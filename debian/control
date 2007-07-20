@@ -1,0 +1,73 @@
+Source: slurm-llnl
+Section: admin
+Priority: extra
+Maintainer: Gennaro Oliva <oliva.g@na.icar.cnr.it>
+Uploaders: Dirk Eddelbuettel <edd@debian.org>
+Build-Depends: debhelper (>= 4.0.0), autotools-dev, libmunge-dev, libncurses5-dev, libssl-dev, po-debconf, python
+Standards-Version: 3.7.2.0
+
+Package: slurm-llnl
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, openssl, ucf, munge, slurm-llnl-basic-plugins (= ${binary:Version}), adduser
+Description: Simple Linux Utility for Resource Management
+ SLURM stands for Simple Linux Utility for Resource Management, it
+ is an open-source cluster resource management and job scheduling system
+ that strives to be simple, scalable, portable, fault-tolerant, and
+ interconnect agnostic.
+
+Package: libslurm11
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Runtime library files for SLURM
+ SLURM, the Simple Linux Utility for Resource Management,
+ is an open-source cluster resource management and job scheduling.
+ This package contains the SLURM runtime library.
+
+Package: libpmi0
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: SLURM PMI library implementation
+ SLURM, the Simple Linux Utility for Resource Management,
+ is an open-source cluster resource management and job scheduling.
+ This package contains the SLURM PMI runtime implementation.
+
+Package: libslurm11-dev
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libslurm11 (= ${binary:Version})
+Description: SLURM development files
+ SLURM, the Simple Linux Utility for Resource Management,
+ is an open-source cluster resource management and job scheduling.
+ This package contains SLURM static library and header files.
+
+Package: libpmi0-dev
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libpmi0 (= ${binary:Version}), libslurm11 (= ${binary:Version})
+Description: SLURM PMI library implementation
+ SLURM, the Simple Linux Utility for Resource Management,
+ is an open-source cluster resource management and job scheduling.
+ This package contains the SLURM PMI implementation static library and header
+ files
+
+Package: slurm-llnl-doc
+Architecture: all
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: SLURM docmentation
+ SLURM, the Simple Linux Utility for Resource Management,
+ is an open-source cluster resource management and job scheduling.
+ This package contains the SLURM html documentation.
+
+Package: slurm-llnl-basic-plugins
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: SLURM docmentation
+ SLURM, the Simple Linux Utility for Resource Management,
+ is an open-source cluster resource management and job scheduling.
+ This package contains development files for the SLURM basic plugins
+
+Package: slurm-llnl-basic-plugins-dev
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, slurm-llnl-basic-plugins (= ${binary:Version})
+Description: SLURM docmentation
+ SLURM, the Simple Linux Utility for Resource Management,
+ is an open-source cluster resource management and job scheduling.
+ This package contains the SLURM basic plugins

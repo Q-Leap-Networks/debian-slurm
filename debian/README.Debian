@@ -1,0 +1,24 @@
+In order to use slurm you will need to create unique job credential
+keys for your site using openssl: a Job Credential Private Key and a
+Job Credential Public Certificate. Both files must be available on all
+nodes in the cluster. These keys are used by slurmctld to construct a
+job credential, which is sent to srun and then forwarded to slurmd to
+initiate job steps.  You can create the certificate and the key with
+openssl as follow:
+
+openssl genrsa -out /etc/slurm-llnl/slurm.key 1024
+openssl rsa -in /etc/slurm-llnl/slurm.key -pubout -out \
+	/etc/slurm-llnl/slurm.cert
+
+You will also need a configuration file for your cluster that need to
+be stored under /etc/slurm-llnl/slurm.conf on every node.
+You can point your browser to
+file:///usr/share/doc/slurm-llnl/slurm-llnl-configurator.html
+for an automatic configuration tool.
+Please leave red fields untouched and change green field
+to fit your cluster configuration.
+
+You can also find a simple sample configuration that provides a
+control machine to run the Slurm's central management daemon and
+a single node for job execution under
+/usr/share/doc/slurm-llnl/examples/slurm.conf.simple.gz

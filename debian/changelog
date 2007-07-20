@@ -1,0 +1,109 @@
+slurm-llnl (1.2.11-1) unstable; urgency=low
+
+  [ Gennaro Oliva ]
+  * debian/copyright use version edited by Dirk 
+
+  [ Dirk Eddelbuettel ]
+  * debian/control: Add myself as Uploaders:
+  * debian/control: Add python as Build-Depends:
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Fri, 20 Jul 2007 21:39:40 +0200
+
+slurm-llnl (1.2.11~20070720-1) unstable; urgency=low
+
+  * Added OpenSSL exception to debian/copyright
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Fri, 20 Jul 2007 16:09:20 +0200
+
+slurm-llnl (1.2.11~20070713-1) unstable; urgency=low
+
+  * New upstream release 
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Fri, 13 Jul 2007 21:17:05 +0200
+
+slurm-llnl (1.2.9-20070617) unstable; urgency=low
+
+  * Switch to the slurm-llnl namespace with sysconfdir /etc/slurm-llnl and
+    localstatedir /var/run/slurm-llnl
+  * Consequent modification of postinst, postrm, slurm-llnl.dirs,
+    slurm-llnl-configurator.html
+  * Removed service stop in the preinst upgrade case to avoid the double
+    stop
+  * Naive sample configuration with two hosts among the examples
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Sun, 17 Jun 2007 10:41:48 +0200
+
+slurm-llnl (1.2.9-20070610) unstable; urgency=low
+
+  * New upstream version availabe
+  * Lintian warning manpage-has-errors-from-man for srun.1 and spank.8 has
+    been removed
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Sun, 10 Jun 2007 01:17:37 +0200
+
+slurm-llnl (1.2.7-20070606) unstable; urgency=low
+
+  * Added "sleep 1" between start and stop to make init.d script restart work 
+  * New copyright file with full listing of authors, copyrights and licenses
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Wed, 06 Jun 2007 00:20:26 +0200
+
+slurm-llnl (1.2.7-20070520) unstable; urgency=low
+
+  * New upstream release available
+  * Debconf configuration removed
+  * LSB functions for the init script
+  * Init script checks configuration and point to README.Debian
+  * slurm-llnl-configurator.html created from configurator.html
+  * old fsf address fixed
+  * preinst upgrade adduser (for people upgrading from old version)
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Thu, 24 May 2007 23:15:03 +0200
+
+slurm-llnl (1.1.20-1) unstable; urgency=low
+
+  * New upstream version available
+  * Built on munge not using opessl 
+  * Using 1.1.13-1 sample configuration file beacuse new upstream config
+    file is not well commented
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Tue, 28 Nov 2006 09:00:31 +0100
+
+slurm-llnl (1.1.13-1) unstable; urgency=low
+
+  * New upstream version available
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Sun,  1 Oct 2006 22:49:47 +0200
+
+slurm-llnl (1.1.10-1) unstable; urgency=low
+
+  * New upstream version available
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Sat,  2 Sep 2006 15:30:43 +0200
+
+slurm-llnl (1.1.4-1) unstable; urgency=low
+
+  * New upstream version available
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Mon, 17 Jul 2006 17:59:00 +0200
+
+slurm-llnl (1.1.3-1) unstable; urgency=low
+
+  * New upstream version available
+  * Removed bluegene binaries
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Wed, 12 Jul 2006 17:18:57 +0200
+
+slurm-llnl (1.1.1-1) unstable; urgency=low
+
+  * New upstream version available
+  * Debconf script for installation
+  * Fixed Build-Dependencies with curses
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Tue, 11 Jul 2006 22:29:25 +0200
+
+slurm-llnl (1.0.1-1) unstable; urgency=low
+
+  * Initial release Closes: #351688
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Tue,  2 May 2006 01:10:43 +0200
