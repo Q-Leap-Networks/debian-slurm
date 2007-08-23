@@ -62,6 +62,7 @@ static char *	_get_node_state(struct node_record *node_ptr);
  *	CDISK=<MB>;		MB of disk space on node
  *	CPROCS=<cpus>;		CPU count on node
  *	[FEATURE=<feature>;]	features associated with node, if any,
+ *	[CAT=<reason>];		Reason for a node being down or drained
  *				colon separator
  *  [#<NODEID>:...];
  */
@@ -163,6 +164,10 @@ static char *	_dump_node(struct node_record *node_ptr, int state_info)
 		node_ptr->name, 
 		_get_node_state(node_ptr));
 	xstrcat(buf, tmp);
+	if (node_ptr->reason) {
+		snprintf(tmp, sizeof(tmp), "CAT=\"%s\";", node_ptr->reason);
+		xstrcat(buf, tmp);
+	}
 	
 	if (state_info == SLURM_INFO_STATE)
 		return buf;
@@ -227,7 +232,7 @@ static char *	_dump_node(struct node_record *node_ptr, int state_info)
 static char *	_get_node_state(struct node_record *node_ptr)
 {
 	uint16_t state = node_ptr->node_state;
-	uint16_t base_state = state & (~NODE_STATE_FLAGS);
+	uint16_t base_state = state & NODE_STATE_BASE;
 
 	if (state & NODE_STATE_DRAIN)
 		return "Draining";

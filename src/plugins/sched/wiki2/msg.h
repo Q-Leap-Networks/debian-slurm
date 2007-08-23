@@ -79,9 +79,11 @@
 #include "src/common/xmalloc.h"
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
+#include "src/slurmctld/slurmctld.h"
 
 /* Global configuration parameters */
 #define E_HOST_SIZE  256
+#define EXC_PART_CNT  10
 #define KEY_SIZE      32
 #define PRIO_HOLD      0
 #define PRIO_DECREMENT 1
@@ -90,6 +92,8 @@ extern char 	auth_key[KEY_SIZE];
 extern char	e_host[E_HOST_SIZE];
 extern char	e_host_bu[E_HOST_SIZE];
 extern uint16_t	e_port;
+extern struct	part_record *exclude_part_ptr[EXC_PART_CNT];
+extern uint32_t first_job_id;
 extern uint16_t	job_aggregation_time;
 extern uint16_t kill_wait;
 extern uint16_t use_host_exp;
@@ -107,11 +111,14 @@ extern int 	get_nodes(char *cmd_ptr, int *err_code, char **err_msg);
 extern int	initialize_wiki(char *cmd_ptr, int *err_code, char **err_msg);
 extern int	job_add_task(char *cmd_ptr, int *err_code, char **err_msg);
 extern int	job_modify_wiki(char *cmd_ptr, int *err_code, char **err_msg);
+extern int	job_notify_wiki(char *cmd_ptr, int *err_code, char **err_msg);
 extern int	job_release_task(char *cmd_ptr, int *err_code, char **err_msg);
 extern int	job_requeue_wiki(char *cmd_ptr, int *err_code, char **err_msg);
 extern int	job_signal_wiki(char *cmd_ptr, int *err_code, char **err_msg);
 extern int	job_will_run(char *cmd_ptr, int *err_code, char **err_msg);
+extern char * 	moab2slurm_task_list(char *moab_tasklist, int *task_cnt);
 extern int	parse_wiki_config(void);
+extern char *	slurm_job2moab_task_list(struct job_record *job_ptr);
 extern int	start_job(char *cmd_ptr, int *err_code, char **err_msg);
 extern int	suspend_job(char *cmd_ptr, int *err_code, char **err_msg);
 extern int	resume_job(char *cmd_ptr, int *err_code, char **err_msg);

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  step_mgr.c - manage the job step information of slurm
- *  $Id: step_mgr.c 11533 2007-05-18 17:39:07Z da $
+ *  $Id: step_mgr.c 11969 2007-08-08 23:13:12Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -65,6 +65,7 @@
 #include "src/slurmctld/locks.h"
 #include "src/slurmctld/node_scheduler.h"
 #include "src/slurmctld/slurmctld.h"
+#include "src/slurmctld/srun_comm.h"
 
 #define MAX_RETRIES 10
 
@@ -293,8 +294,10 @@ int job_step_signal(uint32_t job_id, uint32_t step_id,
 	}
 	
 	/* save user ID of the one who requested the job be cancelled */
-	if(signal == SIGKILL)
+	if (signal == SIGKILL) {
 		step_ptr->job_ptr->requid = uid;
+		srun_step_complete(step_ptr);
+	}
 
 	signal_step_tasks(step_ptr, signal);
 	return SLURM_SUCCESS;
@@ -416,7 +419,7 @@ _pick_step_nodes (struct job_record  *job_ptr,
 	bitstr_t *nodes_avail = NULL, *nodes_idle = NULL;
 	bitstr_t *nodes_picked = NULL, *node_tmp = NULL;
 	int error_code, nodes_picked_cnt = 0, cpus_picked_cnt, i;
-	//char *temp;
+/* 	char *temp; */
 	ListIterator step_iterator;
 	struct step_record *step_p;
 
@@ -433,8 +436,10 @@ _pick_step_nodes (struct job_record  *job_ptr,
 
 	if (step_spec->node_list) {
 		bitstr_t *selected_nodes = NULL;
+/* 		info("selected nodelist is %s", step_spec->node_list); */
 		error_code = node_name2bitmap(step_spec->node_list, false, 
 					      &selected_nodes);
+		
 		if (error_code) {
 			info("_pick_step_nodes: invalid node list %s", 
 				step_spec->node_list);
@@ -449,6 +454,12 @@ _pick_step_nodes (struct job_record  *job_ptr,
 			goto cleanup;
 		}
 		if(step_spec->task_dist == SLURM_DIST_ARBITRARY) {
+			/* if we are in arbitrary mode we need to make
+			 * sure we aren't running on an elan switch.
+			 * If we aren't change the number of nodes
+			 * available to the number we were given since
+			 * that is what the user wants to run on. 
+			 */
 			if (!strcmp(slurmctld_conf.switch_type,
 				    "switch/elan")) {
 				error("Can't do an ARBITRARY task layout with "
@@ -457,16 +468,39 @@ _pick_step_nodes (struct job_record  *job_ptr,
 				xfree(step_spec->node_list);
 				step_spec->task_dist = SLURM_DIST_BLOCK;
 				FREE_NULL_BITMAP(selected_nodes);
-			}
-			step_spec->node_count = bit_set_count(nodes_avail);
+				step_spec->node_count =
+					bit_set_count(nodes_avail);
+			} else 
+				step_spec->node_count =
+					bit_set_count(selected_nodes);
 		}
 		if (selected_nodes) {
 			/* use selected nodes to run the job and
 			 * make them unavailable for future use */
-			nodes_picked = bit_copy(selected_nodes);
-			bit_not(selected_nodes);
-			bit_and(nodes_avail, selected_nodes);
-			bit_free(selected_nodes);
+			
+			/* If we have selected more than we requested
+			 * make the available nodes equal to the
+			 * selected nodes and we will pick from that
+			 * list later on in the function.
+			 * Other than that copy the nodes selected as
+			 * the nodes we want.
+			 */ 
+			if (step_spec->node_count 
+			    && (bit_set_count(selected_nodes)
+				> step_spec->node_count)) {
+				nodes_picked =
+					bit_alloc(bit_size(nodes_avail));
+				if (nodes_picked == NULL)
+					fatal("bit_alloc malloc failure");
+				bit_free(nodes_avail);
+				nodes_avail = selected_nodes;
+				selected_nodes = NULL;
+			} else {
+				nodes_picked = bit_copy(selected_nodes);
+				bit_not(selected_nodes);
+				bit_and(nodes_avail, selected_nodes);
+				bit_free(selected_nodes);
+			}
 		}
 	} else {
 		nodes_picked = bit_alloc(bit_size(nodes_avail));
@@ -527,6 +561,7 @@ _pick_step_nodes (struct job_record  *job_ptr,
 
 	if (step_spec->node_count) {
 		nodes_picked_cnt = bit_set_count(nodes_picked);
+/* 		info("got %d %d", step_spec->node_count, nodes_picked_cnt); */
 		if (nodes_idle 
 		    && (bit_set_count(nodes_idle) >= step_spec->node_count)
 		    && (step_spec->node_count > nodes_picked_cnt)) {
@@ -752,7 +787,8 @@ step_create(job_step_create_request_msg_t *step_specs,
 		xfree(step_specs->node_list);
 		step_specs->node_list = xstrdup(step_node_list);
 	}
-	
+/* 	info("got %s and %s looking for %d nodes", step_node_list, */
+/* 	     step_specs->node_list, step_specs->node_count); */
 	step_ptr->step_node_bitmap = nodeset;
 	
 	switch(step_specs->task_dist) {

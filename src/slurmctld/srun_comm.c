@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  srun_comm.c - srun communications
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  UCRL-CODE-226842.
@@ -47,6 +47,7 @@
 #include "src/common/xstring.h"
 #include "src/slurmctld/agent.h"
 #include "src/slurmctld/slurmctld.h"
+#include "src/slurmctld/srun_comm.h"
 
 #define SRUN_LAUNCH_MSG 0
 
@@ -246,11 +247,37 @@ extern void srun_timeout (struct job_record *job_ptr)
 	list_iterator_destroy(step_iterator);
 }
 
+
 /*
- * srun_complete - notify srun of a job's termination
+ * srun_user_message - Send arbitrary message to an srun job (no job steps)
+ */
+extern void srun_user_message(struct job_record *job_ptr, char *msg)
+{
+	slurm_addr * addr;
+	srun_user_msg_t *msg_arg;
+
+	xassert(job_ptr);
+	if ((job_ptr->job_state != JOB_PENDING)
+	&&  (job_ptr->job_state != JOB_RUNNING))
+		return;
+
+	if (job_ptr->other_port
+	&&  job_ptr->other_host && job_ptr->other_host[0]) {
+		addr = xmalloc(sizeof(struct sockaddr_in));
+		slurm_set_addr(addr, job_ptr->other_port, job_ptr->other_host);
+		msg_arg = xmalloc(sizeof(srun_user_msg_t));
+		msg_arg->job_id = job_ptr->job_id;
+		msg_arg->msg    = xstrdup(msg);
+		_srun_agent_launch(addr, job_ptr->other_host, SRUN_USER_MSG,
+				   msg_arg);
+	}
+}
+
+/*
+ * srun_job_complete - notify srun of a job's termination
  * IN job_ptr - pointer to the slurmctld job record
  */
-extern void srun_complete (struct job_record *job_ptr)
+extern void srun_job_complete (struct job_record *job_ptr)
 {
 	slurm_addr * addr;
 	srun_job_complete_msg_t *msg_arg;
@@ -273,20 +300,66 @@ extern void srun_complete (struct job_record *job_ptr)
 
 	step_iterator = list_iterator_create(job_ptr->step_list);
 	while ((step_ptr = (struct step_record *) list_next(step_iterator))) {
-		if ( (step_ptr->port    == 0)    || 
-		     (step_ptr->host    == NULL) ||
-		     (step_ptr->batch_step)      ||
-		     (step_ptr->host[0] == '\0') )
+		if (step_ptr->batch_step)	/* batch script itself */
 			continue;
-		addr = xmalloc(sizeof(struct sockaddr_in));
-		slurm_set_addr(addr, step_ptr->port, step_ptr->host);
-		msg_arg = xmalloc(sizeof(srun_timeout_msg_t));
-		msg_arg->job_id   = job_ptr->job_id;
-		msg_arg->step_id  = step_ptr->step_id;
-		_srun_agent_launch(addr, step_ptr->host, SRUN_JOB_COMPLETE, 
-				   msg_arg);
+		srun_step_complete(step_ptr);
 	}	
 	list_iterator_destroy(step_iterator);
+}
+
+/*
+ * srun_step_complete - notify srun of a job step's termination
+ * IN step_ptr - pointer to the slurmctld job step record
+ */
+extern void srun_step_complete (struct step_record *step_ptr)
+{
+	slurm_addr * addr;
+	srun_job_complete_msg_t *msg_arg;
+
+	xassert(step_ptr);
+	if (step_ptr->port && step_ptr->host && step_ptr->host[0]) {
+		addr = xmalloc(sizeof(struct sockaddr_in));
+		slurm_set_addr(addr, step_ptr->port, step_ptr->host);
+		msg_arg = xmalloc(sizeof(srun_job_complete_msg_t));
+		msg_arg->job_id   = step_ptr->job_ptr->job_id;
+		msg_arg->step_id  = step_ptr->step_id;
+		_srun_agent_launch(addr, step_ptr->host, SRUN_JOB_COMPLETE,
+				   msg_arg);
+	}
+}
+
+/*
+ * srun_exec - request that srun execute a specific command
+ *	and route it's output to stdout
+ * IN step_ptr - pointer to the slurmctld job step record
+ * IN argv - command and arguments to execute
+ */
+extern void srun_exec(struct step_record *step_ptr, char **argv)
+{
+	slurm_addr * addr;
+	srun_exec_msg_t *msg_arg;
+	int cnt = 1, i;
+
+	xassert(step_ptr);
+
+	if (step_ptr->port && step_ptr->host && step_ptr->host[0]) {
+		for (i=0; argv[i]; i++)
+			cnt++;	/* start at 1 to include trailing NULL */
+		addr = xmalloc(sizeof(struct sockaddr_in));
+		slurm_set_addr(addr, step_ptr->port, step_ptr->host);
+		msg_arg = xmalloc(sizeof(srun_exec_msg_t));
+		msg_arg->job_id  = step_ptr->job_ptr->job_id;
+		msg_arg->step_id = step_ptr->step_id;
+		msg_arg->argc    = cnt;
+		msg_arg->argv    = xmalloc(sizeof(char *) * cnt);
+		for (i=0; i<cnt ; i++)
+			msg_arg->argv[i] = xstrdup(argv[i]);
+		_srun_agent_launch(addr, step_ptr->host, SRUN_EXEC,
+				   msg_arg);
+	} else {
+		error("srun_exec %u.%u lacks communication channel",
+			step_ptr->job_ptr->job_id, step_ptr->step_id);
+	}
 }
 
 /*

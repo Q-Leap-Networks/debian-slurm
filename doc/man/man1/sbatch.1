@@ -9,7 +9,8 @@ sbatch [\fIoptions\fP] \fIscript\fP [\fIargs\fP...]
 .LP 
 sbatch submits a batch script to SLURM.  The batch script may be given to
 sbatch through a file name on the command line, or if no file name is specified,
-sbatch will read in a script from standard input.
+sbatch will read in a script from standard input. The batch script may contain
+options preceeded with "#SBATCH" before any executable commands in the script.
 
 sbatch exits immediately after the script is successfully transferred to the
 SLURM controller and assigned a SLURM job ID.  The batch script is not
@@ -54,6 +55,11 @@ The \fIlist\fR of constraints may include multiple features separated
 by ampersand (AND) and/or vertical bar (OR) operators.
 For example: \fB\-\-constraint="opteron&video"\fR or 
 \fB\-\-constraint="fast|faster"\fR.
+If only one of a set of possible options should be used for all allocated 
+nodes, then use the OR operator and enclose the options within square brackets. 
+For example: "\fB\-\-constraint="[rack1|rack2|rack3|rack4]"\fR might 
+be used to specify that all nodes must be allocated on a single rack of 
+the cluster, but any of those four racks can be used.
 If no nodes have the requested features, then the job will be rejected 
 by the slurm job manager.
 
@@ -233,6 +239,8 @@ the min or max options may be omitted.  For instance, "\-N 10\-" means
 "no fewer than 10 nodes", and "\-N \-20" means "no more than 20 nodes".  The
 default value of this option is one node, but other command line options
 may implicitly set the default node count to a higher value.
+The job will be allocated as many nodes as possible within the range specified 
+and without delaying the initiation of the job.
 
 .TP
 \fB\-n\fR, \fB\-\-tasks\fR[=]<\fInumber\fR>
@@ -288,14 +296,17 @@ option was not set and allow higher system utilization, but application
 performance will likely suffer due to competition for resources within a node.
 
 .TP
-\fB\-t\fR, \fB\-\-time\fR[=]<\fIminutes\fR>
-Set a  limit, in minites, on the total run time of the job allocation.
+\fB\-t\fR, \fB\-\-time\fR=\fItime\fR
+Set a  limit on the total run time of the job allocation.
 If the requested time limit exceeds the partition's time limit, the 
 job will be left in a PENDING state (possibly indefinitely).  The default
 time limit is the partition's time limit.  When the time limit is reached,
 the each task in each job step is sent SIGTERM followed by SIGKILL. The
 interval between signals is specified by the SLURM configuration parameter
 \fBKillWait\fR.  A time limit of zero represents unlimited time.
+Acceptable time formats include "minutes", "minutes:seconds", 
+"hours:minutes:seconds", "days\-hours", "days\-hours:minutes" and 
+"days\-hours:minutes:seconds".
 
 .TP
 \fB\-\-tasks\-per\-node\fR[=]<\fIn\fR>
@@ -491,18 +502,25 @@ Do not free a block on Blue Gene systems only.
 The block name on Blue Gene systems only.
 
 .SH "EXAMPLES"
-.LP 
-Specify a batch script by filename on the command line:
+.LP
+Specify a batch script by filename on the command line.
+The batch script specifies a 1 minute time limit for the job.
 .IP 
 $ cat myscript
 .br
 #!/bin/sh
 .br
+#SBATCH --time=1
+.br
 srun hostname |sort
+.br
+
 .br
 $ sbatch \-N4 myscript
 .br
 salloc: Granted job allocation 65537
+.br
+
 .br
 $ cat slurm\-65537.out
 .br
@@ -526,6 +544,8 @@ morrone:~$ sbatch \-N4 <<EOF
 > EOF
 .br
 sbatch: Submitted batch job 65541
+.br
+
 .br
 $ cat slurm\-65541.out
 .br

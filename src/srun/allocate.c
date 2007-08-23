@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/srun/allocate.c - srun functions for managing node allocations
- * $Id: allocate.c 11346 2007-04-11 16:44:13Z da $
+ * $Id: allocate.c 11792 2007-07-05 23:56:07Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -316,6 +316,7 @@ _handle_msg(slurm_msg_t *msg, resource_allocation_response_msg_t **resp)
 	uid_t slurm_uid = (uid_t) slurm_get_slurm_user_id();
 	int rc = 0;
 	srun_timeout_msg_t *to;
+	srun_user_msg_t *um;
 
 	if ((req_uid != slurm_uid) && (req_uid != 0) && (req_uid != uid)) {
 		error ("Security violation, slurm message from uid %u",
@@ -345,6 +346,11 @@ _handle_msg(slurm_msg_t *msg, resource_allocation_response_msg_t **resp)
 			to = msg->data;
 			timeout_handler(to->timeout);
 			slurm_free_srun_timeout_msg(msg->data);
+			break;
+		case SRUN_USER_MSG:
+			um = msg->data;
+			info("%s", um->msg);
+			slurm_free_srun_user_msg(msg->data);
 			break;
 		default:
 			error("received spurious message type: %d\n",

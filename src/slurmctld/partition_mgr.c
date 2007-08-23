@@ -2,7 +2,7 @@
  *  partition_mgr.c - manage the partition information of slurm
  *	Note: there is a global partition list (part_list) and
  *	time stamp (last_part_update)
- *  $Id: partition_mgr.c 11205 2007-03-20 18:42:31Z jette $
+ *  $Id: partition_mgr.c 11781 2007-07-02 23:00:56Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -450,7 +450,7 @@ int load_all_part_state(void)
 		/* validity test as possible */
 		if ((def_part_flag > 1) ||
 		    (root_only > 1) || (hidden > 1) ||
-		    (shared > SHARED_FORCE) || (state_up > 1)) {
+		    (shared > SHARED_EXCLUSIVE) || (state_up > 1)) {
 			error("Invalid data for partition %s: def_part_flag=%u, "
 				"hidden=%u root_only=%u, shared=%u, state_up=%u",
 				part_name, def_part_flag, hidden, root_only, shared,

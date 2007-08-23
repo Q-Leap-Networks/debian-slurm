@@ -1,11 +1,17 @@
+slurm-llnl (1.2.14-1) unstable; urgency=low
+
+  * New upstream available, 13 and 12 are missing because I was on
+    vacation
+  * Fixed debian/control packages Sections (Closes: #438906) thanks to
+    Manuel Prinz
+  * Fixed debian/control plugins plugins-dev packages descriptions
+    (Closes: #435133) thanks to Anton Blanchard
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Thu, 23 Aug 2007 21:34:14 +0200
+
 slurm-llnl (1.2.11-1) unstable; urgency=low
 
-  [ Gennaro Oliva ]
-  * debian/copyright use version edited by Dirk 
-
-  [ Dirk Eddelbuettel ]
-  * debian/control: Add myself as Uploaders:
-  * debian/control: Add python as Build-Depends:
+  * debian/copyright edited by Dirk 
 
  -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Fri, 20 Jul 2007 21:39:40 +0200
 

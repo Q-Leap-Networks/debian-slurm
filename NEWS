@@ -1,10 +1,90 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
-* Changes in SLURM 1.2.12
+* Changes in SLURM 1.2.15
 =========================
 
+* Changes in SLURM 1.2.14
+=========================
+ -- Fix a couple of bugs in MPICH/MX support (from Asier Roa, BSC).
+ -- Fix perl api for AIX
+ -- Add wiki.conf parameter ExcludePartitions for selected partitions to 
+    be directly schedule by Slurm without Moab control
+ -- Optimize load leveling for shared nodes (alloc.patch, contributed 
+    by Chris Holmes, HP).
+ -- Added PMI_TIME environment variable for user to control how PMI 
+    communications are spread out in time. See "man srun" for details.
+ -- Added PMI timing information to srun debug mode to aid in tuning.
+    Use "srun -vv ..." to see the information.
+ -- Added checkpoint/ompi (OpenMPI) plugin (still under development).
+ -- Fix bug in load leveling logic added to v1.2.13 which can cause an 
+    infinite loop and hang slurmctld when sharing nodes between jobs.
+ -- Added support for sbatch to read in #PBS options from a script
 
+* Changes in SLURM 1.2.13
+=========================
+ -- Add slurm.conf parameter JobFileAppend.
+ -- Fix for segv in "scontrol listpids" on nodes not in SLURM config.
+ -- Add support for SCANCEL_CTLD env var.
+ -- In mpi/mvapich plugin, add startup timeout logic. Time based upon 
+    SLURM_MVAPICH_TIMEOUT (value in seconds).
+ -- Fixed pick_step_node logic to only pick the number of nodes requested
+    from the user when excluding nodes, to avoid an error message.
+ -- Disable salloc, sbatch and srun -I/--immediate options with 
+    Moab scheduler.
+ -- Added "contribs" directory with a Perl API and Torque wrappers for Torque 
+    to SLURM migration.  This directory should be used to put anything that 
+    is outside of SLURM proper such as a different API. Perl APIs contributed 
+    by Hongjia Cao (NUDT).
+ -- In sched/wiki2: add support for tasklist with node name expressions 
+    and task counts (e.g. TASKLIST=tux[1-4]*2:tux[12-14]*4").
+ -- In select/cons_res with sched/wiki2: fix bug in task layout logic.
+ -- Removed all curses info from the bluegene plugin putting it into smap
+    where it belongs.  
+ -- Add support for job time limit specification formats: min, min:sec, 
+    hour:min:sec, and days-hour:min:sec (formerly only supported minutes).
+    Applies to salloc, sbatch, and srun commands.
+ -- Improve scheduling support for exclusive constraint list, nodes can 
+    now be in more than one constraint specific exclusively for a job
+    (e.g. "srun -C [rack1|rack2|rack3|rowB] srun")
+ -- Create separate MPICH/MX plugin (split out from MPICH/GM plugin)
+ -- Increase default MessageTimeout (in slurm.conf) from 5 to 10 secs.
+ -- Fix bug in batch job requeue if node zero of allocation fails to respond 
+    to task launch request.
+ -- Improve load leveling logic to more evenly distribute the workload 
+    (best_load.patch, contributed by Chris Holmes, HP).
+ 
+* Changes in SLURM 1.2.12
+=========================
+ -- Increase maximum message size from 1MB to 16MB (from Ernest Artiaga, BSC). 
+ -- In PMI_Abort(), log the event and abort the entire job step.
+ -- Add support for additional PMI functions: PMI_Get_clique_ranks and 
+    PMI_Get_clique_size (from Chuck Clouston, Bull).
+ -- Report an error when a hostlist comes in appearing to be a box but not 
+    formatted in XYZxXYZ format.
+ -- Add support for partition configuration "Shared=exclusive". This is 
+    equivalent to "srun --exclusive" when select/cons_res is configured.
+ -- In sched/wiki2, report the reason for a node being unavailable for the 
+    GETNODES command using the CAT="<reason>" field.
+ -- In sched/wiki2 with select/linear, duplicate hostnames in HOSTLIST, one
+    per allocated processor.
+ -- Fix bug in scancel with specific signal and job lacks active steps.
+ -- In sched/wiki2, add support for NOTIFYJOB ARG=<jobid> MSG=<message>.
+    This sends a message to an active srun command.
+ -- salloc will now set SLURM_NPROCS to improve srun's behavior under salloc.
+ -- In sched/wiki2 and select/cons_res: insure that Slurm's CPU allocation
+    is identical to Moab's (from Ernest Artiaga and Asier Roa, BSC).
+ -- Added "scontrol show slurmd" command to status local slurmd daemon.
+ -- Set node DOWN if prolog fails on node zero of batch job launch.
+ -- Properly handle "srun --cpus-per-task" within a job allocation when 
+    SLURM_TASKS_PER_NODE environment varable is not set.
+ -- Fixed return of slurm_send_rc_msg if msg->conn_fd is < 0 set errno ENOTCONN
+    and return SLURM_ERROR instead of return ENOTCONN
+ -- Added read before we send anything down a socket to make sure the socket
+    is still there.
+ -- Add slurm.conf variables UnkillableStepProgram and UnkillableStepTimeout.
+ -- Enable nice file propagation from sbatch command.
+ 
 * Changes in SLURM 1.2.11
 =========================
  -- Updated "etc/mpich1.slurm.patch" for direct srun launch of MPICH1_P4
@@ -30,8 +110,8 @@ documents those changes that are of interest to users and admins.
     based upon GNU make-3.81. Patch is in "etc/make.slurm.patch".
  -- Added '-b' option to sbatch for easy MOAB trasition to sbatch instead of
     srun.  Option does nothing in sbatch.
- -- Changed wiki2's handling of a node state in Completiting to return 'busy' 
-    instead of 'running' which is already there in slurm1.1
+ -- Changed wiki2's handling of a node state in Completing to return 'busy' 
+    instead of 'running' which matches slurm version 1.1
 
 * Changes in SLURM 1.2.10
 =========================
@@ -2514,4 +2594,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 11744 2007-06-25 15:16:17Z da $
+$Id: NEWS 12099 2007-08-22 22:37:17Z da $

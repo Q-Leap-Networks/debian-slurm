@@ -2,7 +2,7 @@
  *  salloc.c - Request a SLURM job allocation and
  *             launch a user-specified command.
  *
- *  $Id: salloc.c 11708 2007-06-14 23:21:51Z morrone $
+ *  $Id: salloc.c 12002 2007-08-14 02:55:43Z morrone $
  *****************************************************************************
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -162,6 +162,9 @@ int main(int argc, char *argv[])
 	 * Run the user's command.
 	 */
 	env_array_for_job(&env, alloc);
+	/* Add default task count for srun, if not already set */
+	if (opt.nprocs_set)
+		env_array_append_fmt(&env, "SLURM_NPROCS", "%d", opt.nprocs);
 	env_array_set_environment(env);
 	env_array_free(env);
 	pthread_mutex_lock(&allocation_state_lock);
@@ -299,8 +302,10 @@ static int fill_job_desc_from_opts(job_desc_msg_t *desc)
 
 static void ring_terminal_bell(void)
 {
-	fprintf(stdout, "\a");
-	fflush(stdout);
+        if (isatty(STDOUT_FILENO)) {
+                fprintf(stdout, "\a");
+                fflush(stdout);
+        }
 }
 
 /* returns the pid of the forked command, or <0 on error */

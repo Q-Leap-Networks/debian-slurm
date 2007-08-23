@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/slurmd/slurmd/slurmd.h - header for slurmd
- * $Id: slurmd.h 11207 2007-03-20 23:29:10Z jette $
+ * $Id: slurmd.h 11797 2007-07-06 22:54:22Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -107,7 +107,6 @@ typedef struct slurmd_config {
 	char         *task_prolog;	/* per-task prolog script          */
 	char         *task_epilog;	/* per-task epilog script          */
 	int           port;	        /* local slurmd port               */
-	int           hbeat;		/* heartbeat interval		   */
 	slurm_fd      lfd;		/* slurmd listen file descriptor   */
 	pid_t         pid;		/* server pid                      */
 	log_options_t log_opts;         /* current logging options         */

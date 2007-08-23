@@ -20,6 +20,7 @@
 <p> SLURM contributers include: </p>
 <ul>
 <li>Amjad Majid Ali (Colorado State University)</li>
+<li>P&auml;r Andersson (National Supercomputer Centre, Sweden)</li>
 <li>Don Albert (Bull)</li>
 <li>Ernest Artiaga (Barcelona Supercomputer Center, Spain)</li>
 <li>Anton Blanchard (Samba)</li>
@@ -40,12 +41,14 @@
 <li>Puenlap Lee (Bull)</li>
 <li>Bernard Li (Genome Sciences Centre, Canada)</li>
 <li>Donna Mecozzi (LLNL)</li>
+<li>Pere Munt (Barcelona Supercomputer Center, Spain)<li>
 <li>Bryan O'Sullivan (Pathscale)</li>
 <li>Gennaro Oliva (Institute of High Performance Computing and 
 Networking, Italy)</li>
 <li>Dan Phung (LLNL/Columbia University)</li>
 <li>Ashley Pittman (Quadrics)</li>
 <li>Andy Riebs (HP)</li>
+<li>Asier Roa (Barcelona Supercomputer Center, Spain)<li>
 <li>Federico Sacerdoti (D.E. Shaw)<li>
 <li>Jeff Squyres (LAM MPI)</li>
 <li>Prashanth Tamraparni (HP, India)</li>
@@ -54,6 +57,6 @@ Networking, Italy)</li>
 <li>Anne-Marie Wunderlin (Bull)</li>
 </ul>
 
-<p style="text-align:center;">Last modified 14 June 2007</p>
+<p style="text-align:center;">Last modified 14 August 2007</p>
 
 <!--#include virtual="footer.txt"-->

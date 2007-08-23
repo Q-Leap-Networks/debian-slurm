@@ -3,7 +3,7 @@
  *	Note: there is a global job list (job_list), time stamp 
  *	(last_job_update), and hash table (job_hash)
  *
- *  $Id: job_mgr.c 11727 2007-06-15 23:55:43Z jette $
+ *  $Id: job_mgr.c 12042 2007-08-16 22:39:37Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -221,6 +221,7 @@ void delete_job_details(struct job_record *job_entry)
 	xfree(job_entry->details->req_nodes);
 	xfree(job_entry->details->exc_nodes);
 	FREE_NULL_BITMAP(job_entry->details->req_node_bitmap);
+	xfree(job_entry->details->req_node_layout);
 	FREE_NULL_BITMAP(job_entry->details->exc_node_bitmap);
 	xfree(job_entry->details->features);
 	xfree(job_entry->details->err);
@@ -429,7 +430,9 @@ int load_all_job_state(void)
 		}
 	}
 	if (ver_str && (strcmp(ver_str, JOB_STATE_VERSION) != 0)) {
-		error("Can not recover job state, data version incompatable");
+		error("***********************************************");
+		error("Can not recover job state, incompatable version");
+		error("***********************************************");
 		xfree(ver_str);
 		free_buf(buffer);
 		return EFAULT;
@@ -2441,6 +2444,7 @@ _copy_job_desc_to_job_record(job_desc_msg_t * job_desc,
 		detail_ptr->req_nodes = 
 			_copy_nodelist_no_dup(job_desc->req_nodes);
 		detail_ptr->req_node_bitmap = *req_bitmap;
+		detail_ptr->req_node_layout = NULL; /* Layout specified at start time */
 		*req_bitmap = NULL;	/* Reused nothing left to free */
 	}
 	if (job_desc->exc_nodes) {
@@ -2982,6 +2986,7 @@ static void _pack_pending_job_details(struct job_details *detail_ptr,
 
 		packstr(detail_ptr->req_nodes, buffer);
 		pack_bit_fmt(detail_ptr->req_node_bitmap, buffer);
+		/* detail_ptr->req_node_layout is not packed */
 		packstr(detail_ptr->exc_nodes, buffer);
 		pack_bit_fmt(detail_ptr->exc_node_bitmap, buffer);
 
@@ -3085,6 +3090,13 @@ void reset_job_bitmaps(void)
 		build_node_details(job_ptr);	/* set: num_cpu_groups, 
 						 * cpu_count_reps, node_cnt, 
 						 * cpus_per_node, node_addr */
+		if (select_g_update_nodeinfo(job_ptr) != SLURM_SUCCESS) {
+			error("select_g_update_nodeinfo(%u): %m", 
+				job_ptr->job_id);
+			/* not critical ... ? */
+			/* probably job_fail should be set here */
+		}
+
 		if (_reset_detail_bitmaps(job_ptr))
 			job_fail = true;
 
@@ -3126,6 +3138,9 @@ static int _reset_detail_bitmaps(struct job_record *job_ptr)
 		return SLURM_SUCCESS;
 
 	FREE_NULL_BITMAP(job_ptr->details->req_node_bitmap);
+	xfree(job_ptr->details->req_node_layout); /* layout info is lost
+	                                           * but should be re-generated
+	                                           * at job start time */
 	if ((job_ptr->details->req_nodes) && 
 	    (node_name2bitmap(job_ptr->details->req_nodes, false,  
 			      &job_ptr->details->req_node_bitmap))) {
@@ -3232,7 +3247,8 @@ static void _set_job_prio(struct job_record *job_ptr)
 {
 	xassert(job_ptr);
 	xassert (job_ptr->magic == JOB_MAGIC);
-	job_ptr->priority = slurm_sched_initial_priority(maximum_prio);
+	job_ptr->priority = slurm_sched_initial_priority(maximum_prio,
+							 job_ptr);
 	if (job_ptr->priority > 0)
 		maximum_prio = MIN(job_ptr->priority, maximum_prio);
 }
@@ -3688,6 +3704,7 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 		else if (job_specs->req_nodes[0] == '\0') {
 			xfree(detail_ptr->req_nodes);
 			FREE_NULL_BITMAP(detail_ptr->req_node_bitmap);
+			xfree(detail_ptr->req_node_layout);
 		} else {
 			if (node_name2bitmap(job_specs->req_nodes, false, 
 					     &req_bitmap)) {
@@ -3701,6 +3718,7 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 				detail_ptr->req_nodes =
 					job_specs->req_nodes;
 				FREE_NULL_BITMAP(detail_ptr->req_node_bitmap);
+				xfree(detail_ptr->req_node_layout);
 				detail_ptr->req_node_bitmap = req_bitmap;
 				info("update_job: setting req_nodes to %s "
 				     "for job_id %u", job_specs->req_nodes, 
@@ -4338,7 +4356,7 @@ extern void job_completion_logger(struct job_record  *job_ptr)
 
 	jobacct_g_job_complete_slurmctld(job_ptr);
 	g_slurm_jobcomp_write(job_ptr);
-	srun_complete(job_ptr);
+	srun_job_complete(job_ptr);
 }
 
 /*

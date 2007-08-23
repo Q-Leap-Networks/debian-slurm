@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  opt.h - definitions for srun option processing
- *  $Id: opt.h 11092 2007-03-07 20:33:36Z da $
+ *  $Id: opt.h 11992 2007-08-10 18:59:15Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -119,7 +119,8 @@ typedef struct srun_options {
 	char *mem_bind;		/* binding map for map/mask_mem	*/
 	bool nodes_set;		/* true if nodes explicitly set */
 	bool extra_set;		/* true if extra node info explicitly set */
-	int  time_limit;	/* --time,   -t			*/
+	int  time_limit;	/* --time,   -t	(int minutes)	*/
+	char *time_limit_str;	/* --time,   -t (string)	*/
 	char *partition;	/* --partition=n,   -p n   	*/
 	enum task_dist_states
 	        distribution;	/* --distribution=, -m dist	*/

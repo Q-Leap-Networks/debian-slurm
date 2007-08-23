@@ -1,7 +1,7 @@
 /****************************************************************************\
  *  slurm_protocol_defs.h - definitions used for RPCs
  *
- *  $Id: slurm_protocol_defs.h 11144 2007-03-14 19:17:47Z jette $
+ *  $Id: slurm_protocol_defs.h 12088 2007-08-22 18:02:24Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -75,12 +75,6 @@ enum task_flag_vals {
 	TASK_PARALLEL_DEBUG = 0x1,
 	TASK_UNUSED1 = 0x2,
 	TASK_UNUSED2 = 0x4
-};
-
-enum part_shared {
-	SHARED_NO,		/* Nodes never shared in partition */
-	SHARED_YES,		/* Nodes possible to share in partition */
-	SHARED_FORCE		/* Nodes always shares in partition */
 };
 
 enum suspend_opts {
@@ -169,7 +163,10 @@ typedef enum {
 	REQUEST_STEP_LAYOUT,
 	RESPONSE_STEP_LAYOUT,
 	REQUEST_JOB_REQUEUE,
-	
+	REQUEST_DAEMON_STATUS,
+	RESPONSE_SLURMD_STATUS,
+	RESPONSE_SLURMCTLD_STATUS,
+
 	REQUEST_LAUNCH_TASKS = 6001,
 	RESPONSE_LAUNCH_TASKS,
 	MESSAGE_TASK_EXIT,
@@ -189,6 +186,8 @@ typedef enum {
 	SRUN_TIMEOUT,
 	SRUN_NODE_FAIL,
 	SRUN_JOB_COMPLETE,
+	SRUN_USER_MSG,
+	SRUN_EXEC,
 
 	PMI_KVS_PUT_REQ = 7201,
 	PMI_KVS_PUT_RESP,
@@ -561,6 +560,13 @@ typedef struct srun_job_complete_msg {
         uint32_t step_id;       /* step_id or NO_VAL */
 } srun_job_complete_msg_t;
 
+typedef struct srun_exec_msg {
+	uint32_t job_id;	/* slurm job_id */
+	uint32_t step_id;	/* step_id or NO_VAL */
+	uint16_t argc;		/* argument count */
+	char **  argv;		/* program arguments */
+} srun_exec_msg_t;
+
 typedef struct srun_node_fail_msg {
 	uint32_t job_id;	/* slurm job_id */
 	uint32_t step_id;	/* step_id or NO_VAL */
@@ -598,6 +604,11 @@ typedef struct suspend_msg {
 	uint16_t op;            /* suspend operation, see enum suspend_opts */
 	uint32_t job_id;        /* slurm job_id */
 } suspend_msg_t;
+
+typedef struct srun_user_msg {
+	uint32_t job_id;	/* slurm job_id */
+	char *msg;		/* message to user's srun */
+} srun_user_msg_t;
 
 typedef struct kvs_get_msg {
 	uint16_t task_id;	/* job step's task id */
@@ -746,9 +757,11 @@ void inline slurm_free_update_job_time_msg(job_time_msg_t * msg);
 void inline slurm_free_job_step_kill_msg(job_step_kill_msg_t * msg);
 void inline slurm_free_epilog_complete_msg(epilog_complete_msg_t * msg);
 void inline slurm_free_srun_job_complete_msg(srun_job_complete_msg_t * msg);
+void inline slurm_free_srun_exec_msg(srun_exec_msg_t *msg);
 void inline slurm_free_srun_ping_msg(srun_ping_msg_t * msg);
 void inline slurm_free_srun_node_fail_msg(srun_node_fail_msg_t * msg);
 void inline slurm_free_srun_timeout_msg(srun_timeout_msg_t * msg);
+void inline slurm_free_srun_user_msg(srun_user_msg_t * msg);
 void inline slurm_free_checkpoint_msg(checkpoint_msg_t *msg);
 void inline slurm_free_checkpoint_comp_msg(checkpoint_comp_msg_t *msg);
 void inline slurm_free_checkpoint_resp_msg(checkpoint_resp_msg_t *msg);

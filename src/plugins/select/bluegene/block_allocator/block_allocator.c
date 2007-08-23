@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  block_allocator.c - Assorted functions for layout of bglblocks, 
  *	 wiring, mapping for smap, etc.
- *  $Id: block_allocator.c 11633 2007-06-05 20:29:58Z da $
+ *  $Id: block_allocator.c 11985 2007-08-09 23:07:08Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -804,10 +804,7 @@ extern void ba_init(node_info_msg_t *node_info_ptr)
 	
 	ba_system_ptr = (ba_system_t *) xmalloc(sizeof(ba_system_t));
 	
-	ba_system_ptr->xcord = 1;
-	ba_system_ptr->ycord = 1;
 	ba_system_ptr->num_of_proc = 0;
-	ba_system_ptr->resize_screen = 0;
 	
 	if(node_info_ptr!=NULL) {
 #ifdef HAVE_BG

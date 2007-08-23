@@ -135,6 +135,9 @@ static void _opt_default(void);
 /* set options from batch script */
 static void _opt_batch_script(const void *body, int size);
 
+/* set options from pbs batch script */
+static void _opt_pbs_batch_script(const void *body, int size);
+
 /* set options based upon env vars  */
 static void _opt_env(void);
 
@@ -149,6 +152,7 @@ static void  _print_version(void);
 static void _process_env_var(env_vars_t *e, const char *val);
 
 static uint16_t _parse_mail_type(const char *arg);
+static uint16_t _parse_pbs_mail_type(const char *arg);
 static char *_print_mail_type(const uint16_t type);
 
 /* search PATH for command returns full path */
@@ -162,6 +166,8 @@ static int   _verify_geometry(const char *arg, uint16_t *geometry);
 static int   _verify_conn_type(const char *arg);
 static char *_fullpath(const char *filename);
 static void _set_options(int argc, char **argv);
+static void _set_pbs_options(int argc, char **argv);
+static void _parse_pbs_resource_list(char *rl);
 
 /*---[ end forward declarations of static functions ]---------------------*/
 
@@ -393,7 +399,7 @@ static void _opt_default()
 	opt.max_nodes = 0;
 	opt.tasks_per_node   = -1;
 	opt.nodes_set = false;
-	opt.time_limit = -1;
+	opt.time_limit = 0;
 	opt.partition = NULL;
 
 	opt.job_name = NULL;
@@ -474,7 +480,7 @@ env_vars_t env_vars[] = {
   {"SBATCH_NO_ROTATE",     OPT_BOOL,       &opt.no_rotate,     NULL           },
   {"SBATCH_PARTITION",     OPT_STRING,     &opt.partition,     NULL           },
   {"SBATCH_RAMDISK_IMAGE", OPT_STRING,     &opt.ramdiskimage,  NULL           },
-  {"SBATCH_TIMELIMIT",     OPT_INT,        &opt.time_limit,    NULL           },
+  {"SBATCH_TIMELIMIT",     OPT_STRING,     &opt.time_limit_str,NULL           },
   {"SBATCH_EXCLUSIVE",     OPT_EXCLUSIVE,  NULL,               NULL           },
   {NULL, 0, NULL, NULL}
 };
@@ -755,6 +761,9 @@ int process_options_second_pass(int argc, char *argv[],
 	/* set options from batch script */
 	_opt_batch_script(script_body, script_size);
 
+	/* set options from pbs batch script */
+	_opt_pbs_batch_script(script_body, script_size);
+
 	/* set options from env vars */
 	_opt_env();
 
@@ -926,6 +935,57 @@ static void _opt_batch_script(const void *body, int size)
 	xfree(argv);
 }
 
+/*
+ * set pbs options from batch script
+ *
+ * Build an argv-style array of options from the script "body",
+ * then pass the array to _set_options for() further parsing.
+ */
+static void _opt_pbs_batch_script(const void *body, int size)
+{
+	char *magic_word = "#PBS";
+	int magic_word_len;
+	int argc;
+	char **argv;
+	void *state = NULL;
+	char *line;
+	char *option;
+	char *ptr;
+	int skipped = 0;
+	int i;
+
+	magic_word_len = strlen(magic_word);
+	/* getopt_long skips over the first argument, so fill it in */
+	argc = 1;
+	argv = xmalloc(sizeof(char *));
+	argv[0] = "sbatch";
+
+	while((line = _next_line(body, size, &state)) != NULL) {
+		if (strncmp(line, magic_word, magic_word_len) != 0) {
+			xfree(line);
+			continue;
+		}
+
+		/* this line starts with the magic word */
+		ptr = line + magic_word_len;
+		while ((option = _get_argument(ptr, &skipped)) != NULL) {
+			debug2("Found in script, argument \"%s\"", option);
+			argc += 1;
+			xrealloc(argv, sizeof(char*) * argc);
+			argv[argc-1] = option;
+			ptr += skipped;
+		}
+		xfree(line);
+	}
+
+	if (argc > 0)
+		_set_pbs_options(argc, argv);
+
+	for (i = 1; i < argc; i++)
+		xfree(argv[i]);
+	xfree(argv);
+}
+
 static void _set_options(int argc, char **argv)
 {
 	int opt_char, option_index = 0;
@@ -1040,7 +1100,8 @@ static void _set_options(int argc, char **argv)
 			opt.shared = 1;
 			break;
 		case 't':
-			opt.time_limit = _get_int(optarg, "time");
+			xfree(opt.time_limit_str);
+			opt.time_limit_str = xstrdup(optarg);
 			break;
 		case 'u':
 			_usage();
@@ -1209,6 +1270,371 @@ static void _set_options(int argc, char **argv)
 	}
 }
 
+static void _set_pbs_options(int argc, char **argv)
+{
+	int opt_char, option_index = 0;
+	
+	char *pbs_opt_string = "+a:A:c:C:e:hIj:k:l:m:M:N:o:p:q:r:S:u:v:VWz";
+
+	struct option pbs_long_options[] = {
+		{"start_time", required_argument, 0, 'a'},
+		{"account", required_argument, 0, 'A'},
+		{"checkpoint", required_argument, 0, 'c'},
+		{"working_dir", required_argument, 0, 'C'},
+		{"error", required_argument, 0, 'e'},
+		{"hold", no_argument, 0, 'h'},
+		{"interactive", no_argument, 0, 'I'},
+		{"join", optional_argument, 0, 'j'},
+		{"keep", required_argument, 0, 'k'},
+		{"resource_list", required_argument, 0, 'l'},
+		{"mail_options", required_argument, 0, 'm'},
+		{"mail_user_list", required_argument, 0, 'M'},
+		{"job_name", required_argument, 0, 'N'},
+		{"out", required_argument, 0, 'o'},
+		{"priority", required_argument, 0, 'p'},
+		{"destination", required_argument, 0, 'q'},
+		{"rerunable", required_argument, 0, 'r'},
+		{"script_path", required_argument, 0, 'S'},
+		{"running_user", required_argument, 0, 'u'},
+		{"variable_list", required_argument, 0, 'v'},
+		{"all_env", no_argument, 0, 'V'},
+		{"attributes", no_argument, 0, 'W'},
+		{"no_std", no_argument, 0, 'z'},
+		{NULL, 0, 0, 0}
+	};
+
+
+	optind = 0;
+	while((opt_char = getopt_long(argc, argv, pbs_opt_string,
+				      pbs_long_options, &option_index))
+	      != -1) {
+		switch (opt_char) {
+		case 'a':
+			opt.begin = parse_time(optarg);			
+			break;
+		case 'A':
+			xfree(opt.account);
+			opt.account = xstrdup(optarg);
+			break;
+		case 'c':
+			break;
+		case 'C':
+			xfree(opt.cwd);
+			opt.cwd = xstrdup(optarg);
+			break;
+		case 'e':
+			xfree(opt.efname);
+			if (strncasecmp(optarg, "none", (size_t) 4) == 0)
+				opt.efname = xstrdup("/dev/null");
+			else
+				opt.efname = xstrdup(optarg);
+			break;
+		case 'h':
+			opt.hold = true;
+			break;
+		case 'I':
+			break;
+		case 'j':
+			break;
+		case 'k':
+			break;
+		case 'l':
+			_parse_pbs_resource_list(optarg);
+			break;
+		case 'm':
+			opt.mail_type |= _parse_pbs_mail_type(optarg);
+			if (opt.mail_type == 0)
+				fatal("-m=%s invalid", optarg);
+			break;
+		case 'M':
+			xfree(opt.mail_user);
+			opt.mail_user = xstrdup(optarg);
+			break;
+		case 'N':
+			xfree(opt.job_name);
+			opt.job_name = xstrdup(optarg);
+			break;
+		case 'o':
+			xfree(opt.ofname);
+			if (strncasecmp(optarg, "none", (size_t) 4) == 0)
+				opt.ofname = xstrdup("/dev/null");
+			else
+				opt.ofname = xstrdup(optarg);
+			break;
+		case 'p':
+			if (optarg)
+				opt.nice = strtol(optarg, NULL, 10);
+			else
+				opt.nice = 100;
+			if (abs(opt.nice) > NICE_OFFSET) {
+				error("Invalid nice value, must be between "
+				      "-%d and %d", NICE_OFFSET, NICE_OFFSET);
+				exit(1);
+			}
+			break;
+		case 'q':
+			xfree(opt.partition);
+			opt.partition = xstrdup(optarg);
+			break;
+		case 'r':
+			break;
+		case 'S':
+			break;
+		case 'u':
+			break;
+		case 'v':
+			break;
+		case 'V':
+			break;
+		case 'W':
+			xfree(opt.constraints);
+			opt.constraints = xstrdup(optarg);
+			break;
+		case 'z':
+			break;
+		default:
+			fatal("Unrecognized command line parameter %c",
+			      opt_char);
+		}
+	}
+
+	if (optind < argc) {
+		fatal("Invalid argument: %s", argv[optind]);
+	}
+}
+
+static char *_get_pbs_node_name(char *node_options, int *i)
+{
+	int start = (*i);
+	char *value = NULL;
+
+	while(node_options[*i] 
+	      && node_options[*i] != '+'
+	      && node_options[*i] != ':') 
+		(*i)++;
+
+	value = xmalloc((*i)-start+1);		
+	memcpy(value, node_options+start, (*i)-start);
+
+	if(node_options[*i])
+		(*i)++;
+
+	return value;
+}
+
+static void _get_next_pbs_node_part(char *node_options, int *i)
+{
+	while(node_options[*i] 
+	      && node_options[*i] != '+'
+	      && node_options[*i] != ':') 
+		(*i)++;
+	if(node_options[*i])
+		(*i)++;
+}
+
+static void _parse_pbs_nodes_opts(char *node_opts)
+{
+	int i = 0;
+	char *temp = NULL;
+	char buf[255];
+	int ppn = 0;
+	int node_cnt = 0;
+	hostlist_t hl = hostlist_create(NULL);
+
+	while(node_opts[i]) {
+		if(!strncmp(node_opts+i, "ppn=", 4)) {
+			i+=4;
+			ppn += strtol(node_opts+i, NULL, 10);
+			_get_next_pbs_node_part(node_opts, &i);
+		} else if(isdigit(node_opts[i])) {
+			node_cnt += strtol(node_opts+i, NULL, 10);
+			_get_next_pbs_node_part(node_opts, &i);
+		} else if(isalpha(node_opts[i])) {
+			temp = _get_pbs_node_name(node_opts, &i);
+			hostlist_push(hl, temp);
+			xfree(temp);
+		} else 
+			i++;
+		
+	}
+
+	if(!node_cnt) 
+		node_cnt = 1;
+	else {
+		opt.nodes_set = true;
+		opt.min_nodes = opt.max_nodes = node_cnt;
+	}
+	
+	if(ppn) {
+		ppn *= node_cnt;
+		opt.nprocs_set = true;
+		opt.nprocs = ppn;
+	}
+
+	if(hostlist_count(hl) > 0) {
+		hostlist_ranged_string(hl, sizeof(buf), buf);
+		xfree(opt.nodelist);
+		opt.nodelist = xstrdup(buf);
+#ifdef HAVE_BG
+		info("\tThe nodelist option should only be used if\n"
+		     "\tthe block you are asking for can be created.\n"
+		     "\tPlease consult smap before using this option\n"
+		     "\tor your job may be stuck with no way to run.");
+#endif
+	}
+
+	hostlist_destroy(hl);
+}
+
+static void _get_next_pbs_option(char *pbs_options, int *i)
+{
+	while(pbs_options[*i] && pbs_options[*i] != ',') 
+		(*i)++;
+	if(pbs_options[*i])
+		(*i)++;
+}
+
+static char *_get_pbs_option_value(char *pbs_options, int *i)
+{
+	int start = (*i);
+	char *value = NULL;
+
+	while(pbs_options[*i] && pbs_options[*i] != ',') 
+		(*i)++;
+	value = xmalloc((*i)-start+1);		
+	memcpy(value, pbs_options+start, (*i)-start);
+
+	if(pbs_options[*i])
+		(*i)++;
+
+	return value;
+}
+
+static void _parse_pbs_resource_list(char *rl)
+{
+	int i = 0;
+	char *temp = NULL;
+
+	while(rl[i]) {
+		if(!strncmp(rl+i, "arch=", 5)) {
+			i+=5;
+			_get_next_pbs_option(rl, &i);
+		} else if(!strncmp(rl+i, "cput=", 5)) {
+			i+=5;
+			temp = _get_pbs_option_value(rl, &i);
+			if(!temp) 
+				fatal("No value given for cput");
+			xfree(opt.time_limit_str);
+			opt.time_limit_str = xstrdup(temp);
+			xfree(temp);
+		} else if(!strncmp(rl+i, "file=", 5)) {
+			int end = 0;
+
+			i+=5;
+			temp = _get_pbs_option_value(rl, &i);
+			if(!temp) 
+				fatal("No value given for file");
+
+			end = strlen(temp) - 1;
+			if (toupper(temp[end]) == 'B') {
+				/* In Torque they do GB or MB on the
+				 * end of size, we just want G or M so
+				 * we will remove the b on the end
+				 */
+				temp[end] = '\0';
+			}
+			opt.tmpdisk = _to_bytes(temp);
+			if (opt.tmpdisk < 0) {
+				error("invalid tmp value %s", temp);
+				exit(1);
+			}
+			xfree(temp);
+		} else if(!strncmp(rl+i, "host=", 5)) {
+			i+=5;
+			_get_next_pbs_option(rl, &i);
+		} else if(!strncmp(rl+i, "mem=", 4)) {
+			int end = 0;
+
+			i+=4;
+			temp = _get_pbs_option_value(rl, &i);
+			if(!temp) 
+				fatal("No value given for mem");
+			end = strlen(temp) - 1;
+			if (toupper(temp[end]) == 'B') {
+				/* In Torque they do GB or MB on the
+				 * end of size, we just want G or M so
+				 * we will remove the b on the end
+				 */
+				temp[end] = '\0';
+			}
+			opt.realmem = (int) _to_bytes(temp);
+			if (opt.realmem < 0) {
+				error("invalid memory constraint %s", 
+				      temp);
+				exit(1);
+			}
+
+			xfree(temp);
+		} else if(!strncmp(rl+i, "nice=", 5)) {
+			i+=5;
+			temp = _get_pbs_option_value(rl, &i);
+			if (temp)
+				opt.nice = strtol(temp, NULL, 10);
+			else
+				opt.nice = 100;
+			if (abs(opt.nice) > NICE_OFFSET) {
+				error("Invalid nice value, must be between "
+				      "-%d and %d", NICE_OFFSET, NICE_OFFSET);
+				exit(1);
+			}
+			xfree(temp);
+		} else if(!strncmp(rl+i, "nodes=", 6)) {
+			i+=6;
+			temp = _get_pbs_option_value(rl, &i);
+			if(!temp) 
+				fatal("No value given for nodes");
+			
+			_parse_pbs_nodes_opts(temp);
+			xfree(temp);
+		} else if(!strncmp(rl+i, "opsys=", 6)) {
+ 			i+=6;
+			_get_next_pbs_option(rl, &i);
+		} else if(!strncmp(rl+i, "other=", 6)) {
+			i+=6;
+			_get_next_pbs_option(rl, &i);
+		} else if(!strncmp(rl+i, "pcput=", 6)) {
+			i+=6;
+			temp = _get_pbs_option_value(rl, &i);
+			if(!temp) 
+				fatal("No value given for pcput");
+			xfree(opt.time_limit_str);
+			opt.time_limit_str = xstrdup(temp);
+			xfree(temp);
+		} else if(!strncmp(rl+i, "pmem=", 5)) {
+			i+=5;
+			_get_next_pbs_option(rl, &i);
+		} else if(!strncmp(rl+i, "pvmem=", 6)) {
+			i+=6;
+			_get_next_pbs_option(rl, &i);
+		} else if(!strncmp(rl+i, "software=", 9)) {
+			i+=9;
+			_get_next_pbs_option(rl, &i);
+		} else if(!strncmp(rl+i, "vmem=", 5)) {
+			i+=5;
+			_get_next_pbs_option(rl, &i);
+		} else if(!strncmp(rl+i, "walltime=", 9)) {
+			i+=9;
+			temp = _get_pbs_option_value(rl, &i);
+			if(!temp) 
+				fatal("No value given for walltime");
+			xfree(opt.time_limit_str);
+			opt.time_limit_str = xstrdup(temp);
+			xfree(temp);
+		} else 
+			i++;
+	}
+}
+
 /* 
  * _opt_verify : perform some post option processing verification
  *
@@ -1272,7 +1698,13 @@ static bool _opt_verify(void)
 
 	} /* else if (opt.nprocs_set && !opt.nodes_set) */
 
-	if (opt.time_limit == 0)
+	if (opt.time_limit_str) {
+		opt.time_limit = time_str2mins(opt.time_limit_str);
+		if (opt.time_limit < 0) {
+			error("Invalid time limit specification");
+			exit(1);
+		}
+	} else
 		opt.time_limit = INFINITE;
 
 	if ((opt.euid != (uid_t) -1) && (opt.euid != opt.uid)) 
@@ -1283,6 +1715,16 @@ static bool _opt_verify(void)
 
         if ((opt.egid != (gid_t) -1) && (opt.egid != opt.gid))
 	        opt.gid = opt.egid;
+
+	if (opt.immediate) {
+		char *sched_name = slurm_get_sched_type();
+		if (strcmp(sched_name, "sched/wiki") == 0) {
+			info("WARNING: Ignoring the -I/--immediate option "
+				"(not supported by Maui)");
+			opt.immediate = false;
+		}
+		xfree(sched_name);
+	}
 
 	return verified;
 }
@@ -1304,6 +1746,37 @@ static uint16_t _parse_mail_type(const char *arg)
 
 	return rc;
 }
+
+static uint16_t _parse_pbs_mail_type(const char *arg)
+{
+	uint16_t rc;
+
+	if (strcasecmp(arg, "b") == 0)
+		rc = MAIL_JOB_BEGIN;
+	else if  (strcasecmp(arg, "e") == 0)
+		rc = MAIL_JOB_END;
+	else if (strcasecmp(arg, "a") == 0)
+		rc = MAIL_JOB_FAIL;
+	else if (strcasecmp(arg, "bea") == 0
+		|| strcasecmp(arg, "eba") == 0
+		|| strcasecmp(arg, "eab") == 0
+		|| strcasecmp(arg, "bae") == 0)
+		rc = MAIL_JOB_BEGIN | MAIL_JOB_END |  MAIL_JOB_FAIL;
+	else if (strcasecmp(arg, "be") == 0
+		|| strcasecmp(arg, "eb") == 0)
+		rc = MAIL_JOB_BEGIN | MAIL_JOB_END;
+	else if (strcasecmp(arg, "ba") == 0
+		|| strcasecmp(arg, "ab") == 0)
+		rc = MAIL_JOB_BEGIN | MAIL_JOB_FAIL;
+	else if (strcasecmp(arg, "ea") == 0
+		|| strcasecmp(arg, "ae") == 0)
+		rc = MAIL_JOB_END |  MAIL_JOB_FAIL;
+	else
+		rc = 0;		/* failure */
+
+	return rc;
+}
+
 static char *_print_mail_type(const uint16_t type)
 {
 	if (type == 0)
@@ -1593,8 +2066,8 @@ static void _usage(void)
 "              [-c ncpus] [-r n] [-p partition] [--hold] [-t minutes]\n"
 "              [-D path] [--immediate] [--no-kill]\n"
 "              [--input file] [--output file] [--error file]\n"
-"              [--share] [-m dist] [-J jobname]\n"
-"              [--jobid=id] [--verbose]\n"
+"              [--workdir=directory] [--share] [-m dist] [-J jobname]\n"
+"              [--jobid=id] [--verbose] [--gid=group] [--uid=user]\n"
 "              [-W sec] [--minsockets=n] [--mincores=n] [--minthreads=n]\n"
 "              [--contiguous] [--mincpus=n] [--mem=MB] [--tmp=MB] [-C list]\n"
 "              [--account=name] [--dependency=jobid] [--comment=name]\n"
@@ -1605,7 +2078,8 @@ static void _usage(void)
 #endif
 "              [--mail-type=type] [--mail-user=user][--nice[=value]]\n"
 "              [--no-requeue] [--ntasks-per-node=n]\n"
-"              [-w hosts...] [-x hosts...] executable [args...]\n");
+"              [--nodefile=file] [--nodelist=hosts] [--exclude=hosts]\n"
+"              executable [args...]\n");
 }
 
 static void _help(void)
@@ -1633,12 +2107,15 @@ static void _help(void)
 "  -v, --verbose               verbose mode (multiple -v's increase verbosity)\n"
 "  -q, --quiet                 quiet mode (suppress informational messages)\n"
 "  -d, --dependency=jobid      defer job until specified jobid completes\n"
+"  -D, --workdir=directory     set working directory for batch script\n"
 "      --nice[=value]          decrease secheduling priority by value\n"
 "  -U, --account=name          charge job to specified account\n"
 "      --begin=time            defer job until HH:MM DD/MM/YY\n"
 "      --comment=name          arbitrary comment\n"
 "      --mail-type=type        notify on state change: BEGIN, END, FAIL or ALL\n"
 "      --mail-user=user        who to send email notification for job state changes\n"
+"      --gid=group_id          group ID to run job as (user root only)\n"
+"      --uid=user_id           user ID to run job as (user root only)\n"
 "      --get-user-env          used by Moab.  See srun man page.\n"
 "      --no-requeue            if set, do not permit the job to be requeued\n"
 "\n"
@@ -1651,6 +2128,7 @@ static void _help(void)
 "      --tmp=MB                minimum amount of temporary disk\n"
 "      --contiguous            demand a contiguous range of nodes\n"
 "  -C, --constraint=list       specify a list of constraints\n"
+"  -F, --nodefile=filename     request a specific list of hosts\n"
 "  -w, --nodelist=hosts...     request a specific list of hosts\n"
 "  -x, --exclude=hosts...      exclude a specific list of hosts\n"
 "\n"

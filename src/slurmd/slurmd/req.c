@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmd/req.c - slurmd request handling
- *  $Id: req.c 11590 2007-05-25 18:52:33Z da $
+ *  $Id: req.c 11813 2007-07-11 17:03:30Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -118,6 +118,7 @@ static int  _rpc_file_bcast(slurm_msg_t *msg);
 static int  _rpc_ping(slurm_msg_t *);
 static int  _rpc_step_complete(slurm_msg_t *msg);
 static int  _rpc_stat_jobacct(slurm_msg_t *msg);
+static int  _rpc_daemon_status(slurm_msg_t *msg);
 static int  _run_prolog(uint32_t jobid, uid_t uid, char *bg_part_id);
 static int  _run_epilog(uint32_t jobid, uid_t uid, char *bg_part_id);
 
@@ -128,7 +129,7 @@ static int _waiter_complete (uint32_t jobid);
 
 static bool _steps_completed_now(uint32_t jobid);
 static void _wait_state_completed(uint32_t jobid, int max_delay);
-static uid_t _get_job_uid(uint32_t jobid);
+static long _get_job_uid(uint32_t jobid);
 
 static gids_t *_gids_cache_lookup(char *user, gid_t gid);
 
@@ -138,6 +139,8 @@ static gids_t *_gids_cache_lookup(char *user, gid_t gid);
 static List waiters;
 
 static pthread_mutex_t launch_mutex = PTHREAD_MUTEX_INITIALIZER;
+static time_t booted = 0;
+static time_t last_slurmctld_msg = 0;
 
 void
 slurmd_req(slurm_msg_t *msg)
@@ -145,9 +148,12 @@ slurmd_req(slurm_msg_t *msg)
 	int rc;
 
 	if (msg == NULL) {
-		if (waiters)
+		if (booted == 0)
+			booted = time(NULL);
+		if (waiters) {
 			list_destroy(waiters);
-		waiters = NULL;
+			waiters = NULL;
+		}
 		return;
 	}
 
@@ -157,6 +163,7 @@ slurmd_req(slurm_msg_t *msg)
 		 * very slow prolog on Blue Gene system. Only batch 
 		 * jobs are supported on Blue Gene (no job steps). */
 		_rpc_batch_job(msg);
+		last_slurmctld_msg = time(NULL);
 		slurm_free_job_launch_msg(msg->data);
 		break;
 	case REQUEST_LAUNCH_TASKS:
@@ -178,6 +185,7 @@ slurmd_req(slurm_msg_t *msg)
 		break;
 	case REQUEST_KILL_TIMELIMIT:
 		debug2("Processing RPC: REQUEST_KILL_TIMELIMIT");
+		last_slurmctld_msg = time(NULL);
 		_rpc_timelimit(msg);
 		slurm_free_timelimit_msg(msg->data);
 		break; 
@@ -193,15 +201,18 @@ slurmd_req(slurm_msg_t *msg)
 		break;
 	case REQUEST_SUSPEND:
 		_rpc_suspend_job(msg);
+		last_slurmctld_msg = time(NULL);
 		slurm_free_suspend_msg(msg->data);
 		break;
 	case REQUEST_TERMINATE_JOB:
 		debug2("Processing RPC: REQUEST_TERMINATE_JOB");
+		last_slurmctld_msg = time(NULL);
 		_rpc_terminate_job(msg);
 		slurm_free_kill_job_msg(msg->data);
 		break;
 	case REQUEST_UPDATE_JOB_TIME:
 		_rpc_update_time(msg);
+		last_slurmctld_msg = time(NULL);
 		slurm_free_update_job_time_msg(msg->data);
 		break;
 	case REQUEST_SHUTDOWN:
@@ -210,11 +221,13 @@ slurmd_req(slurm_msg_t *msg)
 		break;
 	case REQUEST_RECONFIGURE:
 		_rpc_reconfig(msg);
+		last_slurmctld_msg = time(NULL);
 		/* No body to free */
 		break;
 	case REQUEST_NODE_REGISTRATION_STATUS:
 		/* Treat as ping (for slurmctld agent, just return SUCCESS) */
 		rc = _rpc_ping(msg);
+		last_slurmctld_msg = time(NULL);
 		/* No body to free */
 		/* Then initiate a separate node registration */
 		if (rc == SLURM_SUCCESS)
@@ -222,6 +235,7 @@ slurmd_req(slurm_msg_t *msg)
 		break;
 	case REQUEST_PING:
 		_rpc_ping(msg);
+		last_slurmctld_msg = time(NULL);
 		/* No body to free */
 		break;
 	case REQUEST_JOB_ID:
@@ -240,6 +254,10 @@ slurmd_req(slurm_msg_t *msg)
 	case MESSAGE_STAT_JOBACCT:
 		rc = _rpc_stat_jobacct(msg);
 		slurm_free_stat_jobacct_msg(msg->data);
+		break;
+	case REQUEST_DAEMON_STATUS:
+		_rpc_daemon_status(msg);
+		/* No body to free */
 		break;
 	default:
 		error("slurmd_req: invalid request msg type %d\n",
@@ -876,6 +894,12 @@ _rpc_batch_job(slurm_msg_t *msg)
 		else
 			(void) _abort_step(req->job_id, req->step_id);
 	}
+
+	/*
+	 *  If job prolog failed, indicate failure to slurmctld
+	 */
+	if (rc == ESLURMD_PROLOG_FAILED)
+		send_registration_msg(rc, false);
 }
 
 static int
@@ -1101,7 +1125,7 @@ _rpc_step_complete(slurm_msg_t *msg)
 		goto done;
 	}
 
-	/* step completion messages are only allowed from other slurmstepd,
+	/* step completionmessages are only allowed from other slurmstepd,
 	   so only root or SlurmUser is allowed here */
 	req_uid = g_slurm_auth_get_uid(msg->auth_cred);
 	if (!_slurm_authorized_user(req_uid)) {
@@ -1123,6 +1147,82 @@ done:
 	return rc;
 }
 
+/* Get list of active jobs and steps, xfree returned value */
+static char *
+_get_step_list(void)
+{
+	char tmp[64];
+	char *step_list = NULL;
+	List steps;
+	ListIterator i;
+	step_loc_t *stepd;
+
+	steps = stepd_available(conf->spooldir, conf->node_name);
+	i = list_iterator_create(steps);
+	while ((stepd = list_next(i))) {
+		int fd;
+		fd = stepd_connect(stepd->directory, stepd->nodename,
+				stepd->jobid, stepd->stepid);
+		if (fd == -1)
+			continue;
+		if (stepd_state(fd) == SLURMSTEPD_NOT_RUNNING) {
+			debug("stale domain socket for stepd %u.%u ",
+				stepd->jobid, stepd->stepid);
+			close(fd);
+			continue;
+		}
+		close(fd);
+
+		if (step_list)
+			xstrcat(step_list, ", ");
+		if (stepd->stepid == NO_VAL) {
+			snprintf(tmp, sizeof(tmp), "%u", 
+				stepd->jobid);
+			xstrcat(step_list, tmp);
+		} else {
+			snprintf(tmp, sizeof(tmp), "%u.%u",
+				stepd->jobid, stepd->stepid);
+			xstrcat(step_list, tmp);
+		}
+	}
+	list_iterator_destroy(i);
+	list_destroy(steps);
+
+	if (step_list == NULL)
+		xstrcat(step_list, "NONE");
+	return step_list;
+}
+
+static int
+_rpc_daemon_status(slurm_msg_t *msg)
+{
+	slurm_msg_t      resp_msg;
+	slurmd_status_t *resp = NULL;
+
+	resp = xmalloc(sizeof(slurmd_status_t));
+	resp->actual_cpus        = conf->actual_cpus;
+	resp->actual_sockets     = conf->actual_sockets;
+	resp->actual_cores       = conf->actual_cores;
+	resp->actual_threads     = conf->actual_threads;
+	resp->actual_real_mem    = conf->real_memory_size;
+	resp->actual_tmp_disk    = conf->tmp_disk_space;
+	resp->booted             = booted;
+	resp->hostname           = xstrdup(conf->node_name);
+	resp->step_list          = _get_step_list();
+	resp->last_slurmctld_msg = last_slurmctld_msg;
+	resp->pid                = conf->pid;
+	resp->slurmd_debug       = conf->debug_level;
+	resp->slurmd_logfile     = xstrdup(conf->logfile);
+	resp->version            = xstrdup(SLURM_VERSION);
+
+	slurm_msg_t_copy(&resp_msg, msg);
+	resp_msg.msg_type = RESPONSE_SLURMD_STATUS;
+	resp_msg.data     = resp;
+	slurm_send_node_msg(msg->conn_fd, &resp_msg);
+	slurm_free_slurmd_status(resp);
+	return SLURM_SUCCESS; 
+}
+
 static int
 _rpc_stat_jobacct(slurm_msg_t *msg)
 {
@@ -1131,7 +1231,7 @@ _rpc_stat_jobacct(slurm_msg_t *msg)
 	stat_jobacct_msg_t *resp = NULL;
 	int fd;
 	uid_t req_uid;
-	uid_t job_uid;
+	long job_uid;
 	
 	debug3("Entering _rpc_stat_jobacct");
 	/* step completion messages are only allowed from other slurmstepd,
@@ -1139,20 +1239,28 @@ _rpc_stat_jobacct(slurm_msg_t *msg)
 	req_uid = g_slurm_auth_get_uid(msg->auth_cred);
 	
 	job_uid = _get_job_uid(req->job_id);
+	if (job_uid < 0) {
+		error("stat_jobacct for invalid job_id: %u",
+			req->job_id);
+		if (msg->conn_fd >= 0)
+			slurm_send_rc_msg(msg, ESLURM_INVALID_JOB_ID);
+		return  ESLURM_INVALID_JOB_ID;
+	}
+
 	/* 
 	 * check that requesting user ID is the SLURM UID or root
 	 */
 	if ((req_uid != job_uid) && (!_slurm_authorized_user(req_uid))) {
 		error("stat_jobacct from uid %ld for job %u "
 		      "owned by uid %ld",
-		      (long) req_uid, req->job_id, 
-		      (long) job_uid);       
+		      (long) req_uid, req->job_id, job_uid);       
 		
 		if (msg->conn_fd >= 0) {
 			slurm_send_rc_msg(msg, ESLURM_USER_ID_MISSING);
 			return ESLURM_USER_ID_MISSING;/* or bad in this case */
 		}
-	} 
+	}
+ 
 	resp = xmalloc(sizeof(stat_jobacct_msg_t));
 	slurm_msg_t_copy(&resp_msg, msg);
 	resp->job_id = req->job_id;
@@ -1463,7 +1571,7 @@ done:
 	slurm_free_reattach_tasks_response_msg(resp);
 }
 
-static uid_t 
+static long 
 _get_job_uid(uint32_t jobid)
 {
 	List steps;
@@ -1471,7 +1579,7 @@ _get_job_uid(uint32_t jobid)
 	step_loc_t *stepd;
 	slurmstepd_info_t *info = NULL;
 	int fd;
-	uid_t uid = 0;
+	long uid = -1;
 
 	steps = stepd_available(conf->spooldir, conf->node_name);
 	i = list_iterator_create(steps);
@@ -1496,7 +1604,7 @@ _get_job_uid(uint32_t jobid)
 			      stepd->jobid, stepd->stepid);
 			continue;
 		}
-		uid = (uid_t)info->uid;
+		uid = (long)info->uid;
 		break;
 	}
 	list_iterator_destroy(i);
@@ -1745,7 +1853,7 @@ _rpc_signal_job(slurm_msg_t *msg)
 {
 	signal_job_msg_t *req = msg->data;
 	uid_t req_uid = g_slurm_auth_get_uid(msg->auth_cred);
-	uid_t job_uid;
+	long job_uid;
 	List steps;
 	ListIterator i;
 	step_loc_t *stepd = NULL;
@@ -1768,6 +1876,9 @@ _rpc_signal_job(slurm_msg_t *msg)
 
 	debug("_rpc_signal_job, uid = %d, signal = %d", req_uid, req->signal);
 	job_uid = _get_job_uid(req->job_id);
+	if (job_uid < 0)
+		goto no_job;
+
 	/* 
 	 * check that requesting user ID is the SLURM UID or root
 	 */
@@ -1798,8 +1909,10 @@ _rpc_signal_job(slurm_msg_t *msg)
 			continue;
 		}
 
-		if (stepd->stepid == SLURM_BATCH_SCRIPT)
+		if (stepd->stepid == SLURM_BATCH_SCRIPT) {
+			debug2("batch script itself not signalled");
 			continue;
+		}
 
 		step_cnt++;
 
@@ -1819,9 +1932,12 @@ _rpc_signal_job(slurm_msg_t *msg)
 	}
 	list_iterator_destroy(i);
 	list_destroy(steps);
-	if (step_cnt == 0)
+
+ no_job:
+	if (step_cnt == 0) {
 		debug2("No steps in jobid %u to send signal %d",
 		       req->job_id, req->signal);
+	}
 
 	/*
 	 *  At this point, if connection still open, we send controller
@@ -1844,7 +1960,7 @@ _rpc_suspend_job(slurm_msg_t *msg)
 {
 	suspend_msg_t *req = msg->data;
 	uid_t req_uid = g_slurm_auth_get_uid(msg->auth_cred);
-	uid_t job_uid;
+	long job_uid;
 	List steps;
 	ListIterator i;
 	step_loc_t *stepd;
@@ -1859,6 +1975,8 @@ _rpc_suspend_job(slurm_msg_t *msg)
 	debug("_rpc_suspend_job jobid=%u uid=%d", 
 		req->job_id, req_uid);
 	job_uid = _get_job_uid(req->job_id);
+	if (job_uid < 0)
+		goto no_job;
 	/* 
 	 * check that requesting user ID is the SLURM UID or root
 	 */
@@ -1908,8 +2026,12 @@ _rpc_suspend_job(slurm_msg_t *msg)
 	}
 	list_iterator_destroy(i);
 	list_destroy(steps);
-	if (step_cnt == 0)
-		debug2("No steps in jobid %u to suspend/resume", req->job_id);
+
+ no_job:
+	if (step_cnt == 0) {
+		debug2("No steps in jobid %u to suspend/resume", 
+			req->job_id);
+	}
 
 	/*
 	 *  At this point, if connection still open, we send controller

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  opt.c - options processing for srun
- *  $Id: opt.c 11623 2007-06-04 21:54:37Z da $
+ *  $Id: opt.c 12098 2007-08-22 22:35:51Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -78,6 +78,7 @@
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 #include "src/common/slurm_rlimits_info.h"
+#include "src/common/parse_time.h"
 #include "src/common/plugstack.h"
 #include "src/common/optz.h"
 #include "src/api/pmi_server.h"
@@ -940,6 +941,7 @@ static void _opt_default()
 	opt.mem_bind_type = 0;
 	opt.mem_bind = NULL;
 	opt.time_limit = NO_VAL;
+	opt.time_limit_str = NULL;
 	opt.partition = NULL;
 	opt.max_threads = MAX_THREADS;
 	pmi_server_max_threads(opt.max_threads);
@@ -1096,7 +1098,7 @@ env_vars_t env_vars[] = {
 {"SLURM_STDERRMODE",    OPT_STRING,     &opt.efname,        NULL             },
 {"SLURM_STDINMODE",     OPT_STRING,     &opt.ifname,        NULL             },
 {"SLURM_STDOUTMODE",    OPT_STRING,     &opt.ofname,        NULL             },
-{"SLURM_TIMELIMIT",     OPT_INT,        &opt.time_limit,    NULL             },
+{"SLURM_TIMELIMIT",     OPT_STRING,     &opt.time_limit_str,NULL             },
 {"SLURM_WAIT",          OPT_INT,        &opt.max_wait,      NULL             },
 {"SLURM_DISABLE_STATUS",OPT_INT,        &opt.disable_status,NULL             },
 {"SLURM_MPI_TYPE",      OPT_MPI,        NULL,               NULL             },
@@ -1675,10 +1677,11 @@ void set_options(const int argc, char **argv, int first)
 			opt.shared = 1;
 			break;
 		case (int)'t':
-			if(!first && opt.time_limit)
+			if(!first && opt.time_limit_str)
 				break;
-			
-			opt.time_limit = _get_int(optarg, "time", true);
+
+			xfree(opt.time_limit_str);
+			opt.time_limit_str = xstrdup(optarg);
 			break;
 		case (int)'T':
 			if(!first && opt.max_threads)
@@ -2406,7 +2409,13 @@ static bool _opt_verify(void)
 	if (opt.max_wait)
 		opt.max_exit_timeout = opt.max_wait;
 
-	if (opt.time_limit == 0)
+	if (opt.time_limit_str) {
+		opt.time_limit = time_str2mins(opt.time_limit_str);
+		if (opt.time_limit < 0) {
+			error("Invalid time limit specification");
+			exit(1);
+		}
+	} else
 		opt.time_limit = INFINITE;
 
 	if ((opt.euid != (uid_t) -1) && (opt.euid != opt.uid)) 
@@ -2426,6 +2435,16 @@ static bool _opt_verify(void)
 	if (opt.propagate && parse_rlimits( opt.propagate, PROPAGATE_RLIMITS)) {
 		error( "--propagate=%s is not valid.", opt.propagate );
 		verified = false;
+	}
+
+	if (opt.immediate) {
+		char *sched_name = slurm_get_sched_type();
+		if (strcmp(sched_name, "sched/wiki") == 0) {
+			info("WARNING: Ignoring the -I/--immediate option "
+				"(not supported by Maui)");
+			opt.immediate = false;
+		}
+		xfree(sched_name);
 	}
 
 	return verified;
@@ -2448,6 +2467,7 @@ static uint16_t _parse_mail_type(const char *arg)
 
 	return rc;
 }
+
 static char *_print_mail_type(const uint16_t type)
 {
 	if (type == 0)
@@ -2459,7 +2479,7 @@ static char *_print_mail_type(const uint16_t type)
 		return "END";
 	if (type == MAIL_JOB_FAIL)
 		return "FAIL";
-	if (type == (MAIL_JOB_BEGIN |  MAIL_JOB_END |  MAIL_JOB_FAIL))
+	if (type == (MAIL_JOB_BEGIN | MAIL_JOB_END | MAIL_JOB_FAIL))
 		return "ALL";
 
 	return "MULTIPLE";
@@ -2850,11 +2870,11 @@ static void _help(void)
 "\n"
 "Affinity/Multi-core options: (when the task/affinity plugin is enabled)\n" 
 "  -B --extra-node-info=S[:C[:T]]            Expands to:\n"
-"      --sockets-per-node=S      number of sockets per node to allocate\n"
-"      --cores-per-socket=C      number of cores per socket to allocate\n"
-"      --threads-per-core=T      number of threads per core to allocate\n"
+"      --sockets-per-node=S    number of sockets per node to allocate\n"
+"      --cores-per-socket=C    number of cores per socket to allocate\n"
+"      --threads-per-core=T    number of threads per core to allocate\n"
 "                              each field can be 'min[-max]' or wildcard '*'\n"
-"                                total cpus requested = (N x S x C x T)\n"
+"                              total cpus requested = (N x S x C x T)\n"
 "\n"
 "      --ntasks-per-socket=n   number of tasks to invoke on each socket\n"
 "      --ntasks-per-core=n     number of tasks to invoke on each core\n"

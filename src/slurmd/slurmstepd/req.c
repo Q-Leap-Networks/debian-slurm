@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/req.c - slurmstepd domain socket request handling
- *  $Id: req.c 11590 2007-05-25 18:52:33Z da $
+ *  $Id: req.c 11856 2007-07-19 02:36:24Z morrone $
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -63,6 +63,7 @@
 #include "src/slurmd/slurmstepd/req.h"
 #include "src/slurmd/slurmstepd/io.h"
 #include "src/slurmd/slurmstepd/mgr.h"
+#include "src/slurmd/slurmstepd/step_terminate_monitor.h"
 
 static void *_handle_accept(void *arg);
 static int _handle_request(int fd, slurmd_job_t *job, uid_t uid, gid_t gid);
@@ -749,6 +750,7 @@ _handle_terminate(int fd, slurmd_job_t *job, uid_t uid)
 
 	debug("_handle_terminate for job %u.%u",
 	      job->jobid, job->stepid);
+	step_terminate_monitor_start(job->jobid, job->stepid);
 
 	debug3("  uid = %d", uid);
 	if (uid != job->uid && !_slurm_authorized_user(uid)) {

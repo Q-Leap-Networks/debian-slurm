@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmd/slurmd.c - main slurm node server daemon
- *  $Id: slurmd.c 11590 2007-05-25 18:52:33Z da $
+ *  $Id: slurmd.c 11829 2007-07-12 16:14:24Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -147,8 +147,15 @@ static void      _install_fork_handlers(void);
 int 
 main (int argc, char *argv[])
 {
-	int pidfd;
+	int i, pidfd;
 	int blocked_signals[] = {SIGPIPE, 0};
+
+	/*
+	 * Make sure we have no extra open files which 
+	 * would be propagated to spawned tasks.
+	 */
+	for (i=3; i<256; i++)
+		(void) close(i);
 
 	/*
 	 * Create and set default values for the slurmd global
@@ -263,6 +270,7 @@ _msg_engine()
 	slurm_fd sock;
 
 	msg_pthread = pthread_self();
+	slurmd_req(NULL);	/* initialize timer */
 	while (!_shutdown) {
 		slurm_addr *cli = xmalloc (sizeof (slurm_addr));
 		if ((sock = slurm_accept_msg_conn(conf->lfd, cli)) >= 0) {

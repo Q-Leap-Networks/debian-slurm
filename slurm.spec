@@ -1,16 +1,16 @@
-# $Id: slurm.spec 11665 2007-06-07 19:06:21Z jette $
+# $Id: slurm.spec 12088 2007-08-22 18:02:24Z jette $
 
 # Note that this package is not relocatable
 
 Name:    slurm
-Version: 1.2.11
-Release: 1
+Version: 1.2.14
+Release: 1%{?dist}
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL 
 Group: System Environment/Base
-Source: slurm-1.2.11.tar.bz2
+Source: slurm-1.2.14.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: http://www.llnl.gov/linux/slurm
 %ifos linux
@@ -48,6 +48,15 @@ BuildRequires: openssl-devel >= 0.9.6 munge-libs munge-devel proctrack >= 3
 %{!?_slurm_sysconfdir: %define _slurm_sysconfdir /etc/slurm}
 %define _sysconfdir %_slurm_sysconfdir
 
+%define _perlarch %(perl -e 'use Config; $T=$Config{installsitearch}; $P=$Config{installprefix}; $T =~ s/$P//; print $T;') 
+
+%define _perldir %{_prefix}%{_perlarch}
+
+%package perlapi
+Summary: Perl API to SLURM.
+Group: Development/System
+Requires: slurm
+
 %package devel
 Summary: Development package for SLURM.
 Group: Development/System
@@ -78,6 +87,11 @@ Summary: SLURM switch plugin for Quadrics Elan3 or Elan4.
 Group: System Environment/Base
 Requires: slurm qsnetlibs
 
+%package torque
+Summary: Torque wrappers for trasitition from Torque to SLURM.
+Group: Development/System
+Requires: slurm
+
 %package aix-federation
 Summary: SLURM interfaces to IBM AIX and Federation switch.
 Group: System Environment/Base
@@ -93,6 +107,10 @@ SLURM is an open source, fault-tolerant, and highly
 scalable cluster management and job scheduling system for Linux clusters
 containing up to thousands of nodes. Components include machine status,
 partition management, job management, and scheduling modules.
+
+%description perlapi
+Perl API package for SLURM.  This package includes the perl API to provide a
+helpful interface to SLURM through Perl.
 
 %description devel
 Development package for SLURM.  This package includes the header files
@@ -116,12 +134,15 @@ SLURM switch plugin for Quadrics Elan3 or Elan4.
 %description aix-federation
 SLURM plugins for IBM AIX and Federation switch.
 
+%description torque
+Torque wrapper scripts used for helping migrate from torque to SLURM.
+
 %description proctrack-sgi-job
 SLURM process tracking plugin for SGI job containers.
 (See http://oss.sgi.com/projects/pagg).
 
 %prep
-%setup -n slurm-1.2.11
+%setup -n slurm-1.2.14
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \
@@ -148,6 +169,7 @@ fi
 rm -rf "$RPM_BUILD_ROOT"
 mkdir -p "$RPM_BUILD_ROOT"
 DESTDIR="$RPM_BUILD_ROOT" make install
+DESTDIR="$RPM_BUILD_ROOT" make install-contrib
 
 %ifos aix5.3
 mv ${RPM_BUILD_ROOT}%{_bindir}/srun ${RPM_BUILD_ROOT}%{_sbindir}
@@ -199,6 +221,24 @@ test -f  $RPM_BUILD_ROOT/%{_libdir}/slurm/checkpoint_aix.so &&
   echo %{_libdir}/slurm/checkpoint_aix.so         >> $LIST
 echo "%config %{_sysconfdir}/federation.conf.example" >> $LIST
 
+LIST=./perlapi.files
+touch $LIST
+test -f $RPM_BUILD_ROOT/%{_perldir}/Slurm.pm &&
+  echo "%{_perldir}/Slurm.pm"                 >> $LIST
+test -f $RPM_BUILD_ROOT/%{_perldir}/auto/Slurm/Slurm.so &&
+  echo "%{_perldir}/auto/Slurm/Slurm.so"      >> $LIST
+
+LIST=./torque.files
+touch $LIST
+echo "%{_bindir}/pbsnodes"                    >> $LIST
+echo "%{_bindir}/qdel"                        >> $LIST
+echo "%{_bindir}/qhold"                       >> $LIST
+echo "%{_bindir}/qrls"                        >> $LIST
+echo "%{_bindir}/qstat"                       >> $LIST
+echo "%{_bindir}/qsub"                        >> $LIST
+echo "%{_bindir}/mpiexec"                     >> $LIST
+
+
 LIST=./bluegene.files
 touch $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/select_bluegene.so &&
@@ -232,7 +272,7 @@ rm -rf $RPM_BUILD_ROOT
 %doc COPYING
 %doc etc/slurm.conf.example
 %doc doc/html
-%{_bindir}/*
+%{_bindir}/s*
 %{_sbindir}/slurmctld
 %{_sbindir}/slurmd
 %{_sbindir}/slurmstepd
@@ -249,6 +289,7 @@ rm -rf $RPM_BUILD_ROOT
 %dir %{_sysconfdir}
 %dir %{_libdir}/slurm
 %{_libdir}/slurm/checkpoint_none.so
+%{_libdir}/slurm/checkpoint_ompi.so
 %{_libdir}/slurm/jobacct_linux.so
 %{_libdir}/slurm/jobacct_none.so
 %{_libdir}/slurm/jobcomp_none.so
@@ -269,6 +310,7 @@ rm -rf $RPM_BUILD_ROOT
 %{_libdir}/slurm/mpi_mpich1_p4.so
 %{_libdir}/slurm/mpi_mpich1_shmem.so
 %{_libdir}/slurm/mpi_mpichgm.so
+%{_libdir}/slurm/mpi_mpichmx.so
 %{_libdir}/slurm/mpi_mvapich.so
 %{_libdir}/slurm/mpi_lam.so
 %{_libdir}/slurm/task_none.so
@@ -305,7 +347,15 @@ rm -rf $RPM_BUILD_ROOT
 %defattr(-,root,root)
 #############################################################################
 
+%files -f perlapi.files perlapi
+%defattr(-,root,root)
+#############################################################################
+
 %files -f switch_elan.files switch-elan
+%defattr(-,root,root)
+#############################################################################
+
+%files -f torque.files torque
 %defattr(-,root,root)
 #############################################################################
 

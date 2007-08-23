@@ -60,6 +60,26 @@
 #  include "src/common/getopt.h"
 #endif
 
+#if HAVE_CURSES_H
+#  include <curses.h>
+#endif
+#if HAVE_NCURSES_H
+#  include <ncurses.h>
+#  ifndef HAVE_CURSES_H
+#     define HAVE_CURSES_H
+#  endif
+#endif
+
+/*
+ * On some systems (read AIX), curses.h includes term.h which does this
+ *    #define lines cur_term-> _c3
+ * This makes the symbol "lines" unusable. There is a similar #define
+ * "columns", "bell", "tone", "pulse", "hangup" and many, many more!!
+ */
+#ifdef lines
+#  undef lines
+#endif
+
 #include <stdlib.h>
 #include <pwd.h>
 #include <ctype.h>
@@ -108,6 +128,12 @@ typedef struct {
 	int node_field_size;
 
 } smap_parameters_t;
+
+extern WINDOW *grid_win;
+extern WINDOW *text_win;
+
+extern int main_xcord;
+extern int main_ycord;
 
 extern smap_parameters_t params;
 extern int text_line_cnt;
