@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  step_ctx.c - step_ctx task functions for use by AIX/POE
  *
- *  $Id: step_ctx.c 10763 2007-01-12 20:15:44Z morrone $
+ *  $Id: step_ctx.c 12171 2007-08-29 17:22:48Z jette $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -329,7 +329,7 @@ extern void slurm_step_ctx_params_t_init (slurm_step_ctx_params_t *ptr)
 	char *jobid_str;
 
 	/* zero the entire structure */
-	memset(ptr, 0, sizeof(job_step_create_request_msg_t));
+	memset(ptr, 0, sizeof(slurm_step_ctx_params_t));
 
 	/* now set anything that shouldn't be 0 or NULL by default */
 	ptr->relative = (uint16_t)NO_VAL;

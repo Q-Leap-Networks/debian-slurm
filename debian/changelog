@@ -1,3 +1,11 @@
+slurm-llnl (1.2.15-1) unstable; urgency=low
+
+  * New upstream release
+  * sview moved to a separate package (slurm-llnl-sview) to avoid gtk
+    dependency for slurm-llnl package
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Sat, 01 Sep 2007 02:10:40 +0200
+
 slurm-llnl (1.2.14-1) unstable; urgency=low
 
   * New upstream available, 13 and 12 are missing because I was on

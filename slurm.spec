@@ -3,14 +3,14 @@
 # Note that this package is not relocatable
 
 Name:    slurm
-Version: 1.2.14
+Version: 1.2.15
 Release: 1%{?dist}
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL 
 Group: System Environment/Base
-Source: slurm-1.2.14.tar.bz2
+Source: slurm-1.2.15.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: http://www.llnl.gov/linux/slurm
 %ifos linux
@@ -142,7 +142,7 @@ SLURM process tracking plugin for SGI job containers.
 (See http://oss.sgi.com/projects/pagg).
 
 %prep
-%setup -n slurm-1.2.14
+%setup -n slurm-1.2.15
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \

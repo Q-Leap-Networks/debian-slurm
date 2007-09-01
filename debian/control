@@ -3,7 +3,7 @@ Section: admin
 Priority: extra
 Maintainer: Gennaro Oliva <oliva.g@na.icar.cnr.it>
 Uploaders: Dirk Eddelbuettel <edd@debian.org>
-Build-Depends: debhelper (>= 4.0.0), autotools-dev, libmunge-dev, libncurses5-dev, libssl-dev, po-debconf, python
+Build-Depends: debhelper (>= 4.0.0), autotools-dev, libmunge-dev, libncurses5-dev, libssl-dev, po-debconf, python, libglade2-dev, libgtk2.0-dev
 Standards-Version: 3.7.2.0
 
 Package: slurm-llnl
@@ -78,3 +78,13 @@ Description: SLURM docmentation
  SLURM, the Simple Linux Utility for Resource Management,
  is an open-source cluster resource management and job scheduling.
  This package contains development files for the SLURM basic plugins
+
+Package: slurm-llnl-sview
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libglade2-dev, libgtk2.0-dev
+Description: GUI to manage SLURM configuration
+ SLURM, the Simple Linux Utility for Resource Management,
+ is an open-source cluster resource management and job scheduling.
+ This package contains sview a GUI that can be used to view SLURM
+ configuration, job, step, node and partitions state information.
+ Authorized users can also modify select information.

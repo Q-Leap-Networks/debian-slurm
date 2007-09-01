@@ -132,6 +132,12 @@ install-arch:
 		debian/slurm-llnl/usr/share/man/man1/slurm-llnl.1
 	rm -f debian/slurm-llnl/usr/sbin/sfree
 
+	#sview package
+	dh_install -pslurm-llnl-sview debian/slurm-llnl/usr/bin/sview usr/bin
+	dh_installman -pslurm-llnl-sview debian/slurm-llnl/usr/share/man/man1/sview.1
+	rm -f debian/slurm-llnl/usr/bin/sview
+	rm -f debian/slurm-llnl/usr/share/man/man1/sview.1
+
 	dh_install -s
 # Must not depend on anything. This is to be called by
 # binary-arch/binary-indep

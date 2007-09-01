@@ -1,5 +1,5 @@
 /*****************************************************************************\
- *  $Id: hostlist.c 11863 2007-07-23 18:15:00Z jette $
+ *  $Id: hostlist.c 12180 2007-08-30 18:06:57Z jette $
  *****************************************************************************
  *  $LSDId: hostlist.c,v 1.14 2003/10/14 20:11:54 grondo Exp $
  *****************************************************************************
@@ -1794,7 +1794,7 @@ char *hostlist_pop(hostlist_t hl)
 {
 	char *host = NULL;
 	if(!hl) {
-		error("hostlist_pop: no hoslist given");
+		error("hostlist_pop: no hostlist given");
 		return NULL;
 	}
 	

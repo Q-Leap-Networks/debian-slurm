@@ -2,7 +2,7 @@
  *  select_cons_res.c - node selection plugin supporting consumable 
  *  resources policies.
  *
- *  $Id: select_cons_res.c 11989 2007-08-10 15:07:39Z jette $
+ *  $Id: select_cons_res.c 12189 2007-08-31 17:57:29Z jette $
  *****************************************************************************\
  *
  *  The following example below illustrates how four jobs are allocated
@@ -2443,7 +2443,6 @@ extern int select_p_update_nodeinfo(struct job_record *job_ptr)
 					error("Job %u Host %s too many allocated sockets %u",
 					      job->job_id, this_node->node_ptr->name, 
 					      this_node->alloc_sockets);
-				this_node->alloc_memory += job->alloc_memory[i];
 				break;
 			case CR_CORE_MEMORY:
 				this_node->alloc_memory += job->alloc_memory[i];
