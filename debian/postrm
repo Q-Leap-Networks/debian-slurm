@@ -25,13 +25,13 @@ case "$1" in
 	 ucf --purge /etc/slurm-llnl/slurm.conf
          rm -rf /etc/slurm-llnl/slurm.conf
          rm -rf /var/run/slurm-llnl
-	 deluser --quiet --system slurm
+	 deluser --quiet slurm
         ;;
 
        remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
 
-
         ;;
+
 
     *)
         echo "postrm called with unknown argument \`$1'" >&2

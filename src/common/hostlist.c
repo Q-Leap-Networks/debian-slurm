@@ -1,5 +1,5 @@
 /*****************************************************************************\
- *  $Id: hostlist.c 12180 2007-08-30 18:06:57Z jette $
+ *  $Id: hostlist.c 12391 2007-09-22 00:23:04Z da $
  *****************************************************************************
  *  $LSDId: hostlist.c,v 1.14 2003/10/14 20:11:54 grondo Exp $
  *****************************************************************************
@@ -277,7 +277,7 @@ static char * _next_tok(char *, char **);
 static int    _zero_padded(unsigned long, int);
 static int    _width_equiv(unsigned long, int *, unsigned long, int *);
 
-static size_t        host_prefix_end(const char *);
+static int           host_prefix_end(const char *);
 static hostname_t    hostname_create(const char *);
 static void          hostname_destroy(hostname_t);
 static int           hostname_suffix_is_valid(hostname_t);
@@ -528,15 +528,21 @@ static int _width_equiv(unsigned long n, int *wn, unsigned long m, int *wm)
 /* 
  * return the location of the last char in the hostname prefix
  */
-static size_t host_prefix_end(const char *hostname)
+static int host_prefix_end(const char *hostname)
 {
-	size_t idx; 
-	if (!hostname)
-		return -1;
+	int idx, len;
+
+	assert(hostname != NULL);
+
+	len = strlen(hostname);
 #ifdef HAVE_BG
-	idx = strlen(hostname) - 4;
+	if (len < 4)
+		return -1;
+	idx = len - 4;
 #else
-	idx = strlen(hostname) - 1;
+	if (len < 1)
+		return -1;
+	idx = len - 1;
 
 	while (idx >= 0 && isdigit((char) hostname[idx])) 
 		idx--;
@@ -551,7 +557,7 @@ static hostname_t hostname_create(const char *hostname)
 {
 	hostname_t hn = NULL;
 	char *p = '\0';
-	size_t idx = 0;
+	int idx = 0;
 
 	assert(hostname != NULL);
 
@@ -569,7 +575,7 @@ static hostname_t hostname_create(const char *hostname)
 	hn->prefix = NULL;
 	hn->suffix = NULL;
 
-	if (idx == strlen(hostname) - 1) {
+	if (idx == (strlen(hostname) - 1)) {
 		if ((hn->prefix = strdup(hostname)) == NULL) {
 			hostname_destroy(hn);
 			out_of_memory("hostname prefix create");

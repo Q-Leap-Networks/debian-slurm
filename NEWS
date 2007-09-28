@@ -1,6 +1,45 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 1.2.18
+=========================
+
+* Changes in SLURM 1.2.17
+=========================
+ -- In select/cons_res properly release resources allocated to job being 
+    suspended (rmbreak.patch, from Chris Holmes, HP).
+ -- Fix AIX linking problem for PMI (mpich2) support.
+ -- Improve PMI logic for greater scalability (up to 16k tasks run).
+ -- Add srun support for SLURM_THREADS and PMI_FANOUT environment variables.
+ -- Fix support in squeue for output format with left justification of 
+    reason (%r) and reason/node_list (%R) output.
+ -- Automatically requeue a batch job when a node allocated to it fails
+    or the prolog fails (unless --no-requeue or --no-kill option used).
+ -- In sched/wiki, enable use of wiki.conf parameter ExcludePartitions to
+    directly schedule selected partitions without Maui control.
+ -- In sched/backfill, if a job requires specific nodes, schedule other jobs
+    ahead of it rather than completely stopping backfill scheduling for that
+    partition.
+ -- BLUEGENE - corrected logic making block allocation work in a circular 
+    fashion instead of linear.
+ 
+* Changes in SLURM 1.2.16
+=========================
+ -- Add --overcommit option to the salloc command.
+ -- Run task epilog from job's working directory rather than directory
+    where slurmd daemon started from.
+ -- Log errors running task prolog or task epilog to srun's output.
+ -- In sched/wiki2, fix bug processing condensed hostlist expressions.
+ -- Release contribs/mpich1.slurm.patch without GPL license. 
+ -- Fix bug in mvapich plugin for read/write calls that return EAGAIN.
+ -- Don't start MVAPICH timeout logic until we know that srun is starting 
+    an MVAPICH program.
+ -- Fix to srun only allocating number of nodes needed for requested task
+    count when combining allocation and step creation in srun.
+ -- Execute task-prolog within proctrack container to insure that all 
+    child processes get terminated.
+ -- Fixed job accounting to work with sgi_job proctrack plugin.
+
 * Changes in SLURM 1.2.15
 =========================
  -- In sched/wiki2, fix bug processing hostlist expressions where hosts
@@ -2601,4 +2640,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 12190 2007-08-31 19:05:18Z jette $
+$Id: NEWS 12383 2007-09-21 21:15:45Z da $

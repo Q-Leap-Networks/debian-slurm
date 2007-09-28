@@ -1,3 +1,11 @@
+slurm-llnl (1.2.17-1) unstable; urgency=low
+
+  * New upstream release, 1.2.16 is missing because I was waiting for
+    a uid in the range 60000-64999 to be assigned to the slurm user
+  * Using fixed uid 64030 for the slurm user
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Fri, 28 Sep 2007 16:42:14 +0200
+
 slurm-llnl (1.2.15-2) unstable; urgency=low
 
   * Added slurm-llnl dependency for sview to solve old packages

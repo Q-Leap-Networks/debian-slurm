@@ -2,7 +2,7 @@
  *  agent.c - parallel background communication functions. This is where  
  *	logic could be placed for broadcast communications.
  *
- *  $Id: agent.c 12088 2007-08-22 18:02:24Z jette $
+ *  $Id: agent.c 12370 2007-09-20 19:18:17Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -871,9 +871,10 @@ static void *_thread_per_group_rpc(void *args)
 				run_scheduler = true;
 			unlock_slurmctld(job_write_lock);
 		}
-			
-		/* SPECIAL CASE: Kill non-startable batch job */
-		if ((msg_type == REQUEST_BATCH_JOB_LAUNCH) && rc &&
+		/* SPECIAL CASE: Kill non-startable batch job, 
+		 * Requeue the job on ESLURMD_PROLOG_FAILED */
+		if ((msg_type == REQUEST_BATCH_JOB_LAUNCH) && 
+		    (rc != SLURM_SUCCESS) && (rc != ESLURMD_PROLOG_FAILED) &&
 		    (ret_data_info->type != RESPONSE_FORWARD_FAILED)) {
 			batch_job_launch_msg_t *launch_msg_ptr = 
 				task_ptr->msg_args_ptr;
@@ -890,9 +891,9 @@ static void *_thread_per_group_rpc(void *args)
 #endif
 		
 		
-		if (((msg_type == REQUEST_SIGNAL_TASKS) 
-		     ||   (msg_type == REQUEST_TERMINATE_TASKS)) 
-		    && (rc == ESRCH)) {
+		if (((msg_type == REQUEST_SIGNAL_TASKS) || 
+		     (msg_type == REQUEST_TERMINATE_TASKS)) && 
+		     (rc == ESRCH)) {
 			/* process is already dead, not a real error */
 			rc = SLURM_SUCCESS;
 		}
@@ -1190,7 +1191,8 @@ void agent_queue_request(agent_arg_t *agent_arg_ptr)
 {
 	queued_request_t *queued_req_ptr = NULL;
 
-	if (agent_cnt < MAX_AGENT_CNT) {	/* execute now */
+	if ((agent_cnt < MAX_AGENT_CNT) ||		/* execute now */
+	    (agent_arg_ptr->msg_type == REQUEST_SHUTDOWN)) {
 		pthread_attr_t attr_agent;
 		pthread_t thread_agent;
 		int rc;

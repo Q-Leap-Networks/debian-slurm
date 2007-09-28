@@ -1,16 +1,16 @@
-# $Id: slurm.spec 12088 2007-08-22 18:02:24Z jette $
+# $Id: slurm.spec 12371 2007-09-20 20:45:23Z jette $
 
 # Note that this package is not relocatable
 
 Name:    slurm
-Version: 1.2.15
+Version: 1.2.17
 Release: 1%{?dist}
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL 
 Group: System Environment/Base
-Source: slurm-1.2.15.tar.bz2
+Source: slurm-1.2.17.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: http://www.llnl.gov/linux/slurm
 %ifos linux
@@ -142,7 +142,7 @@ SLURM process tracking plugin for SGI job containers.
 (See http://oss.sgi.com/projects/pagg).
 
 %prep
-%setup -n slurm-1.2.15
+%setup -n slurm-1.2.17
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \
@@ -381,9 +381,9 @@ if [ -x /sbin/ldconfig ]; then
         [ -x /sbin/chkconfig ] && /sbin/chkconfig --add slurm
     fi
 fi
-if [ ! -f ${RPM_BUILD_ROOT}%{_sysconfdir}/slurm.conf ]; then
+if [ ! -f %{_sysconfdir}/slurm.conf ]; then
     echo "You need to build and install a slurm.conf file"
-    echo "Edit ${RPM_BUILD_ROOT}%{_sysconfdir}/slurm.conf.example and copy it to slurm.conf or"
+    echo "Edit %{_sysconfdir}/slurm.conf.example and copy it to slurm.conf or"
     echo "Build a new one using http://www.llnl.gov/linux/slurm/configurator.html"
 fi
 

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/common/env.c - add an environment variable to environment vector
- *  $Id: env.c 11774 2007-07-02 20:13:14Z jette $
+ *  $Id: env.c 12233 2007-09-07 22:03:42Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -294,7 +294,7 @@ int setup_env(env_t *env)
 	if (env->cpus_on_node 
 	   && setenvf(&env->env, "SLURM_CPUS_ON_NODE", "%d", 
 		      env->cpus_on_node) ) {
-		error("Unable to set SLURM_CPUS_PER_TASK");
+		error("Unable to set SLURM_CPUS_ON_NODE");
 		rc = SLURM_FAILURE;
 	} 
 

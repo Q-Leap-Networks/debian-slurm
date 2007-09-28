@@ -2,7 +2,7 @@
  *  salloc.c - Request a SLURM job allocation and
  *             launch a user-specified command.
  *
- *  $Id: salloc.c 12187 2007-08-31 16:07:57Z jette $
+ *  $Id: salloc.c 12196 2007-08-31 21:28:28Z jette $
  *****************************************************************************
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -165,6 +165,10 @@ int main(int argc, char *argv[])
 	/* Add default task count for srun, if not already set */
 	if (opt.nprocs_set)
 		env_array_append_fmt(&env, "SLURM_NPROCS", "%d", opt.nprocs);
+	if (opt.overcommit) {
+		env_array_append_fmt(&env, "SLURM_OVERCOMMIT", "%d", 
+			opt.overcommit);
+	}
 	env_array_set_environment(env);
 	env_array_free(env);
 	pthread_mutex_lock(&allocation_state_lock);
@@ -285,7 +289,11 @@ static int fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->job_min_memory = opt.realmem;
 	if (opt.tmpdisk > -1)
 		desc->job_min_tmp_disk = opt.tmpdisk;
-	desc->num_procs = opt.nprocs * opt.cpus_per_task;
+	if (opt.overcommit) {
+		desc->num_procs = opt.min_nodes;
+		desc->overcommit = opt.overcommit;
+	} else
+		desc->num_procs = opt.nprocs * opt.cpus_per_task;
 	if (opt.nprocs_set)
 		desc->num_tasks = opt.nprocs;
 	if (opt.cpus_set)
