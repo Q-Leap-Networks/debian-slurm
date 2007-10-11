@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  bluegene.c - blue gene node configuration processing module. 
  *
- *  $Id: bluegene.c 11620 2007-06-04 20:03:56Z da $
+ *  $Id: bluegene.c 12450 2007-10-05 18:22:36Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -683,7 +683,9 @@ end_it:
 		       bg_record->bg_block_id, bg_record->job_running);
 		sleep(1);
 	}
+	
 	slurm_mutex_lock(&block_state_mutex);
+	error("Setting Block %s to ERROR state.", bg_record->bg_block_id);
 	bg_record->job_running = BLOCK_ERROR_STATE;
 	bg_record->state = RM_PARTITION_ERROR;
 	slurm_mutex_unlock(&block_state_mutex);

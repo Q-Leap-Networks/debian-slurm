@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  controller.c - main control machine daemon for slurm
- *  $Id: controller.c 11973 2007-08-08 23:59:56Z jette $
+ *  $Id: controller.c 12452 2007-10-05 19:07:07Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -921,16 +921,13 @@ static void *_slurmctld_background(void *no_data)
 		    slurmctld_conf.backup_addr[0]      &&
 		    (difftime(now, last_assert_primary_time) >=
 		     slurmctld_conf.slurmctld_timeout) &&
-		    node_name && slurmctld_conf.backup_controller &&
+		    slurmctld_conf.backup_controller &&
 		    strcmp(node_name, slurmctld_conf.backup_controller)) {
 			last_assert_primary_time = now;
 			(void) _shutdown_backup_controller(0);
 		}
 		unlock_slurmctld(config_read_lock);
-
-		END_TIMER;
-		if (DELTA_TIMER > 1000000)	/* more than one second */ 
-			info("_slurmctld_background loop %s", TIME_STR);
+		END_TIMER2("_slurmctld_background");
 	}
 
 	debug3("_slurmctld_background shutting down");
@@ -1130,7 +1127,7 @@ static int _shutdown_backup_controller(int wait_time)
 	START_TIMER;
 	if (slurm_send_recv_rc_msg_only_one(&req, &rc, 
 				(CONTROL_TIMEOUT * 1000)) < 0) {
-		END_TIMER;
+		END_TIMER2("_shutdown_backup_controller");
 		error("_shutdown_backup_controller:send/recv: %m, %s", TIME_STR);
 		return SLURM_ERROR;
 	}

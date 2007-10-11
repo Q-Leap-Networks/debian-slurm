@@ -87,10 +87,10 @@ static uint32_t cr_enabled = 0, cr_test = 0;
  *	[FLAGS=INTERACTIVE;]		set if interactive (not batch) job
  *	WCLIMIT=<secs>;			wall clock time limit, seconds
  *	TASKS=<cpus>;			CPUs required
+ *	NODES=<nodes>;			nodes required
  *	QUEUETIME=<uts>;		submission time
  *	STARTTIME=<uts>;		time execution started
  *	RCLASS=<partition>;		SLURM partition name
- *	NODES=<nodes>;			nodes required
  *	RMEM=<MB>;			MB of memory required
  *	RDISK=<MB>;			MB of disk space required
  *	[COMMENT=<whatever>;]		job dependency or account number
@@ -105,7 +105,7 @@ static uint32_t cr_enabled = 0, cr_test = 0;
 /* RET 0 on success, -1 on failure */
 extern int	get_jobs(char *cmd_ptr, int *err_code, char **err_msg)
 {
-	char *arg_ptr, *tmp_char, *tmp_buf, *buf = NULL;
+	char *arg_ptr = NULL, *tmp_char = NULL, *tmp_buf = NULL, *buf = NULL;
 	time_t update_time;
 	/* Locks: read job, partition */
 	slurmctld_lock_t job_read_lock = {
@@ -151,8 +151,8 @@ extern int	get_jobs(char *cmd_ptr, int *err_code, char **err_msg)
 		/* report all jobs */
 		buf = _dump_all_jobs(&job_rec_cnt, state_info);
 	} else {
-		struct job_record *job_ptr;
-		char *job_name, *tmp2_char;
+		struct job_record *job_ptr = NULL;
+		char *job_name = NULL, *tmp2_char = NULL;
 		uint32_t job_id;
 
 		job_name = strtok_r(tmp_char, ":", &tmp2_char);
@@ -269,16 +269,16 @@ static char *	_dump_job(struct job_record *job_ptr, int state_info)
 	xstrcat(buf, tmp);
 
 	snprintf(tmp, sizeof(tmp),
-		"TASKS=%u;QUEUETIME=%u;STARTTIME=%u;",
+		"TASKS=%u;NODES=%u;",
 		_get_job_tasks(job_ptr),
-		_get_job_submit_time(job_ptr),
-		(uint32_t) job_ptr->start_time);
+		_get_job_min_nodes(job_ptr));
 	xstrcat(buf, tmp);
 
 	snprintf(tmp, sizeof(tmp),
-		"RCLASS=%s;NODES=%u;",
-		job_ptr->partition,
-		_get_job_min_nodes(job_ptr));
+		"QUEUETIME=%u;STARTTIME=%u;RCLASS=%s;",
+		_get_job_submit_time(job_ptr),
+		(uint32_t) job_ptr->start_time,
+		job_ptr->partition);
 	xstrcat(buf, tmp);
 
 	snprintf(tmp, sizeof(tmp),

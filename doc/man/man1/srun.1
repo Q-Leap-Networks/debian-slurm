@@ -1,4 +1,4 @@
-\." $Id: srun.1 12315 2007-09-13 23:56:02Z jette $
+\." $Id: srun.1 12445 2007-10-03 22:24:35Z jette $
 .\"
 .TH SRUN "1" "July 2007" "srun 1.2" "slurm components"
 
@@ -554,6 +554,7 @@ environment variables for LAM/MPI.
 .B mpich1_shmem
 Initiates one process per node and establishes necessary
 environment variables for mpich1 shared memory model.
+This also works for mvapich built for shared memory.
 .TP
 .B mpichgm
 For use with Myrinet.

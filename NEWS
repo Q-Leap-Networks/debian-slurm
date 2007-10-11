@@ -3,6 +3,25 @@ documents those changes that are of interest to users and admins.
 
 * Changes in SLURM 1.2.18
 =========================
+ -- BLUEGENE - bug fix for smap stating passthroughs are used when they aren't
+ -- Fixed bug in sview to be able to edit partitions correctly
+ -- Fixed bug so in slurm.conf files where SlurmdPort isn't defined things
+    work correctly.
+ -- In sched/wiki2 and sched/wiki add support for batch job being requeued
+    in Slurm either when nodes fail or upon request.
+ -- In sched/wiki2 and sched/wiki with FastSchedule=2 configured and nodes 
+    configured with more CPUs than actually exist, return a value of TASKS 
+    equal to the number of configured CPUs that are allocated to a job rather 
+    than the number of physical CPUs allocated.
+ -- For sched/wiki2, timeout "srun --get-user-env ..." command after 3 seconds 
+    if unable to perform pseudo-login and get user environment variables.
+ -- Add contribs/time_login.c program to test how long pseudo-login takes
+    for specific users or all users. This can identify users for which Moab 
+    job submissions are unable to set the proper environment variables.
+ -- Fix problem in parallel make of Slurm.
+ -- Fixed bug in consumable resources when CR_Core_Memory is enabled
+ -- Add delay in slurmctld for "scontrol shutdown" RPC to get propagated 
+    to slurmd daemons.
 
 * Changes in SLURM 1.2.17
 =========================
@@ -2640,4 +2659,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 12383 2007-09-21 21:15:45Z da $
+$Id: NEWS 12462 2007-10-08 17:42:47Z jette $

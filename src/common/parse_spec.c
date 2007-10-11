@@ -1,4 +1,4 @@
-/* $Id: parse_spec.c 10574 2006-12-15 23:38:29Z jette $ */
+/* $Id: parse_spec.c 12452 2007-10-05 19:07:07Z da $ */
 /*****************************************************************************\
  * parse_spec.c - configuration file parser
  *****************************************************************************
@@ -178,7 +178,7 @@ _load_integer (int *destination, char *keyword, char *in_line)
 	if (str_ptr1 != NULL) {
 		str_len1 = strlen (keyword);
 		strcpy (scratch, str_ptr1 + str_len1);
-		if ((scratch[0] == (char) NULL) || 
+		if ((scratch[0] == '\0') || 
 		    (isspace ((int) scratch[0]))) {
 			/* keyword with no value set */
 			*destination = 1;
@@ -235,7 +235,7 @@ _load_long (long *destination, char *keyword, char *in_line)
 	if (str_ptr1 != NULL) {
 		str_len1 = strlen (keyword);
 		strcpy (scratch, str_ptr1 + str_len1);
-		if ((scratch[0] == (char) NULL) || 
+		if ((scratch[0] == '\0') || 
 		    (isspace ((int) scratch[0]))) {	
 			/* keyword with no value set */
 			*destination = 1;

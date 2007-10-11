@@ -2,7 +2,7 @@
  *  agent.c - parallel background communication functions. This is where  
  *	logic could be placed for broadcast communications.
  *
- *  $Id: agent.c 12370 2007-09-20 19:18:17Z jette $
+ *  $Id: agent.c 12462 2007-10-08 17:42:47Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1191,8 +1191,7 @@ void agent_queue_request(agent_arg_t *agent_arg_ptr)
 {
 	queued_request_t *queued_req_ptr = NULL;
 
-	if ((agent_cnt < MAX_AGENT_CNT) ||		/* execute now */
-	    (agent_arg_ptr->msg_type == REQUEST_SHUTDOWN)) {
+	if (agent_arg_ptr->msg_type == REQUEST_SHUTDOWN) { /* execute now */
 		pthread_attr_t attr_agent;
 		pthread_t thread_agent;
 		int rc;
@@ -1203,8 +1202,12 @@ void agent_queue_request(agent_arg_t *agent_arg_ptr)
 		rc = pthread_create(&thread_agent, &attr_agent,
 				    agent, (void *) agent_arg_ptr);
 		slurm_attr_destroy(&attr_agent);
-		if (rc == 0)
+		if (rc == 0) {
+			sleep(1);
+			if (!pthread_kill(thread_agent, 0))
+				info("Shutdown agent still running");
 			return;
+		}
 	}
 
 	queued_req_ptr = xmalloc(sizeof(queued_request_t));

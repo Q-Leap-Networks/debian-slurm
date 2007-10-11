@@ -2,7 +2,7 @@
  *  node_scheduler.c - select and allocated nodes to jobs 
  *	Note: there is a global node table (node_record_table_ptr) 
  *
- *  $Id: node_scheduler.c 12092 2007-08-22 20:39:02Z jette $
+ *  $Id: node_scheduler.c 12452 2007-10-05 19:07:07Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -243,7 +243,7 @@ extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
  */
 static int _match_feature(char *seek, char *available)
 {
-	char *tmp_available, *str_ptr3, *str_ptr4;
+	char *tmp_available = NULL, *str_ptr3 = NULL, *str_ptr4 = NULL;
 	int found;
 
 	if (seek == NULL)
@@ -1533,7 +1533,7 @@ static bitstr_t *_valid_features(char *requested, char *available)
 	result = 1;			/* assume good for now */
 	last_op = FEATURE_OP_AND;
 	for (i=0; ; i++) {
-		if (tmp_requested[i] == (char) NULL) {
+		if (tmp_requested[i] == '\0') {
 			if (strlen(str_ptr1) == 0)
 				break;
 			found = _match_feature(str_ptr1, available);
@@ -1551,7 +1551,7 @@ static bitstr_t *_valid_features(char *requested, char *available)
 				result = 0;
 				break;
 			}
-			tmp_requested[i] = (char) NULL;
+			tmp_requested[i] = '\0';
 			found = _match_feature(str_ptr1, available);
 			if (last_op == FEATURE_OP_AND)
 				result &= found;
@@ -1561,7 +1561,7 @@ static bitstr_t *_valid_features(char *requested, char *available)
 			last_op = FEATURE_OP_AND;
 
 		} else if (tmp_requested[i] == '|') {
-			tmp_requested[i] = (char) NULL;
+			tmp_requested[i] = '\0';
 			found = _match_feature(str_ptr1, available);
 			if (bracket != 0) {
 				if (found) {
@@ -1591,7 +1591,7 @@ static bitstr_t *_valid_features(char *requested, char *available)
 			str_ptr1 = &tmp_requested[i + 1];
 
 		} else if (tmp_requested[i] == ']') {
-			tmp_requested[i] = (char) NULL;
+			tmp_requested[i] = '\0';
 			found = _match_feature(str_ptr1, available);
 			if (found) {
 				if (!result_bits)
@@ -1615,7 +1615,7 @@ static bitstr_t *_valid_features(char *requested, char *available)
 				   && (bracket == 1)) {
 				last_op = FEATURE_OP_OR;
 				str_ptr1 = &tmp_requested[i + 2];
-			} else if ((tmp_requested[i + 1] == (char) NULL)
+			} else if ((tmp_requested[i + 1] == '\0')
 				   && (bracket == 1)) {
 				break;
 			} else {
