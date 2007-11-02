@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/srun/allocate.c - srun functions for managing node allocations
- * $Id: allocate.c 11792 2007-07-05 23:56:07Z jette $
+ * $Id: allocate.c 12574 2007-10-26 17:00:52Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -558,12 +558,13 @@ job_desc_msg_create_from_opts (char *script)
 		xassert (opt.batch);
 
 		j->environment = NULL;
-		if (opt.get_user_env) {
+		if (opt.get_user_env >= 0) {
 			struct passwd *pw = NULL;
 			pw = getpwuid(opt.uid);
 			if (pw != NULL) {
 				j->environment =
-					env_array_user_default(pw->pw_name);
+					env_array_user_default(pw->pw_name,
+							opt.get_user_env);
 				/* FIXME - should we abort if j->environment
 				   is NULL? */
 			}

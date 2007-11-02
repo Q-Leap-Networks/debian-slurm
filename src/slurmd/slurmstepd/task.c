@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  slurmd/slurmstepd/task.c - task launching functions for slurmstepd
- *  $Id: task.c 12201 2007-08-31 22:34:26Z jette $
+ *  $Id: task.c 12573 2007-10-26 15:57:01Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -337,7 +337,7 @@ exec_task(slurmd_job_t *job, int i, int waitfd)
 	job->envtp->env = NULL;
 	xfree(job->envtp->task_count);
 
-	if (job->multi_prog) {
+	if (job->multi_prog && task->argv[0]) {
 		/*
 		 * Normally the client (srun/slauch) expands the command name
 		 * to a fully qualified path, but in --multi-prog mode it
@@ -392,6 +392,10 @@ exec_task(slurmd_job_t *job, int i, int waitfd)
 		job->env[0] = (char *)NULL;
 	}
 
+	if (task->argv[0] == NULL) {
+		error("No executable program specified for this task");
+		exit(2);
+	}
 	execve(task->argv[0], task->argv, job->env);
 
 	/* 

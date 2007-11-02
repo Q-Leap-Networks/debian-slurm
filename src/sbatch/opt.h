@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  opt.h - definitions for srun option processing
- *  $Id: opt.h 12190 2007-08-31 19:05:18Z jette $
+ *  $Id: opt.h 12574 2007-10-26 17:00:52Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -104,10 +104,10 @@ typedef struct sbatch_options {
 	bool reboot;		/* --reboot			*/
 	bool no_rotate;		/* --no_rotate, -R		*/
 	uint16_t conn_type;	/* --conn-type 			*/
-	char *blrtsimage;       /* --blrtsimage BlrtsImage for block */
-	char *linuximage;       /* --linuximage LinuxImage for block */
-	char *mloaderimage;     /* --mloaderimage mloaderImage for block */
-	char *ramdiskimage;     /* --ramdiskimage RamDiskImage for block */
+	char *blrtsimage;       /* --blrts-image BlrtsImage for block */
+	char *linuximage;       /* --linux-image LinuxImage for block */
+	char *mloaderimage;     /* --mloader-image mloaderImage for block */
+	char *ramdiskimage;     /* --ramdisk-image RamDiskImage for block */
 	/*********************/
 
 	time_t begin;		/* --begin			*/
@@ -116,7 +116,7 @@ typedef struct sbatch_options {
 	char *ifname;		/* input file name		*/
 	char *ofname;		/* output file name		*/
 	char *efname;		/* error file name		*/
-	bool get_user_env;	/* --get-user-env		*/
+	int get_user_env;	/* --get-user-env[=timeout]	*/
 } opt_t;
 
 extern opt_t opt;

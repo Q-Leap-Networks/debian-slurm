@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/mgr.c - job manager functions for slurmstepd
- *  $Id: mgr.c 12244 2007-09-10 21:03:20Z da $
+ *  $Id: mgr.c 12580 2007-10-29 20:17:09Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -301,9 +301,10 @@ cleanup1:
 	error("batch script setup failed for job %u.%u",
 	      msg->job_id, msg->step_id);
 
-	if (msg->step_id == SLURM_BATCH_SCRIPT)
-		_send_complete_batch_script_msg(job, -1, -1);
-	else
+	if (msg->step_id == SLURM_BATCH_SCRIPT) {
+		_send_complete_batch_script_msg(job, 
+			ESLURMD_CREATE_BATCH_DIR_ERROR, -1);
+	} else
 		_send_step_complete_msgs(job);
 
 	return NULL;
