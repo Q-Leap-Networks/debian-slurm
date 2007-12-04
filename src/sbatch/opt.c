@@ -141,6 +141,7 @@ static void _opt_pbs_batch_script(const void *body, int size);
 
 /* set options based upon env vars  */
 static void _opt_env(void);
+static void _proc_get_user_env(char *optarg);
 
 /* list known options and their settings  */
 static void  _opt_list(void);
@@ -446,7 +447,9 @@ static void _opt_default()
 	opt.ifname = xstrdup("/dev/null");
 	opt.ofname = NULL;
 	opt.efname = NULL;
-	opt.get_user_env = -1;
+
+	opt.get_user_env_time = -1;
+	opt.get_user_env_mode = -1;
 }
 
 /*---[ env var processing ]-----------------------------------------------*/
@@ -616,7 +619,7 @@ static struct option long_options[] = {
 	{"immediate",     no_argument,       0, 'I'},
 	{"job-name",      required_argument, 0, 'J'},
 	{"no-kill",       no_argument,       0, 'k'},
-	{"tasks",         required_argument, 0, 'n'},
+	{"ntasks",        required_argument, 0, 'n'},
 	{"nodes",         required_argument, 0, 'N'},
 	{"output",        required_argument, 0, 'o'},
 	{"overcommit",    no_argument,       0, 'O'},
@@ -1227,6 +1230,10 @@ static void _set_options(int argc, char **argv)
 			break;
 		case LONG_OPT_BEGIN:
 			opt.begin = parse_time(optarg);
+			if (opt.begin == 0) {
+				fatal("Invalid time specification %s",
+				      optarg);
+			}
 			break;
 		case LONG_OPT_MAIL_TYPE:
 			opt.mail_type |= _parse_mail_type(optarg);
@@ -1285,15 +1292,17 @@ static void _set_options(int argc, char **argv)
 			break;
 		case LONG_OPT_TASKSPERNODE:
 			opt.tasks_per_node = _get_int(optarg, "ntasks-per-node");
+			setenvf(NULL, "SLURM_NTASKS_PER_NODE", "%d",
+				opt.tasks_per_node);
 			break;
 		case LONG_OPT_WRAP:
 			/* handled in process_options_first_pass() */
 			break;
 		case LONG_OPT_GET_USER_ENV:
 			if (optarg)
-				opt.get_user_env = strtol(optarg, NULL, 10);
+				_proc_get_user_env(optarg);
 			else
-				opt.get_user_env = 0;
+				opt.get_user_env_time = 0;
 			break;
 		default:
 			fatal("Unrecognized command line parameter %c",
@@ -1304,6 +1313,25 @@ static void _set_options(int argc, char **argv)
 	if (optind < argc) {
 		fatal("Invalid argument: %s", argv[optind]);
 	}
+}
+
+static void _proc_get_user_env(char *optarg)
+{
+	char *end_ptr;
+
+	if ((optarg[0] >= '0') && (optarg[0] <= '9'))
+		opt.get_user_env_time = strtol(optarg, &end_ptr, 10);
+	else {
+		opt.get_user_env_time = 0;
+		end_ptr = optarg;
+	}
+
+	if ((end_ptr == NULL) || (end_ptr[0] == '\0'))
+		return;
+	if      ((end_ptr[0] == 's') || (end_ptr[0] == 'S'))
+		opt.get_user_env_mode = 1;
+	else if ((end_ptr[0] == 'l') || (end_ptr[0] == 'L'))
+		opt.get_user_env_mode = 2;
 }
 
 static void _set_pbs_options(int argc, char **argv)

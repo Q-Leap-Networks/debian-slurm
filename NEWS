@@ -1,6 +1,37 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 1.2.20
+=========================
+ -- In switch/federation, fix small memory leak effecting slurmd.
+ -- Add PMI_FANOUT_OFF_HOST environment variable to control how message 
+    forwarding is done for PMI (MPICH2). See "man srun" for details.
+ -- From sbatch set SLURM_NTASKS_PER_NODE when --ntasks-per-node option is 
+    specified.
+ -- BLUEGENE: Documented the prefix should always be lower case and the 3
+    digit suffix should be uppercase if any letters are used as digits. 
+ -- In sched/wiki and sched/wiki2, add support for --cpus-per-task option.
+    From Miguel Ros, BSC.
+ -- In sched/wiki2, prevent invalid memory pointer (and likely seg fault) 
+    for job associated with a partition that has since been deleted.
+ -- In sched/wiki2 plus select/cons_res, prevent invalid memory pointer 
+    (and likely seg fault) when a job is requeued.
+ -- In sched/wiki, add support for job suspend, resume, and modify.
+ -- In sched/wiki, add suppport for processor allocation (not just node allocation)
+    with layout control.
+ -- Prevent re-sending job termination RPC to a node that has already completed 
+    the job. Only send it to specific nodes which have not reported completion.
+ -- Support larger environment variables 64K instead of BUFSIZ (8k on some 
+    systems).
+ -- If a job is being requeued, job step create requests will print a 
+    warning and repeatedly retry rather than aborting.
+ -- Add optional mode value to srun and sbatch --get-user-env option.
+ -- Print error message and retry job submit commands when MaxJobCount 
+    is reached. From Don Albert, Bull.
+ -- Treat invalid begin time specification as a fatal error in sbatch and 
+    srun. From Don Albert, Bull.
+ -- Validate begin time specification to avoid hours >24, minutes >59, etc.
+
 * Changes in SLURM 1.2.19
 =========================
 *** NOTE IMPORTANT CHANGE IN RPM BUILD BELOW ****
@@ -2707,4 +2738,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 12599 2007-11-01 21:19:34Z jette $
+$Id: NEWS 12712 2007-11-29 00:12:08Z jette $

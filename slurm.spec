@@ -1,4 +1,4 @@
-# $Id: slurm.spec 12605 2007-11-01 23:12:43Z jette $
+# $Id: slurm.spec 12730 2007-11-29 19:51:09Z jette $
 #
 # Note that this package is not relocatable
 
@@ -34,7 +34,6 @@
 %slurm_without_opt bluegene
 %slurm_without_opt auth_none
 %slurm_without_opt debug
-%slurm_without_opt sgijob
 
 # Build with munge by default on all platforms (disable with --without munge)
 %slurm_with_opt munge
@@ -48,20 +47,27 @@
 %endif
 
 # Define with_aix on AIX systems (for proctrack)
-%ifos aix
+%ifos aix5.3
 %slurm_with_opt aix
 %endif
 
+# Build with sgijob on CHAOS systems
+#  (add elan too when it is available)
+%if %{?chaos}0
+%slurm_with_opt sgijob
+%else
+%slurm_without_opt sgijob
+%endif
 
 Name:    slurm
-Version: 1.2.19
+Version: 1.2.20
 Release: 1%{?dist}
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL 
 Group: System Environment/Base
-Source: slurm-1.2.19.tar.bz2
+Source: slurm-1.2.20.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: http://www.llnl.gov/linux/slurm
 BuildRequires: openssl-devel >= 0.9.6 openssl >= 0.9.6
@@ -205,7 +211,7 @@ SLURM process tracking plugin for SGI job containers.
 #############################################################################
 
 %prep
-%setup -n slurm-1.2.19
+%setup -n slurm-1.2.20
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \

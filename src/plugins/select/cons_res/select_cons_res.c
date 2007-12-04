@@ -2,7 +2,7 @@
  *  select_cons_res.c - node selection plugin supporting consumable 
  *  resources policies.
  *
- *  $Id: select_cons_res.c 12452 2007-10-05 19:07:07Z da $
+ *  $Id: select_cons_res.c 12649 2007-11-15 18:02:35Z da $
  *****************************************************************************\
  *
  *  The following example below illustrates how four jobs are allocated
@@ -545,7 +545,7 @@ static void _append_to_job_list(struct select_cr_job *new_job)
 /*
  * _count_cpus - report how many cpus are available with the identified nodes 
  */
-static void _count_cpus(unsigned *bitmap, uint16_t *sum)
+static void _count_cpus(bitstr_t *bitmap, uint16_t *sum)
 {
 	int i, allocated_lps;
 	*sum = 0;

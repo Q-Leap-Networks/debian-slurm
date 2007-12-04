@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/srun/allocate.c - srun functions for managing node allocations
- * $Id: allocate.c 12574 2007-10-26 17:00:52Z jette $
+ * $Id: allocate.c 12700 2007-11-27 23:39:24Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -363,8 +363,7 @@ static bool
 _retry()
 {
 	static int  retries = 0;
-	static char *msg = "Slurm controller not responding, "
-		           "sleeping and retrying.";
+	static char *msg = "Slurm job queue full, sleeping and retrying.";
 
 	if (errno == ESLURM_ERROR_ON_DESC_TO_RECORD_COPY) {
 		if (retries == 0)
@@ -558,13 +557,14 @@ job_desc_msg_create_from_opts (char *script)
 		xassert (opt.batch);
 
 		j->environment = NULL;
-		if (opt.get_user_env >= 0) {
+		if (opt.get_user_env_time >= 0) {
 			struct passwd *pw = NULL;
 			pw = getpwuid(opt.uid);
 			if (pw != NULL) {
 				j->environment =
 					env_array_user_default(pw->pw_name,
-							opt.get_user_env);
+							opt.get_user_env_time,
+							opt.get_user_env_mode);
 				/* FIXME - should we abort if j->environment
 				   is NULL? */
 			}

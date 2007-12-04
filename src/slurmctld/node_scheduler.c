@@ -2,7 +2,7 @@
  *  node_scheduler.c - select and allocated nodes to jobs 
  *	Note: there is a global node table (node_record_table_ptr) 
  *
- *  $Id: node_scheduler.c 12452 2007-10-05 19:07:07Z da $
+ *  $Id: node_scheduler.c 12631 2007-11-06 22:48:18Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -137,7 +137,7 @@ extern void allocate_nodes(struct job_record *job_ptr)
  * globals: node_record_count - number of nodes configured
  *	node_record_table_ptr - pointer to global node table
  */
-extern int count_cpus(unsigned *bitmap)
+extern int count_cpus(bitstr_t *bitmap)
 {
 	int i, sum;
 

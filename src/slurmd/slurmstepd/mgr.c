@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/mgr.c - job manager functions for slurmstepd
- *  $Id: mgr.c 12580 2007-10-29 20:17:09Z jette $
+ *  $Id: mgr.c 12647 2007-11-12 17:09:47Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -537,7 +537,7 @@ _one_step_complete_msg(slurmd_job_t *job, int first, int last)
 	for (i = 0; i < REVERSE_TREE_PARENT_RETRY; i++) {
 		if (i)
 			sleep(1);
-		retcode = slurm_send_recv_rc_msg_only_one(&req, &rc, 10000);
+		retcode = slurm_send_recv_rc_msg_only_one(&req, &rc, 0);
 		if (retcode == 0 && rc == 0)
 			goto finished;
 	}
