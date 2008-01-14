@@ -1,4 +1,4 @@
-# $Id: slurm.spec 12730 2007-11-29 19:51:09Z jette $
+# $Id: slurm.spec 12767 2007-12-03 17:00:12Z jette $
 #
 # Note that this package is not relocatable
 
@@ -60,16 +60,16 @@
 %endif
 
 Name:    slurm
-Version: 1.2.20
-Release: 1%{?dist}
+Version: 1.2.21
+Release: 1
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL 
 Group: System Environment/Base
-Source: slurm-1.2.20.tar.bz2
+Source: slurm-1.2.21.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
-URL: http://www.llnl.gov/linux/slurm
+URL: https://computing.llnl.gov/linux/slurm/
 BuildRequires: openssl-devel >= 0.9.6 openssl >= 0.9.6
 
 %description 
@@ -211,7 +211,7 @@ SLURM process tracking plugin for SGI job containers.
 #############################################################################
 
 %prep
-%setup -n slurm-1.2.20
+%setup -n slurm-1.2.21
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \

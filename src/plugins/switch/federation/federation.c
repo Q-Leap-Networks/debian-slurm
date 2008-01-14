@@ -1,6 +1,6 @@
 /*****************************************************************************\
  **  federation.c - Library routines for initiating jobs on IBM Federation
- **  $Id: federation.c 12618 2007-11-02 22:31:39Z jette $
+ **  $Id: federation.c 12736 2007-11-29 21:53:34Z jette $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -2254,7 +2254,7 @@ _check_rdma_job_count(char *adapter)
 
 	rc = ntbl_rdma_jobs(NTBL_VERSION, adapter,
 			    &job_count, &job_keys);
-	if (rc != NTBL_SUCESSS) {
+	if (rc != NTBL_SUCCESS) {
 		error("ntbl_rdma_jobs(): %d", rc);
 		return SLURM_ERROR;
 	}

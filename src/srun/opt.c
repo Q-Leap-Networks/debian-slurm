@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  opt.c - options processing for srun
- *  $Id: opt.c 12711 2007-11-29 00:04:01Z jette $
+ *  $Id: opt.c 12856 2007-12-19 00:18:44Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1871,8 +1871,10 @@ void set_options(const int argc, char **argv, int first)
 			break;
 		case LONG_OPT_PROPAGATE:
 			xfree(opt.propagate);
-			if (optarg) opt.propagate = xstrdup(optarg);
-			else	    opt.propagate = xstrdup("ALL");
+			if (optarg)
+				opt.propagate = xstrdup(optarg);
+			else
+				opt.propagate = xstrdup("ALL");
 			break;
 		case LONG_OPT_PROLOG:
 			xfree(opt.prolog);

@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  slurm_protocol_socket_implementation.c - slurm communications interfaces 
  *                                           based upon sockets.
- *  $Id: slurm_protocol_socket_implementation.c 12005 2007-08-14 17:20:11Z jette $
+ *  $Id: slurm_protocol_socket_implementation.c 12827 2007-12-14 22:29:30Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -294,7 +294,7 @@ int _slurm_send_timeout(slurm_fd fd, char *buf, size_t size,
 			sent = SLURM_ERROR;
 			goto done;			
 		}
-
+		
                 rc = _slurm_send(fd, &buf[sent], (size - sent), flags);
                 if (rc < 0) {
  			if (errno == EINTR)

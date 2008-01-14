@@ -1,7 +1,7 @@
 /****************************************************************************\
  *  slurm_protocol_pack.c - functions to pack and unpack structures for RPCs
  *
- *  $Id: slurm_protocol_pack.c 12532 2007-10-22 22:52:39Z jette $
+ *  $Id: slurm_protocol_pack.c 12814 2007-12-11 23:28:22Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -3199,7 +3199,8 @@ _unpack_stat_jobacct_msg(stat_jobacct_msg_t ** msg_ptr, Buf buffer)
 	safe_unpack32(&msg->return_code, buffer);
 	safe_unpack32(&msg->step_id, buffer);
 	safe_unpack32(&msg->num_tasks, buffer);
-	jobacct_g_unpack(&msg->jobacct, buffer);
+	if (jobacct_g_unpack(&msg->jobacct, buffer) != SLURM_SUCCESS)
+		goto unpack_error;
 
 	return SLURM_SUCCESS;
 
@@ -3263,7 +3264,8 @@ _unpack_step_complete_msg(step_complete_msg_t ** msg_ptr, Buf buffer)
 	safe_unpack32(&msg->range_first, buffer);
 	safe_unpack32(&msg->range_last, buffer);
 	safe_unpack32(&msg->step_rc, buffer);
-	jobacct_g_unpack(&msg->jobacct, buffer);
+	if (jobacct_g_unpack(&msg->jobacct, buffer) != SLURM_SUCCESS)
+		goto unpack_error;
 
 	return SLURM_SUCCESS;
 

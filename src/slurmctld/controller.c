@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  controller.c - main control machine daemon for slurm
- *  $Id: controller.c 12452 2007-10-05 19:07:07Z da $
+ *  $Id: controller.c 12861 2007-12-19 22:04:25Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -897,6 +897,7 @@ static void *_slurmctld_background(void *no_data)
 			last_sched_time = now;
 			if (schedule())
 				last_checkpoint_time = 0;  /* force state save */
+			set_job_elig_time();
 		}
 
 		if (difftime(now, last_trigger) > TRIGGER_INTERVAL) {

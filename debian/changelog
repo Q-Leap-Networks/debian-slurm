@@ -1,3 +1,12 @@
+slurm-llnl (1.2.21-1) unstable; urgency=low
+
+  * New upstream release
+  * Added support for uscan (Closes: #454317) thanks to Manuel Prinz
+  * Solve preinst failure when upgrading and the user slurm does not
+    exist (Closes: #459618) thanks to Manuel Prinz
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Mon, 14 Jan 2008 15:06:12 +0100
+
 slurm-llnl (1.2.20-1) unstable; urgency=low
 
   * New Upstream Release 

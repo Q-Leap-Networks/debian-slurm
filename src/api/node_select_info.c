@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  node_select_info.c - get the node select plugin state information of slurm
  *
- *  $Id: node_select_info.c 10574 2006-12-15 23:38:29Z jette $
+ *  $Id: node_select_info.c 12825 2007-12-14 21:23:57Z jette $
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -39,6 +39,10 @@
 
 #ifdef HAVE_CONFIG_H
 #  include "config.h"
+#endif
+
+#ifdef HAVE_SYS_SYSLOG_H
+#  include <sys/syslog.h>
 #endif
 
 #include <errno.h>

@@ -1,4 +1,4 @@
-# $Id: configure.ac 12592 2007-10-31 21:12:49Z jette $
+# $Id: configure.ac 12827 2007-12-14 22:29:30Z da $
 # This file is to be processed with autoconf to generate a configure script
 
 dnl Prologue
@@ -60,6 +60,7 @@ AC_CHECK_HEADERS(mcheck.h values.h socket.h sys/socket.h  \
                  sysint.h inttypes.h termcap.h netdb.h sys/socket.h  \
                  sys/systemcfg.h ncurses.h curses.h sys/dr.h sys/vfs.h \
 		 pam/pam_appl.h security/pam_appl.h sys/sysctl.h \
+		 sys/syslog.h \
 		)
 AC_HEADER_SYS_WAIT
 AC_HEADER_TIME
@@ -295,6 +296,7 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/jobacct/linux/Makefile
 		 src/plugins/jobacct/aix/Makefile
 		 src/plugins/jobacct/none/Makefile
+		 src/plugins/jobacct/gold/Makefile
 		 src/plugins/jobcomp/Makefile
 		 src/plugins/jobcomp/filetxt/Makefile
 		 src/plugins/jobcomp/none/Makefile

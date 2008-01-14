@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  sfree.c - free specified block or all blocks.
- *  $Id: sfree.c 10574 2006-12-15 23:38:29Z jette $
+ *  $Id: sfree.c 12858 2007-12-19 20:15:32Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -113,7 +113,10 @@ int main(int argc, char *argv[])
 	
 	bridge_init();
 	if (!have_db2) {
-		printf("must be on BG SN to resolve.\n");
+		error("Required libraries can not be found "
+		       "to access the Bluegene system.\nPlease "
+		       "set your LD_LIBRARY_PATH correctly to "
+		       "point to them.");
 		exit(0);
 	}
 

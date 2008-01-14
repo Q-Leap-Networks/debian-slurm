@@ -3,7 +3,7 @@
  *	Note: there is a global job list (job_list), time stamp 
  *	(last_job_update), and hash table (job_hash)
  *
- *  $Id: job_mgr.c 12655 2007-11-20 21:02:43Z jette $
+ *  $Id: job_mgr.c 12861 2007-12-19 22:04:25Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1063,6 +1063,7 @@ extern int kill_running_job_by_node_name(char *node_name, bool step_test)
 				_excise_node_from_job(job_ptr, node_ptr);
 			} else if (job_ptr->batch_flag && job_ptr->details &&
 			           (job_ptr->details->no_requeue == 0)) {
+				uint16_t save_state;
 				info("requeue job %u due to failure of node %s",
 				     job_ptr->job_id, node_name);
 				_set_job_prio(job_ptr);
@@ -1073,7 +1074,15 @@ extern int kill_running_job_by_node_name(char *node_name, bool step_test)
 				else
 					job_ptr->end_time = now;
 				deallocate_nodes(job_ptr, false, suspended);
+
+				/* We want this job to look like it was cancelled in the
+				 * accounting logs. Set a new submit time so the restarted
+				 * job looks like a new job. */
+				save_state = job_ptr->job_state;
+				job_ptr->job_state  = JOB_CANCELLED;
 				job_completion_logger(job_ptr);
+				job_ptr->job_state = save_state;
+				job_ptr->details->submit_time = now;
 			} else {
 				info("Killing job_id %u on failed node %s",
 				     job_ptr->job_id, node_name);
@@ -1351,13 +1360,14 @@ extern int job_allocate(job_desc_msg_t * job_specs, int immediate,
 	error_code = _job_create(job_specs, allocate, will_run,
 				 &job_ptr, submit_uid);
 	*job_pptr = job_ptr;
+	time_t now = time(NULL);
 	
 	if (error_code) {
 		if (immediate && job_ptr) {
 			job_ptr->job_state = JOB_FAILED;
 			job_ptr->exit_code = 1;
 			job_ptr->state_reason = FAIL_BAD_CONSTRAINTS;
-			job_ptr->start_time = job_ptr->end_time = time(NULL);
+			job_ptr->start_time = job_ptr->end_time = now;
 			job_completion_logger(job_ptr);
 		}
 		return error_code;
@@ -1389,7 +1399,7 @@ extern int job_allocate(job_desc_msg_t * job_specs, int immediate,
 		job_ptr->job_state  = JOB_FAILED;
 		job_ptr->exit_code  = 1;
 		job_ptr->state_reason = FAIL_BAD_CONSTRAINTS;
-		job_ptr->start_time = job_ptr->end_time = time(NULL);
+		job_ptr->start_time = job_ptr->end_time = now;
 		job_completion_logger(job_ptr);
 		if (!independent)
 			return ESLURM_DEPENDENCY;
@@ -1405,18 +1415,23 @@ extern int job_allocate(job_desc_msg_t * job_specs, int immediate,
 		(!top_prio) || (!independent);
 	error_code = select_nodes(job_ptr, no_alloc, NULL);
 	if (!test_only) {
-		last_job_update = time(NULL);
+		last_job_update = now;
 		slurm_sched_schedule();	/* work for external scheduler */
 	}
-	if ((error_code == ESLURM_NODES_BUSY)
-	    ||  (error_code == ESLURM_JOB_HELD)
-	    ||  (error_code == ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE)) {
+	if (independent &&
+	    (job_ptr->details && (job_ptr->details->begin_time == 0)) &&
+	    ((error_code == SLURM_SUCCESS) || (error_code == ESLURM_NODES_BUSY)))
+		job_ptr->details->begin_time = now;
+ 
+	if ((error_code == ESLURM_NODES_BUSY) ||
+	    (error_code == ESLURM_JOB_HELD) ||
+	    (error_code == ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE)) {
 		/* Not fatal error, but job can't be scheduled right now */
 		if (immediate) {
 			job_ptr->job_state  = JOB_FAILED;
 			job_ptr->exit_code  = 1;
 			job_ptr->state_reason = FAIL_BAD_CONSTRAINTS;
-			job_ptr->start_time = job_ptr->end_time = time(NULL);
+			job_ptr->start_time = job_ptr->end_time = now;
 			job_completion_logger(job_ptr);
 		} else {	/* job remains queued */
 			if (error_code == ESLURM_NODES_BUSY) {
@@ -1430,7 +1445,7 @@ extern int job_allocate(job_desc_msg_t * job_specs, int immediate,
 		job_ptr->job_state  = JOB_FAILED;
 		job_ptr->exit_code  = 1;
 		job_ptr->state_reason = FAIL_BAD_CONSTRAINTS;
-		job_ptr->start_time = job_ptr->end_time = time(NULL);
+		job_ptr->start_time = job_ptr->end_time = now;
 		job_completion_logger(job_ptr);
 		return error_code;
 	}
@@ -1438,7 +1453,7 @@ extern int job_allocate(job_desc_msg_t * job_specs, int immediate,
 	if (will_run) {		/* job would run, flag job destruction */
 		job_ptr->job_state  = JOB_FAILED;
 		job_ptr->exit_code  = 1;
-		job_ptr->start_time = job_ptr->end_time = time(NULL);
+		job_ptr->start_time = job_ptr->end_time = now;
 	} 
 	return SLURM_SUCCESS;
 }
@@ -1628,6 +1643,7 @@ extern int job_complete(uint32_t job_id, uid_t uid, bool requeue,
 	time_t now = time(NULL);
 	uint32_t job_comp_flag = 0;
 	bool suspended = false;
+
 	info("completing job %u", job_id);
 	job_ptr = find_job_record(job_id);
 	if (job_ptr == NULL) {
@@ -1673,7 +1689,7 @@ extern int job_complete(uint32_t job_id, uid_t uid, bool requeue,
 		job_completion_logger(job_ptr);
 	} else {
 		if (job_return_code == NO_VAL) {
-			job_ptr->job_state = JOB_CANCELLED| job_comp_flag;
+			job_ptr->job_state = JOB_CANCELLED | job_comp_flag;
 			job_ptr->requid = uid;
 		} else if (WIFEXITED(job_return_code) &&
 		           WEXITSTATUS(job_return_code)) {
@@ -2235,17 +2251,18 @@ _read_data_array_from_file(char *file_name, char ***data, uint16_t * size)
 	buf_size = BUF_SIZE;
 	buffer = xmalloc(buf_size);
 	while (1) {
-		amount = read(fd, &buffer[pos], buf_size);
+		amount = read(fd, &buffer[pos], BUF_SIZE);
 		if (amount < 0) {
 			error("Error reading file %s, %m", file_name);
 			xfree(buffer);
 			close(fd);
 			return;
 		}
-		if (amount < buf_size)	/* end of file */
+		if (amount < BUF_SIZE)	/* end of file */
 			break;
 		pos += amount;
-		xrealloc(buffer, (pos + buf_size));
+		buf_size += amount;
+		xrealloc(buffer, buf_size);
 	}
 	close(fd);
 
@@ -2291,17 +2308,18 @@ void _read_data_from_file(char *file_name, char **data)
 	buf_size = BUF_SIZE;
 	buffer = xmalloc(buf_size);
 	while (1) {
-		amount = read(fd, &buffer[pos], buf_size);
+		amount = read(fd, &buffer[pos], BUF_SIZE);
 		if (amount < 0) {
 			error("Error reading file %s, %m", file_name);
 			xfree(buffer);
 			close(fd);
 			return;
 		}
-		if (amount < buf_size)	/* end of file */
+		if (amount < BUF_SIZE)	/* end of file */
 			break;
 		pos += amount;
-		xrealloc(buffer, (pos + buf_size));
+		buf_size += amount;
+		xrealloc(buffer, buf_size);
 	}
 
 	*data = buffer;
@@ -3383,8 +3401,11 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 	last_job_update = now;
 
 	if ((job_specs->time_limit != NO_VAL) && (!IS_JOB_FINISHED(job_ptr))) {
-		if (super_user ||
-		    (job_ptr->time_limit > job_specs->time_limit)) {
+		if (job_ptr->time_limit == job_specs->time_limit) {
+			verbose("update_job: new time limit identical to old "
+				"time limit %u", job_specs->job_id);
+		} else if (super_user ||
+			   (job_ptr->time_limit > job_specs->time_limit)) {
 			time_t old_time =  job_ptr->time_limit;
 			if (old_time == INFINITE)	/* one year in mins */
 				old_time = (365 * 24 * 60);
@@ -4728,6 +4749,7 @@ extern int job_requeue (uid_t uid, uint32_t job_id, slurm_fd conn_fd)
 	slurm_msg_t resp_msg;
 	return_code_msg_t rc_msg;
 	time_t now = time(NULL);
+	uint16_t save_state;
 
 	/* find the job */
 	job_ptr = find_job_record (job_id);
@@ -4747,7 +4769,7 @@ extern int job_requeue (uid_t uid, uint32_t job_id, slurm_fd conn_fd)
 		rc = ESLURM_ALREADY_DONE;
 		goto reply;
 	}
-	if (job_ptr->details && job_ptr->details->no_requeue) {
+	if ((job_ptr->details == NULL) || job_ptr->details->no_requeue) {
 		rc = ESLURM_DISABLED;
 		goto reply;
 	}
@@ -4786,10 +4808,16 @@ extern int job_requeue (uid_t uid, uint32_t job_id, slurm_fd conn_fd)
 	else
 		job_ptr->end_time = now;
 	deallocate_nodes(job_ptr, false, suspended);
-	if (job_ptr->details)
-		xfree(job_ptr->details->req_node_layout);
+	xfree(job_ptr->details->req_node_layout);
+
+	/* We want this job to look like it was cancelled in the
+	 * accounting logs. Set a new submit time so the restarted
+	 * job looks like a new job. */
+	save_state = job_ptr->job_state;
+	job_ptr->job_state  = JOB_CANCELLED;
 	job_completion_logger(job_ptr);
-//FIXME: Test accounting
+	job_ptr->job_state = save_state;
+	job_ptr->details->submit_time = now;
 
     reply:
 	if (conn_fd >= 0) {

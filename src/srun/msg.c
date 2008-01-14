@@ -1,6 +1,6 @@
 /****************************************************************************\
  *  msg.c - process message traffic between srun and slurm daemons
- *  $Id: msg.c 12538 2007-10-23 17:11:04Z jette $
+ *  $Id: msg.c 12809 2007-12-11 18:41:21Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -213,7 +213,7 @@ static void _handle_update_mpir_proctable(int fd, srun_job_t *job)
 	   call the Breakpoint */
 	if (tasks_recorded == job->step_layout->task_cnt) {
 		if (opt.multi_prog)
-			set_multi_name(ntasks);
+			set_multi_name(tasks_recorded);
 		MPIR_debug_state = MPIR_DEBUG_SPAWNED;
 		MPIR_Breakpoint();
 		if (opt.debugger_test)
@@ -1306,6 +1306,8 @@ par_thr(void *arg)
 	//slurm_uid = (uid_t) slurm_get_slurm_user_id();
 	close(msg_par->msg_pipe[0]); // close read end of pipe
 	close(par_msg->msg_pipe[1]); // close write end of pipe 
+	/* Note: On some message types, we read a task ID as the 
+	 * first number then read status or exit code as the second */
 	while(read(par_msg->msg_pipe[0], &c, sizeof(int)) 
 	      == sizeof(int)) {
 		// getting info from msg thread
@@ -1321,11 +1323,11 @@ par_thr(void *arg)
 			update_job_state(job, c);
 			break;
 		case PIPE_TASK_STATE:
-			debug("PIPE_TASK_STATE, c = %d", c);
 			if(tid == -1) {
 				tid = c;
 				continue;
 			}
+			debug("PIPE_TASK_STATE tid=%d, state=%d", tid, c);
 			slurm_mutex_lock(&job->task_mutex);
 			job->task_state[tid] = c;
 			if(c == SRUN_TASK_FAILED)
@@ -1338,14 +1340,12 @@ par_thr(void *arg)
 			tid = -1;
 			break;
 		case PIPE_TASK_EXITCODE:
-			debug("PIPE_TASK_EXITCODE");
 			if(tid == -1) {
-				debug("  setting tid");
 				tid = c;
 				continue;
 			}
+			debug("PIPE_TASK_EXITCODE tid=%d code=%d", tid, c);
 			slurm_mutex_lock(&job->task_mutex);
-			debug("  setting task %d exitcode %d", tid, c);
 			job->tstatus[tid] = c;
 			slurm_mutex_unlock(&job->task_mutex);
 			tid = -1;

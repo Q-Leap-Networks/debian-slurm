@@ -1,6 +1,34 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 1.2.22
+=========================
+
+
+* Changes in SLURM 1.2.21
+=========================
+ -- Fixed torque wrappers to look in the correct spot for the perl api
+ -- Do not treat user resetting his time limit to the current value as
+    an error.
+ -- Set correct executable names for Totalview when --multi-prog option 
+    is used and more than one node is allocated to the job step.
+ -- When a batch job gets requeued, record in accounting logs that 
+    the job was cancelled, the requeued job's submit time will be 
+    set to the time of its requeue so it looks like a different job.
+ -- Prevent communication problems if the slurmd/slurmstepd have a 
+    different JobAcct plugin configured than slurmctld.
+ -- Adding Gold plugin for job accounting
+ -- In sched/wiki2, add support for MODIFYJOB option "JOBNAME=<name>"
+    to modify a job's name.
+ -- Add configuration check for sys/syslog.h and include it as needed.
+ -- Add --propagate option to sbatch for control over limit propagation.
+ -- Added Gold interface to the jobacct plugin.  To configure in the config
+    file specify...  
+    JobAcctType=jobacct/gold
+    JobAcctLogFile=CLUSTER_NAME:GOLD_AUTH_KEY_FILE:GOLDD_HOST:GOLDD_PORT7112
+ -- In slurmctld job record, set begin_time to time when all of a job's
+    dependencies are met.
+
 * Changes in SLURM 1.2.20
 =========================
  -- In switch/federation, fix small memory leak effecting slurmd.
@@ -2738,4 +2766,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 12712 2007-11-29 00:12:08Z jette $
+$Id: NEWS 12878 2007-12-20 18:20:03Z jette $

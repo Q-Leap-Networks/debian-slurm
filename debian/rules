@@ -138,6 +138,7 @@ install-arch:
 	rm -f debian/slurm-llnl/usr/bin/sview
 	rm -f debian/slurm-llnl/usr/share/man/man1/sview.1
 
+	rmdir debian/slurm-llnl/usr/lib
 	dh_install -s
 # Must not depend on anything. This is to be called by
 # binary-arch/binary-indep

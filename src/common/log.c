@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  log.c - slurm logging facilities
- *  $Id: log.c 10574 2006-12-15 23:38:29Z jette $
+ *  $Id: log.c 12825 2007-12-14 21:23:57Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -59,7 +59,6 @@
 
 #include <stdarg.h>
 #include <errno.h>
-#include <syslog.h>
 
 #ifdef WITH_PTHREADS
 #  include <pthread.h>

@@ -2,8 +2,8 @@ Document: slurm-llnl
 Title: Debian slurm-llnl Manual
 Author: Slurm Team
 Abstract: The manual of SLURM, the Simple Linux Utility for Resource
-  Management, an open-source cluster resource management
-  and job scheduling tool.
+ Management, an open-source cluster resource management
+ and job scheduling tool.
 Section: admin
 
 Format: HTML

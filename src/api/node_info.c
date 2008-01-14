@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  node_info.c - get/print the node state information of slurm
- *  $Id: node_info.c 10851 2007-01-23 21:19:14Z morrone $
+ *  $Id: node_info.c 12825 2007-12-14 21:23:57Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -38,6 +38,10 @@
 
 #ifdef HAVE_CONFIG_H
 #  include "config.h"
+#endif
+
+#ifdef HAVE_SYS_SYSLOG_H
+#  include <sys/syslog.h>
 #endif
 
 #include <errno.h>

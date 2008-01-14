@@ -1,5 +1,5 @@
 ##*****************************************************************************
-## $Id: x_ac_slurm_ssl.m4 11096 2007-03-08 00:16:27Z jette $
+## $Id: x_ac_slurm_ssl.m4 12827 2007-12-14 22:29:30Z da $
 ##*****************************************************************************
 #  AUTHOR:
 #     Mark Grondona <mgrondona@llnl.gov>
@@ -87,6 +87,8 @@ AC_DEFUN([X_AC_SLURM_WITH_SSL], [
   		AC_RUN_IFELSE([AC_LANG_SOURCE([[
   #include <stdlib.h>
   #include <openssl/rand.h>
+  #include <openssl/hmac.h>
+  #include <openssl/sha.h>
   #define SIZE 8
   int main(void) 
   {
