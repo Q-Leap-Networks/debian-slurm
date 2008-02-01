@@ -1,9 +1,33 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
-* Changes in SLURM 1.2.22
+* Changes in SLURM 1.2.23
 =========================
 
+* Changes in SLURM 1.2.22
+=========================
+ -- In sched/wiki2, add support for MODIFYJOB option "MINSTARTTIME=<time>"
+    to modify a job's earliest start time.
+ -- In sbcast, fix bug with large files and causing sbcast to die.
+ -- In sched/wiki2, add support for COMMENT= option in STARTJOB and CANCELJOB
+    commands.
+ -- Avoid printing negative job run time in squeue due to clock skew.
+ -- In sched/wiki and sched/wiki2, add support for wiki.conf option
+    HidePartitionJobs (see man pages for details).
+ -- Update to srun/sbatch --get-user-env option logic (needed by Moab).
+ -- In slurmctld (for Moab) added job->details->reserved_resources field
+    to report resources that were kept in reserve for job while it was 
+    pending.
+ -- In sched/wiki (for Maui scheduler) report a pending job's node feature 
+    requirements (from Miguel Roa, BSC).
+ -- Permit a user to change a pending job's TasksPerNode specification 
+    using scontrol (from Miguel Roa, BSC).
+ -- Add support for node UP/DOWN event logging in jobacct/gold plugin
+    WARNING: using the jobacct/gold plugin slows the system startup set the
+    MessageTimeout variable in the slurm.conf to around 20+.
+ -- Added check at start of slurmctld to look for /tmp/slurm_gold_first if
+    there, and using the gold plugin slurm will make record of all nodes in
+    downed or drained state.
 
 * Changes in SLURM 1.2.21
 =========================
@@ -2766,4 +2790,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 12878 2007-12-20 18:20:03Z jette $
+$Id: NEWS 13118 2008-01-29 19:09:00Z da $

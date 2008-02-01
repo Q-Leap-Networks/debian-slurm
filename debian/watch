@@ -1,2 +1,2 @@
 version=3
-http://sf.net/slurm/slurm-(.+)\.tar\.bz2
+http://sf.net/slurm/slurm-(1.2.+)\.tar\.bz2
