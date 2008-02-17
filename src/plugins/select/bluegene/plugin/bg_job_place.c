@@ -2,7 +2,7 @@
  *  bg_job_place.c - blue gene job placement (e.g. base block selection)
  *  functions.
  *
- *  $Id: bg_job_place.c 12627 2007-11-06 19:48:55Z jette $ 
+ *  $Id: bg_job_place.c 13271 2008-02-14 20:02:00Z da $ 
  *****************************************************************************
  *  Copyright (C) 2004-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -209,7 +209,6 @@ static int _find_best_block_match(struct job_record* job_ptr,
 	uint32_t req_procs = job_ptr->num_procs;
 	uint32_t proc_cnt;
 	ba_request_t request; 
-	ba_request_t *try_request = NULL; 
 	int i;
 	int rot_cnt = 0;
 	int created = 0;
@@ -256,50 +255,7 @@ static int _find_best_block_match(struct job_record* job_ptr,
 		
 	if(start[X] != (uint16_t)NO_VAL)
 		start_req = 1;
-	if(num_unused_cpus != total_cpus) {
-		/* 
-		   see if we have already tried to create this 
-		   size but couldn't make it right now no reason 
-		   to try again 
-		*/
-		slurm_mutex_lock(&request_list_mutex);
-		itr = list_iterator_create(bg_request_list);
-		while ((try_request = list_next(itr))) {
-			if(start_req) {
-				if ((try_request->start[X] != start[X])
-				    || (try_request->start[Y] != start[Y])
-				    || (try_request->start[Z] != start[Z])) {
-					debug4("got %c%c%c looking for %c%c%c",
-					       alpha_num[try_request->start[X]],
-					       alpha_num[try_request->start[Y]],
-					       alpha_num[try_request->start[Z]],
-					       alpha_num[start[X]],
-					       alpha_num[start[Y]],
-					       alpha_num[start[Z]]);
-					continue;
-				}
-				debug3("found %c%c%c looking for %c%c%c",
-				       alpha_num[try_request->start[X]],
-				       alpha_num[try_request->start[Y]],
-				       alpha_num[try_request->start[Z]],
-				       alpha_num[start[X]],
-				       alpha_num[start[Y]],
-				       alpha_num[start[Z]]);
-			}
-			if(try_request->procs == req_procs) {
-				debug("already tried to create but "
-				      "can't right now.");
-				list_iterator_destroy(itr);
-				slurm_mutex_unlock(&request_list_mutex);
-				if(test_only)
-					return SLURM_SUCCESS;
-				else
-					return SLURM_ERROR;
-			}				
-		}
-		list_iterator_destroy(itr);
-		slurm_mutex_unlock(&request_list_mutex);
-	}
+
 	select_g_get_jobinfo(job_ptr->select_jobinfo,
 			     SELECT_DATA_CONN_TYPE, &conn_type);
 	select_g_get_jobinfo(job_ptr->select_jobinfo,
@@ -471,8 +427,8 @@ try_again:
 		      req_procs, max_procs, proc_cnt);
 		if ((proc_cnt < req_procs)
 		    || ((max_procs != NO_VAL) && (proc_cnt > max_procs))) {
-			/* We use the proccessor count per partition here
-			   mostly to see if we can run on a smaller partition. 
+			/* We use the proccessor count per block here
+			   mostly to see if we can run on a smaller block. 
 			 */
 			convert_num_unit((float)proc_cnt, tmp_char, 
 					 sizeof(tmp_char), UNIT_NONE);
@@ -522,7 +478,7 @@ try_again:
 			continue;
 		}
 				
-		/* Make sure no other partitions are under this partition 
+		/* Make sure no other blocks are under this block 
 		   are booted and running jobs
 		*/
 		itr2 = list_iterator_create(bg_list);
@@ -719,7 +675,12 @@ try_again:
 		request.linuximage = linuximage;
 		request.mloaderimage = mloaderimage;
 		request.ramdiskimage = ramdiskimage;
-	
+		if(job_ptr->details->req_node_bitmap) 
+			request.avail_node_bitmap = 
+				job_ptr->details->req_node_bitmap;
+		else
+			request.avail_node_bitmap = slurm_block_bitmap;
+
 		debug("trying with all free blocks");
 		if(create_dynamic_block(&request, NULL) == SLURM_ERROR) {
 			error("this job will never run on "
@@ -735,24 +696,6 @@ try_again:
 				goto end_it;
 			} 
 
-			/* 
-			   add request to list so we don't try again until 
-			   something happens like a job finishing or 
-			   something so we can try again 
-			*/
-			debug3("adding %d %d", 
-			       request.procs, request.conn_type);
-			try_request = xmalloc(sizeof(ba_request_t));
-			try_request->procs = req_procs;
-			try_request->save_name = NULL;
-			try_request->elongate_geos = NULL;
-			try_request->start_req = request.start_req;
-			for(i=0; i<BA_SYSTEM_DIMENSIONS; i++) 
-				try_request->start[i] = start[i];
-			slurm_mutex_lock(&request_list_mutex);
-			list_push(bg_request_list, try_request);
-			slurm_mutex_unlock(&request_list_mutex);
-		
 			slurm_conf_lock();
 			snprintf(tmp_char, sizeof(tmp_char), "%s%s", 
 				 slurmctld_conf.node_prefix,
@@ -812,6 +755,12 @@ try_again:
 			request.linuximage = linuximage;
 			request.mloaderimage = mloaderimage;
 			request.ramdiskimage = ramdiskimage;
+			if(job_ptr->details->req_node_bitmap) 
+				request.avail_node_bitmap = 
+					job_ptr->details->req_node_bitmap;
+			else
+				request.avail_node_bitmap = slurm_block_bitmap;
+			
 			/* 1- try empty space
 			   2- we see if we can create one in the 
 			   unused bps

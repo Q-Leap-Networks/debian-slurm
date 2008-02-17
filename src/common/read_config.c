@@ -140,6 +140,7 @@ s_p_options_t slurm_conf_options[] = {
 	{"JobCredentialPrivateKey", S_P_STRING},
 	{"JobCredentialPublicCertificate", S_P_STRING},
 	{"JobFileAppend", S_P_UINT16},
+	{"GetEnvTimeout", S_P_UINT16},
 	{"KillTree", S_P_UINT16, defunct_option},
 	{"KillWait", S_P_UINT16},
 	{"MailProg", S_P_STRING},
@@ -315,7 +316,7 @@ static int parse_nodename(void **dest, slurm_parser_enum_t type,
 
 		if (!s_p_get_uint32(&n->tmp_disk, "TmpDisk", tbl)
 		    && !s_p_get_uint32(&n->tmp_disk, "TmpDisk", dflt))
-			n->tmp_disk = 1;
+			n->tmp_disk = 0;
 
 		if (!s_p_get_uint32(&n->weight, "Weight", tbl)
 		    && !s_p_get_uint32(&n->weight, "Weight", dflt))
@@ -456,6 +457,13 @@ static int parse_partitionname(void **dest, slurm_parser_enum_t type,
 		if (!s_p_get_string(&p->nodes, "Nodes", tbl)
 		    && !s_p_get_string(&p->nodes, "Nodes", dflt))
 			p->nodes = NULL;
+		else {
+			int i;
+			for (i=0; p->nodes[i]; i++) {
+				if (isspace(p->nodes[i]))
+					p->nodes[i] = ',';
+			}
+		}
 
 		if (!s_p_get_boolean(&p->root_only_flag, "RootOnly", tbl)
 		    && !s_p_get_boolean(&p->root_only_flag, "RootOnly", dflt))
@@ -1431,6 +1439,9 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 
 	if (!s_p_get_uint16(&conf->job_file_append, "JobFileAppend", hashtbl))
 		conf->job_file_append = 0;
+
+	if (!s_p_get_uint16(&conf->get_env_timeout, "GetEnvTimeout", hashtbl))
+		conf->get_env_timeout = DEFAULT_GET_ENV_TIMEOUT;
 
 	if (!s_p_get_uint16(&conf->kill_wait, "KillWait", hashtbl))
 		conf->kill_wait = DEFAULT_KILL_WAIT;

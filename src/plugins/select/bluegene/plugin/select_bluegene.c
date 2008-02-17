@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  select_bluegene.c - node selection plugin for Blue Gene system.
  * 
- *  $Id: select_bluegene.c 12409 2007-09-26 16:32:16Z jette $
+ *  $Id: select_bluegene.c 13271 2008-02-14 20:02:00Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1085,8 +1085,6 @@ extern int select_p_update_node_state (int index, uint16_t state)
 		}
 	}
 #endif
-	if(bluegene_layout_mode == LAYOUT_DYNAMIC) 
-		remove_from_request_list();
 	return SLURM_ERROR;
 }
 

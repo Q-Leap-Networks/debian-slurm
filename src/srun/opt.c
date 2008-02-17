@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  opt.c - options processing for srun
- *  $Id: opt.c 12856 2007-12-19 00:18:44Z jette $
+ *  $Id: opt.c 13270 2008-02-14 19:40:44Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1721,6 +1721,9 @@ void set_options(const int argc, char **argv, int first)
 #ifdef HAVE_BG
 			info("\tThe nodelist option should only be used if\n"
 			     "\tthe block you are asking for can be created.\n"
+			     "\tIt should also include all the midplanes you\n"
+			     "\twant to use, partial lists may not\n"
+			     "\twork correctly.\n"
 			     "\tPlease consult smap before using this option\n"
 			     "\tor your job may be stuck with no way to run.");
 #endif
@@ -2168,7 +2171,7 @@ static void _opt_args(int argc, char **argv)
 		char *fullpath;
 		char *cmd       = remote_argv[0];
 		bool search_cwd = (opt.batch || opt.allocate);
-		int  mode       = (search_cwd) ? R_OK : R_OK | X_OK;
+		int  mode       = (search_cwd) ? R_OK : X_OK;
 
 		if ((fullpath = _search_path(cmd, search_cwd, mode))) {
 			xfree(remote_argv[0]);

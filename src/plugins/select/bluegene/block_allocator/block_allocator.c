@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  block_allocator.c - Assorted functions for layout of bglblocks, 
  *	 wiring, mapping for smap, etc.
- *  $Id: block_allocator.c 12543 2007-10-23 22:19:49Z jette $
+ *  $Id: block_allocator.c 13150 2008-01-31 22:59:13Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1264,6 +1264,7 @@ extern int copy_node_path(List nodes, List dest_nodes)
 #endif	
 	return rc;
 }
+
 extern int check_and_set_node_list(List nodes)
 {
 	int rc = SLURM_ERROR;

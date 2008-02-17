@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  step_mgr.c - manage the job step information of slurm
- *  $Id: step_mgr.c 12681 2007-11-26 18:56:25Z jette $
+ *  $Id: step_mgr.c 13155 2008-02-01 17:30:43Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -701,8 +701,16 @@ step_create(job_step_create_request_msg_t *step_specs,
 	if (job_ptr == NULL)
 		return ESLURM_INVALID_JOB_ID ;
 
-	if ((job_ptr->job_state == JOB_SUSPENDED) || IS_JOB_PENDING(job_ptr))
+	if (job_ptr->job_state == JOB_SUSPENDED)
 		return ESLURM_DISABLED;
+	if (IS_JOB_PENDING(job_ptr)) {
+		/* NOTE: LSF creates a job allocation for batch jobs.
+		 * After the allocation has been made, LSF submits a
+		 * job to run in that allocation (sbatch --jobid= ...).
+		 * If that job is pending either LSF messed up or LSF is
+		 * not being used. We have seen this problem with Moab. */
+		return ESLURM_DUPLICATE_JOB_ID;
+	}
 
 	if (batch_step) {
 		info("user %u attempting to run batch script within "

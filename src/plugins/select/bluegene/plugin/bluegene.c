@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  bluegene.c - blue gene node configuration processing module. 
  *
- *  $Id: bluegene.c 12450 2007-10-05 18:22:36Z da $
+ *  $Id: bluegene.c 13271 2008-02-14 20:02:00Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -59,8 +59,6 @@ List bg_found_block_list = NULL;  	/* found bg blocks already on system */
 List bg_job_block_list = NULL;  	/* jobs running in these blocks */
 List bg_booted_block_list = NULL;  	/* blocks that are booted */
 List bg_freeing_list = NULL;  	        /* blocks that being freed */
-List bg_request_list = NULL;  	        /* list of request that can't 
-					   be made just yet */
 
 List bg_blrtsimage_list = NULL;
 List bg_linuximage_list = NULL;
@@ -80,7 +78,6 @@ uint16_t bridge_api_verb = 0;
 bool agent_fini = false;
 time_t last_bg_update;
 pthread_mutex_t block_state_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t request_list_mutex = PTHREAD_MUTEX_INITIALIZER;
 int num_block_to_free = 0;
 int num_block_freed = 0;
 int blocks_are_created = 0;
@@ -185,13 +182,6 @@ extern void fini_bg(void)
 	while(destroy_cnt > 0)
 		usleep(1000);
 	
-	slurm_mutex_lock(&request_list_mutex);
-	if (bg_request_list) {
-		list_destroy(bg_request_list);
-		bg_request_list = NULL;
-	}
-	slurm_mutex_unlock(&request_list_mutex);
-		
 	if(bg_blrtsimage_list) {
 		list_destroy(bg_blrtsimage_list);
 		bg_blrtsimage_list = NULL;
@@ -407,6 +397,7 @@ extern void process_nodes(bg_record_t *bg_record)
 					start);
 				if(bg_record->nodes[j] != ',')
 					break;
+				j--;
 			}
 			j++;
 		}
@@ -423,6 +414,8 @@ extern void process_nodes(bg_record_t *bg_record)
 
 	itr = list_iterator_create(bg_record->bg_block_list);
 	while ((ba_node = list_next(itr)) != NULL) {
+		if(!ba_node->used)
+			continue;
 		debug4("%c%c%c is included in this block",
 		       alpha_num[ba_node->coord[X]],
 		       alpha_num[ba_node->coord[Y]],
@@ -1205,6 +1198,89 @@ extern int create_dynamic_block(ba_request_t *request, List my_block_list)
 		debug("No list was given");
 	}
 
+	if(request->avail_node_bitmap) {
+		int j=0, number;
+		int x,y,z;
+		char *nodes = NULL;
+		bitstr_t *bitmap = bit_alloc(node_record_count);
+		int start[BA_SYSTEM_DIMENSIONS];
+		int end[BA_SYSTEM_DIMENSIONS];
+
+		/* we want the bps that aren't in this partition to
+		 * mark them as used
+		 */
+		bit_or(bitmap, request->avail_node_bitmap);
+		bit_not(bitmap);
+		nodes = bitmap2node_name(bitmap);
+		//info("not using %s", nodes);
+		while(nodes[j] != '\0') {
+			if ((nodes[j] == '[' || nodes[j] == ',')
+			    && (nodes[j+8] == ']' || nodes[j+8] == ',')
+			    && (nodes[j+4] == 'x' || nodes[j+4] == '-')) {
+				j++;
+				number = xstrntol(nodes + j,
+						  NULL, BA_SYSTEM_DIMENSIONS,
+						  HOSTLIST_BASE);
+				start[X] = number / 
+					(HOSTLIST_BASE * HOSTLIST_BASE);
+				start[Y] = (number % 
+					    (HOSTLIST_BASE * HOSTLIST_BASE))
+					/ HOSTLIST_BASE;
+				start[Z] = (number % HOSTLIST_BASE);
+				j += 4;
+				number = xstrntol(nodes + j,
+						NULL, 3, HOSTLIST_BASE);
+				end[X] = number /
+					(HOSTLIST_BASE * HOSTLIST_BASE);
+				end[Y] = (number 
+					  % (HOSTLIST_BASE * HOSTLIST_BASE))
+					/ HOSTLIST_BASE;
+				end[Z] = (number % HOSTLIST_BASE);
+				j += 3;
+				for (x = start[X]; x <= end[X]; x++) {
+					for (y = start[Y]; y <= end[Y]; y++) {
+						for (z = start[Z]; 
+						     z <= end[Z]; z++) {
+							ba_system_ptr->
+								grid[x]
+#ifdef HAVE_BG
+								[y][z]
+#endif
+								.used = 1;
+						}
+					}
+				}
+				
+				if(nodes[j] != ',')
+					break;
+				j--;
+			} else if((nodes[j] >= '0' && nodes[j] <= '9')
+				  || (nodes[j] >= 'A' && nodes[j] <= 'Z')) {
+				
+				number = xstrntol(nodes + j,
+						  NULL, BA_SYSTEM_DIMENSIONS,
+						  HOSTLIST_BASE);
+				x = number / (HOSTLIST_BASE * HOSTLIST_BASE);
+				y = (number % (HOSTLIST_BASE * HOSTLIST_BASE))
+					/ HOSTLIST_BASE;
+				z = (number % HOSTLIST_BASE);
+				j+=3;
+				ba_system_ptr->grid[x]
+#ifdef HAVE_BG
+					[y][z]
+#endif
+					.used = 1;
+
+				if(nodes[j] != ',') 
+					break;
+				j--;
+			}
+			j++;
+		}
+		xfree(nodes);
+		FREE_NULL_BITMAP(bitmap);
+	}
+
 	if(request->size==1 && request->procs < bluegene_bp_node_cnt) {
 		request->conn_type = SELECT_SMALL;
 		if(request->procs == (procs_per_node/16)) {
@@ -1228,14 +1304,14 @@ extern int create_dynamic_block(ba_request_t *request, List my_block_list)
 			}
 			num_quarter=4;
 		}
-		
+
 		if(_breakup_blocks(request, my_block_list) != SLURM_SUCCESS) {
 			debug2("small block not able to be placed");
 			//rc = SLURM_ERROR;
 		} else 
 			goto finished;
 	}
-	
+		
 	if(request->conn_type == SELECT_NAV)
 		request->conn_type = SELECT_TORUS;
 	
@@ -1531,31 +1607,6 @@ extern int remove_from_bg_list(List my_bg_list, bg_record_t *bg_record)
 	return rc;
 }
 
-extern int remove_from_request_list()
-{
-	ba_request_t *try_request = NULL; 
-	ListIterator itr;
-	int rc = SLURM_ERROR;
-
-	/* 
-	   remove all requests out of the list.
-	*/
-		
-	slurm_mutex_lock(&request_list_mutex);
-	itr = list_iterator_create(bg_request_list);
-	while ((try_request = list_next(itr)) != NULL) {
-		debug3("removing size %d", 
-		       try_request->procs);
-		list_remove(itr);
-		delete_ba_request(try_request);
-		//list_iterator_reset(itr);
-		rc = SLURM_SUCCESS;
-	}
-	list_iterator_destroy(itr);
-	slurm_mutex_unlock(&request_list_mutex);
-	return rc;
-}
-
 extern int bg_free_block(bg_record_t *bg_record)
 {
 #ifdef HAVE_BG_FILES
@@ -1704,8 +1755,6 @@ extern void *mult_destroy_block(void *args)
 		 * tool such as smap it will be in a nice order
 		 */
 		sort_bg_record_inc_size(bg_freeing_list);
-		
-		remove_from_request_list();
 		
 		slurm_mutex_lock(&block_state_mutex);
 		if(remove_from_bg_list(bg_job_block_list, bg_record) 
@@ -2361,7 +2410,7 @@ static int _addto_node_list(bg_record_t *bg_record, int *start, int *end)
 		      alpha_num[DIM_SIZE[X]], alpha_num[DIM_SIZE[Y]], 
 		      alpha_num[DIM_SIZE[Z]]);
 	}
-	debug3("bluegene.conf: %c%c%cx%c%c%c",
+	debug3("adding bps: %c%c%cx%c%c%c",
 	       alpha_num[start[X]], alpha_num[start[Y]], alpha_num[start[Z]],
 	       alpha_num[end[X]], alpha_num[end[Y]], alpha_num[end[Z]]);
 	debug3("slurm.conf:    %c%c%c",
@@ -2380,6 +2429,7 @@ static int _addto_node_list(bg_record_t *bg_record, int *start, int *end)
 				slurm_conf_unlock();
 				ba_node = ba_copy_node(
 					&ba_system_ptr->grid[x][y][z]);
+				ba_node->used = 1;
 				list_append(bg_record->bg_block_list, ba_node);
 				node_count++;
 			}
@@ -2436,12 +2486,6 @@ static void _set_bg_lists()
 		list_destroy(bg_list);
 	bg_list = list_create(destroy_bg_record);
 
-	slurm_mutex_lock(&request_list_mutex);
-	if(bg_request_list) 
-		list_destroy(bg_request_list);
-	bg_request_list = list_create(delete_ba_request);
-	slurm_mutex_unlock(&request_list_mutex);
-	
 	slurm_mutex_unlock(&block_state_mutex);	
 	
 	if(bg_blrtsimage_list)
@@ -2865,6 +2909,14 @@ static int _breakup_blocks(ba_request_t *request, List my_block_list)
 			continue;
 		if(bg_record->state != RM_PARTITION_FREE)
 			continue;
+		if (request->avail_node_bitmap &&
+		    !bit_super_set(bg_record->bitmap,
+				   request->avail_node_bitmap)) {
+			debug2("bg block %s has nodes not usable by this job",
+			       bg_record->bg_block_id);
+			continue;
+		}
+			
 		if(request->start_req) {
 			if ((request->start[X] != bg_record->start[X])
 			    || (request->start[Y] != bg_record->start[Y])
@@ -2889,7 +2941,7 @@ static int _breakup_blocks(ba_request_t *request, List my_block_list)
 		proc_cnt = bg_record->bp_count * 
 			bg_record->cpus_per_bp;
 		if(proc_cnt == request->procs) {
-			debug2("found it here %s, %s",
+			debug("found it here %s, %s",
 			       bg_record->bg_block_id,
 			       bg_record->nodes);
 			request->save_name = xmalloc(4);
@@ -2961,6 +3013,14 @@ static int _breakup_blocks(ba_request_t *request, List my_block_list)
 	       != NULL) {
 		if(bg_record->job_running != NO_JOB_RUNNING)
 			continue;
+		if (request->avail_node_bitmap &&
+		    !bit_super_set(bg_record->bitmap,
+				   request->avail_node_bitmap)) {
+			debug2("bg block %s has nodes not usable by this job",
+			       bg_record->bg_block_id);
+			continue;
+		}
+
 		if(request->start_req) {
 			if ((request->start[X] != bg_record->start[X])
 			    || (request->start[Y] != bg_record->start[Y])
