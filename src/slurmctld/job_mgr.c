@@ -3,7 +3,7 @@
  *	Note: there is a global job list (job_list), time stamp 
  *	(last_job_update), and hash table (job_hash)
  *
- *  $Id: job_mgr.c 13176 2008-02-04 16:56:57Z jette $
+ *  $Id: job_mgr.c 13373 2008-02-27 16:47:13Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1087,6 +1087,7 @@ extern int kill_running_job_by_node_name(char *node_name, bool step_test)
 			} else {
 				info("Killing job_id %u on failed node %s",
 				     job_ptr->job_id, node_name);
+				srun_node_fail(job_ptr->job_id, node_name);
 				job_ptr->job_state = JOB_NODE_FAIL | 
 					JOB_COMPLETING;
 				job_ptr->exit_code = 

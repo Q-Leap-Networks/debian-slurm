@@ -2,7 +2,7 @@
  *  select_cons_res.c - node selection plugin supporting consumable 
  *  resources policies.
  *
- *  $Id: select_cons_res.c 12649 2007-11-15 18:02:35Z da $
+ *  $Id: select_cons_res.c 13373 2008-02-27 16:47:13Z jette $
  *****************************************************************************\
  *
  *  The following example below illustrates how four jobs are allocated
@@ -1309,6 +1309,8 @@ extern int select_p_state_restore(char *dir_name)
 	safe_unpack16(&restore_plugin_crtype,  buffer);
 	safe_unpack32(&restore_pstate_version, buffer);
 
+	if (restore_plugin_type == NULL)
+		goto unpack_error;
 	if ((strcmp(restore_plugin_type, plugin_type) != 0) ||
 	    (restore_plugin_version != plugin_version) ||
 	    (restore_plugin_crtype  != cr_type) ||

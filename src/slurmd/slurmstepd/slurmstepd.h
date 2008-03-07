@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/slurmd/slurmstepd/slurmstepd.h - slurmstepd general header file
- * $Id: slurmstepd.h 11590 2007-05-25 18:52:33Z da $
+ * $Id: slurmstepd.h 13322 2008-02-21 19:06:27Z da $
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -55,6 +55,7 @@ typedef struct {
 	slurm_addr parent_addr;
 	int children;
 	int max_depth;
+	bool wait_children;
 	bitstr_t *bits;
 	int step_rc;
 	jobacctinfo_t *jobacct;
