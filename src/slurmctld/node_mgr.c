@@ -4,7 +4,7 @@
  *	hash table (node_hash_table), time stamp (last_node_update) and 
  *	configuration list (config_list)
  *
- *  $Id: node_mgr.c 13274 2008-02-14 21:32:07Z jette $
+ *  $Id: node_mgr.c 13552 2008-03-11 17:34:27Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1524,7 +1524,8 @@ validate_node_specs (char *node_name, uint16_t cpus,
 					node_flags;
 				node_ptr->last_idle = now;
 			}
-			xfree(node_ptr->reason);
+			if ((node_flags & NODE_STATE_DRAIN) == 0)
+				xfree(node_ptr->reason);
 			jobacct_g_node_up(node_ptr, now);
 		} else if ((base_state == NODE_STATE_DOWN) &&
 		           (slurmctld_conf.ret2service == 1) &&
@@ -2234,6 +2235,7 @@ void make_node_idle(struct node_record *node_ptr,
 						"%ld seconds", job_ptr->job_id,
 						(long) delay);
 				job_ptr->job_state &= (~JOB_COMPLETING);
+				delete_step_records(job_ptr, 0);
 				slurm_sched_schedule();
 			}
 		} else {

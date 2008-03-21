@@ -3,7 +3,7 @@
  *	Note: there is a global job list (job_list), time stamp 
  *	(last_job_update), and hash table (job_hash)
  *
- *  $Id: job_mgr.c 13373 2008-02-27 16:47:13Z jette $
+ *  $Id: job_mgr.c 13533 2008-03-10 16:11:30Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1038,7 +1038,7 @@ extern int kill_running_job_by_node_name(char *node_name, bool step_test)
 			   	      job_ptr->job_id);
 			if (job_ptr->node_cnt == 0) {
 				job_ptr->job_state &= (~JOB_COMPLETING);
-				delete_step_records(job_ptr, 1);
+				delete_step_records(job_ptr, 0);
 				slurm_sched_schedule();
 			}
 			if (node_ptr->comp_job_cnt)
@@ -3672,12 +3672,23 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 				info("update_job: setting features to %s for "
 				     "job_id %u", job_specs->features, 
 				     job_specs->job_id);
+			} else {
+				info("update_job: cleared features for job %u",
+				     job_specs->job_id);
 			}
 		} else {
 			error("Attempt to change features for job %u",
 			      job_specs->job_id);
 			error_code = ESLURM_ACCESS_DENIED;
 		}
+	}
+
+	if (job_specs->comment) {
+		xfree(job_ptr->comment);
+		job_ptr->comment = job_specs->comment;
+		job_specs->comment = NULL;	/* Nothing left to free */
+		info("update_job: setting comment to %s for job_id %u",
+		     job_ptr->comment, job_specs->job_id);
 	}
 
 	if (job_specs->name) {
@@ -3767,10 +3778,13 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 	if (job_specs->account) {
 		xfree(job_ptr->account);
 		if (job_specs->account[0] != '\0') {
-			job_ptr->account = job_specs->account ;
+			job_ptr->account = job_specs->account;
+			job_specs->account = NULL;  /* Nothing left to free */
 			info("update_job: setting account to %s for job_id %u",
 			     job_ptr->account, job_specs->job_id);
-			job_specs->account = NULL;
+		} else {
+			info("update_job: cleared account for job_id %u",
+			     job_specs->job_id);
 		}
 	}
 

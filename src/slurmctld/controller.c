@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  controller.c - main control machine daemon for slurm
- *  $Id: controller.c 13156 2008-02-01 17:43:01Z da $
+ *  $Id: controller.c 13506 2008-03-07 00:13:15Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -429,6 +429,8 @@ int main(int argc, char *argv[])
 		verbose("Unable to remove pidfile '%s': %m",
 			slurmctld_conf.slurmctld_pidfile);
 
+	jobacct_g_fini_slurmctld();  /* Save pending message traffic */
+
 #ifdef MEMORY_LEAK_DEBUG
 {
 	/* This should purge all allocated memory,   *\
@@ -456,7 +458,6 @@ int main(int argc, char *argv[])
 	/* Plugins are needed to purge job/node data structures,
 	 * unplug after other data structures are purged */
 	g_slurm_jobcomp_fini();
-	jobacct_g_fini_slurmctld();
 	slurm_sched_fini();
 	slurm_select_fini();
 	checkpoint_fini();

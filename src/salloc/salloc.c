@@ -1,10 +1,9 @@
 /*****************************************************************************\
  *  salloc.c - Request a SLURM job allocation and
  *             launch a user-specified command.
- *
- *  $Id: salloc.c 12700 2007-11-27 23:39:24Z jette $
  *****************************************************************************
- *  Copyright (C) 2006 The Regents of the University of California.
+ *  Copyright (C) 2006-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>
  *  UCRL-CODE-226842.
@@ -31,13 +30,14 @@
 #  include "config.h"
 #endif
 
+#include <pwd.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdbool.h>
-#include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
+#include <unistd.h>
 
 #include <slurm/slurm.h>
 
@@ -97,6 +97,25 @@ int main(int argc, char *argv[])
 		logopt.stderr_level -= opt.quiet;
 		logopt.prefix_level = 1;
 		log_alter(logopt, 0, NULL);
+	}
+
+	if (opt.cwd && chdir(opt.cwd)) {
+		error("chdir(%s): %m", opt.cwd);
+		exit(1);
+	}
+
+	if (opt.get_user_env_time >= 0) {
+		struct passwd *pw;
+		pw = getpwuid(opt.uid);
+		if (pw == NULL) {
+			error("getpwuid(%u): %m", (uint32_t)opt.uid);
+			exit(1);
+		}
+		env = env_array_user_default(pw->pw_name,
+					     opt.get_user_env_time,
+					     opt.get_user_env_mode);
+		if (env == NULL)
+			exit(1);    /* error already logged */
 	}
 
 	/*
@@ -163,6 +182,8 @@ int main(int argc, char *argv[])
 		&& ((after - before) > DEFAULT_BELL_DELAY))) {
 		ring_terminal_bell();
 	}
+	if (opt.no_shell)
+		exit(0);
 	if (allocation_interrupted) {
 		/* salloc process received a signal after
 		 * slurm_allocate_resources_blocking returned with the

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  opt.h - definitions for srun option processing
- *  $Id: opt.h 12697 2007-11-27 22:02:29Z jette $
+ *  $Id: opt.h 13407 2008-02-28 20:13:43Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -156,7 +156,7 @@ typedef struct srun_options {
 	bool labelio;		/* --label-output, -l		*/
 	bool unbuffered;        /* --unbuffered,   -u           */
 	bool allocate;		/* --allocate, 	   -A		*/
-	bool noshell;		/* --noshell                    */
+	bool noshell;		/* --no-shell                   */
 	bool overcommit;	/* --overcommit,   -O		*/
 	bool batch;		/* --batch,   -b		*/
 	bool no_kill;		/* --no-kill, -k		*/
