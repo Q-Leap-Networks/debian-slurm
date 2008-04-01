@@ -1,3 +1,11 @@
+slurm-llnl (1.2.25-2) unstable; urgency=low
+
+  * Fix a bug in the preinst script that causes the slurm user removal even
+    if its uid is correct (Closes: #472177). Thanks to Jerome BENOIT for his
+    collaboration.
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Tue, 01 Apr 2008 15:27:08 +0200
+
 slurm-llnl (1.2.25-1) unstable; urgency=low
 
   * New upstream release 
