@@ -3,7 +3,7 @@
  *  address space. Selects nodes for a job so as to minimize the number 
  *  of sets of consecutive nodes using a best-fit algorithm.
  *
- *  $Id: select_linear.c 12419 2007-09-27 16:33:13Z jette $
+ *  $Id: select_linear.c 13767 2008-04-02 17:29:59Z jette $
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -723,8 +723,9 @@ extern int select_p_get_extra_jobinfo (struct node_record *node_ptr,
 	{
 		uint16_t *tmp_16 = (uint16_t *) data;
 
-		if ((job_ptr->details->cpus_per_task > 1)
-		||  (job_ptr->details->mc_ptr)) {
+		if (job_ptr->details &&
+		    ((job_ptr->details->cpus_per_task > 1) ||
+		     (job_ptr->details->mc_ptr))) {
 			int index = (node_ptr - node_record_table_ptr);
 			*tmp_16 = _get_avail_cpus(job_ptr, index);
 		} else {

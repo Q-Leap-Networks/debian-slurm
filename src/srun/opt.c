@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  opt.c - options processing for srun
- *  $Id: opt.c 13623 2008-03-17 16:46:23Z jette $
+ *  $Id: opt.c 13727 2008-03-27 23:49:35Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -2585,7 +2585,7 @@ _create_path_list(void)
 static char *
 _search_path(char *cmd, bool check_current_dir, int access_mode)
 {
-	List         l        = _create_path_list();
+	List         l        = NULL;
 	ListIterator i        = NULL;
 	char *path, *fullpath = NULL;
 
@@ -2596,6 +2596,10 @@ _search_path(char *cmd, bool check_current_dir, int access_mode)
 		xstrcat(fullpath, cmd);
 		goto done;
 	}
+
+	l = _create_path_list();
+	if (l == NULL)
+		return NULL;
 
 	if (check_current_dir) 
 		list_prepend(l, xstrdup(opt.cwd));
@@ -2611,7 +2615,8 @@ _search_path(char *cmd, bool check_current_dir, int access_mode)
 		fullpath = NULL;
 	}
 done:
-	list_destroy(l);
+	if (l)
+		list_destroy(l);
 	return fullpath;
 }
 

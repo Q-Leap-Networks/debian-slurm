@@ -1,6 +1,33 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 1.2.27
+=========================
+ -- Record job eligible time in accounting database (for jobacct/gold only).
+ -- Prevent user root from executing a job step within a job allocation 
+    belonging to another user.
+ -- Fixed limiting issue for strings larger than 4096 in xstrfmtcat
+ -- Fix bug in how Slurm reports job state to Maui/Moab when a job is requeued
+    due to a node failure, but we can't terminate the job's spawned processes.
+    Job was being reported as PENDING when it was really still COMPLETING.
+ -- Added patch from Jerry Smith for qstat -a output
+ -- Fixed looking at the correct perl path for Slurm.pm in torque wrappers.
+ -- Enhance job requeue on node failure to be more robust.
+ -- Added configuration parameter "DisableRootJobs". See "man slurm.conf" 
+    for details.
+
+* Changes in SLURM 1.2.26
+=========================
+ -- Correct number of sockets/cores/threads reported by slurmd (from
+    Par Andersson, National Supercomputer Centre, Sweden).
+ -- Update libpmi linking so that libslurm is not required for PMI use
+    (from Steven McDougal, SiCortex).
+ -- In srun and sbatch, do not check the PATH env var if an absolute pathname 
+    of the program is specified (previously reported an error if no PATH).
+ -- Correct output of "sinfo -o %C" (CPU counts by node state).
+ -- Treat attempt to submit a batch job against an existing resource allocation
+    as an error if sched/wiki2 is configured (Moab).
+
 * Changes in SLURM 1.2.25
 =========================
  -- Bug fix for setting exit code in accounting for batch script.
@@ -2851,4 +2878,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 13623 2008-03-17 16:46:23Z jette $
+$Id: NEWS 13871 2008-04-15 15:47:33Z jette $

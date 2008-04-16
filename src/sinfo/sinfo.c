@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  sinfo.c - Report overall state the system
  *
- *  $Id: sinfo.c 10744 2007-01-11 20:09:18Z da $
+ *  $Id: sinfo.c 13835 2008-04-09 18:57:18Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -724,7 +724,7 @@ static void _update_sinfo(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr)
 
 	sinfo_ptr->cpus_alloc += node_ptr->used_cpus;
 	sinfo_ptr->cpus_total += node_ptr->cpus;
-	if ((sinfo_ptr->node_state & NODE_STATE_DRAIN) ||
+	if ((node_ptr->node_state & NODE_STATE_DRAIN) ||
 	    (base_state == NODE_STATE_DOWN)) {
 		sinfo_ptr->cpus_other += node_ptr->cpus -
 					 node_ptr->used_cpus;

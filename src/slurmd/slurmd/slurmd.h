@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/slurmd/slurmd/slurmd.h - header for slurmd
- * $Id: slurmd.h 11797 2007-07-06 22:54:22Z jette $
+ * $Id: slurmd.h 13688 2008-03-21 17:27:38Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -123,7 +123,6 @@ typedef struct slurmd_config {
 	uint16_t	use_pam;
 	uint16_t	use_cpusets;	/* Use cpusets, if available       */
 	uint16_t	propagate_prio;	/* PropagatePrioProcess flag       */
-	uint16_t        fast_schedule;	/* use config from file/slurmctld  */
 } slurmd_conf_t;
 
 extern slurmd_conf_t * conf;

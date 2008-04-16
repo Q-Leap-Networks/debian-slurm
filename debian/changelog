@@ -1,3 +1,16 @@
+slurm-llnl (1.2.27-1) unstable; urgency=low
+
+  * New upstream release (1.2.26 is missing because it was replaced too
+    quickly!!!)
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Wed, 16 Apr 2008 22:23:25 +0200
+
+slurm-llnl (1.2.25-3) unstable; urgency=low
+
+  * Fix a problem with the man pages compression
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Wed, 02 Apr 2008 08:32:14 +0200
+
 slurm-llnl (1.2.25-2) unstable; urgency=low
 
   * Fix a bug in the preinst script that causes the slurm user removal even

@@ -3,7 +3,7 @@
  *	Note: there is a global job list (job_list), time stamp 
  *	(last_job_update), and hash table (job_hash)
  *
- *  $Id: job_mgr.c 13533 2008-03-10 16:11:30Z jette $
+ *  $Id: job_mgr.c 13871 2008-04-15 15:47:33Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1063,13 +1063,11 @@ extern int kill_running_job_by_node_name(char *node_name, bool step_test)
 				_excise_node_from_job(job_ptr, node_ptr);
 			} else if (job_ptr->batch_flag && job_ptr->details &&
 			           (job_ptr->details->no_requeue == 0)) {
-				uint16_t save_state;
 				srun_node_fail(job_ptr->job_id, node_name);
 				info("requeue job %u due to failure of node %s",
 				     job_ptr->job_id, node_name);
 				_set_job_prio(job_ptr);
 				job_ptr->time_last_active  = now;
-				job_ptr->job_state = JOB_PENDING | JOB_COMPLETING;
 				if (suspended)
 					job_ptr->end_time = job_ptr->suspend_time;
 				else
@@ -1078,11 +1076,12 @@ extern int kill_running_job_by_node_name(char *node_name, bool step_test)
 				/* We want this job to look like it was cancelled in the
 				 * accounting logs. Set a new submit time so the restarted
 				 * job looks like a new job. */
-				save_state = job_ptr->job_state;
 				job_ptr->job_state  = JOB_CANCELLED;
 				deallocate_nodes(job_ptr, false, suspended);
 				job_completion_logger(job_ptr);
-				job_ptr->job_state = save_state;
+				job_ptr->job_state = JOB_PENDING;
+				if (job_ptr->node_cnt)
+					job_ptr->job_state |= JOB_COMPLETING;
 				job_ptr->details->submit_time = now;
 			} else {
 				info("Killing job_id %u on failed node %s",
@@ -1679,12 +1678,12 @@ extern int job_complete(uint32_t job_id, uid_t uid, bool requeue,
 		job_ptr->batch_flag++;	/* only one retry */
 		job_ptr->job_state = JOB_PENDING | job_comp_flag;
 		info("Non-responding node, requeue JobId=%u", job_ptr->job_id);
-	} else if (job_ptr->job_state == JOB_PENDING) {
-		job_ptr->job_state  = JOB_CANCELLED;
-		job_ptr->start_time = now;
-		job_ptr->end_time   = now;
-		job_ptr->requid = uid;
-		job_completion_logger(job_ptr);
+	} else if ((job_ptr->job_state == JOB_PENDING) && job_ptr->details && 
+		   job_ptr->batch_flag) {
+		/* Possible failure mode with DOWN node and job requeue.
+		 * The DOWN node might actually respond to the cancel and
+		 * take us here. */
+		return SLURM_SUCCESS;
 	} else {
 		if (job_return_code == NO_VAL) {
 			job_ptr->job_state = JOB_CANCELLED | job_comp_flag;
@@ -2521,7 +2520,8 @@ _copy_job_desc_to_job_record(job_desc_msg_t * job_desc,
 		detail_ptr->work_dir = xstrdup(job_desc->work_dir);
 	if (job_desc->overcommit != (uint16_t) NO_VAL)
 		detail_ptr->overcommit = job_desc->overcommit;
-	detail_ptr->begin_time = job_desc->begin_time;
+	if (job_desc->begin_time > time(NULL))
+		detail_ptr->begin_time = job_desc->begin_time;
 	job_ptr->select_jobinfo = 
 		select_g_copy_jobinfo(job_desc->select_jobinfo);
 	detail_ptr->mc_ptr = _set_multi_core_data(job_desc);	
@@ -2644,6 +2644,11 @@ static int _validate_job_desc(job_desc_msg_t * job_desc_msg, int allocate,
 			wiki_sched = true;
 		xfree(sched_type);
 		wiki_sched_test = true;
+	}
+
+	if ((job_desc_msg->user_id == 0) && slurmctld_conf.disable_root_jobs) {
+		error("Security violation, SUBMIT_JOB for user root disabled");
+		return ESLURM_USER_ID_MISSING;
 	}
 
 	if ((job_desc_msg->num_procs == NO_VAL)
@@ -4434,6 +4439,7 @@ extern bool job_independent(struct job_record *job_ptr)
 	struct job_record *dep_ptr;
 	struct job_details *detail_ptr = job_ptr->details;
 	time_t now = time(NULL);
+	bool send_acct_rec = false;
 
 	if (detail_ptr && (detail_ptr->begin_time > now)) {
 		job_ptr->state_reason = WAIT_TIME;
@@ -4455,8 +4461,20 @@ extern bool job_independent(struct job_record *job_ptr)
 	return false;	/* job exists and incomplete */
 
  indi:	/* job is independent, set begin time as needed */
-	if (detail_ptr && (detail_ptr->begin_time == 0))
+	if (detail_ptr && (detail_ptr->begin_time == 0)) {
 		detail_ptr->begin_time = now;
+		send_acct_rec = true;
+	} else if (job_ptr->state_reason == WAIT_TIME) {
+		job_ptr->state_reason = WAIT_NO_REASON;
+		send_acct_rec = true;
+	}
+	if (send_acct_rec) {
+		/* We want to record when a job becomes eligible in
+		 * order to calculate reserved time (a measure of
+		 * system over-subscription), job really is not
+		 * starting now */
+		jobacct_g_job_start_slurmctld(job_ptr);
+	}
 	return true;
 }
 /*
@@ -4781,7 +4799,6 @@ extern int job_requeue (uid_t uid, uint32_t job_id, slurm_fd conn_fd)
 	slurm_msg_t resp_msg;
 	return_code_msg_t rc_msg;
 	time_t now = time(NULL);
-	uint16_t save_state;
 
 	/* find the job */
 	job_ptr = find_job_record (job_id);
@@ -4834,7 +4851,6 @@ extern int job_requeue (uid_t uid, uint32_t job_id, slurm_fd conn_fd)
 	if (job_ptr->job_state == JOB_SUSPENDED)
 		suspended = true;
 	job_ptr->time_last_active  = now;
-	job_ptr->job_state         = JOB_PENDING | JOB_COMPLETING;
 	if (suspended)
 		job_ptr->end_time = job_ptr->suspend_time;
 	else
@@ -4843,12 +4859,13 @@ extern int job_requeue (uid_t uid, uint32_t job_id, slurm_fd conn_fd)
 	/* We want this job to look like it was cancelled in the
 	 * accounting logs. Set a new submit time so the restarted
 	 * job looks like a new job. */
-	save_state = job_ptr->job_state;
 	job_ptr->job_state  = JOB_CANCELLED;
 	deallocate_nodes(job_ptr, false, suspended);
 	xfree(job_ptr->details->req_node_layout);
 	job_completion_logger(job_ptr);
-	job_ptr->job_state = save_state;
+	job_ptr->job_state = JOB_PENDING;
+	if (job_ptr->node_cnt)
+		job_ptr->job_state |= JOB_COMPLETING;
 	job_ptr->details->submit_time = now;
 
     reply:

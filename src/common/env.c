@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/common/env.c - add an environment variable to environment vector
- *  $Id: env.c 13237 2008-02-08 23:16:16Z jette $
+ *  $Id: env.c 13678 2008-03-20 21:02:07Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -45,6 +45,7 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 #include <sys/poll.h>
 #include <sys/types.h>

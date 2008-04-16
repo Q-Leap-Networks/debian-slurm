@@ -4,7 +4,7 @@
  *	hash table (node_hash_table), time stamp (last_node_update) and 
  *	configuration list (config_list)
  *
- *  $Id: node_mgr.c 13552 2008-03-11 17:34:27Z jette $
+ *  $Id: node_mgr.c 13869 2008-04-15 00:51:16Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1962,6 +1962,7 @@ void set_node_down (char *name, char *reason)
 		return;
 	}
 
+	_make_node_down(node_ptr, now);
 	(void) kill_running_job_by_node_name(name, false);
 	if ((node_ptr->reason == NULL)
 	||  (strncmp(node_ptr->reason, "Not responding", 14) == 0)) {
@@ -1976,7 +1977,6 @@ void set_node_down (char *name, char *reason)
 		node_ptr->reason = xstrdup(reason);
 		xstrcat(node_ptr->reason, time_buf);
 	}
-	_make_node_down(node_ptr, now);
 
 	return;
 }

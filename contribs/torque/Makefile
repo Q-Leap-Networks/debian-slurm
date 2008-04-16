@@ -71,14 +71,14 @@ SCRIPTS = $(bin_SCRIPTS)
 SOURCES =
 DIST_SOURCES =
 DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
-ACLOCAL = ${SHELL} /home/oliva/debs/slurm-llnl/1.2.25/slurm-llnl-1.2.5/auxdir/missing --run aclocal-1.10
-AMTAR = ${SHELL} /home/oliva/debs/slurm-llnl/1.2.25/slurm-llnl-1.2.5/auxdir/missing --run tar
+ACLOCAL = ${SHELL} /home/oliva/debs/slurm-llnl/1.2.27/slurm-llnl-1.2.27/auxdir/missing --run aclocal-1.10
+AMTAR = ${SHELL} /home/oliva/debs/slurm-llnl/1.2.27/slurm-llnl-1.2.27/auxdir/missing --run tar
 AR = ar
 AUTHD_CFLAGS = 
 AUTHD_LIBS = -lauth -le
-AUTOCONF = ${SHELL} /home/oliva/debs/slurm-llnl/1.2.25/slurm-llnl-1.2.5/auxdir/missing --run autoconf
-AUTOHEADER = ${SHELL} /home/oliva/debs/slurm-llnl/1.2.25/slurm-llnl-1.2.5/auxdir/missing --run autoheader
-AUTOMAKE = ${SHELL} /home/oliva/debs/slurm-llnl/1.2.25/slurm-llnl-1.2.5/auxdir/missing --run automake-1.10
+AUTOCONF = ${SHELL} /home/oliva/debs/slurm-llnl/1.2.27/slurm-llnl-1.2.27/auxdir/missing --run autoconf
+AUTOHEADER = ${SHELL} /home/oliva/debs/slurm-llnl/1.2.27/slurm-llnl-1.2.27/auxdir/missing --run autoheader
+AUTOMAKE = ${SHELL} /home/oliva/debs/slurm-llnl/1.2.27/slurm-llnl-1.2.27/auxdir/missing --run automake-1.10
 AWK = mawk
 BG_INCLUDES = 
 CC = i486-linux-gnu-gcc
@@ -125,7 +125,7 @@ LIB_LDFLAGS =
 LN_S = ln -s
 LTLIBOBJS = 
 MAINT = #
-MAKEINFO = ${SHELL} /home/oliva/debs/slurm-llnl/1.2.25/slurm-llnl-1.2.5/auxdir/missing --run makeinfo
+MAKEINFO = ${SHELL} /home/oliva/debs/slurm-llnl/1.2.27/slurm-llnl-1.2.27/auxdir/missing --run makeinfo
 MKDIR_P = /bin/mkdir -p
 MUNGE_CPPFLAGS = -I/usr/include
 MUNGE_LDFLAGS = -L/usr/lib64
@@ -163,19 +163,19 @@ SLURM_API_MAJOR = 11
 SLURM_API_REVISION = 0
 SLURM_API_VERSION = 0x0b0000
 SLURM_MAJOR = 1
-SLURM_MICRO = 25
+SLURM_MICRO = 27
 SLURM_MINOR = 2
-SLURM_VERSION = 1.2.25
+SLURM_VERSION = 1.2.27
 SO_LDFLAGS = 
 SSL_CPPFLAGS = 
 SSL_LDFLAGS = 
 SSL_LIBS = -lcrypto
 STRIP = strip
-VERSION = 1.2.25
-abs_builddir = /home/oliva/debs/slurm-llnl/1.2.25/slurm-llnl-1.2.5/contribs/torque
-abs_srcdir = /home/oliva/debs/slurm-llnl/1.2.25/slurm-llnl-1.2.5/contribs/torque
-abs_top_builddir = /home/oliva/debs/slurm-llnl/1.2.25/slurm-llnl-1.2.5
-abs_top_srcdir = /home/oliva/debs/slurm-llnl/1.2.25/slurm-llnl-1.2.5
+VERSION = 1.2.27
+abs_builddir = /home/oliva/debs/slurm-llnl/1.2.27/slurm-llnl-1.2.27/contribs/torque
+abs_srcdir = /home/oliva/debs/slurm-llnl/1.2.27/slurm-llnl-1.2.27/contribs/torque
+abs_top_builddir = /home/oliva/debs/slurm-llnl/1.2.27/slurm-llnl-1.2.27
+abs_top_srcdir = /home/oliva/debs/slurm-llnl/1.2.27/slurm-llnl-1.2.27
 ac_ct_CC = 
 ac_ct_CXX = 
 ac_ct_F77 = 
@@ -204,7 +204,7 @@ host_vendor = pc
 htmldir = ${docdir}
 includedir = ${prefix}/include
 infodir = ${prefix}/share/info
-install_sh = $(SHELL) /home/oliva/debs/slurm-llnl/1.2.25/slurm-llnl-1.2.5/auxdir/install-sh
+install_sh = $(SHELL) /home/oliva/debs/slurm-llnl/1.2.27/slurm-llnl-1.2.27/auxdir/install-sh
 libdir = ${exec_prefix}/lib
 libexecdir = ${exec_prefix}/libexec
 localedir = ${datarootdir}/locale
@@ -229,6 +229,7 @@ top_builddir = ../..
 top_srcdir = ../..
 AUTOMAKE_OPTIONS = foreign
 bin_SCRIPTS = pbsnodes qdel qhold qrls qstat qsub mpiexec
+_perldir = $(exec_prefix)`perl -e 'use Config; $$T=$$Config{installsitearch}; $$P=$$Config{installprefix}; $$P1="$$P/local"; $$T =~ s/$$P1//; $$T =~ s/$$P//; print $$T;'`
 all: all-am
 
 .SUFFIXES:
@@ -410,8 +411,8 @@ install-binSCRIPTS: $(bin_SCRIPTS)
 	@$(NORMAL_INSTALL)
 	test -z "$(bindir)" || $(MKDIR_P) "$(DESTDIR)$(bindir)"
 	@list='$(bin_SCRIPTS)'; for p in $$list; do \
-	   echo "sed 's%use lib .*%use lib qw(${exec_prefix}/lib ${exec_prefix}/lib/perl5);%' $(top_srcdir)/contribs/torque/$$p.pl > $(DESTDIR)$(bindir)/$$p"; \
-	   sed 's%use lib .*%use lib qw(${exec_prefix}/lib ${exec_prefix}/lib/perl5);%' $(top_srcdir)/contribs/torque/$$p.pl >$(DESTDIR)$(bindir)/$$p; \
+	   echo "sed 's%use lib .*%use lib qw(${_perldir});%' $(top_srcdir)/contribs/torque/$$p.pl > $(DESTDIR)$(bindir)/$$p"; \
+	   sed "s%use lib .*%use lib qw(${_perldir});%" $(top_srcdir)/contribs/torque/$$p.pl >$(DESTDIR)$(bindir)/$$p; \
 	   chmod 755 $(DESTDIR)$(bindir)/$$p;\
 	done
 
