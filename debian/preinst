@@ -17,7 +17,16 @@ set -e
 
 case "$1" in
     install)
-      adduser --quiet --system --group --uid 64030 --no-create-home slurm
+      if [ $(id -u slurm 2>/dev/null) ]; then
+        SLURMUID=$(id -u slurm 2>/dev/null)
+        SLURMGID=$(id -g slurm 2>/dev/null)
+        if [ "$SLURMUID" != "64030" ] || [ "$SLURMGID" != "64030" ] ; then
+          deluser --quiet slurm
+          adduser --quiet --system --group --uid 64030 --no-create-home slurm
+        fi
+      else
+        adduser --quiet --system --group --uid 64030 --no-create-home slurm
+      fi
     ;;
 
     upgrade)
@@ -26,9 +35,11 @@ case "$1" in
         SLURMGID=$(id -g slurm 2>/dev/null)
         if [ "$SLURMUID" != "64030" ] || [ "$SLURMGID" != "64030" ] ; then
           deluser --quiet slurm
+          adduser --quiet --system --group --uid 64030 --no-create-home slurm
         fi
+      else
+        adduser --quiet --system --group --uid 64030 --no-create-home slurm
       fi
-      adduser --quiet --system --group --uid 64030 --no-create-home slurm
     ;;
 
     abort-upgrade)

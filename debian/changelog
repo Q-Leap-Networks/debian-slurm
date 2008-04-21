@@ -1,3 +1,11 @@
+slurm-llnl (1.2.27-2) unstable; urgency=low
+
+  * Fix a bug when installing with an already existent slurm user
+    (Closes: #459618) thanks to Manuel Prinz
+  * Thanks to Dirk Eddelbuettel for man pages compression patch 
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Tue, 22 Apr 2008 01:02:38 +0200
+
 slurm-llnl (1.2.27-1) unstable; urgency=low
 
   * New upstream release (1.2.26 is missing because it was replaced too
