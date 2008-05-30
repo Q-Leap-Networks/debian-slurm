@@ -2,13 +2,13 @@
  *  agent.h - data structures and function definitions for parallel 
  *	background communications
  *
- *  $Id: agent.h 10574 2006-12-15 23:38:29Z jette $
+ *  $Id: agent.h 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette@llnl.gov>, et. al.
  *  Derived from dsh written by Jim Garlick <garlick1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -42,7 +42,6 @@
 #ifndef _AGENT_H
 #define _AGENT_H
 
-#include "src/slurmctld/agent.h"
 #include "src/slurmctld/slurmctld.h"
 
 #define AGENT_IS_THREAD  	 1	/* set if agent itself a thread of 
@@ -88,9 +87,12 @@ extern void agent_queue_request(agent_arg_t *agent_arg_ptr);
  * agent_retry - Agent for retrying pending RPCs. One pending request is 
  *	issued if it has been pending for at least min_wait seconds
  * IN min_wait - Minimum wait time between re-issue of a pending RPC
+ * IN mai_too - Send pending email too, note this performed using a 
+ *		fork/waitpid, so it can take longer than just creating 
+ *		a pthread to send RPCs
  * RET count of queued requests remaining
  */
-extern int agent_retry (int min_wait);
+extern int agent_retry (int min_wait, bool mail_too);
 
 /* agent_purge - purge all pending RPC requests */
 extern void agent_purge (void);

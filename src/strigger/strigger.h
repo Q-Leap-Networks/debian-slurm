@@ -2,9 +2,10 @@
  *  strigger.h - definitions used for strigger functions
  *****************************************************************************
  *  Copyright (C) 2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -54,7 +55,9 @@ struct strigger_parameters {
 	bool     mode_get;
 	bool     mode_clear;
 	bool     node_down;
+	bool     node_drained;
 	char *   node_id;
+	bool     node_fail;
 	bool     node_idle;
 	bool     node_up;
 	int      offset;

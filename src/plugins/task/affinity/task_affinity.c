@@ -2,12 +2,12 @@
  *  task_affinity.c - Library for task pre-launch and post_termination
  *	functions for task affinity support
  *****************************************************************************
- *  Copyright (C) 2005 Hewlett-Packard Development Company, L.P.
+ *  Copyright (C) 2005-2008 Hewlett-Packard Development Company, L.P.
  *  Modified by Hewlett-Packard for task affinity support using task_none.c
- *  Copyright (C) 2005 The Regents of the University of California and
+ *  Copyright (C) 2005-2007 The Regents of the University of California
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  task_none.c Written by Morris Jette <jette1@llnl.gov>. 
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -42,6 +42,7 @@
 #  include "config.h"
 #endif
 
+#include <ctype.h>
 #include <signal.h>
 #include <sys/types.h>
 
@@ -83,7 +84,7 @@ const uint32_t plugin_version   = 100;
  * init() is called when the plugin is loaded, before any other functions
  *	are called.  Put global initialization here.
  */
-int init ( void )
+extern int init (void)
 {
 	lllp_ctx_alloc();
 	verbose("%s loaded", plugin_name);
@@ -94,7 +95,7 @@ int init ( void )
  * fini() is called when the plugin is removed. Clear any allocated 
  *	storage here.
  */
-int fini ( void )
+extern int fini (void)
 {
 	lllp_ctx_destroy();
 	verbose("%s unloaded", plugin_name);
@@ -102,12 +103,104 @@ int fini ( void )
 }
 
 /*
+ * _isvalue_task
+ * returns 1 is the argument appears to be a value, 0 otherwise
+ * this should be identical to _isvalue in src/srun/opt.c
+ */
+static int _isvalue_task(char *arg)
+{
+    	if (isdigit(*arg)) {		/* decimal values and 0x.. hex values */
+	    	return 1;
+	}
+
+	while (isxdigit(*arg)) {	/* hex values not preceded by 0x */
+		arg++;
+	}
+
+	if ((*arg == ',') || (*arg == '\0')) { /* end of field or string */
+	    	return 1;
+	}
+
+	return 0;			/* not a value */
+}
+
+/* cpu bind enforcement, update binding type based upon SLURM_ENFORCED_CPU_BIND
+ * environment variable */
+static void _update_bind_type(launch_tasks_request_msg_t *req)
+{
+	char *buf, *p, *tok;
+	char buf_type[100];
+	cpu_bind_type_t cpu_bind_type;
+	int cpu_bind_type_is_valid = 0;
+	char* cpu_bind_type_str = getenv("SLURM_ENFORCED_CPU_BIND");
+
+	if (cpu_bind_type_str == NULL)
+		return;
+
+	buf = xstrdup(cpu_bind_type_str);
+	p = buf;
+
+	/* change all ',' delimiters not followed by a digit to ';'  */
+	/* simplifies parsing tokens while keeping map/mask together */
+	while (p[0] != '\0') {
+		if ((p[0] == ',') && (!_isvalue_task(&(p[1]))))
+			p[0] = ';';
+		p++;
+	}
+
+	p = buf;
+	cpu_bind_type = 0;
+	while ((tok = strsep(&p, ";")) && !cpu_bind_type_is_valid) {
+		if ((strcasecmp(tok, "q") == 0) ||
+		    (strcasecmp(tok, "quiet") == 0)) {
+			cpu_bind_type &= ~CPU_BIND_VERBOSE;
+		} else if ((strcasecmp(tok, "v") == 0) ||
+			   (strcasecmp(tok, "verbose") == 0)) {
+			cpu_bind_type |= CPU_BIND_VERBOSE;
+		} else if ((strcasecmp(tok, "no") == 0) ||
+			   (strcasecmp(tok, "none") == 0)) {
+			cpu_bind_type |= CPU_BIND_NONE;
+			cpu_bind_type_is_valid = 1;
+		} else if ((strcasecmp(tok, "socket") == 0) ||
+			   (strcasecmp(tok, "sockets") == 0)) {
+			cpu_bind_type |= CPU_BIND_TO_SOCKETS;
+			cpu_bind_type_is_valid = 1;
+		} else if ((strcasecmp(tok, "core") == 0) ||
+			   (strcasecmp(tok, "cores") == 0)) {
+			cpu_bind_type |= CPU_BIND_TO_CORES;
+			cpu_bind_type_is_valid = 1;
+		} else if ((strcasecmp(tok, "thread") == 0) ||
+			   (strcasecmp(tok, "threads") == 0)) {
+			cpu_bind_type |= CPU_BIND_TO_THREADS;
+			cpu_bind_type_is_valid = 1;
+		} else {
+			error("task affinity : invalid enforced cpu bind "
+			      "method '%s': none or an auto binding "
+			      "(cores,sockets,threads) is required",
+			      cpu_bind_type_str);
+			cpu_bind_type_is_valid = 0;
+			break;
+		}
+	}
+	xfree(buf);
+
+	if (cpu_bind_type_is_valid) {
+		req->cpu_bind_type = cpu_bind_type;
+		slurm_sprint_cpu_bind_type(buf_type, req->cpu_bind_type);
+		info("task affinity : enforcing '%s' cpu bind method", 
+		     cpu_bind_type_str);
+	}
+}
+
+/*
  * task_slurmd_launch_request()
  */
-int task_slurmd_launch_request ( uint32_t job_id,
-			launch_tasks_request_msg_t *req, uint32_t node_id)
+extern int task_slurmd_launch_request (uint32_t job_id, 
+				       launch_tasks_request_msg_t *req, 
+				       uint32_t node_id)
 {
 	int hw_sockets, hw_cores, hw_threads;
+	char buf_type[100];
 
 	debug("task_slurmd_launch_request: %u %u", job_id, node_id);
 	hw_sockets = conf->sockets;
@@ -115,33 +208,62 @@ int task_slurmd_launch_request ( uint32_t job_id,
 	hw_threads = conf->threads;
 
 	if (((hw_sockets >= 1) && ((hw_cores > 1) || (hw_threads > 1))) 
-	    || (!(req->cpu_bind_type & CPU_BIND_NONE)))	
+	    || (!(req->cpu_bind_type & CPU_BIND_NONE))) {
+		_update_bind_type(req);
+
+		slurm_sprint_cpu_bind_type(buf_type, req->cpu_bind_type);
+		info("task affinity : before lllp distribution cpu bind "
+		     "method is '%s' (%s)", buf_type, req->cpu_bind);
+
 		lllp_distribution(req, node_id);
+		  
+		slurm_sprint_cpu_bind_type(buf_type, req->cpu_bind_type);
+		info("task affinity : after lllp distribution cpu bind "
+		     "method is '%s' (%s)", buf_type, req->cpu_bind);
+	}
+		
 	/* Remove the slurm msg timeout needs to be investigated some more */
 	/* req->cpu_bind_type = CPU_BIND_NONE; */ 
-
+	
 	return SLURM_SUCCESS;
 }
 
 /*
  * task_slurmd_reserve_resources()
  */
-int task_slurmd_reserve_resources ( uint32_t job_id,
-			launch_tasks_request_msg_t *req, uint32_t node_id)
+extern int task_slurmd_reserve_resources (uint32_t job_id, 
+					  launch_tasks_request_msg_t *req,
+					  uint32_t node_id)
 {
-	debug("task_slurmd_reserve_resources: %u",
-		job_id);
+	debug("task_slurmd_reserve_resources: %u", job_id);
 	cr_reserve_lllp(job_id, req, node_id);
+	return SLURM_SUCCESS;
+}
+
+/*
+ * task_slurmd_suspend_job()
+ */
+extern int task_slurmd_suspend_job (uint32_t job_id)
+{
+	debug("task_slurmd_suspend_job: %u", job_id);
+	return SLURM_SUCCESS;
+}
+
+/*
+ * task_slurmd_resume_job()
+ */
+extern int task_slurmd_resume_job (uint32_t job_id)
+{
+	debug("task_slurmd_resume_job: %u", job_id);
 	return SLURM_SUCCESS;
 }
 
 /*
  * task_slurmd_release_resources()
  */
-int task_slurmd_release_resources ( uint32_t job_id )
+extern int task_slurmd_release_resources (uint32_t job_id)
 {
-	debug("task_slurmd_release_resources: %u",
-		job_id);
+	debug("task_slurmd_release_resources: %u", job_id);
 	cr_release_lllp(job_id);
 	return SLURM_SUCCESS;
 }
@@ -151,7 +273,7 @@ int task_slurmd_release_resources ( uint32_t job_id )
  * user to launch his jobs. Use this to create the CPUSET directory
  * and set the owner appropriately.
  */
-int task_pre_setuid ( slurmd_job_t *job )
+extern int task_pre_setuid (slurmd_job_t *job)
 {
 	char path[PATH_MAX];
 
@@ -172,7 +294,7 @@ int task_pre_setuid ( slurmd_job_t *job )
  *	It is followed by TaskProlog program (from slurm.conf) and
  *	--task-prolog (from srun command line).
  */
-int task_pre_launch ( slurmd_job_t *job )
+extern int task_pre_launch (slurmd_job_t *job)
 {
 	char base[PATH_MAX], path[PATH_MAX];
 
@@ -256,7 +378,7 @@ int task_pre_launch ( slurmd_job_t *job )
  *	It is preceeded by --task-epilog (from srun command line)
  *	followed by TaskEpilog program (from slurm.conf).
  */
-int task_post_term ( slurmd_job_t *job )
+extern int task_post_term (slurmd_job_t *job)
 {
 	debug("affinity task_post_term: %u.%u, task %d",
 		job->jobid, job->stepid, job->envtp->procid);

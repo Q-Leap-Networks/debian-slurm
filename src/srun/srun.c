@@ -5,7 +5,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona@llnl.gov>, et. al.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -65,9 +65,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
+#include <termios.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <grp.h>
+
 
 #include "src/common/fd.h"
 #include "src/common/log.h"
@@ -80,17 +82,17 @@
 #include "src/common/mpi.h"
 #include "src/common/slurm_rlimits_info.h"
 #include "src/common/plugstack.h"
+#include "src/common/read_config.h"
 
 #include "src/srun/allocate.h"
 #include "src/srun/srun_job.h"
-#include "src/srun/launch.h"
-#include "src/srun/msg.h"
 #include "src/srun/opt.h"
-#include "src/srun/sigstr.h"
-#include "src/srun/reattach.h"
-#include "src/srun/attach.h"
+#include "src/srun/debugger.h"
 #include "src/srun/srun.h"
-#include "src/srun/signals.h"
+#include "src/srun/srun_pty.h"
+#include "src/srun/multi_prog.h"
+#include "src/api/pmi_server.h"
+#include "src/api/step_launch.h"
 
 #define MAX_RETRIES 20
 #define MAX_ENTRIES 50
@@ -100,56 +102,69 @@
 #define	TYPE_SCRIPT	2
 
 mpi_plugin_client_info_t mpi_job_info[1];
-pid_t srun_ppid = 0;
+static struct termios termdefaults;
+int global_rc;
+srun_job_t *job = NULL;
+
+struct {
+	bitstr_t *start_success;
+	bitstr_t *start_failure;
+	bitstr_t *finish_normal;
+	bitstr_t *finish_abnormal;
+} task_state;
 
 /*
  * forward declaration of static funcs
  */
 static void  _print_job_information(resource_allocation_response_msg_t *resp);
-static char *_build_script (const char *argv0, char *pathname, int file_type);
-static char *_get_shell (void);
-static void  _send_options(const int argc, char **argv);
-static void  _get_options (const char *buffer);
-static char *_get_token(char *buf_ptr);
-static int   _is_file_text (char *, char**);
-static int   _run_batch_job (const char *argv0);
-static int   _run_job_script(srun_job_t *job, env_t *env);
 static void  _set_prio_process_env(void);
 static int   _set_rlimit_env(void);
 static int   _set_umask_env(void);
 static char *_uint16_array_to_str(int count, const uint16_t *array);
-static void  _switch_standalone(srun_job_t *job);
 static int   _become_user (void);
-static int   _print_script_exit_status(const char *argv0, int status);
 static void  _run_srun_prolog (srun_job_t *job);
 static void  _run_srun_epilog (srun_job_t *job);
 static int   _run_srun_script (srun_job_t *job, char *script);
-static int   _change_rlimit_rss(void);
 static int   _slurm_debug_env_val (void);
 static int   _call_spank_local_user (srun_job_t *job);
+static void  _set_stdio_fds(srun_job_t *job, slurm_step_io_fds_t *cio_fds);
 static void  _define_symbols(void);
+static void  _pty_restore(void);
+static void  _step_opt_exclusive(void);
+static void _task_start(launch_tasks_response_msg_t *msg);
+static void _task_finish(task_exit_msg_t *msg);
+static void _task_state_struct_init(int num_tasks);
+static void _task_state_struct_print(void);
+static void _task_state_struct_free(void);
+static void _handle_intr();
+static void _handle_signal(int signo);
+static int _setup_signals();
 
 int srun(int ac, char **av)
 {
 	resource_allocation_response_msg_t *resp;
-	srun_job_t *job = NULL;
-	int exitcode = 0;
 	env_t *env = xmalloc(sizeof(env_t));
 	uint32_t job_id = 0;
 	log_options_t logopt = LOG_OPTS_STDERR_ONLY;
-	slurm_step_io_fds_t fds = SLURM_STEP_IO_FDS_INITIALIZER;
-	char **mpi_env = NULL;
-	mpi_plugin_client_state_t *mpi_state;
-	
+	slurm_step_launch_params_t launch_params;
+	slurm_step_launch_callbacks_t callbacks;
+	int got_alloc = 0;
+
 	env->stepid = -1;
 	env->procid = -1;
 	env->localid = -1;
 	env->nodeid = -1;
 	env->cli = NULL;
 	env->env = NULL;
+	env->ckpt_path = NULL;
 
 	logopt.stderr_level += _slurm_debug_env_val();
 	log_init(xbasename(av[0]), logopt, 0, NULL);
+
+/* 	xsignal(SIGQUIT, _ignore_signal); */
+/* 	xsignal(SIGPIPE, _ignore_signal); */
+/* 	xsignal(SIGUSR1, _ignore_signal); */
+/* 	xsignal(SIGUSR2, _ignore_signal); */
 
 	/* Initialize plugin stack, read options from plugins, etc.
 	 */
@@ -170,7 +185,7 @@ int srun(int ac, char **av)
 		error ("srun initialization failed");
 		exit (1);
 	}
-	srun_ppid = getppid();
+	record_ppid();
 	
 	/* reinit log with new verbosity (if changed by command line)
 	 */
@@ -185,14 +200,13 @@ int srun(int ac, char **av)
 		log_alter(logopt, 0, NULL);
 	}
 
-	if (!opt.allocate) {
-		(void) _set_rlimit_env();
-		_set_prio_process_env();
-		(void) _set_umask_env();
-	}
+	(void) _set_rlimit_env();
+	_set_prio_process_env();
+	(void) _set_umask_env();
+	
 	/* Set up slurmctld message handler */
 	slurmctld_msg_init();
-	
+
 	/* now global "opt" should be filled in and available,
 	 * create a job from opt
 	 */
@@ -202,96 +216,28 @@ int srun(int ac, char **av)
 			slurm_perror("allocation failure");
 			exit (1);
 		}
-		info("allocation success");
-		exit (0);
-
-	} else if (opt.batch) {
-	    	/* allow binding with batch submissions */
-		env->distribution = opt.distribution;
-		env->cpu_bind_type = opt.cpu_bind_type;
-		env->cpu_bind = opt.cpu_bind;
-		env->mem_bind_type = opt.mem_bind_type;
-		env->mem_bind = opt.mem_bind;
-		setup_env(env);
-
-		if (_run_batch_job(av[0]) < 0)
-			exit (1);
 		exit (0);
 
 	} else if (opt.no_alloc) {
 		info("do not allocate resources");
-		sig_setup_sigmask();
 		job = job_create_noalloc(); 
-		_switch_standalone(job);
-
-	} else if (opt.allocate) {
-		sig_setup_sigmask();
-		if ( !(resp = allocate_nodes()) ) 
+		if (create_job_step(job) < 0) {
 			exit(1);
-		if (opt.noshell) {
-			fprintf (stdout, "SLURM_JOBID=%u\n", resp->job_id);
-			exit (0);
 		}
-		if (_become_user () < 0)
-			info ("Warning: unable to assume uid=%lu\n", opt.uid);
-		_print_job_information(resp);
-		
-		job = job_create_allocation(resp);
-		if(!job)
-			exit(1);
-		
-		job->step_layout = 
-			fake_slurm_step_layout_create(resp->node_list,
-						      resp->cpus_per_node,
-						      resp->cpu_count_reps,
-						      resp->node_cnt, 0);
-		if(!job->step_layout)
-			exit(1);
-		if (msg_thr_create(job) < 0)
-			job_fatal(job, "Unable to create msg thread");
-		exitcode = _run_job_script(job, env);
-
-		/* close up the msg thread cleanly */
-		close(job->forked_msg->msg_par->msg_pipe[1]);
-		debug2("Waiting for message thread");
-		if (pthread_join(job->jtid, NULL) < 0)
-			error ("Waiting on message thread: %m");
-		debug2("done");
-
-		srun_job_destroy(job,exitcode);
-
-		debug ("Spawned srun shell terminated");
-		xfree(env->task_count);
-		xfree(env);
-		exit (exitcode);
-
 	} else if ((resp = existing_allocation())) {
 		job_id = resp->job_id;
 		if (opt.alloc_nodelist == NULL)
                        opt.alloc_nodelist = xstrdup(resp->node_list);
-
-		if (opt.allocate) {
-			error("job %u already has an allocation",
-			      job_id);
-			slurm_free_resource_allocation_response_msg(resp);
-			exit(1);
-		}
+		if (opt.exclusive)
+			_step_opt_exclusive();
 
 		job = job_step_create_allocation(resp);
 		slurm_free_resource_allocation_response_msg(resp);
 
-		if(!job)
+		if (!job || create_job_step(job) < 0)
 			exit(1);
-		
-		job->old_job = true;
-		sig_setup_sigmask();
-			
-		if (create_job_step(job) < 0)
-			exit(1);
-	} else if (mode == MODE_ATTACH) {
-		reattach();
-		exit (0);
 	} else {
+		got_alloc = 1;
 		/* Combined job allocation and job step launch */
 #ifdef HAVE_FRONT_END
 		uid_t my_uid = getuid();
@@ -301,18 +247,14 @@ int srun(int ac, char **av)
 			exit(1);
 		}
 #endif
-		if (opt.job_max_memory > 0) {		
-			(void) _change_rlimit_rss();
-		}
-		sig_setup_sigmask();
+	
 		if ( !(resp = allocate_nodes()) ) 
 			exit(1);
 		_print_job_information(resp);
 		job = job_create_allocation(resp);
-		if(!job)
-			exit(1);
-		if (create_job_step(job) < 0) {
-			srun_job_destroy(job, 0);
+		opt.exclusive = false;	/* not applicable for this step */
+		if (!job || create_job_step(job) < 0) {
+			slurm_complete_job(job->jobid, 1);
 			exit(1);
 		}
 		
@@ -324,11 +266,6 @@ int srun(int ac, char **av)
 	 */
 	if (_become_user () < 0)
 		info ("Warning: Unable to assume uid=%lu\n", opt.uid);
-
-	/* job structure should now be filled in */
-
-	if (_call_spank_local_user (job) < 0)
-		job_fatal(job, "Failure in local plugin stack");
 
 	/*
 	 *  Enhance environment for job
@@ -353,144 +290,152 @@ int srun(int ac, char **av)
 	env->labelio = opt.labelio;
 	env->comm_port = slurmctld_comm_addr.port;
 	env->comm_hostname = slurmctld_comm_addr.hostname;
-	if(job) {
+	if (job) {
+		uint16_t *tasks = NULL;
+		slurm_step_ctx_get(job->step_ctx, SLURM_STEP_CTX_TASKS, 
+				   &tasks);
+
 		env->select_jobinfo = job->select_jobinfo;
 		env->nhosts = job->nhosts;
 		env->nodelist = job->nodelist;
 		env->task_count = _uint16_array_to_str(
-			job->nhosts, job->step_layout->tasks);
+			job->nhosts, tasks);
 		env->jobid = job->jobid;
 		env->stepid = job->stepid;
+	}
+	if (opt.pty) {
+		struct termios term;
+		int fd = STDIN_FILENO;
+
+		/* Save terminal settings for restore */
+		tcgetattr(fd, &termdefaults); 
+		tcgetattr(fd, &term);
+		/* Set raw mode on local tty */
+		cfmakeraw(&term);
+		tcsetattr(fd, TCSANOW, &term);
+		atexit(&_pty_restore);
+
+		set_winsize(job);
+		block_sigwinch();
+		pty_thread_create(job);
+		env->pty_port = job->pty_port;
+		env->ws_col   = job->ws_col;
+		env->ws_row   = job->ws_row;
 	}
 	setup_env(env);
 	xfree(env->task_count);
 	xfree(env);
 	
+	_task_state_struct_init(opt.nprocs);
+	slurm_step_launch_params_t_init(&launch_params);
+	launch_params.gid = opt.gid;
+	launch_params.argc = opt.argc;
+	launch_params.argv = opt.argv;
+	launch_params.multi_prog = opt.multi_prog ? true : false;
+	launch_params.cwd = opt.cwd;
+	launch_params.slurmd_debug = opt.slurmd_debug;
+	launch_params.buffered_stdio = !opt.unbuffered;
+	launch_params.labelio = opt.labelio ? true : false;
+	launch_params.remote_output_filename =fname_remote_string(job->ofname);
+	launch_params.remote_input_filename = fname_remote_string(job->ifname);
+	launch_params.remote_error_filename = fname_remote_string(job->efname);
+	launch_params.task_prolog = opt.task_prolog;
+	launch_params.task_epilog = opt.task_epilog;
+	launch_params.cpu_bind = opt.cpu_bind;
+	launch_params.cpu_bind_type = opt.cpu_bind_type;
+	launch_params.mem_bind = opt.mem_bind;
+	launch_params.mem_bind_type = opt.mem_bind_type;	
+	launch_params.open_mode = opt.open_mode;
+	if (opt.acctg_freq >= 0)
+		launch_params.acctg_freq = opt.acctg_freq;
+	launch_params.pty = opt.pty;
+	launch_params.max_sockets     = opt.max_sockets_per_node;
+	launch_params.max_cores       = opt.max_cores_per_socket;
+	launch_params.max_threads     = opt.max_threads_per_core;
+	launch_params.cpus_per_task = opt.cpus_per_task;
+	launch_params.ntasks_per_node   = opt.ntasks_per_node;
+	launch_params.ntasks_per_socket = opt.ntasks_per_socket;
+	launch_params.ntasks_per_core   = opt.ntasks_per_core;
+	launch_params.ckpt_path = xstrdup(opt.ckpt_path);
+
+	/* job structure should now be filled in */
+	_setup_signals();
+
+	_set_stdio_fds(job, &launch_params.local_fds);
+
+	if (MPIR_being_debugged) {
+		launch_params.parallel_debug = true;
+		pmi_server_max_threads(1);
+	} else {
+		launch_params.parallel_debug = false;
+	}
+	callbacks.task_start = _task_start;
+	callbacks.task_finish = _task_finish;
+
 	_run_srun_prolog(job);
 
-	if (msg_thr_create(job) < 0)
-		job_fatal(job, "Unable to create msg thread");
+	mpir_init(job->ctx_params.task_count);
 
-	mpi_job_info->jobid = job->jobid;
-	mpi_job_info->stepid = job->stepid;
-	mpi_job_info->step_layout = job->step_layout;
-	if (!(mpi_state = mpi_hook_client_prelaunch(mpi_job_info, &mpi_env)))
-		job_fatal (job, "Failed to initialize MPI");
-	env_array_set_environment(mpi_env);
-	env_array_free(mpi_env);
-
-	srun_set_stdio_fds(job, &fds);
-	job->client_io = client_io_handler_create(fds,
-						  job->step_layout->task_cnt,
-						  job->step_layout->node_cnt,
-						  job->cred,
-						  opt.labelio);
-	if (!job->client_io
-	    || (client_io_handler_start(job->client_io)	!= SLURM_SUCCESS))
-		job_fatal(job, "failed to start IO handler");
-
-	if (sig_thr_create(job) < 0)
-		job_fatal(job, "Unable to create signals thread: %m");
-	
-	if (launch_thr_create(job) < 0)
- 		job_fatal(job, "Unable to create launch thread: %m");
-	
-	/* wait for job to terminate 
-	 */
-	slurm_mutex_lock(&job->state_mutex);
-	while (job->state < SRUN_JOB_TERMINATED) {
-		pthread_cond_wait(&job->state_cond, &job->state_mutex);
-	}
-	slurm_mutex_unlock(&job->state_mutex);
-	
-	/* job is now overdone, clean up  
-	 *
-	 * If job is "forcefully terminated" exit immediately.
-	 *
-	 */
-	if (job->state == SRUN_JOB_FORCETERM) {
-		info("Force Terminated job");
-		srun_job_destroy(job, 0);
-		exit(1);
-	} else if (job->state == SRUN_JOB_CANCELLED) {
-		info("Cancelling job");
-		srun_job_destroy(job, NO_VAL);
-		exit(1);
-	} else if (job->state == SRUN_JOB_FAILED) {
-		/* This check here is to check if the job failed
-		   because we (srun or slurmd or slurmstepd wasn't
-		   able to fork or make a thread or something we still
-		   need the job failed check below incase the job
-		   failed on it's own.
-		*/
-		info("Job Failed");
-		srun_job_destroy(job, NO_VAL);
+	if (_call_spank_local_user (job) < 0) {
+		error("Failure in local plugin stack");
+		slurm_step_launch_abort(job->step_ctx);
 		exit(1);
 	}
 
-	/*
-	 *  We want to make sure we get the correct state of the job
-	 *  and not finish before all the messages have been sent.
-	 */
-	if (job->state == SRUN_JOB_FAILED)
-		close(job->forked_msg->msg_par->msg_pipe[1]);
-	debug("Waiting for message thread");
-	if (pthread_join(job->jtid, NULL) < 0)
-		error ("Waiting on message thread: %m");
-	debug("done");
-	
-	/* have to check if job was cancelled here just to make sure 
-	   state didn't change when we were waiting for the message thread */
-	exitcode = set_job_rc(job);
-	if (job->state == SRUN_JOB_CANCELLED) {
-		info("Cancelling job");
-		srun_job_destroy(job, NO_VAL);
-	} else if (job->state == SRUN_JOB_FAILED) {
-		info("Terminating job");
-		srun_job_destroy(job, job->rc);
-	} else 
-		srun_job_destroy(job, job->rc);
-		
-	/* wait for launch thread */
-	if (pthread_join(job->lid, NULL) < 0)
-		error ("Waiting on launch thread: %m");
+	update_job_state(job, SRUN_JOB_LAUNCHING);
+	if (slurm_step_launch(job->step_ctx, slurmctld_comm_addr.hostname, 
+	    &launch_params, &callbacks) != SLURM_SUCCESS) {
+		error("Application launch failed: %m");
+		goto cleanup;
+	}
 
-	/*
-	 *  Signal the IO thread to shutdown, which will stop
-	 *  the listening socket and file read (stdin) event
-	 *  IO objects, but allow file write (stdout) objects to
-	 *  complete any writing that remains.
-	 */
-	debug("Waiting for IO thread");
-	if (client_io_handler_finish(job->client_io) != SLURM_SUCCESS)
-		error ("IO handler did not finish correctly: %m");
-	client_io_handler_destroy(job->client_io);
-	debug("done");
-	
-	
-	if (mpi_hook_client_fini (mpi_state) < 0)
-		; /* eh, ignore errors here */
+	update_job_state(job, SRUN_JOB_STARTING);
+	if (slurm_step_launch_wait_start(job->step_ctx) == SLURM_SUCCESS) {
+		update_job_state(job, SRUN_JOB_RUNNING);
+		/* Only set up MPIR structures if the step launched
+		   correctly. */
+		if (opt.multi_prog)
+			mpir_set_multi_name(job->ctx_params.task_count,
+					    launch_params.argv[0]);
+		else
+			mpir_set_executable_names(launch_params.argv[0]);
+		MPIR_debug_state = MPIR_DEBUG_SPAWNED;
+		MPIR_Breakpoint();
+		if (opt.debugger_test)
+			mpir_dump_proctable();
+	} else {
+		info("Job step aborted before step completely launched.");
+	}
 
+	slurm_step_launch_wait_finish(job->step_ctx);
+
+cleanup:
+	if(got_alloc) {
+		cleanup_allocation();
+		slurm_complete_job(job->jobid, global_rc);
+	}
 	_run_srun_epilog(job);
-
-	/* 
-	 *  Let exit() clean up remaining threads.
-	 */
+	slurm_step_ctx_destroy(job->step_ctx);
+	mpir_cleanup();
+	_task_state_struct_free();
 	log_fini();
-	exit(exitcode);
+
+	return global_rc;
 }
 
 static int _call_spank_local_user (srun_job_t *job)
 {
 	struct spank_launcher_job_info info[1];
+	job_step_create_response_msg_t *step_resp;
 
 	info->uid = opt.uid;
 	info->gid = opt.gid;
 	info->jobid = job->jobid;
 	info->stepid = job->stepid;
-	info->step_layout = job->step_layout;	
-	info->argc = remote_argc;
-	info->argv = remote_argv;
+	slurm_step_ctx_get(job->step_ctx, SLURM_STEP_CTX_RESP, &step_resp);
+	info->step_layout = step_resp->step_layout;
+	info->argc = opt.argc;
+	info->argv = opt.argv;
 
 	return spank_local_user(info);
 }
@@ -554,21 +499,6 @@ static char *_uint16_array_to_str(int array_len, const uint16_t *array)
 	return str;
 }
 
-static void
-_switch_standalone(srun_job_t *job)
-{
-	int cyclic = (opt.distribution == SLURM_DIST_CYCLIC);
-
-	if (switch_alloc_jobinfo(&job->switch_job) < 0)
-		fatal("switch_alloc_jobinfo: %m");
-	if (switch_build_jobinfo(job->switch_job, 
-				 job->nodelist, 
-				 job->step_layout->tasks, 
-				 cyclic, opt.network) < 0)
-		fatal("switch_build_jobinfo: %m");
-}
-
-
 static void 
 _print_job_information(resource_allocation_response_msg_t *resp)
 {
@@ -590,301 +520,6 @@ _print_job_information(resource_allocation_response_msg_t *resp)
 			break;
 	}
 	verbose("%s",job_details);
-}
-
-
-/* submit a batch job and return error code */
-static int
-_run_batch_job(const char *argv0)
-{
-	int file_type, retries = 0;
-	int rc = SLURM_SUCCESS;
-	job_desc_msg_t *req;
-	submit_response_msg_t *resp;
-	char *script;
-	static char *msg = "Slurm job queue full, sleeping and retrying.";
-
-	if ((remote_argc == 0) || (remote_argv[0] == NULL))
-		return SLURM_ERROR;
-
-	file_type = _is_file_text (remote_argv[0], NULL);
-
-	/* if (file_type == TYPE_NOT_TEXT) {
-         *	error ("file %s is not script", remote_argv[0]);
-	 *	return SLURM_ERROR;
-	 * }
-	 */
-
-	if ((script = _build_script (argv0, remote_argv[0], file_type))
-	    == NULL) {
-		error ("unable to build script from file %s", remote_argv[0]);
-		return SLURM_ERROR;
-	}
-
-	if (!(req = job_desc_msg_create_from_opts (script)))
-		fatal ("Unable to create job request");
-
-	/* Do not re-use existing job id from environment variable
-	 * when submitting new job from within a running job */
-	if (!opt.jobid_set)
-		req->job_id = NO_VAL;
-
-	while ((rc = slurm_submit_batch_job(req, &resp)) < 0) {
-		if ((errno != ESLURM_ERROR_ON_DESC_TO_RECORD_COPY) ||
-		    (retries >= MAX_RETRIES))
-			return (error("Unable to submit batch job: %m"));
-		
-		if (retries == 0)
-			error(msg);
-		else
-			debug(msg);
-		sleep (++retries);
-	}
-
-	
-	if (rc == SLURM_SUCCESS) {
-		if (resp->step_id == NO_VAL)
-			info ("jobid %u submitted",resp->job_id);
-		else
-			info ("jobid %u.%u submitted",resp->job_id,
-							resp->step_id);
-		if (resp->error_code) {
-			if (opt.immediate) {
-				error("Job failed: %s", 
-					slurm_strerror(resp->error_code));
-				rc = resp->error_code;
-			} else {
-				info("Warning: %s", 
-					slurm_strerror(resp->error_code));
-			}
-		}
-		slurm_free_submit_response_response_msg (resp);
-	}
-
-	job_desc_msg_destroy (req);
-	xfree (script);
-
-	return (rc);
-}
-
-static void _send_options(const int argc, char **argv)
-{
-	int i;
-	
-	set_options(argc, argv, 0);
-	for(i=1; i<argc; i++) {
-		debug3("argv[%d] = %s.",i,argv[i]);
-		xfree(argv[i]);
-	}
-}
-
-/* _get_shell - return a string containing the default shell for this user
- * NOTE: This function is NOT reentrant (see getpwuid_r if needed) */
-static char *
-_get_shell (void)
-{
-	struct passwd *pw_ent_ptr;
-
-	pw_ent_ptr = getpwuid (opt.uid);
-	if ( ! pw_ent_ptr ) {
-		pw_ent_ptr = getpwnam( "nobody" );
-		info( "warning - no user information for user %d", opt.uid );
-	}
-	return pw_ent_ptr->pw_shell;
-}
-
-static char *_get_token(char *buf_ptr)
-{
-	int i, token_size = 0;
-	char *token;
-
-	for (i=1; (buf_ptr[i] != '\n') && (buf_ptr[i] != '\0');
-			i++) {
-		if (isspace(buf_ptr[i]))
-			break;
-	}
-	token_size = i;
-
-	token = xmalloc(token_size + 1);
-	strncpy(token, buf_ptr, token_size);
-	return token;
-}
-
-/* _get_opts - gather options put in user script.  Used for batch scripts. */
-static void
-_get_options (const char *buffer)
-{
-	int argc = 1;
-	char *argv[MAX_ENTRIES];
-	char *buf_loc = (char *) buffer;
-
-	while ((buf_loc = strstr(buf_loc, "#SLURM"))) {
-		buf_loc += 6;
-		/* find the tokens and move them to argv */
-		for ( ; ((buf_loc[0] != '\n') && (buf_loc[0] != '\0')); 
-				buf_loc++) {
-			if (isspace(buf_loc[0]))
-				continue;
-			argv[argc] = _get_token(buf_loc);
-			buf_loc += (strlen(argv[argc]) - 1);
-			argc++;
-		}
-	}
-	if(argc > 1)
-		_send_options(argc, argv);
-	return;
-}
-
-#define F 0	/* char never appears in text */
-#define T 1	/* character appears in plain ASCII text */
-#define I 2	/* character appears in ISO-8859 text */
-#define X 3     /* character appears in non-ISO extended ASCII */
-static char text_chars[256] = {
-	/*                  BEL BS HT LF    FF CR    */
-	F, F, F, F, F, F, F, T, T, T, T, F, T, T, F, F,  /* 0x0X */
-	/*                              ESC          */
-	F, F, F, F, F, F, F, F, F, F, F, T, F, F, F, F,  /* 0x1X */
-	T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T,  /* 0x2X */
-	T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T,  /* 0x3X */
-	T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T,  /* 0x4X */
-	T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T,  /* 0x5X */
-	T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T,  /* 0x6X */
-	T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, F,  /* 0x7X */
-	/*            NEL                            */
-	X, X, X, X, X, T, X, X, X, X, X, X, X, X, X, X,  /* 0x8X */
-	X, X, X, X, X, X, X, X, X, X, X, X, X, X, X, X,  /* 0x9X */
-	I, I, I, I, I, I, I, I, I, I, I, I, I, I, I, I,  /* 0xaX */
-	I, I, I, I, I, I, I, I, I, I, I, I, I, I, I, I,  /* 0xbX */
-	I, I, I, I, I, I, I, I, I, I, I, I, I, I, I, I,  /* 0xcX */
-	I, I, I, I, I, I, I, I, I, I, I, I, I, I, I, I,  /* 0xdX */
-	I, I, I, I, I, I, I, I, I, I, I, I, I, I, I, I,  /* 0xeX */
-	I, I, I, I, I, I, I, I, I, I, I, I, I, I, I, I   /* 0xfX */
-};
-
-
-/* _is_file_text - determine if specified file is a script
- * shell_ptr - if not NULL, set to pointer to pathname of specified shell 
- *		(if any, ie. return code of 2)
- *	return 0 if the specified file can not be read or does not contain text
- *	returns 2 if file contains text starting with "#!", otherwise
- *	returns 1 if file contains text, but lacks "#!" header 
- */
-static int
-_is_file_text (char *fname, char **shell_ptr)
-{
-	int buf_size, fd, i;
-	int rc = 1;	/* initially assume the file contains text */
-	unsigned char buffer[8192];
-
-	if (fname[0] != '/') {
-		info("warning: %s not found in local path", fname);
-		return 0;
-	}
-
-	fd = open(fname, O_RDONLY);
-	if (fd < 0) {
-		error ("Unable to open file %s: %m", fname);
-		return 0;
-	}
-
-	buf_size = read (fd, buffer, sizeof (buffer));
-	if (buf_size < 0) {
-		error ("Unable to read file %s: %m", fname);
-		rc = 0;
-	}
-	(void) close (fd);
-
-	for (i=0; i<buf_size; i++) {
-		if (((int) text_chars[buffer[i]] != T) 
-		&&  ((int) text_chars[buffer[i]] != I)) {
-			rc = 0;
-			break;
-		}
-	}
-
-	if ((rc == 1) && (buf_size > 2)) {
-		if ((buffer[0] == '#') && (buffer[1] == '!'))
-			rc = 2;
-	}
-
-	if ((rc == 2) && shell_ptr) {
-		shell_ptr[0] = xmalloc (sizeof (buffer));
-		for (i=2; i<sizeof(buffer); i++) {
-			if (iscntrl (buffer[i])) {
-				shell_ptr[0][i-2] = '\0';
-				break;
-			} else
-				shell_ptr[0][i-2] = buffer[i];
-		}
-		if (i == sizeof(buffer)) {
-			error ("shell specified in script too long, not used");
-			xfree (shell_ptr[0]);
-			shell_ptr[0] = NULL;
-		}
-	}
-
-	return rc;
-}
-
-/* allocate and build a string containing a script for a batch job */
-static char *
-_build_script (const char *argv0, char *fname, int file_type)
-{
-	cbuf_t cb = cbuf_create(512, 1048576);
-	int   fd     = -1;
-	int   i      =  0;
-	char *buffer = NULL;
-
-	if (file_type != 0) {
-		if ((fd = open(fname, O_RDONLY)) < 0) {
-			error ("Unable to open file %s: %m", fname);
-			return NULL;
-		}
-	}
-
-	if (file_type != TYPE_SCRIPT) {
-		xstrfmtcat(buffer, "#!%s\n", _get_shell());
-		if (file_type == 0) {
-			xstrfmtcat(buffer, "%s ", argv0); /* path to srun */
-			for (i = 0; i < remote_argc; i++)
-				xstrfmtcat(buffer, "%s ", remote_argv[i]);
-			xstrcatchar(buffer, '\n');
-		}
-	} 
-	
-	if (file_type != 0) {
-		int len = buffer ? strlen(buffer) : 0;
-		int size;
-
-		while ((size = cbuf_write_from_fd(cb, fd, -1, NULL)) > 0) 
-			;
-		
-		if (size < 0) {
-			error ("unable to read %s: %m", fname);
-			cbuf_destroy(cb);
-			return NULL;
-		}
-
-		cbuf_write(cb, "\0", 1, NULL);
-
-		xrealloc(buffer, cbuf_used(cb) + len +1);
-
-		cbuf_read(cb, buffer+len, cbuf_used(cb));
-
-		if (close(fd) < 0)
-			error("close: %m");
-	}
-	
-	cbuf_destroy(cb);
-
-	_get_options(buffer);
-
-	if (strlen(buffer) >= 0xffff) {
-		error("Job script exceeds size supported by slurm");
-		xfree(buffer);
-	}
-
-	return buffer;
 }
 
 /* Set SLURM_UMASK environment variable with current state */
@@ -937,34 +572,6 @@ static void  _set_prio_process_env(void)
 	debug ("propagating SLURM_PRIO_PROCESS=%d", retval);
 }
 
-/* 
- *  Change SLURM_RLIMIT_RSS to the user specified value --job-mem 
- *  or opt.job_max_memory 
- */
-static int _change_rlimit_rss(void)
-{
-	struct rlimit        rlim[1];
-	long                 new_cur;
-	int                  rc = SLURM_SUCCESS;
-	
-	if (getrlimit (RLIMIT_RSS, rlim) < 0)
-		return (error ("getrlimit (RLIMIT_RSS): %m"));
-
-	new_cur = opt.job_max_memory*1024; 
-	if((new_cur > rlim->rlim_max) || (new_cur < 0))
-		rlim->rlim_cur = rlim->rlim_max;
-	else
-		rlim->rlim_cur = new_cur;
-
-	if (setenvf (NULL, "SLURM_RLIMIT_RSS", "%lu", rlim->rlim_cur) < 0)
-		error ("unable to set %s in environment", "RSS");
-
-	if (setrlimit (RLIMIT_RSS, rlim) < 0) 
-		return (error ("Unable to change memoryuse: %m"));
-
-	return rc;
-}
-
 /* Set SLURM_RLIMIT_* environment variables with current resource 
  * limit values, reset RLIMIT_NOFILE to maximum possible value */
 static int _set_rlimit_env(void)
@@ -1015,111 +622,6 @@ static int _set_rlimit_env(void)
 	}
 
 	return rc;
-}
-
-static int
-_print_script_exit_status(const char *argv0, int status)
-{
-	char *corestr = "";
-	int exitcode = 0;
-
-	if (status == 0) {
-		verbose("%s: Done", argv0);
-		return exitcode;
-	}
-
-#ifdef WCOREDUMP
-	if (WCOREDUMP(status))
-		corestr = " (core dumped)";
-#endif
-
-	if (WIFSIGNALED(status)) {
-		error("%s: %s%s", argv0, sigstr(status), corestr);
-		return WTERMSIG(status) + 128;
-	}
-	if (WEXITSTATUS(status))
-		error("%s: Exit %d", argv0, WEXITSTATUS(status));
-	return WEXITSTATUS(status);
-}
-
-/* allocation option specified, spawn a script and wait for it to exit */
-static int _run_job_script (srun_job_t *job, env_t *env)
-{
-	int   status, exitcode;
-	pid_t cpid;
-	char **argv = (remote_argv[0] ? remote_argv : NULL);
-
-	if (opt.nprocs_set)
-		env->nprocs = opt.nprocs;
-	if (opt.cpus_set)
-		env->cpus_per_task = opt.cpus_per_task;
-	if (opt.ntasks_per_node != NO_VAL)
-		env->ntasks_per_node = opt.ntasks_per_node;
-	if (opt.ntasks_per_socket != NO_VAL)
-		env->ntasks_per_socket = opt.ntasks_per_socket;
-	if (opt.ntasks_per_core != NO_VAL)
-		env->ntasks_per_core = opt.ntasks_per_core;
-	env->distribution = opt.distribution;
-	env->overcommit = opt.overcommit;
-	env->slurmd_debug = opt.slurmd_debug;
-	env->labelio = opt.labelio;
-	env->comm_port = slurmctld_comm_addr.port;
-	env->comm_hostname = slurmctld_comm_addr.hostname;
-	if(job) {
-		env->select_jobinfo = job->select_jobinfo;
-		env->jobid = job->jobid;
-		env->nhosts = job->nhosts;
-		env->nodelist = job->nodelist;
-		env->task_count = _uint16_array_to_str(
-			job->nhosts, job->step_layout->tasks);
-	}
-	
-	if (setup_env(env) != SLURM_SUCCESS) 
-		return SLURM_ERROR;
-
-	if (!argv) {
-		/*
-		 *  If no arguments were supplied, spawn a shell
-		 *    for the user.
-		 */
-		argv = xmalloc(2 * sizeof(char *));
-		argv[0] = _get_shell();
-		argv[1] = NULL;
-	}
-
-	if ((cpid = fork()) < 0) {
-		error("fork: %m");
-		exit(1);
-	} 
-
-	if (cpid == 0) { 
-		/*
-		 *  Child.
-		 */
-#ifdef HAVE_AIX
-		(void) mkcrid(0);
-#endif
-		log_fini();
-		sig_unblock_signals();
-		execvp(argv[0], argv);
-		exit(1);
-	}
-
-	/* 
-	 *  Parent continues.
-	 */
-
-    again:
-	if (waitpid(cpid, &status, 0) < (pid_t) 0) {
-		if (errno == EINTR)
-			goto again;
-		error("waitpid: %m");
-	}
-
-	exitcode = _print_script_exit_status(xbasename(argv[0]), status); 
-
-	(void) unsetenv("SLURM_JOBID");	/* no return code on some systems */
-	return exitcode;
 }
 
 static int _become_user (void)
@@ -1186,8 +688,8 @@ static int _run_srun_script (srun_job_t *job, char *script)
 		 */
 		args = xmalloc(sizeof(char *) * 1024);
 		args[0] = script;
-		for (i = 0; i < remote_argc; i++) {
-			args[i+1] = remote_argv[i];
+		for (i = 0; i < opt.argc; i++) {
+			args[i+1] = opt.argv[i];
 		}
 		args[i+1] = NULL;
 		execv(script, args);
@@ -1209,7 +711,7 @@ static int _run_srun_script (srun_job_t *job, char *script)
 }
 
 static int
-_is_local_file (io_filename_t *fname)
+_is_local_file (fname_t *fname)
 {
 	if (fname->name == NULL)
 		return 1;
@@ -1220,10 +722,25 @@ _is_local_file (io_filename_t *fname)
 	return ((fname->type != IO_PER_TASK) && (fname->type != IO_ONE));
 }
 
-void
-srun_set_stdio_fds(srun_job_t *job, slurm_step_io_fds_t *cio_fds)
+static void
+_set_stdio_fds(srun_job_t *job, slurm_step_io_fds_t *cio_fds)
 {
 	bool err_shares_out = false;
+	int file_flags;
+
+	if (opt.open_mode == OPEN_MODE_APPEND)
+		file_flags = O_CREAT|O_WRONLY|O_APPEND;
+	else if (opt.open_mode == OPEN_MODE_TRUNCATE)
+		file_flags = O_CREAT|O_WRONLY|O_APPEND|O_TRUNC;
+	else {
+		slurm_ctl_conf_t *conf;
+		conf = slurm_conf_lock();
+		if (conf->job_file_append)
+			file_flags = O_CREAT|O_WRONLY|O_APPEND;
+		else
+			file_flags = O_CREAT|O_WRONLY|O_APPEND|O_TRUNC;
+		slurm_conf_unlock();
+	}
 
 	/*
 	 * create stdin file descriptor
@@ -1237,9 +754,14 @@ srun_set_stdio_fds(srun_job_t *job, slurm_step_io_fds_t *cio_fds)
 				fatal("Could not open stdin file: %m");
 		}
 		if (job->ifname->type == IO_ONE) {
+			job_step_create_response_msg_t *step_resp = NULL;
+			
+			slurm_step_ctx_get(job->step_ctx, SLURM_STEP_CTX_RESP,
+					   &step_resp);
+		
 			cio_fds->in.taskid = job->ifname->taskid;
 			cio_fds->in.nodeid = slurm_step_layout_host_id(
-				job->step_layout, job->ifname->taskid);
+				step_resp->step_layout, job->ifname->taskid);
 		}
 	}
 
@@ -1251,7 +773,7 @@ srun_set_stdio_fds(srun_job_t *job, slurm_step_io_fds_t *cio_fds)
 			cio_fds->out.fd = STDOUT_FILENO;
 		} else {
 			cio_fds->out.fd = open(job->ofname->name,
-					       O_CREAT|O_WRONLY|O_TRUNC, 0644);
+					       file_flags, 0644);
 			if (cio_fds->out.fd == -1)
 				fatal("Could not open stdout file: %m");
 		}
@@ -1269,12 +791,13 @@ srun_set_stdio_fds(srun_job_t *job, slurm_step_io_fds_t *cio_fds)
 	if (err_shares_out) {
 		debug3("stdout and stderr sharing a file");
 		cio_fds->err.fd = cio_fds->out.fd;
+		cio_fds->err.taskid = cio_fds->out.taskid;
 	} else if (_is_local_file(job->efname)) {
 		if ((job->efname->name == NULL) || (job->efname->taskid != -1)) {
 			cio_fds->err.fd = STDERR_FILENO;
 		} else {
 			cio_fds->err.fd = open(job->efname->name,
-					       O_CREAT|O_WRONLY|O_TRUNC, 0644);
+					       file_flags, 0644);
 			if (cio_fds->err.fd == -1)
 				fatal("Could not open stderr file: %m");
 		}
@@ -1290,3 +813,286 @@ static void _define_symbols(void)
 {
 	slurm_signal_job_step(0,0,0);	/* needed by mvapich and mpichgm */
 }
+
+static void _pty_restore(void)
+{
+	/* STDIN is probably closed by now */
+	if (tcsetattr(STDOUT_FILENO, TCSANOW, &termdefaults) < 0)
+		fprintf(stderr, "tcsetattr: %s\n", strerror(errno));
+}
+
+/* opt.exclusive is set, disable user task layout controls */
+static void _step_opt_exclusive(void)
+{
+	if (opt.nodes_set) {
+		verbose("ignoring node count set by --nodes or SLURM_NNODES");
+		verbose("  it is incompatible with --exclusive");
+		opt.nodes_set = false;
+		opt.min_nodes = 1;
+		opt.max_nodes = 0;
+	}
+	if (!opt.nprocs_set)
+		fatal("--nprocs must be set with --exclusive");
+	if (opt.relative_set)
+		fatal("--relative disabled, incompatible with --exclusive");
+	if (opt.exc_nodes)
+		fatal("--exclude is incompatible with --exclusive");
+	if (opt.nodelist)
+		fatal("--nodelist is incompatible with --exclusive");
+}
+
+static void
+_task_start(launch_tasks_response_msg_t *msg)
+{
+	MPIR_PROCDESC *table;
+	int taskid;
+	int i;
+
+	verbose("Node %s (%d), %d tasks started",
+		msg->node_name, msg->srun_node_id, msg->count_of_pids);
+
+	for (i = 0; i < msg->count_of_pids; i++) {
+		taskid = msg->task_ids[i];
+		table = &MPIR_proctable[taskid];
+		table->host_name = xstrdup(msg->node_name);
+		/* table->executable_name is set elsewhere */
+		table->pid = msg->local_pids[i];
+
+		if (msg->return_code == 0) {
+			bit_set(task_state.start_success, taskid);
+		} else {
+			bit_set(task_state.start_failure, taskid);
+		}
+	}
+
+}
+
+static void
+_terminate_job_step(slurm_step_ctx_t *step_ctx)
+{
+	uint32_t job_id, step_id;
+
+	slurm_step_ctx_get(step_ctx, SLURM_STEP_CTX_JOBID, &job_id);
+	slurm_step_ctx_get(step_ctx, SLURM_STEP_CTX_STEPID, &step_id);
+	info("Terminating job step %u.%u", job_id, step_id);
+	slurm_kill_job_step(job_id, step_id, SIGKILL);
+}
+
+static void
+_handle_max_wait(int signo)
+{
+	info("First task exited %ds ago", opt.max_wait);
+	_task_state_struct_print();
+	_terminate_job_step(job->step_ctx);
+}
+
+static void
+_task_finish(task_exit_msg_t *msg)
+{
+	static bool first_done = true;
+	static bool first_error = true;
+	int rc = 0;
+	int i;
+
+	verbose("%d tasks finished (rc=%u)",
+		msg->num_tasks, msg->return_code);
+	if (WIFEXITED(msg->return_code)) {
+		rc = WEXITSTATUS(msg->return_code);
+		if (rc != 0) {
+			for (i = 0; i < msg->num_tasks; i++) {
+				error("task %u exited with exit code %d",
+				      msg->task_id_list[i], rc);
+				bit_set(task_state.finish_abnormal,
+					msg->task_id_list[i]);
+			}
+		} else {
+			for (i = 0; i < msg->num_tasks; i++) {
+				bit_set(task_state.finish_normal,
+					msg->task_id_list[i]);
+			}
+		}
+	} else if (WIFSIGNALED(msg->return_code)) {
+		for (i = 0; i < msg->num_tasks; i++) {
+			verbose("task %u killed by signal %d",
+				msg->task_id_list[i],
+				WTERMSIG(msg->return_code));
+			bit_set(task_state.finish_abnormal,
+				msg->task_id_list[i]);
+		}
+		rc = 1;
+	}
+	global_rc = MAX(global_rc, rc);
+
+	if (first_error && rc > 0 && opt.kill_bad_exit) {
+		first_error = false;
+		_terminate_job_step(job->step_ctx);
+	} else if (first_done && opt.max_wait > 0) {
+		/* If these are the first tasks to finish we need to
+		 * start a timer to kill off the job step if the other
+		 * tasks don't finish within opt.max_wait seconds.
+		 */
+		first_done = false;
+		debug2("First task has exited");
+		xsignal(SIGALRM, _handle_max_wait);
+		verbose("starting alarm of %d seconds", opt.max_wait);
+		alarm(opt.max_wait);
+	}
+}
+
+static void
+_task_state_struct_init(int num_tasks)
+{
+	task_state.start_success = bit_alloc(num_tasks);
+	task_state.start_failure = bit_alloc(num_tasks);
+	task_state.finish_normal = bit_alloc(num_tasks);
+	task_state.finish_abnormal = bit_alloc(num_tasks);
+}
+
+/*
+ * Tasks will most likely have bits set in multiple of the task_state
+ * bit strings (e.g. a task can start normally and then later exit normally)
+ * so we ensure that a task is only "seen" once.
+ */
+static void
+_task_state_struct_print(void)
+{
+	bitstr_t *tmp, *seen, *not_seen;
+	char buf[BUFSIZ];
+	int len;
+
+	len = bit_size(task_state.finish_abnormal); /* all the same length */
+	tmp = bit_alloc(len);
+	seen = bit_alloc(len);
+	not_seen = bit_alloc(len);
+	bit_not(not_seen);
+
+	if (bit_set_count(task_state.finish_abnormal) > 0) {
+		bit_copybits(tmp, task_state.finish_abnormal);
+		bit_and(tmp, not_seen);
+		bit_fmt(buf, BUFSIZ, tmp);
+		info("task%s: exited abnormally", buf);
+		bit_or(seen, tmp);
+		bit_copybits(not_seen, seen);
+		bit_not(not_seen);
+	}
+
+	if (bit_set_count(task_state.finish_normal) > 0) {
+		bit_copybits(tmp, task_state.finish_normal);
+		bit_and(tmp, not_seen);
+		bit_fmt(buf, BUFSIZ, tmp);
+		info("task%s: exited", buf);
+		bit_or(seen, tmp);
+		bit_copybits(not_seen, seen);
+		bit_not(not_seen);
+	}
+
+	if (bit_set_count(task_state.start_failure) > 0) {
+		bit_copybits(tmp, task_state.start_failure);
+		bit_and(tmp, not_seen);
+		bit_fmt(buf, BUFSIZ, tmp);
+		info("task%s: failed to start", buf);
+		bit_or(seen, tmp);
+		bit_copybits(not_seen, seen);
+		bit_not(not_seen);
+	}
+
+	if (bit_set_count(task_state.start_success) > 0) {
+		bit_copybits(tmp, task_state.start_success);
+		bit_and(tmp, not_seen);
+		bit_fmt(buf, BUFSIZ, tmp);
+		info("task%s: running", buf);
+		bit_or(seen, tmp);
+		bit_copybits(not_seen, seen);
+		bit_not(not_seen);
+	}
+}
+
+static void
+_task_state_struct_free(void)
+{
+	bit_free(task_state.start_success);
+	bit_free(task_state.start_failure);
+	bit_free(task_state.finish_normal);
+	bit_free(task_state.finish_abnormal);
+}
+	
+static void _handle_intr()
+{
+	static time_t last_intr      = 0;
+	static time_t last_intr_sent = 0;
+	if (opt.quit_on_intr) {
+		job_force_termination(job);
+		slurm_step_launch_abort(job->step_ctx);
+		return;
+	}
+
+	if (((time(NULL) - last_intr) > 1) && !opt.disable_status) {
+		info("interrupt (one more within 1 sec to abort)");
+		_task_state_struct_print();
+		last_intr = time(NULL);
+	} else  { /* second Ctrl-C in half as many seconds */
+		update_job_state(job, SRUN_JOB_CANCELLED);
+		/* terminate job */
+		if (job->state < SRUN_JOB_FORCETERM) {
+			if ((time(NULL) - last_intr_sent) < 1) {
+				job_force_termination(job);
+				slurm_step_launch_abort(job->step_ctx);
+				return;
+			}
+
+			info("sending Ctrl-C to job");
+			last_intr_sent = time(NULL);
+			slurm_step_launch_fwd_signal(job->step_ctx, SIGINT);
+
+		} else {
+			job_force_termination(job);
+			slurm_step_launch_abort(job->step_ctx);
+		}
+	}
+}
+
+static void _handle_signal(int signo)
+{
+	debug2("got signal %d", signo);
+
+	switch (signo) {
+	case SIGINT:
+		_handle_intr();
+		break;
+	case SIGQUIT:
+		info("Quit");
+		/* continue with slurm_step_launch_abort */
+	case SIGTERM:
+	case SIGHUP:
+		job_force_termination(job);
+		slurm_step_launch_abort(job->step_ctx);
+		break;
+	/* case SIGTSTP: */
+/* 		debug3("got SIGTSTP"); */
+/* 		break; */
+	case SIGCONT:
+		debug3("got SIGCONT");
+		break;
+	default:
+		slurm_step_launch_fwd_signal(job->step_ctx, signo);
+		break;
+	}
+}
+
+static int _setup_signals()
+{
+	int sigarray[] = {
+		SIGINT,  SIGQUIT, /*SIGTSTP,*/ SIGCONT, SIGTERM,
+		SIGALRM, SIGUSR1, SIGUSR2, SIGPIPE, 0
+	};
+	int rc = SLURM_SUCCESS, i=0, signo;
+
+	xassert(job);
+	xassert(job->step_ctx);
+
+	while ((signo = sigarray[i++])) 
+		xsignal(signo, _handle_signal);
+
+	return rc;
+}
+

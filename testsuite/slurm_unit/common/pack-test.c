@@ -1,4 +1,4 @@
-/* $Id: pack-test.c 1528 2002-10-31 15:56:56Z grondo $ */
+/* $Id: pack-test.c 13654 2008-03-18 23:00:20Z jette $ */
 
 #if HAVE_CONFIG_H
 #  include <config.h>
@@ -32,8 +32,8 @@
 int main (int argc, char *argv[])
 {
 	Buf buffer;
-	uint16_t test16 = 1234, out16, byte_cnt;
-	uint32_t test32 = 5678, out32;
+	uint16_t test16 = 1234, out16;
+	uint32_t test32 = 5678, out32, byte_cnt;
 	char testbytes[] = "TEST BYTES", *outbytes;
 	char teststring[] = "TEST STRING",  *outstring = NULL;
 	char *nullstr = NULL;

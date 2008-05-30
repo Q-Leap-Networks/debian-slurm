@@ -4,7 +4,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>, et. al.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -384,7 +384,6 @@ extern void get_button_list_from_main(List *button_list, int start, int end,
 		*button_list = list_create(destroy_grid_button);
 	
 	color_inx %= sview_colors_cnt;
-	
 	itr = list_iterator_create(grid_button_list);
 	while((grid_button = list_next(itr))) {
 		if ((grid_button->inx < start)

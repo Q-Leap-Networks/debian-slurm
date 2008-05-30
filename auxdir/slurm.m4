@@ -1,5 +1,5 @@
 ##*****************************************************************************
-## $Id: slurm.m4 8192 2006-05-25 00:15:05Z morrone $
+## $Id: slurm.m4 13389 2008-02-27 22:03:57Z jette $
 ##*****************************************************************************
 #  AUTHOR:
 #    Mark A. Grondona <mgrondona@llnl.gov>
@@ -13,7 +13,6 @@
 AC_DEFUN([X_AC_SLURM_PORTS],
 [
   AC_MSG_CHECKING(for slurmctld default port)
-
   AC_ARG_WITH(slurmctld-port,
     AS_HELP_STRING(--with-slurmctld-port=N,set slurmctld default port [[6817]]),
         [ if test `expr match "$withval" '[[0-9]]*$'` -gt 0; then
@@ -22,11 +21,11 @@ AC_DEFUN([X_AC_SLURM_PORTS],
         ]
   )
   AC_MSG_RESULT(${slurmctldport=$1})
-
   AC_DEFINE_UNQUOTED(SLURMCTLD_PORT, [$slurmctldport],
                      [Define the default port number for slurmctld])
   AC_SUBST(SLURMCTLD_PORT)
   
+
   AC_MSG_CHECKING(for slurmd default port)
   AC_ARG_WITH(slurmd-port,
     AS_HELP_STRING(--with-slurmd-port=N,set slurmd default port [[6818]]),
@@ -36,12 +35,23 @@ AC_DEFUN([X_AC_SLURM_PORTS],
         ]
   )
   AC_MSG_RESULT(${slurmdport=$2})
-
   AC_DEFINE_UNQUOTED(SLURMD_PORT, [$slurmdport],
                      [Define the default port number for slurmd])
-
   AC_SUBST(SLURMD_PORT)
   
+
+  AC_MSG_CHECKING(for slurmdbd default port)
+  AC_ARG_WITH(slurmdbd-port,
+    AS_HELP_STRING(--with-slurmdbd-port=N,set slurmdbd default port [[6819]]),
+        [ if test `expr match "$withval" '[[0-9]]*$'` -gt 0; then
+            slurmdbdport="$withval"
+          fi
+        ]
+  )
+  AC_MSG_RESULT(${slurmdbdport=$3})
+  AC_DEFINE_UNQUOTED(SLURMDBD_PORT, [$slurmdbdport],
+                     [Define the default port number for slurmdbd])
+  AC_SUBST(SLURMDBD_PORT)
 ])
 dnl
 dnl Check for program_invocation_name

@@ -12,7 +12,7 @@
 # Copyright (C) 2002-2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-226842.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -46,7 +46,7 @@ set job_id      0
 set host_0      ""
 set task_cnt  0
 set timeout $max_job_delay
-set salloc_pid [spawn $salloc -N1-1 -t1 $slaunch -c 1 -l $bin_printenv SLURMD_NODENAME]
+set salloc_pid [spawn $salloc -N1-1 -t1 $srun -c 1 -l $bin_printenv SLURMD_NODENAME]
 expect {
 	-re "Granted job allocation ($number)" {
 		set job_id $expect_out(1,string)
@@ -59,7 +59,7 @@ expect {
 		}
 		exp_continue
 	}
-	-re "($number): ($alpha_numeric)" {
+	-re "($number): ($alpha_numeric_under)" {
 		if {$task_cnt == 0} {
 			set host_0 $expect_out(1,string)
 		}
@@ -90,7 +90,7 @@ if {[string compare $host_0 ""] == 0} {
 set alloc_fail 0
 set job_id     0
 set task_cnt2  0
-set salloc_pid [spawn $salloc -N1-1 -w $host_0 -t1 $slaunch -n [expr $task_cnt + 1] -l $bin_printenv SLURMD_NODENAME]
+set salloc_pid [spawn $salloc -N1-1 -w $host_0 -t1 $srun -n [expr $task_cnt + 1] -l $bin_printenv SLURMD_NODENAME]
 expect {
 	-re "Granted job allocation ($number)" {
 		set job_id $expect_out(1,string)
@@ -133,13 +133,13 @@ set job_id      0
 set host_0      ""
 set host_1      ""
 
-set salloc_pid [spawn $salloc -N1-1 -t1 $slaunch -l $bin_printenv SLURMD_NODENAME]
+set salloc_pid [spawn $salloc -N1-1 -t1 $srun -l $bin_printenv SLURMD_NODENAME]
 expect {
 	 -re "Granted job allocation ($number)" {
 		set job_id $expect_out(1,string)
 		exp_continue
 	}
-	-re "($number): ($alpha_numeric)" {
+	-re "($number): ($alpha_numeric_under)" {
 		if {$expect_out(1,string) == 0} {
 			set host_0 $expect_out(2,string)
 		}
@@ -185,13 +185,13 @@ set host_1      ""
 set host_2      ""
 set host_3      ""
 set timeout $max_job_delay
-set salloc_pid [spawn $salloc -N1-3 -t1 $slaunch -l $bin_printenv SLURMD_NODENAME]
+set salloc_pid [spawn $salloc -N1-3 -t1 $srun -l $bin_printenv SLURMD_NODENAME]
 expect {
 	-re "Granted job allocation ($number)" {
 		set job_id $expect_out(1,string)
 		exp_continue
 	}
-	-re "($number): ($alpha_numeric)" {
+	-re "($number): ($alpha_numeric_under)" {
 		if {$expect_out(1,string) == 0} {
 			set host_0 $expect_out(2,string)
 		}
@@ -254,7 +254,7 @@ set host_1      ""
 set host_2      ""
 set host_3      ""
 set timeout $max_job_delay
-set salloc_pid [spawn $salloc -N2-3 -t1 $slaunch -l $bin_printenv SLURMD_NODENAME]
+set salloc_pid [spawn $salloc -N2-3 -t1 $srun -l $bin_printenv SLURMD_NODENAME]
 expect {
 	-re "Granted job allocation ($number)" {
 		set job_id $expect_out(1,string)
@@ -264,7 +264,7 @@ expect {
 		send_user "\nWARNING: can't test salloc task distribution\n"
 		exit $exit_code
 	}
-	-re "($number): ($alpha_numeric)" {
+	-re "($number): ($alpha_numeric_under)" {
 		if {$expect_out(1,string) == 0} {
 			set host_0 $expect_out(2,string)
 		}

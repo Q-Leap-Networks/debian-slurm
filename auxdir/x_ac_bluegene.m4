@@ -1,5 +1,5 @@
 ##*****************************************************************************
-## $Id: x_ac_bluegene.m4 8863 2006-08-10 18:47:55Z da $
+## $Id: x_ac_bluegene.m4 14087 2008-05-20 19:35:45Z da $
 ##*****************************************************************************
 #  AUTHOR:
 #    Morris Jette <jette1@llnl.gov>
@@ -45,14 +45,14 @@ AC_DEFUN([X_AC_BLUEGENE],
          		have_bg_ar=yes
 			bg_bridge_so="$bg_dir/lib64/libbglbridge.so"
        	 		bg_ldflags="$bg_ldflags -L$bg_dir/lib64 -L/usr/lib64 -Wl,--unresolved-symbols=ignore-in-shared-libs -lbglbridge -lbgldb -ltableapi -lbglmachine -lexpat -lsaymessage"
-      		fi
+        	fi
       
       		# Search for required DB2 library in the directory
       		if test -z "$have_db2" -a -f "$bg_dir/lib64/libdb2.so" ; then
          		have_db2=yes
 	 	 	bg_db2_so="$bg_dir/lib64/libdb2.so"
        	 		bg_ldflags="$bg_ldflags -L$bg_dir/lib64 -ldb2"
-      		fi
+       		fi
 
       		# Search for headers in the directory
       		if test -z "$have_bg_hdr" -a -f "$bg_dir/include/rm_api.h" ; then
@@ -75,7 +75,7 @@ AC_DEFUN([X_AC_BLUEGENE],
 
   	if test ! -z "$have_bg_files" ; then
       		BG_INCLUDES="$bg_includes"
-      		AC_DEFINE(HAVE_BG_FILES, 1, [Define to 1 if have Blue Gene files])
+		AC_DEFINE(HAVE_BG_FILES, 1, [Define to 1 if have Blue Gene files])
 
       		AC_DEFINE_UNQUOTED(BG_BRIDGE_SO, "$bg_bridge_so", [Define the BG_BRIDGE_SO value])
 		AC_DEFINE_UNQUOTED(BG_DB2_SO, "$bg_db2_so", [Define the BG_DB2_SO value])

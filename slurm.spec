@@ -1,4 +1,4 @@
-# $Id: slurm.spec 13299 2008-02-19 19:46:58Z da $
+# $Id: slurm.spec 14109 2008-05-22 16:26:23Z jette $
 #
 # Note that this package is not relocatable
 
@@ -8,10 +8,11 @@
 # --with aix         %_with_aix         1    build aix-federation RPM
 # --with authd       %_with_authd       1    build auth-authd RPM
 # --with auth_none   %_with_auth_none   1    build auth-none RPM
-# --with elan        %_with_elan        1    build switch_elan RPM
-# --without munge    %_without_munge    1    don't build auth-munge RPM
 # --with bluegene    %_with_bluegene    1    build bluegene RPM
 # --with debug       %_with_debug       1    enable extra debugging within SLURM
+# --with elan        %_with_elan        1    build switch-elan RPM
+# --without munge    %_without_munge    1    don't build auth-munge RPM
+# --without openssl  %_without_openssl  1    don't require openssl RPM to be installed
 # --without pam      %_without_pam      1    don't require pam-devel RPM to be installed
 # --without readline %_without_readline 1    don't require readline-devel RPM to be installed
 # --with sgijob      %_with_sgijob      1    build proctrack-sgi-job RPM
@@ -35,8 +36,11 @@
 %slurm_without_opt auth_none
 %slurm_without_opt debug
 
-# Build with munge by default on all platforms (disable with --without munge)
+# Build with munge by default on all platforms (disable using --without munge)
 %slurm_with_opt munge
+
+# Build with OpenSSL by default on all platforms (disable using --without openssl)
+%slurm_with_opt openssl
 
 # Use readline by default on all systems
 %slurm_with_opt readline
@@ -60,29 +64,24 @@
 %endif
 
 Name:    slurm
-Version: 1.2.27
+Version: 1.3.3
 Release: 1
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL 
 Group: System Environment/Base
-Source: slurm-1.2.27.tar.bz2
+Source: slurm-1.3.3.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: https://computing.llnl.gov/linux/slurm/
-BuildRequires: openssl-devel >= 0.9.6 openssl >= 0.9.6
 
-%description 
-SLURM is an open source, fault-tolerant, and highly
-scalable cluster management and job scheduling system for Linux clusters
-containing up to thousands of nodes. Components include machine status,
-partition management, job management, and scheduling modules.
+Requires: slurm-plugins
 
 %ifnos aix
 BuildRequires: ncurses-devel
 %endif
 %ifos linux
-BuildRequires: python 
+BuildRequires: python
 %endif
 %if %{slurm_with pam}
 BuildRequires: pam-devel
@@ -90,6 +89,15 @@ BuildRequires: pam-devel
 %if %{slurm_with readline}
 BuildRequires: readline-devel
 %endif
+%if %{slurm_with openssl}
+BuildRequires: openssl-devel >= 0.9.6 openssl >= 0.9.6
+%endif
+
+%description 
+SLURM is an open source, fault-tolerant, and highly
+scalable cluster management and job scheduling system for Linux clusters
+containing up to 65,536 nodes. Components include machine status,
+partition management, job management, scheduling and accounting modules.
 
 #  Allow override of sysconfdir via _slurm_sysconfdir.
 #  Note 'global' instead of 'define' needed here to work around apparent
@@ -117,6 +125,7 @@ BuildRequires: readline-devel
 %define _perlarch %(perl -e 'use Config; $T=$Config{installsitearch}; $P=$Config{installprefix}; $P1="$P/local"; $T =~ s/$P1//; $T =~ s/$P//; print $T;') 
 
 %define _perldir %{_prefix}%{_perlarch}
+%define _php_extdir %(php-config --extension-dir 2>/dev/null || echo %{_libdir}/php5)
 
 %package perlapi
 Summary: Perl API to SLURM.
@@ -153,12 +162,12 @@ SLURM authentication module for Brent Chun's authd
 %endif
 
 %if %{slurm_with munge}
-%package auth-munge
-Summary: SLURM auth implementation using Chris Dunlap's Munge
+%package munge
+Summary: SLURM authentication and crypto implementation using Munge
 Group: System Environment/Base
 Requires: slurm munge
 BuildRequires: munge-devel munge-libs
-%description auth-munge
+%description munge
 SLURM authentication module for Chris Dunlap's Munge
 %endif
 
@@ -180,6 +189,19 @@ BuildRequires: qsnetlibs
 %description switch-elan
 SLURM switch plugin for Quadrics Elan3 or Elan4.
 %endif
+
+%package slurmdbd
+Summary: SLURM database daemon
+Group: System Environment/Base
+Requires: slurm-plugins
+%description slurmdbd
+SLURM database daemon
+
+%package plugins
+Summary: SLURM plugins (loadable shared objects)
+Group: System Environment/Base
+%description plugins
+SLURM plugins (loadable shared objects)
 
 %package torque
 Summary: Torque/PBS wrappers for transitition from Torque/PBS to SLURM.
@@ -212,7 +234,7 @@ SLURM process tracking plugin for SGI job containers.
 #############################################################################
 
 %prep
-%setup -n slurm-1.2.27
+%setup -n slurm-1.3.3
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \
@@ -235,11 +257,11 @@ DESTDIR="$RPM_BUILD_ROOT" make install-contrib
 
 %ifos aix5.3
 mv ${RPM_BUILD_ROOT}%{_bindir}/srun ${RPM_BUILD_ROOT}%{_sbindir}
-mv ${RPM_BUILD_ROOT}%{_bindir}/slaunch ${RPM_BUILD_ROOT}%{_sbindir}
 %endif
 
 if [ -d /etc/init.d ]; then
-   install -D -m755 etc/init.d.slurm $RPM_BUILD_ROOT/etc/init.d/slurm
+   install -D -m755 etc/init.d.slurm    $RPM_BUILD_ROOT/etc/init.d/slurm
+   install -D -m755 etc/init.d.slurmdbd $RPM_BUILD_ROOT/etc/init.d/slurmdbd
 fi
 install -D -m644 etc/slurm.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/slurm.conf.example
 install -D -m755 etc/slurm.epilog.clean ${RPM_BUILD_ROOT}%{_sysconfdir}/slurm.epilog.clean
@@ -251,18 +273,15 @@ rm -f $RPM_BUILD_ROOT/%{_libdir}/slurm/*.{a,la}
 LIST=./slurm.files
 touch $LIST
 if [ -d /etc/init.d ]; then
-   echo "/etc/init.d/slurm" >> $LIST
+   echo "/etc/init.d/slurm"    >> $LIST
 fi
-test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/task_affinity.so &&
-   echo %{_libdir}/slurm/task_affinity.so >> $LIST
 
-# Build file lists for optional plugin packages
-for plugin in auth_munge auth_authd; do
-   LIST=./${plugin}.files
-   touch $LIST
-   test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/${plugin}.so &&
-     echo %{_libdir}/slurm/${plugin}.so > $LIST
-done
+LIST=./munge.files
+touch $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/auth_munge.so   &&
+  echo %{_libdir}/slurm/auth_munge.so             >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/crypto_munge.so &&
+  echo %{_libdir}/slurm/crypto_munge.so           >> $LIST
 
 LIST=./switch_elan.files
 touch $LIST
@@ -290,10 +309,39 @@ test -f $RPM_BUILD_ROOT/%{_perldir}/Slurm.pm &&
   echo "%{_perldir}/Slurm.pm"                 >> $LIST
 test -f $RPM_BUILD_ROOT/%{_perldir}/auto/Slurm/Slurm.so &&
   echo "%{_perldir}/auto/Slurm/Slurm.so"      >> $LIST
+test -f $RPM_BUILD_ROOT/%{_mandir}/man3/Slurm.3 &&
+echo "%{_mandir}/man3/Slurm.3"                 >> $LIST
 test -f $RPM_BUILD_ROOT/%{_perldir}/auto/Slurm/Slurm.bs &&
   echo "%{_perldir}/auto/Slurm/Slurm.bs"      >> $LIST
 test -f $RPM_BUILD_ROOT/%{_perldir}/auto/Slurm/autosplit.ix &&
   echo "%{_perldir}/auto/Slurm/autosplit.ix"      >> $LIST
+
+LIST=./slurmdbd.files
+touch $LIST
+if [ -d /etc/init.d ]; then
+   echo "/etc/init.d/slurmdbd" >> $LIST
+fi
+
+LIST=./plugins.files
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/task_affinity.so &&
+   echo %{_libdir}/slurm/task_affinity.so >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/crypto_openssl.so &&
+   echo %{_libdir}/slurm/crypto_openssl.so >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/accounting_storage_gold.so
+   echo %{_libdir}/slurm/accounting_storage_gold.so >> $LIST
+
+# Build file lists for optional plugin packages
+for plugin in auth_authd; do
+   LIST=./${plugin}.files
+   touch $LIST
+   test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/${plugin}.so &&
+     echo %{_libdir}/slurm/${plugin}.so > $LIST
+done
+
+
+
+
+
 
 LIST=./torque.files
 touch $LIST
@@ -342,7 +390,6 @@ rm -rf $RPM_BUILD_ROOT
 %doc RELEASE_NOTES
 %doc DISCLAIMER
 %doc COPYING
-%doc etc/slurm.conf.example
 %doc doc/html
 %{_bindir}/s*
 %{_sbindir}/slurmctld
@@ -350,43 +397,17 @@ rm -rf $RPM_BUILD_ROOT
 %{_sbindir}/slurmstepd
 %ifos aix5.3
 %{_sbindir}/srun
-%{_sbindir}/slaunch
 %endif
 %{_libdir}/*.so*
 %{_libdir}/slurm/src/*
 %{_mandir}/man1/*
 %{_mandir}/man5/slurm.*
 %{_mandir}/man5/wiki.*
-%{_mandir}/man8/*
+%{_mandir}/man8/slurmctld.*
+%{_mandir}/man8/slurmd.*
+%{_mandir}/man8/slurmstepd*
+%{_mandir}/man8/spank*
 %dir %{_sysconfdir}
-%dir %{_libdir}/slurm
-%{_libdir}/slurm/checkpoint_none.so
-%{_libdir}/slurm/checkpoint_ompi.so
-%{_libdir}/slurm/jobacct_gold.so
-%{_libdir}/slurm/jobacct_linux.so
-%{_libdir}/slurm/jobacct_none.so
-%{_libdir}/slurm/jobcomp_none.so
-%{_libdir}/slurm/jobcomp_filetxt.so
-%{_libdir}/slurm/jobcomp_script.so
-%{_libdir}/slurm/proctrack_pgid.so
-%{_libdir}/slurm/proctrack_linuxproc.so
-%{_libdir}/slurm/sched_backfill.so
-%{_libdir}/slurm/sched_builtin.so
-%{_libdir}/slurm/sched_hold.so
-%{_libdir}/slurm/sched_gang.so
-%{_libdir}/slurm/sched_wiki.so
-%{_libdir}/slurm/sched_wiki2.so
-%{_libdir}/slurm/select_cons_res.so
-%{_libdir}/slurm/select_linear.so
-%{_libdir}/slurm/switch_none.so
-%{_libdir}/slurm/mpi_none.so
-%{_libdir}/slurm/mpi_mpich1_p4.so
-%{_libdir}/slurm/mpi_mpich1_shmem.so
-%{_libdir}/slurm/mpi_mpichgm.so
-%{_libdir}/slurm/mpi_mpichmx.so
-%{_libdir}/slurm/mpi_mvapich.so
-%{_libdir}/slurm/mpi_lam.so
-%{_libdir}/slurm/task_none.so
 %dir %{_libdir}/slurm/src
 %config %{_sysconfdir}/slurm.conf.example
 %config %{_sysconfdir}/slurm.epilog.clean
@@ -411,7 +432,7 @@ rm -rf $RPM_BUILD_ROOT
 #############################################################################
 
 %if %{slurm_with munge}
-%files -f auth_munge.files auth-munge
+%files -f munge.files munge
 %defattr(-,root,root)
 %endif
 #############################################################################
@@ -438,6 +459,55 @@ rm -rf $RPM_BUILD_ROOT
 %endif
 #############################################################################
 
+%files -f slurmdbd.files slurmdbd
+%defattr(-,root,root)
+%{_sbindir}/slurmdbd
+%{_mandir}/man5/slurmdbd.*
+%{_mandir}/man8/slurmdbd.*
+#############################################################################
+
+%files -f plugins.files plugins
+%defattr(-,root,root)
+%dir %{_libdir}/slurm
+%{_libdir}/slurm/accounting_storage_filetxt.so
+%{_libdir}/slurm/accounting_storage_mysql.so
+%{_libdir}/slurm/accounting_storage_none.so
+%{_libdir}/slurm/accounting_storage_pgsql.so
+%{_libdir}/slurm/accounting_storage_slurmdbd.so
+%{_libdir}/slurm/checkpoint_none.so
+%{_libdir}/slurm/checkpoint_ompi.so
+%{_libdir}/slurm/checkpoint_xlch.so
+%{_libdir}/slurm/jobacct_gather_aix.so
+%{_libdir}/slurm/jobacct_gather_linux.so
+%{_libdir}/slurm/jobacct_gather_none.so
+%{_libdir}/slurm/jobcomp_none.so
+%{_libdir}/slurm/jobcomp_filetxt.so
+%{_libdir}/slurm/jobcomp_mysql.so
+%{_libdir}/slurm/jobcomp_pgsql.so
+%{_libdir}/slurm/jobcomp_script.so
+%{_libdir}/slurm/jobcomp_slurmdbd.so
+%{_libdir}/slurm/proctrack_pgid.so
+%{_libdir}/slurm/proctrack_linuxproc.so
+%{_libdir}/slurm/sched_backfill.so
+%{_libdir}/slurm/sched_builtin.so
+%{_libdir}/slurm/sched_hold.so
+%{_libdir}/slurm/sched_gang.so
+%{_libdir}/slurm/sched_wiki.so
+%{_libdir}/slurm/sched_wiki2.so
+%{_libdir}/slurm/select_cons_res.so
+%{_libdir}/slurm/select_linear.so
+%{_libdir}/slurm/switch_none.so
+%{_libdir}/slurm/mpi_lam.so
+%{_libdir}/slurm/mpi_mpich1_p4.so
+%{_libdir}/slurm/mpi_mpich1_shmem.so
+%{_libdir}/slurm/mpi_mpichgm.so
+%{_libdir}/slurm/mpi_mpichmx.so
+%{_libdir}/slurm/mpi_mvapich.so
+%{_libdir}/slurm/mpi_none.so
+%{_libdir}/slurm/mpi_openmpi.so
+%{_libdir}/slurm/task_none.so
+#############################################################################
+
 %files -f torque.files torque
 %defattr(-,root,root)
 #############################################################################
@@ -458,6 +528,11 @@ rm -rf $RPM_BUILD_ROOT
 #if [ -x /etc/init.d/slurm ]; then
 #    if /etc/init.d/slurm status | grep -q running; then
 #        /etc/init.d/slurm stop
+#    fi
+#fi
+#if [ -x /etc/init.d/slurmdbd ]; then
+#    if /etc/init.d/slurmdbd status | grep -q running; then
+#        /etc/init.d/slurmdbd stop
 #    fi
 #fi
 
@@ -482,6 +557,12 @@ if [ "$1" = 0 ]; then
         [ -x /sbin/chkconfig ] && /sbin/chkconfig --del slurm
         if /etc/init.d/slurm status | grep -q running; then
             /etc/init.d/slurm stop
+        fi
+    fi
+    if [ -x /etc/init.d/slurmdbd ]; then
+        [ -x /sbin/chkconfig ] && /sbin/chkconfig --del slurmdbd
+        if /etc/init.d/slurmdbd status | grep -q running; then
+            /etc/init.d/slurmdbd stop
         fi
     fi
 fi

@@ -1,12 +1,12 @@
 /*****************************************************************************\
  *  step_launch.h - launch a parallel job step
  *
- *  $Id: step_launch.h 10920 2007-02-02 03:01:14Z morrone $
+ *  $Id: step_launch.h 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -87,11 +87,16 @@ struct step_launch_state {
 /*
  * Create a launch state structure for a specified step context, "ctx".
  */
-struct step_launch_state * step_launch_state_create(slurm_step_ctx ctx);
+struct step_launch_state * step_launch_state_create(slurm_step_ctx_t *ctx);
 
 /*
  * Free the memory associated with the a launch state structure.
  */
 void step_launch_state_destroy(struct step_launch_state *sls);
 
+/*
+ * Record the parent process ID of the program which spawned this.
+ * Needed to locate the mpirun program for OpenMPI checkpoint
+ */
+void record_ppid(void);
 #endif /* _STEP_LAUNCH_H */

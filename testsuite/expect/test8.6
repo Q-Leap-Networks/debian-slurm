@@ -10,7 +10,7 @@
 # Copyright (C) 2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Danny Auble <da@llnl.gov>
-# UCRL-CODE-226842.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -39,9 +39,9 @@ set matches     0
 set 32node_block_cnt 16
 set 128node_block_cnt 8
 set 512node_block_cnt 8
-set 1knode_block_cnt 8
-set 4knode_block_cnt 8
-set 8knode_block_cnt 8
+set 1knode_block_cnt  8
+set 4knode_block_cnt  8
+set 8knode_block_cnt  8
 set 16knode_block_cnt 8
 set 32knode_block_cnt 8
 
@@ -55,33 +55,25 @@ if {[test_bluegene] == 0} {
 	exit $exit_code
 }
 
-#
-# Delete left-over input script files
-# Build input script file
-#
-exec $bin_rm -f $file_in
-exec echo "#!$bin_bash"    >$file_in
-exec echo "$bin_sleep $sleep_time "     >>$file_in
-exec $bin_chmod 700 $file_in
-
-#
+make_bash_script $file_in "$bin_sleep $sleep_time"
 set timeout [expr $max_job_delay + $sleep_time]
 
-# make a bunch of 32 cnode blocks
-
+# make a bunch of blocks of the specified size (node_cnt)
 proc run_batch_jobs { node_cnt job_cnt file_in } {
-	global srun number kill_srun
+	global sbatch srun number kill_srun
 	set start_cnt 0	
 	for {set inx 0} {$inx < $job_cnt} {incr inx} {
-		set srun_pid [spawn $srun --batch --output=/dev/null -t2 -N$node_cnt-$node_cnt $file_in]
+		set sbatch_pid [spawn $sbatch --output=/dev/null -t5 -N$node_cnt-$node_cnt $file_in]
 		expect {
-			-re "More processors requested than permitted"
-			{
+			-re "More processors requested than permitted" {
 				send_user "This error was expected, no worries\n"
 				return -1
-	
 			}
-			-re "jobid ($number) submitted" {
+			-re "Requested node configuration is not available" {
+				send_user "This error was expected, no worries\n"
+				return -1
+			}
+			-re "Submitted batch job ($number)" {
 				incr start_cnt
 				exp_continue
 			}
@@ -90,8 +82,8 @@ proc run_batch_jobs { node_cnt job_cnt file_in } {
 				exp_continue
 			}
 			timeout {
-				send_user "\nFAILURE: srun not responding\n"
-				slow_kill $srun_pid
+				send_user "\nFAILURE: sbatch not responding\n"
+				slow_kill $sbatch_pid
 				return 0
 			}
 			eof {
@@ -109,12 +101,11 @@ proc run_batch_jobs { node_cnt job_cnt file_in } {
 # Wait up to 900 seconds for all jobs to terminate
 # Return 0 if all jobs done, remainin job count otherwise
 proc wait_for_all_jobs { job_name } {
-	global squeue bin_sleep
+	global scancel squeue bin_sleep file_in
 
 	set last_matches 0
 	send_user "Waiting for all jobs to terminate\n"
-	for {set inx 0} {$inx < 60} {incr inx} {
-		exec $bin_sleep 15
+	for {set inx 0} {$inx < 600} {incr inx} {
 		set matches 0
 		log_user 0
 		spawn $squeue -o %j
@@ -123,6 +114,13 @@ proc wait_for_all_jobs { job_name } {
 				incr matches
 				exp_continue
 			}
+			-re "error" {
+				set matches -1
+			}
+			timeout {
+				send_user "No response from squeue\n"
+				set matches -1
+			}
 			eof {
 				wait
 			}
@@ -130,23 +128,35 @@ proc wait_for_all_jobs { job_name } {
 		log_user 1
 		if {$matches == 0} { 
 			send_user "All jobs complete\n"
-			return 0
+			break
 		}
-		send_user "  $matches jobs remaining\n"
-		if {$matches == $last_matches} {
-			return $matches
+		if {$matches > 0} {
+			send_user "  $matches jobs remaining\n"
+#			Moab can slow throughput down a lot, 
+#			so don't return here
+#			if {$matches == $last_matches} {
+#				send_user "Running jobs hung\n"
+#				break
+#			}
+#			set last_matches $matches
+			exec $bin_sleep 15
 		}
-		set last_matches $matches
 	}
+	exec $scancel -n $file_in
 	return $matches
 }
 
-if {[run_batch_jobs 32 $32node_block_cnt $file_in ] != 1} {
+#
+# Run the jobs here. We can be reasonably sure of running 
+# 512 cnode jobs (one midplane). Other sizes may not be supported
+# due to architecture (I/O node count) and/or slurm configuration
+#
+if {[run_batch_jobs 32 $32node_block_cnt $file_in ] == 0} {
 	send_user "\nFAILURE: 32 cnodes can't be created\n"
 	set exit_code 1	
 }
 
-if {[run_batch_jobs 128 $32node_block_cnt $file_in ] != 1} {
+if {[run_batch_jobs 128 $128node_block_cnt $file_in ] == 0} {
 	send_user "\nFAILURE: 128 cnodes can't be created\n"
 	set exit_code 1	
 }
@@ -156,7 +166,7 @@ if {[run_batch_jobs 512 $512node_block_cnt $file_in ] != 1} {
 	set exit_code 1	
 }
 
-if {[run_batch_jobs 1k $1knode_block_cnt $file_in ] != 1} {
+if {[run_batch_jobs 1k $1knode_block_cnt $file_in ] == 0} {
 	send_user "\nFAILURE: 1k cnodes can't be created\n"
 	set exit_code 1	
 }
@@ -181,7 +191,7 @@ if {[run_batch_jobs 32k $32knode_block_cnt $file_in ] == 0} {
 	set exit_code 1	
 }
 
-if {[run_batch_jobs 1k $1knode_block_cnt $file_in ] != 1} {
+if {[run_batch_jobs 1k $1knode_block_cnt $file_in ] == 0} {
 	send_user "\nFAILURE: 1k cnodes can't be created\n"
 	set exit_code 1	
 }
@@ -191,17 +201,17 @@ if {[run_batch_jobs 512 $512node_block_cnt $file_in ] != 1} {
 	set exit_code 1	
 }
 
-if {[run_batch_jobs 128 $128node_block_cnt $file_in ] != 1} {
+if {[run_batch_jobs 128 $128node_block_cnt $file_in ] == 0} {
 	send_user "\nFAILURE: 128 cnodes can't be created\n"
 	set exit_code 1	
 }
 
-if {[run_batch_jobs 32 $32node_block_cnt $file_in ] != 1} {
+if {[run_batch_jobs 32 $32node_block_cnt $file_in ] == 0} {
 	send_user "\nFAILURE: 32 cnodes can't be created\n"
 	set exit_code 1	
 }
 
-if {[run_batch_jobs 512 $512node_block_cnt $file_in ] != 1} {
+if {[run_batch_jobs 512 $512node_block_cnt $file_in ] == 0} {
 	send_user "\nFAILURE: 512 cnodes can't be created\n"
 	set exit_code 1	
 }

@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  node_info.c - get/print the node state information of slurm
- *  $Id: node_info.c 12825 2007-12-14 21:23:57Z jette $
+ *  $Id: node_info.c 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -147,6 +147,18 @@ slurm_sprint_node_table (node_info_t * node_ptr, int one_liner )
 		node_ptr->weight, node_ptr->features,
 		node_ptr->reason);
 	xstrcat(out, tmp_line);
+
+	/****** Line 3 (optional) ******/
+	if (node_ptr->arch || node_ptr->os) {
+		if (one_liner)
+			xstrcat(out, " ");
+		else
+			xstrcat(out, "\n   ");
+		snprintf(tmp_line, sizeof(tmp_line),
+			"Arch=%s OS=%s",
+			node_ptr->arch, node_ptr->os);
+		xstrcat(out, tmp_line);
+	}
 	xstrcat(out, "\n");
 
 	return out;

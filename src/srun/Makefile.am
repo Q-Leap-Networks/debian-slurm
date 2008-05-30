@@ -10,18 +10,11 @@ srun_SOURCES = \
 	srun.c srun.h \
 	opt.c opt.h \
 	srun_job.c srun_job.h \
-	msg.c msg.h \
-	signals.c signals.h \
-	launch.c    \
-	launch.h    \
-	attach.h    \
-	attach.c    \
-	reattach.c  \
-	reattach.h  \
+	srun_pty.c srun_pty.h \
+	debugger.h    \
+	debugger.c    \
 	fname.c     \
 	fname.h     \
-	sigstr.c    \
-	sigstr.h    \
 	allocate.c  \
 	allocate.h  \
 	core-format.c \
@@ -34,7 +27,7 @@ convenience_libs = $(top_builddir)/src/api/libslurmhelper.la
 srun_LDADD = \
 	$(convenience_libs) 
 
-srun_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(FEDERATION_LDFLAGS)
+srun_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
 
 force:
 $(convenience_libs) : force

@@ -1,12 +1,12 @@
 /*****************************************************************************\
  *  node_select_info.c - get the node select plugin state information of slurm
  *
- *  $Id: node_select_info.c 12825 2007-12-14 21:23:57Z jette $
+ *  $Id: node_select_info.c 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.

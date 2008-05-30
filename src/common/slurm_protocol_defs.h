@@ -1,12 +1,12 @@
 /****************************************************************************\
  *  slurm_protocol_defs.h - definitions used for RPCs
  *
- *  $Id: slurm_protocol_defs.h 12088 2007-08-22 18:02:24Z jette $
+ *  $Id: slurm_protocol_defs.h 13755 2008-04-01 19:12:53Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov>.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -64,6 +64,7 @@
 #include "src/common/job_options.h"
 #include "src/common/slurm_step_layout.h"
 #include "src/common/xassert.h"
+//#include "src/common/slurm_jobacct_common.h"
 
 #define MAX_SLURM_NAME 64
 #define FORWARD_INIT 0xfffe
@@ -93,7 +94,9 @@ typedef enum {
 	RESPONSE_SHUTDOWN,
 	REQUEST_PING,
 	REQUEST_CONTROL,
-
+	REQUEST_SET_DEBUG_LEVEL,
+	REQUEST_HEALTH_CHECK,
+	
 	REQUEST_BUILD_INFO = 2001,
 	RESPONSE_BUILD_INFO,
 	REQUEST_JOB_INFO,
@@ -141,6 +144,7 @@ typedef enum {
 	REQUEST_JOB_READY,
 	RESPONSE_JOB_READY,
 	REQUEST_JOB_END_TIME,
+	REQUEST_JOB_NOTIFY,
 
 	REQUEST_JOB_STEP_CREATE = 5001,
 	RESPONSE_JOB_STEP_CREATE,
@@ -153,6 +157,7 @@ typedef enum {
 	REQUEST_CHECKPOINT,
 	RESPONSE_CHECKPOINT,
 	REQUEST_CHECKPOINT_COMP,
+	REQUEST_CHECKPOINT_TASK_COMP,
 	RESPONSE_CHECKPOINT_COMP,
 	REQUEST_SUSPEND,
 	RESPONSE_SUSPEND,
@@ -171,6 +176,7 @@ typedef enum {
 	RESPONSE_LAUNCH_TASKS,
 	MESSAGE_TASK_EXIT,
 	REQUEST_SIGNAL_TASKS,
+	REQUEST_CHECKPOINT_TASKS,
 	REQUEST_TERMINATE_TASKS,
 	REQUEST_REATTACH_TASKS,
 	RESPONSE_REATTACH_TASKS,
@@ -196,7 +202,10 @@ typedef enum {
 
 	RESPONSE_SLURM_RC = 8001,
 
-	RESPONSE_FORWARD_FAILED = 9001
+	RESPONSE_FORWARD_FAILED = 9001,
+
+	ACCOUNTING_UPDATE_MSG = 10001,
+
 } slurm_msg_type_t;
 
 typedef enum {
@@ -254,6 +263,7 @@ typedef struct slurm_protocol_config {
 
 typedef struct slurm_msg {
 	slurm_msg_type_t msg_type;
+	uint16_t flags;
 	slurm_addr address;       
 	slurm_fd conn_fd;
 	void *auth_cred;
@@ -285,6 +295,12 @@ typedef struct job_step_kill_msg {
 	uint16_t signal;
 	uint16_t batch_flag;
 } job_step_kill_msg_t;
+
+typedef struct job_notify_msg {
+	uint32_t job_id;
+	uint32_t job_step_id;	/* currently not used */
+	char *   message;
+} job_notify_msg_t;
 
 typedef struct job_id_msg {
 	uint32_t job_id;
@@ -356,6 +372,13 @@ typedef struct kill_tasks_msg {
 	uint32_t signal;
 } kill_tasks_msg_t;
 
+typedef struct checkpoint_tasks_msg {
+	uint32_t job_id;
+	uint32_t job_step_id;
+	uint32_t signal;
+	time_t timestamp;
+} checkpoint_tasks_msg_t;
+
 typedef struct epilog_complete_msg {
 	uint32_t job_id;
 	uint32_t return_code;
@@ -371,6 +394,10 @@ typedef struct last_update_msg {
 	time_t last_update;
 } last_update_msg_t;
 
+typedef struct set_debug_level_msg {
+	uint32_t debug_level;
+} set_debug_level_msg_t;
+
 typedef struct job_step_specs {
 	uint32_t job_id;	/* job ID */
 	uint32_t user_id;	/* user the job runs as */
@@ -382,10 +409,16 @@ typedef struct job_step_specs {
 	uint16_t plane_size;	/* plane size when task_dist =
 				   SLURM_DIST_PLANE */
 	uint16_t port;		/* port to contact initiating srun */
+	uint16_t ckpt_interval;	/* checkpoint creation interval (minutes) */
+	uint16_t exclusive;	/* 1 if CPUs not shared with other steps */
+	uint16_t immediate;	/* 1 if allocate to run or fail immediately,
+				 * 0 if to be queued awaiting resources */
+	uint16_t mem_per_task;	/* MB memory required per task, 0=no limit */
 	char *host;		/* host to contact initiating srun */
 	char *node_list;	/* list of required nodes */
 	char *network;		/* network use spec */
 	char *name;		/* name of the job step, default "" */
+	char *ckpt_path;	/* path to store checkpoint image files */
 	uint8_t overcommit;     /* flag, 1 to allow overcommit of processors,
 				   0 to disallow overcommit. default is 0 */
 } job_step_create_request_msg_t;
@@ -406,9 +439,11 @@ typedef struct launch_tasks_request_msg {
 	uint32_t  nprocs;	/* number of processes in this job step   */
 	uint32_t  uid;
 	uint32_t  gid;
+	uint32_t  job_mem;	/* MB of memory reserved by job, 0 if no limit */
+	uint32_t  task_mem;	/* MB of memory reserved per task, 0 if no limit */
 	uint16_t  *tasks_to_launch;
-	uint16_t  envc;
-	uint16_t  argc;
+	uint32_t  envc;
+	uint32_t  argc;
 	uint16_t  multi_prog;
 	uint16_t  *cpus_allocated;
 	uint16_t  max_sockets;
@@ -438,6 +473,9 @@ typedef struct launch_tasks_request_msg {
 	
 	uint16_t user_managed_io; /* 0 for "normal" IO,
 				     1 for "user manged" IO */
+	uint8_t open_mode;	/* stdout/err append or truncate */
+	uint8_t pty;		/* use pseudo tty */
+	uint16_t acctg_freq;	/* accounting polling interval */
 
 	/********** START "normal" IO only options **********/
 	/* These options are ignored if user_managed_io is 1 */
@@ -458,6 +496,7 @@ typedef struct launch_tasks_request_msg {
 	switch_jobinfo_t switch_job;	/* switch credential for the job */
 	job_options_t options;  /* Arbitrary job options */
 	char *complete_nodelist;
+	char *ckpt_path;	/* checkpoint path */
 } launch_tasks_request_msg_t;
 
 typedef struct task_user_managed_io_msg {
@@ -477,8 +516,11 @@ typedef struct return_code_msg {
  * the event of some launch failure or race condition preventing slurmd 
  * from getting the MPIRUN_PARTITION at that time. It is needed for 
  * the job epilog. */
+#define SIG_NODE_FAIL	998	/* Dummy signal value to signify node failure */
+#define SIG_FAILURE     999	/* Dummy signal value to signify sys failure */
 typedef struct kill_job_msg {
 	uint32_t job_id;
+	uint16_t job_state;
 	uint32_t job_uid;
 	time_t   time;		/* slurmctld's time of request */
 	char *nodes;
@@ -531,14 +573,17 @@ typedef struct batch_job_launch_msg {
 	char *in;		/* pathname of stdin */
 	char *out;		/* pathname of stdout */
 	char *work_dir;		/* full pathname of working directory */
-	uint16_t argc;
+	uint32_t argc;
 	char **argv;
-	uint16_t envc;		/* element count in environment */
+	uint32_t envc;		/* element count in environment */
 	char **environment;	/* environment variables to set for job, 
 				 *   name=value pairs, one per line */
 	select_jobinfo_t select_jobinfo;	/* opaque data type */
 	slurm_cred_t cred;
-	uint16_t overcommit;	/* if resources being over subscribed */
+	uint8_t open_mode;	/* stdout/err append or truncate */
+	uint8_t overcommit;	/* if resources being over subscribed */
+	uint16_t acctg_freq;	/* accounting polling interval */
+	uint32_t job_mem;	/* memory limit for job */
 } batch_job_launch_msg_t;
 
 typedef struct job_id_request_msg {
@@ -550,34 +595,12 @@ typedef struct job_id_response_msg {
 	uint32_t return_code;	/* slurm return code */
 } job_id_response_msg_t;
 
-typedef struct srun_ping_msg {
-	uint32_t job_id;	/* slurm job_id */
-	uint32_t step_id;	/* step_id or NO_VAL */
-} srun_ping_msg_t;
-
-typedef struct srun_job_complete_msg {
-        uint32_t job_id;        /* slurm job_id */
-        uint32_t step_id;       /* step_id or NO_VAL */
-} srun_job_complete_msg_t;
-
 typedef struct srun_exec_msg {
 	uint32_t job_id;	/* slurm job_id */
 	uint32_t step_id;	/* step_id or NO_VAL */
-	uint16_t argc;		/* argument count */
+	uint32_t argc;		/* argument count */
 	char **  argv;		/* program arguments */
 } srun_exec_msg_t;
-
-typedef struct srun_node_fail_msg {
-	uint32_t job_id;	/* slurm job_id */
-	uint32_t step_id;	/* step_id or NO_VAL */
-	char *nodelist;		/* name of failed node(s) */
-} srun_node_fail_msg_t;
-
-typedef struct srun_timeout_msg {
-	uint32_t job_id;	/* slurm job_id */
-	uint32_t step_id;	/* step_id or NO_VAL */
-	time_t   timeout;	/* when job scheduled to be killed */
-} srun_timeout_msg_t;
 
 typedef struct checkpoint_msg {
 	uint16_t op;		/* checkpoint operation, see enum check_opts */
@@ -594,6 +617,15 @@ typedef struct checkpoint_comp_msg {
 	char *   error_msg;	/* error message on failure */
 } checkpoint_comp_msg_t;
 
+typedef struct checkpoint_task_comp_msg {
+	uint32_t job_id;	/* slurm job_id */
+	uint32_t step_id;	/* slurm step_id */
+	uint32_t task_id;	/* task id */
+	time_t   begin_time;	/* time checkpoint began */
+	uint32_t error_code;	/* error code on failure */
+	char *   error_msg;	/* error message on failure */
+} checkpoint_task_comp_msg_t;
+
 typedef struct checkpoint_resp_msg {
 	time_t   event_time;	/* time of checkpoint start/finish */
 	uint32_t error_code;	/* error code on failure */
@@ -605,11 +637,6 @@ typedef struct suspend_msg {
 	uint32_t job_id;        /* slurm job_id */
 } suspend_msg_t;
 
-typedef struct srun_user_msg {
-	uint32_t job_id;	/* slurm job_id */
-	char *msg;		/* message to user's srun */
-} srun_user_msg_t;
-
 typedef struct kvs_get_msg {
 	uint16_t task_id;	/* job step's task id */
 	uint16_t size;		/* count of tasks in job */
@@ -617,7 +644,6 @@ typedef struct kvs_get_msg {
 	char * hostname;	/* hostname to be sent the kvs data */
 } kvs_get_msg_t;
 
-#define FILE_BLOCKS 8
 typedef struct file_bcast_msg {
 	char *fname;		/* name of the destination file */
 	uint16_t block_no;	/* block number of this data */
@@ -628,8 +654,8 @@ typedef struct file_bcast_msg {
 	uint32_t gid;		/* group for destination file */
 	time_t atime;		/* last access time for destination file */
 	time_t mtime;		/* last modification time for dest file */
-	uint32_t block_len[FILE_BLOCKS];/* length of this data block */
-	char *block[FILE_BLOCKS];	/* data for this block, 64k max */
+	uint32_t block_len;	/* length of this data block */
+	char *block;		/* data for this block */
 } file_bcast_msg_t; 
 
 typedef struct multi_core_data {
@@ -655,18 +681,32 @@ typedef struct multi_core_data {
 	uint16_t plane_size;        /* plane size when task_dist = SLURM_DIST_PLANE */
 } multi_core_data_t;
 
+typedef struct pty_winsz {
+	uint16_t cols;
+	uint16_t rows;
+} pty_winsz_t;
+
+typedef struct will_run_response_msg {
+	uint32_t job_id;
+	uint32_t proc_cnt;
+	time_t start_time;
+	char *node_list;
+} will_run_response_msg_t;
+
 /*****************************************************************************\
  * Slurm API Message Types
 \*****************************************************************************/
 typedef struct slurm_node_registration_status_msg {
 	time_t timestamp;
 	char *node_name;
+	char *arch;
+	char *os;
 	uint16_t cpus;
 	uint16_t sockets;
 	uint16_t cores;
 	uint16_t threads;
-	uint32_t real_memory_size;
-	uint32_t temporary_disk_space;
+	uint32_t real_memory;
+	uint32_t tmp_disk;
 	uint32_t job_count;	/* number of associate job_id's */
 	uint32_t *job_id;	/* IDs of running job (if any) */
 	uint16_t *step_id;	/* IDs of running job steps (if any) */
@@ -674,6 +714,15 @@ typedef struct slurm_node_registration_status_msg {
 	uint16_t startup;	/* slurmd just restarted */
 	switch_node_info_t switch_nodeinfo;	/* set only if startup != 0 */
 } slurm_node_registration_status_msg_t;
+
+
+/*****************************************************************************\
+ *      ACCOUNTING PUSHS
+\*****************************************************************************/
+
+typedef struct {
+	List update_list; /* of type acct_update_object_t *'s */
+} accounting_update_msg_t;
 
 typedef struct slurm_ctl_conf slurm_ctl_conf_info_msg_t;
 /*****************************************************************************\
@@ -696,7 +745,10 @@ extern void slurm_msg_t_init (slurm_msg_t *msg);
  */
 extern void slurm_msg_t_copy(slurm_msg_t *dest, slurm_msg_t *src);
 
+extern void slurm_destroy_char(void *object);
+
 /* free message functions */
+void inline slurm_free_checkpoint_tasks_msg(checkpoint_tasks_msg_t * msg);
 void inline slurm_free_last_update_msg(last_update_msg_t * msg);
 void inline slurm_free_return_code_msg(return_code_msg_t * msg);
 void inline slurm_free_job_alloc_info_msg(job_alloc_info_msg_t * msg);
@@ -705,6 +757,7 @@ void inline slurm_free_job_step_info_request_msg(
 		job_step_info_request_msg_t *msg);
 void inline slurm_free_node_info_request_msg(node_info_request_msg_t *msg);
 void inline slurm_free_part_info_request_msg(part_info_request_msg_t *msg);
+void inline slurm_free_set_debug_level_msg(set_debug_level_msg_t *msg);
 
 #define	slurm_free_timelimit_msg(msg) \
 	slurm_free_kill_job_msg(msg)
@@ -764,6 +817,7 @@ void inline slurm_free_srun_timeout_msg(srun_timeout_msg_t * msg);
 void inline slurm_free_srun_user_msg(srun_user_msg_t * msg);
 void inline slurm_free_checkpoint_msg(checkpoint_msg_t *msg);
 void inline slurm_free_checkpoint_comp_msg(checkpoint_comp_msg_t *msg);
+void inline slurm_free_checkpoint_task_comp_msg(checkpoint_task_comp_msg_t *msg);
 void inline slurm_free_checkpoint_resp_msg(checkpoint_resp_msg_t *msg);
 void inline slurm_free_suspend_msg(suspend_msg_t *msg);
 void slurm_free_resource_allocation_response_msg (
@@ -780,11 +834,16 @@ void slurm_free_job_step_info_response_msg(
 void slurm_free_node_info_msg(node_info_msg_t * msg);
 void slurm_free_partition_info_msg(partition_info_msg_t * msg);
 void slurm_free_get_kvs_msg(kvs_get_msg_t *msg);
+void slurm_free_will_run_response_msg(will_run_response_msg_t *msg);
 void inline slurm_free_file_bcast_msg(file_bcast_msg_t *msg);
 void inline slurm_free_step_complete_msg(step_complete_msg_t *msg);
 void inline slurm_free_stat_jobacct_msg(stat_jobacct_msg_t *msg);
 void inline slurm_free_node_select_msg(
 		node_info_select_request_msg_t *msg);
+void inline slurm_free_job_notify_msg(job_notify_msg_t * msg);
+
+void inline slurm_free_accounting_update_msg(accounting_update_msg_t *msg);
+
 extern int slurm_free_msg_data(slurm_msg_type_t type, void *data);
 extern uint32_t slurm_get_return_code(slurm_msg_type_t type, void *data);
 

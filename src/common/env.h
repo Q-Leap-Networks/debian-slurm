@@ -4,7 +4,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -70,6 +70,10 @@ typedef struct env_options {
 	int cpus_on_node;
 	pid_t task_pid;
 	char *sgtids;		/* global ranks array of integers */	
+	uint16_t pty_port;	/* used to communicate window size changes */
+	uint8_t ws_col;		/* window size, columns */
+	uint8_t ws_row;		/* window size, row count */
+	char *ckpt_path;	/* --ckpt-path=                 */
 } env_t;
 
 
@@ -161,8 +165,7 @@ void
 env_array_for_step(char ***dest,
 		   const job_step_create_response_msg_t *step,
 		   const char *launcher_hostname,
-		   uint16_t launcher_port,
-		   const char *ip_addr_str);
+		   uint16_t launcher_port);
 
 /*
  * Return an empty environment variable array (contains a single

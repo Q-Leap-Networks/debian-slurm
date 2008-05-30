@@ -4,7 +4,7 @@
  *  Copyright (C) 2006-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -43,6 +43,7 @@
 #include "src/common/list.h"
 #include "src/common/node_select.h"
 #include "src/common/uid.h"
+#include "src/slurmctld/licenses.h"
 #include "src/slurmctld/locks.h"
 
 static char *	_dump_all_jobs(int *job_cnt, time_t update_time);
@@ -65,10 +66,23 @@ static int	_hidden_job(struct job_record *job_ptr);
 
 static uint32_t cr_enabled = 0, cr_test = 0;
 
+/* We only keep a few reject message to limit the overhead */
+#define REJECT_MSG_MAX        16
+#define REJECT_MSG_LEN       128
+static int reject_msg_cnt = 0;
+typedef struct reject_msg {
+	uint32_t job_id;
+	char     reason[REJECT_MSG_LEN];
+} reject_msg_t;
+reject_msg_t reject_msgs[REJECT_MSG_MAX];
+
 /*
  * get_jobs - get information on specific job(s) changed since some time
- * cmd_ptr IN - CMD=GETJOBS ARG=[<UPDATETIME>:<JOBID>[:<JOBID>]...]
+ * cmd_ptr IN   - CMD=GETJOBS ARG=[<UPDATETIME>:<JOBID>[:<JOBID>]...]
  *                              [<UPDATETIME>:ALL]
+ * err_code OUT - 0 or an error code
+ * err_msg OUT  - response message
+ * NOTE: xfree() err_msg if err_code is zero
  * RET 0 on success, -1 on failure
  *
  * Response format
@@ -100,7 +114,6 @@ static uint32_t cr_enabled = 0, cr_test = 0;
  * [#<JOBID>;...];			additional jobs, if any
  *
  */
-/* RET 0 on success, -1 on failure */
 extern int	get_jobs(char *cmd_ptr, int *err_code, char **err_msg)
 {
 	char *arg_ptr = NULL, *tmp_char = NULL, *tmp_buf = NULL, *buf = NULL;
@@ -165,7 +178,10 @@ extern int	get_jobs(char *cmd_ptr, int *err_code, char **err_msg)
 	if (buf)
 		buf_size = strlen(buf);
 	tmp_buf = xmalloc(buf_size + 32);
-	sprintf(tmp_buf, "SC=0 ARG=%d#%s", job_rec_cnt, buf);
+	if (job_rec_cnt)
+		sprintf(tmp_buf, "SC=0 ARG=%d#%s", job_rec_cnt, buf);
+	else
+		sprintf(tmp_buf, "SC=0 ARG=0#");
 	xfree(buf);
 	*err_code = 0;
 	*err_msg = tmp_buf;
@@ -216,6 +232,7 @@ static char *	_dump_job(struct job_record *job_ptr, time_t update_time)
 {
 	char tmp[16384], *buf = NULL;
 	uint32_t end_time, suspend_time;
+	int i, rej_sent = 0;
 
 	if (!job_ptr)
 		return NULL;
@@ -261,7 +278,22 @@ static char *	_dump_job(struct job_record *job_ptr, time_t update_time)
 		xfree(hosts);
 	}
 
-	if (job_ptr->job_state == JOB_FAILED) {
+	if (reject_msg_cnt) {
+		/* Possible job requeue/reject message */
+		for (i=0; i<REJECT_MSG_MAX; i++) {
+			if (reject_msgs[i].job_id != job_ptr->job_id)
+				continue;
+			snprintf(tmp, sizeof(tmp),
+				"REJMESSAGE=\"%s\";",
+				reject_msgs[i].reason);
+			xstrcat(buf, tmp);
+			reject_msgs[i].job_id = 0;
+			reject_msg_cnt--;
+			rej_sent = 1;
+			break;
+		}
+	}
+	if ((rej_sent == 0) && (job_ptr->job_state == JOB_FAILED)) {
 		snprintf(tmp, sizeof(tmp),
 			"REJMESSAGE=\"%s\";",
 			job_reason_string(job_ptr->state_reason));
@@ -272,16 +304,18 @@ static char *	_dump_job(struct job_record *job_ptr, time_t update_time)
 		xstrcat(buf, "FLAGS=INTERACTIVE;");
 
 	snprintf(tmp, sizeof(tmp), 
-		"UPDATETIME=%u;WCLIMIT=%u;",
+		"UPDATETIME=%u;WCLIMIT=%u;TASKS=%u;",
 		(uint32_t) job_ptr->time_last_active,
-		(uint32_t) _get_job_time_limit(job_ptr));
+		(uint32_t) _get_job_time_limit(job_ptr),
+		_get_job_tasks(job_ptr));
 	xstrcat(buf, tmp);
 
-	snprintf(tmp, sizeof(tmp),
-		"TASKS=%u;NODES=%u;",
-		_get_job_tasks(job_ptr),
-		_get_job_min_nodes(job_ptr));
-	xstrcat(buf, tmp);
+	if (!IS_JOB_FINISHED(job_ptr)) {
+		snprintf(tmp, sizeof(tmp),
+			"NODES=%u;",
+			_get_job_min_nodes(job_ptr));
+		xstrcat(buf, tmp);
+	}
 
 	snprintf(tmp, sizeof(tmp),
 		"DPROCS=%u;",
@@ -351,26 +385,25 @@ static void	_get_job_comment(struct job_record *job_ptr,
 	size = snprintf(buffer, buf_size, "COMMENT=\"");
 
 	/* JOB DEPENDENCY */
-	if (job_ptr->dependency) {
+	if (job_ptr->details && job_ptr->details->dependency) {
 		/* Kludge for job dependency set via srun */
 		size += snprintf((buffer + size), (buf_size - size),
-			"DEPEND=afterany:%u", job_ptr->dependency);
+			"DEPEND=%s", job_ptr->details->dependency);
 		field_sep = "?";
 	}
 
 	/* SHARED NODES */
 	if (cr_enabled)	{			/* consumable resources */
 		if (job_ptr->part_ptr &&
-		    (job_ptr->part_ptr->shared == SHARED_EXCLUSIVE))
+		    (job_ptr->part_ptr->max_share == 0))	/* Exclusive use */
 			sharing = 0;
-		else if (job_ptr->details && (job_ptr->details->shared != 0))
+		else if (job_ptr->details && job_ptr->details->shared)
 			sharing = 1;
-	} else if (job_ptr->part_ptr) {			/* partition with */
-		if (job_ptr->part_ptr->shared == SHARED_FORCE)
-			sharing = 1;
-		else if ((job_ptr->part_ptr->shared == SHARED_YES)
-		&&  (job_ptr->details)			/* optional for partition */
-		&&  (job_ptr->details->shared))		/* with job to share */
+	} else if (job_ptr->part_ptr) {		/* partition level control */
+		if (job_ptr->part_ptr->max_share & SHARED_FORCE)
+			sharing = 1;		/* Sharing forced */
+		else if ((job_ptr->part_ptr->max_share > 1) &&
+		         (job_ptr->details) && (job_ptr->details->shared))
 			sharing = 1;
 	}
 	if (sharing) {
@@ -425,7 +458,8 @@ static uint32_t _get_job_min_disk(struct job_record *job_ptr)
 static uint32_t	_get_job_min_nodes(struct job_record *job_ptr)
 {
 	if (job_ptr->job_state > JOB_PENDING) {
-		/* return actual count of allocated nodes */
+		/* return actual count of currently allocated nodes.
+		 * NOTE: gets decremented to zero while job is completing */
 		return job_ptr->node_cnt;
 	}
 
@@ -453,15 +487,21 @@ static uint32_t _get_job_submit_time(struct job_record *job_ptr)
 
 static uint32_t _get_job_tasks(struct job_record *job_ptr)
 {
-	uint32_t task_cnt = 1;
+	uint32_t task_cnt;
 
-	if (job_ptr->num_procs)
-		task_cnt = job_ptr->num_procs;
-
-	if (job_ptr->details) {
-		task_cnt = MAX(task_cnt,
-			       (_get_job_min_nodes(job_ptr) * 
-			        job_ptr->details->ntasks_per_node));
+	if (job_ptr->job_state > JOB_PENDING) {
+		task_cnt = job_ptr->total_procs;
+	} else {
+		if (job_ptr->num_procs)
+			task_cnt = job_ptr->num_procs;
+		else
+			task_cnt = 1;
+		if (job_ptr->details) {
+			task_cnt = MAX(task_cnt,
+				       (_get_job_min_nodes(job_ptr) * 
+				        job_ptr->details->
+					ntasks_per_node));
+		}
 	}
 
 	return task_cnt / _get_job_cpus_per_task(job_ptr);
@@ -504,12 +544,12 @@ static char *	_get_job_state(struct job_record *job_ptr)
 			return "Running";
 	}
 
-	if (base_state == JOB_PENDING)
-		return "Idle";
 	if (base_state == JOB_RUNNING)
 		return "Running";
 	if (base_state == JOB_SUSPENDED)
 		return "Suspended";
+	if (base_state == JOB_PENDING)
+		return "Idle";
 
 	if ((base_state == JOB_COMPLETE) || (base_state == JOB_FAILED))
 		state_str = "Completed";
@@ -567,4 +607,30 @@ static uint32_t	_get_job_suspend_time(struct job_record *job_ptr)
 	return (uint32_t) 0;
 }
 
+extern void wiki_job_requeue(struct job_record *job_ptr, char *reason)
+{
+	int empty = -1, i;
+
+	for (i=0; i<REJECT_MSG_MAX; i++) {
+		if ((reject_msgs[i].job_id == 0) && (empty == -1)) {
+			empty = i;
+			if (reject_msg_cnt == 0)
+				break;
+		} else if (reject_msgs[i].job_id != job_ptr->job_id)
+			continue;
+
+		/* over-write previous message for this job */
+		strncpy(reject_msgs[i].reason, reason, REJECT_MSG_LEN);
+		reject_msgs[i].reason[REJECT_MSG_LEN - 1] = '\0';
+		return;
+	}
+
+	if (empty == -1)	/* no free space */
+		return;
+
+	reject_msgs[empty].job_id = job_ptr->job_id;
+	strncpy(reject_msgs[i].reason, reason, REJECT_MSG_LEN);
+	reject_msgs[i].reason[REJECT_MSG_LEN - 1] = '\0';
+	reject_msg_cnt++;
+}
 

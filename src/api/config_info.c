@@ -1,11 +1,11 @@
 /****************************************************************************\
  *  config_info.c - get/print the system configuration information of slurm
- *  $Id: config_info.c 11798 2007-07-07 00:02:31Z jette $
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> and Kevin Tew <tew1@llnl.gov>.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -117,144 +117,224 @@ void slurm_print_ctl_conf ( FILE* out,
 	slurm_make_time_str ((time_t *)&slurm_ctl_conf_ptr->last_update, 
 			     time_str, sizeof(time_str));
 	fprintf(out, "Configuration data as of %s\n", time_str);
-	fprintf(out, "AuthType          = %s\n", 
+	fprintf(out, "AccountingStorageEnforce = %u\n",
+		slurm_ctl_conf_ptr->accounting_storage_enforce);
+	fprintf(out, "AccountingStorageHost   = %s\n", 
+		slurm_ctl_conf_ptr->accounting_storage_host);
+	fprintf(out, "AccountingStorageLoc    = %s\n", 
+		slurm_ctl_conf_ptr->accounting_storage_loc);
+	fprintf(out, "AccountingStoragePass   = %s\n", 
+		slurm_ctl_conf_ptr->accounting_storage_pass);
+	fprintf(out, "AccountingStoragePort   = %u\n", 
+		slurm_ctl_conf_ptr->accounting_storage_port);
+	fprintf(out, "AccountingStorageType   = %s\n", 
+		slurm_ctl_conf_ptr->accounting_storage_type);
+	fprintf(out, "AccountingStorageUser   = %s\n", 
+		slurm_ctl_conf_ptr->accounting_storage_user);
+	fprintf(out, "AuthType                = %s\n", 
 		slurm_ctl_conf_ptr->authtype);
-	fprintf(out, "BackupAddr        = %s\n", 
+	fprintf(out, "BackupAddr              = %s\n", 
 		slurm_ctl_conf_ptr->backup_addr);
-	fprintf(out, "BackupController  = %s\n", 
+	fprintf(out, "BackupController        = %s\n", 
 		slurm_ctl_conf_ptr->backup_controller);
-	fprintf(out, "CacheGroups       = %u\n", 
+	slurm_make_time_str ((time_t *)&slurm_ctl_conf_ptr->boot_time,
+			     time_str, sizeof(time_str));
+	fprintf(out, "BOOT_TIME               = %s\n",
+		time_str);
+	fprintf(out, "CacheGroups             = %u\n", 
 		slurm_ctl_conf_ptr->cache_groups);
-	fprintf(out, "CheckpointType    = %s\n",
+	fprintf(out, "CheckpointType          = %s\n",
 		slurm_ctl_conf_ptr->checkpoint_type);
-	fprintf(out, "ControlAddr       = %s\n", 
+	fprintf(out, "ClusterName             = %s\n",
+		slurm_ctl_conf_ptr->cluster_name);
+	fprintf(out, "ControlAddr             = %s\n", 
 		slurm_ctl_conf_ptr->control_addr);
-	fprintf(out, "ControlMachine    = %s\n", 
+	fprintf(out, "ControlMachine          = %s\n", 
 		slurm_ctl_conf_ptr->control_machine);
-	fprintf(out, "Epilog            = %s\n", 
+	fprintf(out, "CryptoType              = %s\n",
+		slurm_ctl_conf_ptr->crypto_type);
+	if (slurm_ctl_conf_ptr->def_mem_per_task) {
+		fprintf(out, "DefMemPerTask           = %u\n",
+			slurm_ctl_conf_ptr->def_mem_per_task);
+	} else
+		fprintf(out, "DefMemPerTask           = UNLIMITED\n");
+	if (slurm_ctl_conf_ptr->disable_root_jobs)
+		fprintf(out, "DisableRootJobs         = YES\n");
+	else
+		fprintf(out, "DisableRootJobs         = NO\n");
+	fprintf(out, "Epilog                  = %s\n",
 		slurm_ctl_conf_ptr->epilog);
-	fprintf(out, "FastSchedule      = %u\n", 
+	fprintf(out, "EpilogMsgTime           = %u\n",
+		slurm_ctl_conf_ptr->epilog_msg_time);
+	fprintf(out, "FastSchedule            = %u\n",
 		slurm_ctl_conf_ptr->fast_schedule);
-	fprintf(out, "FirstJobId        = %u\n", 
+	fprintf(out, "FirstJobId              = %u\n",
 		slurm_ctl_conf_ptr->first_job_id);
+	fprintf(out, "GetEnvTimeout           = %u\n",
+		slurm_ctl_conf_ptr->get_env_timeout);
+	fprintf(out, "HealthCheckInterval     = %u\n",
+		slurm_ctl_conf_ptr->health_check_interval);
+	fprintf(out, "HealthCheckProgram      = %s\n",
+		slurm_ctl_conf_ptr->health_check_program);
 #ifdef HAVE_XCPU
-	fprintf(out, "HAVE_XCPU         = %d\n", HAVE_XCPU);
+	fprintf(out, "HAVE_XCPU               = %d\n", HAVE_XCPU);
 #endif
-	fprintf(out, "InactiveLimit     = %u\n", 
+	fprintf(out, "InactiveLimit           = %u\n",
 		slurm_ctl_conf_ptr->inactive_limit);
-	fprintf(out, "JobAcctLogFile    = %s\n", 
-		slurm_ctl_conf_ptr->job_acct_logfile);
-	fprintf(out, "JobAcctFrequency  = %u\n",
-		slurm_ctl_conf_ptr->job_acct_freq);
-	fprintf(out, "JobAcctType       = %s\n", 
-		slurm_ctl_conf_ptr->job_acct_type);
-	fprintf(out, "JobCompLoc        = %s\n", 
-		slurm_ctl_conf_ptr->job_comp_loc);
-	fprintf(out, "JobCompType       = %s\n", 
+	fprintf(out, "JobAcctGatherFrequency  = %u\n",
+		slurm_ctl_conf_ptr->job_acct_gather_freq);
+	fprintf(out, "JobAcctGatherType       = %s\n",
+		slurm_ctl_conf_ptr->job_acct_gather_type);
+	fprintf(out, "JobCompHost             = %s\n",
+		slurm_ctl_conf_ptr->job_comp_host);
+	fprintf(out, "JobCompLoc              = %s\n",
+		 slurm_ctl_conf_ptr->job_comp_loc);
+	fprintf(out, "JobCompPass             = %s\n",
+		 slurm_ctl_conf_ptr->job_comp_pass);
+	fprintf(out, "JobCompPort             = %u\n",
+		slurm_ctl_conf_ptr->job_comp_port);
+	fprintf(out, "JobCompType             = %s\n", 
 		slurm_ctl_conf_ptr->job_comp_type);
+	fprintf(out, "JobCompUser             = %s\n", 
+		slurm_ctl_conf_ptr->job_comp_user);
 	fprintf(out, "JobCredentialPrivateKey = %s\n", 
 		slurm_ctl_conf_ptr->job_credential_private_key);
 	fprintf(out, "JobCredentialPublicCertificate = %s\n", 
 		slurm_ctl_conf_ptr->job_credential_public_certificate);
-	fprintf(out, "KillWait          = %u\n", 
+	fprintf(out, "JobFileAppend           = %u\n",
+		slurm_ctl_conf_ptr->job_file_append);
+	fprintf(out, "JobRequeue              = %u\n",
+		slurm_ctl_conf_ptr->job_requeue);
+	fprintf(out, "KillWait                = %u\n", 
 		slurm_ctl_conf_ptr->kill_wait);
-	fprintf(out, "MailProg          = %s\n",
+	fprintf(out, "Licenses                = %s\n",
+		slurm_ctl_conf_ptr->licenses);
+	fprintf(out, "MailProg                = %s\n",
 		slurm_ctl_conf_ptr->mail_prog);
-	fprintf(out, "MaxJobCount       = %u\n", 
+	fprintf(out, "MaxJobCount             = %u\n", 
 		slurm_ctl_conf_ptr->max_job_cnt);
-	fprintf(out, "MessageTimeout    = %u\n",
+	if (slurm_ctl_conf_ptr->max_mem_per_task) {
+		fprintf(out, "MaxMemPerTask           = %u\n",
+			slurm_ctl_conf_ptr->max_mem_per_task);
+	} else
+		fprintf(out, "MaxMemPerTask           = UNLIMITED\n");
+	fprintf(out, "MessageTimeout          = %u\n",
 		slurm_ctl_conf_ptr->msg_timeout);
-	fprintf(out, "MinJobAge         = %u\n", 
+	fprintf(out, "MinJobAge               = %u\n", 
 		slurm_ctl_conf_ptr->min_job_age);
-	fprintf(out, "MpiDefault        = %s\n",
+	fprintf(out, "MpiDefault              = %s\n",
 		slurm_ctl_conf_ptr->mpi_default);
 #ifdef MULTIPLE_SLURMD
-	fprintf(out, "MULTIPLE_SLURMD   = %d\n", MULTIPLE_SLURMD);
+	fprintf(out, "MULTIPLE_SLURMD         = %d\n", MULTIPLE_SLURMD);
 #endif
-	fprintf(out, "NEXT_JOB_ID       = %u\n",
+	fprintf(out, "NEXT_JOB_ID             = %u\n",
 		slurm_ctl_conf_ptr->next_job_id);
-	fprintf(out, "PluginDir         = %s\n", 
+	fprintf(out, "PluginDir               = %s\n", 
 		slurm_ctl_conf_ptr->plugindir);
-	fprintf(out, "PlugStackConfig   = %s\n",
+	fprintf(out, "PlugStackConfig         = %s\n",
 		slurm_ctl_conf_ptr->plugstack);
-	fprintf(out, "ProctrackType     = %s\n",
+	fprintf(out, "PrivateData             = %u\n",
+		slurm_ctl_conf_ptr->private_data);
+	fprintf(out, "ProctrackType           = %s\n",
 		slurm_ctl_conf_ptr->proctrack_type);
-	fprintf(out, "Prolog            = %s\n", 
+	fprintf(out, "Prolog                  = %s\n", 
 		slurm_ctl_conf_ptr->prolog);
-	fprintf(out, "PropagatePrioProcess = %u\n",
+	fprintf(out, "PropagatePrioProcess    = %u\n",
 		slurm_ctl_conf_ptr->propagate_prio_process);
         fprintf(out, "PropagateResourceLimits = %s\n",
                 slurm_ctl_conf_ptr->propagate_rlimits);
         fprintf(out, "PropagateResourceLimitsExcept = %s\n", 
                 slurm_ctl_conf_ptr->propagate_rlimits_except);
-	fprintf(out, "ReturnToService   = %u\n", 
+	fprintf(out, "ResumeProgram           = %s\n", 
+		slurm_ctl_conf_ptr->resume_program);
+	fprintf(out, "ResumeRate              = %u\n", 
+		slurm_ctl_conf_ptr->resume_rate);
+	fprintf(out, "ReturnToService         = %u\n", 
 		slurm_ctl_conf_ptr->ret2service);
-	fprintf(out, "SchedulerPort     = %u\n",
+	fprintf(out, "SchedulerParameters     = %s\n",
+		slurm_ctl_conf_ptr->sched_params);
+	fprintf(out, "SchedulerPort           = %u\n",
 		slurm_ctl_conf_ptr->schedport);
-	fprintf(out, "SchedulerRootFilter = %u\n",
+	fprintf(out, "SchedulerRootFilter     = %u\n",
 		slurm_ctl_conf_ptr->schedrootfltr);
-	fprintf(out, "SchedulerType     = %s\n",
+	fprintf(out, "SchedulerTimeSlice      = %u\n",
+		slurm_ctl_conf_ptr->sched_time_slice);
+	fprintf(out, "SchedulerType           = %s\n",
 		slurm_ctl_conf_ptr->schedtype);
-	fprintf(out, "SelectType        = %s\n",
+	fprintf(out, "SelectType              = %s\n",
 		slurm_ctl_conf_ptr->select_type);
 	if (slurm_ctl_conf_ptr->select_type_param) {
-		fprintf(out, "SelectTypeParameters = %s\n",
+		fprintf(out, "SelectTypeParameters    = %s\n",
 			_select_info(slurm_ctl_conf_ptr->
 			select_type_param));
 	}
-	fprintf(out, "SlurmUser         = %s(%u)\n", 
+	fprintf(out, "SlurmUser               = %s(%u)\n", 
 		slurm_ctl_conf_ptr->slurm_user_name,
 		slurm_ctl_conf_ptr->slurm_user_id);
-	fprintf(out, "SlurmctldDebug    = %u\n", 
+	fprintf(out, "SlurmctldDebug          = %u\n", 
 		slurm_ctl_conf_ptr->slurmctld_debug);
-	fprintf(out, "SlurmctldLogFile  = %s\n", 
+	fprintf(out, "SlurmctldLogFile        = %s\n", 
 		slurm_ctl_conf_ptr->slurmctld_logfile);
-	fprintf(out, "SlurmctldPidFile  = %s\n", 
+	fprintf(out, "SlurmctldPidFile        = %s\n", 
 		slurm_ctl_conf_ptr->slurmctld_pidfile);
-	fprintf(out, "SlurmctldPort     = %u\n", 
+	fprintf(out, "SlurmctldPort           = %u\n", 
 		slurm_ctl_conf_ptr->slurmctld_port);
-	fprintf(out, "SlurmctldTimeout  = %u\n", 
+	fprintf(out, "SlurmctldTimeout        = %u\n", 
 		slurm_ctl_conf_ptr->slurmctld_timeout);
-	fprintf(out, "SlurmdDebug       = %u\n", 
+	fprintf(out, "SlurmdDebug             = %u\n", 
 		slurm_ctl_conf_ptr->slurmd_debug);
-	fprintf(out, "SlurmdLogFile     = %s\n", 
+	fprintf(out, "SlurmdLogFile           = %s\n", 
 		slurm_ctl_conf_ptr->slurmd_logfile);
-	fprintf(out, "SlurmdPidFile     = %s\n", 
+	fprintf(out, "SlurmdPidFile           = %s\n", 
 		slurm_ctl_conf_ptr->slurmd_pidfile);
 #ifndef MULTIPLE_SLURMD
-	fprintf(out, "SlurmdPort        = %u\n", 
+	fprintf(out, "SlurmdPort              = %u\n", 
 		slurm_ctl_conf_ptr->slurmd_port);
 #endif
-	fprintf(out, "SlurmdSpoolDir    = %s\n", 
+	fprintf(out, "SlurmdSpoolDir          = %s\n", 
 		slurm_ctl_conf_ptr->slurmd_spooldir);
-	fprintf(out, "SlurmdTimeout     = %u\n", 
+	fprintf(out, "SlurmdTimeout           = %u\n", 
 		slurm_ctl_conf_ptr->slurmd_timeout);
-	fprintf(out, "SLURM_CONFIG_FILE = %s\n", 
+	fprintf(out, "SLURM_CONFIG_FILE       = %s\n", 
 		slurm_ctl_conf_ptr->slurm_conf);
-	fprintf(out, "SLURM_VERSION     = %s\n", SLURM_VERSION);
-	fprintf(out, "SrunProlog        = %s\n",
-		slurm_ctl_conf_ptr->srun_prolog);
-	fprintf(out, "SrunEpilog        = %s\n",
+	fprintf(out, "SLURM_VERSION           = %s\n", SLURM_VERSION);
+	fprintf(out, "SrunEpilog              = %s\n",
 		slurm_ctl_conf_ptr->srun_epilog);
-	fprintf(out, "StateSaveLocation = %s\n", 
+	fprintf(out, "SrunProlog              = %s\n",
+		slurm_ctl_conf_ptr->srun_prolog);
+	fprintf(out, "StateSaveLocation       = %s\n", 
 		slurm_ctl_conf_ptr->state_save_location);
-	fprintf(out, "SwitchType        = %s\n",
+	fprintf(out, "SuspendExcNodes         = %s\n", 
+		slurm_ctl_conf_ptr->suspend_exc_nodes);
+	fprintf(out, "SuspendExcParts         = %s\n", 
+		slurm_ctl_conf_ptr->suspend_exc_parts);
+	fprintf(out, "SuspendProgram          = %s\n", 
+		slurm_ctl_conf_ptr->suspend_program);
+	fprintf(out, "SuspendRate             = %u\n", 
+		slurm_ctl_conf_ptr->suspend_rate);
+	fprintf(out, "SuspendTime             = %d\n", 
+		((int)slurm_ctl_conf_ptr->suspend_time - 1));
+	fprintf(out, "SwitchType              = %s\n",
 		slurm_ctl_conf_ptr->switch_type);
-	fprintf(out, "TaskEpilog        = %s\n",
+	fprintf(out, "TaskEpilog              = %s\n",
 		slurm_ctl_conf_ptr->task_epilog);
-	fprintf(out, "TaskPlugin        = %s\n",
+	fprintf(out, "TaskPlugin              = %s\n",
 		 slurm_ctl_conf_ptr->task_plugin);
-	fprintf(out, "TaskPluginParam   = %s\n",
+	fprintf(out, "TaskPluginParam         = %s\n",
 		_task_plugin_param(slurm_ctl_conf_ptr->task_plugin_param));
-	fprintf(out, "TaskProlog        = %s\n",
+	fprintf(out, "TaskProlog              = %s\n",
 		slurm_ctl_conf_ptr->task_prolog);
-	fprintf(out, "TmpFS             = %s\n", 
+	fprintf(out, "TmpFS                   = %s\n", 
 		slurm_ctl_conf_ptr->tmp_fs);
-	fprintf(out, "TreeWidth         = %u\n",
+	fprintf(out, "TreeWidth               = %u\n",
 		slurm_ctl_conf_ptr->tree_width);
-	fprintf(out, "UsePam            = %u\n",
+	fprintf(out, "UsePam                  = %u\n",
 		slurm_ctl_conf_ptr->use_pam);
-	fprintf(out, "WaitTime          = %u\n", 
+	fprintf(out, "UnkillableStepProgram   = %s\n",
+		slurm_ctl_conf_ptr->unkillable_program);
+	fprintf(out, "UnkillableStepTimeout   = %u\n",
+		slurm_ctl_conf_ptr->unkillable_timeout);
+	fprintf(out, "WaitTime                = %u\n", 
 		slurm_ctl_conf_ptr->wait_time);
 }
 

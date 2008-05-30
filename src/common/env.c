@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  src/common/env.c - add an environment variable to environment vector
- *  $Id: env.c 13678 2008-03-20 21:02:07Z jette $
+ *  $Id: env.c 14025 2008-05-09 16:37:03Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>, Danny Auble <da@llnl.gov>.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -48,8 +48,9 @@
 #include <strings.h>
 #include <unistd.h>
 #include <sys/poll.h>
+#include <sys/stat.h>
 #include <sys/types.h>
-
+#include <sys/param.h>		/* MAXPATHLEN */
 #include "src/common/macros.h"
 #include "slurm/slurm.h"
 #include "src/common/log.h"
@@ -77,7 +78,7 @@ strong_alias(env_array_append_fmt,	slurm_env_array_append_fmt);
 strong_alias(env_array_overwrite,	slurm_env_array_overwrite);
 strong_alias(env_array_overwrite_fmt,	slurm_env_array_overwrite_fmt);
 
-#define ENV_BUFSIZE (64 * 1024)
+#define ENV_BUFSIZE (256 * 1024)
 
 /*
  *  Return pointer to `name' entry in environment if found, or
@@ -172,7 +173,7 @@ setenvfs(const char *fmt, ...)
 	int rc;
 
 	va_start(ap, fmt);
-	vsnprintf(buf, ENV_BUFSIZE, fmt, ap);
+	vsnprintf(buf, sizeof(buf), fmt, ap);
 	va_end(ap);
 	
 	bufcpy = xstrdup(buf);
@@ -191,7 +192,7 @@ setenvf(char ***envp, const char *name, const char *fmt, ...)
 	char *bufcpy;
 
 	va_start(ap, fmt);
-	vsnprintf (buf, ENV_BUFSIZE, fmt, ap);
+	vsnprintf (buf, sizeof(buf), fmt, ap);
 	va_end(ap);
 	bufcpy = xstrdup(buf);
 	
@@ -649,8 +650,28 @@ int setup_env(env_t *env)
 		setenvf(&env->env, "LOADL_ACTIVE", "3.2.0");
 	}
 #endif
-	
-	return SLURM_SUCCESS;
+
+	if (env->pty_port
+	&&  setenvf(&env->env, "SLURM_PTY_PORT", "%hu", env->pty_port)) {
+		error("Can't set SLURM_PTY_PORT env variable");
+		rc = SLURM_FAILURE;
+	}
+	if (env->ws_col
+	&&  setenvf(&env->env, "SLURM_PTY_WIN_COL", "%hu", env->ws_col)) {
+		error("Can't set SLURM_PTY_WIN_COL env variable");
+		rc = SLURM_FAILURE;
+	}
+	if (env->ws_row
+	&&  setenvf(&env->env, "SLURM_PTY_WIN_ROW", "%hu", env->ws_row)) {
+		error("Can't set SLURM_PTY_WIN_ROW env variable");
+		rc = SLURM_FAILURE;
+	}
+	if (env->ckpt_path 
+        && setenvf(&env->env, "SLURM_CHECKPOINT_PATH", "%s", env->ckpt_path)) {
+		error("Can't set SLURM_CHECKPOINT_PATH env variable");
+		rc = SLURM_FAILURE;
+	}
+	return rc;
 }
 
 /**********************************************************************
@@ -878,8 +899,7 @@ void
 env_array_for_step(char ***dest, 
 		   const job_step_create_response_msg_t *step,
 		   const char *launcher_hostname,
-		   uint16_t launcher_port,
-		   const char *ip_addr_str)
+		   uint16_t launcher_port)
 {
 	char *tmp;
 
@@ -897,8 +917,6 @@ env_array_for_step(char ***dest,
 			 "%s", launcher_hostname);
 	env_array_overwrite_fmt(dest, "SLURM_STEP_LAUNCHER_PORT",
 			 "%hu", launcher_port);
-/* 	env_array_overwrite_fmt(dest, "SLURM_STEP_LAUNCHER_IPADDR", */
-/* 			 "%s", ip_addr_str); */
 
 	/* OBSOLETE */
 	env_array_overwrite_fmt(dest, "SLURM_STEPID", "%u", step->job_step_id);
@@ -911,8 +929,6 @@ env_array_for_step(char ***dest,
 			 "%s", launcher_hostname);
 	env_array_overwrite_fmt(dest, "SLURM_SRUN_COMM_PORT",
 			 "%hu", launcher_port);
-/* 	env_array_overwrite_fmt(dest, "SLURM_LAUNCH_NODE_IPADDR", */
-/* 			 "%s", ip_addr_str); */
 
 	xfree(tmp);
 }
@@ -977,7 +993,7 @@ int env_array_append_fmt(char ***array_ptr, const char *name,
 	}
 
 	va_start(ap, value_fmt);
-	vsnprintf (buf, ENV_BUFSIZE, value_fmt, ap);
+	vsnprintf (buf, sizeof(buf), value_fmt, ap);
 	va_end(ap);
 	
 	ep = _find_name_in_env(*array_ptr, name);
@@ -1053,7 +1069,7 @@ int env_array_overwrite_fmt(char ***array_ptr, const char *name,
 	}
 
 	va_start(ap, value_fmt);
-	vsnprintf (buf, ENV_BUFSIZE, value_fmt, ap);
+	vsnprintf (buf, sizeof(buf), value_fmt, ap);
 	va_end(ap);
 	
 	xstrfmtcat (str, "%s=%s", name, buf);
@@ -1172,11 +1188,11 @@ static int _env_array_entry_splitter(const char *entry,
  */
 static int _env_array_putenv(const char *string)
 {
-	char name[ENV_BUFSIZE];
+	char name[256];
 	char value[ENV_BUFSIZE];
 
-	if (!_env_array_entry_splitter(string, name, ENV_BUFSIZE, value, 
-				       ENV_BUFSIZE))
+	if (!_env_array_entry_splitter(string, name, sizeof(name),
+				       value, sizeof(value)))
 		return 0;
 	if (setenv(name, value, 1) == -1)
 		return 0;
@@ -1208,16 +1224,16 @@ void env_array_set_environment(char **env_array)
 void env_array_merge(char ***dest_array, const char **src_array)
 {
 	char **ptr;
-	char name[ENV_BUFSIZE];
+	char name[256];
 	char value[ENV_BUFSIZE];
 
 	if (src_array == NULL)
 		return;
 
 	for (ptr = (char **)src_array; *ptr != NULL; ptr++) {
-		_env_array_entry_splitter(*ptr, name, ENV_BUFSIZE, value, 
-					  ENV_BUFSIZE);
-		env_array_overwrite(dest_array, name, value);
+		if (_env_array_entry_splitter(*ptr, name, sizeof(name),
+					      value, sizeof(value)))
+			env_array_overwrite(dest_array, name, value);
 	}
 }
 
@@ -1244,8 +1260,8 @@ static void _strip_cr_nl(char *line)
  */
 char **_load_env_cache(const char *username)
 {
-	char *state_save_loc, fname[ENV_BUFSIZE];
-	char line[ENV_BUFSIZE], name[ENV_BUFSIZE], value[ENV_BUFSIZE];
+	char *state_save_loc, fname[MAXPATHLEN];
+	char line[ENV_BUFSIZE], name[256], value[ENV_BUFSIZE];
 	char **env = NULL;
 	FILE *fp;
 	int i;
@@ -1267,11 +1283,11 @@ char **_load_env_cache(const char *username)
 	info("Getting cached environment variables at %s", fname);
 	env = env_array_create();
 	while (1) {
-		if (!fgets(line, ENV_BUFSIZE, fp))
+		if (!fgets(line, sizeof(line), fp))
 			break;
 		_strip_cr_nl(line);
-		if (_env_array_entry_splitter(line, name, ENV_BUFSIZE, value, 
-					      ENV_BUFSIZE) &&
+		if (_env_array_entry_splitter(line, name, sizeof(name), 
+					      value, sizeof(value)) &&
 		    (!_discard_env(name, value)))
 			env_array_overwrite(&env, name, value);
 	}
@@ -1297,17 +1313,29 @@ char **_load_env_cache(const char *username)
  */
 char **env_array_user_default(const char *username, int timeout, int mode)
 {
-	char *line, *last, name[128], value[ENV_BUFSIZE];
+	char *line = NULL, *last = NULL, name[128], value[ENV_BUFSIZE];
 	char buffer[ENV_BUFSIZE];
 	char **env = NULL;
 	char *starttoken = "XXXXSLURMSTARTPARSINGHEREXXXX";
 	char *stoptoken  = "XXXXSLURMSTOPPARSINGHEREXXXXX";
-	char cmdstr[256];
+	char cmdstr[256], *env_loc = NULL;
 	int fildes[2], found, fval, len, rc, timeleft;
 	int buf_read, buf_rem;
 	pid_t child;
 	struct timeval begin, now;
 	struct pollfd ufds;
+	struct stat buf;
+
+	if (stat("/bin/su", &buf))
+		fatal("Could not locate command: /bin/su");
+	if (stat("/bin/echo", &buf))
+		fatal("Could not locate command: /bin/echo");
+	if (stat("/bin/env", &buf) == 0)
+		env_loc = "/bin/env";
+	else if (stat("/usr/bin/env", &buf) == 0)
+		env_loc = "/usr/bin/env";
+	else
+		fatal("Could not location command: env");
 
 	if (geteuid() != (uid_t)0) {
 		fatal("WARNING: you must be root to use --get-user-env");
@@ -1332,8 +1360,8 @@ char **env_array_user_default(const char *username, int timeout, int mode)
 		open("/dev/null", O_WRONLY);
 		snprintf(cmdstr, sizeof(cmdstr),
 			 "/bin/echo; /bin/echo; /bin/echo; "
-			 "/bin/echo %s; /bin/env; /bin/echo %s",
-			 starttoken, stoptoken);
+			 "/bin/echo %s; %s; /bin/echo %s",
+			 starttoken, env_loc, stoptoken);
 		if      (mode == 1)
 			execl("/bin/su", "su", username, "-c", cmdstr, NULL);
 		else if (mode == 2)

@@ -10,7 +10,7 @@
 # Copyright (C) 2002-2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Christopher J. Morrone <morrone2@llnl.gov>
-# UCRL-CODE-226842.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -42,10 +42,10 @@ set timeout $max_job_delay
 # Run an srun to grab a single node allocation, but not start any
 # job steps.
 #
-set srun_alloc_pid [spawn $srun -v -N1 -n1 -A $bin_sleep 600]
+set srun_alloc_pid [spawn $salloc -v -N1 -n1 $bin_sleep 600]
 set srun_alloc_sid $spawn_id
 expect {
-	-re "srun: jobid ($number)" {
+	-re "salloc: Granted job allocation ($number)" {
 		set jobid $expect_out(1,string)
 	}
 	timeout {
@@ -90,7 +90,7 @@ if {$got_pattern == 0} {
 }
 
 #
-# Release the allocation by killing the first srun (really it kills the "sleep")
+# Release the allocation by killing salloc (really it kills the "sleep")
 #
 cancel_job $jobid
 set spawn_id $srun_alloc_sid

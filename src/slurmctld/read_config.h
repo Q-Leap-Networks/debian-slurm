@@ -1,10 +1,10 @@
 /*****************************************************************************\
- *  read_config.h - header to manager node ping
+ *  read_config.h - functions for reading slurmctld configuration
  *****************************************************************************
  *  Copyright (C) 2003 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -48,7 +48,7 @@
  *                  node DOWN/DRAIN state and reason information
  *              1 = recover only saved job state information
  *              2 = recover all state saved from last slurmctld shutdown
- * RET 0 if no error, otherwise an error code
+ * RET SLURM_SUCCESS if no error, otherwise an error code
  * Note: Operates on common variables only
  */
 extern int read_slurm_conf(int recover);

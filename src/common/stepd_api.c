@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  src/common/stepd_api.c - slurmstepd message API
- *  $Id: stepd_api.c 12808 2007-12-11 17:25:08Z jette $
+ *  $Id: stepd_api.c 13695 2008-03-21 21:28:17Z jette $
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher Morrone <morrone2@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -58,7 +58,7 @@
 #include "src/common/pack.h"
 #include "src/common/slurm_auth.h"
 #include "src/common/slurm_cred.h"
-#include "src/common/slurm_jobacct.h"
+#include "src/common/slurm_jobacct_gather.h"
 #include "src/common/list.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/read_config.h"
@@ -211,7 +211,7 @@ stepd_connect(const char *directory, const char *nodename,
 
 	buffer = init_buf(0);
 	/* Create an auth credential */
-	auth_cred = g_slurm_auth_create(NULL, 2);
+	auth_cred = g_slurm_auth_create(NULL, 2, NULL);
 	if (auth_cred == NULL) {
 		error("Creating authentication credential: %s",
 		      g_slurm_auth_errstr(g_slurm_auth_errno(NULL)));
@@ -289,6 +289,7 @@ stepd_get_info(int fd)
 	safe_read(fd, &info->jobid, sizeof(uint32_t));
 	safe_read(fd, &info->stepid, sizeof(uint32_t));
 	safe_read(fd, &info->nodeid, sizeof(uint32_t));
+	safe_read(fd, &info->job_mem_limit, sizeof(uint32_t));
 
 	return info;
 rwfail:
@@ -312,6 +313,26 @@ stepd_signal(int fd, int signal)
 	safe_read(fd, &rc, sizeof(int));
 	return rc;
 rwfail:
+	return -1;
+}
+
+/*
+ * Send a checkpoint request to all tasks of a job step.
+ */
+int
+stepd_checkpoint(int fd, int signal, time_t timestamp)
+{
+	int req = REQUEST_CHECKPOINT_TASKS;
+	int rc;
+
+	safe_write(fd, &req, sizeof(int));
+	safe_write(fd, &signal, sizeof(int));
+	safe_write(fd, &timestamp, sizeof(time_t));
+
+	/* Receive the return code */
+	safe_read(fd, &rc, sizeof(int));
+	return rc;
+ rwfail:
 	return -1;
 }
 
@@ -647,21 +668,21 @@ rwfail:
 	return (pid_t)-1;
 }
 
-/*
- * Suspend execution of the job step.  Only root or SlurmUser is
- * authorized to use this call.
- *
- * Returns SLURM_SUCCESS is successful.  On error returns SLURM_ERROR
- * and sets errno.
- */
 int
-stepd_suspend(int fd)
+_step_suspend_write(int fd)
 {
 	int req = REQUEST_STEP_SUSPEND;
-	int rc;
-	int errnum = 0;
 
 	safe_write(fd, &req, sizeof(int));
+	return 0;
+rwfail:
+	return -1;
+}
+
+int
+_step_suspend_read(int fd)
+{
+	int rc, errnum = 0;
 
 	/* Receive the return code and errno */
 	safe_read(fd, &rc, sizeof(int));
@@ -671,6 +692,43 @@ stepd_suspend(int fd)
 	return rc;
 rwfail:
 	return -1;
+}
+
+
+/*
+ * Suspend execution of the job step.  Only root or SlurmUser is
+ * authorized to use this call. Since this activity includes a 'sleep 1'
+ * in the slurmstepd, initiate the the "suspend" in parallel
+ *
+ * Returns SLURM_SUCCESS is successful.  On error returns SLURM_ERROR
+ * and sets errno.
+ */
+int
+stepd_suspend(int *fd, int size, uint32_t jobid)
+{
+	int i;
+	int rc = 0;
+
+	for (i = 0; i < size; i++) {
+		debug2("Suspending job %u cached step count %d", jobid, i);
+		if (_step_suspend_write(fd[i]) < 0) {
+			debug("  suspend send failed: job %u (%d): %m",
+				jobid, i);
+			close(fd[i]);
+			fd[i] = -1;
+			rc = -1;
+		}
+	}
+	for (i = 0; i < size; i++) {
+		if (fd[i] == -1)
+			continue;
+		if (_step_suspend_read(fd[i]) < 0) {
+			debug("  resume failed for cached step count %d: %m",
+				i);
+			rc = -1;
+		}
+	}
+	return rc;
 }
 
 /*
@@ -743,7 +801,7 @@ stepd_completion(int fd, step_complete_msg_t *sent)
 	safe_write(fd, &sent->range_first, sizeof(int));
 	safe_write(fd, &sent->range_last, sizeof(int));
 	safe_write(fd, &sent->step_rc, sizeof(int));
-	jobacct_g_setinfo(sent->jobacct, JOBACCT_DATA_PIPE, &fd);	
+	jobacct_gather_g_setinfo(sent->jobacct, JOBACCT_DATA_PIPE, &fd);
 	/* Receive the return code and errno */
 	safe_read(fd, &rc, sizeof(int));
 	safe_read(fd, &errnum, sizeof(int));
@@ -771,15 +829,16 @@ stepd_stat_jobacct(int fd, stat_jobacct_msg_t *sent, stat_jobacct_msg_t *resp)
 	safe_write(fd, &req, sizeof(int));
 	
 	/* Receive the jobacct struct and return */
-	resp->jobacct = jobacct_g_alloc(NULL);
+	resp->jobacct = jobacct_gather_g_create(NULL);
 	
-	rc = jobacct_g_getinfo(resp->jobacct, JOBACCT_DATA_PIPE, &fd);	
+	rc = jobacct_gather_g_getinfo(resp->jobacct, JOBACCT_DATA_PIPE, &fd);
+	
 	safe_read(fd, &tasks, sizeof(int));
 	resp->num_tasks = tasks;
 	return rc;
 rwfail:
 	error("an error occured %d", rc);
-	jobacct_g_free(resp->jobacct);
+	jobacct_gather_g_destroy(resp->jobacct);
 	resp->jobacct = NULL;
 	return rc;
 }

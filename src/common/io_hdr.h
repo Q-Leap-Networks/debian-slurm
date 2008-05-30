@@ -1,11 +1,11 @@
 /*****************************************************************************\
  * src/common/io_hdr.h - IO connection header functions
- * $Id: io_hdr.h 10574 2006-12-15 23:38:29Z jette $
+ * $Id: io_hdr.h 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark A. Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.

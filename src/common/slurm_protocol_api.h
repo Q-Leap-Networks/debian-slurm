@@ -3,9 +3,10 @@
  *	definitions
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov>, et. al.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -96,6 +97,21 @@ int inline slurm_set_api_config(slurm_protocol_config_t * protocol_conf);
  */
 inline slurm_protocol_config_t *slurm_get_api_config();
 
+/* slurm_get_def_mem_per_task
+ * RET DefMemPerTask value from slurm.conf
+ */
+uint32_t slurm_get_def_mem_per_task(void);
+
+/* slurm_get_max_mem_per_task
+ * RET MaxMemPerTask value from slurm.conf
+ */
+uint32_t slurm_get_max_mem_per_task(void);
+
+/* slurm_get_epilog_msg_time
+ * RET EpilogMsgTime value from slurm.conf
+ */
+uint32_t slurm_get_epilog_msg_time(void);
+
 /* slurm_get_env_timeout
  * return default timeout for srun/sbatch --get-user-env option
  */
@@ -129,6 +145,24 @@ int inline slurm_api_set_default_config();
  * execute this only at program termination to free all memory */
 void inline slurm_api_clear_config(void);
 
+/* slurm_get_health_check_program
+ * get health_check_program from slurmctld_conf object from slurmctld_conf object
+ * RET char *   - health_check_program, MUST be xfreed by caller
+ */
+char *slurm_get_health_check_program(void);
+
+/* slurm_get_slurmdbd_addr
+ * get slurm_dbd_addr from slurmctld_conf object from slurmctld_conf object
+ * RET char *   - slurmdbd_addr, MUST be xfreed by caller
+ */
+char *slurm_get_slurmdbd_addr(void);
+
+/* slurm_get_slurmdbd_port
+ * get slurm_dbd_port from slurmctld_conf object from slurmctld_conf object
+ * RET uint16_t   - dbd_port
+ */
+uint16_t slurm_get_slurmdbd_port(void);
+
 /* slurm_get_plugin_dir
  * get plugin directory from slurmctld_conf object from slurmctld_conf object 
  * RET char *   - plugin directory, MUST be xfreed by caller
@@ -154,6 +188,24 @@ extern char *slurm_get_auth_type(void);
  */
 extern int slurm_set_auth_type(char *auth_type);
 
+/* slurm_get_checkpoint_type
+ * returns the checkpoint_type from slurmctld_conf object
+ * RET char *    - checkpoint type, MUST be xfreed by caller
+ */
+extern char *slurm_get_checkpoint_type(void);
+
+/* slurm_get_cluster_name
+ * returns the cluster name from slurmctld_conf object
+ * RET char *    - cluster name,  MUST be xfreed by caller
+ */
+char *slurm_get_cluster_name(void);
+
+/* slurm_get_crypto_type
+ * returns the crypto_type from slurmctld_conf object
+ * RET char *    - crypto type, MUST be xfreed by caller
+ */
+extern char *slurm_get_crypto_type(void);
+
 /* slurm_get_fast_schedule
  * returns the value of fast_schedule in slurmctld_conf object
  */
@@ -169,29 +221,95 @@ extern int slurm_set_tree_width(uint16_t tree_width);
  */
 extern uint16_t slurm_get_tree_width(void);
 
-/* slurm_get_jobacct_loc
- * returns the job accounting loc from slurmctld_conf object
- * RET char *    - job accounting location,  MUST be xfreed by caller
+/* slurm_get_accounting_storage_type
+ * returns the accounting storage type from slurmctld_conf object
+ * RET char *    - accounting storage type,  MUST be xfreed by caller
  */
-char *slurm_get_jobacct_loc(void);
+char *slurm_get_accounting_storage_type(void);
 
-/* slurm_get_jobacct_freq
- * returns the job accounting poll frequency from the slurmctld_conf object
- * RET int    - job accounting frequency
+/* slurm_get_accounting_storage_user
+ * returns the storage user from slurmctld_conf object
+ * RET char *    - storage user,  MUST be xfreed by caller
  */
-uint16_t slurm_get_jobacct_freq(void);
+char *slurm_get_accounting_storage_user(void);
 
-/* slurm_get_jobacct_type
+/* slurm_get_accounting_storage_host
+ * returns the storage host from slurmctld_conf object
+ * RET char *    - storage host,  MUST be xfreed by caller
+ */
+char *slurm_get_accounting_storage_host(void);
+
+/* slurm_get_accounting_storage_pass
+ * returns the storage password from slurmctld_conf object
+ * RET char *    - storage location,  MUST be xfreed by caller
+ */
+char *slurm_get_accounting_storage_loc(void);
+
+/* slurm_set_accounting_storage_loc
+ * IN: char *loc (name of file or database)
+ * RET 0 or error code
+ */
+int slurm_set_accounting_storage_loc(char *loc);
+
+/* slurm_get_accounting_storage_pass
+ * returns the storage password from slurmctld_conf object
+ * RET char *    - storage password,  MUST be xfreed by caller
+ */
+char *slurm_get_accounting_storage_pass(void);
+
+/* slurm_get_accounting_storage_port
+ * returns the storage port from slurmctld_conf object
+ * RET uint32_t   - storage port
+ */
+uint32_t slurm_get_accounting_storage_port(void);
+
+/* slurm_get_jobacct_gather_type
  * returns the job accounting type from slurmctld_conf object
  * RET char *    - job accounting type,  MUST be xfreed by caller
  */
-char *slurm_get_jobacct_type(void);
+char *slurm_get_jobacct_gather_type(void);
+
+/* slurm_get_jobacct_gather_freq
+ * returns the job accounting poll frequency from the slurmctld_conf object
+ * RET int    - job accounting frequency
+ */
+uint16_t slurm_get_jobacct_gather_freq(void);
 
 /* slurm_get_jobcomp_type
  * returns the job completion logger type from slurmctld_conf object
  * RET char *    - job completion type,  MUST be xfreed by caller
  */
 char *slurm_get_jobcomp_type(void);
+
+/* slurm_get_jobcomp_loc
+ * returns the job completion loc from slurmctld_conf object
+ * RET char *    - job completion location,  MUST be xfreed by caller
+ */
+char *slurm_get_jobcomp_loc(void);
+
+/* slurm_get_jobcomp_user
+ * returns the storage user from slurmctld_conf object
+ * RET char *    - storage user,  MUST be xfreed by caller
+ */
+char *slurm_get_jobcomp_user(void);
+
+/* slurm_get_jobcomp_host
+ * returns the storage host from slurmctld_conf object
+ * RET char *    - storage host,  MUST be xfreed by caller
+ */
+char *slurm_get_jobcomp_host(void);
+
+/* slurm_get_jobcomp_pass
+ * returns the storage password from slurmctld_conf object
+ * RET char *    - storage password,  MUST be xfreed by caller
+ */
+char *slurm_get_jobcomp_pass(void);
+
+/* slurm_get_jobcomp_port
+ * returns the storage port from slurmctld_conf object
+ * RET uint32_t   - storage port
+ */
+uint32_t slurm_get_jobcomp_port(void);
 
 /* slurm_get_propagate_prio_process
  * return the PropagatePrioProcess flag from slurmctld_conf object
@@ -607,7 +725,7 @@ int inline slurm_unpack_slurm_addr_no_alloc(slurm_addr * slurm_address,
  * returns		- SLURM error code
  */
 void inline slurm_pack_slurm_addr_array(slurm_addr * slurm_address,
-					uint16_t size_val, Buf buffer);
+					uint32_t size_val, Buf buffer);
 /* slurm_unpack_slurm_addr_array
  * unpacks an array of slurm_addrs from a buffer
  * OUT slurm_address	- slurm_addr to unpack to
@@ -616,7 +734,7 @@ void inline slurm_pack_slurm_addr_array(slurm_addr * slurm_address,
  * returns		- SLURM error code
  */
 int inline slurm_unpack_slurm_addr_array(slurm_addr ** slurm_address,
-					 uint16_t * size_val, Buf buffer);
+					 uint32_t * size_val, Buf buffer);
 
 /**********************************************************************\
  * simplified communication routines 

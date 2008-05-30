@@ -6,7 +6,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -77,7 +77,7 @@ struct sess_record *session_ptr;
 int dump_proc(int uid, int sid);
 void init_proc(void);
 int parse_proc_stat(char* proc_stat, int *session, 
-		long unsigned *time, long *resident_set_size);
+		    unsigned long *time, long *resident_set_size);
 int read_proc();
 
 #if DEBUG_MODULE
@@ -178,7 +178,7 @@ init_proc (void)
  * RET - zero or errno code
  */
 int 
-parse_proc_stat(char* proc_stat, int *session, long unsigned *time, 
+parse_proc_stat(char* proc_stat, int *session, unsigned long *time, 
 		long *resident_set_size) {
 	int pid, ppid, pgrp, tty, tpgid;
 	char cmd[16], state[1];
@@ -239,7 +239,7 @@ read_proc()
 	struct stat buffer;
 	int uid, session;
 	long resident_set_size;
-	long unsigned time;
+	unsigned long time;
 	struct sess_record *s_ptr, *sess_free;
 
 	/* Initialization */

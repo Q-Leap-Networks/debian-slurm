@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  src/common/slurm_cred.h  - SLURM job credential operations
- *  $Id: slurm_cred.h 10574 2006-12-15 23:38:29Z jette $
+ *  $Id: slurm_cred.h 14148 2008-05-28 23:35:40Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona1@llnl.gov>.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -129,11 +129,16 @@ int  slurm_cred_ctx_unpack(slurm_cred_ctx_t ctx, Buf buffer);
 typedef struct {
 	uint32_t jobid;
 	uint32_t stepid;
+	uint32_t job_mem;	/* MB of memory reserved for job */
+	uint32_t task_mem;	/* MB of memory reserved per task */
 	uid_t    uid;
 	char    *hostlist;
 	uint32_t alloc_lps_cnt;
         uint32_t *alloc_lps;
 } slurm_cred_arg_t;
+
+/* Terminate the plugin and release all memory. */
+int slurm_crypto_fini(void);
 
 /*
  * Create a slurm credential using the values in `arg.'
@@ -262,6 +267,11 @@ int slurm_cred_get_signature(slurm_cred_t cred, char **datap, int *len);
  */
 void slurm_cred_print(slurm_cred_t cred);
 
+/*
+ * Get count of allocated LPS (processors) by node
+ */
+int slurm_cred_get_alloc_lps(slurm_cred_t cred, char **nodes, 
+			     uint32_t *alloc_lps_cnt, uint32_t **alloc_lps);
 #ifdef DISABLE_LOCALTIME
 extern char * timestr (const time_t *tp, char *buf, size_t n);
 #endif

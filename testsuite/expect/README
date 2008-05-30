@@ -1,8 +1,10 @@
 ############################################################################
+# Copyright (C) 2008 Lawrence Livermore National Security.
 # Copyright (C) 2002-2007 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-226842.
+# Additionals by Joseph Donaghy <donaghy1@llnl.gov>
+# LLNL-CODE-402394.
 #
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -92,18 +94,15 @@ test1.8    Confirm that basic srun stdin, stdout, and stderr options work
            (--input, --output, and --error option respectively). 
 test1.9    Test of srun verbose mode (--verbose option).
 test1.10   Test of srun/slurmd debug mode (--debug option).
-test1.11   Test of batch job and job name options (--batch and --job-name 
-           options).
-test1.12   Test of processors, memory, and temporary disk space 
-           constraints options (--mincpus, --mem, and --tmp options).
-           Also test that priority zero job is not started (--hold option).
+test1.11   Test job name option (--job-name).
+test1.12   Test of --checkpoint option. This does not validate the 
+           checkpoint file itself.
 test1.13   Test of immediate allocation option (--immediate option).
-test1.14   Test of shared and contiguous options (--shared and --contiguous).
-           Also uses --batch and --hold options. Also see test1.53.
+test1.14   Test exclusive resource allocation for a step (--exclusive option).
 test1.15   Test of wait option (--wait option).
 test1.16   Confirm that srun buffering can be disabled (--unbuffered option).
-test1.17   Confirm that srun allocation mode (--allocate option).
-test1.18   Test of srun attach to existing job (--attach and --join options).
+test1.17   Test of srun --open-mode (truncate or append) option.
+test1.18   Test of --licenses option
 test1.19   Test srun stdout/err file name formatting (--output and --error 
            options with %j, %J, %n, %s and %t specifications).
 test1.20   Test srun stdout/err disabling (--output and --error options with 
@@ -128,31 +127,28 @@ test1.31   Verify that SLURM directed environment variables are processed:
            SLURM_STDOUTMODE.
 test1.32   Test of srun signal forwarding
 test1.33   Test of srun application exit code reporting
-test1.34   Verify that command arguments get forwarded to job script 
-           (--batch option).
+test1.34   REMOVED
 test1.35   Test of batch job with multiple concurrent job steps
 test1.36   Test parallel launch of srun (e.g. "srun srun hostname")
-test1.37   Confirm that node sharing flags are respected  (--nodelist and 
-           --share options).
+test1.37   REMOVED
 test1.38   Test srun handling of SIGINT to get task status or kill the job
            (--quit-on-interrupt option).
 test1.39   Test of linux light-weight core files.
-test1.40   Test of stand-alone srun resource allocation (--uid and --no-shell
-           options).
+test1.40   REMOVED
 test1.41   Validate SLURM debugger infrastructure (--debugger-test option).
-test1.42   Test of account number and job dependencies (--account, --begin 
+test1.42   Test of account number and job dependencies (--account,
            and --depedency options).
 test1.43   Test of slurm_job_will_run API, (srun --test-only option).
 test1.44   Read srun's stdout slowly and test for lost data.   
-test1.45   Test the launch of a batch job within an existing job allocation.
+test1.45   REMOVED
 test1.46   Test srun option --kill-on-bad-exit
-test1.47   Tests #SLURM entry functionality in a batch script.
+test1.47   REMOVED
 test1.48   Test of srun mail options (--mail-type and --mail-user options).
 test1.49   Test of srun task-prolog and task-epilog options.
 test1.50   Test of running non-existant job, confirm timely termination.
 test1.51   Test propagation of umask to spawned tasks.
 test1.52   Test of hostfile logic
-test1.53   Test of nice value specification (--nice option).
+test1.53   REMOVED
 test1.54   Test of running different executables with different arguments
            for each task (--multi-prog option).
 test1.55   Make certain that srun behaves when its controlling terminal
@@ -175,8 +171,7 @@ test1.83   Test of contiguous option with multiple nodes (--contiguous option).
            Also see test1.14.
 test1.84   Test of cpus-per-task option on a single node (--cpus-per-task  
            option).
-test1.85   Test of partition specification on job submission (--partition  
-           option).
+test1.85   REMOVED
 test1.86   Confirm node selection from within a job step on existing allocation
            (--nodelist, --exclude, --nodes and --nprocs options).
 test1.87   Confirm node selection from within a job step on existing allocation
@@ -186,6 +181,7 @@ test1.89   Test of CPU affinity support.
 test1.90   Test of memory affinity support for NUMA systems.
 test1.91   Test of CPU affinity for multi-core systems.
 test1.92   Test of task distribution support on multi-core systems.
+test1.93   Test of LAM-MPI functionality
 **NOTE**   The above tests for mutliple processor/partition systems only
 
 test2.#    Testing of scontrol options (to be run as unprivileged user). 
@@ -215,6 +211,7 @@ test3.6    Testing of hidden partitions.
 test3.7    Test of job suspend/resume.
 test3.8    Test of batch job requeue.
 test3.9    Test of "scontrol show slurmd"
+test3.10   Test of "scontrol notify <jobid> <message>"
 UNTESTED   "scontrol abort"    would stop slurm 
 UNTESTED   "scontrol shutdown" would stop slurm
 
@@ -276,14 +273,13 @@ test7.#    Testing of other functionality.
 ==========================================
 test7.1    Test priorities slurmctld assigns to jobs. Uses srun --hold and 
            --batch options.
-test7.2    Test of PMI functions available via API library. Uses srun and 
-           slaunch. Tests --pmi-threads option in both commands.
+test7.2    Test of PMI functions available via API library. Tests 
+           --pmi-threads option in srun command.
 test7.3    Test of slurm_step_launch API with spawn_io=true
            (needed by poe on IBM AIX systems).
 test7.4    Test of TotalView operation with srun, with and without bulk 
            transfer.
-test7.5    Test of TotalView operation with slaunch, with and without bulk
-           transfer.
+test7.5    REMOVED
 test7.6    Test of TotalView operation with sattach
 test7.7    Test of sched/wiki2 plugin. This is intended to execute in the 
            place of Moab or Maui and emulate its actions to confirm proper
@@ -298,13 +294,13 @@ test7.10   Test if we can trick SLURM into using the wrong user ID
 
 test8.#    Test of Blue Gene specific functionality.
 =================================================
-test8.1    Test of Blue Gene specific srun command line options
-test8.2    Test of Blue Gene specific srun environment variables
+test8.1    Test of Blue Gene specific sbatch command line options
+test8.2    Test of Blue Gene specific sbatch environment variables
 test8.3    Test of Blue Gene specific job geometry support
 test8.4    Test of Blue Gene MPI job execution
 test8.5    Confirm we can make a 32, 128, and 512 cnode block.
 test8.6    Stress test Dynamic mode block creation.
-
+test8.7    Test of Blue Gene scheduling with sched/wik2 plugin.
 
 test9.#    System stress testing. Exercises all commands and daemons.
 =====================================================================
@@ -475,66 +471,8 @@ test17.29  Verify that command arguments get forwarded to job script.
 test17.30  Test of comment field specification (--comment option).
 test17.31  Tests #PBS entry functionality in a batch script.
 test17.32  Test of --overcommit option.
+test17.33  Test of --open-mode option.
 
-
-test18.#   Testing of slaunch options.
-======================================
-test18.1   Confirm slaunch usage option works (--usage option).
-test18.2   Confirm slaunch help option works (--help option).
-test18.3   Confirm that slaunch reports a proper version number
-           (--version option).
-test18.4   Confirm that a job executes with the proper task count (--tasks
-           and --overcommit options).
-test18.5   Confirm that slauch local stdin, stdout, and stderr options work
-           (options --slaunch-input, --slaunch-output and --slaunch-error 
-           respectively).
-test18.6   Test of slaunch verbose mode (--verbose option).
-test18.7   Test of slaunch/slurmd debug mode (--slurmd_debug option).
-test18.8   Confirm that slaunch buffering can be disabled (--unbuffered option).
-test18.9   Test of wait option (--wait option).
-test18.10  Test slaunch task stdout/err disabling (--task-output and 
-           --task-error options).
-test18.11  Test slaunch stdout/err file name formatting (--task-output and 
-           --task-error options with %j, %J, %n, %s and %t specifications).
-test18.12  Test slaunch stdin routing to specific task (--slaunch-input-filter
-           option with numeric argument).
-test18.13  Confirm that slaunch sets appropriate working directory (--workdir
-           option).
-test18.14  Verify the appropriate job environment variables are set
-test18.15  Verify that user environment variables are propagated to the job
-test18.16  Verify that user limits are propagated to the job
-test18.17  Test of salloc and slaunch exit code reporting
-test18.18  Test of parallel launch of slaunch ("slaunch slaunch id").
-test18.19  Test of slaunch signal forwarding (actually using scancel, for 
-           now anyway)
-test18.20  Run "slaunch cat" and read slaunch's stdout SLOWLY, creating
-           stdout back pressure in slaunch.
-test18.21  Test of slaunch's --kill-on-bad-exit option.
-test18.22  Test of slaunch task-prolog and task-epilog option.
-test18.23  Test of running non-existant job, confirm timely termination.
-test18.24  Test propagation of umask to spawned tasks.
-test18.25  Test of --task-layout-file option.
-test18.26  Test of running different executables with different arguments
-           for each task (--multi-prog option).
-test18.27  Confirm that a job executes with the proper task distribution
-           (--nodes and --distribution options).
-test18.28  Confirm that a job executes with the proper node count
-           (--nodes option).
-test18.29  Test of slaunch --cpus-per-task option.
-test18.30  Confirm that a job executes with the proper node count
-           (--nodes option).
-test18.31  Confirm that a job executes with the specified nodes
-            (--relative, --nodelist-byname and --nodelist-byid).
-test18.32  Basic MPI functionality tests via slaunch.
-test18.33  Verify environment variables controlling slaunch are processed:
-           SLAUNCH_DEBUG, SLAUNCH_DISTRIBUTION, SLAUNCH_LABELIO and 
-           SLAUNCH_OVERCOMMIT
-test18.34  Test slaunch's ability to set the job step's name (--name option)
-test18.35  Test of task layout controls (--task-layout-byid, 
-           --task-layout-byname and --task-layout-file options).
-test18.36  Test of CPU affinity support (--cpu-bind option).
-test18.37  Test of memory affinity support for NUMA systems (--mem-bind option).
-test18.38  Test of slaunch --jobid
 
 test19.#   Testing of strigger options.
 =======================================
@@ -554,3 +492,12 @@ test20.2   qstat command tests
 test20.3   qdel command tests
 test20.4   pbsnodes command tests
 
+
+test21.#   Testing of sacctmgr commands and options.
+=================================================
+test21.1   sacctmgr --usage
+test21.2   sacctmgr --help
+test21.3   sacctmgr -V
+test21.4   sacctmgr version
+test21.5   sacctmgr add, list, and delete a cluster
+test21.6   sacctmgr add, list, and delete multiple cluster

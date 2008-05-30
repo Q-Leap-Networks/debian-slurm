@@ -10,7 +10,7 @@
 # Copyright (C) 2002 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-226842.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -54,9 +54,9 @@ BEGIN_TIME=`date +%s`
 for major in `seq 1 20`; do
 	for minor in `seq 1 100`; do
 		TEST=test${major}.${minor}
-		if [ ! -f $TEST ]; then continue; fi
+		if [ ! -f ./$TEST ]; then continue; fi
 
-		$TEST
+		./$TEST
 		if [ $? -eq 0 ]
 		then
 			COMPLETIONS=$((COMPLETIONS+1))

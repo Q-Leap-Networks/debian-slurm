@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  partition_info.c - get/print the partition state information of slurm
- *  $Id: partition_info.c 12627 2007-11-06 19:48:55Z jette $
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *   
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -108,6 +108,7 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 	char tmp1[16], tmp2[16];
 	char tmp_line[MAXHOSTRANGELEN];
 	char *out = NULL;
+	uint16_t force, val;
 
 	/****** Line 1 ******/
 #ifdef HAVE_BG
@@ -139,14 +140,20 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 	else
 		sprintf(tmp_line, "Default=NO ");
 	xstrcat(out, tmp_line);
-	if (part_ptr->shared == SHARED_NO)
-		sprintf(tmp_line, "Shared=NO ");
-	else if (part_ptr->shared == SHARED_YES)
-		sprintf(tmp_line, "Shared=YES ");
-	else if (part_ptr->shared == SHARED_EXCLUSIVE)
-		sprintf(tmp_line, "Shared=EXCLUSIVE ");
-	else
-		sprintf(tmp_line, "Shared=FORCE ");
+	force = part_ptr->max_share & SHARED_FORCE;
+	val = part_ptr->max_share & (~SHARED_FORCE);
+	if (val == 0)
+		xstrcat(out, "Shared=EXCLUSIVE ");
+	else if (force) {
+		sprintf(tmp_line, "Shared=FORCE:%u ", val);
+		xstrcat(out, tmp_line);
+	} else if (val == 1)
+		xstrcat(out, "Shared=NO ");
+	else {
+		sprintf(tmp_line, "Shared=YES:%u ", val);
+		xstrcat(out, tmp_line);
+	}
+	sprintf(tmp_line, "Priority=%u ", part_ptr->priority);
 	xstrcat(out, tmp_line);
 	if (part_ptr->state_up)
 		sprintf(tmp_line, "State=UP ");
@@ -155,8 +162,12 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 	xstrcat(out, tmp_line);
 	if (part_ptr->max_time == INFINITE)
 		sprintf(tmp_line, "MaxTime=UNLIMITED ");
-	else
-		sprintf(tmp_line, "MaxTime=%u ", part_ptr->max_time);
+	else {
+		char time_line[32];
+		secs2time_str(part_ptr->max_time * 60, time_line, 
+			sizeof(time_line));
+		sprintf(tmp_line, "MaxTime=%s ", time_line);
+	}
 	xstrcat(out, tmp_line);
 	if (part_ptr->hidden)
 		sprintf(tmp_line, "Hidden=YES");
@@ -169,7 +180,6 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 		xstrcat(out, "\n   ");
 	
 	/****** Line 3 ******/
-
 #ifdef HAVE_BG
 	convert_num_unit((float)part_ptr->min_nodes, tmp1, sizeof(tmp1),
 			 UNIT_NONE);
@@ -190,6 +200,11 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 #endif
 		sprintf(tmp_line, "MaxNodes=%s ", tmp1);
 	}
+	xstrcat(out, tmp_line);
+	if (part_ptr->disable_root_jobs)
+		sprintf(tmp_line, "DisableRootJobs=YES ");
+	else
+		sprintf(tmp_line, "DisableRootJobs=NO ");
 	xstrcat(out, tmp_line);
 	if ((part_ptr->allow_groups == NULL) || 
 	    (part_ptr->allow_groups[0] == '\0'))

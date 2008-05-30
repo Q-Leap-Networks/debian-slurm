@@ -11,10 +11,12 @@
 # set mpicc     "/usr/local/bin/mpicc"
 #
 ############################################################################
+# Copyright (C) 2008 Lawrence Livermore National Security.
 # Copyright (C) 2002-2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-226842.
+# Additions by Joseph Donaghy <donaghy1@llnl.gov>
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -34,7 +36,7 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 
-global sacct salloc sattach sbatch sbcast scancel scontrol sinfo slaunch smap squeue srun
+global sacctmgr sacct salloc sattach sbatch sbcast scancel scontrol sinfo smap squeue srun
 
 # Conditional set.  Only set variable if variable does not yet exist.
 proc cset {name value} {
@@ -53,6 +55,8 @@ if [file exists globals.local] {
 # Used to locate binaries, libraries, and header files.
 #
 cset slurm_dir   "/usr"
+cset build_dir   "../../"
+cset sacctmgr    "${slurm_dir}/bin/sacctmgr"
 cset sacct       "${slurm_dir}/bin/sacct"
 cset salloc      "${slurm_dir}/bin/salloc"
 cset sattach     "${slurm_dir}/bin/sattach"
@@ -61,7 +65,6 @@ cset sbcast      "${slurm_dir}/bin/sbcast"
 cset scancel     "${slurm_dir}/bin/scancel"
 cset scontrol    "${slurm_dir}/bin/scontrol"
 cset sinfo       "${slurm_dir}/bin/sinfo"
-cset slaunch     "${slurm_dir}/bin/slaunch"
 cset smap        "${slurm_dir}/bin/smap"
 cset squeue      "${slurm_dir}/bin/squeue"
 cset srun        "${slurm_dir}/bin/srun"
@@ -100,7 +103,7 @@ cset prompt "(%|#|\\\$|]|\[^>]>) *(|\[^ ]* *)$"
 # Only the shell names (e.g. bin_bash) must be full pathnames
 #
 cset bin_awk 	"awk"
-cset bin_bash   [exec which bash | tail -1]
+cset bin_bash   [exec which bash | tail -n 1]
 cset bin_cat	"cat"
 cset bin_cc	"gcc"
 cset bin_chmod	"chmod"
@@ -162,7 +165,7 @@ cset sleep_error_message "(invalid time interval)|(bad character in argument)"
 set alpha                "\[a-zA-Z\]+"
 set alpha_cap            "\[A-Z\]+"
 set alpha_numeric        "\[a-zA-Z0-9\]+"
-set alpha_numeric_under  "\[a-zA-Z0-9_\]+"
+set alpha_numeric_under  "\[a-zA-Z0-9_\-\]+"
 set alpha_under          "\[A-Z_\]+"
 set end_of_line          "\[\r\n\]"
 set number               "\[0-9\]+"

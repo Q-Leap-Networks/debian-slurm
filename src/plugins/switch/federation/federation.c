@@ -1,11 +1,11 @@
 /*****************************************************************************\
  **  federation.c - Library routines for initiating jobs on IBM Federation
- **  $Id: federation.c 12736 2007-11-29 21:53:34Z jette $
+ **  $Id: federation.c 13702 2008-03-22 00:13:35Z jette $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jason King <jking@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -1134,8 +1134,8 @@ static int _fake_unpack_adapters(Buf buf)
 	safe_unpack32(&adapter_count, buf);
 	for (i = 0; i < adapter_count; i++) {
 		/* no copy, just advances buf counters */
-		unpackmem_ptr(&dummyptr, &dummy16, buf);
-		if (dummy16 != FED_ADAPTERNAME_LEN)
+		safe_unpackmem_ptr(&dummyptr, &dummy32, buf);
+		if (dummy32 != FED_ADAPTERNAME_LEN)
 			goto unpack_error;
 		safe_unpack16(&dummy16, buf);
 		safe_unpack16(&dummy16, buf);
@@ -1171,7 +1171,7 @@ _unpack_nodeinfo(fed_nodeinfo_t *n, Buf buf, bool believe_window_status)
 	int i, j;
 	fed_adapter_t *tmp_a = NULL;
 	fed_window_t *tmp_w = NULL;
-	uint16_t size;
+	uint32_t size;
 	fed_nodeinfo_t *tmp_n = NULL;
 	char *name_ptr, name[FED_HOSTLEN];
 	int magic;
@@ -1186,7 +1186,7 @@ _unpack_nodeinfo(fed_nodeinfo_t *n, Buf buf, bool believe_window_status)
 	safe_unpack32(&magic, buf);
 	if(magic != FED_NODEINFO_MAGIC)
 		slurm_seterrno_ret(EBADMAGIC_FEDNODEINFO);
-	unpackmem_ptr(&name_ptr, &size, buf);
+	safe_unpackmem_ptr(&name_ptr, &size, buf);
 	if(size != FED_HOSTLEN)
 		goto unpack_error;
 	memcpy(name, name_ptr, size);
@@ -1234,7 +1234,7 @@ _unpack_nodeinfo(fed_nodeinfo_t *n, Buf buf, bool believe_window_status)
 	safe_unpack32(&tmp_n->adapter_count, buf);
 	for(i = 0; i < tmp_n->adapter_count; i++) {
 		tmp_a = tmp_n->adapter_list + i;
-		unpackmem_ptr(&name_ptr, &size, buf);
+		safe_unpackmem_ptr(&name_ptr, &size, buf);
 		if(size != FED_ADAPTERNAME_LEN)
 			goto unpack_error;
 		memcpy(tmp_a->name, name_ptr, size);
@@ -1964,7 +1964,7 @@ fed_pack_jobinfo(fed_jobinfo_t *j, Buf buf)
 static int
 _unpack_tableinfo(fed_tableinfo_t *tableinfo, Buf buf)
 {
-	uint16_t size;
+	uint32_t size;
 	char *name_ptr;
 	int i;
 
@@ -1978,7 +1978,7 @@ _unpack_tableinfo(fed_tableinfo_t *tableinfo, Buf buf)
 		safe_unpack16(&tableinfo->table[i]->lid, buf);
 		safe_unpack16(&tableinfo->table[i]->window_id, buf);
 	}
-	unpackmem_ptr(&name_ptr, &size, buf);
+	safe_unpackmem_ptr(&name_ptr, &size, buf);
 	if (size != FED_ADAPTERNAME_LEN)
 		goto unpack_error;
 	memcpy(tableinfo->adapter_name, name_ptr, size);
@@ -1993,7 +1993,7 @@ unpack_error: /* safe_unpackXX are macros which jump to unpack_error */
 int 
 fed_unpack_jobinfo(fed_jobinfo_t *j, Buf buf)
 {
-	uint16_t size;
+	uint32_t size;
 	int i, k;
 	
 	assert(j);
@@ -2003,7 +2003,7 @@ fed_unpack_jobinfo(fed_jobinfo_t *j, Buf buf)
 	safe_unpack32(&j->magic, buf);
 	assert(j->magic == FED_JOBINFO_MAGIC);
 	safe_unpack16(&j->job_key, buf);
-	unpackmem(j->job_desc, &size, buf);
+	safe_unpackmem(j->job_desc, &size, buf);
 	if(size != DESCLEN)
 		goto unpack_error;
 	safe_unpack32(&j->window_memory, buf);
@@ -2234,7 +2234,8 @@ _wait_for_all_windows(fed_tableinfo_t *tableinfo)
 			if (err != SLURM_SUCCESS) {
 				error("Window %hu adapter %s did not become"
 				      " free within %d seconds",
-				      lid, tableinfo->table[i]->window_id, i);
+				      lid, tableinfo->table[i]->window_id, 
+				      retry);
 				rc = err;
 				retry = 2;
 			}

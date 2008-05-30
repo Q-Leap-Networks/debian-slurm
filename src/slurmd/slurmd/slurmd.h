@@ -1,11 +1,11 @@
 /*****************************************************************************\
  * src/slurmd/slurmd/slurmd.h - header for slurmd
- * $Id: slurmd.h 13688 2008-03-21 17:27:38Z jette $
+ * $Id: slurmd.h 13690 2008-03-21 18:17:38Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -99,7 +99,7 @@ typedef struct slurmd_config {
 	char         *logfile;		/* slurmd logfile, if any          */
 	char         *spooldir;		/* SlurmdSpoolDir	           */
 	char         *pidfile;		/* PidFile location		   */
-
+	char         *health_check_program;	/* run on RPC request      */
 	char         *tmpfs;		/* directory of tmp FS             */
 	char         *pubkey;		/* location of job cred public key */
 	char         *epilog;		/* Path to Epilog script	   */
@@ -119,7 +119,7 @@ typedef struct slurmd_config {
 
 	uid_t           slurm_user_id;	/* UID that slurmctld runs as      */
 	pthread_mutex_t config_mutex;	/* lock for slurmd_config access   */
-	uint16_t        job_acct_freq;
+	uint16_t        job_acct_gather_freq;
 	uint16_t	use_pam;
 	uint16_t	use_cpusets;	/* Use cpusets, if available       */
 	uint16_t	propagate_prio;	/* PropagatePrioProcess flag       */

@@ -4,7 +4,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>, Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -422,7 +422,8 @@ _parse_format( char* format )
 {
 	int field_size;
 	bool right_justify;
-	char *prefix, *suffix, *token, *tmp_char, *tmp_format;
+	char *prefix = NULL, *suffix = NULL, *token = NULL,
+		*tmp_char = NULL, *tmp_format = NULL;
 	char field[1];
 
 	if (format == NULL) {
@@ -514,6 +515,12 @@ _parse_format( char* format )
 					suffix );
 		} else if (field[0] == 'N') {
 			format_add_node_list( params.format_list, 
+					field_size, 
+					right_justify, 
+					suffix );
+		} else if (field[0] == 'p') {
+			params.match_flags.priority_flag = true;
+			format_add_priority( params.format_list, 
 					field_size, 
 					right_justify, 
 					suffix );
@@ -691,6 +698,8 @@ void _print_options( void )
 	printf("memory_flag     = %s\n", params.match_flags.memory_flag ?
 			"true" : "false");
 	printf("partition_flag  = %s\n", params.match_flags.partition_flag ?
+			"true" : "false");
+	printf("priority_flag   = %s\n", params.match_flags.priority_flag ?
 			"true" : "false");
 	printf("reason_flag     = %s\n", params.match_flags.reason_flag ?
 			"true" : "false");

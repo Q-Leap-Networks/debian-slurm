@@ -2,7 +2,7 @@
 
 <h1>SLURM Team</h1>
 <p>SLURM development has been a joint effort of 
-<a href="http://www.llnl.gov/">Lawrence Livermore National Laboratory</a> (LLNL),
+<a href="https://www.llnl.gov/">Lawrence Livermore National Laboratory</a> (LLNL),
 <a href="http://www.hp.com/">HP</a>,
 <a href="http://www.bull.com/">Bull</a>,
 <a href="http://www.lnxi.com/">Linux NetworX</a>.
@@ -12,9 +12,7 @@
 <li>Morris Jette (LLNL, Project leader)</li>
 <li>Danny Auble (LLNL)</li>
 <li>Susanne Balle (HP)</li>
-<li>Mark Grondona (LLNL)</li>
-<li>Chris Morrone (LLNL)</li>
-<li>Daniel Palermo (HP)</li>
+<li>Chris Holmes (HP)</li>
 </ul>
 
 <p> SLURM contributers include: </p>
@@ -31,8 +29,9 @@
 <li>Chris Dunlap (LLNL)</li>
 <li>Joey Ekstrom (LLNL/Bringham Young University)</li>
 <li>Jim Garlick (LLNL)</li>
+<li>Mark Grondona (LLNL)</li>
 <li>Takao Hatazaki (HP, Japan)</li>
-<li>Chris Holmes (HP)</li>
+<li>Matthieu Hautreux (CEA, France)</li>
 <li>Nathan Huff (North Dakota State University)</li>
 <li>David Jackson (Cluster Resources)</li>
 <li>Greg Johnson (LANL)</li>
@@ -42,10 +41,12 @@
 <li>Bernard Li (Genome Sciences Centre, Canada)</li>
 <li>Steven McDougall (SiCortex)</li>
 <li>Donna Mecozzi (LLNL)</li>
+<li>Chris Morrone (LLNL)</li>
 <li>Pere Munt (Barcelona Supercomputer Center, Spain)<li>
 <li>Bryan O'Sullivan (Pathscale)</li>
 <li>Gennaro Oliva (Institute of High Performance Computing and 
 Networking, Italy)</li>
+<li>Daniel Palermo (HP)</li>
 <li>Dan Phung (LLNL/Columbia University)</li>
 <li>Ashley Pittman (Quadrics)</li>
 <li>Andy Riebs (HP)</li>
@@ -59,6 +60,6 @@ Networking, Italy)</li>
 <li>Anne-Marie Wunderlin (Bull)</li>
 </ul>
 
-<p style="text-align:center;">Last modified 14 August 2007</p>
+<p style="text-align:center;">Last modified 22 May 2008</p>
 
 <!--#include virtual="footer.txt"-->

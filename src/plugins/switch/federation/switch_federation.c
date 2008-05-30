@@ -1,12 +1,12 @@
 /***************************************************************************** \
  **  switch_federation.c - Library routines for initiating jobs on IBM 
  **	Federation
- **  $Id: switch_federation.c 10574 2006-12-15 23:38:29Z jette $
+ **  $Id: switch_federation.c 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jason King <jking@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.

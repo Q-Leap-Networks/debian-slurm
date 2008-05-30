@@ -11,7 +11,7 @@
  *  and
  *  Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>,
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -142,11 +142,11 @@ extern int
 multi_prog_get_argv(char *file_contents, char **prog_env, int task_rank,
 		    int *argc, char ***argv)
 {
-	char *line;
+	char *line = NULL;
 	int line_num = 0;
 	int task_offset;
-	char *p, *s, *ptrptr;
-	char *rank_spec, *args_spec;
+	char *p = NULL, *s = NULL, *ptrptr = NULL;
+	char *rank_spec = NULL, *args_spec = NULL;
 	int prog_argc = 0;
 	char **prog_argv = NULL;
 	char *local_data = NULL;

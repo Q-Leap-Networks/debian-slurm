@@ -5,7 +5,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov>, et. al.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -66,6 +66,7 @@
 
 /* used to set flags to empty */
 #define SLURM_PROTOCOL_NO_FLAGS 0 
+#define SLURM_GLOBAL_AUTH_KEY   1
 
 #if MONGO_IMPLEMENTATION
 #  include <src/common/slurm_protocol_mongo_common.h>

@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  signal.c - Send a signal to a slurm job or job step
- *  $Id: signal.c 12647 2007-11-12 17:09:47Z da $
+ *  $Id: signal.c 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -402,5 +402,39 @@ static int _terminate_batch_script_step(
 		rc = i;
 
 	return rc;
+}
+
+/*
+ * slurm_notify_job - send message to the job's stdout, 
+ *	usable only by user root
+ * IN job_id - slurm job_id or 0 for all jobs
+ * IN message - arbitrary message
+ * RET 0 or -1 on error
+ */
+extern int slurm_notify_job (uint32_t job_id, char *message)
+{
+	int rc;
+	slurm_msg_t msg;
+	job_notify_msg_t req;
+
+	slurm_msg_t_init(&msg);
+	/* 
+	 * Request message:
+	 */
+	req.job_id      = job_id;
+	req.job_step_id = NO_VAL;	/* currently not used */
+	req.message     = message;
+	msg.msg_type    = REQUEST_JOB_NOTIFY;
+	msg.data        = &req;
+
+	if (slurm_send_recv_controller_rc_msg(&msg, &rc) < 0)
+		return SLURM_FAILURE;
+
+	if (rc) {
+		slurm_seterrno_ret(rc);
+		return SLURM_FAILURE;
+	}
+
+	return SLURM_SUCCESS;
 }
 

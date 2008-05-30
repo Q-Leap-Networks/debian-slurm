@@ -5,7 +5,7 @@
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -31,7 +31,7 @@
 
 main (int argc, char **argv) 
 {
-	int exit_code, i, sleep_time, mem_kb;
+	int exit_code, sleep_time, mem_kb;
 	char *mem;
 
 	if (argc != 4) {
@@ -46,10 +46,11 @@ main (int argc, char **argv)
 	mem_kb     = atoi(argv[3]);
 
 	mem = malloc(mem_kb * 1024);
-	/* We need to actually use the memory for
-	 * AIX to the allocation */
-	for (i=0; i<(mem_kb * 1024); i++)
-		mem[i] = i%64;
+	/* need to do a memset on the memory or AIX will not give it
+	 * to me! 
+	 */
+	memset(mem, 0, (mem_kb * 1024));
 	sleep(sleep_time);
+	free(mem);
 	exit(exit_code);
 }

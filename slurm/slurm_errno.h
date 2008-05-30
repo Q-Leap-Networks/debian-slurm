@@ -5,7 +5,7 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov>, 
  *	Jim Garlick <garlick@llnl.gov>, et. al.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -150,6 +150,13 @@ enum {
 	ESLURM_TASKDIST_ARBITRARY_UNSUPPORTED,
 	ESLURM_TASKDIST_REQUIRES_OVERCOMMIT,
 	ESLURM_JOB_HELD,
+	ESLURM_INVALID_CRYPTO_TYPE_CHANGE,
+	ESLURM_INVALID_BANK_ACCOUNT,
+	ESLURM_INVALID_TASK_MEMORY,
+	ESLURM_INVALID_ACCOUNT,
+	ESLURM_INVALID_LICENSES,
+	ESLURM_NEED_RESTART,
+	ESLURM_ACCOUNTING_POLICY,
 
 	/* switch specific error codes, specific values defined in plugin module */
 	ESLURM_SWITCH_MIN = 3000,

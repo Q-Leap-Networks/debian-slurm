@@ -1,12 +1,12 @@
 /****************************************************************************\
  *  opts.c - srun command line option parsing
  *
- *  $Id: opts.c 12590 2007-10-31 16:08:11Z jette $
+ *  $Id: opts.c 14150 2008-05-29 00:14:29Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>, Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -558,6 +558,11 @@ extern int parse_format( char* format )
 				                        field_size, 
 				                        right_justify, 
 				                        suffix );
+			else if (field[0] == 'Q')
+				 job_format_add_priority_long( params.format_list,
+							field_size,
+							right_justify,
+							suffix );
 			else if (field[0] == 'r')
 				job_format_add_reason( params.format_list,
 							field_size,

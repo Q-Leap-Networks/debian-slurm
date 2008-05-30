@@ -1,5 +1,5 @@
 ############################################################################### 
-#                   Sample configuration file for SLURM
+#                 Sample configuration file for SLURM 1.3
 ###############################################################################
 #
 # This file holds the system-wide SLURM configuration. It is read
@@ -39,6 +39,7 @@
 # ControlAddr=edev0		# default: same as ControlMachine
 # BackupController=dev1		# default: no backup controller
 # BackupAddr=edev1		# default: same as BackupController
+
 ControlMachine=laptop
 
 #
@@ -53,6 +54,7 @@ ControlMachine=laptop
 # Example:
 # 
 # StateSaveLocation=/mnt/slurm	# default: "/tmp"
+
 StateSaveLocation=/var/run/slurm-llnl/slurmctld
 
 #
@@ -66,7 +68,8 @@ StateSaveLocation=/var/run/slurm-llnl/slurmctld
 #
 # Example:
 # 
-# SlurmdSpoolDir=/var/tmp/slurmd	# default: "/tmp/slurmd"
+# SlurmdSpoolDir=/var/tmp/slurmd	# default: "/var/spool/slurmd"
+
 SlurmdSpoolDir=/var/run/slurm-llnl/slurmd
 
 #
@@ -78,7 +81,8 @@ SlurmdSpoolDir=/var/run/slurm-llnl/slurmd
 #
 # Example:
 #
-# SlurmUser=slurm
+# SlurmUser=slurm	# default: "root"
+
 SlurmUser=slurm
 
 #
@@ -99,7 +103,7 @@ SlurmUser=slurm
 # Example:
 #
 # CacheGroups=1		# default is `0'
-CacheGroups=0
+
 
 #
 # o Define the slurmctld and slurmd server port numbers
@@ -114,38 +118,11 @@ CacheGroups=0
 #
 # Example:
 #
-# SlurmctldPort=7010 	# 
-# SlurmdPort=7011       #
-SlurmctldPort=6817
-SlurmdPort=6818
+# SlurmctldPort=7010 	# default is `6817'
+# SlurmdPort=7011       # default is `6818'
+
 
 #
-# o Define slurmd and slurmctld logging options
-#
-#    "SlurmctldDebug"   : verbosity of slurmctld log messages 
-#                         (Values from 0 to 7 are legal, with `0' being
-#                          "quiet" operation and `7' being insanely verbose)
-#
-#    "SlurmdDebug"      : verbosity of slurmd log messages (0-7, see above)
-#
-#    "SlurmctldLogFile" : fully qualified pathname to slurmctld logfile
-#                         (If a logfile is set for slurmctld, logging via
-#                          syslog will be turned off)
-#
-#    "SlurmdLogFile"    : fully qualified pathname to slurmd logfile,
-#                         may contain "%h" for hostname substitution
-#                         (same caveat as SlurmctldLogFile above)
-#
-# Example:
-#
-# SlurmctldDebug=4	# default is `3'  
-# SlurmdDebug=4		# default is `3'
-#
-# SlurmctldLogFile=/var/log/slurmctld.log  # default is to log via syslog()
-# SlurmdLogFile=/var/log/slurmd.log.%h     # substitute hostname for "%h"
-SlurmctldDebug=3
-SlurmdDebug=3
-
 # o Define an alternate location for slurmd and slurmctld pid files, 
 #   SlurmctldPidFile and SlurmdPidFile should have different values
 #  
@@ -156,7 +133,8 @@ SlurmdDebug=3
 # Example:
 #
 # SlurmctldPidFile=/var/slurm/slurmctld.pid  # default: "/var/run/slurmctld.pid"
-# SlurmdPidFile=/var/slurm/slurmd.pid     # default: "/var/run/slurmd.pid"
+# SlurmdPidFile=/var/slurm/slurmd.pid        # default: "/var/run/slurmd.pid"
+
 SlurmctldPidFile=/var/run/slurm-llnl/slurmctld.pid
 SlurmdPidFile=/var/run/slurm-llnl/slurmd.pid
 
@@ -169,86 +147,14 @@ SlurmdPidFile=/var/run/slurm-llnl/slurmd.pid
 # "auth/munge"  : LLNL's munge
 #
 # WARNING: The use of "auth/none" permits any user to execute jobs as any 
-# other user. This may be fine for testing purposes, but do not use it in production.
+# other user. This may be fine for testing purposes, but do not use it in
+# production.
 #
-# AuthType=auth/none
+# Example:
+#
+# AuthType=auth/munge	# default: "auth/none"
+
 AuthType=auth/munge
-
-# o Define TreeWidth for communication to the slurmds.  Slurmds use
-# a virtual tree network, this variable specifies the width of the tree
-#
-# Default is 50
-#
-# TreeWidth=50
-
-
-#
-# o Define a scheduler.
-#
-# "SchedulerType"	 : the type of scheduler. Orders pending jobs.
-#	"sched/builtin"	 : the default, SLURM's built-in FIFO scheduler.
-#	"sched/backfill" : FIFO scheduling with backfill.
-#	"sched/hold"     : hold all new jobs if "/etc/slurm.hold" exists, 
-#	                   otherwise perform FIFO scheduling.
-#	"sched/wiki"	 : the Wiki interface to Maui.
-#
-# "SchedulerAuth"	 : an authentication token, if any, that must
-#			   be used in a scheduler communication
-#			   protocol.  The interpretation of this value
-#			   depends on the plugin type.
-#
-# "SchedulerPort"	 : for polling schedulers, the port number on
-#			   which slurmctld should listen for connection
-#			   requests.
-#
-# "SchedulerRootFilter"	 : for schedulers that support it (currently only
-#			   sched/backfill). If set to '1' then scheduler
-#			   will filter and avoid RootOnly partitions (let
-#			   root user or process schedule these partitions).
-#			   Otherwise scheduler will treat RootOnly
-#			   partitions as any other standard partition.
-#
-# SchedulerType=sched/wiki
-# SchedulerAuth=42
-# SchedulerPort=7321
-# SchedulerRootFilter=0	# default is '1'
-SchedulerType=sched/backfill
-SchedulerPort=7321
-
-#
-# "SelectType"			: node selection logic for scheduling.
-#	"select/bluegene"	: the default on BlueGene systems, aware of
-#				  system topology, manages bglblocks, etc.
-#	"select/cons_res"	: allocate individual consumable resources
-#				  (i.e. processors, memory, etc.)
-#	"select/linear"		: the default on non-BlueGene systems,
-#				  no topology awareness, oriented toward
-#				  allocating nodes to jobs rather than
-#				  resources within a node (e.g. CPUs)
-#
-# SelectType=select/linear
-SelectType=select/linear
-
-#
-# "JobCompType"			:  Define the job completion logging
-#				   mechanism to be used
-#	"jobcomp/none"		: no job logging, the default
-#	"jobcomp/filetxt"	: log job record to a text file
-#	"jobcomp/script"	: execute an arbitrary script
-#
-# JobCompType=jobcomp/filetxt
-JobCompType=jobcomp/none
-
-#
-# o Define location where job completion logs are to be written
-#   Interpretation of the parameter is dependent upon the logging
-#   mechanism used (specified by the JobCompType parameter). For
-#   "JobCompType=jobcomp/filetxt" the value of JobCompLoc should
-#   be the fully qualified pathname of a file into which text
-#   records are appended.
-#
-# JobCompLoc=/var/log/slurm.job.log
-
 
 #
 # o Define the switch or interconnect in use.
@@ -260,8 +166,10 @@ JobCompType=jobcomp/none
 #     switch/federation: IBM Federation switch
 #     switch/elan      : Quadrics Elan 3 or Elan 4 interconnect.
 #
-# SwitchType=switch/none
-SwitchType=switch/none
+# Example:
+#
+# SwitchType=switch/elan	# default: "switch/none"
+
 
 #
 # o Define the process tracking mechanism in use.
@@ -279,89 +187,36 @@ SwitchType=switch/none
 #                             for more information
 #     "proctrack/pgid"      : use Unix process group ID for process tracking,
 #                             the default value on all other computers
+# 
+# Example:
+#
+# ProctrackType=proctrack/linuxproc	# default "proctrack/pgid"
 
-# ProctrackType=proctrack/pgid
-ProctrackType=proctrack/pgid
-
-#
-# o Define the job accounting mechanism to use.
-#
-#   "jobacct/aix"      : Job accounting information
-#                        from the AIX proc table
-#   "jobacct/linux"    : Job accouting information 
-#                        from the linux proc table
-#   "jobacct/none"     : No job accouting information.
-#
-
-JobAcctType=jobacct/none
-
-#
-# o Define the Frequency of the JobAcct poll thread
-#
-# JobAcctFrequency=30
-
-#
-# o Define the log file for job accounting this will be written on the
-#   same node the slurmctld is being ran on.  
-#
-#JobAcctLogFile=/var/log/slurm_jobacct.log
 
 #
 # o Define the places to look for SLURM plugins.  This is a
 #   colon-separated list of directories, just like the PATH
 #   environment variable.
 #
-# PluginDir=/etc/slurm/plugins # default: PREFIX/lib/slurm
-
-#
-# o Define some timeout values for the slurm controller and backup
-#
-#    "SlurmctldTimeout" : amount of time, in seconds, backup controller
-#                         waits for primary controller to respond 
-#                         before assuming control.
-#
-#    "SlurmdTimeout"    : amount of time, in seconds, the controller
-#                         waits for slurmd to respond before setting the
-#                         node's state to DOWN. If set to 0, this feature
-#                         is disabled.
-#
-#    "InactiveLimit"    : The interval, in seconds, a job or job step is 
-#                         permitted to be inactive (srun command not responding)
-#                         before being terminated.
-#
-#    "MinJobAge"        : The time, in seconds, after a job completes before
-#                         its record is purged from the active slurmctld data.
-#   
-#    "KillWait"         : The time, in seconds, between SIGTERM and SIGKILL
-#                         signals sent to a job upon reaching its timelimit.
-#
-#    "WaitTime"         : Specifies how many seconds srun should wait after the 
-#                         first task terminates before terminating all remaining  
-#                         tasks. If set to 0, this feature is disabled.
-#
 # Example:
 #
-# SlurmctldTimeout=120	# Defaults to 120 seconds
-# SlurmdTimeout=300	# Defaults to 300 seconds
-# InactiveLimit=600	# Defaults to 0 (unlimited)
-# MinJobAge=30		# Defaults to 300 seconds
-# KillWait=10		# Defaults to 30 seconds
-# WaitTime=30		# Defaults to 0 (unlimited)
-SlurmctldTimeout=300
-SlurmdTimeout=300
-InactiveLimit=0
-MinJobAge=300
-KillWait=30
-Waittime=0
+# PluginDir=/etc/slurm/plugins:/usr/local/etc	# default: /usr/lib/slurm
+
 
 #
 # o Define other miscellaneous SLURM controller configuration values:
 #
 #    "FastSchedule"     : if set to `1' consider the configuration of nodes
-#                         to be exactly that set in the config file. Otherwise,
-#                         consider configuration of nodes to that which is
-#                         reported by the node's slurmd. A FastSchedule value of
-#                         zero will result in significantly slower scheduling.
+#                         to be exactly that set in the config file, if set
+#                         to `0' consider configuration of nodes to that
+#                         which is reported by the node's slurmd, if set to
+#                         `2' consider the configuration of each node to be
+#                         that specified in the slurm.conf configuration
+#                         file (as `1') and any node with less resources
+#                         than configured will not be set DOWN.
+#                         This can be useful for testing purposes.
+#                         A FastSchedule value of zero will result in
+#                         significantly slower scheduling.
 #
 #    "FirstJobId"       : Number of the first assigned job id.
 #
@@ -373,7 +228,8 @@ Waittime=0
 #    "MaxJobCount"      : defines the maximum number of jobs slurmctld can 
 #                         have in its active database at one time. Set the 
 #                         values of MaxJobCount and MinJobAge so as to avoid 
-#                         having slurmctld exhaust its memory or other resources.
+#                         having slurmctld exhaust its memory or other
+#                         resources.
 #
 #    "MpiDefault"	: define the default type of MPI to be used. If
 #			  srun does not specify another value, slurm will 
@@ -389,9 +245,8 @@ Waittime=0
 # ReturnToService=1     	# default is `0'
 # MaxJobCount=10000		# Defaults to 2000
 # MpiDefault			# default is "none"
-FastSchedule=1
+
 ReturnToService=1
-MpiDefault=none
 
 #
 # o Define Process Priority Propagation Configuration
@@ -525,7 +380,7 @@ MpiDefault=none
 # TaskProlog=/usr/local/slurm/etc/task_prolog # default is none
 # TaskEpilog=/usr/local/slurm/etc/task_epilog # default is none
 # TaskPlugin=task/affinity                    # default is task/none
-TaskPlugin=task/none
+
 
 #
 # o Define the temporary file system 
@@ -551,8 +406,69 @@ TaskPlugin=task/none
 #
 # JobCredentialPrivateKey=/etc/slurm/slurm.key
 # JobCredentialPublicCertificate=/etc/slurm/slurm.cert 
+
 JobCredentialPrivateKey=/etc/slurm-llnl/slurm.key
 JobCredentialPublicCertificate=/etc/slurm-llnl/slurm.cert
+
+#  "CheckpointType" : Define the system-initiated checkpoint method to be
+#                     used for user jobs. Acceptable values at present
+#		     include "checkpoint/aix" (only on AIX systems),
+#		     "checkpoint/ompi" (requires OpenMPI version 1.3 or
+#		     higher), "checkpoint/xlch" (for XLCH, requires that
+#		     SlurmUser be root), and "checkpoint/none". The default
+#		     value is "checkpoint/none".
+# Example:
+#
+# CheckpointType=checkpoint/ompi	# default: "checkpoint/none"
+
+# "CryptoType" : Define the cryptographic signature tool to be used in the
+#                creation of job step credentials. Acceptable values at present
+#                include "crypto/munge" and "crypto/openssl"
+#
+# Example:
+#
+# CryptoType=crypto/munge 	# default: "crypto/openssl"
+
+CryptoType=crypto/openssl
+
+# "DisableRootJobs" : If set to 1 then user root will be prevented from running
+#                     any jobs.
+# Example:
+#
+# DisableRootJobs=1	# default: `0'
+
+# "JobFileAppend" : This option controls what to do if a job’s output or error
+#                   file exist when the job is started. If JobFileAppend is set
+#                   to a value of 1, then append to the existing file.
+# Example:
+#
+# JobFileAppend=1 	# default:`0'
+
+# "JobRequeue" : This option controls what to do by default after a node failure.
+#                If JobRequeue is set to a value of 1, then any job running on
+#                the failed node will be requeued for execution on different
+#                nodes. If JobRequeue is set to a value of 0, then any job 
+#                running on the failed node will be terminated.
+# Example:
+#
+# JobRequeue=1		# default: `0'
+
+# "MailProg" : Fully qualified pathname to the program used to send email per
+#              user request.
+# Example:
+#
+# MailProg=/usr/bin/mail	# default: "/bin/mail"
+
+MailProg=/usr/bin/mail
+
+# "PrivateData" : If non-zero then users are unable to view jobs or job steps
+#                 belonging to other users (except for SlurmUser or root, who can
+#                 view all jobs). Otherwise any user is permitted
+#                 to view any jobs or job steps.
+# Example:
+#
+# PrivateData=1		# default: `0'
+
 
 #
 #     Node and Partition Configuration
@@ -607,6 +523,7 @@ JobCredentialPublicCertificate=/etc/slurm-llnl/slurm.cert
 # NodeName=DEFAULT Procs=2 TmpDisk=64000 State=UNKNOWN
 # NodeName=host[0-25] NodeAddr=ehost[0-25] Weight=16
 # NodeName=host26     NodeAddr=ehost26     Weight=32 Feature=graphics_card
+
 NodeName=server Procs=1 State=UNKNOWN
 
 #
@@ -654,4 +571,348 @@ NodeName=server Procs=1 State=UNKNOWN
 # PartitionName=DEFAULT MaxTime=30 MaxNodes=26
 # PartitionName=debug Nodes=host[0-8,18-25] State=UP Default=YES
 # PartitionName=batch Nodes=host[9-17,26]   State=UP
+
 PartitionName=debug Nodes=server Default=YES MaxTime=INFINITE State=UP
+
+#
+#     Timers Section
+#     ========================================================================
+
+#
+#    "SlurmctldTimeout" : amount of time, in seconds, backup controller
+#                         waits for primary controller to respond 
+#                         before assuming control.
+#
+#    "SlurmdTimeout"    : amount of time, in seconds, the controller
+#                         waits for slurmd to respond before setting the
+#                         node's state to DOWN. If set to 0, this feature
+#                         is disabled.
+#
+#    "InactiveLimit"    : The interval, in seconds, a job or job step is 
+#                         permitted to be inactive (srun command not responding)
+#                         before being terminated.
+#
+#    "MinJobAge"        : The time, in seconds, after a job completes before
+#                         its record is purged from the active slurmctld data.
+#   
+#    "KillWait"         : The time, in seconds, between SIGTERM and SIGKILL
+#                         signals sent to a job upon reaching its timelimit.
+#
+#    "WaitTime"         : Specifies how many seconds srun should wait after the 
+#                         first task terminates before terminating all remaining  
+#                         tasks. If set to 0, this feature is disabled.
+#
+#    "EpilogMsgTime"    : The  number of microseconds the the slurmctld daemon
+#                         requires to process an epilog completion message from
+#                         the  slurmd  dameons.
+#    "MessageTimeout"   : Time permitted for a round-trip communication to
+#                         complete in seconds.
+#
+# Example:
+#
+# SlurmctldTimeout=120	# Defaults to 120 seconds
+# SlurmdTimeout=300	# Defaults to 300 seconds
+# InactiveLimit=600	# Defaults to 0 (unlimited)
+# MinJobAge=30		# Defaults to 300 seconds
+# KillWait=10		# Defaults to 30 seconds
+# WaitTime=30		# Defaults to 0 (unlimited)
+# EpilogMsgTime=2000	# Defaults to 2000 microseconds
+# MessageTimeout=10     # Defaults to 10 seconds
+
+SlurmctldTimeout=300
+
+#
+# "UnkillableStepTimeout" : The length of time, in seconds, that SLURM will wait
+#                           before deciding that processes in a job step are
+#                           unkillable (after they have been signaled with
+#                           SIGKILL).
+#                           The default timeout value is 60 seconds.
+# "UnkillableStepProgram" : If the processes in a job step are determined to be
+#                           unkillable for a period of time specified by the
+#                           UnkillableStepTimeout variable, the program
+#                           specified by the UnkillableStepProgram string will
+#                           be executed.
+#
+# Example:
+#
+#UnkillableStepProgram=
+#UnkillableStepTimeout=60
+
+#
+#    "HealthCheckInterval" : The interval in seconds between executions of
+#                            HealthCheckProgram. The default value is zero,
+#                            which disables execution.
+#    "HealthCheckProgram" :  Fully qualified pathname of a script to execute
+#                            as user root periodically on all compute nodes
+#                            that are not in the DOWN state.
+#
+# Example:
+#
+#HealthCheckInterval=0   # Default to 0 (disabled)
+#HealthCheckProgram=     # By Default, no program will be executed
+
+
+
+#
+#     Scheduling Section
+#     ========================================================================
+
+#
+#
+# o Define a scheduler.
+#
+# "SchedulerType"	 : the type of scheduler. Orders pending jobs.
+#	"sched/builtin"	 : the default, SLURM's built-in FIFO scheduler.
+#	"sched/backfill" : FIFO scheduling with backfill.
+#	"sched/hold"     : hold all new jobs if "/etc/slurm.hold" exists, 
+#	                   otherwise perform FIFO scheduling.
+#	"sched/wiki"	 : the Wiki interface to Maui.
+#	"sched/gang"     : for gang scheduler (time-slicing of parallel jobs)
+#
+# "SchedulerPort"	 : for polling schedulers, the port number on
+#			   which slurmctld should listen for connection
+#			   requests.
+#
+# "SchedulerRootFilter"	 : for schedulers that support it (currently only
+#			   sched/backfill). If set to '1' then scheduler
+#			   will filter and avoid RootOnly partitions (let
+#			   root user or process schedule these partitions).
+#			   Otherwise scheduler will treat RootOnly
+#			   partitions as any other standard partition.
+#
+# Example:
+#
+# SchedulerType=sched/wiki	# default: "sched/builtin"
+# SchedulerAuth=42
+# SchedulerPort=7321
+# SchedulerRootFilter=0	# default is '1'
+
+SchedulerType=sched/backfill
+
+# "SchedulerTimeSlice" : Number of seconds in each time slice when
+#                        SchedulerType=sched/gang.
+# Example:
+#
+# SchedulerTimeSlice=15	# default: `30'
+
+# "DefMemPerTask" : Default real memory size available per task in MegaBytes.
+# Example:
+#
+# DefMemPerTask=512	# default: `0' (unlimited).
+
+# "MaxMemPerTask" : Maximum real memory size available per task in MegaBytes.
+# Example:
+#
+# MaxMemPerTask=512	# default: `0' (unlimited).
+
+# "SelectType" : Identifies the type of resource selection algorithm to be
+#                used. Acceptable values include "select/linear" for
+#                sequentially ordered nodes in a one-dimensional array,
+#                "select/cons_res" for resources within a node individually
+#                allocated as consumable or "select/bluegene"
+#                for a three-dimensional BlueGene system.
+# Example:
+#
+# SelectType=select/cons_res		# default: "select/linear"
+
+
+# "SelectTypeParameters" : Specify consumable resources. The only supported
+#                          option  for SelectType=select/linear is CR_Memory,
+#                          the other values are supported only for
+#                          SelectType=select/cons_res:
+#                          "CR_CPU"           : CPUs are consumable resources
+#                          "CR_CPU_Memory"    : CPUs and memory are consumable
+#                                               resources
+#                          "CR_Core"          : Cores are consumable resources
+#                          "CR_Core_Memory"   : Cores and memory are consumable
+#                                               resources
+#                          "CR_Socket"        : Sockets are consumable resources
+#                          "CR_Socket_Memory" : Memory and CPUs are consumable
+#                                               resources
+#                          "CR_Memory"        : Memory is a consumable resource.
+#
+# Example:
+#
+# SelectTypeParameters=CR_CPU
+
+
+#
+#     Logging and Accounting 
+#     ========================================================================
+
+#
+# o Define slurmd and slurmctld logging options
+#
+#    "SlurmctldDebug"   : verbosity of slurmctld log messages 
+#                         (Values from 0 to 7 are legal, with `0' being
+#                          "quiet" operation and `7' being insanely verbose)
+#
+#    "SlurmdDebug"      : verbosity of slurmd log messages (0-7, see above)
+#
+#    "SlurmctldLogFile" : fully qualified pathname to slurmctld logfile
+#                         (If a logfile is set for slurmctld, logging via
+#                          syslog will be turned off)
+#
+#    "SlurmdLogFile"    : fully qualified pathname to slurmd logfile,
+#                         may contain "%h" for hostname substitution
+#                         (same caveat as SlurmctldLogFile above)
+#
+# Example:
+#
+# SlurmctldDebug=4	# default is `3'  
+# SlurmdDebug=4		# default is `3'
+#
+
+SlurmdLogFile=/var/log/slurm-llnl/slurmd.log
+SlurmctldLogFile=/var/log/slurm-llnl/slurmctld.log
+
+# "AccountingStorageEnforce" : If set to a non-zero value and the user,
+#                              partition, account association is not defined
+#                              for a job in the accounting database then
+#                              prevent the job from being executed.
+# Example
+#
+# AccountingStorageEnforce=1	# default=`0'
+
+# "AccountingStorageHost" : Define the name of the host where the database is
+#                           running we are going to store the accounting data.
+# "AccountingStorageType" : Define the accounting storage mechanism type.
+#                           Acceptable values include:
+#                           "accounting_storage/filetxt" for writing account
+#                           records in a text file,
+#                           "accounting_storage/gold" for using the Gold
+#                           system,
+#                           "accounting_storage/mysql" for using MySQL,
+#                           "accounting_storage/pgsql" for using PostgreSQL,
+#                           "accounting_storage/slurmdbd" for using the
+#                           SLURM database daemon system and
+#                           "accounting_storage/none" which means that
+#                           records are not maintained.
+# "AccountingStorageLoc"  : Specifies name of the database as the location of
+#                           the file or database where accounting records are
+#                           written.
+# "AccountingStoragePort" : Define the port the database server is listening
+#                           on where we are going to store the accounting data.
+# "AccountingStorageUser" : Define the name of the user we are going to connect
+#                           to the database with to store the accounting data.
+# "AccountingStoragePass" : Define the password used to gain access to the
+#                           database to store the accounting data. 
+#
+# Example:
+#
+# AccountingStorageType=accounting_storage/mysql
+# 					default: "accounting_storage/none"
+# AccountingStorageHost=localhost
+# AccountingStoragePort=3306
+# AccountingStorageLoc=slurmdb		# name of the database	
+# AccountingStorageUser=slurm		# name of the user	
+# AccountingStoragePass=maradona10	# password
+
+
+#
+# "JobAcctGatherType" : Define the job accounting mechanism type. Acceptable
+#                       values include "jobacct_gather/aix" (for AIX operating
+#                       system), "jobacct_gather/linux" (for Linux operating
+#                       system) and "jobacct_gather/none"
+# "JobAcctFrequency"  : Define the Frequency of the JobAcct poll thread
+#
+# Example:
+#
+# JobAcctFrequency=30
+# JobAcctGatherType=jobacct_gather/linux	#default: "jobacct_gather/none
+
+
+# "ClusterName" : The name by which this SLURM managed cluster is known for
+#                 accounting purposes. This is needed distinguish between
+#                 accounting data from multiple clusters being recorded in
+#                 a single database.
+# Example:
+#
+# ClusterName=maradona
+
+
+# "JobCompHost" : Define the name of the host where the database is
+#                 running and used to store the job completion data.
+# "JobCompPort" : Define the port the database server is listening on
+#                 where we are going to store the job completion data.
+# "JobCompLoc"  : The interpretation of this value depends upon the
+#                 logging mechanism specified by the JobCompType
+#                 parameter either a filename or a database name.
+# "JobCompUser" : Define the name of the user we are going to connect
+#                 to the database with to store the job completion data.
+# "JobCompPass" : Define the password used to gain access to the
+#                 database to store the job completition data.
+# "JobCompType" : Define the job completion logging mechanism type. Acceptable
+#                 values include:
+#                 "jobcomp/filetxt" for writing account records in a text file,
+#                 "jobcomp/gold" for using the Gold system,
+#                 "jobcomp/mysql" for using MySQL,
+#                 "jobcomp/pgsql" for using PostgreSQL,
+#                 "jobcomp/slurmdbd" for using the SLURM database daemon,
+#                 "jobcomp/script" for executing a script and
+#                 "jobcomp/none" which means that records are not maintained.
+# Example:
+# JobCompType=jobcomp/mysql 	# default: "jobcomp/none"
+# JobCompHost=localhost
+# JobCompPort=3306
+# JobCompLoc=slurmjobcompdb	# name of the database	
+# JobCompUser=slurm		# name of the user	
+# JobCompPass=maradona10	# password
+
+
+#
+# o Define slurmd and slurmctld logging options
+#
+#    "SlurmctldDebug"   : verbosity of slurmctld log messages 
+#                         (Values from 0 to 7 are legal, with `0' being
+#                          "quiet" operation and `7' being insanely verbose)
+#
+#    "SlurmdDebug"      : verbosity of slurmd log messages (0-7, see above)
+#
+#    "SlurmctldLogFile" : fully qualified pathname to slurmctld logfile
+#                         (If a logfile is set for slurmctld, logging via
+#                          syslog will be turned off)
+#
+#    "SlurmdLogFile"    : fully qualified pathname to slurmd logfile,
+#                         may contain "%h" for hostname substitution
+#                         (same caveat as SlurmctldLogFile above)
+#
+# Example:
+#
+# SlurmctldDebug=4	# default is `3'  
+# SlurmdDebug=4		# default is `3'
+#
+# SlurmctldLogFile=/var/log/slurmctld.log  # default is to log via syslog()
+# SlurmdLogFile=/var/log/slurmd.log.%h     # substitute hostname for "%h"
+
+
+#
+#     Power save support for idle nodes (optional)
+#     ========================================================================
+
+# "SuspendProgram"  : The program that will be executed when a node remains
+#                     idle for an extended period of time. This program is
+#                     expected to place the node into some power save mode.
+# "ResumeProgram"   : The program that will be executed when a node in power
+#                     save mode is assigned work to perform.
+# "ResumeRate"      : The rate at which nodes in power save mode are returned
+#                     to normal operation by ResumeProgram.
+# "SuspendExcNodes" : Specifies the nodes which are to not be placed in power
+#                     save mode, even if the node remains idle for an
+#                     extended period of time. 
+# "SuspendExcParts" : Specifies the partitions whose nodes are to not be
+#                     placed in power save mode, even if the node remains
+#                     idle for an extended period of time.
+# "SuspendRate"     : The rate at which nodes are place into power save mode
+#                     by SuspendProgram.
+# "SuspendTime"     : Nodes which remain idle for this number of seconds will
+#                     be placed into power save mode by SuspendProgram
+#
+# Example:
+# SuspendProgram=/usr/share/doc/slurm-llnl/examples/slurm-suspend.sh
+# ResumeProgram=/usr/share/doc/slurm-llnl/examples/slurm-resume.sh
+# ResumeRate=32
+# SuspendExcNodes=nfsnode
+# SuspendExcParts=severs
+# SuspendRate=32
+# SuspendTime=60

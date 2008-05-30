@@ -11,7 +11,7 @@
 # Copyright (C) 2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-226842.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -89,7 +89,7 @@ exec $bin_chmod 700 $file_prog
 #
 # Create an allocation
 #
-set srun_pid [spawn $srun --allocate -N1 --exclusive --verbose -t2]
+set salloc_pid [spawn $salloc -N1 --exclusive --verbose -t2 $bin_bash]
 
 #
 # Run a job step to get allocated processor count and affinity
@@ -110,7 +110,7 @@ expect {
 		exp_continue
 	}
 	timeout {
-		send_user "\nFAILURE: srun (from --allocate) not responding "
+		send_user "\nFAILURE: salloc not responding "
 		send_user "or failure to recognize prompt\n"
 		set exit_code 1
 	}
@@ -135,7 +135,7 @@ expect {
 		exp_continue
 	}
 	timeout {
-		send_user "\nFAILURE: srun (from --allocate) not responding "
+		send_user "\nFAILURE: salloc not responding "
 		send_user "or failure to recognize prompt\n"
 		set exit_code 1
 	}
@@ -163,7 +163,7 @@ expect {
 		exp_continue
 	}
 	timeout {
-		send_user "\nFAILURE: srun (from --allocate) not responding "
+		send_user "\nFAILURE: salloc not responding "
 		send_user "or failure to recognize prompt\n"
 		set exit_code 1
 	}
@@ -186,7 +186,7 @@ expect {
 		exp_continue
 	}
 	timeout {
-		send_user "\nFAILURE: srun (from --allocate) not responding "
+		send_user "\nFAILURE: salloc not responding "
 		send_user "or failure to recognize prompt\n"
 		set exit_code 1
 	}
@@ -215,7 +215,7 @@ expect {
 		exp_continue
 	}
 	timeout {
-		send_user "\nFAILURE: srun (from --allocate) not responding "
+		send_user "\nFAILURE: salloc not responding "
 		send_user "or failure to recognize prompt\n"
 		set exit_code 1
 		exp_continue
@@ -242,7 +242,7 @@ while {$cpu_cnt < $task_cnt} {
 			exp_continue
 		}
 		timeout {
-			send_user "\nFAILURE: srun (from --allocate) not "
+			send_user "\nFAILURE: salloc not "
 			send_user "responding or failure to recognize prompt\n"
 			set exit_code 1
 			exp_continue
@@ -276,7 +276,7 @@ while {$cpu_cnt < $task_cnt} {
 			exp_continue
 		}
 		timeout {
-			send_user "\nFAILURE: srun (from --allocate) not "
+			send_user "\nFAILURE: salloc not "
 			send_user "responding or failure to recognize prompt\n"
 			set exit_code 1
 			exp_continue
@@ -352,7 +352,7 @@ expect {
 		exp_continue
 	}
 	timeout {
-		send_user "\nFAILURE: srun (from --allocate) not responding "
+		send_user "\nFAILURE: salloc not responding "
 		send_user "or failure to recognize prompt\n"
 		set exit_code 1
 		exp_continue
@@ -380,7 +380,7 @@ expect {
 		exp_continue
 	}
 	timeout {
-		send_user "\nFAILURE: srun (from --allocate) not responding "
+		send_user "\nFAILURE: salloc not responding "
 		send_user "or failure to recognize prompt\n"
 		set exit_code 1
 		exp_continue
@@ -408,7 +408,7 @@ expect {
 		exp_continue
 	}
 	timeout {
-		send_user "\nFAILURE: srun (from --allocate) not responding "
+		send_user "\nFAILURE: salloc not responding "
 		send_user "or failure to recognize prompt\n"
 		set exit_code 1
 		exp_continue
@@ -436,7 +436,7 @@ expect {
 		exp_continue
 	}
 	timeout {
-		send_user "\nFAILURE: srun (from --allocate) not responding "
+		send_user "\nFAILURE: salloc not responding "
 		send_user "or failure to recognize prompt\n"
 		set exit_code 1
 		exp_continue
@@ -464,7 +464,7 @@ expect {
 		exp_continue
 	}
 	timeout {
-		send_user "\nFAILURE: srun (from --allocate) not responding "
+		send_user "\nFAILURE: salloc not responding "
 		send_user "or failure to recognize prompt\n"
 		set exit_code 1
 		exp_continue
@@ -492,7 +492,7 @@ expect {
 		exp_continue
 	}
 	timeout {
-		send_user "\nFAILURE: srun (from --allocate) not responding "
+		send_user "\nFAILURE: salloc not responding "
 		send_user "or failure to recognize prompt\n"
 		set exit_code 1
 		exp_continue
@@ -514,9 +514,9 @@ expect {
 		set exit_code 1
 	}
 	timeout {
-		send_user "\nFAILURE: srun (from --allocate) not responding "
+		send_user "\nFAILURE: salloc not responding "
 		send_user "or failure to recognize prompt\n"
-		slow_kill $srun_pid
+		slow_kill $salloc_pid
 		set exit_code 1
 	}
 	eof {
@@ -530,7 +530,6 @@ if {$exit_code == 0} {
 } else {
 	send_user "\nNOTE: This test can fail if the node configuration in slurm.conf \n"
 	send_user "  (sockets, cores, threads) differs from the actual configuration\n"
-
 }
 exit $exit_code
 

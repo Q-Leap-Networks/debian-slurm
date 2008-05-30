@@ -4,7 +4,7 @@
  *  Copyright (C) 2006-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -72,6 +72,22 @@ extern void fini( void )
 extern int slurm_sched_plugin_schedule( void )
 {
 	(void) event_notify(1234, "Requested by Slurm");
+	return SLURM_SUCCESS;
+}
+
+/***************************************************************************/
+/*  TAG(                   slurm_sched_plugin_newalloc                   ) */
+/***************************************************************************/
+extern int slurm_sched_plugin_newalloc( struct job_record *job_ptr )
+{
+	return SLURM_SUCCESS;
+}
+
+/***************************************************************************/
+/*  TAG(                   slurm_sched_plugin_freealloc                  ) */
+/***************************************************************************/
+extern int slurm_sched_plugin_freealloc( struct job_record *job_ptr )
+{
 	return SLURM_SUCCESS;
 }
 
@@ -151,3 +167,18 @@ char *slurm_sched_strerror( int errnum )
 	return NULL;
 }
 
+/**************************************************************************/
+/* TAG(              slurm_sched_plugin_requeue                         ) */
+/**************************************************************************/
+void slurm_sched_plugin_requeue( struct job_record *job_ptr, char *reason )
+{
+        wiki_job_requeue(job_ptr, reason);
+}
+
+/**************************************************************************/
+/* TAG(              slurm_sched_get_conf                               ) */
+/**************************************************************************/
+char *slurm_sched_get_conf( void )
+{
+	return get_wiki_conf();
+}

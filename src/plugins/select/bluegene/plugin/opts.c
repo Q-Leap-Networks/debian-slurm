@@ -1,11 +1,11 @@
 /****************************************************************************\
  *  opts.c - sfree command line option processing functions
- *  $Id: opts.c 12403 2007-09-25 18:36:42Z da $
+ *  $Id: opts.c 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.

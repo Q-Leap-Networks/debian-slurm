@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  block_allocator.c - Assorted functions for layout of bglblocks, 
  *	 wiring, mapping for smap, etc.
- *  $Id: block_allocator.c 13150 2008-01-31 22:59:13Z da $
+ *  $Id: block_allocator.c 13934 2008-04-23 23:00:29Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -404,8 +404,9 @@ extern int new_ba_request(ba_request_t* ba_request)
 			if ((geo[i] < 1) 
 			    ||  (geo[i] > DIM_SIZE[i])){
 				error("new_ba_request Error, "
-				      "request geometry is invalid %d "
-				      "DIMS are %c%c%c", 
+				      "request geometry is invalid %d can't be "
+				      "%d, DIMS are %c%c%c", 
+				      i,
 				      geo[i],
 				      alpha_num[DIM_SIZE[X]],
 				      alpha_num[DIM_SIZE[Y]],
@@ -980,7 +981,7 @@ extern void init_wires()
 #else
 				source = &ba_system_ptr->grid[x];
 #endif
-				for(i=0; i<6; i++) {
+				for(i=0; i<NUM_PORTS_PER_NODE; i++) {
 					_switch_config(source, source, 
 						       X, i, i);
 					_switch_config(source, source, 
@@ -1051,11 +1052,11 @@ extern void ba_update_node_state(ba_node_t *ba_node, uint16_t state)
 	}
 
 #ifdef HAVE_BG
-	debug2("ba_update_node_state: new state of node[%c%c%c] is %s", 
+	debug2("ba_update_node_state: new state of [%c%c%c] is %s", 
 	       alpha_num[ba_node->coord[X]], alpha_num[ba_node->coord[Y]],
 	       alpha_num[ba_node->coord[Z]], node_state_string(state)); 
 #else
-	debug2("ba_update_node_state: new state of node[%d] is %s", 
+	debug2("ba_update_node_state: new state of [%d] is %s", 
 	       ba_node->coord[X],
 	       node_state_string(state)); 
 #endif
@@ -1093,7 +1094,6 @@ extern ba_node_t *ba_copy_node(ba_node_t *ba_node)
  */
 extern int allocate_block(ba_request_t* ba_request, List results)
 {
-
 	if (!_initialized){
 		error("Error, configuration not initialized, "
 		      "calling ba_init(NULL)");
@@ -1252,9 +1252,12 @@ extern int copy_node_path(List nodes, List dest_nodes)
 			curr_switch = &ba_node->axis_switch[dim];
 			new_switch = &new_ba_node->axis_switch[dim];
 			if(curr_switch->int_wire[0].used) {
-				_copy_the_path(dest_nodes, 
-					       curr_switch, new_switch,
-					       0, dim);
+				if(!_copy_the_path(dest_nodes, 
+						   curr_switch, new_switch,
+						   0, dim)) {
+					rc = SLURM_ERROR;
+					break;
+				}
 			}
 		}
 		
@@ -1306,23 +1309,35 @@ extern int check_and_set_node_list(List nodes)
 			curr_ba_switch = &curr_ba_node->axis_switch[i];
 			//info("checking dim %d", i);
 		
-			for(j=0; j<BA_SYSTEM_DIMENSIONS; j++) {
+			for(j=0; j<NUM_PORTS_PER_NODE; j++) {
 				//info("checking port %d", j);
 		
 				if(ba_switch->int_wire[j].used 
-				   && curr_ba_switch->int_wire[j].used) {
+				   && curr_ba_switch->int_wire[j].used
+					&& j != curr_ba_switch->
+				   int_wire[j].port_tar) {
 					debug3("%c%c%c dim %d port %d "
-					       "is already in use",
+					       "is already in use to %d",
 					       alpha_num[ba_node->coord[X]], 
 					       alpha_num[ba_node->coord[Y]],
 					       alpha_num[ba_node->coord[Z]], 
 					       i,
-					       j);
+					       j,
+					       curr_ba_switch->
+					       int_wire[j].port_tar);
 					rc = SLURM_ERROR;
 					goto end_it;
 				}
 				if(!ba_switch->int_wire[j].used)
 					continue;
+
+				/* info("setting %c%c%c dim %d port %d -> %d", */
+/* 				     alpha_num[ba_node->coord[X]],  */
+/* 				     alpha_num[ba_node->coord[Y]], */
+/* 				     alpha_num[ba_node->coord[Z]],  */
+/* 				     i, */
+/* 				     j, */
+/* 				     ba_switch->int_wire[j].port_tar); */
 				curr_ba_switch->int_wire[j].used = 1;
 				curr_ba_switch->int_wire[j].port_tar 
 					= ba_switch->int_wire[j].port_tar;
@@ -2479,9 +2494,8 @@ static int _copy_the_path(List nodes, ba_switch_t *curr_switch,
 		next_mark_switch = &ba_node->axis_switch[dim];
 			
 	}
-	_copy_the_path(nodes, next_switch, next_mark_switch,
+	return _copy_the_path(nodes, next_switch, next_mark_switch,
 		       port_tar, dim);
-	return 1;
 }
 
 static int _find_yz_path(ba_node_t *ba_node, int *first, 
@@ -2777,8 +2791,8 @@ static int _reset_the_path(ba_switch_t *curr_switch, int source,
 #endif
 		.axis_switch[dim];
 
-	_reset_the_path(next_switch, port_tar, target, dim);
-	return 1;
+	return _reset_the_path(next_switch, port_tar, target, dim);
+//	return 1;
 }
 
 /*
@@ -3161,7 +3175,7 @@ start_again:
 #endif
 	}							
 requested_end:
-	debug("can't allocate");
+	debug2("1 can't allocate");
 	
 	return 0;
 }
@@ -3554,7 +3568,7 @@ static int _set_external_wires(int dim, int count, ba_node_t* source,
 			break;
 		}
 	} else {
-		fatal("Do don't have a config to do a BG system with %d "
+		fatal("We don't have a config to do a BG system with %d "
 		      "in the X-dim.", DIM_SIZE[X]);
 	}
 #else
@@ -4897,56 +4911,56 @@ int main(int argc, char** argv)
 	ba_init(new_node_ptr);
 	init_wires(NULL);
 						
-	/* results = list_create(NULL); */
-/* 	request->geometry[0] = 1; */
-/* 	request->geometry[1] = 4; */
-/* 	request->geometry[2] = 4; */
-/* 	request->start[0] = 5; */
-/* 	request->start[1] = 0; */
-/* 	request->start[2] = 0; */
-/* 	request->start_req = 1; */
-/* 	request->size = 32; */
-/* 	request->rotate = 0; */
-/* 	request->elongate = 0; */
-/* 	request->conn_type = SELECT_TORUS; */
-/* 	new_ba_request(request); */
-/* 	print_ba_request(request); */
-/* 	if(!allocate_block(request, results)) { */
-/*        		debug("couldn't allocate %c%c%c", */
-/* 		       request->geometry[0], */
-/* 		       request->geometry[1], */
-/* 		       request->geometry[2]);	 */
-/* 	} */
-/* 	list_destroy(results); */
-
-/* 	results = list_create(NULL); */
-/* 	request->geometry[0] = 1; */
-/* 	request->geometry[1] = 1; */
-/* 	request->geometry[2] = 1; */
-/* 	request->start[0] = 0; */
-/* 	request->start[1] = 0; */
-/* 	request->start[2] = 0; */
-/* 	request->start_req = 1; */
-/* 	request->size = 1; */
-/* 	request->rotate = 0; */
-/* 	request->elongate = 0; */
-/* 	request->conn_type = SELECT_TORUS; */
-/* 	new_ba_request(request); */
-/* 	print_ba_request(request); */
-/* 	if(!allocate_block(request, results)) { */
-/*        		debug("couldn't allocate %c%c%c", */
-/* 		       alpha_num[request->geometry[0]], */
-/* 		       alpha_num[request->geometry[1]], */
-/* 		       alpha_num[request->geometry[2]]);	 */
-/* 	} */
-/* 	list_destroy(results); */
-
 	results = list_create(NULL);
-	request->geometry[0] = 12;
+	request->geometry[0] = 1;
 	request->geometry[1] = 1;
 	request->geometry[2] = 1;
-	request->start[0] = 0;
+	request->start[0] = 6;
+	request->start[1] = 3;
+	request->start[2] = 2;
+	request->start_req = 1;
+//	request->size = 1;
+	request->rotate = 0;
+	request->elongate = 0;
+	request->conn_type = SELECT_TORUS;
+	new_ba_request(request);
+	print_ba_request(request);
+	if(!allocate_block(request, results)) {
+       		debug("couldn't allocate %c%c%c",
+		       request->geometry[0],
+		       request->geometry[1],
+		       request->geometry[2]);
+	}
+	list_destroy(results);
+
+	results = list_create(NULL);
+	request->geometry[0] = 2;
+	request->geometry[1] = 4;
+	request->geometry[2] = 1;
+	request->start[0] = 3;
 	request->start[1] = 0;
+	request->start[2] = 2;
+	request->start_req = 1;
+//	request->size = 16;
+	request->rotate = 0;
+	request->elongate = 0;
+	request->conn_type = SELECT_TORUS;
+	new_ba_request(request);
+	print_ba_request(request);
+	if(!allocate_block(request, results)) {
+       		debug("couldn't allocate %c%c%c",
+		       alpha_num[request->geometry[0]],
+		       alpha_num[request->geometry[1]],
+		       alpha_num[request->geometry[2]]);
+	}
+	list_destroy(results);
+
+	results = list_create(NULL);
+	request->geometry[0] = 2;
+	request->geometry[1] = 1;
+	request->geometry[2] = 4;
+	request->start[0] = 5;
+	request->start[1] = 2;
 	request->start[2] = 0;
 	request->start_req = 1;
 	request->rotate = 0;
@@ -5004,16 +5018,17 @@ int main(int argc, char** argv)
 	for(x=startx;x<endx;x++) {
 		for(y=starty;y<endy;y++) {
 			for(z=startz;z<endz;z++) {
+				ba_node_t *curr_node = 
+					&(ba_system_ptr->grid[x][y][z]);
 				info("Node %c%c%c Used = %d Letter = %c",
 				     alpha_num[x],alpha_num[y],alpha_num[z],
-				     ba_system_ptr->grid[x][y][z].used,
-				     ba_system_ptr->grid[x][y][z].letter);
+				     curr_node->used,
+				     curr_node->letter);
 				for(dim=0;dim<1;dim++) {
 					info("Dim %d",dim);
 					ba_switch_t *wire =
-						&ba_system_ptr->
-						grid[x][y][z].axis_switch[dim];
-					for(j=0;j<6;j++)
+						&curr_node->axis_switch[dim];
+					for(j=0;j<NUM_PORTS_PER_NODE;j++)
 						info("\t%d -> %d -> %c%c%c %d "
 						     "Used = %d",
 						     j, wire->int_wire[j].

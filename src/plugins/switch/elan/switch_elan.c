@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  switch_elan.c - Library routines for initiating jobs on QsNet. 
- *  $Id: switch_elan.c 10751 2007-01-11 22:19:34Z jette $
+ *  $Id: switch_elan.c 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
  *  Copyright (C) 2003-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov>, et. al.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -233,7 +233,7 @@ int switch_p_libstate_restore (char *dir_name, bool recover)
 	int error_code = SLURM_SUCCESS;
 	int state_fd, data_allocated = 0, data_read = 0, data_size = 0;
 	char *ver_str = NULL;
-	uint16_t ver_str_len;
+	uint32_t ver_str_len;
 
 	if (!recover)	/* clean start, no recovery */
 		return qsw_init(NULL);
@@ -271,11 +271,11 @@ int switch_p_libstate_restore (char *dir_name, bool recover)
 	if (error_code == SLURM_SUCCESS) {
 		buffer = create_buf (data, data_size);
 		data = NULL;    /* now in buffer, don't xfree() */
-		if (buffer && (size_buf(buffer) >= sizeof(uint16_t) + 
+		if (buffer && (size_buf(buffer) >= sizeof(uint32_t) + 
 				strlen(QSW_STATE_VERSION))) {
 			char *ptr = get_buf_data(buffer);
 
-			if (!memcmp(&ptr[sizeof(uint16_t)], 
+			if (!memcmp(&ptr[sizeof(uint32_t)], 
 					QSW_STATE_VERSION, 3)) {
 				unpackstr_xmalloc(&ver_str, &ver_str_len, 
 						buffer);

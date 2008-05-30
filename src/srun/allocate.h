@@ -1,11 +1,11 @@
 /*****************************************************************************\
  * src/srun/allocate.h - node allocation functions for srun
- * $Id: allocate.h 10574 2006-12-15 23:38:29Z jette $
+ * $Id: allocate.h 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -43,6 +43,13 @@
 
 #include "src/srun/srun_job.h"
 
+typedef struct slurmctld_communication_addr {
+	char *hostname;
+	uint16_t port;
+} slurmctld_comm_addr_t;
+
+slurmctld_comm_addr_t slurmctld_comm_addr;
+
 /* 
  * Allocate nodes from the slurm controller -- retrying the attempt
  * if the controller appears to be down, and optionally waiting for
@@ -53,18 +60,24 @@
  */
 resource_allocation_response_msg_t * allocate_nodes(void);
 
+/* clean up the msg thread polling for information from the controller */
+int cleanup_allocation();
+
 /*
  * Test if an allocation would occur now given the job request.
  * Do not actually allocate resources
  */
 int allocate_test(void);
 
+/* Set up port to handle messages from slurmctld */
+slurm_fd slurmctld_msg_init(void);
+
 /*
  * Create a job_desc_msg_t object, filled in from the current srun options
- * (see opt.h), if script != NULL then this is a batch job.
+ * (see opt.h)
  * The resulting memory must be freed with  job_desc_msg_destroy()
  */
-job_desc_msg_t * job_desc_msg_create_from_opts (char *script);
+job_desc_msg_t * job_desc_msg_create_from_opts ();
 
 /* 
  * Destroy (free memory from) a job_desc_msg_t object allocated with

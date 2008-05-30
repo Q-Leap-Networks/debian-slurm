@@ -11,7 +11,7 @@
 # Copyright (C) 2005-2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-226842.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -47,7 +47,7 @@ exec $bin_rm -f $file_in
 make_bash_script $file_in "$bin_hostname"
 
 #
-# Spawn a srun batch job that uses stdout/err and confirm their contents
+# Spawn a batch job that uses stdout/err and confirm their contents
 #
 set timeout $max_job_delay
 if { [test_bluegene] } {
@@ -60,9 +60,9 @@ if { [test_bluegene] } {
 	}
 }
 
-set srun_pid [spawn $srun -N$node_cnt -A -v -t1]
+set salloc_pid [spawn $salloc -N$node_cnt -v -t1 $bin_bash]
 expect {
-	-re "jobid ($number):" {
+	-re "Granted job allocation ($number)" {
 		set job_id_1 $expect_out(1,string)
 		send "$sbatch --jobid=$job_id_1 -o none -e none $file_in \n"
 		exp_continue
@@ -79,7 +79,7 @@ expect {
 	}
 	timeout {
 		send_user "\nFAILURE: srun not responding\n"
-		slow_kill $srun_pid
+		slow_kill $salloc_pid
 		set exit_code 1
 	}
 	eof {

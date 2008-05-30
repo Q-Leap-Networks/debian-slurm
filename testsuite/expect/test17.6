@@ -1,7 +1,7 @@
 #!/usr/bin/expect
 ############################################################################
 # Purpose: Test of SLURM functionality
-#          Confirm that a job executes with the proper task count (--tasks
+#          Confirm that a job executes with the proper task count (--ntasks
 #          option).
 #
 # Output:  "TEST: #.#" followed by "SUCCESS" if test was successful, OR
@@ -11,7 +11,7 @@
 # Copyright (C) 2002-2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-226842.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -45,7 +45,7 @@ print_header $test_id
 # Submit a slurm job that will execute 'id' on $task_cnt tasks (or try anyway)
 #
 file delete $file_in $file_out
-make_bash_script $file_in "$slaunch $bin_id"
+make_bash_script $file_in "$srun $bin_id"
 set job_id 0
 set no_run 0
 spawn $sbatch --ntasks=$task_cnt --output=$file_out -t1 $file_in

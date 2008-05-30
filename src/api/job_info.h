@@ -1,12 +1,12 @@
 /*****************************************************************************\
  *  job_info.h - get/print the job state information of slurm
  *
- *  $Id: job_info.h 10574 2006-12-15 23:38:29Z jette $
+ *  $Id: job_info.h 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.

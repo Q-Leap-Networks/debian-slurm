@@ -4,7 +4,7 @@
  *  Copyright (C) 2006-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -39,6 +39,7 @@
 #include "src/common/node_select.h"
 #include "src/common/slurm_protocol_defs.h"
 #include "src/common/xstring.h"
+#include "src/slurmctld/job_scheduler.h"
 #include "src/slurmctld/locks.h"
 #include "src/slurmctld/slurmctld.h"
 #include "src/slurmctld/state_save.h"
@@ -46,7 +47,9 @@
 static int	_start_job(uint32_t jobid, int task_cnt, char *hostlist, 
 			char *tasklist, int *err_code, char **err_msg);
 
-/* RET 0 on success, -1 on failure */
+/* Start a job:
+ *	CMD=STARTJOB ARG=<jobid> TASKLIST=<node_list>
+ * RET 0 on success, -1 on failure */
 extern int	start_job(char *cmd_ptr, int *err_code, char **err_msg)
 {
 	char *arg_ptr, *task_ptr, *tasklist, *tmp_char;
@@ -79,6 +82,7 @@ extern int	start_job(char *cmd_ptr, int *err_code, char **err_msg)
 		return -1;
 	}
 	task_ptr += 9;	/* skip over "TASKLIST=" */
+	null_term(task_ptr);
 	tasklist = moab2slurm_task_list(task_ptr, &task_cnt);
 	if (tasklist)
 		hl = hostlist_create(tasklist);

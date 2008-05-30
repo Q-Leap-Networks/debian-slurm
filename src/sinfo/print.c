@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  print.c - sinfo print job functions
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov> and 
  *  Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *   
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -170,7 +170,8 @@ static int _print_secs(long time, int width, bool right, bool cut_output)
 }
 
 static int 
-_build_min_max_16_string(char *buffer, int buf_size, uint16_t min, uint16_t max, bool range)
+_build_min_max_16_string(char *buffer, int buf_size, uint16_t min, uint16_t max, 
+			 bool range)
 {
 	char tmp_min[8];
 	char tmp_max[8];
@@ -191,7 +192,8 @@ _build_min_max_16_string(char *buffer, int buf_size, uint16_t min, uint16_t max,
 }
 
 static int 
-_build_min_max_32_string(char *buffer, int buf_size, uint32_t min, uint32_t max, bool range)
+_build_min_max_32_string(char *buffer, int buf_size, uint32_t min, uint32_t max, 
+			 bool range)
 {
 	char tmp_min[8];
 	char tmp_max[8];
@@ -631,6 +633,24 @@ int _print_prefix(sinfo_data_t * job, int width, bool right_justify,
 	return SLURM_SUCCESS;
 }
 
+int _print_priority(sinfo_data_t * sinfo_data, int width,
+			bool right_justify, char *suffix)
+{
+	char id[FORMAT_STRING_SIZE];
+
+	if (sinfo_data) {
+		_build_min_max_16_string(id, FORMAT_STRING_SIZE, 
+		                      sinfo_data->part_info->priority, 
+		                      sinfo_data->part_info->priority, true);
+		_print_str(id, width, right_justify, true);
+	} else
+		_print_str("PRIORITY", width, right_justify, true);
+
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
 int _print_reason(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix)
 {
@@ -668,15 +688,20 @@ int _print_root(sinfo_data_t * sinfo_data, int width,
 int _print_share(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix)
 {
+	char id[FORMAT_STRING_SIZE];
+
 	if (sinfo_data) {
-		if (sinfo_data->part_info == NULL)
-			_print_str("n/a", width, right_justify, true);
-		else if (sinfo_data->part_info->shared > 1)
-			_print_str("force", width, right_justify, true);
-		else if (sinfo_data->part_info->shared)
-			_print_str("yes", width, right_justify, true);
+		bool force = sinfo_data->part_info->max_share & SHARED_FORCE;
+		uint16_t val = sinfo_data->part_info->max_share & (~SHARED_FORCE);
+		if (val == 0)
+			snprintf(id, sizeof(id), "EXCLUSIVE");
+		else if (force)
+			snprintf(id, sizeof(id), "FORCE:%u", val);
+		else if (val == 1)
+			snprintf(id, sizeof(id), "NO");
 		else
-			_print_str("no", width, right_justify, true);
+			snprintf(id, sizeof(id), "YES:%u", val);
+		_print_str(id, width, right_justify, true);
 	} else
 		_print_str("SHARE", width, right_justify, true);
 

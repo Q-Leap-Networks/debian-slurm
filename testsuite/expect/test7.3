@@ -12,7 +12,7 @@
 # Copyright (C) 2004 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-226842.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -55,7 +55,8 @@ exec $bin_chmod 700 $io_prog
 
 send_user "slurm_dir is $slurm_dir\n"
 if {![test_aix]} {
-	exec $bin_cc ${test_prog}.c -g -pthread -o ${test_prog} -I${slurm_dir}/include -Wl,--rpath=${slurm_dir}/lib -L${slurm_dir}/lib -lslurm
+	send_user "$bin_cc ${test_prog}.c -g -pthread -o ${test_prog} -I${slurm_dir}/include -Wl,--rpath=${slurm_dir}/lib -L${slurm_dir}/lib -lslurm\n"
+	exec       $bin_cc ${test_prog}.c -g -pthread -o ${test_prog} -I${slurm_dir}/include -Wl,--rpath=${slurm_dir}/lib -L${slurm_dir}/lib -lslurm
 } else {
 	send_user "$bin_cc ${test_prog}.c -Wl,-brtl -g -pthread -o ${test_prog} -I${slurm_dir}/include  -L${slurm_dir}/lib -lslurm -lntbl\n"
 	exec       $bin_cc ${test_prog}.c -Wl,-brtl -g -pthread -o ${test_prog} -I${slurm_dir}/include  -L${slurm_dir}/lib -lslurm -lntbl

@@ -145,7 +145,6 @@
 
 #include "sacct.h"
 
-
 void invalidSwitchCombo(char *good, char *bad);
 void _print_header(void);
 
@@ -154,7 +153,6 @@ void _print_header(void);
  */
 sacct_parameters_t params;
 fields_t fields[] = {{"account", print_account},
-		     {"blockid", print_blockid},
 		     {"cpu", print_cpu},
 		     {"cputime", print_cputime}, 
 		     {"elapsed", print_elapsed},
@@ -163,42 +161,38 @@ fields_t fields[] = {{"account", print_account},
 		     {"finished", print_end},		/* Defunct name */ 
 		     {"gid", print_gid}, 
 		     {"group", print_group}, 
-		     {"idrss", print_idrss}, 
-		     {"inblocks", print_inblocks}, 
-		     {"isrss", print_isrss}, 
-		     {"ixrss", print_ixrss}, 
 		     {"job", print_job},
 		     {"jobid", print_jobid}, 
 		     {"jobname", print_name}, 
-		     {"majflt", print_majflt}, 
-		     {"minflt", print_minflt}, 
-		     {"msgrcv", print_msgrcv}, 
-		     {"msgsnd", print_msgsnd}, 
 		     {"ncpus", print_ncpus}, 
-		     {"nivcsw", print_nivcsw}, 
 		     {"nodes", print_nodes}, 
+		     {"nnodes", print_nnodes}, 
 		     {"nprocs", print_ntasks},
-		     {"nsignals", print_nsignals},
-		     {"nswap", print_nswap}, 
 		     {"ntasks", print_ntasks}, 
-		     {"nvcsw", print_nvcsw}, 
-		     {"outblocks", print_outblocks},
 		     {"pages", print_pages}, 
 		     {"partition", print_partition}, 
 		     {"rss", print_rss},
 		     {"start", print_start}, 
-		     {"status", print_status}, 
+		     {"state", print_state}, 
+		     {"status", print_state}, 
 		     {"submit", print_submit}, 
+		     {"timelimit", print_timelimit}, 
 		     {"submitted", print_submit},	/* Defunct name */
 		     {"systemcpu", print_systemcpu}, 
 		     {"uid", print_uid}, 
 		     {"user", print_user}, 
 		     {"usercpu", print_usercpu}, 
 		     {"vsize", print_vsize}, 
-		     {"vsize_short", print_vsize_short}, 
+#ifdef HAVE_BG
+		     {"blockid", print_blockid}, 
+		     {"connection", print_connection}, 
+		     {"geo", print_geo}, 
+		     {"max_procs", print_max_procs}, 
+		     {"reboot", print_reboot}, 
+		     {"rotate", print_rotate}, 
+		     {"bg_start_point", print_bg_start_point}, 		     
+#endif
 		     {NULL, NULL}};
-
-long input_error = 0;		/* Muddle through bad data, but complain! */
 
 List jobs = NULL;
 
@@ -208,13 +202,13 @@ int printfields[MAX_PRINTFIELDS],	/* Indexed into fields[] */
 int main(int argc, char **argv)
 {
 	enum {
-		DUMP,
-		EXPIRE,
-		FDUMP,
-		LIST,
-		STAT,
-		HELP,
-		USAGE
+		SACCT_DUMP,
+		SACCT_EXPIRE,
+		SACCT_FDUMP,
+		SACCT_LIST,
+		SACCT_STAT,
+		SACCT_HELP,
+		SACCT_USAGE
 	} op;
 	int rc = 0;
 	
@@ -226,9 +220,9 @@ int main(int argc, char **argv)
 	 */
 
 	if (params.opt_help)
-		op = HELP;
+		op = SACCT_HELP;
 	else if (params.opt_dump) {
-		op = DUMP;
+		op = SACCT_DUMP;
 		if (params.opt_long || params.opt_total 
 		    || params.opt_field_list || params.opt_expire) {
 			if (params.opt_verbose)
@@ -247,11 +241,11 @@ int main(int argc, char **argv)
 			goto finished;
 		}
 	} else if (params.opt_fdump) {
-		op = FDUMP;
+		op = SACCT_FDUMP;
 	} else if (params.opt_stat) {
-		op = STAT;
+		op = SACCT_STAT;
 	} else if (params.opt_expire) {
-		op = EXPIRE;
+		op = SACCT_EXPIRE;
 		if (params.opt_long || params.opt_total 
 		    || params.opt_field_list || 
 		    (params.opt_gid>=0) || (params.opt_uid>=0) ||
@@ -281,32 +275,46 @@ int main(int argc, char **argv)
 			goto finished;
 		}
 	} else
-		op = LIST;
+		op = SACCT_LIST;
 
 	
 	switch (op) {
-	case DUMP:
-		get_data();
-		do_dump();
+	case SACCT_DUMP:
+		if(get_data() == SLURM_ERROR)
+			exit(errno);
+		if(params.opt_completion) 
+			do_dump_completion();
+		else 
+			do_dump();
 		break;
-	case EXPIRE:
-		do_expire();
+	case SACCT_EXPIRE:
+		do_expire(0);
 		break;
-	case FDUMP:
-		get_data();
+	case SACCT_FDUMP:
+		if(get_data() == SLURM_ERROR)
+			exit(errno);
 		break;
-	case LIST:
+	case SACCT_LIST:
 		if (params.opt_header) 	/* give them something to look */
 			_print_header();/* at while we think...        */
-		get_data();
-		do_list();
+		if(get_data() == SLURM_ERROR)
+			exit(errno);
+		if(params.opt_completion) 
+			do_list_completion();
+		else 
+			do_list();
 		break;
-	case STAT:
+	case SACCT_STAT:
+		fprintf(stderr,
+			"This functionality has been replaced with 'sstat' "
+			"in the future please make note this will "
+			"not be supported.");
+		
 		if (params.opt_header) 	/* give them something to look */
 			_print_header();/* at while we think...        */
 		do_stat();
 		break;
-	case HELP:
+	case SACCT_HELP:
 		do_help();
 		break;
 	default:

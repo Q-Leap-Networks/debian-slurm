@@ -7,3 +7,4 @@ etc/slurm-llnl
 var/run/slurm-llnl
 var/run/slurm-llnl/slurmd
 var/run/slurm-llnl/slurmctld
+var/log/slurm-llnl

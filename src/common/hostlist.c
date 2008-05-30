@@ -1,12 +1,12 @@
 /*****************************************************************************\
- *  $Id: hostlist.c 13270 2008-02-14 19:40:44Z da $
+ *  $Id: hostlist.c 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
  *  $LSDId: hostlist.c,v 1.14 2003/10/14 20:11:54 grondo Exp $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -168,7 +168,7 @@ strong_alias(hostset_nth,		slurm_hostset_nth);
 /* ----[ Internal Data Structures ]---- */
 
 
-char *alpha_num = "0123456789ABCDEFGHIJKLMNOPQRSTUZWXYZ";
+char *alpha_num = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
 #ifdef HAVE_BG		
 /* logic for block node description */

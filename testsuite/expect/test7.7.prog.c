@@ -2,9 +2,10 @@
  *  test7.7.prog.c - Test of sched/wiki2 plugin
  *****************************************************************************
  *  Copyright (C) 2006-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -33,9 +34,11 @@
 
 #include "./test7.7.crypto.c"
 
+#define _DEBUG 0
+
 /* global variables */
 char *auth_key, *control_addr;
-int   e_port, sched_port;
+int   e_port, is_bluegene, sched_port;
 long  job_id;
 
 static int _conn_wiki_port(char *host, int port)
@@ -333,6 +336,7 @@ static void _modify_job(long my_job_id)
 		"TS=%u AUTH=root DT=CMD=MODIFYJOB ARG=%ld "
 		/* "MINSTARTTIME=55555 " */
 		/* "JOBNAME=foo " */
+		/* "RFEATURES=big " */
 		/* "PARTITION=pdebug " */
 		/* "NODES=2 " */ 
 		/* "DEPEND=afterany:3 " */
@@ -349,7 +353,7 @@ static void _notify_job(long my_job_id)
 
 	snprintf(out_msg, sizeof(out_msg),
 		"TS=%u AUTH=root DT=CMD=NOTIFYJOB ARG=%ld "
-		"MSG=this is a test",
+		"MSG=this_is_a_test",
 		(uint32_t) now, my_job_id);
 	_xmit(out_msg);
 }
@@ -382,9 +386,9 @@ static void _job_will_run(long my_job_id)
 	char out_msg[128];
 
 	snprintf(out_msg, sizeof(out_msg),
-		"TS=%u AUTH=root DT=CMD=JOBWILLRUN ARG=%ld %s",
+		"TS=%u AUTH=root DT=CMD=JOBWILLRUN ARG=JOBID=%ld,%s",
 		(uint32_t) now, my_job_id,
-		"TASKLIST=");	/* put desired node list here */
+		"");		/* put available node list here */
 	_xmit(out_msg);
 }
 
@@ -394,16 +398,28 @@ static void _initialize(void)
 	char out_msg[128];
 
 	snprintf(out_msg, sizeof(out_msg),
-		"TS=%u AUTH=root DT=CMD=INITIALIZE ARG=USEHOSTEXP=T EPORT=%u",
+		"TS=%u AUTH=root DT=CMD=INITIALIZE ARG=USEHOSTEXP=N EPORT=%u",
 		(uint32_t) now, e_port);
+	_xmit(out_msg);
+}
+
+static void _single_msg(void)
+{
+	time_t now = time(NULL);
+	char out_msg[1024];
+
+	snprintf(out_msg, sizeof(out_msg),
+		"TS=%u AUTH=root DT=CMD=%s",
+		(uint32_t) now, 
+		"JOBWILLRUN ARG=JOBID=65537,bgl[000x733] JOBID=65539,bgl[000x733] JOBID=65538,bgl[000x733]");
 	_xmit(out_msg);
 }
 
 int main(int argc, char * argv[])
 {
-	if (argc < 4) {
+	if (argc < 6) {
 		printf("Usage: %s, auth_key control_addr e_port "
-			"job_id sched_port\n", argv[0]);
+			"job_id sched_port is_bluegene\n", argv[0]);
 		exit(1);
 	}
 
@@ -412,20 +428,27 @@ int main(int argc, char * argv[])
 	e_port       = atoi(argv[3]);
 	job_id       = atoi(argv[4]);
 	sched_port   = atoi(argv[5]);
-	printf("auth_key=%s control_addr=%s e_port=%d job_id=%d sched_port=%d\n", 
-		auth_key, control_addr, e_port, job_id, sched_port);
+	is_bluegene  = atoi(argv[6]);
+	printf("auth_key=%s control_addr=%s e_port=%d job_id=%d sched_port=%d "
+		"is_bluegene=%d\n", 
+		auth_key, control_addr, e_port, job_id, sched_port, is_bluegene);
 
+#if _DEBUG
+	_single_msg();
+#else
 	_initialize();
 	_get_jobs();
 	_get_nodes();
 	_job_will_run(job_id);
 	_modify_job(job_id);
-	/* _notify_job(65544); */
 	_get_jobs();
 	_start_job(job_id);
 	_get_jobs();
-	_suspend_job(job_id);
-	_resume_job(job_id);
+	if (!is_bluegene) {
+		_suspend_job(job_id);
+		_resume_job(job_id);
+	}
+	_notify_job(job_id);
 	_signal_job(job_id);
 	if (e_port)
 		_event_mgr();
@@ -438,7 +461,7 @@ int main(int argc, char * argv[])
 	sleep(15);
 	_start_job(job_id);
 	_get_jobs();
-
+#endif
 	printf("SUCCESS\n");
 	exit(0);
 }

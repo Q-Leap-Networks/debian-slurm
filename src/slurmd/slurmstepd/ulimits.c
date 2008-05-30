@@ -1,11 +1,11 @@
 /*****************************************************************************\
  * src/slurmd/slurmstepd/ulimits.c - set user limits for job
- * $Id: ulimits.c 11693 2007-06-13 16:22:30Z jette $
+ * $Id: ulimits.c 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -76,10 +76,46 @@ static int _set_limit(char **env, slurm_rlimits_info_t *rli);
 int set_user_limits(slurmd_job_t *job)
 {
 	slurm_rlimits_info_t *rli;
+	struct rlimit r;
+	rlim_t task_mem_bytes;
 
 	for (rli = get_slurm_rlimits_info(); rli->name; rli++)
 		_set_limit( job->env, rli );
 
+	/* Set soft and hard memory and data size limit for this process, 
+	 * try to handle job and task limit (all spawned processes) in slurmd */
+	task_mem_bytes  = job->task_mem;	/* MB */
+	task_mem_bytes *= (1024 * 1024);
+#ifdef RLIMIT_AS
+	if ((task_mem_bytes) && (getrlimit(RLIMIT_AS, &r) == 0) &&
+	    (r.rlim_max > task_mem_bytes)) {
+		r.rlim_max =  r.rlim_cur = task_mem_bytes;
+		if (setrlimit(RLIMIT_AS, &r)) {
+			/* Indicates that limit has already been exceeded */
+			fatal("setrlimit(RLIMIT_AS, %u MB): %m", job->task_mem);
+		} else
+			info("Set task_mem(%u MB)", job->task_mem);
+#if 0
+		getrlimit(RLIMIT_AS, &r);
+		info("task memory limits: %u %u", r.rlim_cur, r.rlim_max);
+#endif
+	}
+#endif
+#ifdef RLIMIT_DATA
+	if ((task_mem_bytes) && (getrlimit(RLIMIT_DATA, &r) == 0) &&
+	    (r.rlim_max > task_mem_bytes)) {
+		r.rlim_max =  r.rlim_cur = task_mem_bytes;
+		if (setrlimit(RLIMIT_DATA, &r)) {
+			/* Indicates that limit has already been exceeded */
+			fatal("setrlimit(RLIMIT_DATA, %u MB): %m", job->task_mem);
+		} else
+			info("Set task_data(%u MB)", job->task_mem);
+#if 0
+		getrlimit(RLIMIT_DATA, &r);
+		info("task DATA limits: %u %u", r.rlim_cur, r.rlim_max);
+#endif
+	}
+#endif
 	return SLURM_SUCCESS;
 }
 

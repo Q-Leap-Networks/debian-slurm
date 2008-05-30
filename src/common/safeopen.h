@@ -1,10 +1,10 @@
 /*****************************************************************************\
  *  safeopen.h - safer interface to open()
- *  $Id: safeopen.h 10574 2006-12-15 23:38:29Z jette $
+ *  $Id: safeopen.h 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.

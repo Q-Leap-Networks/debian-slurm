@@ -29,6 +29,7 @@ hv_to_slurm_step_ctx_params(HV* hv, slurm_step_ctx_params_t* params)
 	FETCH_FIELD(hv, params, node_list, charp, FALSE);
 	FETCH_FIELD(hv, params, network, charp, FALSE);
 	FETCH_FIELD(hv, params, overcommit, bool, FALSE);
+	FETCH_FIELD(hv, params, mem_per_task, uint16_t, FALSE);
 	return 0;
 }
 
@@ -54,7 +55,7 @@ hv_to_slurm_step_launch_params(HV* hv, slurm_step_launch_params_t* params)
 			argv_av = (AV*)SvRV(*svp);
 			params->argc = av_len(argv_av) + 1;
 			if (params->argc > 0) {
-				Newz(0, params->argv, params->argc + 1, char*);
+				Newz(0, params->argv, (int32_t)(params->argc + 1), char*);
 				for(i = 0; i < params->argc; i ++) {
 					if((svp = av_fetch(argv_av, i, FALSE)))
 						*(params->argv + i) = (char*) SvPV_nolen(*svp);
@@ -95,6 +96,7 @@ hv_to_slurm_step_launch_params(HV* hv, slurm_step_launch_params_t* params)
 	}
 	FETCH_FIELD(hv, params, cwd, charp, FALSE);
 	FETCH_FIELD(hv, params, user_managed_io, bool, FALSE);
+	FETCH_FIELD(hv, params, msg_timeout, uint32_t, FALSE);
 	FETCH_FIELD(hv, params, buffered_stdio, bool, FALSE);
 	FETCH_FIELD(hv, params, labelio, bool, FALSE);
 	FETCH_FIELD(hv, params, remote_output_filename, charp, FALSE);

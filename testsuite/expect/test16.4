@@ -11,7 +11,7 @@
 # Copyright (C) 2002-2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-226842.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -56,7 +56,7 @@ exec $bin_chmod 700 $file_prog
 # Spawn initial program via srun
 #
 set timeout $max_job_delay
-set salloc_pid [spawn $salloc -N1-4 -t2 $slaunch -n4 --overcommit $file_prog]
+set salloc_pid [spawn $salloc -N1-4 -t2 $srun -n4 --overcommit $file_prog]
 set init_id $spawn_id
 expect {
         -i $init_id

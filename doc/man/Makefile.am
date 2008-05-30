@@ -3,6 +3,7 @@ EXTRA_DIST = man1 man3 man5 man8
 
 man1_MANS =            \
 	man1/sacct.1 \
+	man1/sacctmgr.1 \
 	man1/salloc.1 \
 	man1/sattach.1 \
 	man1/sbatch.1 \
@@ -10,11 +11,12 @@ man1_MANS =            \
 	man1/scancel.1 \
 	man1/scontrol.1 \
 	man1/sinfo.1   \
-	man1/slaunch.1 \
 	man1/slurm.1 \
 	man1/smap.1 \
 	man1/squeue.1 \
+	man1/sreport.1 \
 	man1/srun.1 \
+	man1/sstat.1 \
 	man1/strigger.1 \
 	man1/sview.1
 
@@ -92,12 +94,14 @@ man3_MANS = man3/slurm_hostlist_create.3 \
 
 man5_MANS = man5/bluegene.conf.5 \
 	man5/slurm.conf.5 \
+	man5/slurmdbd.conf.5 \
 	man5/wiki.conf.5
 
 man8_MANS = man8/slurmctld.8 \
 	man8/slurmd.8 \
-	man8/spank.8 \
-	man8/slurmstepd.8
+	man8/slurmdbd.8 \
+	man8/slurmstepd.8 \
+	man8/spank.8
 
 dist-hook:
 	-rm -rf `find $(distdir) -name CVS`

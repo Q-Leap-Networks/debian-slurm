@@ -1,11 +1,12 @@
 /*****************************************************************************\
  *  auth_munge.c - SLURM auth implementation via Chris Dunlap's Munge
- *  $Id: auth_munge.c 10574 2006-12-15 23:38:29Z jette $
+ *  $Id: auth_munge.c 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
- *  Copyright (C) 2002 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov> 
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -122,7 +123,7 @@ static munge_info_t * cred_info_create(munge_ctx_t ctx);
 static void           cred_info_destroy(munge_info_t *);
 static void           _print_cred_info(munge_info_t *mi);
 static void           _print_cred(munge_ctx_t ctx);
-static int            _decode_cred(slurm_auth_credential_t *c);
+static int            _decode_cred(slurm_auth_credential_t *c, char *socket);
 
 
 /*
@@ -146,7 +147,7 @@ int init ( void )
  * data at this time is implementation-dependent.
  */
 slurm_auth_credential_t *
-slurm_auth_create( void *argv[] )
+slurm_auth_create( void *argv[], char *socket )
 {
 	int retry = 2;
 	slurm_auth_credential_t *cred = NULL;
@@ -156,6 +157,24 @@ slurm_auth_create( void *argv[] )
 
 	if (ctx == NULL) {
 		error("munge_ctx_create failure");
+		return NULL;
+	}
+
+#if 0
+	/* This logic can be used to determine what socket is used by default.
+	 * A typical name is "/var/run/munge/munge.socket.2" */
+{
+	char *old_socket;
+	if (munge_ctx_get(ctx, MUNGE_OPT_SOCKET, &old_socket) != EMUNGE_SUCCESS)
+		error("munge_ctx_get failure");
+	else
+		info("Default Munge socket is %s", old_socket);
+}
+#endif
+	if (socket &&
+	    (munge_ctx_set(ctx, MUNGE_OPT_SOCKET, socket) != EMUNGE_SUCCESS)) {
+		error("munge_ctx_set failure");
+		munge_ctx_destroy(ctx);
 		return NULL;
 	}
 
@@ -226,7 +245,7 @@ slurm_auth_destroy( slurm_auth_credential_t *cred )
  * Return SLURM_SUCCESS if the credential is in order and valid.
  */
 int
-slurm_auth_verify( slurm_auth_credential_t *c, void *argv )
+slurm_auth_verify( slurm_auth_credential_t *c, void *argv, char *socket )
 {
 	if (!c) {
 		plugin_errno = SLURM_AUTH_BADARG;
@@ -238,7 +257,7 @@ slurm_auth_verify( slurm_auth_credential_t *c, void *argv )
 	if (c->verified) 
 		return SLURM_SUCCESS;
 
-	if (_decode_cred(c) < 0) 
+	if (_decode_cred(c, socket) < 0) 
 		return SLURM_ERROR;
 
 	return SLURM_SUCCESS;
@@ -249,13 +268,13 @@ slurm_auth_verify( slurm_auth_credential_t *c, void *argv )
  * is not assured until slurm_auth_verify() has been called for it.
  */
 uid_t
-slurm_auth_get_uid( slurm_auth_credential_t *cred )
+slurm_auth_get_uid( slurm_auth_credential_t *cred, char *socket )
 {
 	if (cred == NULL) {
 		plugin_errno = SLURM_AUTH_BADARG;
 		return SLURM_AUTH_NOBODY;
 	}
-	if ((!cred->verified) && (_decode_cred(cred) < 0)) {
+	if ((!cred->verified) && (_decode_cred(cred, socket) < 0)) {
 		cred->cr_errno = SLURM_AUTH_INVALID;
 		return SLURM_AUTH_NOBODY;
 	}
@@ -270,13 +289,13 @@ slurm_auth_get_uid( slurm_auth_credential_t *cred )
  * above for details on correct behavior.
  */
 gid_t
-slurm_auth_get_gid( slurm_auth_credential_t *cred )
+slurm_auth_get_gid( slurm_auth_credential_t *cred, char *socket )
 {
 	if (cred == NULL) {
 		plugin_errno = SLURM_AUTH_BADARG;
 		return SLURM_AUTH_NOBODY;
 	}
-	if ((!cred->verified) && (_decode_cred(cred) < 0)) {
+	if ((!cred->verified) && (_decode_cred(cred, socket) < 0)) {
 		cred->cr_errno = SLURM_AUTH_INVALID;
 		return SLURM_AUTH_NOBODY;
 	}
@@ -325,9 +344,9 @@ slurm_auth_pack( slurm_auth_credential_t *cred, Buf buf )
 slurm_auth_credential_t *
 slurm_auth_unpack( Buf buf )
 {
-	slurm_auth_credential_t *cred;
+	slurm_auth_credential_t *cred = NULL;
 	char    *type;
-	uint16_t size;
+	uint32_t size;
 	uint32_t version;
 	
 	if ( buf == NULL ) {
@@ -338,20 +357,14 @@ slurm_auth_unpack( Buf buf )
 	/*
 	 * Get the authentication type.
 	 */
-	if ( unpackmem_ptr( &type, &size, buf ) != SLURM_SUCCESS ) {
-		plugin_errno = SLURM_AUTH_UNPACK;
-		return NULL;
-	}
+	safe_unpackmem_ptr( &type, &size, buf );
 	
 	if (( type == NULL )
 	||  ( strcmp( type, plugin_type ) != 0 )) {
 		plugin_errno = SLURM_AUTH_MISMATCH;
 		return NULL;
 	}
-	if ( unpack32( &version, buf ) != SLURM_SUCCESS ) {
-		plugin_errno = SLURM_AUTH_UNPACK;
-		return NULL;
-	}	
+	safe_unpack32( &version, buf );
 	if ( version != plugin_version ) {
 		plugin_errno = SLURM_AUTH_MISMATCH;
 		return NULL;
@@ -367,13 +380,11 @@ slurm_auth_unpack( Buf buf )
 
 	xassert(cred->magic = MUNGE_MAGIC);
 
-	if (unpackstr_malloc(&cred->m_str, &size, buf) < 0) {
-		plugin_errno = SLURM_AUTH_UNPACK;
-		goto unpack_error;
-	}
+	safe_unpackstr_malloc(&cred->m_str, &size, buf);
 	return cred;
 
  unpack_error:
+	plugin_errno = SLURM_AUTH_UNPACK;
 	xfree( cred );
 	return NULL;
 }
@@ -439,7 +450,7 @@ slurm_auth_errstr( int slurm_errno )
  * into slurm credential `c'
  */
 static int 
-_decode_cred(slurm_auth_credential_t *c)
+_decode_cred(slurm_auth_credential_t *c, char *socket)
 {
 	int retry = 2;
 	munge_err_t e;
@@ -455,6 +466,12 @@ _decode_cred(slurm_auth_credential_t *c)
 
 	if ((ctx = munge_ctx_create()) == NULL) {
 		error("munge_ctx_create failure");
+		return SLURM_ERROR;
+	}
+	if (socket &&
+	    (munge_ctx_set(ctx, MUNGE_OPT_SOCKET, socket) != EMUNGE_SUCCESS)) {
+		error("munge_ctx_set failure");
+		munge_ctx_destroy(ctx);
 		return SLURM_ERROR;
 	}
 

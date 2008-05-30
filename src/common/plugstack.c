@@ -3,7 +3,7 @@
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -1017,7 +1017,7 @@ static struct spank_plugin_opt *_find_remote_option_by_name(const char
 	}
 
 	if (!(name = strchr(buf, ':'))) {
-		error("Malformed plugin option \"%s\" recieved. Ignoring",
+		error("Malformed plugin option \"%s\" received. Ignoring",
 		      str);
 		return (NULL);
 	}

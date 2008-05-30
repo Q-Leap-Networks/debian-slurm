@@ -1,31 +1,46 @@
-slurm-llnl (1.2.27-2) unstable; urgency=low
+slurm-llnl (1.3.3-1) unstable; urgency=low
 
-  * Fix a bug when installing with an already existent slurm user
-    (Closes: #459618) thanks to Manuel Prinz
-  * Thanks to Dirk Eddelbuettel for man pages compression patch 
+  * New upstream release
+  * Removed patches to src/slurmctd/controller.c src/slurmdbd/slurmdbd.c
+    doc/man/man1/sacctmgr.1 included to upstream
+  * Edited watch file to seek for 1.3 releases
+  * doc/man/man1/salloc.1 doc/man/man1/sbatch.1 doc/man/man5/slurm.conf.5
+    patched to improve formatting and avoid manual warnings 
 
- -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Tue, 22 Apr 2008 01:02:38 +0200
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Fri, 30 May 2008 13:11:30 +0200
 
-slurm-llnl (1.2.27-1) unstable; urgency=low
+slurm-llnl (1.3.2-1) unstable; urgency=low
 
-  * New upstream release (1.2.26 is missing because it was replaced too
-    quickly!!!)
+  * New upstream major release.
+  * New slurmdbd package.
+  * init.d script modified to check if configuration file is for version 1.2
+  * Installation script renamed to slurm-llnl.{pre,post}{inst,rm}
+  * Sample slurm-resume.sh script to use with ResumeProgram
+  * Sample slurm-suspend.sh script to use with SuspendProgram
+  * New sample configuration file updated to version 1.3
+  * New html automatic configuration tool updated to version 1.3
+  * New build dependency for postgres and mysql development files
+  * Added log files to be stored in /var/log/slurm-llnl 
+  * Added logrotate for log files
+  * Added patch to slurmctld in order to correctly support SIGHUP
+  * Added patch to slurmdbd in order to correctly support SIGHUP
+  * slurm-llnl.init.d modified in order to use the correct pidfile
+  * slurm-llnl.init.d check openssl vulnerabilty
+  * slurm-llnl.init.d check for key only on the controller and for cert on all
+    the slurmd nodes only if cryptotype is openssl
+  * slurm-llnl.init.d seek for key and cert in the location specified in the
+    configuration file (not necessarly in /etc/slurm-llnl)
+  * Added patch to sacctmgr.1 manual page to correct hyphens where
+    minus signs were intended
+  * Removed bashism from installation and init.d scripts
 
- -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Wed, 16 Apr 2008 22:23:25 +0200
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Wed, 28 May 2008 10:49:49 +0200
 
-slurm-llnl (1.2.25-3) unstable; urgency=low
+slurm-llnl (1.3.0-1) unstable; urgency=low
 
-  * Fix a problem with the man pages compression
+  * New upstream release
 
- -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Wed, 02 Apr 2008 08:32:14 +0200
-
-slurm-llnl (1.2.25-2) unstable; urgency=low
-
-  * Fix a bug in the preinst script that causes the slurm user removal even
-    if its uid is correct (Closes: #472177). Thanks to Jerome BENOIT for his
-    collaboration.
-
- -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Tue, 01 Apr 2008 15:27:08 +0200
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Mon, 31 Mar 2008 00:18:47 +0200
 
 slurm-llnl (1.2.25-1) unstable; urgency=low
 

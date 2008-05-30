@@ -5,7 +5,7 @@
  *  Copyright (C) 2003 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.com> et. al.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -54,7 +54,34 @@
 
 #include "src/slurmctld/slurmctld.h"
 
+typedef struct {
+	uint32_t jobid;
+	char *partition;
+	char *start_time;
+	char *end_time;
+	uint32_t uid;
+	char *uid_name;
+	uint32_t gid;
+	char *gid_name;
+	uint32_t node_cnt;
+	char *nodelist;
+	char *jobname;
+	char *state;
+	char *timelimit;
+#ifdef HAVE_BG
+	char *blockid;
+	char *connection;
+	char *reboot;
+	char *rotate;
+	uint32_t max_procs;
+	char *geo;
+	char *bg_start_point;
+#endif
+} jobcomp_job_rec_t;
+
 typedef struct slurm_jobcomp_context * slurm_jobcomp_context_t;
+
+extern void jobcomp_destroy_job(void *object);
 
 /* initialization of job completion logging */
 extern int g_slurm_jobcomp_init(char *jobcomp_loc);
@@ -70,6 +97,20 @@ extern int g_slurm_jobcomp_errno(void);
 
 /* convert job completion logger specific error code to a string */
 extern char *g_slurm_jobcomp_strerror(int errnum);
+
+/* 
+ * get info from the storage 
+ * returns List of jobcomp_job_rec_t *
+ * note List needs to be freed when called
+ */
+extern List g_slurm_jobcomp_get_jobs(List selected_steps,
+				     List selected_parts,
+				     void *params);
+
+/* 
+ * expire old info from the storage 
+ */
+extern void g_slurm_jobcomp_archive(List selected_parts, void *params);
 
 #endif /*__SLURM_JOBCOMP_H__*/
 

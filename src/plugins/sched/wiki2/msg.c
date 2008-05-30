@@ -4,7 +4,7 @@
  *  Copyright (C) 2006-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -38,6 +38,7 @@
 #include "./crypto.h"
 #include "./msg.h"
 #include "src/common/uid.h"
+#include "src/slurmctld/locks.h"
 #include <sys/poll.h>
 
 #define _DEBUG 0
@@ -142,11 +143,19 @@ static void *_msg_thread(void *no_data)
 	slurm_fd sock_fd = -1, new_fd;
 	slurm_addr cli_addr;
 	char *msg;
-	slurm_ctl_conf_t *conf = slurm_conf_lock();
+	slurm_ctl_conf_t *conf;
 	int i;
+	/* Locks: Write configuration, job, node, and partition */
+	slurmctld_lock_t config_write_lock = {
+		WRITE_LOCK, WRITE_LOCK, WRITE_LOCK, WRITE_LOCK };
 
+	conf = slurm_conf_lock();
 	sched_port = conf->schedport;
 	slurm_conf_unlock();
+
+	/* Wait until configuration is completely loaded */
+	lock_slurmctld(config_write_lock);
+	unlock_slurmctld(config_write_lock);
 
 	/* If SchedulerPort is already taken, keep trying to open it
 	 * once per minute. Slurmctld will continue to function
@@ -181,8 +190,10 @@ static void *_msg_thread(void *no_data)
 		err_code = 0;
 		err_msg = "";
 		msg = _recv_msg(new_fd);
-		_proc_msg(new_fd, msg);
-		xfree(msg);
+		if (msg) {
+			_proc_msg(new_fd, msg);
+			xfree(msg);
+		}
 		slurm_close_accepted_conn(new_fd);
 	}
 	verbose("wiki: message engine shutdown");
@@ -206,7 +217,7 @@ static char * _get_wiki_conf_path(void)
 		val = default_slurm_config_file;
 
 	/* Replace file name on end of path */
-	i = strlen(val) + 1;
+	i = strlen(val) + 10;
 	path = xmalloc(i);
 	strcpy(path, val);
 	val = strrchr(path, (int)'/');
@@ -351,9 +362,59 @@ extern int parse_wiki_config(void)
 	info("HostFormat         = %u", use_host_exp);
 	info("JobAggregationTime = %u sec", job_aggregation_time);
 	info("JobPriority        = %s", init_prio_mode ? "run" : "hold");
-	info("KillWait           = %u sec", kill_wait);      
+	info("KillWait           = %u sec", kill_wait);
+	for (i=0; i<EXC_PART_CNT; i++) {
+		if (!exclude_part_ptr[i])
+			continue;
+		info("ExcludePartitions  = %s", exclude_part_ptr[i]->name);
+	}
+	for (i=0; i<HIDE_PART_CNT; i++) {
+		if (!hide_part_ptr[i])
+			continue;
+		info("HidePartitionJobs  = %s", hide_ptr_ptr[i]->name);
+	}
 #endif
 	return SLURM_SUCCESS;
+}
+
+/*
+ * Return a string containing any scheduling plugin configuration information 
+ * that we want to expose via "scontrol show configuration".
+ * NOTE: the caller must xfree the returned pointer
+ */
+extern char *	get_wiki_conf(void)
+{
+	int i, first;
+	char buf[20], *conf = NULL;
+
+	snprintf(buf, sizeof(buf), "HostFormat=%u", use_host_exp);
+	xstrcat(conf, buf);
+
+	first = 1;
+	for (i=0; i<EXC_PART_CNT; i++) {
+		if (!exclude_part_ptr[i])
+			continue;
+		if (first) {
+			xstrcat(conf, ";ExcludePartitions=");
+			first = 0;
+		} else
+			xstrcat(conf, ",");
+		xstrcat(conf, exclude_part_ptr[i]->name);
+	}
+
+	first = 1;
+	for (i=0; i<HIDE_PART_CNT; i++) {
+		if (!hide_part_ptr[i])
+			continue;
+		if (first) {
+			xstrcat(conf, ";HidePartitionJobs=");
+			first = 0;
+		} else
+			xstrcat(conf, ",");
+		xstrcat(conf, hide_part_ptr[i]->name);
+	}
+
+	return conf;
 }
 
 static size_t	_read_bytes(int fd, char *buf, size_t size)
@@ -620,7 +681,8 @@ static void	_proc_msg(slurm_fd new_fd, char *msg)
 		job_release_task(cmd_ptr, &err_code, &err_msg);
 	} else if (strncmp(cmd_ptr, "JOBWILLRUN", 10) == 0) {
 		msg_type = "wiki:JOBWILLRUN";
-		job_will_run(cmd_ptr, &err_code, &err_msg);
+		if (!job_will_run(cmd_ptr, &err_code, &err_msg))
+			goto free_resp_msg;
 	} else if (strncmp(cmd_ptr, "MODIFYJOB", 9) == 0) {
 		msg_type = "wiki:MODIFYJOB";
 		job_modify_wiki(cmd_ptr, &err_code, &err_msg);

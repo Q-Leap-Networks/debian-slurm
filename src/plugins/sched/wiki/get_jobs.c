@@ -4,7 +4,7 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -42,6 +42,7 @@
 #include "src/common/hostlist.h"
 #include "src/common/list.h"
 #include "src/common/uid.h"
+#include "src/slurmctld/licenses.h"
 #include "src/slurmctld/locks.h"
 #include "src/slurmctld/slurmctld.h"
 
@@ -125,8 +126,8 @@ extern int	get_jobs(char *cmd_ptr, int *err_code, char **err_msg)
 		/* report all jobs */
 		buf = _dump_all_jobs(&job_rec_cnt, update_time);
 	} else {
-		struct job_record *job_ptr;
-		char *job_name, *tmp2_char;
+		struct job_record *job_ptr = NULL;
+		char *job_name = NULL, *tmp2_char = NULL;
 		uint32_t job_id;
 
 		job_name = strtok_r(tmp_char, ":", &tmp2_char);
@@ -148,7 +149,10 @@ extern int	get_jobs(char *cmd_ptr, int *err_code, char **err_msg)
 	if (buf)
 		buf_size = strlen(buf);
 	tmp_buf = xmalloc(buf_size + 32);
-	sprintf(tmp_buf, "SC=0 ARG=%d#%s", job_rec_cnt, buf);
+	if (job_rec_cnt)
+		sprintf(tmp_buf, "SC=0 ARG=%d#%s", job_rec_cnt, buf);
+	else
+		sprintf(tmp_buf, "SC=0 ARG=0#");
 	xfree(buf);
 	*err_code = 0;
 	*err_msg = tmp_buf;
@@ -241,18 +245,18 @@ static char *	_dump_job(struct job_record *job_ptr, time_t update_time)
 	}
 
 	snprintf(tmp, sizeof(tmp), 
-		"UPDATETIME=%u;WCLIMIT=%u;",
+		"UPDATETIME=%u;WCLIMIT=%u;TASKS=%u;",
 		(uint32_t) job_ptr->time_last_active,
-		(uint32_t) _get_job_time_limit(job_ptr));
+		(uint32_t) _get_job_time_limit(job_ptr),
+		_get_job_tasks(job_ptr));
 	xstrcat(buf, tmp);
 
-	/* Don't report actual tasks or nodes allocated since
-	 * this can impact requeue on heterogenous clusters */
-	snprintf(tmp, sizeof(tmp),
-		"TASKS=%u;NODES=%u;",
-		_get_job_tasks(job_ptr),
-		_get_job_min_nodes(job_ptr));
-	xstrcat(buf, tmp);
+	if (!IS_JOB_FINISHED(job_ptr)) {
+		snprintf(tmp, sizeof(tmp),
+			"NODES=%u;",
+			_get_job_min_nodes(job_ptr));
+		xstrcat(buf, tmp);
+	}
 
 	snprintf(tmp, sizeof(tmp),
 		"DPROCS=%u;",
@@ -344,7 +348,8 @@ static uint32_t _get_job_min_disk(struct job_record *job_ptr)
 static uint32_t	_get_job_min_nodes(struct job_record *job_ptr)
 {
 	if (job_ptr->job_state > JOB_PENDING) {
-		/* return actual count of allocated nodes */
+		/* return actual count of currently allocated nodes.
+		 * NOTE: gets decremented to zero while job is completing */
 		return job_ptr->node_cnt;
 	}
 
@@ -372,15 +377,21 @@ static uint32_t _get_job_submit_time(struct job_record *job_ptr)
 
 static uint32_t _get_job_tasks(struct job_record *job_ptr)
 {
-	uint32_t task_cnt = 1;
+	uint32_t task_cnt;
 
-	if (job_ptr->num_procs)
-		task_cnt = job_ptr->num_procs;
-
-	if (job_ptr->details) {
-		task_cnt = MAX(task_cnt,
-			       (_get_job_min_nodes(job_ptr) * 
-			        job_ptr->details->ntasks_per_node));
+	if (job_ptr->job_state > JOB_PENDING) {
+		task_cnt = job_ptr->total_procs;
+	} else {
+		if (job_ptr->num_procs)
+			task_cnt = job_ptr->num_procs;
+		else
+			task_cnt = 1;
+		if (job_ptr->details) {
+			task_cnt = MAX(task_cnt,
+				       (_get_job_min_nodes(job_ptr) * 
+				        job_ptr->details->
+					ntasks_per_node));
+		}
 	}
 
 	return task_cnt / _get_job_cpus_per_task(job_ptr);
@@ -414,12 +425,12 @@ static char *	_get_job_state(struct job_record *job_ptr)
 			return "Running";
 	}
 
-	if (base_state == JOB_PENDING)
-		return "Idle";
 	if (base_state == JOB_RUNNING)
 		return "Running";
 	if (base_state == JOB_SUSPENDED)
 		return "Suspended";
+	if (base_state == JOB_PENDING)
+		return "Idle";
 
 	if (base_state == JOB_COMPLETE)
 		return "Completed";

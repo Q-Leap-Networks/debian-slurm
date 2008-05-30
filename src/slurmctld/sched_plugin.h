@@ -4,7 +4,7 @@
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jay Windley <jwindley@lnxi.com>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -72,10 +72,25 @@ int slurm_sched_reconfig( void );
 int slurm_sched_schedule( void );
 
 /*
+ * Note the successful allocation of resources to a job.
+ */
+int slurm_sched_newalloc( struct job_record *job_ptr );
+
+/*
+ * Note the successful release of resources to a job.
+ */
+int slurm_sched_freealloc( struct job_record *job_ptr );
+
+/*
  * Supply the initial SLURM priority for a newly-submitted job.
  */
 uint32_t slurm_sched_initial_priority( uint32_t max_prio, 
 				       struct job_record *job_ptr );
+
+/*
+ * Requeue a job
+ */
+void slurm_sched_requeue( struct job_record *job_ptr, char *reason );
 
 /*
  * Note that some job is pending.
@@ -96,5 +111,11 @@ int slurm_sched_p_get_errno( void );
  * Return any plugin-specific error description
  */
 char *slurm_sched_p_strerror( int errnum );
+
+/*
+ * Return any plugin-specific configuration information
+ * Caller must xfree return value
+ */
+char *slurm_sched_p_get_conf( void );
 
 #endif /*__SLURM_CONTROLLER_SCHED_PLUGIN_API_H__*/

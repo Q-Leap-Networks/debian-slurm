@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  job_info.c - get/print the job state information of slurm
- *  $Id: job_info.c 13465 2008-03-04 16:51:08Z jette $
+ *  $Id: job_info.c 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -189,8 +189,11 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 		sprintf(tmp_line, "UNLIMITED ");
 	else if (job_ptr->time_limit == NO_VAL)
 		sprintf(tmp_line, "Partition_Limit ");
-	else
-		sprintf(tmp_line, "%u ", job_ptr->time_limit);
+	else {
+		secs2time_str(job_ptr->time_limit * 60, tmp1,
+			sizeof(tmp1));
+		sprintf(tmp_line, "%s ", tmp1);
+	}
 	xstrcat(out, tmp_line);
 	if (WIFSIGNALED(job_ptr->exit_code))
 		term_sig = WTERMSIG(job_ptr->exit_code);
@@ -339,10 +342,11 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 
 	/****** Line 8 ******/
 	snprintf(tmp_line, sizeof(tmp_line),
-		"Shared=%s Contiguous=%d CPUs/task=%u", 
+		"Shared=%s Contiguous=%d CPUs/task=%u Licenses=%s", 
 		 (job_ptr->shared == 0 ? "0" :
 		  job_ptr->shared == 1 ? "1" : "OK"),
-		 job_ptr->contiguous, job_ptr->cpus_per_task);
+		 job_ptr->contiguous, job_ptr->cpus_per_task,
+		 job_ptr->licenses);
 	xstrcat(out, tmp_line);
 
 	if (one_liner)
@@ -377,8 +381,17 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 
 	/****** Line 11 ******/
 	snprintf(tmp_line, sizeof(tmp_line), 
-		"Dependency=%u Account=%s Reason=%s Network=%s",
-		job_ptr->dependency, job_ptr->account,
+		"Dependency=%s Account=%s Requeue=%u",
+		job_ptr->dependency, job_ptr->account, job_ptr->requeue);
+	xstrcat(out, tmp_line);
+	if (one_liner)
+		xstrcat(out, " ");
+	else
+		xstrcat(out, "\n   ");
+
+	/****** Line 12 ******/
+	snprintf(tmp_line, sizeof(tmp_line), 
+		"Reason=%s Network=%s",
 		job_reason_string(job_ptr->state_reason), 
 		job_ptr->network);
 	xstrcat(out, tmp_line);
@@ -387,7 +400,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	else
 		xstrcat(out, "\n   ");
 
-	/****** Line 12 ******/
+	/****** Line 13 ******/
 	snprintf(tmp_line, sizeof(tmp_line), "Req%s=%s Req%sIndices=", 
 		nodelist, job_ptr->req_nodes, nodelist);
 	xstrcat(out, tmp_line);
@@ -404,7 +417,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	else
 		xstrcat(out, "\n   ");
 
-	/****** Line 13 ******/
+	/****** Line 14 ******/
 	snprintf(tmp_line, sizeof(tmp_line), "Exc%s=%s Exc%sIndices=", 
 		nodelist, job_ptr->exc_nodes, nodelist);
 	xstrcat(out, tmp_line);
@@ -421,7 +434,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	else
 		xstrcat(out, "\n   ");
 
-	/****** Line 14 ******/
+	/****** Line 15 ******/
 	slurm_make_time_str((time_t *)&job_ptr->submit_time, time_str, 
 		sizeof(time_str));
 	snprintf(tmp_line, sizeof(tmp_line), "SubmitTime=%s ", 
@@ -437,7 +450,24 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 		  time_str, (long int)job_ptr->pre_sus_time);
 	xstrcat(out, tmp_line);
 
-	/****** Line 15 (optional) ******/
+	/****** Lines 16, 17 (optional, batch only) ******/
+	if (job_ptr->batch_flag) {
+		if (one_liner)
+			xstrcat(out, " ");
+		else
+			xstrcat(out, "\n   ");
+		sprintf(tmp_line, "Command=%s", job_ptr->command);
+		xstrcat(out, tmp_line);
+
+		if (one_liner)
+			xstrcat(out, " ");
+		else
+			xstrcat(out, "\n   ");
+		sprintf(tmp_line, "WorkDir=%s", job_ptr->work_dir);
+		xstrcat(out, tmp_line);
+	}
+
+	/****** Line 18 (optional) ******/
 	if (job_ptr->comment) {
 		if (one_liner)
 			xstrcat(out, " ");
@@ -448,7 +478,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 		xstrcat(out, tmp_line);
 	}
 
-	/****** Line 16 (optional) ******/
+	/****** Line 19 (optional) ******/
 	select_g_sprint_jobinfo(job_ptr->select_jobinfo,
 				select_buf, sizeof(select_buf),
 				SELECT_PRINT_MIXED);
@@ -459,7 +489,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 			xstrcat(out, "\n   ");
 		xstrcat(out, select_buf);
 	}
-	/****** Line 17 (optional) ******/
+	/****** Line 20 (optional) ******/
 	select_g_sprint_jobinfo(job_ptr->select_jobinfo,
 				select_buf, sizeof(select_buf),
 				SELECT_PRINT_BLRTS_IMAGE);
@@ -472,7 +502,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 			 "BlrtsImage=%s", select_buf);
 		xstrcat(out, tmp_line);
 	}
-	/****** Line 18 (optional) ******/
+	/****** Line 21 (optional) ******/
 	select_g_sprint_jobinfo(job_ptr->select_jobinfo,
 				select_buf, sizeof(select_buf),
 				SELECT_PRINT_LINUX_IMAGE);
@@ -485,7 +515,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 			 "LinuxImage=%s", select_buf);
 		xstrcat(out, tmp_line);
 	}
-	/****** Line 19 (optional) ******/
+	/****** Line 22 (optional) ******/
 	select_g_sprint_jobinfo(job_ptr->select_jobinfo,
 				select_buf, sizeof(select_buf),
 				SELECT_PRINT_MLOADER_IMAGE);
@@ -498,7 +528,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 			 "MloaderImage=%s", select_buf);
 		xstrcat(out, tmp_line);
 	}
-	/****** Line 20 (optional) ******/
+	/****** Line 23 (optional) ******/
 	select_g_sprint_jobinfo(job_ptr->select_jobinfo,
 				select_buf, sizeof(select_buf),
 				SELECT_PRINT_RAMDISK_IMAGE);

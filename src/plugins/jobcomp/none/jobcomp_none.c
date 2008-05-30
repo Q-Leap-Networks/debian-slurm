@@ -4,7 +4,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -83,7 +83,7 @@
  */
 const char plugin_name[]       	= "Job completion logging NONE plugin";
 const char plugin_type[]       	= "jobcomp/none";
-const uint32_t plugin_version	= 90;
+const uint32_t plugin_version	= 100;
 
 /*
  * init() is called when the plugin is loaded, before any other functions
@@ -119,7 +119,21 @@ char *slurm_jobcomp_strerror( int errnum )
 	        return NULL;
 }
 
+List slurm_jobcomp_get_jobs(List selected_steps, List selected_parts,
+			    void *params)
+{
+	return NULL;
+}
+
+void slurm_jobcomp_archive(List selected_parts,
+			   void *params)
+{
+	return;
+}
+
 int fini ( void )
 {
 	return SLURM_SUCCESS;
 }
+
+

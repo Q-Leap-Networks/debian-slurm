@@ -6,7 +6,7 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -17,7 +17,7 @@
  *  any later version.
  *
  *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
+ *  to link the code of portions of this program with the OpenSSL library under
  *  certain conditions as described in each individual source file, and 
  *  distribute linked combinations including the two. You must obey the GNU 
  *  General Public License in all respects for all of the code used other than 
@@ -39,11 +39,10 @@
 
 #include "sacct.h"
 #include <pthread.h>
-#include "src/common/slurm_jobacct.h"
 #include "src/common/forward.h"
 #include "src/common/slurm_auth.h"
 
-step_rec_t step;
+jobacct_step_rec_t step;
 	
 int thr_finished = 0;
 	
@@ -65,7 +64,7 @@ int _sacct_query(slurm_step_layout_t *step_layout, uint32_t job_id,
 	ret_data_info_t *ret_data_info = NULL;
 	int rc = SLURM_SUCCESS;
 	int ntasks = 0;
-
+	int tot_tasks = 0;
 	debug("getting the stat of job %d on %d nodes", 
 	      job_id, step_layout->node_cnt);
 
@@ -74,20 +73,15 @@ int _sacct_query(slurm_step_layout_t *step_layout, uint32_t job_id,
 	memset(&step.sacct, 0, sizeof(sacct_t));
 	step.sacct.min_cpu = (float)NO_VAL;
 
-	step.header.jobnum = job_id;
-	step.header.partition = NULL;
-	step.header.blockid = NULL;
-	step.stepnum = step_id;
+	step.stepid = step_id;
 	step.nodes = step_layout->node_list;
 	step.stepname = NULL;
-	step.status = JOB_RUNNING;
-	step.ntasks = 0;
+	step.state = JOB_RUNNING;
 	slurm_msg_t_init(&msg);
-	
 	/* Common message contents */
 	r.job_id      = job_id;
 	r.step_id     = step_id;
-	r.jobacct     = jobacct_g_alloc(NULL);
+	r.jobacct     = jobacct_gather_g_create(NULL);
 	msg.msg_type        = MESSAGE_STAT_JOBACCT;
 	msg.data            = &r;
 	
@@ -107,7 +101,7 @@ int _sacct_query(slurm_step_layout_t *step_layout, uint32_t job_id,
 			if(jobacct_msg) {
 				debug2("got it back for job %d", 
 				       jobacct_msg->job_id);
-				jobacct_g_2_sacct(
+				jobacct_gather_g_2_sacct(
 					&temp_sacct, 
 					jobacct_msg->jobacct);
 				ntasks += jobacct_msg->num_tasks;
@@ -131,23 +125,23 @@ int _sacct_query(slurm_step_layout_t *step_layout, uint32_t job_id,
 	list_iterator_destroy(itr);
 	list_destroy(ret_list);
 
-	step.ntasks += ntasks;		
+	tot_tasks += ntasks;		
 cleanup:
 	
-	if(step.ntasks) {
+	if(tot_tasks) {
 		step.sacct.ave_rss *= 1024;
 		step.sacct.max_rss *= 1024;
 		step.sacct.ave_vsize *= 1024;
 		step.sacct.max_vsize *= 1024;
 
-		step.sacct.ave_cpu /= step.ntasks;
+		step.sacct.ave_cpu /= tot_tasks;
 		step.sacct.ave_cpu /= 100;
 		step.sacct.min_cpu /= 100;
-		step.sacct.ave_rss /= step.ntasks;
-		step.sacct.ave_vsize /= step.ntasks;
-		step.sacct.ave_pages /= step.ntasks;
+		step.sacct.ave_rss /= tot_tasks;
+		step.sacct.ave_vsize /= tot_tasks;
+		step.sacct.ave_pages /= tot_tasks;
 	}
-	jobacct_g_free(r.jobacct);	
+	jobacct_gather_g_destroy(r.jobacct);	
 	return SLURM_SUCCESS;
 }
 
@@ -198,8 +192,10 @@ int sacct_stat(uint32_t jobid, uint32_t stepid)
 	}
 
 	_sacct_query(step_layout, jobid, stepid);
-	slurm_step_layout_destroy(step_layout);	
 	
 	_process_results();
+	
+	slurm_step_layout_destroy(step_layout);	
+	
 	return rc;
 }

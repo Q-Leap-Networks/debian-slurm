@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  opt.h - definitions for srun option processing
- *  $Id: opt.h 13407 2008-02-28 20:13:43Z jette $
+ *  $Id: opt.h 13771 2008-04-02 20:03:47Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona1@llnl.gov>, et. al.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -58,19 +58,7 @@
 #define INT_UNASSIGNED ((int)-1)
 
 /* global variables relating to user options */
-extern char **remote_argv;
-extern int remote_argc;
 extern int _verbose;
-
-/* mutually exclusive modes for srun */
-enum modes {
-	MODE_UNKNOWN	= 0,
-	MODE_NORMAL	= 1,
-	MODE_IMMEDIATE	= 2,
-	MODE_ATTACH	= 3,
-	MODE_ALLOCATE	= 4,
-	MODE_BATCH	= 5
-};
 
 extern enum modes mode;
 
@@ -121,6 +109,10 @@ typedef struct srun_options {
 	bool extra_set;		/* true if extra node info explicitly set */
 	int  time_limit;	/* --time,   -t	(int minutes)	*/
 	char *time_limit_str;	/* --time,   -t (string)	*/
+	int  ckpt_interval;	/* --checkpoint (int minutes)	*/
+	char *ckpt_interval_str;/* --checkpoint (string)	*/
+	char *ckpt_path;	/* --checkpoint-path (string)   */
+	bool exclusive;		/* --exclusive			*/
 	char *partition;	/* --partition=n,   -p n   	*/
 	enum task_dist_states
 	        distribution;	/* --distribution=, -m dist	*/
@@ -132,7 +124,7 @@ typedef struct srun_options {
 	unsigned int jobid;     /* --jobid=jobid                */
 	bool jobid_set;		/* true if jobid explicitly set */
 	char *mpi_type;		/* --mpi=type			*/
-	unsigned int dependency;/* --dependency, -P jobid	*/
+	char *dependency;	/* --dependency, -P type:jobid	*/
 	int nice;		/* --nice			*/
 	char *account;		/* --account, -U acct_name	*/
 	char *comment;		/* --comment			*/
@@ -143,7 +135,6 @@ typedef struct srun_options {
 
 	int  slurmd_debug;	/* --slurmd-debug, -D           */
 	core_format_t core_type;/* --core= 	        	*/
-	char *attach;		/* --attach=id	    -a id	*/ 
 	bool join;		/* --join, 	    -j		*/
 
 	/* no longer need these, they are set globally : 	*/
@@ -158,10 +149,8 @@ typedef struct srun_options {
 	bool allocate;		/* --allocate, 	   -A		*/
 	bool noshell;		/* --no-shell                   */
 	bool overcommit;	/* --overcommit,   -O		*/
-	bool batch;		/* --batch,   -b		*/
 	bool no_kill;		/* --no-kill, -k		*/
 	bool kill_bad_exit;	/* --kill-on-bad-exit, -K	*/
-	bool no_requeue;	/* --no-requeue			*/
 	uint16_t shared;	/* --share,   -s		*/
 	int  max_wait;		/* --wait,    -W		*/
 	bool quit_on_intr;      /* --quit-on-interrupt, -q      */
@@ -173,6 +162,7 @@ typedef struct srun_options {
 	char *propagate;	/* --propagate[=RLIMIT_CORE,...]*/
 	char *task_epilog;	/* --task-epilog=		*/
 	char *task_prolog;	/* --task-prolog=		*/
+	char *licenses;		/* --licenses, -L		*/
 
 	/* constraint options */
 	int32_t job_min_cpus;	/* --mincpus=n			*/
@@ -180,7 +170,7 @@ typedef struct srun_options {
 	int32_t job_min_cores;	/* --mincores=n			*/
 	int32_t job_min_threads;/* --minthreads=n		*/
 	int32_t job_min_memory;	/* --mem=n			*/
-	int32_t job_max_memory;	/* --job-mem=n			*/
+	int32_t task_mem;	/* --task-mem=n			*/
 	long job_min_tmp_disk;	/* --tmp=n			*/
 	char *constraints;	/* --constraints=, -C constraint*/
 	bool contiguous;	/* --contiguous			*/
@@ -212,8 +202,11 @@ typedef struct srun_options {
 	uint16_t mail_type;	/* --mail-type			*/
 	char *mail_user;	/* --mail-user			*/
 	char *ctrl_comm_ifhn;	/* --ctrl-comm-ifhn		*/
-	int get_user_env_time;	/* --get-user-env[=secs]	*/
-	int get_user_env_mode;	/* --get-user-env=[S|L]		*/
+	uint8_t open_mode;	/* --open-mode=append|truncate	*/
+	int acctg_freq;		/* --acctg-freq=secs		*/
+	bool pty;		/* --pty			*/
+	int argc;		/* length of argv array		*/
+	char **argv;		/* left over on command line	*/
 } opt_t;
 
 extern opt_t opt;
@@ -238,9 +231,5 @@ extern opt_t opt;
  * 4. perform some verification that options are reasonable
  */
 int initialize_and_process_args(int argc, char *argv[]);
-
-/* set options based upon commandline args */
-void set_options(const int argc, char **argv, int first);
-
 
 #endif	/* _HAVE_OPT_H */

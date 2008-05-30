@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  qsw.c - Library routines for initiating jobs on QsNet. 
- *  $Id: qsw.c 10574 2006-12-15 23:38:29Z jette $
+ *  $Id: qsw.c 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jim Garlick <garlick@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -747,7 +747,7 @@ _free_hwcontext(uint32_t prog_num)
 			if (prog_num != step_ctx_p->st_prognum)
 				continue;
 			_dump_step_ctx("_free_hwcontext", step_ctx_p);
-			list_delete(iter);
+			list_delete_item(iter);
 			break;
 		}
 		if (!step_ctx_p) {

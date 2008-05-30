@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/slurmstepd_job.h  slurmd_job_t definition
- *  $Id: slurmstepd_job.h 10574 2006-12-15 23:38:29Z jette $
+ *  $Id: slurmstepd_job.h 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -117,6 +117,8 @@ typedef struct slurmd_job {
 	uint32_t       nodeid; /* relative position of this node in job     */
 	uint32_t       ntasks; /* number of tasks on *this* node            */
 	uint32_t       debug;  /* debug level for job slurmd                */
+	uint32_t       job_mem;  /* MB of memory reserved for the job       */
+	uint32_t       task_mem; /* MB of memory reserved for each task     */ 
 	uint16_t       cpus;   /* number of cpus to use for this job        */
 	uint16_t       argc;   /* number of commandline arguments           */
 	char         **env;    /* job environment                           */
@@ -188,8 +190,10 @@ typedef struct slurmd_job {
 
 	char          *batchdir;
 	jobacctinfo_t *jobacct;
-
+	uint8_t        open_mode;	/* stdout/err append or truncate */
+	uint8_t        pty;		/* set if creating pseudo tty       */
 	job_options_t  options;
+	char          *ckpt_path;
 } slurmd_job_t;
 
 

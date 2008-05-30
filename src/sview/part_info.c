@@ -6,7 +6,7 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *   
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -88,6 +88,7 @@ enum {
 #endif
 	SORTID_NODES, 
 	SORTID_ONLY_LINE, 
+	SORTID_PRIORITY,
 	SORTID_REASON,
 	SORTID_ROOT, 
 	SORTID_SHARE, 
@@ -125,6 +126,8 @@ static display_data_t display_data_part[] = {
 #endif
 	{G_TYPE_STRING, SORTID_JOB_SIZE, "Job Size", FALSE,
 	 EDIT_NONE, refresh_part, create_model_part, admin_edit_part},
+	{G_TYPE_STRING, SORTID_PRIORITY, "Priority", FALSE,
+	 EDIT_TEXTBOX, refresh_part, create_model_part, admin_edit_part},
 	{G_TYPE_STRING, SORTID_MIN_NODES, "Min Nodes", FALSE,
 	 EDIT_TEXTBOX, refresh_part, create_model_part, admin_edit_part},
 	{G_TYPE_STRING, SORTID_MAX_NODES, "Max Nodes", FALSE,
@@ -332,6 +335,8 @@ static void _set_active_combo_part(GtkComboBox *combo,
 			action = 1;
 		else if(!strcmp(temp_char, "force"))
 			action = 2;
+		else if(!strcmp(temp_char, "exclusive"))
+			action = 3;
 		else 
 			action = 0;
 		break;
@@ -411,6 +416,11 @@ static const char *_set_part_msg(update_part_msg_t *part_msg,
 			goto return_error;
 		part_msg->max_time = (uint32_t)temp_int;
 		break;
+	case SORTID_PRIORITY:
+		temp_int = strtol(new_text, (char **)NULL, 10);
+		type = "priority";
+		part_msg->priority = (uint16_t)temp_int;
+		break;
 	case SORTID_MIN_NODES:
 		temp_int = strtol(new_text, (char **)NULL, 10);
 		type = "min_nodes";
@@ -442,11 +452,13 @@ static const char *_set_part_msg(update_part_msg_t *part_msg,
 		break;
 	case SORTID_SHARE:
 		if (!strcasecmp(new_text, "yes")) {
-			part_msg->shared = SHARED_YES;
-		} else if (!strcasecmp(new_text, "no")) {
-			part_msg->shared = SHARED_NO;
-		} else {
-			part_msg->shared = SHARED_FORCE;
+			 part_msg->max_share = 4;
+		} else if (!strcasecmp(new_text, "exclusive")) {
+			part_msg->max_share = 0;
+		} else if (!strcasecmp(new_text, "force")) {
+			part_msg->max_share = SHARED_FORCE | 4;
+		} else {	/* "no" */
+			part_msg->max_share = 1;
 		}
 		type = "share";
 		break;
@@ -722,7 +734,7 @@ static void _layout_part_record(GtkTreeView *treeview,
 {
 	GtkTreeIter iter;
 	ListIterator itr = NULL;
-	char time_buf[20];
+	char time_buf[20], tmp_buf[20];
 	char tmp_cnt[8];
 	char tmp_cnt1[8];
 	char tmp_cnt2[8];
@@ -794,7 +806,14 @@ static void _layout_part_record(GtkTreeView *treeview,
 				   find_col_name(display_data_part,
 						 SORTID_JOB_SIZE),
 				   time_buf);
-	
+
+	convert_num_unit((float)part_ptr->priority,
+			 time_buf, sizeof(time_buf), UNIT_NONE);
+	add_display_treestore_line(update, treestore, &iter,
+				   find_col_name(display_data_part,
+						 SORTID_PRIORITY),
+				   time_buf);
+				   
 	if (part_ptr->min_nodes == (uint32_t) INFINITE)
 		snprintf(time_buf, sizeof(time_buf), "infinite");
 	else {
@@ -825,11 +844,17 @@ static void _layout_part_record(GtkTreeView *treeview,
 						 SORTID_ROOT),
 				   temp_char);
 		
-	if(part_ptr->shared > 1)
-		temp_char = "force";
-	else if(part_ptr->shared)
-		temp_char = "yes";
-	else 
+	if(part_ptr->max_share & SHARED_FORCE) {
+		snprintf(tmp_buf, sizeof(tmp_buf), "force:%u", 
+			 (part_ptr->max_share & ~(SHARED_FORCE))); 
+		temp_char = tmp_buf;
+	} else if(part_ptr->max_share == 0)
+		temp_char = "exclusive";
+	else if(part_ptr->max_share > 1) {
+		snprintf(tmp_buf, sizeof(tmp_buf), "yes:%u", 
+			 part_ptr->max_share);
+		temp_char = tmp_buf;
+	} else 
 		temp_char = "no";
 	add_display_treestore_line(update, treestore, &iter,
 				   find_col_name(display_data_part,
@@ -921,7 +946,7 @@ static void _update_part_record(sview_part_info_t *sview_part_info,
 				GtkTreeStore *treestore, 
 				GtkTreeIter *iter)
 {
-	char time_buf[20];
+	char time_buf[20], tmp_buf[20];
 	char tmp_cnt[8];
 	char *temp_char = NULL;
 	partition_info_t *part_ptr = sview_part_info->part_ptr;
@@ -962,6 +987,11 @@ static void _update_part_record(sview_part_info_t *sview_part_info,
 			      part_ptr->max_nodes, true);
 	gtk_tree_store_set(treestore, iter, SORTID_JOB_SIZE, time_buf, -1);
 	
+	convert_num_unit((float)part_ptr->priority,
+			 time_buf, sizeof(time_buf), UNIT_NONE);
+	gtk_tree_store_set(treestore, iter, SORTID_PRIORITY,
+			   time_buf, -1);
+
 	if (part_ptr->min_nodes == (uint32_t) INFINITE)
 		snprintf(time_buf, sizeof(time_buf), "infinite");
 	else {
@@ -985,11 +1015,17 @@ static void _update_part_record(sview_part_info_t *sview_part_info,
 		temp_char = "no";
 	gtk_tree_store_set(treestore, iter, SORTID_ROOT, temp_char, -1);
 	
-	if(part_ptr->shared > 1)
-		temp_char = "force";
-	else if(part_ptr->shared)
-		temp_char = "yes";
-	else 
+	if(part_ptr->max_share & SHARED_FORCE) {
+		snprintf(tmp_buf, sizeof(tmp_buf), "force:%u", 
+			 (part_ptr->max_share & ~(SHARED_FORCE))); 
+		temp_char = tmp_buf;
+	} else if(part_ptr->max_share == 0)
+		temp_char = "exclusive";
+	else if(part_ptr->max_share > 1) {
+		snprintf(tmp_buf, sizeof(tmp_buf), "yes:%u", 
+			 part_ptr->max_share);
+		temp_char = tmp_buf;
+	} else 
 		temp_char = "no";
 	gtk_tree_store_set(treestore, iter, SORTID_SHARE, temp_char, -1);
 	
@@ -1566,7 +1602,7 @@ need_refresh:
 		treeview = GTK_TREE_VIEW(spec_info->display_widget);
 		update = 1;
 	}
-	
+
 	itr = list_iterator_create(info_list);
 	while ((sview_part_info = (sview_part_info_t*) list_next(itr))) {
 		part_ptr = sview_part_info->part_ptr;
@@ -1709,6 +1745,7 @@ extern GtkListStore *create_model_part(int type)
 				   -1);	
 
 		break;
+	case SORTID_PRIORITY:
 	case SORTID_TIMELIMIT:
 	case SORTID_MIN_NODES:
 	case SORTID_MAX_NODES:
@@ -1730,9 +1767,9 @@ extern GtkListStore *create_model_part(int type)
 		model = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_INT);
 		gtk_list_store_append(model, &iter);
 		gtk_list_store_set(model, &iter,
-				   0, "yes",
+				   0, "force",
 				   1, SORTID_SHARE,
-				   -1);	
+				   -1);
 		gtk_list_store_append(model, &iter);
 		gtk_list_store_set(model, &iter,
 				   0, "no",
@@ -1740,9 +1777,14 @@ extern GtkListStore *create_model_part(int type)
 				   -1);	
 		gtk_list_store_append(model, &iter);
 		gtk_list_store_set(model, &iter,
-				   0, "force",
+				   0, "yes",
 				   1, SORTID_SHARE,
-				   -1);	
+				   -1);
+		gtk_list_store_append(model, &iter);	
+		gtk_list_store_set(model, &iter,
+				   0, "exclusive",
+				   1, SORTID_SHARE,
+				   -1);
 		break;
 	case SORTID_GROUPS:
 		break;

@@ -61,8 +61,13 @@
 #include <sys/utsname.h>
 #include <unistd.h>
 
-#define _GNU_SOURCE
-#define __USE_GNU
+#ifndef   _GNU_SOURCE
+#  define _GNU_SOURCE
+#endif
+#ifndef   __USE_GNU
+#define   __USE_GNU
+#endif
+
 #include <sched.h> /* SMB */
 
 #ifdef HAVE_STDLIB_H
@@ -80,7 +85,6 @@
 #include "src/common/node_select.h"
 #include "src/common/fd.h"
 #include "src/common/safeopen.h"
-#include "src/common/slurm_jobacct.h"
 #include "src/common/switch.h"
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"

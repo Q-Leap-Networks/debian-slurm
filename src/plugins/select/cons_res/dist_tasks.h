@@ -5,7 +5,7 @@
  *****************************************************************************
  *  Copyright (C) 2006 Hewlett-Packard Development Company, L.P.
  *  Written by Susanne M. Balle, <susanne.balle@hp.com>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -53,15 +53,12 @@ int cr_exclusive_dist(struct select_cr_job *job,
 		      const select_type_plugin_info_t cr_type);
 
 int cr_dist(struct select_cr_job *job, int cyclic,
-	    const select_type_plugin_info_t cr_type,
-	    const uint16_t fast_schedule);
+	    const select_type_plugin_info_t cr_type);
 
 int cr_plane_dist(struct select_cr_job *job, 
 		  const uint16_t plane_size,
 		  const select_type_plugin_info_t cr_type);
 
-int compute_c_b_task_dist(struct select_cr_job *job, 	    
-			  const select_type_plugin_info_t cr_type,
-			  const uint16_t fast_schedule);
+int compute_c_b_task_dist(struct select_cr_job *job);
 
 #endif /* !_CONS_RES_DIST_TASKS_H */

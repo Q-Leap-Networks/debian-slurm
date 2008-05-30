@@ -2,9 +2,10 @@
  *  strigger.c - Manage slurm event triggers
  *****************************************************************************
  *  Copyright (C) 2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -147,6 +148,10 @@ static int _set_trigger(void)
 		ti.trig_type |= TRIGGER_TYPE_BLOCK_ERR;
 	if (params.node_down)
 		ti.trig_type |= TRIGGER_TYPE_DOWN;
+	if (params.node_drained)
+		ti.trig_type |= TRIGGER_TYPE_DRAINED;
+	if (params.node_fail)
+		ti.trig_type |= TRIGGER_TYPE_FAIL;
 	if (params.node_idle)
 		ti.trig_type |= TRIGGER_TYPE_IDLE;
 	if (params.node_up)
@@ -206,6 +211,20 @@ static int _get_trigger(void)
 					!= TRIGGER_RES_TYPE_NODE)
 			||  (trig_msg->trigger_array[i].trig_type 
 					!= TRIGGER_TYPE_DOWN))
+				continue;
+		}
+		if (params.node_drained) {
+			if ((trig_msg->trigger_array[i].res_type  
+					!= TRIGGER_RES_TYPE_NODE)
+			||  (trig_msg->trigger_array[i].trig_type 
+					!= TRIGGER_TYPE_DRAINED))
+				continue;
+		}
+		if (params.node_fail) {
+			if ((trig_msg->trigger_array[i].res_type  
+					!= TRIGGER_RES_TYPE_NODE)
+			||  (trig_msg->trigger_array[i].trig_type 
+					!= TRIGGER_TYPE_FAIL))
 				continue;
 		}
 		if (params.node_id) {
@@ -281,6 +300,10 @@ static char *_trig_type(uint16_t trig_type)
 		return "up";
 	else if (trig_type == TRIGGER_TYPE_DOWN)
 		return "down";
+	else if (trig_type == TRIGGER_TYPE_DRAINED)
+		return "drained";
+	else if (trig_type == TRIGGER_TYPE_FAIL)
+		return "fail";
 	else if (trig_type == TRIGGER_TYPE_IDLE)
 		return "idle";
 	else if (trig_type == TRIGGER_TYPE_TIME)

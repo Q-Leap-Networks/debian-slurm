@@ -4,7 +4,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -100,6 +100,8 @@ int  print_sinfo_list(List sinfo_list);
 	format_add_function(list,wid,right,suffix,_print_partition)
 #define format_add_prefix(list,wid,right,suffix) \
 	format_add_function(list,wid,right,suffix,_print_prefix)
+#define format_add_priority(list,wid,right,suffix) \
+	format_add_function(list,wid,right,suffix,_print_priority)
 #define format_add_reason(list,wid,right,suffix) \
 	format_add_function(list,wid,right,suffix,_print_reason)
 #define format_add_root(list,wid,right,prefix) \
@@ -154,6 +156,8 @@ int _print_nodes_aiot(sinfo_data_t * sinfo_data, int width,
 int _print_partition(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
 int _print_prefix(sinfo_data_t * sinfo_data, int width,
+			bool right_justify, char *suffix);
+int _print_priority(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
 int _print_reason(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);

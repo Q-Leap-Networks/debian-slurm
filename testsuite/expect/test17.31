@@ -10,7 +10,7 @@
 # Copyright (C) 2005-2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Danny Auble <da@llnl.gov>
-# UCRL-CODE-226842.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -146,11 +146,15 @@ expect {
 		wait
 	}
 }
-
-
 if {$matches != 3} {
 	send_user "\nFAILURE: sbatch didn't read the correct options from batch file\n"
 	set exit_code 1
+}
+if {$job_id == 0} {
+	send_user "\nFAILURE: sbatch failed to submit the job\n"
+	set exit_code 1
+} else {
+	cancel_job $job_id
 }
 
 #
