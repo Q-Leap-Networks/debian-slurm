@@ -118,6 +118,8 @@ _slurm_mpi_context_destroy( slurm_mpi_context_t c )
 		if ( plugrack_destroy( c->plugin_list ) != SLURM_SUCCESS ) {
 			return SLURM_ERROR;
 		}
+	} else {
+		plugin_unload(c->cur_plugin);
 	}
 
 	xfree(c->mpi_type);
@@ -144,6 +146,16 @@ _slurm_mpi_get_ops( slurm_mpi_context_t c )
 	};
 	int n_syms = sizeof( syms ) / sizeof( char * );
 	char *plugin_dir = NULL;
+	
+	/* Find the correct plugin. */
+        c->cur_plugin = plugin_load_and_link(c->mpi_type, n_syms, syms,
+					     (void **) &c->ops);
+        if ( c->cur_plugin != PLUGIN_INVALID_HANDLE ) 
+        	return &c->ops;
+
+	error("Couldn't find the specified plugin name for %s "
+	      "looking at all files",
+	      c->mpi_type);
 	
 	/* Get the plugin list, if needed. */
 	if ( c->plugin_list == NULL ) {

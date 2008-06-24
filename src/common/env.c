@@ -1,8 +1,8 @@
 /*****************************************************************************\
  *  src/common/env.c - add an environment variable to environment vector
- *  $Id: env.c 14025 2008-05-09 16:37:03Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>, Danny Auble <da@llnl.gov>.
  *  LLNL-CODE-402394.
@@ -168,15 +168,16 @@ int
 setenvfs(const char *fmt, ...)
 {
 	va_list ap;
-	char buf[ENV_BUFSIZE];
-	char *bufcpy;
+	char *buf, *bufcpy;
 	int rc;
 
+	buf = xmalloc(ENV_BUFSIZE);
 	va_start(ap, fmt);
-	vsnprintf(buf, sizeof(buf), fmt, ap);
+	vsnprintf(buf, ENV_BUFSIZE, fmt, ap);
 	va_end(ap);
 	
 	bufcpy = xstrdup(buf);
+	xfree(buf);
 	rc = putenv(bufcpy);
 	return rc;
 }
@@ -184,17 +185,18 @@ setenvfs(const char *fmt, ...)
 int 
 setenvf(char ***envp, const char *name, const char *fmt, ...)
 {
-	char buf[ENV_BUFSIZE];
 	char **ep = NULL;
 	char *str = NULL;
 	va_list ap;
 	int rc;
-	char *bufcpy;
+	char *buf, *bufcpy;
 
+	buf = xmalloc(ENV_BUFSIZE);
 	va_start(ap, fmt);
-	vsnprintf (buf, sizeof(buf), fmt, ap);
+	vsnprintf (buf, ENV_BUFSIZE, fmt, ap);
 	va_end(ap);
 	bufcpy = xstrdup(buf);
+	xfree(buf);
 	
 	xstrfmtcat (str, "%s=%s", name, bufcpy);
 	xfree(bufcpy);
@@ -735,7 +737,7 @@ static char *_uint16_array_to_str(int array_len, const uint16_t *array)
  * This function returns the string representation of the compressed
  * array.  Free with xfree().
  */
-static char *_uint32_compressed_to_str(uint32_t array_len,
+extern char *uint32_compressed_to_str(uint32_t array_len,
 				       const uint32_t *array,
 				       const uint32_t *array_reps)
 {
@@ -789,7 +791,7 @@ env_array_for_job(char ***dest, const resource_allocation_response_msg_t *alloc)
 	env_array_overwrite_fmt(dest, "SLURM_JOB_NODELIST", "%s",
 				alloc->node_list);
 
-	tmp = _uint32_compressed_to_str((uint32_t)alloc->num_cpu_groups,
+	tmp = uint32_compressed_to_str((uint32_t)alloc->num_cpu_groups,
 					alloc->cpus_per_node,
 					alloc->cpu_count_reps);
 	env_array_overwrite_fmt(dest, "SLURM_JOB_CPUS_PER_NODE", "%s", tmp);
@@ -847,7 +849,7 @@ env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch,
 	env_array_overwrite_fmt(dest, "SLURM_JOB_ID", "%u", batch->job_id);
 	env_array_overwrite_fmt(dest, "SLURM_JOB_NUM_NODES", "%u", num_nodes);
 	env_array_overwrite_fmt(dest, "SLURM_JOB_NODELIST", "%s", batch->nodes);
-	tmp = _uint32_compressed_to_str((uint32_t)batch->num_cpu_groups,
+	tmp = uint32_compressed_to_str((uint32_t)batch->num_cpu_groups,
 					batch->cpus_per_node,
 					batch->cpu_count_reps);
 	env_array_overwrite_fmt(dest, "SLURM_JOB_CPUS_PER_NODE", "%s", tmp);
@@ -978,30 +980,28 @@ char **env_array_create(void)
 int env_array_append_fmt(char ***array_ptr, const char *name,
 			 const char *value_fmt, ...)
 {
-	char buf[ENV_BUFSIZE];
+	char *buf;
 	char **ep = NULL;
 	char *str = NULL;
 	va_list ap;
 
-	buf[0] = '\0';
-	if (array_ptr == NULL) {
+	if (array_ptr == NULL)
 		return 0;
-	}
 
-	if (*array_ptr == NULL) {
+	if (*array_ptr == NULL)
 		*array_ptr = env_array_create();
-	}
 
-	va_start(ap, value_fmt);
-	vsnprintf (buf, sizeof(buf), value_fmt, ap);
-	va_end(ap);
-	
 	ep = _find_name_in_env(*array_ptr, name);
-	if (*ep != NULL) {
+	if (*ep != NULL)
 		return 0;
-	}
+
+	buf = xmalloc(ENV_BUFSIZE);
+	va_start(ap, value_fmt);
+	vsnprintf (buf, ENV_BUFSIZE, value_fmt, ap);
+	va_end(ap);
 
 	xstrfmtcat (str, "%s=%s", name, buf);
+	xfree(buf);
 	ep = _extend_env(array_ptr);
 	*ep = str;
 	
@@ -1021,18 +1021,15 @@ int env_array_append(char ***array_ptr, const char *name,
 	char **ep = NULL;
 	char *str = NULL;
 
-	if (array_ptr == NULL) {
+	if (array_ptr == NULL)
 		return 0;
-	}
 
-	if (*array_ptr == NULL) {
+	if (*array_ptr == NULL)
 		*array_ptr = env_array_create();
-	}
 
 	ep = _find_name_in_env(*array_ptr, name);
-	if (*ep != NULL) {
+	if (*ep != NULL)
 		return 0;
-	}
 
 	xstrfmtcat (str, "%s=%s", name, value);
 	ep = _extend_env(array_ptr);
@@ -1054,25 +1051,24 @@ int env_array_append(char ***array_ptr, const char *name,
 int env_array_overwrite_fmt(char ***array_ptr, const char *name,
 			    const char *value_fmt, ...)
 {
-	char buf[ENV_BUFSIZE];
+	char *buf;
 	char **ep = NULL;
 	char *str = NULL;
 	va_list ap;
 
-	buf[0] = '\0';
-	if (array_ptr == NULL) {
+	if (array_ptr == NULL)
 		return 0;
-	}
 
-	if (*array_ptr == NULL) {
+	if (*array_ptr == NULL)
 		*array_ptr = env_array_create();
-	}
 
+	buf = xmalloc(ENV_BUFSIZE);
 	va_start(ap, value_fmt);
-	vsnprintf (buf, sizeof(buf), value_fmt, ap);
+	vsnprintf (buf, ENV_BUFSIZE, value_fmt, ap);
 	va_end(ap);
 	
 	xstrfmtcat (str, "%s=%s", name, buf);
+	xfree(buf);
 	ep = _find_name_in_env(*array_ptr, name);
 	if (*ep != NULL) {
 		xfree (*ep);
@@ -1188,16 +1184,17 @@ static int _env_array_entry_splitter(const char *entry,
  */
 static int _env_array_putenv(const char *string)
 {
-	char name[256];
-	char value[ENV_BUFSIZE];
+	int rc = 0;
+	char name[256], *value;
 
-	if (!_env_array_entry_splitter(string, name, sizeof(name),
-				       value, sizeof(value)))
-		return 0;
-	if (setenv(name, value, 1) == -1)
-		return 0;
-	
-	return 1;
+	value = xmalloc(ENV_BUFSIZE);
+	if ((_env_array_entry_splitter(string, name, sizeof(name),
+				       value, ENV_BUFSIZE)) &&
+	    (setenv(name, value, 1) != -1))
+		rc = 1;
+
+	xfree(value);
+	return rc;
 }
 
 /*
@@ -1224,17 +1221,18 @@ void env_array_set_environment(char **env_array)
 void env_array_merge(char ***dest_array, const char **src_array)
 {
 	char **ptr;
-	char name[256];
-	char value[ENV_BUFSIZE];
+	char name[256], *value;
 
 	if (src_array == NULL)
 		return;
 
+	value = xmalloc(ENV_BUFSIZE);
 	for (ptr = (char **)src_array; *ptr != NULL; ptr++) {
 		if (_env_array_entry_splitter(*ptr, name, sizeof(name),
-					      value, sizeof(value)))
+					      value, ENV_BUFSIZE))
 			env_array_overwrite(dest_array, name, value);
 	}
+	xfree(value);
 }
 
 /*
@@ -1258,10 +1256,10 @@ static void _strip_cr_nl(char *line)
  * Load user environment from a cache file located in
  * <state_save_location>/env_username
  */
-char **_load_env_cache(const char *username)
+static char **_load_env_cache(const char *username)
 {
 	char *state_save_loc, fname[MAXPATHLEN];
-	char line[ENV_BUFSIZE], name[256], value[ENV_BUFSIZE];
+	char *line, name[256], *value;
 	char **env = NULL;
 	FILE *fp;
 	int i;
@@ -1271,26 +1269,31 @@ char **_load_env_cache(const char *username)
 		     username);
 	xfree(state_save_loc);
 	if (i < 0) {
-		fatal("Environment cache filename overflow");
+		error("Environment cache filename overflow");
 		return NULL;
 	}
 	if (!(fp = fopen(fname, "r"))) {
-		fatal("Could not open user environment cache at %s: %m",
+		error("Could not open user environment cache at %s: %m",
 			fname);
 		return NULL;
 	}
 
-	info("Getting cached environment variables at %s", fname);
+	verbose("Getting cached environment variables at %s", fname);
 	env = env_array_create();
+	line  = xmalloc(ENV_BUFSIZE);
+	value = xmalloc(ENV_BUFSIZE);
 	while (1) {
-		if (!fgets(line, sizeof(line), fp))
+		if (!fgets(line, ENV_BUFSIZE, fp))
 			break;
 		_strip_cr_nl(line);
 		if (_env_array_entry_splitter(line, name, sizeof(name), 
-					      value, sizeof(value)) &&
+					      value, ENV_BUFSIZE) &&
 		    (!_discard_env(name, value)))
 			env_array_overwrite(&env, name, value);
 	}
+	xfree(line);
+	xfree(value);
+
 	fclose(fp);
 	return env;
 }
@@ -1313,18 +1316,26 @@ char **_load_env_cache(const char *username)
  */
 char **env_array_user_default(const char *username, int timeout, int mode)
 {
-	char *line = NULL, *last = NULL, name[128], value[ENV_BUFSIZE];
-	char buffer[ENV_BUFSIZE];
+	char *line = NULL, *last = NULL, name[128], *value, *buffer;
 	char **env = NULL;
 	char *starttoken = "XXXXSLURMSTARTPARSINGHEREXXXX";
 	char *stoptoken  = "XXXXSLURMSTOPPARSINGHEREXXXXX";
 	char cmdstr[256], *env_loc = NULL;
 	int fildes[2], found, fval, len, rc, timeleft;
-	int buf_read, buf_rem;
+	int buf_read, buf_rem, config_timeout;
 	pid_t child;
 	struct timeval begin, now;
 	struct pollfd ufds;
 	struct stat buf;
+
+	if (geteuid() != (uid_t)0) {
+		fatal("WARNING: you must be root to use --get-user-env");
+		return NULL;
+	}
+
+	config_timeout = slurm_get_env_timeout();
+	if (config_timeout == 0)	/* just read directly from cache */
+		 return _load_env_cache(username);
 
 	if (stat("/bin/su", &buf))
 		fatal("Could not locate command: /bin/su");
@@ -1336,11 +1347,10 @@ char **env_array_user_default(const char *username, int timeout, int mode)
 		env_loc = "/usr/bin/env";
 	else
 		fatal("Could not location command: env");
-
-	if (geteuid() != (uid_t)0) {
-		fatal("WARNING: you must be root to use --get-user-env");
-		return NULL;
-	}
+	snprintf(cmdstr, sizeof(cmdstr),
+		 "/bin/echo; /bin/echo; /bin/echo; "
+		 "/bin/echo %s; %s; /bin/echo %s",
+		 starttoken, env_loc, stoptoken);
 
 	if (pipe(fildes) < 0) {
 		fatal("pipe: %m");
@@ -1353,15 +1363,12 @@ char **env_array_user_default(const char *username, int timeout, int mode)
 		return NULL;
 	}
 	if (child == 0) {
+		setpgid(0, 0);
 		close(0);
 		open("/dev/null", O_RDONLY);
 		dup2(fildes[1], 1);
 		close(2);
 		open("/dev/null", O_WRONLY);
-		snprintf(cmdstr, sizeof(cmdstr),
-			 "/bin/echo; /bin/echo; /bin/echo; "
-			 "/bin/echo %s; %s; /bin/echo %s",
-			 starttoken, env_loc, stoptoken);
 		if      (mode == 1)
 			execl("/bin/su", "su", username, "-c", cmdstr, NULL);
 		else if (mode == 2)
@@ -1377,19 +1384,21 @@ char **env_array_user_default(const char *username, int timeout, int mode)
 	}
 
 	close(fildes[1]);
-	if ((fval = fcntl(fildes[0], F_GETFL, 0)) >= 0)
-		fcntl(fildes[0], F_SETFL, fval | O_NONBLOCK);
+	if ((fval = fcntl(fildes[0], F_GETFL, 0)) < 0)
+		error("fcntl(F_GETFL) failed: %m");
+	else if (fcntl(fildes[0], F_SETFL, fval | O_NONBLOCK) < 0)
+		error("fcntl(F_SETFL) failed: %m");
 
 	gettimeofday(&begin, NULL);
 	ufds.fd = fildes[0];
 	ufds.events = POLLIN;
 
 	/* Read all of the output from /bin/su into buffer */
-	if ((timeout == 0) && ((timeout = slurm_get_env_timeout()) == 0))
-		timeleft = DEFAULT_GET_ENV_TIMEOUT;
+	if (timeout == 0)
+		timeout = config_timeout;	/* != 0 test above */
 	found = 0;
 	buf_read = 0;
-	bzero(buffer, sizeof(buffer));
+	buffer = xmalloc(ENV_BUFSIZE);
 	while (1) {
 		gettimeofday(&now, NULL);
 		timeleft = timeout * 1000;
@@ -1397,11 +1406,13 @@ char **env_array_user_default(const char *username, int timeout, int mode)
 		timeleft -= (now.tv_usec - begin.tv_usec) / 1000;
 		if (timeleft <= 0) {
 			verbose("timeout waiting for /bin/su to complete");
+			kill(-child, 9);
 			break;
 		}
 		if ((rc = poll(&ufds, 1, timeleft)) <= 0) {
 			if (rc == 0) {
 				verbose("timeout waiting for /bin/su to complete");
+				kill(-child, 9);
 				break;
 			}
 			if ((errno == EINTR) || (errno == EAGAIN))
@@ -1419,7 +1430,7 @@ char **env_array_user_default(const char *username, int timeout, int mode)
 			}
 			break;
 		}
-		buf_rem = sizeof(buffer) - buf_read;
+		buf_rem = ENV_BUFSIZE - buf_read;
 		if (buf_rem == 0) {
 			error("buffer overflow loading env vars");
 			break;
@@ -1438,6 +1449,7 @@ char **env_array_user_default(const char *username, int timeout, int mode)
 	close(fildes[0]);
 	if (!found) {
 		error("Failed to load current user environment variables");
+		xfree(buffer);
 		return _load_env_cache(username);
 	}
 
@@ -1454,6 +1466,7 @@ char **env_array_user_default(const char *username, int timeout, int mode)
 	}
 	if (!found) {
 		error("Failed to get current user environment variables");
+		xfree(buffer);
 		return _load_env_cache(username);
 	}
 
@@ -1462,17 +1475,20 @@ char **env_array_user_default(const char *username, int timeout, int mode)
 	found = 0;
 	env = env_array_create();
 	line = strtok_r(NULL, "\n", &last);
+	value = xmalloc(ENV_BUFSIZE);
 	while (!found && line) {
 		if (!strncmp(line, stoptoken, len)) {
 			found = 1;
 			break;
 		}
 		if (_env_array_entry_splitter(line, name, sizeof(name), 
-					      value, sizeof(value)) &&
+					      value, ENV_BUFSIZE) &&
 		    (!_discard_env(name, value)))
 			env_array_overwrite(&env, name, value);
 		line = strtok_r(NULL, "\n", &last);
 	}
+	xfree(value);
+	xfree(buffer);
 	if (!found) {
 		error("Failed to get all user environment variables");
 		env_array_free(env);

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/common/slurm_cred.c - SLURM job credential functions
- *  $Id: slurm_cred.c 14148 2008-05-28 23:35:40Z jette $
+ *  $Id: slurm_cred.c 14208 2008-06-06 19:15:24Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008 Lawrence Livermore National Security.
@@ -280,6 +280,8 @@ _slurm_crypto_context_destroy( slurm_crypto_context_t *c )
 		if ( plugrack_destroy( c->plugin_list ) != SLURM_SUCCESS ) {
 			 return SLURM_ERROR;
 		}
+	} else {
+		plugin_unload(c->cur_plugin);
 	}
 
 	xfree( c->crypto_type );
@@ -308,7 +310,18 @@ _slurm_crypto_get_ops( slurm_crypto_context_t *c )
 	};
 	int n_syms = sizeof( syms ) / sizeof( char * );
 	int rc = 0;
-        /* Get the plugin list, if needed. */
+ 
+	/* Find the correct plugin. */
+        c->cur_plugin = plugin_load_and_link(c->crypto_type, n_syms, syms,
+					     (void **) &c->ops);
+        if ( c->cur_plugin != PLUGIN_INVALID_HANDLE ) 
+        	return &c->ops;
+
+	error("Couldn't find the specified plugin name for %s "
+	      "looking at all files",
+	      c->crypto_type);
+	
+       /* Get the plugin list, if needed. */
         if ( c->plugin_list == NULL ) {
 		char *plugin_dir;
                 c->plugin_list = plugrack_create();

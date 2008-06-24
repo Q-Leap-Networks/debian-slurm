@@ -44,18 +44,18 @@
 
 typedef struct {
 	int assoc_id;
-	int a_cpu;
+	uint64_t a_cpu;
 } local_assoc_usage_t;
 
 typedef struct {
 	char *name;
-	int total_time;
-	int a_cpu;
+	uint64_t total_time;
+	uint64_t a_cpu;
 	int cpu_count;
-	int d_cpu;
-	int i_cpu;
-	int o_cpu;
-	int r_cpu;
+	uint64_t d_cpu;
+	uint64_t i_cpu;
+	uint64_t o_cpu;
+	uint64_t r_cpu;
 	time_t start;
 	time_t end;
 } local_cluster_usage_t;
@@ -314,7 +314,7 @@ extern int mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 
 			if(!row_end || row_end > curr_end) 
 				row_end = curr_end;
-			
+
 			if(last_id != assoc_id) {
 				a_usage =
 					xmalloc(sizeof(local_cluster_usage_t));
@@ -452,9 +452,13 @@ extern int mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 			 */
 			
 			if(c_usage->i_cpu < 0) {
+/* 				info("got %d %d %d", c_usage->r_cpu, */
+/* 				     c_usage->i_cpu, c_usage->o_cpu); */
 				c_usage->r_cpu += c_usage->i_cpu;
 				c_usage->o_cpu -= c_usage->i_cpu;
 				c_usage->i_cpu = 0;
+				if(c_usage->r_cpu < 0)
+					c_usage->r_cpu = 0;
 			}
 			
 /* 			info("cluster %s(%d) down %d alloc %d " */
@@ -472,19 +476,9 @@ extern int mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 			if(query) {
 				xstrfmtcat(query, 
 					   ", (%d, %d, '%s', %d, %d, "
-					   "%d, %d, %d, %d, %d) "
-					   "on duplicate key update "
-					   "mod_time=%d, cpu_count=%d, "
-					   "alloc_cpu_secs=%d, "
-					   "down_cpu_secs=%d, "
-					   "idle_cpu_secs=%d, "
-					   "over_cpu_secs=%d, resv_cpu_secs=%d",
+					   "%llu, %llu, %llu, %llu, %llu)",
 					   now, now, 
 					   c_usage->name, c_usage->start, 
-					   c_usage->cpu_count, c_usage->a_cpu,
-					   c_usage->d_cpu, c_usage->i_cpu,
-					   c_usage->o_cpu, c_usage->r_cpu,
-					   now, 
 					   c_usage->cpu_count, c_usage->a_cpu,
 					   c_usage->d_cpu, c_usage->i_cpu,
 					   c_usage->o_cpu, c_usage->r_cpu); 
@@ -496,25 +490,26 @@ extern int mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 					   "down_cpu_secs, idle_cpu_secs, "
 					   "over_cpu_secs, resv_cpu_secs) "
 					   "values (%d, %d, '%s', %d, %d, "
-					   "%d, %d, %d, %d, %d) "
-					   "on duplicate key update "
-					   "mod_time=%d, cpu_count=%d, "
-					   "alloc_cpu_secs=%d, "
-					   "down_cpu_secs=%d, "
-					   "idle_cpu_secs=%d, "
-					   "over_cpu_secs=%d, resv_cpu_secs=%d",
+					   "%llu, %llu, %llu, %llu, %llu)",
 					   cluster_hour_table, now, now, 
 					   c_usage->name, c_usage->start, 
-					   c_usage->cpu_count, c_usage->a_cpu,
-					   c_usage->d_cpu, c_usage->i_cpu,
-					   c_usage->o_cpu, c_usage->r_cpu,
-					   now,
-					   c_usage->cpu_count, c_usage->a_cpu,
+					   c_usage->cpu_count,
+					   c_usage->a_cpu,
 					   c_usage->d_cpu, c_usage->i_cpu,
 					   c_usage->o_cpu, c_usage->r_cpu); 
 			}
 		}
+
 		if(query) {
+			xstrfmtcat(query, 
+				   " on duplicate key update "
+				   "mod_time=%d, cpu_count=VALUES(cpu_count), "
+				   "alloc_cpu_secs=VALUES(alloc_cpu_secs), "
+				   "down_cpu_secs=VALUES(down_cpu_secs), "
+				   "idle_cpu_secs=VALUES(idle_cpu_secs), "
+				   "over_cpu_secs=VALUES(over_cpu_secs), "
+				   "resv_cpu_secs=VALUES(resv_cpu_secs)",
+				   now);
 			rc = mysql_db_query(mysql_conn->acct_mysql_db, query);
 			xfree(query);
 			if(rc != SLURM_SUCCESS) {
@@ -530,30 +525,28 @@ extern int mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 /* 			     a_usage->a_cpu); */
 			if(query) {
 				xstrfmtcat(query, 
-					   ", (%d, %d, %d, %d, %d, "
-					   "%d, %d, %d, %d) "
-					   "on duplicate key update "
-					   "mod_time=%d, alloc_cpu_secs=%d",
+					   ", (%d, %d, %d, %d, %llu)",
 					   now, now, 
 					   a_usage->assoc_id, curr_start,
-					   a_usage->a_cpu,
-					   now, a_usage->a_cpu); 
+					   a_usage->a_cpu); 
 			} else {
 				xstrfmtcat(query, 
 					   "insert into %s (creation_time, "
 					   "mod_time, id, period_start, "
 					   "alloc_cpu_secs) values "
-					   "(%d, %d, %d, %d, %d) "
-					   "on duplicate key update "
-					   "mod_time=%d, alloc_cpu_secs=%d",
+					   "(%d, %d, %d, %d, %llu)",
 					   assoc_hour_table, now, now, 
 					   a_usage->assoc_id, curr_start,
-					   a_usage->a_cpu,
-					   now, a_usage->a_cpu); 
+					   a_usage->a_cpu); 
 			}
 		}
-		
 		if(query) {
+			xstrfmtcat(query, 
+				   " on duplicate key update "
+				   "mod_time=%d, "
+				   "alloc_cpu_secs=VALUES(alloc_cpu_secs)",
+				   now);
+					   	
 			debug3("%d query\n%s", mysql_conn->conn, query);
 			rc = mysql_db_query(mysql_conn->acct_mysql_db, query);
 			xfree(query);
@@ -606,8 +599,8 @@ extern int mysql_daily_rollup(mysql_conn_t *mysql_conn,
 
 	while(curr_start < end) {
 		debug3("curr day is now %d-%d", curr_start, curr_end);
-/* 	info("start %s", ctime(&curr_start)); */
-/* 	info("end %s", ctime(&curr_end)); */
+/* 		info("start %s", ctime(&curr_start)); */
+/* 		info("end %s", ctime(&curr_end)); */
 		query = xstrdup_printf(
 			"insert into %s (creation_time, mod_time, id, "
 			"period_start, alloc_cpu_secs) select %d, %d, id, "
@@ -702,8 +695,8 @@ extern int mysql_monthly_rollup(mysql_conn_t *mysql_conn,
 
 	while(curr_start < end) {
 		debug3("curr month is now %d-%d", curr_start, curr_end);
-/* 	info("start %s", ctime(&curr_start)); */
-/* 	info("end %s", ctime(&curr_end)); */
+/* 		info("start %s", ctime(&curr_start)); */
+/* 		info("end %s", ctime(&curr_end)); */
 		query = xstrdup_printf(
 			"insert into %s (creation_time, mod_time, id, "
 			"period_start, alloc_cpu_secs) select %d, %d, id, "
@@ -756,6 +749,20 @@ extern int mysql_monthly_rollup(mysql_conn_t *mysql_conn,
 		start_tm.tm_isdst = -1;
 		curr_end = mktime(&start_tm);
 	}
+
+	/* remove all data from event table that was older than
+	 * start. 
+	 */
+	query = xstrdup_printf("delete from %s where period_end < %d "
+			       "&& end != 0",
+			       event_table, start);
+	rc = mysql_db_query(mysql_conn->acct_mysql_db, query);
+	xfree(query);
+	if(rc != SLURM_SUCCESS) {
+		error("Couldn't remove old event data");
+		return SLURM_ERROR;
+	}
+
 	return SLURM_SUCCESS;
 }
 

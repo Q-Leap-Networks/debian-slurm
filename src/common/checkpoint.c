@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  checkpoint.c - implementation-independent checkpoint functions
- *  $Id: checkpoint.c 13672 2008-03-19 23:10:58Z jette $
+ *  $Id: checkpoint.c 14208 2008-06-06 19:15:24Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -127,6 +127,8 @@ _slurm_checkpoint_context_destroy( slurm_checkpoint_context_t c )
 		if ( plugrack_destroy( c->plugin_list ) != SLURM_SUCCESS ) {
 			 return SLURM_ERROR;
 		}
+	} else {
+		plugin_unload(c->cur_plugin);
 	}
 
 	xfree( c->checkpoint_type );
@@ -156,6 +158,16 @@ _slurm_checkpoint_get_ops( slurm_checkpoint_context_t c )
 	};
         int n_syms = sizeof( syms ) / sizeof( char * );
 
+	/* Find the correct plugin. */
+        c->cur_plugin = plugin_load_and_link(c->checkpoint_type, n_syms, syms,
+					     (void **) &c->ops);
+        if ( c->cur_plugin != PLUGIN_INVALID_HANDLE ) 
+        	return &c->ops;
+
+	error("Couldn't find the specified plugin name for %s "
+	      "looking at all files",
+	      c->checkpoint_type);
+	
         /* Get the plugin list, if needed. */
         if ( c->plugin_list == NULL ) {
 		char *plugin_dir;

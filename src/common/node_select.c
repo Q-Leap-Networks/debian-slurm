@@ -9,7 +9,7 @@
  *  the plugin. This is because functions required by the plugin can not be 
  *  resolved on the front-end nodes, so we can't load the plugins there.
  *
- *  $Id: node_select.c 13697 2008-03-21 21:56:40Z da $
+ *  $Id: node_select.c 14208 2008-06-06 19:15:24Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -196,6 +196,16 @@ static slurm_select_ops_t * _select_get_ops(slurm_select_context_t *c)
 	};
 	int n_syms = sizeof( syms ) / sizeof( char * );
 
+	/* Find the correct plugin. */
+        c->cur_plugin = plugin_load_and_link(c->select_type, n_syms, syms,
+					     (void **) &c->ops);
+        if ( c->cur_plugin != PLUGIN_INVALID_HANDLE ) 
+        	return &c->ops;
+
+	error("Couldn't find the specified plugin name for %s "
+	      "looking at all files",
+	      c->select_type);
+	
 	/* Get plugin list. */
 	if ( c->plugin_list == NULL ) {
 		char *plugin_dir;
@@ -266,6 +276,8 @@ static int _select_context_destroy( slurm_select_context_t *c )
 		if ( plugrack_destroy( c->plugin_list ) != SLURM_SUCCESS ) {
 			return SLURM_ERROR;
 		}
+	} else {
+		plugin_unload(c->cur_plugin);
 	}
 
 	xfree( c->select_type );

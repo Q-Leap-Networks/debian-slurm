@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  auth_munge.c - SLURM auth implementation via Chris Dunlap's Munge
- *  $Id: auth_munge.c 13672 2008-03-19 23:10:58Z jette $
+ *  $Id: auth_munge.c 14319 2008-06-23 21:28:52Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008 Lawrence Livermore National Security.
@@ -73,7 +73,7 @@
 
 #define MUNGE_ERRNO_OFFSET	1000
 
-const char plugin_name[]       	= "auth plugin for Munge (Chris Dunlap, LLNL)";
+const char plugin_name[]       	= "auth plugin for Munge (http://home.gna.org/munge/)";
 const char plugin_type[]       	= "auth/munge";
 const uint32_t plugin_version	= 10;
 

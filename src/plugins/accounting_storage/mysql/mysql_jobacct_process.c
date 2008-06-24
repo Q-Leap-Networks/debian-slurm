@@ -45,25 +45,19 @@
 #include "mysql_jobacct_process.h"
 
 #ifdef HAVE_MYSQL
-static void _do_fdump(List job_list)
-{
-	info("fdump option not applicable from mysql plugin");
-	return;
-}
 
 extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn,
-					   List selected_steps,
-					   List selected_parts,
-					   sacct_parameters_t *params)
+					   acct_job_cond_t *job_cond)
 {
 
 	char *query = NULL;	
 	char *extra = NULL;	
 	char *tmp = NULL;	
-	char *selected_part = NULL;
+	char *object = NULL;
 	jobacct_selected_step_t *selected_step = NULL;
 	ListIterator itr = NULL;
 	int set = 0;
+	char *table_level="t2";
 	MYSQL_RES *result = NULL, *step_result = NULL;
 	MYSQL_ROW row, step_row;
 	int i;
@@ -97,7 +91,10 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn,
 		"t1.alloc_cpus",
 		"t1.nodelist",
 		"t1.kill_requid",
-		"t1.qos"
+		"t1.qos",
+		"t2.user",
+		"t2.cluster",
+		"t2.lft"
 	};
 
 	/* if this changes you will need to edit the corresponding 
@@ -159,6 +156,9 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn,
 		JOB_REQ_NODELIST,
 		JOB_REQ_KILL_REQUID,
 		JOB_REQ_QOS,
+		JOB_REQ_USER_NAME,
+		JOB_REQ_CLUSTER,
+		JOB_REQ_LFT,
 		JOB_REQ_COUNT		
 	};
 	enum {
@@ -195,62 +195,175 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn,
 		STEP_REQ_COUNT
 	};
 
-	if(selected_steps && list_count(selected_steps)) {
+	if(!job_cond)
+		goto no_cond;
+
+	/* THIS ASSOCID CHECK ALWAYS NEEDS TO BE FIRST!!!!!!! */
+	if(job_cond->associd_list && list_count(job_cond->associd_list)) {
+		set = 0;
+		xstrfmtcat(extra, ", %s as t3 where (");
+		itr = list_iterator_create(job_cond->associd_list);
+		while((object = list_next(itr))) {
+			if(set) 
+				xstrcat(extra, " || ");
+			xstrfmtcat(extra, "t3.id=%s", object);
+			set = 1;
+		}
+		list_iterator_destroy(itr);
+		xstrcat(extra, ")");
+		table_level="t3";
+		/* just incase the association is gone */
+		if(set) 
+			xstrcat(extra, " || ");
+		xstrfmtcat(extra, "t3.id is null) && "
+			   "(t2.lft between t3.lft and t3.rgt "
+			   "|| t2.lft is null)");
+	}
+
+	if(job_cond->acct_list && list_count(job_cond->acct_list)) {
 		set = 0;
 		if(extra)
 			xstrcat(extra, " && (");
 		else
 			xstrcat(extra, " where (");
-		itr = list_iterator_create(selected_steps);
+		itr = list_iterator_create(job_cond->acct_list);
+		while((object = list_next(itr))) {
+			if(set) 
+				xstrcat(extra, " || ");
+			xstrfmtcat(extra, "t1.acct='%s'", object);
+			set = 1;
+		}
+		list_iterator_destroy(itr);
+		xstrcat(extra, ")");
+	}
+
+	if(job_cond->groupid_list && list_count(job_cond->groupid_list)) {
+		set = 0;
+		if(extra)
+			xstrcat(extra, " && (");
+		else
+			xstrcat(extra, " where (");
+		itr = list_iterator_create(job_cond->groupid_list);
+		while((object = list_next(itr))) {
+			if(set) 
+				xstrcat(extra, " || ");
+			xstrfmtcat(extra, "t1.gid=", object);
+			set = 1;
+		}
+		list_iterator_destroy(itr);
+		xstrcat(extra, ")");
+	}
+
+	if(job_cond->partition_list && list_count(job_cond->partition_list)) {
+		set = 0;
+		if(extra)
+			xstrcat(extra, " && (");
+		else
+			xstrcat(extra, " where (");
+		itr = list_iterator_create(job_cond->partition_list);
+		while((object = list_next(itr))) {
+			if(set) 
+				xstrcat(extra, " || ");
+			xstrfmtcat(extra, "t1.partition='%s'", object);
+			set = 1;
+		}
+		list_iterator_destroy(itr);
+		xstrcat(extra, ")");
+	}
+
+	if(job_cond->step_list && list_count(job_cond->step_list)) {
+		set = 0;
+		if(extra)
+			xstrcat(extra, " && (");
+		else
+			xstrcat(extra, " where (");
+		itr = list_iterator_create(job_cond->step_list);
 		while((selected_step = list_next(itr))) {
 			if(set) 
 				xstrcat(extra, " || ");
-			tmp = xstrdup_printf("t1.jobid=%u",
-					      selected_step->jobid);
-			xstrcat(extra, tmp);
+			xstrfmtcat(extra, "t1.jobid=%u", selected_step->jobid);
 			set = 1;
-			xfree(tmp);
 		}
 		list_iterator_destroy(itr);
 		xstrcat(extra, ")");
 	}
 
-	if(selected_parts && list_count(selected_parts)) {
+	if(job_cond->usage_start) {
+		if(!job_cond->usage_end)
+			job_cond->usage_end = now;
+
+		if(extra)
+			xstrcat(extra, " && (");
+		else
+			xstrcat(extra, " where (");
+		xstrfmtcat(extra, 
+			   "(t1.eligible < %d "
+			   "&& (t1.end >= %d || t1.end = 0)))",
+			   job_cond->usage_end, job_cond->usage_start);
+	}
+
+	/* we need to put all the associations (t2) stuff together here */
+	if(job_cond->cluster_list && list_count(job_cond->cluster_list)) {
 		set = 0;
 		if(extra)
 			xstrcat(extra, " && (");
 		else
 			xstrcat(extra, " where (");
-		itr = list_iterator_create(selected_parts);
-		while((selected_part = list_next(itr))) {
+
+		itr = list_iterator_create(job_cond->cluster_list);
+		while((object = list_next(itr))) {
 			if(set) 
 				xstrcat(extra, " || ");
-			tmp = xstrdup_printf("t1.partition='%s'",
-					      selected_part);
-			xstrcat(extra, tmp);
+			xstrfmtcat(extra, "%s.cluster='%s'", 
+				   table_level, object);
 			set = 1;
-			xfree(tmp);
 		}
 		list_iterator_destroy(itr);
-		xstrcat(extra, ")");
+		/* just incase the association is gone */
+		if(set) 
+			xstrcat(extra, " || ");
+		xstrfmtcat(extra, "%s.cluster is null)", table_level);
 	}
-	
-	for(i=0; i<JOB_REQ_COUNT; i++) {
-		if(i) 
-			xstrcat(tmp, ", ");
-		xstrcat(tmp, job_req_inx[i]);
-	}
-	
-	query = xstrdup_printf("select %s from %s t1",
-			       tmp, job_table);
-	xfree(tmp);
 
+	if(job_cond->user_list && list_count(job_cond->user_list)) {
+		set = 0;
+		if(extra)
+			xstrcat(extra, " && (");
+		else
+			xstrcat(extra, " where (");
+
+		itr = list_iterator_create(job_cond->user_list);
+		while((object = list_next(itr))) {
+			if(set) 
+				xstrcat(extra, " || ");
+			xstrfmtcat(extra, "%s.user='%s'", table_level, object);
+			set = 1;
+		}
+		list_iterator_destroy(itr);
+		/* just incase the association is gone */
+		if(set) 
+			xstrcat(extra, " || ");
+		xstrfmtcat(extra, "%s.user is null)", table_level);
+	}
+
+no_cond:	
+
+	xfree(tmp);
+	xstrfmtcat(tmp, "%s", job_req_inx[0]);
+	for(i=1; i<JOB_REQ_COUNT; i++) {
+		xstrfmtcat(tmp, ", %s", job_req_inx[i]);
+	}
+	
+	query = xstrdup_printf("select %s from %s as t1 left join %s as t2 "
+			       "on t1.associd=t2.id",
+			       tmp, job_table, assoc_table);
+	xfree(tmp);
 	if(extra) {
 		xstrcat(query, extra);
 		xfree(extra);
 	}
-
-	//info("query = %s", query);
+	
+	debug3("%d query\n%s", mysql_conn->conn, query);
 	if(!(result = mysql_db_query_ret(
 		     mysql_conn->acct_mysql_db, query, 0))) {
 		xfree(query);
@@ -261,45 +374,101 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn,
 
 	while((row = mysql_fetch_row(result))) {
 		char *id = row[JOB_REQ_ID];
-		acct_association_rec_t account_rec;
-		memset(&account_rec, 0, sizeof(acct_association_rec_t));
+		
 		job = create_jobacct_job_rec();
 
 		job->alloc_cpus = atoi(row[JOB_REQ_ALLOC_CPUS]);
-		account_rec.id = job->associd = atoi(row[JOB_REQ_ASSOCID]);
-		assoc_mgr_fill_in_assoc(mysql_conn, &account_rec, 0, NULL);
-		if(account_rec.cluster) {
-			if(params->opt_cluster &&
-			   strcmp(params->opt_cluster, account_rec.cluster)) {
-				destroy_jobacct_job_rec(job);
-				job = NULL;
-				continue;
-			}
-			job->cluster = xstrdup(account_rec.cluster);
-		}
+		job->associd = atoi(row[JOB_REQ_ASSOCID]);
 
-		if(account_rec.user) 
-			job->user = xstrdup(account_rec.user);
+		if(row[JOB_REQ_CLUSTER])
+			job->cluster = xstrdup(row[JOB_REQ_CLUSTER]);
+
+		if(row[JOB_REQ_USER_NAME]) 
+			job->user = xstrdup(row[JOB_REQ_USER_NAME]);
 		else 
 			job->uid = atoi(row[JOB_REQ_UID]);
-		if(account_rec.acct) 
-			job->account = xstrdup(account_rec.acct);
-		else
+
+		if(row[JOB_REQ_LFT])
+			job->lft = atoi(row[JOB_REQ_LFT]);
+
+		if(row[JOB_REQ_ACCOUNT])
 			job->account = xstrdup(row[JOB_REQ_ACCOUNT]);
-	
-		job->blockid = xstrdup(row[JOB_REQ_BLOCKID]);
+		if(row[JOB_REQ_BLOCKID])
+			job->blockid = xstrdup(row[JOB_REQ_BLOCKID]);
 
 		job->eligible = atoi(row[JOB_REQ_ELIGIBLE]);
 		job->submit = atoi(row[JOB_REQ_SUBMIT]);
 		job->start = atoi(row[JOB_REQ_START]);
 		job->end = atoi(row[JOB_REQ_END]);
-		job->suspended = atoi(row[JOB_REQ_SUSPENDED]);
-		if(!job->end) {
-			job->elapsed = now - job->start;
-		} else {
+		if(job_cond->usage_start) {
+			if(job->start && (job->start < job_cond->usage_start))
+				job->start = job_cond->usage_start;
+
+			if(!job->start && job->end)
+				job->start = job->end;
+
+			if(!job->end || job->end > job_cond->usage_end) 
+				job->end = job_cond->usage_end;
+
 			job->elapsed = job->end - job->start;
+
+			if(row[JOB_REQ_SUSPENDED]) {
+				MYSQL_RES *result2 = NULL;
+				MYSQL_ROW row2;
+				/* get the suspended time for this job */
+				query = xstrdup_printf(
+					"select start, end from %s where "
+					"(start < %d && (end >= %d "
+					"|| end = 0)) && id=%s "
+					"order by start",
+					suspend_table,
+					job_cond->usage_end, 
+					job_cond->usage_start,
+					row[JOB_REQ_ID]);
+				
+				debug4("%d query\n%s", mysql_conn->conn, query);
+				if(!(result2 = mysql_db_query_ret(
+					     mysql_conn->acct_mysql_db,
+					     query, 0))) {
+					list_destroy(job_list);
+					job_list = NULL;
+					break;
+				}
+				xfree(query);
+				while((row2 = mysql_fetch_row(result2))) {
+					int local_start =
+						atoi(row2[0]);
+					int local_end = 
+						atoi(row2[1]);
+					
+					if(!local_start)
+						continue;
+					
+					if(job->start > local_start)
+						local_start = job->start;
+					if(job->end < local_end)
+						local_end = job->end;
+					
+					if((local_end - local_start) < 1)
+						continue;
+					
+					job->elapsed -= 
+						(local_end - local_start);
+					job->suspended += 
+						(local_end - local_start);
+				}
+				mysql_free_result(result2);			
+
+			}
+		} else {
+			job->suspended = atoi(row[JOB_REQ_SUSPENDED]);
+			if(!job->end) {
+				job->elapsed = now - job->start;
+			} else {
+				job->elapsed = job->end - job->start;
+			}
+			job->elapsed -= job->suspended;
 		}
-		job->elapsed -= job->suspended;
 
 		job->jobid = atoi(row[JOB_REQ_JOBID]);
 		job->jobname = xstrdup(row[JOB_REQ_NAME]);
@@ -322,9 +491,10 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn,
 					
 		list_append(job_list, job);
 
-		if(selected_steps && list_count(selected_steps)) {
+		if(job_cond && job_cond->step_list
+		   && list_count(job_cond->step_list)) {
 			set = 0;
-			itr = list_iterator_create(selected_steps);
+			itr = list_iterator_create(job_cond->step_list);
 			while((selected_step = list_next(itr))) {
 				if(selected_step->jobid != job->jobid) {
 					continue;
@@ -339,11 +509,9 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn,
 				else 
 					xstrcat(extra, " && (");
 			
-				tmp = xstrdup_printf("t1.stepid=%u",
-						     selected_step->stepid);
-				xstrcat(extra, tmp);
+				xstrfmtcat(extra, "t1.stepid=%u",
+					   selected_step->stepid);
 				set = 1;
-				xfree(tmp);
 				job->show_full = 0;
 			}
 			list_iterator_destroy(itr);
@@ -382,7 +550,7 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn,
 			step->state = atoi(step_row[STEP_REQ_STATE]);
 			step->exitcode = atoi(step_row[STEP_REQ_COMP_CODE]);
 			step->ncpus = atoi(step_row[STEP_REQ_CPUS]);
-			step->start = atoi(step_row[JOB_REQ_START]);
+			step->start = atoi(step_row[STEP_REQ_START]);
 			
 			step->end = atoi(step_row[STEP_REQ_END]);
 			/* figure this out by start stop */
@@ -405,17 +573,17 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn,
 				step->tot_cpu_usec += 
 				step->user_cpu_usec + step->sys_cpu_usec;
 			step->sacct.max_vsize =
-				atoi(step_row[STEP_REQ_MAX_VSIZE]) * 1024;
+				atoi(step_row[STEP_REQ_MAX_VSIZE]);
 			step->sacct.max_vsize_id.taskid = 
 				atoi(step_row[STEP_REQ_MAX_VSIZE_TASK]);
 			step->sacct.ave_vsize = 
-				atof(step_row[STEP_REQ_AVE_VSIZE]) * 1024;
+				atof(step_row[STEP_REQ_AVE_VSIZE]);
 			step->sacct.max_rss =
-				atoi(step_row[STEP_REQ_MAX_RSS]) * 1024;
+				atoi(step_row[STEP_REQ_MAX_RSS]);
 			step->sacct.max_rss_id.taskid = 
 				atoi(step_row[STEP_REQ_MAX_RSS_TASK]);
 			step->sacct.ave_rss = 
-				atof(step_row[STEP_REQ_AVE_RSS]) * 1024;
+				atof(step_row[STEP_REQ_AVE_RSS]);
 			step->sacct.max_pages =
 				atoi(step_row[STEP_REQ_MAX_PAGES]);
 			step->sacct.max_pages_id.taskid = 
@@ -437,7 +605,7 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn,
 				atoi(step_row[STEP_REQ_MAX_PAGES_NODE]);
 			step->sacct.min_cpu_id.nodeid = 
 				atoi(step_row[STEP_REQ_MIN_CPU_NODE]);
-	
+
 			step->requid = atoi(step_row[STEP_REQ_KILL_REQUID]);
 		}
 		mysql_free_result(step_result);
@@ -446,9 +614,6 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn,
 			job->track_steps = 1;
 	}
 	mysql_free_result(result);
-
-	if (params && params->opt_fdump) 
-		_do_fdump(job_list);
 
 	return job_list;
 }

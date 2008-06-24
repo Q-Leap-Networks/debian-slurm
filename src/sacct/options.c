@@ -41,8 +41,6 @@
 #include "sacct.h"
 #include <time.h>
 
-void _destroy_parts(void *object);
-void _destroy_steps(void *object);
 void _help_fields_msg(void);
 void _help_msg(void);
 void _usage(void);
@@ -52,22 +50,6 @@ int selected_state[STATE_COUNT];
 List selected_parts = NULL;
 List selected_steps = NULL;
 void *acct_db_conn = NULL;
-
-void _destroy_parts(void *object)
-{
-	char *part = (char *)object;
-	xfree(part);
-}
-
-void _destroy_steps(void *object)
-{
-	jobacct_selected_step_t *step = (jobacct_selected_step_t *)object;
-	if(step) {
-		xfree(step->job);
-		xfree(step->step);
-		xfree(step);
-	}
-}
 
 void _show_rec(char *f[])
 {
@@ -221,7 +203,7 @@ void _usage(void)
 
 void _init_params()
 {
-	params.opt_cluster = NULL;	/* --cluster */
+	params.opt_cluster = slurm_get_cluster_name();	/* --cluster */
 	params.opt_completion = 0;	/* --completion */
 	params.opt_dump = 0;		/* --dump */
 	params.opt_dup = -1;		/* --duplicates; +1 = explicitly set */
@@ -396,6 +378,7 @@ void parse_command_line(int argc, char **argv)
 			params.opt_completion = 1;
 			break;
 		case 'C':
+			xfree(params.opt_cluster);
 			params.opt_cluster = xstrdup(optarg);
 			break;
 		case 'd':
@@ -788,8 +771,8 @@ void parse_command_line(int argc, char **argv)
 				 (params.opt_field_list==NULL? 0 :
 				  sizeof(params.opt_field_list)) +
 				 strlen(dot)+1);
-		strcat(params.opt_field_list, dot);
-		strcat(params.opt_field_list, ",");
+		xstrcat(params.opt_field_list, dot);
+		xstrcat(params.opt_field_list, ",");
 	} 
 
 	if(long_output) {
@@ -803,8 +786,8 @@ void parse_command_line(int argc, char **argv)
 				 (params.opt_field_list==NULL? 0 :
 				  strlen(params.opt_field_list)) +
 				 strlen(dot)+1);
-		strcat(params.opt_field_list, dot);
-		strcat(params.opt_field_list, ",");
+		xstrcat(params.opt_field_list, dot);
+		xstrcat(params.opt_field_list, ",");
 	} 
 	
 	if (params.opt_field_list==NULL) {
@@ -814,9 +797,8 @@ void parse_command_line(int argc, char **argv)
 			dot = DEFAULT_COMP_FIELDS;
 		else
 			dot = DEFAULT_FIELDS;
-		params.opt_field_list = xmalloc(strlen(dot)+1);
-		strcpy(params.opt_field_list, dot); 
-		strcat(params.opt_field_list, ",");
+		params.opt_field_list = xstrdup(dot);
+		xstrcat(params.opt_field_list, ",");
 	}
 
 	start = params.opt_field_list;
@@ -1125,8 +1107,8 @@ void do_list(void)
 		do_jobsteps = 0;
 	itr = list_iterator_create(jobs);
 	while((job = list_next(itr))) {
-		/* FIX ME: this should be handled while getting the
-		   data, not afterwards.
+		/* This is really handled when we got the data except
+		   for the filetxt plugin so keep it here.
 		*/
 		if (params.opt_uid >= 0 && (job->uid != params.opt_uid))
 			continue;
@@ -1212,8 +1194,8 @@ void do_stat()
 void sacct_init()
 {
 	int i=0;
-	selected_parts = list_create(_destroy_parts);
-	selected_steps = list_create(_destroy_steps);
+	selected_parts = list_create(slurm_destroy_char);
+	selected_steps = list_create(destroy_jobacct_selected_step);
 	for(i=0; i<STATE_COUNT; i++)
 		selected_state[i] = 0;
 }

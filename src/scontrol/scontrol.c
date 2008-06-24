@@ -3,6 +3,8 @@
  *	provides interface to read, write, update, and configurations.
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Portions Copyright (C) 2008 Vijay Ramasubramanian.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  LLNL-CODE-402394.
@@ -419,6 +421,9 @@ _print_daemons (void)
 	if ((n = slurm_conf_get_nodename(me))) {
 		d = 1;
 		xfree(n);
+	} else if ((n = slurm_conf_get_aliased_nodename())) {
+		d = 1;
+		xfree(n);
 	} else if ((n = slurm_conf_get_nodename("localhost"))) {
 		d = 1;
 		xfree(n);
@@ -526,7 +531,8 @@ _process_command (int argc, char *argv[])
 		}
 		_print_ping ();
 	}
-	else if (strncasecmp (argv[0], "quiet", 4) == 0) {
+	else if ((strncasecmp (argv[0], "\\q", 2) == 0) ||
+		 (strncasecmp (argv[0], "quiet", 4) == 0)) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr, "too many arguments for keyword:%s\n",

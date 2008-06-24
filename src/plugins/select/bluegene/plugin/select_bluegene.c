@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  select_bluegene.c - node selection plugin for Blue Gene system.
  * 
- *  $Id: select_bluegene.c 14091 2008-05-20 21:34:02Z da $
+ *  $Id: select_bluegene.c 14295 2008-06-19 23:58:28Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -261,6 +261,7 @@ extern int select_p_state_save(char *dir_name)
 	Buf buffer = init_buf(BUF_SIZE);
 	DEF_TIMERS;
 
+	debug("bluegene: select_p_state_save");
 	START_TIMER;
 	/* write header: time */
 	packstr(BLOCK_STATE_VERSION, buffer);
@@ -363,7 +364,10 @@ extern int select_p_state_restore(char *dir_name)
 	int blocks = 0;
 
 	debug("bluegene: select_p_state_restore");
-
+#ifdef HAVE_BG_FILES
+	debug("This doesn't do anything on a real bluegene system");
+	return SLURM_SUCCESS;
+#endif
 	if(!dir_name) {
 		debug2("Starting bluegene with clean slate");
 		return SLURM_SUCCESS;

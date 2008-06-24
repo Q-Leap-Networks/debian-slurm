@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  jobcomp_script.c - Script running slurm job completion logging plugin.
- *  $Id: jobcomp_script.c 14054 2008-05-14 17:06:31Z da $
+ *  $Id: jobcomp_script.c 14242 2008-06-11 23:29:49Z jette $
  *****************************************************************************
  *  Produced at Center for High Performance Computing, North Dakota State
  *  University
@@ -285,6 +285,7 @@ static int _env_append_fmt (char ***envp, const char *name,
 static char ** _create_environment (struct jobcomp_info *job)
 {
 	char **env;
+	char *tz;
 
 	env = xmalloc (1 * sizeof (*env));
 	env[0] = NULL;
@@ -310,6 +311,8 @@ static char ** _create_environment (struct jobcomp_info *job)
 	else 
 		_env_append_fmt (&env, "LIMIT", "%lu", job->limit);
 
+	if ((tz = getenv ("TZ")))
+		_env_append_fmt (&env, "TZ", "%s", tz);
 #ifdef _PATH_STDPATH
 	_env_append (&env, "PATH", _PATH_STDPATH);
 #else

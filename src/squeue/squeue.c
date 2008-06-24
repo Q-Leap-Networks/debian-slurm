@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  squeue.c - Report jobs in the slurm system
  *
- *  $Id: squeue.c 13672 2008-03-19 23:10:58Z jette $
+ *  $Id: squeue.c 14165 2008-05-30 21:23:22Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -72,8 +72,12 @@ main (int argc, char *argv[])
 {
 	log_options_t opts = LOG_OPTS_STDERR_ONLY ;
 
-	log_init(xbasename(argv[0]), opts, SYSLOG_FACILITY_DAEMON, NULL);
+	log_init(xbasename(argv[0]), opts, SYSLOG_FACILITY_USER, NULL);
 	parse_command_line( argc, argv );
+	if (params.verbose) {
+		opts.stderr_level += params.verbose;
+		log_alter(opts, SYSLOG_FACILITY_USER, NULL);
+	}
 	max_line_size = _get_window_width( );
 	
 	while (1) 

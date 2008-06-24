@@ -251,7 +251,7 @@ extern int acct_storage_p_add_users(void *db_conn, uint32_t uid,
 }
 
 extern int acct_storage_p_add_coord(void *db_conn, uint32_t uid,
-				    char *acct, acct_user_cond_t *user_q)
+				    List acct_list, acct_user_cond_t *user_q)
 {
 	return SLURM_SUCCESS;
 }
@@ -309,7 +309,8 @@ extern List acct_storage_p_remove_users(void *db_conn, uint32_t uid,
 }
 
 extern List acct_storage_p_remove_coord(void *db_conn, uint32_t uid,
-				       char *acct, acct_user_cond_t *user_q)
+					List acct_list, 
+					acct_user_cond_t *user_q)
 {
 	return SLURM_SUCCESS;
 }
@@ -803,6 +804,37 @@ extern List jobacct_storage_p_get_jobs(void *db_conn,
 {
 	return filetxt_jobacct_process_get_jobs(selected_steps, selected_parts,
 						params);
+}
+
+/* 
+ * get info from the storage 
+ * returns List of jobacct_job_rec_t *
+ * note List needs to be freed when called
+ */
+extern List jobacct_storage_p_get_jobs_cond(void *db_conn,
+					    acct_job_cond_t *job_cond)
+{
+	sacct_parameters_t params;
+
+	memset(&params, 0, sizeof(sacct_parameters_t));
+	params.opt_uid = -1;
+
+	if(job_cond->cluster_list && list_count(job_cond->cluster_list)) {
+		params.opt_cluster = list_pop(job_cond->cluster_list);
+	}
+	if(job_cond->user_list && list_count(job_cond->user_list)) {
+		char *user = list_pop(job_cond->user_list);
+		struct passwd *pw = NULL;
+		if ((pw=getpwnam(user)))
+			params.opt_uid = pw->pw_uid;
+		xfree(user);
+	}
+
+	return filetxt_jobacct_process_get_jobs(job_cond->step_list, 
+						job_cond->partition_list,
+						&params);
+	if(params.opt_cluster)
+		xfree(params.opt_cluster);
 }
 
 /* 

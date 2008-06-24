@@ -1,7 +1,9 @@
 /****************************************************************************\
  *  popups.c - put different popup displays here
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Portions Copyright (C) 2008 Vijay Ramasubramanian
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>, et. al.
  *  LLNL-CODE-402394.
@@ -628,6 +630,9 @@ extern void create_daemon_popup(GtkAction *action, gpointer user_data)
 	slurm_conf_unlock();
 
 	if ((n = slurm_conf_get_nodename(me))) {
+		d = 1;
+		xfree(n);
+	} else if ((n = slurm_conf_get_aliased_nodename())) {
 		d = 1;
 		xfree(n);
 	} else if ((n = slurm_conf_get_nodename("localhost"))) {

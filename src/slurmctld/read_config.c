@@ -55,6 +55,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "src/common/assoc_mgr.h"
 #include "src/common/hostlist.h"
 #include "src/common/list.h"
 #include "src/common/macros.h"
@@ -66,6 +67,7 @@
 #include "src/common/switch.h"
 #include "src/common/xstring.h"
 
+#include "src/slurmctld/acct_policy.h"
 #include "src/slurmctld/job_scheduler.h"
 #include "src/slurmctld/licenses.h"
 #include "src/slurmctld/locks.h"
@@ -76,6 +78,7 @@
 #include "src/slurmctld/slurmctld.h"
 #include "src/slurmctld/trigger_mgr.h"
 
+static void _acct_restore_active_jobs(void);
 static int  _build_bitmaps(void);
 static void _build_bitmaps_pre_select(void);
 static int  _init_all_slurm_conf(void);
@@ -710,7 +713,7 @@ static int _build_all_partitionline_info()
 int read_slurm_conf(int recover)
 {
 	DEF_TIMERS;
-	int error_code, i, rc;
+	int error_code, i, rc, load_job_ret = SLURM_SUCCESS;
 	int old_node_record_count;
 	struct node_record *old_node_table_ptr;
 	char *old_auth_type       = xstrdup(slurmctld_conf.authtype);
@@ -783,10 +786,10 @@ int read_slurm_conf(int recover)
 	if (recover > 1) {	/* Load node, part and job info */
 		(void) load_all_node_state(false);
 		(void) load_all_part_state();
-		(void) load_all_job_state();
+		load_job_ret = load_all_job_state();
 	} else if (recover == 1) {	/* Load job info only */
 		(void) load_all_node_state(true);
-		(void) load_all_job_state();
+		load_job_ret = load_all_job_state();
 	} else {	/* Load no info, preserve all state */
 		if (old_node_table_ptr) {
 			info("restoring original state of nodes");
@@ -816,7 +819,7 @@ int read_slurm_conf(int recover)
 	_purge_old_node_state(old_node_table_ptr, old_node_record_count);
 
 	if ((rc = _build_bitmaps()))
-		return rc;	/* fatal error */
+		fatal("_build_bitmaps failure");
 
 	license_free();
 	if (license_init(slurmctld_conf.licenses) != SLURM_SUCCESS)
@@ -847,6 +850,11 @@ int read_slurm_conf(int recover)
 	rc = _preserve_select_type_param(&slurmctld_conf,
 					 old_select_type_p);
 	error_code = MAX(error_code, rc);	/* not fatal */
+
+	/* Restore job accounting info if file missing or corrupted,
+	 * an extremely rare situation */
+	if (load_job_ret)
+		_acct_restore_active_jobs();
 
 	slurmctld_conf.last_update = time(NULL);
 	END_TIMER2("read_slurm_conf");
@@ -1175,6 +1183,7 @@ static void _validate_node_proc_count(void)
 
 /*
  * _restore_job_dependencies - Build depend_list and license_list for every job
+ *	also reset the runing job count for scheduling policy
  */
 static int _restore_job_dependencies(void)
 {
@@ -1185,8 +1194,14 @@ static int _restore_job_dependencies(void)
 	bool valid;
 	List license_list;
 
+	assoc_mgr_clear_used_info();
 	job_iterator = list_iterator_create(job_list);
 	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
+		if (accounting_enforce &&
+		    ((job_ptr->job_state == JOB_RUNNING) ||
+		     (job_ptr->job_state == JOB_SUSPENDED)))
+			acct_policy_job_begin(job_ptr);
+
 		license_list = license_job_validate(job_ptr->licenses, &valid);
 		if (job_ptr->license_list)
 			list_destroy(job_ptr->license_list);
@@ -1210,4 +1225,36 @@ static int _restore_job_dependencies(void)
 	}
 	list_iterator_destroy(job_iterator);
 	return error_code;
+}
+
+/* Flush accounting information on this cluster, then for each running or 
+ * suspended job, restore its state in the accounting system */
+static void _acct_restore_active_jobs(void)
+{
+	struct job_record *job_ptr;
+	ListIterator job_iterator;
+	struct step_record *step_ptr;
+	ListIterator step_iterator;
+
+	info("Reinitializing job accounting state");
+	acct_storage_g_flush_jobs_on_cluster(acct_db_conn,
+					     slurmctld_cluster_name,
+					     time(NULL));
+	job_iterator = list_iterator_create(job_list);
+	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
+		if (job_ptr->job_state == JOB_SUSPENDED)
+			jobacct_storage_g_job_suspend(acct_db_conn, job_ptr);
+		if ((job_ptr->job_state == JOB_SUSPENDED) ||
+		    (job_ptr->job_state == JOB_RUNNING)) {
+			jobacct_storage_g_job_start(acct_db_conn, job_ptr);
+			step_iterator = list_iterator_create(job_ptr->step_list);
+			while ((step_ptr = (struct step_record *) 
+					   list_next(step_iterator))) {
+				jobacct_storage_g_step_start(acct_db_conn, 
+							     step_ptr);
+			}
+			list_iterator_destroy (step_iterator);
+		}
+	}
+	list_iterator_destroy(job_iterator);
 }

@@ -1,8 +1,9 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/mgr.c - job manager functions for slurmstepd
- *  $Id: mgr.c 13971 2008-05-02 20:23:00Z jette $
+ *  $Id: mgr.c 14238 2008-06-11 21:54:28Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
  *  LLNL-CODE-402394.
@@ -669,10 +670,13 @@ job_manager(slurmd_job_t *job)
 	 */
 	if (switch_init() != SLURM_SUCCESS
 	    || slurmd_task_init() != SLURM_SUCCESS
-	    || mpi_hook_slurmstepd_init(&job->env) != SLURM_SUCCESS
 	    || slurm_proctrack_init() != SLURM_SUCCESS
 	    || slurm_jobacct_gather_init() != SLURM_SUCCESS) {
-		rc = SLURM_FAILURE;
+		rc = SLURM_PLUGIN_NAME_INVALID;
+		goto fail1;
+	}
+	if (mpi_hook_slurmstepd_init(&job->env) != SLURM_SUCCESS) {
+		rc = SLURM_MPI_PLUGIN_NAME_INVALID;
 		goto fail1;
 	}
 	
@@ -729,7 +733,12 @@ job_manager(slurmd_job_t *job)
 	reattach_job = job;
 
 	job->state = SLURMSTEPD_STEP_RUNNING;
-
+	
+	/* if we are not polling then we need to make sure we get some
+	 * information here
+	 */
+	if(!conf->job_acct_gather_freq)
+		jobacct_gather_g_stat_task(0);
 	/* Send job launch response with list of pids */
 	_send_launch_resp(job, 0);
 

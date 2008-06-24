@@ -4,7 +4,7 @@
  *	hash table (node_hash_table), time stamp (last_node_update) and 
  *	configuration list (config_list)
  *
- *  $Id: node_mgr.c 14124 2008-05-23 21:12:21Z da $
+ *  $Id: node_mgr.c 14293 2008-06-19 19:27:39Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -70,6 +70,7 @@
 #include "src/slurmctld/sched_plugin.h"
 #include "src/slurmctld/slurmctld.h"
 #include "src/slurmctld/trigger_mgr.h"
+#include "src/plugins/select/bluegene/plugin/bg_boot_time.h"
 
 #define _DEBUG		0
 #define MAX_RETRIES	10
@@ -1720,7 +1721,9 @@ extern int validate_nodes_via_front_end(
 		     * completes which waits for bgblock boot to complete.  
 		     * This can take several minutes on BlueGene. */
 		if (difftime(now, job_ptr->time_last_active) <= 
-				(1400 + 5 * job_ptr->node_cnt))
+
+		    (BG_FREE_PREVIOUS_BLOCK + BG_MIN_BLOCK_BOOT +
+		     BG_INCR_BLOCK_BOOT * job_ptr->node_cnt))
 			continue;
 #else
 		if (difftime(now, job_ptr->time_last_active) <= 5)

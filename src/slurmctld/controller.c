@@ -173,6 +173,7 @@ static void         _init_config(void);
 static void         _init_pidfile(void);
 static void         _kill_old_slurmctld(void);
 static void         _parse_commandline(int argc, char *argv[]);
+static void         _remove_assoc(acct_association_rec_t *rec);
 inline static int   _report_locks_set(void);
 static void *       _service_connection(void *arg);
 static int          _shutdown_backup_controller(int wait_time);
@@ -196,6 +197,7 @@ int main(int argc, char *argv[])
 	/* Locks: Write configuration, job, node, and partition */
 	slurmctld_lock_t config_write_lock = {
 		WRITE_LOCK, WRITE_LOCK, WRITE_LOCK, WRITE_LOCK };
+	assoc_init_args_t assoc_init_arg;
 
 	/*
 	 * Establish initial configuration
@@ -297,7 +299,9 @@ int main(int argc, char *argv[])
 	slurmctld_cluster_name = xstrdup(slurmctld_conf.cluster_name);
 	accounting_enforce = slurmctld_conf.accounting_storage_enforce;
 	acct_db_conn = acct_storage_g_get_connection(true, false);
-	if (assoc_mgr_init(acct_db_conn, accounting_enforce) &&
+	assoc_init_arg.enforce = accounting_enforce;
+	assoc_init_arg.remove_assoc_notify = _remove_assoc;
+	if (assoc_mgr_init(acct_db_conn, &assoc_init_arg) &&
 	    accounting_enforce) {
 		error("assoc_mgr_init failure");
 		fatal("slurmdbd and/or database must be up at "
@@ -375,11 +379,11 @@ int main(int argc, char *argv[])
 			    (!stat("/tmp/slurm_accounting_first", &stat_buf))) {
 				/* When first starting to write node state
 				 * information to Gold or SlurmDBD, create 
-				 * a file called "/tmp/slurm_accounting_first" to 
-				 * capture node initialization information */
-		   
+				 * a file called "/tmp/slurm_accounting_first"  
+				 * to capture node initialization information */
+				
 				_accounting_mark_all_nodes_down("cold-start");
-				 unlink("/tmp/slurm_accounting_first");
+				unlink("/tmp/slurm_accounting_first");
 			}
 		} else {
 			error("this host (%s) not valid controller (%s or %s)",
@@ -391,7 +395,7 @@ int main(int argc, char *argv[])
 		if(!acct_db_conn) {
 			acct_db_conn = 
 				acct_storage_g_get_connection(true, false);
-			if (assoc_mgr_init(acct_db_conn, accounting_enforce) &&
+			if (assoc_mgr_init(acct_db_conn, &assoc_init_arg) &&
 			    accounting_enforce) {
 				error("assoc_mgr_init failure");
 				fatal("slurmdbd and/or database must be up at "
@@ -496,12 +500,6 @@ int main(int argc, char *argv[])
 	if (i >= 10)
 		error("Left %d agent threads active", cnt);
 
-	/* Purge our local data structures */
-	job_fini();
-	part_fini();	/* part_fini() must preceed node_fini() */
-	node_fini();
-	trigger_fini();
-
 	/* Plugins are needed to purge job/node data structures,
 	 * unplug after other data structures are purged */
 	g_slurm_jobcomp_fini();
@@ -513,6 +511,12 @@ int main(int argc, char *argv[])
 	slurm_auth_fini();
 	switch_fini();
 	assoc_mgr_fini();
+
+	/* Purge our local data structures */
+	job_fini();
+	part_fini();	/* part_fini() must preceed node_fini() */
+	node_fini();
+	trigger_fini();
 
 	/* purge remaining data structures */
 	slurm_cred_ctx_destroy(slurmctld_config.cred_ctx);
@@ -948,6 +952,21 @@ static int _accounting_mark_all_nodes_down(char *reason)
 	}
 	return rc;
 }
+
+static void _remove_assoc(acct_association_rec_t *rec)
+{
+	int cnt = 0;
+
+	if (accounting_enforce)
+		cnt = job_cancel_by_assoc_id(rec->id);
+
+	if (cnt) {
+		info("Removed association id:%u user:%s, cancelled %u jobs",
+		     rec->id, rec->user, cnt);
+	} else
+		debug("Removed association id:%u user:%s", rec->id, rec->user);
+}
+
 /*
  * _slurmctld_background - process slurmctld background activities
  *	purge defunct job records, save state, schedule jobs, and 
@@ -1008,8 +1027,9 @@ static void *_slurmctld_background(void *no_data)
 	(void) pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 	debug3("_slurmctld_background pid = %u", getpid());
 
-	while (slurmctld_config.shutdown_time == 0) {
-		sleep(1);
+	while (1) {
+		if (slurmctld_config.shutdown_time == 0)
+			sleep(1);
 
 		now = time(NULL);
 		START_TIMER;
