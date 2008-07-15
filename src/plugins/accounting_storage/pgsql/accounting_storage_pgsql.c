@@ -660,7 +660,8 @@ extern int init ( void )
 	char *location = NULL;
 #else
 	fatal("No Postgres database was found on the machine. "
-	      "Please check the configure log and run again.");	
+	      "Please check the config.log from the run of configure "
+	      "and run again.");	
 #endif
 	/* since this can be loaded from many different places
 	   only tell us once. */
@@ -793,9 +794,9 @@ extern List acct_storage_p_modify_users(PGconn *acct_pgsql_db, uint32_t uid,
 	return SLURM_SUCCESS;
 }
 
-extern List acct_storage_p_modify_accts(PGconn *acct_pgsql_db, uint32_t uid,
-				       acct_account_cond_t *acct_q,
-				       acct_account_rec_t *acct)
+extern List acct_storage_p_modify_accounts(PGconn *acct_pgsql_db, uint32_t uid,
+					   acct_account_cond_t *acct_q,
+					   acct_account_rec_t *acct)
 {
 	return SLURM_SUCCESS;
 }
@@ -1556,7 +1557,7 @@ extern List jobacct_storage_p_get_jobs_cond(PGconn *acct_pgsql_db,
 					    acct_job_cond_t *job_cond)
 {
 	List job_list = NULL;
-#ifdef HAVE_MYSQL
+#ifdef HAVE_PGSQL
 	if(!acct_pgsql_db || PQstatus(acct_pgsql_db) != CONNECTION_OK) {
 		if(!pgsql_get_db_connection(&acct_pgsql_db,
 					    pgsql_db_name, pgsql_db_info))

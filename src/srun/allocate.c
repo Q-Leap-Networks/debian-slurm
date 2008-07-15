@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/srun/allocate.c - srun functions for managing node allocations
- * $Id: allocate.c 14242 2008-06-11 23:29:49Z jette $
+ * $Id: allocate.c 14453 2008-07-08 20:26:18Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -89,7 +89,7 @@ static sig_atomic_t destroy_job = 0;
 
 static void _set_pending_job_id(uint32_t job_id)
 {
-	info("Pending job allocation %u", job_id);
+	debug2("Pending job allocation %u", job_id);
 	pending_job_id = job_id;
 }
 
@@ -235,7 +235,7 @@ allocate_nodes(void)
 	xsignal(SIGUSR2, _signal_while_allocating);
 
 	while (!resp) {
-		resp = slurm_allocate_resources_blocking(j, opt.max_wait,
+		resp = slurm_allocate_resources_blocking(j, 0,
 							 _set_pending_job_id);
 		if (destroy_job) {
 			/* cancelled by signal */

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  opt.c - options processing for srun
- *  $Id: opt.c 14110 2008-05-22 16:34:50Z jette $
+ *  $Id: opt.c 14420 2008-07-02 19:52:49Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -778,6 +778,7 @@ env_vars_t env_vars[] = {
 {"SLURM_OPEN_MODE",     OPT_OPEN_MODE,  NULL,               NULL             },
 {"SLURM_ACCTG_FREQ",    OPT_INT,        &opt.acctg_freq,    NULL             },
 {"SLURM_TASK_MEM",      OPT_INT,        &opt.task_mem,      NULL             },
+{"SLURM_NETWORK",       OPT_STRING,     &opt.network,       NULL             },
 {NULL, 0, NULL, NULL}
 };
 
@@ -1353,11 +1354,15 @@ static void set_options(const int argc, char **argv)
 				_get_int(optarg, "max-exit-timeout", true);
 			break;
 		case LONG_OPT_UID:
+			if (opt.euid != (uid_t) -1)
+				fatal ("duplicate --uid option");
 			opt.euid = uid_from_string (optarg);
 			if (opt.euid == (uid_t) -1)
 				fatal ("--uid=\"%s\" invalid", optarg);
 			break;
 		case LONG_OPT_GID:
+			if (opt.egid != (gid_t) -1)
+				fatal ("duplicate --gid option");
 			opt.egid = gid_from_string (optarg);
 			if (opt.egid == (gid_t) -1)
 				fatal ("--gid=\"%s\" invalid", optarg);
@@ -1388,9 +1393,7 @@ static void set_options(const int argc, char **argv)
 		case LONG_OPT_NETWORK:
 			xfree(opt.network);
 			opt.network = xstrdup(optarg);
-#ifdef HAVE_AIX
 			setenv("SLURM_NETWORK", opt.network, 1);
-#endif
 			break;
 		case LONG_OPT_PROPAGATE:
 			xfree(opt.propagate);
@@ -2012,9 +2015,6 @@ static bool _opt_verify(void)
 	if ((opt.egid != (gid_t) -1) && (opt.egid != opt.gid)) 
 		opt.gid = opt.egid;
 
-        if ((opt.egid != (gid_t) -1) && (opt.egid != opt.gid))
-	        opt.gid = opt.egid;
-
 	if (opt.propagate && parse_rlimits( opt.propagate, PROPAGATE_RLIMITS)) {
 		error( "--propagate=%s is not valid.", opt.propagate );
 		verified = false;
@@ -2221,7 +2221,7 @@ static void _usage(void)
 "            [--contiguous] [--mincpus=n] [--mem=MB] [--tmp=MB] [-C list]\n"
 "            [--mpi=type] [--account=name] [--dependency=type:jobid]\n"
 "            [--kill-on-bad-exit] [--propagate[=rlimits] [--comment=name]\n"
-"            [--cpu_bind=...] [--mem_bind=...]\n"
+"            [--cpu_bind=...] [--mem_bind=...] [--network=type]\n"
 "            [--ntasks-per-node=n] [--ntasks-per-socket=n]\n"
 "            [--ntasks-per-core=n]\n"
 #ifdef HAVE_BG		/* Blue gene specific options */

@@ -1,6 +1,23 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 1.3.5
+========================
+ -- Fix processing of auth/munge authtentication key for messages originating 
+    in slurmdbd and sent to slurmctld. 
+ -- If srun is allocating resources (not within sbatch or salloc) and MaxWait
+    is configured to a non-zero value then wait indefinitely for the resource
+    allocation rather than aborting the request after MaxWait time.
+ -- For Moab only: add logic to reap defunct "su" processes that are spawned by
+    slurmd to load user's environment variables.
+ -- Added more support for "dumping" account information to a flat file and 
+    read in again to protect data incase something bad happens to the database.
+ -- Sacct will now report account names for job steps.
+ -- For AIX: Remove MP_POERESTART_ENV environment variable, disabling poerestart
+    command. User must explicitly set MP_POERESTART_ENV before executing poerestart.
+ -- Put back notification that a job has been allocated resources when it was
+    pending.
+
 * Changes in SLURM 1.3.4
 ========================
  -- Some updates to man page formatting from Gennaro Oliva, ICAR.
@@ -359,6 +376,18 @@ documents those changes that are of interest to users and admins.
 * Changes in SLURM 1.2.32
 =========================
  -- Disable scancel of job in RootOnly partition only for sched/wiki2 (Moab).
+    Permit user scancel from other configurations (e.g. LSF).
+ -- Add support for sbatch --distribution and --network options.
+ -- Correct pending job's wait reason to "Priority" rather than "Resources" if
+    required resources are being held in reserve for a higher priority job.
+ -- In sched/wiki2 (Moab) report a node's state as "Drained" rather than "Draining"
+    if it has no allocated work (An undocumented Moab wiki option, see CRI
+    ticket #2394).
+ -- Log to job's output when it is cancelled or reaches it's time limit (ported
+    from existing code in slurm v1.3).
+ -- Add support in salloc and sbatch commands for --network option.
+ -- Add support for user environment variables that include '\n' (e.g. 
+    bash functions).
 
 * Changes in SLURM 1.2.31
 =========================
@@ -3299,4 +3328,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 14322 2008-06-23 22:01:33Z da $
+$Id: NEWS 14453 2008-07-08 20:26:18Z da $

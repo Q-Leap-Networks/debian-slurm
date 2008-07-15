@@ -380,7 +380,7 @@ static int _add_account_coords(void *db_conn,
 		itr2 = list_iterator_create(user.coord_accts);
 		while((acct = list_next(itr))) {
 			while((coord = list_next(itr2))) {
-				if(!strcasecmp(coord->acct_name, acct))
+				if(!strcasecmp(coord->name, acct))
 					break;
 			}
 			if(!coord)  {
@@ -457,7 +457,7 @@ static int _add_assocs(void *db_conn,
 				account = object->parent_acct;
 			list_iterator_reset(itr2);
 			while((coord = list_next(itr2))) {
-				if(!strcasecmp(coord->acct_name, account))
+				if(!strcasecmp(coord->name, account))
 					break;
 			}
 			if(!coord) 
@@ -1140,7 +1140,7 @@ static int   _modify_accounts(void *db_conn,
 			comment = "Request didn't affect anything";
 			rc = SLURM_SUCCESS;
 		} else {
-			comment = "Unkown issue";
+			comment = "Unknown issue";
 			rc = SLURM_ERROR;
 		}
 		error("%s", comment);
@@ -1155,7 +1155,6 @@ static int   _modify_accounts(void *db_conn,
 	slurmdbd_pack_list_msg(DBD_GOT_LIST, &list_msg, *out_buffer);
 	if(list_msg.my_list)
 		list_destroy(list_msg.my_list);
-	*out_buffer = make_dbd_rc_msg(rc, comment, DBD_MODIFY_ACCOUNTS);
 	return rc;
 }
 
@@ -1196,7 +1195,7 @@ static int   _modify_assocs(void *db_conn,
 			comment = "Request didn't affect anything";
 			rc = SLURM_SUCCESS;
 		} else {
-			comment = "Unkown issue";
+			comment = "Unknown issue";
 			rc = SLURM_ERROR;
 		}
 		error("%s", comment);
@@ -1257,7 +1256,7 @@ static int   _modify_clusters(void *db_conn,
 			comment = "Request didn't affect anything";
 			rc = SLURM_SUCCESS;
 		} else {
-			comment = "Unkown issue";
+			comment = "Unknown issue";
 			rc = SLURM_ERROR;
 		}
 		error("%s", comment);
@@ -1326,7 +1325,7 @@ static int   _modify_users(void *db_conn,
 			comment = "Request didn't affect anything";
 			rc = SLURM_SUCCESS;
 		} else {
-			comment = "Unkown issue";
+			comment = "Unknown issue";
 			rc = SLURM_ERROR;
 		}
 		error("%s", comment);
@@ -1534,7 +1533,7 @@ static int   _remove_accounts(void *db_conn,
 			comment = "Request didn't affect anything";
 			rc = SLURM_SUCCESS;
 		} else {
-			comment = "Unkown issue";
+			comment = "Unknown issue";
 			rc = SLURM_ERROR;
 		}
 		error("%s", comment);
@@ -1568,8 +1567,9 @@ static int   _remove_account_coords(void *db_conn,
 	    SLURM_SUCCESS) {
 		comment = "Failed to unpack DBD_REMOVE_ACCOUNT_COORDS message";
 		error("%s", comment);
-		rc = SLURM_ERROR;
-		goto end_it;
+		*out_buffer = make_dbd_rc_msg(SLURM_ERROR, comment,
+					      DBD_ADD_ACCOUNT_COORDS);
+		return SLURM_ERROR;
 	}
 	
 	/* All authentication needs to be done inside the plugin since we are
@@ -1589,7 +1589,7 @@ static int   _remove_account_coords(void *db_conn,
 			comment = "Request didn't affect anything";
 			rc = SLURM_SUCCESS;
 		} else {
-			comment = "Unkown issue";
+			comment = "Unknown issue";
 			rc = SLURM_ERROR;
 		}
 		error("%s", comment);
@@ -1607,11 +1607,6 @@ static int   _remove_account_coords(void *db_conn,
 		list_destroy(list_msg.my_list);
 
 	return rc;
-end_it:
-	slurmdbd_free_acct_coord_msg(get_msg);
-	*out_buffer = make_dbd_rc_msg(rc, comment, DBD_ADD_ACCOUNT_COORDS);
-	return rc;
-
 }
 
 static int   _remove_assocs(void *db_conn,
@@ -1649,7 +1644,7 @@ static int   _remove_assocs(void *db_conn,
 			comment = "Request didn't affect anything";
 			rc = SLURM_SUCCESS;
 		} else {
-			comment = "Unkown issue";
+			comment = "Unknown issue";
 			rc = SLURM_ERROR;
 		}
 		error("%s", comment);
@@ -1711,7 +1706,7 @@ static int   _remove_clusters(void *db_conn,
 			comment = "Request didn't affect anything";
 			rc = SLURM_SUCCESS;
 		} else {
-			comment = "Unkown issue";
+			comment = "Unknown issue";
 			rc = SLURM_ERROR;
 		}
 		error("%s", comment);
@@ -1771,7 +1766,7 @@ static int   _remove_users(void *db_conn,
 			comment = "Request didn't affect anything";
 			rc = SLURM_SUCCESS;
 		} else {
-			comment = "Unkown issue";
+			comment = "Unknown issue";
 			rc = SLURM_ERROR;
 		}
 		error("%s", comment);

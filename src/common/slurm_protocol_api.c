@@ -641,18 +641,20 @@ static char *_global_auth_key(void)
 {
 	static bool loaded_storage_pass = false;
 	static char storage_pass[512] = "\0";
+	static char *storage_pass_ptr = NULL;
 	slurm_ctl_conf_t *conf;
 
 	if(loaded_storage_pass)
-		return storage_pass;
+		return storage_pass_ptr;
 
 	if(slurmdbd_conf) {
-		if(slurmdbd_conf->storage_pass) {
-			if(strlen(slurmdbd_conf->storage_pass) > 
+		if(slurmdbd_conf->auth_info) {
+			if(strlen(slurmdbd_conf->auth_info) > 
 			   sizeof(storage_pass))
-				fatal("StoragePass is too long");
-			strncpy(storage_pass, slurmdbd_conf->storage_pass, 
+				fatal("AuthInfo is too long");
+			strncpy(storage_pass, slurmdbd_conf->auth_info, 
 				sizeof(storage_pass));
+			storage_pass_ptr = storage_pass;
 		}
 	} else {
 		conf = slurm_conf_lock();
@@ -662,11 +664,12 @@ static char *_global_auth_key(void)
 				fatal("AccountingStoragePass is too long");
 			strncpy(storage_pass, conf->accounting_storage_pass, 
 				sizeof(storage_pass));
+			storage_pass_ptr = storage_pass;
 		}
 		slurm_conf_unlock();
 	}
 	loaded_storage_pass = true;
-	return storage_pass;
+	return storage_pass_ptr;
 }
 
 /* slurm_get_accounting_storage_port
@@ -1470,6 +1473,9 @@ List slurm_receive_msgs(slurm_fd fd, int steps, int timeout)
 
 	debug4("orig_timeout was %d we have %d steps and a timeout of %d",
 	       orig_timeout, steps, timeout);
+	/* we compare to the orig_timeout here because that is really
+	 *  what we are going to wait for each step
+	 */
 	if(orig_timeout >= (slurm_get_msg_timeout() * 10000)) {
 		debug("slurm_receive_msgs: "
 		      "You are sending a message with timeout's greater "
@@ -1479,7 +1485,8 @@ List slurm_receive_msgs(slurm_fd fd, int steps, int timeout)
 	} else if(orig_timeout < 1000) {
 		debug("slurm_receive_msgs: "
 		      "You are sending a message with a very short timeout of "
-		      "%d milliseconds", timeout);
+		      "%d milliseconds each step in the tree has %d "
+		      "milliseconds", timeout, orig_timeout);
 	} 
 	
 

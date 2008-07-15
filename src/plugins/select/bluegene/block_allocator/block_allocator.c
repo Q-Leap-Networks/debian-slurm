@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  block_allocator.c - Assorted functions for layout of bglblocks, 
  *	 wiring, mapping for smap, etc.
- *  $Id: block_allocator.c 14322 2008-06-23 22:01:33Z da $
+ *  $Id: block_allocator.c 14348 2008-06-25 19:05:31Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1571,9 +1571,6 @@ extern int removable_set_bps(char *bps)
 extern int reset_all_removed_bps()
 {
 	int x;
-#ifdef HAVE_BG
-	int y,z;
-#endif
 
 	for (x = 0; x < DIM_SIZE[X]; x++) {
 #ifdef HAVE_BG
