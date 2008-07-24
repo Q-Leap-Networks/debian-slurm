@@ -1,6 +1,7 @@
 #
 
 AUTOMAKE_OPTIONS = foreign
+CLEANFILES = core.*
 
 INCLUDES = -I$(top_srcdir) 
 
@@ -8,7 +9,7 @@ bin_PROGRAMS = salloc
 
 salloc_SOURCES = salloc.c salloc.h opt.c opt.h
 
-convenience_libs = $(top_builddir)/src/api/libslurmhelper.la
+convenience_libs = $(top_builddir)/src/api/libslurm.o -ldl
 
 salloc_LDADD = \
 	$(convenience_libs) 

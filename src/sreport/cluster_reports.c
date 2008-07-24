@@ -71,9 +71,12 @@ static int _set_cond(int *start, int argc, char *argv[],
 	int end = 0;
 	int local_cluster_flag = all_clusters_flag;
 
+	if(!cluster_cond->cluster_list)
+		cluster_cond->cluster_list = list_create(slurm_destroy_char);
+
 	for (i=(*start); i<argc; i++) {
 		end = parse_option_end(argv[i]);
-		if (strncasecmp (argv[i], "Set", 3) == 0) {
+		if (!strncasecmp (argv[i], "Set", 3)) {
 			i--;
 			break;
 		} else if(!end && !strncasecmp(argv[i], "where", 5)) {
@@ -81,24 +84,23 @@ static int _set_cond(int *start, int argc, char *argv[],
 		} else if(!end && !strncasecmp(argv[i], "all_clusters", 1)) {
 			local_cluster_flag = 1;
 			continue;
-		} else if(!end) {
-			addto_char_list(cluster_cond->cluster_list, argv[i]);
+		} else if(!end
+			  || !strncasecmp (argv[i], "Names", 1)) {
+			slurm_addto_char_list(cluster_cond->cluster_list,
+					      argv[i]);
 			set = 1;
-		} else if (strncasecmp (argv[i], "End", 1) == 0) {
+		} else if (!strncasecmp (argv[i], "End", 1)) {
 			cluster_cond->usage_end = parse_time(argv[i]+end);
 			set = 1;
-		} else if (strncasecmp (argv[i], "Format", 1) == 0) {
+		} else if (!strncasecmp (argv[i], "Format", 1)) {
 			if(format_list)
-				addto_char_list(format_list, argv[i]+end);
-		} else if (strncasecmp (argv[i], "Names", 1) == 0) {
-			addto_char_list(cluster_cond->cluster_list,
-					argv[i]+end);
-			set = 1;
-		} else if (strncasecmp (argv[i], "Start", 1) == 0) {
+				slurm_addto_char_list(format_list, argv[i]+end);
+		} else if (!strncasecmp (argv[i], "Start", 1)) {
 			cluster_cond->usage_start = parse_time(argv[i]+end);
 			set = 1;
 		} else {
-			printf(" Unknown condition: %s\n"
+			exit_code=1;
+			fprintf(stderr," Unknown condition: %s\n"
 			       "Use keyword set to modify value\n", argv[i]);
 		}
 	}
@@ -123,7 +125,9 @@ static int _setup_print_fields_list(List format_list)
 	char *object = NULL;
 
 	if(!format_list || !list_count(format_list)) {
-		printf(" error: we need a format list to set up the print.\n");
+		exit_code=1;
+			fprintf(stderr, " we need a format list "
+				"to set up the print.\n");
 		return SLURM_ERROR;
 	}
 
@@ -192,7 +196,8 @@ static int _setup_print_fields_list(List format_list)
 				field->len = 9;
 			field->print_routine = sreport_print_time;
 		} else {
-			printf("Unknown field '%s'\n", object);
+			exit_code=1;
+			fprintf(stderr, " Unknown field '%s'\n", object);
 			xfree(field);
 			continue;
 		}
@@ -211,14 +216,14 @@ static List _get_cluster_list(int argc, char *argv[], uint32_t *total_time,
 	int i=0;
 	List cluster_list = NULL;
 
-	cluster_cond->cluster_list = list_create(slurm_destroy_char);
 	cluster_cond->with_usage = 1;
 
 	_set_cond(&i, argc, argv, cluster_cond, format_list);
 	
 	cluster_list = acct_storage_g_get_clusters(db_conn, cluster_cond);
 	if(!cluster_list) {
-		printf(" Problem with cluster query.\n");
+		exit_code=1;
+		fprintf(stderr, " Problem with cluster query.\n");
 		return NULL;
 	}
 
@@ -270,7 +275,7 @@ extern int cluster_utilization(int argc, char *argv[])
 		goto end_it;
 
 	if(!list_count(format_list)) 
-		addto_char_list(format_list, "Cl,a,d,i,res,rep");
+		slurm_addto_char_list(format_list, "Cl,a,d,i,res,rep");
 
 	_setup_print_fields_list(format_list);
 	list_destroy(format_list);
@@ -311,48 +316,40 @@ extern int cluster_utilization(int argc, char *argv[])
 		while((field = list_next(itr2))) {
 			switch(field->type) {
 			case PRINT_CLUSTER_NAME:
-				field->print_routine(SLURM_PRINT_VALUE,
-						     field,
+				field->print_routine(field,
 						     cluster->name);		
 				break;
 			case PRINT_CLUSTER_CPUS:
-				field->print_routine(SLURM_PRINT_VALUE,
-						     field,
+				field->print_routine(field,
 						     total_acct.cpu_count);
 				break;
 			case PRINT_CLUSTER_ACPU:
-				field->print_routine(SLURM_PRINT_VALUE,
-						     field,
+				field->print_routine(field,
 						     total_acct.alloc_secs,
 						     total_reported);
 				break;
 			case PRINT_CLUSTER_DCPU:
-				field->print_routine(SLURM_PRINT_VALUE,
-						     field,
+				field->print_routine(field,
 						     total_acct.down_secs,
 						     total_reported);
 				break;
 			case PRINT_CLUSTER_ICPU:
-				field->print_routine(SLURM_PRINT_VALUE,
-						     field,
+				field->print_routine(field,
 						     total_acct.idle_secs,
 						     total_reported);
 				break;
 			case PRINT_CLUSTER_RCPU:
-				field->print_routine(SLURM_PRINT_VALUE,
-						     field,
+				field->print_routine(field,
 						     total_acct.resv_secs,
 						     total_reported);
 				break;
 			case PRINT_CLUSTER_OCPU:
-					field->print_routine(SLURM_PRINT_VALUE,
-						     field,
+					field->print_routine(field,
 						     total_acct.over_secs,
 						     total_reported);
 				break;
 			case PRINT_CLUSTER_TOTAL:
-				field->print_routine(SLURM_PRINT_VALUE,
-						     field,
+				field->print_routine(field,
 						     total_reported,
 						     local_total_time);
 				break;

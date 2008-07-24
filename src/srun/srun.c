@@ -120,6 +120,7 @@ static int   _become_user (void);
 static int   _call_spank_local_user (srun_job_t *job);
 static void  _define_symbols(void);
 static void  _handle_intr();
+static void  _handle_pipe(int signo);
 static void  _handle_signal(int signo);
 static void  _print_job_information(resource_allocation_response_msg_t *resp);
 static void  _pty_restore(void);
@@ -229,6 +230,7 @@ int srun(int ac, char **av)
 			exit(1);
 		}
 	} else if ((resp = existing_allocation())) {
+		
 		job_id = resp->job_id;
 		if (opt.alloc_nodelist == NULL)
                        opt.alloc_nodelist = xstrdup(resp->node_list);
@@ -409,7 +411,8 @@ int srun(int ac, char **av)
 		if (opt.debugger_test)
 			mpir_dump_proctable();
 	} else {
-		info("Job step aborted before step completely launched.");
+		info("Job step %u.%u aborted before step completely launched.",
+		     job->jobid, job->stepid);
 	}
 
 	slurm_step_launch_wait_finish(job->step_ctx);
@@ -1061,7 +1064,8 @@ static void _handle_intr()
 				return;
 			}
 
-			info("sending Ctrl-C to job");
+			info("sending Ctrl-C to job %u.%u",
+			     job->jobid, job->stepid);
 			last_intr_sent = time(NULL);
 			slurm_step_launch_fwd_signal(job->step_ctx, SIGINT);
 
@@ -1070,6 +1074,16 @@ static void _handle_intr()
 			slurm_step_launch_abort(job->step_ctx);
 		}
 	}
+}
+
+static void _handle_pipe(int signo)
+{
+	static int ending = 0;
+
+	if(ending)
+		return;
+	ending = 1;
+	slurm_step_launch_abort(job->step_ctx);
 }
 
 static void _handle_signal(int signo)
@@ -1085,7 +1099,11 @@ static void _handle_signal(int signo)
 		/* continue with slurm_step_launch_abort */
 	case SIGTERM:
 	case SIGHUP:
-		job_force_termination(job);
+		/* No need to call job_force_termination here since we
+		 * are ending the job now and we don't need to update the
+		 * state.
+		 */
+		info ("forcing job termination");
 		slurm_step_launch_abort(job->step_ctx);
 		break;
 	/* case SIGTSTP: */
@@ -1104,7 +1122,7 @@ static int _setup_signals()
 {
 	int sigarray[] = {
 		SIGINT,  SIGQUIT, /*SIGTSTP,*/ SIGCONT, SIGTERM,
-		SIGALRM, SIGUSR1, SIGUSR2, SIGPIPE, 0
+		SIGALRM, SIGUSR1, SIGUSR2, /*SIGPIPE,*/ 0
 	};
 	int rc = SLURM_SUCCESS, i=0, signo;
 
@@ -1113,6 +1131,10 @@ static int _setup_signals()
 
 	while ((signo = sigarray[i++])) 
 		xsignal(signo, _handle_signal);
+	/* special case for SIGPIPE since we don't want to print stuff
+	 * and get into a locked up state
+	 */
+	xsignal(SIGPIPE, _handle_pipe);
 
 	return rc;
 }

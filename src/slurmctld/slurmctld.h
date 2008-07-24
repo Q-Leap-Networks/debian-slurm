@@ -331,7 +331,8 @@ struct job_details {
 	uint16_t ntasks_per_node;	/* number of tasks on each node */
 	/* job constraints: */
 	uint32_t job_min_procs;		/* minimum processors per node */
-	uint32_t job_min_memory;	/* minimum memory per node, MB */
+	uint32_t job_min_memory;	/* minimum memory per node (MB) OR
+					 * memory per allocated CPU | MEM_PER_CPU */
 	uint32_t job_min_tmp_disk;	/* minimum tempdisk per node, MB */
 	char *err;			/* pathname of job's stderr file */
 	char *in;			/* pathname of job's stdin file */
@@ -469,7 +470,7 @@ struct 	step_record {
 	time_t pre_sus_time;		/* time step ran prior to last suspend */
 	time_t tot_sus_time;		/* total time in suspended state */
 	bitstr_t *step_node_bitmap;	/* bitmap of nodes allocated to job 
-					   step */
+					 * step */
 	uint16_t port;			/* port for srun communications */
 	char *host;			/* host for srun communications */
 	uint16_t batch_step;		/* 1 if batch job step, 0 otherwise */
@@ -485,9 +486,9 @@ struct 	step_record {
 	uint32_t exit_code;		/* highest exit code from any task */
 	bitstr_t *exit_node_bitmap;	/* bitmap of exited nodes */
 	jobacctinfo_t *jobacct;         /* keep track of process info in the 
-					   step */
+					 * step */
 	slurm_step_layout_t *step_layout;/* info about how tasks are laid out
-					    in the step */
+					  * in the step */
 };
 
 extern List job_list;			/* list of job_record entries */
@@ -1210,6 +1211,20 @@ extern void pack_job (struct job_record *dump_job_ptr, Buf buffer);
  */
 extern void pack_part (struct part_record *part_ptr, Buf buffer);
 
+/* 
+ * pack_one_job - dump information for one jobs in 
+ *	machine independent form (for network transmission)
+ * OUT buffer_ptr - the pointer is set to the allocated buffer.
+ * OUT buffer_size - set to size of the buffer in bytes
+ * IN job_id - ID of job that we want info for
+ * IN uid - uid of user making request (for partition filtering)
+ * NOTE: the buffer at *buffer_ptr must be xfreed by the caller
+ * NOTE: change _unpack_job_desc_msg() in common/slurm_protocol_pack.c 
+ *	whenever the data format changes
+ */
+extern int pack_one_job(char **buffer_ptr, int *buffer_size,
+			 uint32_t job_id, uid_t uid);
+
 /* part_filter_clear - Clear the partition's hidden flag based upon a user's
  * group access. This must follow a call to part_filter_set() */
 extern void part_filter_clear(void);
@@ -1219,7 +1234,7 @@ extern void part_filter_clear(void);
 extern void part_filter_set(uid_t uid);
 
 /* part_fini - free all memory associated with partition records */
-void part_fini (void);
+extern void part_fini (void);
 
 /*
  * purge_old_job - purge old job records. 

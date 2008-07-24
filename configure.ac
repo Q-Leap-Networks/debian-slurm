@@ -1,4 +1,4 @@
-# $Id: configure.ac 14147 2008-05-28 22:46:41Z da $
+# $Id: configure.ac 14598 2008-07-21 20:12:45Z da $
 # This file is to be processed with autoconf to generate a configure script
 
 dnl Prologue
@@ -333,7 +333,6 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/jobcomp/script/Makefile
 		 src/plugins/jobcomp/mysql/Makefile
 		 src/plugins/jobcomp/pgsql/Makefile
-		 src/plugins/jobcomp/slurmdbd/Makefile
 		 src/plugins/proctrack/Makefile
 		 src/plugins/proctrack/aix/Makefile
 		 src/plugins/proctrack/pgid/Makefile

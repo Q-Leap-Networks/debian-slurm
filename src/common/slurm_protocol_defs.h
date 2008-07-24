@@ -1,9 +1,8 @@
 /****************************************************************************\
  *  slurm_protocol_defs.h - definitions used for RPCs
- *
- *  $Id: slurm_protocol_defs.h 13755 2008-04-01 19:12:53Z jette $
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov>.
  *  LLNL-CODE-402394.
@@ -117,6 +116,7 @@ typedef enum {
 	REQUEST_TRIGGER_GET,
 	REQUEST_TRIGGER_CLEAR,
 	RESPONSE_TRIGGER_GET,
+	REQUEST_JOB_INFO_SINGLE,
 
 	REQUEST_UPDATE_JOB = 3001,
 	REQUEST_UPDATE_NODE,
@@ -746,6 +746,7 @@ extern void slurm_msg_t_init (slurm_msg_t *msg);
 extern void slurm_msg_t_copy(slurm_msg_t *dest, slurm_msg_t *src);
 
 extern void slurm_destroy_char(void *object);
+extern int slurm_addto_char_list(List char_list, char *names);
 
 /* free message functions */
 void inline slurm_free_checkpoint_tasks_msg(checkpoint_tasks_msg_t * msg);
@@ -852,14 +853,17 @@ extern char *job_state_string(enum job_states inx);
 extern char *job_state_string_compact(enum job_states inx);
 extern char *node_state_string(enum node_states inx);
 extern char *node_state_string_compact(enum node_states inx);
+extern void  private_data_string(uint16_t private_data, char *str, int str_len);
 
 #define safe_read(fd, buf, size) do {					\
 		int remaining = size;					\
 		char *ptr = (char *) buf;				\
 		int rc;							\
 		while (remaining > 0) {					\
-                        rc = read(fd, ptr, remaining);			\
-                        if (rc == 0) {					\
+			rc = read(fd, ptr, remaining);			\
+			if ((rc == 0) && (remaining == size))		\
+				goto rwfail;				\
+			else if (rc == 0) {				\
 				debug("%s:%d: %s: safe_read (%d of %d) EOF", \
 				      __FILE__, __LINE__, __CURRENT_FUNC__, \
 				      remaining, (int)size);		\

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  allocate.c - allocate nodes for a job or step with supplied contraints
- *  $Id: allocate.c 14453 2008-07-08 20:26:18Z da $
+ *  $Id: allocate.c 14571 2008-07-18 22:25:56Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -251,6 +251,8 @@ slurm_allocate_resources_blocking (const job_desc_msg_t *user_req,
 			/* yes, allocation has been granted */
 			errno = SLURM_PROTOCOL_SUCCESS;
 		} else if (!req->immediate) {
+			if(resp->error_code != SLURM_SUCCESS) 
+				info("%s", slurm_strerror(resp->error_code));
 			/* no, we need to wait for a response */
 			job_id = resp->job_id;
 			slurm_free_resource_allocation_response_msg(resp);
@@ -630,6 +632,9 @@ _handle_msg(slurm_msg_t *msg, resource_allocation_response_msg_t **resp)
 			slurm_send_rc_msg(msg, SLURM_SUCCESS);
 			*resp = msg->data;
 			rc = 1;
+			break;
+		case SRUN_JOB_COMPLETE:
+			info("Job has been cancelled");
 			break;
 		default:
 			error("received spurious message type: %d\n",

@@ -51,6 +51,7 @@ int exit_flag;		/* program to terminate if =1 */
 int input_words;	/* number of words of input permitted */
 int one_liner;		/* one record per line if =1 */
 int quiet_flag;		/* quiet=1, verbose=-1, normal=0 */
+int verbosity;		/* count of -v options */
 int rollback_flag;       /* immediate execute=1, else = 0 */
 int with_assoc_flag = 0;
 void *db_conn = NULL;
@@ -71,6 +72,7 @@ main (int argc, char *argv[])
 	int error_code = SLURM_SUCCESS, i, opt_char, input_field_count;
 	char **input_fields;
 	log_options_t opts = LOG_OPTS_STDERR_ONLY ;
+	int local_exit_code = 0;
 
 	int option_index;
 	static struct option long_options[] = {
@@ -96,6 +98,7 @@ main (int argc, char *argv[])
 	exit_flag         = 0;
 	input_field_count = 0;
 	quiet_flag        = 0;
+	verbosity         = 0;
 	log_init("sacctmgr", opts, SYSLOG_FACILITY_DAEMON, NULL);
 
 	if (getenv ("SACCTMGR_ALL"))
@@ -139,6 +142,7 @@ main (int argc, char *argv[])
 			break;
 		case (int)'v':
 			quiet_flag = -1;
+			verbosity++;
 			break;
 		case (int)'V':
 			_print_version();
@@ -163,6 +167,12 @@ main (int argc, char *argv[])
 		}	
 	}
 
+	if (verbosity) {
+		opts.stderr_level += verbosity;
+		opts.prefix_level = 1;
+		log_alter(opts, 0, NULL);
+	}
+
 	db_conn = acct_storage_g_get_connection(false, rollback_flag);
 	my_uid = getuid();
 
@@ -176,8 +186,17 @@ main (int argc, char *argv[])
 		if (error_code || exit_flag)
 			break;
 		error_code = _get_command (&input_field_count, input_fields);
+		/* This is here so if someone made a mistake we allow
+		 * them to fix it and let the process happen since there
+		 * are checks for global exit_code we need to reset it.
+		 */
+		if(exit_code) {
+			local_exit_code = exit_code;
+			exit_code = 0;
+		}
 	}
-
+	if(local_exit_code) 
+		exit_code = local_exit_code;
 	acct_storage_g_close_connection(&db_conn);
 	slurm_acct_storage_fini();
 	exit(exit_code);
@@ -454,23 +473,25 @@ static void _add_it (int argc, char *argv[])
 	int error_code = SLURM_SUCCESS;
 
 	/* First identify the entity to add */
-	if (strncasecmp (argv[0], "User", 1) == 0) {
-		error_code = sacctmgr_add_user((argc - 1), &argv[1]);
+	if (strncasecmp (argv[0], "Account", 1) == 0) {
+		error_code = sacctmgr_add_account((argc - 1), &argv[1]);
 	} else if (strncasecmp (argv[0], "Cluster", 2) == 0) {
 		error_code = sacctmgr_add_cluster((argc - 1), &argv[1]);
 	} else if (strncasecmp (argv[0], "Coordinator", 2) == 0) {
 		error_code = sacctmgr_add_coord((argc - 1), &argv[1]);
-	} else if (strncasecmp (argv[0], "Account", 1) == 0) {
-		error_code = sacctmgr_add_account((argc - 1), &argv[1]);
+	} else if (strncasecmp (argv[0], "QOS", 1) == 0) {
+		error_code = sacctmgr_add_qos((argc - 1), &argv[1]);
+	} else if (strncasecmp (argv[0], "User", 1) == 0) {
+		error_code = sacctmgr_add_user((argc - 1), &argv[1]);
 	} else {
 		exit_code = 1;
 		fprintf(stderr, "No valid entity in add command\n");
 		fprintf(stderr, "Input line must include, ");
 		fprintf(stderr, "\"User\", \"Account\", \"Coordinator\", ");
-		fprintf(stderr, "or \"Cluster\"\n");
+		fprintf(stderr, "\"Cluster\", or \"QOS\"\n");
 	}
 	
-	if (error_code) {
+	if (error_code == SLURM_ERROR) {
 		exit_code = 1;
 	}
 }
@@ -479,29 +500,35 @@ static void _add_it (int argc, char *argv[])
  * _show_it - list the slurm configuration per the supplied arguments 
  * IN argc - count of arguments
  * IN argv - list of arguments
+ * undocumented association options wopi and wopl
+ * without parent info and without parent limits
  */
 static void _show_it (int argc, char *argv[]) 
 {
 	int error_code = SLURM_SUCCESS;
 		
 	/* First identify the entity to list */
-	if (strncasecmp (argv[0], "User", 1) == 0) {
-		error_code = sacctmgr_list_user((argc - 1), &argv[1]);
-	} else if (strncasecmp (argv[0], "Account", 2) == 0) {
+	if (strncasecmp (argv[0], "Account", 2) == 0) {
 		error_code = sacctmgr_list_account((argc - 1), &argv[1]);
 	} else if (strncasecmp (argv[0], "Association", 2) == 0) {
 		error_code = sacctmgr_list_association((argc - 1), &argv[1]);
 	} else if (strncasecmp (argv[0], "Cluster", 1) == 0) {
 		error_code = sacctmgr_list_cluster((argc - 1), &argv[1]);
+	} else if (strncasecmp (argv[0], "QOS", 1) == 0) {
+		error_code = sacctmgr_list_qos((argc - 1), &argv[1]);
+	} else if (strncasecmp (argv[0], "Transactions", 1) == 0) {
+		error_code = sacctmgr_list_txn((argc - 1), &argv[1]);
+	} else if (strncasecmp (argv[0], "User", 1) == 0) {
+		error_code = sacctmgr_list_user((argc - 1), &argv[1]);
 	} else {
 		exit_code = 1;
 		fprintf(stderr, "No valid entity in list command\n");
 		fprintf(stderr, "Input line must include ");
 		fprintf(stderr, "\"User\", \"Account\", \"Association\", ");
-		fprintf(stderr, "or \"Cluster\"\n");
+		fprintf(stderr, "\"Cluster\", or \"QOS\"\n");
 	} 
 	
-	if (error_code) {
+	if (error_code == SLURM_ERROR) {
 		exit_code = 1;
 	}
 }
@@ -517,12 +544,12 @@ static void _modify_it (int argc, char *argv[])
 	int error_code = SLURM_SUCCESS;
 
 	/* First identify the entity to modify */
-	if (strncasecmp (argv[0], "User", 1) == 0) {
-		error_code = sacctmgr_modify_user((argc - 1), &argv[1]);
-	} else if (strncasecmp (argv[0], "Account", 1) == 0) {
+	if (strncasecmp (argv[0], "Account", 1) == 0) {
 		error_code = sacctmgr_modify_account((argc - 1), &argv[1]);
 	} else if (strncasecmp (argv[0], "Cluster", 1) == 0) {
 		error_code = sacctmgr_modify_cluster((argc - 1), &argv[1]);
+	} else if (strncasecmp (argv[0], "User", 1) == 0) {
+		error_code = sacctmgr_modify_user((argc - 1), &argv[1]);
 	} else {
 		exit_code = 1;
 		fprintf(stderr, "No valid entity in modify command\n");
@@ -531,7 +558,7 @@ static void _modify_it (int argc, char *argv[])
 		fprintf(stderr, "or \"Cluster\"\n");
 	}
 
-	if (error_code) {
+	if (error_code == SLURM_ERROR) {
 		exit_code = 1;
 	}
 }
@@ -546,23 +573,25 @@ static void _delete_it (int argc, char *argv[])
 	int error_code = SLURM_SUCCESS;
 
 	/* First identify the entity to delete */
-	if (strncasecmp (argv[0], "User", 1) == 0) {
-		error_code = sacctmgr_delete_user((argc - 1), &argv[1]);
-	} else if (strncasecmp (argv[0], "Account", 1) == 0) {
+	if (strncasecmp (argv[0], "Account", 1) == 0) {
 		error_code = sacctmgr_delete_account((argc - 1), &argv[1]);
 	} else if (strncasecmp (argv[0], "Cluster", 2) == 0) {
 		error_code = sacctmgr_delete_cluster((argc - 1), &argv[1]);
 	} else if (strncasecmp (argv[0], "Coordinator", 2) == 0) {
 		error_code = sacctmgr_delete_coord((argc - 1), &argv[1]);
+	} else if (strncasecmp (argv[0], "QOS", 2) == 0) {
+		error_code = sacctmgr_delete_qos((argc - 1), &argv[1]);
+	} else if (strncasecmp (argv[0], "User", 1) == 0) {
+		error_code = sacctmgr_delete_user((argc - 1), &argv[1]);
 	} else {
 		exit_code = 1;
 		fprintf(stderr, "No valid entity in delete command\n");
 		fprintf(stderr, "Input line must include ");
 		fprintf(stderr, "\"User\", \"Account\", \"Coordinator\", ");
-		fprintf(stderr, "or \"Cluster\"\n");
+		fprintf(stderr, "\"Cluster\", or \"QOS\"\n");
 	}
 	
-	if (error_code) {
+	if (error_code == SLURM_ERROR) {
 		exit_code = 1;
 	}
 }
@@ -611,7 +640,8 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
      version                  display tool version number.                 \n\
      !!                       Repeat the last command entered.             \n\
                                                                            \n\
-  <ENTITY> may be \"cluster\", \"account\", \"user\", of \"coordinator\".  \n\
+  <ENTITY> may be \"account\", \"association\", \"cluster\",               \n\
+                  \"coordinator\", \"qos\", \"transaction\", or \"user\".  \n\
                                                                            \n\
   <SPECS> are different for each command entity pair.                      \n\
        list account       - Clusters=, Descriptions=, Format=, Names=,     \n\
@@ -638,6 +668,16 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
                             (where options) Names=                         \n\
        delete cluster     - Names=                                         \n\
                                                                            \n\
+       add coordinator    - Accounts=, and Names=                          \n\
+       delete coordinator - Accounts=, and Names=                          \n\
+                                                                           \n\
+       list qos           - Descriptions=, Ids=, Names=, and WithDeleted   \n\
+       add qos            - Description=, and Names=                       \n\
+       delete qos         - Descriptions=, Ids=, and Names=                \n\
+                                                                           \n\
+       list transactions  - Actor=, EndTime,                               \n\
+                            Format=, ID=, and Start=                       \n\
+                                                                           \n\
        list user          - AdminLevel=, DefaultAccounts=, Format=, Names=,\n\
                             QosLevel=, and WithAssocs                      \n\
        add user           - Accounts=, AdminLevel=, Clusters=,             \n\
@@ -653,8 +693,24 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
        delete user        - Accounts=, AdminLevel=, Clusters=,             \n\
                             DefaultAccounts=, and Names=                   \n\
                                                                            \n\
-       add coordinator    - Accounts=, and Names=                          \n\
-       delete coordinator - Accounts=, and Names=                          \n\
+  Format options are different for listing each entity pair.               \n\
+                                                                           \n\
+       Account            - Account, Cluster, CoordinatorList,             \n\
+                            Description, Organization, QOS, QOSRAW         \n\
+                                                                           \n\
+       Association        - Account, Cluster, Fairshare, ID, LFT,          \n\
+                            MaxCPUSecs, MaxJobs, MaxNodes, MaxWall,        \n\
+                            ParentID, ParentName, Partition, RGT, User     \n\
+                                                                           \n\
+       Cluster            - Cluster, ControlHost, ControlPort, Fairshare   \n\
+                            MaxCPUSecs, MaxJobs, MaxNodes, MaxWall         \n\
+                                                                           \n\
+       QOS                - Description, ID, Name                          \n\
+                                                                           \n\
+       Transactions       - Action, Actor, ID, Info, TimeStamp, Where      \n\
+                                                                           \n\
+       User               - Account, AdminLevel, Cluster, CoordinatorList, \n\
+                            DefaultAccount, QOS, QOSRAW, User              \n\
                                                                            \n\
                                                                            \n\
   All commands entitys, and options are case-insensitive.               \n\n");

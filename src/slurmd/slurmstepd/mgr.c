@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/mgr.c - job manager functions for slurmstepd
- *  $Id: mgr.c 14238 2008-06-11 21:54:28Z jette $
+ *  $Id: mgr.c 14504 2008-07-14 17:38:53Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008 Lawrence Livermore National Security.
@@ -1801,7 +1801,7 @@ _run_script_as_user(const char *name, const char *path, slurmd_job_t *job,
 			break;
 		} else if (rc == 0) {
 			sleep(1);
-			if ((--max_wait) == 0) {
+			if ((--max_wait) <= 0) {
 				killpg(cpid, SIGKILL);
 				opt = 0;
 			}
@@ -1810,7 +1810,7 @@ _run_script_as_user(const char *name, const char *path, slurmd_job_t *job,
 			break;
 		}
 	}
-	/* Insure that all child processes get killed */
+	/* Insure that all child processes get killed, one last time */
 	killpg(cpid, SIGKILL);
 	slurm_container_signal(job->cont_id, SIGKILL);
 	

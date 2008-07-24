@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/srun/allocate.c - srun functions for managing node allocations
- * $Id: allocate.c 14453 2008-07-08 20:26:18Z da $
+ * $Id: allocate.c 14570 2008-07-18 22:06:26Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -80,7 +80,6 @@ static uint32_t pending_job_id = 0;
  * Static Prototypes
  */
 static void _set_pending_job_id(uint32_t job_id);
-static void _ignore_signal(int signo);
 static void _exit_on_signal(int signo);
 static void _signal_while_allocating(int signo);
 static void  _intr_handler(int signo);
@@ -101,11 +100,6 @@ static void _signal_while_allocating(int signo)
 	}
 }
 
-static void _ignore_signal(int signo)
-{
-	/* do nothing */
-}
-
 static void _exit_on_signal(int signo)
 {
 	exit_flag = true;
@@ -114,7 +108,10 @@ static void _exit_on_signal(int signo)
 /* This typically signifies the job was cancelled by scancel */
 static void _job_complete_handler(srun_job_complete_msg_t *msg)
 {
-	info("Force Terminated job");
+	if((int)msg->step_id >= 0)
+		info("Force Terminated job %u.%u", msg->job_id, msg->step_id);
+	else
+		info("Force Terminated job %u", msg->job_id);
 }
 
 /*
@@ -246,16 +243,22 @@ allocate_nodes(void)
 	}
 	
 	xsignal(SIGHUP, _exit_on_signal);
-	xsignal(SIGINT, _ignore_signal);
-	xsignal(SIGQUIT, _ignore_signal);
-	xsignal(SIGPIPE, _ignore_signal);
-	xsignal(SIGTERM, _ignore_signal);
-	xsignal(SIGUSR1, _ignore_signal);
-	xsignal(SIGUSR2, _ignore_signal);
+	xsignal(SIGINT, ignore_signal);
+	xsignal(SIGQUIT, ignore_signal);
+	xsignal(SIGPIPE, ignore_signal);
+	xsignal(SIGTERM, ignore_signal);
+	xsignal(SIGUSR1, ignore_signal);
+	xsignal(SIGUSR2, ignore_signal);
 
 	job_desc_msg_destroy(j);
 
 	return resp;
+}
+
+void
+ignore_signal(int signo)
+{
+	/* do nothing */
 }
 
 int 
@@ -450,7 +453,9 @@ job_desc_msg_create_from_opts ()
 	if (opt.job_min_threads != NO_VAL)
 		j->job_min_threads  = opt.job_min_threads;
 	if (opt.job_min_memory != NO_VAL)
-		j->job_min_memory   = opt.job_min_memory;
+		j->job_min_memory = opt.job_min_memory;
+	else if (opt.mem_per_cpu != NO_VAL)
+		j->job_min_memory = opt.mem_per_cpu | MEM_PER_CPU;
 	if (opt.job_min_tmp_disk != NO_VAL)
 		j->job_min_tmp_disk = opt.job_min_tmp_disk;
 	if (opt.overcommit) {
@@ -511,8 +516,6 @@ create_job_step(srun_job_t *job)
 		: (opt.nprocs*opt.cpus_per_task);
 	
 	job->ctx_params.relative = (uint16_t)opt.relative;
-	if (opt.task_mem != NO_VAL)
-		job->ctx_params.mem_per_task = (uint16_t)opt.task_mem;
 	job->ctx_params.ckpt_interval = (uint16_t)opt.ckpt_interval;
 	job->ctx_params.ckpt_path = opt.ckpt_path;
 	job->ctx_params.exclusive = (uint16_t)opt.exclusive;

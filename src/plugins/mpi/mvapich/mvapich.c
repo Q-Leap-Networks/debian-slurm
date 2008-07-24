@@ -408,6 +408,20 @@ static void mvapich_poll_destroy (struct mvapich_poll *mp)
 	xfree (mp);
 }
 
+
+/*
+ *  Call poll(2) on mvapich_poll object, handling EAGAIN and EINTR errors.
+ */
+static int mvapich_poll_internal (struct mvapich_poll *mp)
+{
+	int n;
+	while ((n = poll (mp->fds, mp->nfds, startup_timeout (mp->st))) < 0) {
+		if (errno != EINTR && errno != EAGAIN)
+			return (-1);
+	}
+	return (n);
+}
+
 /*
  *  Poll for next available mvapich_info object with read/write activity
  * 
@@ -457,7 +471,7 @@ again:
 
 		mvapich_debug3 ("mvapich_poll_next (nfds=%d, timeout=%d)\n", 
 				mp->nfds, startup_timeout (st));
-		if ((rc = poll (mp->fds, mp->nfds, startup_timeout (st))) < 0)
+		if ((rc = mvapich_poll_internal (mp)) < 0)
 			mvapich_terminate_job (st, "mvapich_poll_next: %m");
 		else if (rc == 0) {
 			/*
@@ -471,9 +485,9 @@ again:
 
 	/*
 	 *  Loop through poll fds and return first mvapich_info object
-     *   we find that has the requested read/write activity. 
+	 *   we find that has the requested read/write activity. 
 	 *   When found, we update the loop counter, and return
-     *   the corresponding mvapich_info object.
+	 *   the corresponding mvapich_info object.
 	 *
 	 */
 	for (i = mp->counter; i < mp->nfds; i++) {
@@ -786,7 +800,7 @@ static int mvapich_recv (mvapich_state_t *st, void* buf, int size, int rank)
 /* Scatter data in buf to ranks using chunks of size bytes */
 static int mvapich_scatterbcast (mvapich_state_t *st, void* buf, int size)
 {
-	int rc;
+	int rc = 0;
 	int n = 0;
 	struct mvapich_poll *mp;
 	struct mvapich_info *mvi;
@@ -1284,8 +1298,9 @@ static int mvapich_abort_accept (mvapich_state_t *st)
 			mvapich_abort_timeout ());
 
 	while ((rc = poll (pfds, 1, mvapich_abort_timeout ())) < 0) {
-		if (errno != EINTR)
-			return (-1);
+		if (errno == EINTR || errno == EAGAIN)
+			continue;
+		return (-1);
 	}
 
 	/* 
@@ -1689,11 +1704,13 @@ mvapich_initialize_connections (mvapich_state_t *st,
 
 		mvapich_debug3 ("do_poll (nfds=%d)\n", nfds);
 
-		if ((rc = poll (fds, nfds, startup_timeout (st))) < 0) {
+		while ((rc = poll (fds, nfds, startup_timeout (st))) < 0) {
+			if (errno == EINTR || errno == EAGAIN)
+				continue;
 			error ("mvapich: poll: %m");
 			break;
 		}
-		else if (rc == 0) {
+		if (rc == 0) {
 			report_absent_tasks (st, 1);
 			mvapich_terminate_job (st, NULL);
 		}

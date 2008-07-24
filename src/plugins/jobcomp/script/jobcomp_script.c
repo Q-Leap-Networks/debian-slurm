@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  jobcomp_script.c - Script running slurm job completion logging plugin.
- *  $Id: jobcomp_script.c 14242 2008-06-11 23:29:49Z jette $
+ *  $Id: jobcomp_script.c 14500 2008-07-11 23:00:14Z jette $
  *****************************************************************************
  *  Produced at Center for High Performance Computing, North Dakota State
  *  University
@@ -251,16 +251,15 @@ static char ** _extend_env (char ***envp)
 
 static int _env_append (char ***envp, const char *name, const char *val)
 {
-	char buf[4096];
-	char *entry;
+	char *entry = NULL;
 	char **ep;
 
 	if (val == NULL)
 		val = "";
 
-	snprintf (buf, sizeof (buf) - 1, "%s=%s", name, val);
+	xstrfmtcat (entry, "%s=%s", name, val);
 
-	if (!(entry = xstrdup (buf)))
+	if (entry == NULL)
 		return (-1);
 
 	ep = _extend_env (envp);

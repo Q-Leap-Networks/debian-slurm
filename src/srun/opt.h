@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  opt.h - definitions for srun option processing
- *  $Id: opt.h 13771 2008-04-02 20:03:47Z jette $
+ *  $Id: opt.h 14469 2008-07-09 18:15:23Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -170,7 +170,7 @@ typedef struct srun_options {
 	int32_t job_min_cores;	/* --mincores=n			*/
 	int32_t job_min_threads;/* --minthreads=n		*/
 	int32_t job_min_memory;	/* --mem=n			*/
-	int32_t task_mem;	/* --task-mem=n			*/
+	int32_t mem_per_cpu;	/* --mem-per-cpu=n		*/
 	long job_min_tmp_disk;	/* --tmp=n			*/
 	char *constraints;	/* --constraints=, -C constraint*/
 	bool contiguous;	/* --contiguous			*/

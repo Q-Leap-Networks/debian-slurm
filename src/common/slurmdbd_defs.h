@@ -57,10 +57,38 @@
 #include "src/common/list.h"
 #include "src/common/slurm_accounting_storage.h"
 
-/* Increment SLURMDBD_VERSION if any of the RPCs change */
-#define SLURMDBD_VERSION 01
+/*
+ * SLURMDBD_VERSION is the version of the slurmdbd protocol currently 
+ *	being used (i.e. this code). Increment this value whenever an
+ *	RPC is added. Do not modify an existing RPC, but create a new
+ *	msg_type for the new format (add new entries to the end of
+ *	slurmdbd_msg_type_t so numbering of existing msg_type values
+ *	do not change). Comment the version number when a defunct 
+ *	msg_type stops being used. For example, rather than changing
+ *	the format of the RPC for DBD_ADD_USERS, add a DBD_ADD_USERS_V2, 
+ *	stop using DBD_ADD_USERS and add comment of this sort "Last used
+ *	in SLURMDBD_VERSION 05". The slurmdbd must continue to support 
+ *	old RPCs for some time (until all Slurm clusters in that grid 
+ *	get upgraded to use the new set of RPCs). At that time, slurmdbd 
+ *	can have support for the old RPCs removed.
+ *	
+ * SLURMDBD_VERSION_MIN is the minimum protocol version which slurmdbd
+ *	will accept. Messages being sent to the slurmdbd from commands
+ *	or daemons using older versions of the protocol will be 
+ *	rejected. Increment this value and discard the code processing
+ *	that msg_type only after all systems have been upgraded. Don't 
+ *	remove entries from slurmdbd_msg_type_t or the numbering scheme
+ *	will break (the enum value of a msg_type would change).
+ *
+ * The slurmdbd should be at least as current as any Slurm cluster
+ *	communicating with it (e.g. it will not accept messages with a
+ *	version higher than SLURMDBD_VERSION).
+ */
+#define SLURMDBD_VERSION	02
+#define SLURMDBD_VERSION_MIN	02
 
 /* SLURM DBD message types */
+/* ANY TIME YOU ADD TO THIS LIST UPDATE THE CONVERSION FUNCTIONS! */
 typedef enum {
 	DBD_INIT = 1400,	/* Connection initialization		*/
 	DBD_FINI,       	/* Connection finalization		*/
@@ -108,7 +136,13 @@ typedef enum {
 	DBD_STEP_COMPLETE,	/* Record step completion		*/
 	DBD_STEP_START,		/* Record step starting			*/
 	DBD_UPDATE_SHARES_USED,	/* Record current share usage		*/
-	DBD_GET_JOBS_COND 	/* Get job information with a condition */
+	DBD_GET_JOBS_COND, 	/* Get job information with a condition */
+	DBD_GET_TXN,		/* Get transaction information		*/
+	DBD_GOT_TXN,		/* Got transaction information		*/
+	DBD_ADD_QOS,		/* Add QOS information   	        */
+	DBD_GET_QOS,		/* Get QOS information   	        */
+	DBD_GOT_QOS,		/* Got QOS information   	        */
+	DBD_REMOVE_QOS		/* Remove QOS information   	        */
 } slurmdbd_msg_type_t;
 
 /*****************************************************************************\
@@ -319,6 +353,10 @@ extern int slurm_send_slurmdbd_recv_rc_msg(slurmdbd_msg_t *req, int *rc);
 
 extern Buf pack_slurmdbd_msg(slurmdbd_msg_t *req);
 extern int unpack_slurmdbd_msg(slurmdbd_msg_t *resp, Buf buffer);
+
+extern slurmdbd_msg_type_t str_2_slurmdbd_msg_type(char *msg_type);
+extern char *slurmdbd_msg_type_2_str(slurmdbd_msg_type_t msg_type);
+
 /*****************************************************************************\
  * Free various SlurmDBD message structures
 \*****************************************************************************/

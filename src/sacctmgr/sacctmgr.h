@@ -109,11 +109,13 @@ extern int sacctmgr_add_user(int argc, char *argv[]);
 extern int sacctmgr_add_account(int argc, char *argv[]);
 extern int sacctmgr_add_cluster(int argc, char *argv[]);
 extern int sacctmgr_add_coord(int argc, char *argv[]);
+extern int sacctmgr_add_qos(int argc, char *argv[]);
 
 extern int sacctmgr_list_association(int argc, char *argv[]);
 extern int sacctmgr_list_user(int argc, char *argv[]);
 extern int sacctmgr_list_account(int argc, char *argv[]);
 extern int sacctmgr_list_cluster(int argc, char *argv[]);
+extern int sacctmgr_list_qos(int argc, char *argv[]);
 
 extern int sacctmgr_modify_association(int argc, char *argv[]);
 extern int sacctmgr_modify_user(int argc, char *argv[]);
@@ -125,6 +127,7 @@ extern int sacctmgr_delete_user(int argc, char *argv[]);
 extern int sacctmgr_delete_account(int argc, char *argv[]);
 extern int sacctmgr_delete_cluster(int argc, char *argv[]);
 extern int sacctmgr_delete_coord(int argc, char *argv[]);
+extern int sacctmgr_delete_qos(int argc, char *argv[]);
 
 /* this has pointers to assoc_list so do not destroy assoc_list before
  * using the list returned from this function.
@@ -137,15 +140,19 @@ extern int sacctmgr_dump_cluster(int argc, char *argv[]);
 extern void destroy_sacctmgr_assoc(void *object);
 extern int parse_option_end(char *option);
 extern char *strip_quotes(char *option, int *increased);
-extern void addto_char_list(List char_list, char *names);
 extern int notice_thread_init();
 extern int notice_thread_fini();
 extern int commit_check(char *warning);
 extern int get_uint(char *in_value, uint32_t *out_value, char *type);
-extern void sacctmgr_print_coord_list(type_t type, print_field_t *field,
-				      List value);
+extern int addto_qos_char_list(List char_list, List qos_list, char *names, 
+			       int option);
+extern void sacctmgr_print_coord_list(print_field_t *field, List value);
+extern void sacctmgr_print_qos_list(print_field_t *field, List qos_list,
+				    List value);
+extern char *get_qos_complete_str(List qos_list, List num_qos_list);
 extern int sort_coord_list(acct_coord_rec_t *coord_a,
 			   acct_coord_rec_t *coord_b);
+extern int sort_char_list(char *name_a, char *name_b);
 
 /* you need to free the objects returned from these functions */
 extern acct_association_rec_t *sacctmgr_find_association(char *user,
@@ -168,6 +175,8 @@ extern acct_association_rec_t *sacctmgr_find_association_from_list(
 	char *cluster, char *partition);
 extern acct_association_rec_t *sacctmgr_find_account_base_assoc_from_list(
 	List assoc_list, char *account, char *cluster);
+extern acct_qos_rec_t *sacctmgr_find_qos_from_list(
+	List qos_list, char *name);
 extern acct_user_rec_t *sacctmgr_find_user_from_list(
 	List user_list, char *name);
 extern acct_account_rec_t *sacctmgr_find_account_from_list(
@@ -183,5 +192,8 @@ extern int print_file_sacctmgr_assoc_list(FILE *fd,
 					  List acct_list);
 
 extern void load_sacctmgr_cfg_file (int argc, char *argv[]);
+
+/* txn_functions.c */
+extern int sacctmgr_list_txn(int argc, char *argv[]);
 
 #endif

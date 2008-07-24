@@ -213,7 +213,7 @@ enum job_state_reason {
 /* Reasons for job to be pending */
 	WAIT_NO_REASON = 0,	/* not set or job not pending */
 	WAIT_PRIORITY,		/* higher priority jobs exist */
-	WAIT_DEPENDENCY,	/* depedent job has not completed */
+	WAIT_DEPENDENCY,	/* dependent job has not completed */
 	WAIT_RESOURCES,		/* required resources not available */
 	WAIT_PART_NODE_LIMIT,	/* request exceeds partition node limit */
 	WAIT_PART_TIME_LIMIT,	/* request exceeds partition time limit */
@@ -448,7 +448,12 @@ typedef enum select_type_plugin_info {
 #define TASK_PARAM_CPUSETS 0x0001
 #define TASK_PARAM_SCHED   0x0002
 
+#define MEM_PER_CPU  0x80000000
 #define SHARED_FORCE 0x8000
+
+#define PRIVATE_DATA_JOBS	0x0001	/* job/step data is private */
+#define PRIVATE_DATA_NODES	0x0002	/* node data is private */
+#define PRIVATE_DATA_PARTITIONS	0x0004	/* partition data is private */
 
 /*****************************************************************************\
  *	PROTOCOL DATA STRUCTURE DEFINITIONS
@@ -528,7 +533,9 @@ typedef struct job_descriptor {	/* For submit, allocate, and update requests */
 	uint16_t job_min_sockets;  /* minimum sockets per node, default=0 */
 	uint16_t job_min_cores;    /* minimum cores per processor, default=0 */
 	uint16_t job_min_threads;  /* minimum threads per core, default=0 */
-	uint32_t job_min_memory;   /* minimum real memory per node, default=0 */
+	uint32_t job_min_memory;   /* minimum real memory per node OR 
+				    * real memory per CPU | MEM_PER_CPU,
+				    * default=0 (no limit) */
 	uint32_t job_min_tmp_disk; /* minimum tmp disk per node, default=0 */
 	uint32_t num_procs;	/* total count of processors required, 
 				 * default=0 */
@@ -990,7 +997,8 @@ typedef struct slurm_ctl_conf {
 				   bluegene clusters NULL otherwise */
 	char *plugindir;	/* pathname to plugins */
 	char *plugstack;        /* pathname to plugin stack config file */
-	uint16_t private_data;	/* block viewing of other user jobs */
+	uint16_t private_data;	/* block viewing of information, 
+				 * see PRIVATE_DATA_* */
 	char *proctrack_type;	/* process tracking plugin type */
 	char *prolog;		/* pathname of job prolog */
 	uint16_t propagate_prio_process; /* 1 if process priority should
@@ -1538,6 +1546,15 @@ void slurm_print_slurmd_status PARAMS((
 /*****************************************************************************\
  *	SLURM JOB CONTROL CONFIGURATION READ/PRINT/UPDATE FUNCTIONS
 \*****************************************************************************/
+
+/*
+ * slurm_load_job - issue RPC to get job information for one job ID
+ * IN job_info_msg_pptr - place to store a job configuration pointer
+ * IN job_id -  ID of job we want information about 
+ * RET 0 or -1 on error
+ * NOTE: free the response using slurm_free_job_info_msg
+ */
+extern int slurm_load_job PARAMS((job_info_msg_t **resp, uint32_t job_id));
 
 /*
  * slurm_load_jobs - issue RPC to get slurm all job configuration  
