@@ -2,7 +2,7 @@
  *  partition_mgr.c - manage the partition information of slurm
  *	Note: there is a global partition list (part_list) and
  *	time stamp (last_part_update)
- *  $Id: partition_mgr.c 14068 2008-05-19 15:58:22Z jette $
+ *  $Id: partition_mgr.c 14795 2008-08-15 21:54:22Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -58,6 +58,7 @@
 #include "src/common/list.h"
 #include "src/common/node_select.h"
 #include "src/common/pack.h"
+#include "src/common/uid.h"
 #include "src/common/xstring.h"
 
 #include "src/slurmctld/locks.h"
@@ -709,7 +710,7 @@ extern void pack_all_part(char **buffer_ptr, int *buffer_size,
 	part_iterator = list_iterator_create(part_list);
 	while ((part_ptr = (struct part_record *) list_next(part_iterator))) {
 		xassert (part_ptr->magic == PART_MAGIC);
-		if (((show_flags & SHOW_ALL) == 0) &&
+		if (((show_flags & SHOW_ALL) == 0) && (uid != 0) &&
 		    ((part_ptr->hidden) || (validate_group (part_ptr, uid) == 0)))
 			continue;
 		pack_part(part_ptr, buffer);
@@ -1018,6 +1019,7 @@ uid_t *_get_groups_members(char *group_names)
 
 	if (group_names == NULL)
 		return NULL;
+
 	tmp_names = xstrdup(group_names);
 	one_group_name = strtok_r(tmp_names, ",", &name_ptr);
 	while (one_group_name) {
@@ -1051,50 +1053,61 @@ uid_t *_get_groups_members(char *group_names)
  */
 uid_t *_get_group_members(char *group_name)
 {
-	struct group *group_struct_ptr;
-	struct passwd *user_pw_ptr;
-	int i, j;
-	uid_t *group_uids = NULL;
-	int uid_cnt = 0;
+	char grp_buffer[PW_BUF_SIZE];
+	char pw_buffer[PW_BUF_SIZE];
+  	struct group grp,  *grp_result = NULL;
+	struct passwd pw, *pwd_result = NULL;
+	uid_t *group_uids, my_uid;
+	gid_t my_gid;
+	int i, j, uid_cnt;
+#ifdef HAVE_AIX
+	FILE *fp = NULL;
+#endif
 
-	group_struct_ptr = getgrnam(group_name); /* Note: static memory, 
-						  * do not free */
-	if (group_struct_ptr == NULL) {
+	/* We need to check for !grp_result, since it appears some 
+	 * versions of this function do not return an error on failure.
+	 */
+	if (getgrnam_r(group_name, &grp, grp_buffer, PW_BUF_SIZE, 
+		       &grp_result) || (grp_result == NULL)) {
 		error("Could not find configured group %s", group_name);
-		setgrent();
 		return NULL;
 	}
 
-	for (i = 0;; i++) {
-		if (group_struct_ptr->gr_mem[i] == NULL)
+	my_gid = grp_result->gr_gid;
+
+	for (uid_cnt=0; ; uid_cnt++) {
+		if (grp_result->gr_mem[uid_cnt] == NULL)
 			break;
 	}
 
-	uid_cnt = i;
 	group_uids = (uid_t *) xmalloc(sizeof(uid_t) * (uid_cnt + 1));
-	memset(group_uids, 0, (sizeof(uid_t) * (uid_cnt + 1)));
-	
+
 	j = 0;
-	for (i = 0; i < uid_cnt; i++) {
-		user_pw_ptr = getpwnam(group_struct_ptr->gr_mem[i]);
-		if (user_pw_ptr) {
-			if (user_pw_ptr->pw_uid)
-				group_uids[j++] = user_pw_ptr->pw_uid;
-		} else
+	for (i=0; i<uid_cnt; i++) {
+		my_uid = uid_from_string(grp_result->gr_mem[i]);
+		if (my_uid == (uid_t) -1) {
 			error("Could not find user %s in configured group %s",
-			      group_struct_ptr->gr_mem[i], group_name);
-		setpwent();
+			      grp_result->gr_mem[i], group_name);
+		} else if (my_uid) {
+			group_uids[j++] = my_uid;
+		}
 	}
-	
-	while((user_pw_ptr = getpwent())) {
-		if(user_pw_ptr->pw_gid != group_struct_ptr->gr_gid)
+
+	setpwent();
+#ifdef HAVE_AIX
+	while (!getpwent_r(&pw, pw_buffer, PW_BUF_SIZE, &fp)) {
+		pwd_result = &pw;
+#else
+	while (!getpwent_r(&pw, pw_buffer, PW_BUF_SIZE, &pwd_result)) {
+#endif
+ 		if (pwd_result->pw_gid != my_gid)
 			continue;
 		j++;
-		xrealloc(group_uids, ((j+1) * sizeof(uid_t)));
-		group_uids[j-1] = user_pw_ptr->pw_uid;		
+ 		xrealloc(group_uids, ((j+1) * sizeof(uid_t)));
+		group_uids[j-1] = pwd_result->pw_uid;
 	}
-	setpwent();
-	setgrent();
+	endpwent();
+
 	return group_uids;
 }
 

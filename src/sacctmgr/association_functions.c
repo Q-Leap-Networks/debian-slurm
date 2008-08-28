@@ -173,6 +173,7 @@ static int _set_cond(int *start, int argc, char *argv[],
 					argv[i]+end);
 			set = 1;
 		} else if (!strncasecmp (argv[i], "Parent", 4)) {
+			xfree(association_cond->parent_acct);
 			association_cond->parent_acct =
 				strip_quotes(argv[i]+end, NULL);
 			set = 1;
@@ -197,6 +198,14 @@ static int _sort_childern_list(sacctmgr_assoc_t *assoc_a,
 			       sacctmgr_assoc_t *assoc_b)
 {
 	int diff = 0;
+
+	/* first just check the lfts and rgts if a lft is inside of the
+	 * others lft and rgt just return it is less
+	 */ 
+	if(assoc_a->assoc->lft > assoc_b->assoc->lft 
+	   && assoc_a->assoc->lft < assoc_b->assoc->rgt)
+		return 1;
+
 	/* check to see if this is a user association or an account.
 	 * We want the accounts at the bottom 
 	 */
@@ -370,7 +379,7 @@ extern int sacctmgr_list_association(int argc, char *argv[])
 		return SLURM_ERROR;
 	} else if(!list_count(format_list)) 
 		slurm_addto_char_list(format_list,
-				      "C,A,U,F,MaxC,MaxJ,MaxN,MaxW");
+				      "C,A,U,Part,F,MaxC,MaxJ,MaxN,MaxW");
 
 	print_fields_list = list_create(destroy_print_field);
 
@@ -405,7 +414,8 @@ extern int sacctmgr_list_association(int argc, char *argv[])
 			field->name = xstrdup("LFT");
 			field->len = 6;
 			field->print_routine = print_fields_uint;
-		} else if(!strncasecmp("MaxCPUSecs", object, 4)) {
+		} else if(!strncasecmp("MaxCPUSecs", object, 4)
+			  || !strncasecmp("MaxProcSecsPerJob", object, 4)) {
 			field->type = PRINT_MAXC;
 			field->name = xstrdup("MaxCPUSecs");
 			field->len = 11;

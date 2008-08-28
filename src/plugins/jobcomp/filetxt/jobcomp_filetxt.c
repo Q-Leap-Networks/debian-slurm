@@ -53,6 +53,7 @@
 #include "src/common/slurm_protocol_defs.h"
 #include "src/common/slurm_jobcomp.h"
 #include "src/common/parse_time.h"
+#include "src/common/uid.h"
 #include "filetxt_jobcomp_process.h"
 
 /*
@@ -115,21 +116,15 @@ static void
 _get_user_name(uint32_t user_id, char *user_name, int buf_size)
 {
 	static uint32_t cache_uid      = 0;
-	static char     cache_name[32] = "root";
-	struct passwd * user_info      = NULL;
+	static char     cache_name[32] = "root", *uname;
 
-	if (user_id == cache_uid)
-		snprintf(user_name, buf_size, "%s", cache_name);
-	else {
-		user_info = getpwuid((uid_t) user_id);
-		if (user_info && user_info->pw_name[0])
-			snprintf(cache_name, sizeof(cache_name), "%s", 
-				user_info->pw_name);
-		else
-			snprintf(cache_name, sizeof(cache_name), "Unknown");
+	if (user_id != cache_uid) {
+		uname = uid_to_string((uid_t) user_id);
+		snprintf(cache_name, sizeof(cache_name), "%s", uname);
+		xfree(uname);
 		cache_uid = user_id;
-		snprintf(user_name, buf_size, "%s", cache_name);
 	}
+	snprintf(user_name, buf_size, "%s", cache_name);
 }
 
 /* get the group name for the give group_id */
@@ -137,21 +132,15 @@ static void
 _get_group_name(uint32_t group_id, char *group_name, int buf_size)
 {
 	static uint32_t cache_gid      = 0;
-	static char     cache_name[32] = "root";
-	struct group  *group_info      = NULL;
+	static char     cache_name[32] = "root", *gname;
 
-	if (group_id == cache_gid)
-		snprintf(group_name, buf_size, "%s", cache_name);
-	else {
-		group_info = getgrgid((gid_t) group_id);
-		if (group_info && group_info->gr_name[0])
-			snprintf(cache_name, sizeof(cache_name), "%s", 
-				group_info->gr_name);
-		else
-			snprintf(cache_name, sizeof(cache_name), "Unknown");
+	if (group_id != cache_gid) {
+		gname = gid_to_string((gid_t) group_id);
+		snprintf(cache_name, sizeof(cache_name), "%s", gname);
+		xfree(gname);
 		cache_gid = group_id;
-		snprintf(group_name, buf_size, "%s", cache_name);
 	}
+	snprintf(group_name, buf_size, "%s", cache_name);
 }
 
 /* 

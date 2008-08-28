@@ -229,7 +229,7 @@ void *agent(void *args)
 	}
 	slurm_mutex_unlock(&agent_cnt_mutex);
 	if (slurmctld_config.shutdown_time)
-		return NULL;
+		goto cleanup;
 	
 	/* basic argument value tests */
 	begin_time = time(NULL);
@@ -734,14 +734,15 @@ finished:	;
 #endif
 }
 
-/* Report a communications error for specified node */
+/* Report a communications error for specified node
+ * This also gets logged as a non-responsive node */
 static inline int _comm_err(char *node_name)
 {
 	int rc = 1;
 #if AGENT_IS_THREAD
 	if ((rc = is_node_resp (node_name)))
 #endif
-		error("agent/send_recv_msg: %s: %m", node_name);
+		verbose("agent/send_recv_msg: %s: %m", node_name);
 	return rc;
 }
 
@@ -841,8 +842,7 @@ static void *_thread_per_group_rpc(void *args)
 		} else {
 			if(!(ret_list = slurm_send_recv_msgs(
 				     thread_ptr->nodelist,
-				     &msg, 
-				     0))) {
+				     &msg, 0, true))) {
 				error("_thread_per_group_rpc: "
 				      "no ret_list given");
 				goto cleanup;
@@ -1335,13 +1335,16 @@ static void _purge_agent_args(agent_arg_t *agent_arg_ptr)
 				RESPONSE_RESOURCE_ALLOCATION)
 			slurm_free_resource_allocation_response_msg(
 					agent_arg_ptr->msg_args);
-		else if ((agent_arg_ptr->msg_type == REQUEST_TERMINATE_JOB)
-		||       (agent_arg_ptr->msg_type == REQUEST_KILL_TIMELIMIT))
+		else if ((agent_arg_ptr->msg_type == REQUEST_ABORT_JOB)     ||
+			 (agent_arg_ptr->msg_type == REQUEST_TERMINATE_JOB) ||
+			 (agent_arg_ptr->msg_type == REQUEST_KILL_TIMELIMIT))
 			slurm_free_kill_job_msg(agent_arg_ptr->msg_args);
 		else if (agent_arg_ptr->msg_type == SRUN_USER_MSG)
 			slurm_free_srun_user_msg(agent_arg_ptr->msg_args);
 		else if (agent_arg_ptr->msg_type == SRUN_EXEC)
 			slurm_free_srun_exec_msg(agent_arg_ptr->msg_args);
+		else if (agent_arg_ptr->msg_type == SRUN_NODE_FAIL)
+			slurm_free_srun_node_fail_msg(agent_arg_ptr->msg_args);
 		else
 			xfree(agent_arg_ptr->msg_args);
 	}
@@ -1414,7 +1417,7 @@ extern void mail_job_info (struct job_record *job_ptr, uint16_t mail_type)
 	mail_info_t *mi = _mail_alloc();
 
 	if (!job_ptr->mail_user)
-		mi->user_name = xstrdup(uid_to_string((uid_t)job_ptr->user_id));
+		mi->user_name = uid_to_string((uid_t)job_ptr->user_id);
 	else
 		mi->user_name = xstrdup(job_ptr->mail_user);
 

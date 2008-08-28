@@ -72,6 +72,7 @@
 
 
 #include "src/common/fd.h"
+#include "src/common/hostlist.h"
 #include "src/common/log.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/switch.h"
@@ -93,6 +94,12 @@
 #include "src/srun/multi_prog.h"
 #include "src/api/pmi_server.h"
 #include "src/api/step_launch.h"
+
+#if defined (HAVE_DECL_STRSIGNAL) && !HAVE_DECL_STRSIGNAL
+#  ifndef strsignal
+ extern char *strsignal(int);
+#  endif
+#endif /* defined HAVE_DECL_STRSIGNAL && !HAVE_DECL_STRSIGNAL */
 
 #define MAX_RETRIES 20
 #define MAX_ENTRIES 50
@@ -910,41 +917,83 @@ _handle_max_wait(int signo)
 	_terminate_job_step(job->step_ctx);
 }
 
+static char *
+_taskids_to_nodelist(bitstr_t *tasks_exited)
+{
+	int i;
+	char *hostname, *hostlist_str;
+	hostlist_t hostlist;
+	job_step_create_response_msg_t *step_resp;
+	slurm_step_layout_t *step_layout;
+
+	if (!job->step_ctx) {
+		error("No step_ctx");
+		hostlist_str = xstrdup("Unknown");
+		return hostlist_str;
+	}
+
+	slurm_step_ctx_get(job->step_ctx, SLURM_STEP_CTX_RESP, &step_resp);
+	step_layout = step_resp->step_layout;
+	hostlist = hostlist_create(NULL);
+	for (i=0; i<job->ntasks; i++) {
+		if (!bit_test(tasks_exited, i))
+			continue;
+		hostname = slurm_step_layout_host_name(step_layout, i);
+		hostlist_push(hostlist, hostname);
+	}
+	hostlist_uniq(hostlist);
+	hostlist_str = xmalloc(2048);
+	hostlist_ranged_string(hostlist, 2048, hostlist_str);
+	hostlist_destroy(hostlist);
+	return hostlist_str;
+}
+
 static void
 _task_finish(task_exit_msg_t *msg)
 {
+	bitstr_t *tasks_exited = NULL;
+	char buf[2048], *core_str = "", *msg_str, *node_list = NULL;
 	static bool first_done = true;
 	static bool first_error = true;
 	int rc = 0;
 	int i;
 
-	verbose("%d tasks finished (rc=%u)",
+	verbose("%u tasks finished (rc=%u)",
 		msg->num_tasks, msg->return_code);
+	tasks_exited = bit_alloc(job->ntasks);
+	for (i=0; i<msg->num_tasks; i++)
+		bit_set(tasks_exited,  msg->task_id_list[i]);
+	bit_fmt(buf, sizeof(buf), tasks_exited);
 	if (WIFEXITED(msg->return_code)) {
 		rc = WEXITSTATUS(msg->return_code);
 		if (rc != 0) {
-			for (i = 0; i < msg->num_tasks; i++) {
-				error("task %u exited with exit code %d",
-				      msg->task_id_list[i], rc);
-				bit_set(task_state.finish_abnormal,
-					msg->task_id_list[i]);
-			}
+			bit_or(task_state.finish_abnormal, tasks_exited);
+			node_list = _taskids_to_nodelist(tasks_exited);
+			error("%s: task %s: Exited with exit code %d", 
+			      node_list, buf, rc);
 		} else {
-			for (i = 0; i < msg->num_tasks; i++) {
-				bit_set(task_state.finish_normal,
-					msg->task_id_list[i]);
-			}
+			bit_or(task_state.finish_normal, tasks_exited);
+			verbose("task %s: Completed", buf);
 		}
 	} else if (WIFSIGNALED(msg->return_code)) {
-		for (i = 0; i < msg->num_tasks; i++) {
-			verbose("task %u killed by signal %d",
-				msg->task_id_list[i],
-				WTERMSIG(msg->return_code));
-			bit_set(task_state.finish_abnormal,
-				msg->task_id_list[i]);
-		}
+		bit_or(task_state.finish_abnormal, tasks_exited);
 		rc = 1;
+		msg_str = strsignal(WTERMSIG(msg->return_code));
+#ifdef WCOREDUMP
+		if (WCOREDUMP(msg->return_code))
+			core_str = " (core dumped)";
+#endif
+		node_list = _taskids_to_nodelist(tasks_exited);
+		if (job->state >= SRUN_JOB_CANCELLED) {
+			verbose("%s: task %s: %s%s", 
+				node_list, buf, msg_str, core_str);
+		} else {
+			error("%s: task %s: %s%s", 
+			      node_list, buf, msg_str, core_str);
+		}
 	}
+	xfree(node_list);
+	bit_free(tasks_exited);
 	global_rc = MAX(global_rc, rc);
 
 	if (first_error && rc > 0 && opt.kill_bad_exit) {
@@ -994,7 +1043,7 @@ _task_state_struct_print(void)
 		bit_copybits(tmp, task_state.finish_abnormal);
 		bit_and(tmp, not_seen);
 		bit_fmt(buf, BUFSIZ, tmp);
-		info("task%s: exited abnormally", buf);
+		info("task %s: exited abnormally", buf);
 		bit_or(seen, tmp);
 		bit_copybits(not_seen, seen);
 		bit_not(not_seen);
@@ -1004,7 +1053,7 @@ _task_state_struct_print(void)
 		bit_copybits(tmp, task_state.finish_normal);
 		bit_and(tmp, not_seen);
 		bit_fmt(buf, BUFSIZ, tmp);
-		info("task%s: exited", buf);
+		info("task %s: exited", buf);
 		bit_or(seen, tmp);
 		bit_copybits(not_seen, seen);
 		bit_not(not_seen);
@@ -1014,7 +1063,7 @@ _task_state_struct_print(void)
 		bit_copybits(tmp, task_state.start_failure);
 		bit_and(tmp, not_seen);
 		bit_fmt(buf, BUFSIZ, tmp);
-		info("task%s: failed to start", buf);
+		info("task %s: failed to start", buf);
 		bit_or(seen, tmp);
 		bit_copybits(not_seen, seen);
 		bit_not(not_seen);
@@ -1024,7 +1073,7 @@ _task_state_struct_print(void)
 		bit_copybits(tmp, task_state.start_success);
 		bit_and(tmp, not_seen);
 		bit_fmt(buf, BUFSIZ, tmp);
-		info("task%s: running", buf);
+		info("task %s: running", buf);
 		bit_or(seen, tmp);
 		bit_copybits(not_seen, seen);
 		bit_not(not_seen);
@@ -1039,7 +1088,7 @@ _task_state_struct_free(void)
 	bit_free(task_state.finish_normal);
 	bit_free(task_state.finish_abnormal);
 }
-	
+
 static void _handle_intr()
 {
 	static time_t last_intr      = 0;
@@ -1051,7 +1100,10 @@ static void _handle_intr()
 	}
 
 	if (((time(NULL) - last_intr) > 1) && !opt.disable_status) {
-		info("interrupt (one more within 1 sec to abort)");
+		if (job->state < SRUN_JOB_FORCETERM)
+			info("interrupt (one more within 1 sec to abort)");
+		else
+			info("interrupt (abort already in progress)");
 		_task_state_struct_print();
 		last_intr = time(NULL);
 	} else  { /* second Ctrl-C in half as many seconds */
@@ -1068,7 +1120,7 @@ static void _handle_intr()
 			     job->jobid, job->stepid);
 			last_intr_sent = time(NULL);
 			slurm_step_launch_fwd_signal(job->step_ctx, SIGINT);
-
+			slurm_step_launch_abort(job->step_ctx);
 		} else {
 			job_force_termination(job);
 			slurm_step_launch_abort(job->step_ctx);

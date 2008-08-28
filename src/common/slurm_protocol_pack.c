@@ -590,6 +590,7 @@ pack_msg(slurm_msg_t const *msg, Buf buffer)
 	case REQUEST_SIGNAL_JOB:
 		_pack_signal_job_msg((signal_job_msg_t *) msg->data, buffer);
 		break;
+	case REQUEST_ABORT_JOB:
 	case REQUEST_KILL_TIMELIMIT:
 	case REQUEST_TERMINATE_JOB:
 		_pack_kill_job_msg((kill_job_msg_t *) msg->data, buffer);
@@ -928,6 +929,7 @@ unpack_msg(slurm_msg_t * msg, Buf buffer)
 		rc = _unpack_signal_job_msg((signal_job_msg_t **)&(msg->data),
 					    buffer);
 		break;
+	case REQUEST_ABORT_JOB:
 	case REQUEST_KILL_TIMELIMIT:
 	case REQUEST_TERMINATE_JOB:
 		rc = _unpack_kill_job_msg((kill_job_msg_t **) & (msg->data), 
@@ -3032,10 +3034,12 @@ static void
 _pack_task_exit_msg(task_exit_msg_t * msg, Buf buffer)
 {
 	xassert(msg != NULL);
-	pack32((uint32_t)msg->return_code, buffer);
-	pack32((uint32_t)msg->num_tasks, buffer);
+	pack32(msg->return_code, buffer);
+	pack32(msg->num_tasks, buffer);
 	pack32_array(msg->task_id_list,
 		     msg->num_tasks, buffer);
+	pack32(msg->job_id, buffer);
+	pack32(msg->step_id, buffer);
 }
 
 static int
@@ -3053,6 +3057,8 @@ _unpack_task_exit_msg(task_exit_msg_t ** msg_ptr, Buf buffer)
 	safe_unpack32_array(&msg->task_id_list, &uint32_tmp, buffer);
 	if (msg->num_tasks != uint32_tmp)
 		goto unpack_error;
+	safe_unpack32(&msg->job_id, buffer);
+	safe_unpack32(&msg->step_id, buffer);
 	return SLURM_SUCCESS;
 
 unpack_error:
@@ -3365,7 +3371,7 @@ unpack_error:
 static void
 _pack_shutdown_msg(shutdown_msg_t * msg, Buf buffer)
 {
-	pack16((uint16_t)msg->core, buffer);
+	pack16((uint16_t)msg->options, buffer);
 }
 
 static int
@@ -3376,7 +3382,7 @@ _unpack_shutdown_msg(shutdown_msg_t ** msg_ptr, Buf buffer)
 	msg = xmalloc(sizeof(shutdown_msg_t));
 	*msg_ptr = msg;
 
-	safe_unpack16(&msg->core, buffer);
+	safe_unpack16(&msg->options, buffer);
 	return SLURM_SUCCESS;
 
 unpack_error:

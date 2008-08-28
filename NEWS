@@ -1,6 +1,53 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 1.3.7
+========================
+ -- Add jobid/stepid to MESSAGE_TASK_EXIT to address race condition when 
+    a job step is cancelled, another is started immediately (before the 
+    first one completely terminates) and ports are reused. 
+    NOTE: This change requires that SLURM be updated on all nodes of the
+    cluster at the same time. There will be no impact upon currently running
+    jobs (they will ignore the jobid/stepid at the end of the message).
+ -- Added Python module to process hostslists as used by SLURM. See
+    contribs/python/hostlist. Supplied by Kent Engstrom, National
+    Supercomputer Centre, Sweden.
+ -- Report task termination due to signal (restored functionality present
+    in slurm v1.2).
+ -- Remove sbatch test for script size being no larger than 64k bytes.
+    The current limit is 4GB.
+ -- Disable FastSchedule=0 use with SchedulerType=sched/gang. Node 
+    configuration must be specified in slurm.conf for gang scheduling now.
+ -- For sched/wiki and sched/wiki2 (Maui or Moab scheduler) disable the ability
+    of a non-root user to change a job's comment field (used by Maui/Moab for
+    storing scheduler state information).
+ -- For sched/wiki (Maui) add pending job's future start time to the state
+    info reported to Maui.
+ -- Improve reliability of job requeue logic on node failure.
+ -- Add logic to ping non-responsive nodes even if SlurmdTimeout=0. This permits
+    the node to be returned to use when it starts responding rather than 
+    remaining in a non-usable state.
+ -- Honor HealthCheckInterval values that are smaller than SlurmdTimeout.
+ -- For non-responding nodes, log them all on a single line with a hostlist 
+    expression rather than one line per node. Frequency of log messages is 
+    dependent upon SlurmctldDebug value from 300 seconds at SlurmctldDebug<=3
+    to 1 second at SlurmctldDebug>=5.
+ -- If a DOWN node is resumed, set its state to IDLE & NOT_RESPONDING and 
+    ping the node immediately to clear the NOT_RESPONDING flag.
+ -- Log that a job's time limit is reached, but don't sent SIGXCPU.
+ -- Fixed gid to be set in slurmstepd when run by root
+ -- Changed getpwent to getpwent_r in the slurmctld and slurmd
+ -- Increase timeout on most slurmdbd communications to 60 secs (time for
+    substantial database updates).
+ -- Treat srun option of --begin= with a value of now without a numeric
+    component as a failure (e.g. "--begin=now+hours").
+ -- Eliminate a memory leak associated with notifying srun of allocated
+    nodes having failed.
+ -- Add scontrol shutdown option of "slurmctld" to just shutdown the 
+    slurmctld daemon and leave the slurmd daemons running.
+ -- Do not require JobCredentialPrivateKey or JobCredentialPublicCertificate
+    in slurm.conf if using CryptoType=crypto/munge.
+
 * Changes in SLURM 1.3.6
 ========================
  -- Add new function to get information for a single job rather than always
@@ -402,6 +449,26 @@ documents those changes that are of interest to users and admins.
  -- Added new configuration parameter: CryptoType.
     Moved existing digital signature logic into new plugin: crypto/openssl.
     Added new support for crypto/munge (available with GPL license).
+
+* Changes in SLURM 1.2.34
+=========================
+ -- Permit the cancellation of a job that is in the process of being 
+    requeued.
+ -- Ignore the show_flag when getting job, step, node or partition information
+    for user root.
+ -- Convert some functions to thread-safe versions: getpwnam, getpwuid, 
+    getgrnam, and getgrgid to similar functions with "_r" suffix. While no
+    failures have been observed, a race condition would in the worst case
+    permit a user access to a partition not normally allowed due to the
+    AllowGroup specification or the wrong user identified in an accounting
+    record. The job would NOT be run as the wrong user.
+ -- For PMI only (MPICH2/MVAPICH2) base address to send messages to (the srun)
+    upon the address from which slurmd gets the task launch request rather then
+    "hostname" where srun executes.
+ -- Make test for StateSaveLocation directory more comprehensive.
+ -- For jobcomp/script plugin, PROCS environment variable is now the actual
+    count of allocated processors rather than the count of processes to 
+    be started.
 
 * Changes in SLURM 1.2.33
 =========================
@@ -3369,4 +3436,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 14583 2008-07-21 17:18:13Z da $
+$Id: NEWS 14883 2008-08-25 21:36:27Z jette $

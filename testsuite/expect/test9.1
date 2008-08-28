@@ -9,7 +9,8 @@
 # Note:    This script generates and then deletes files in the working directory 
 #          named test9.1.input and test9.1.output
 ############################################################################
-# Copyright (C) 2002 The Regents of the University of California.
+# Copyright (C) 2002-2007 The Regents of the University of California.
+# Copyright (C) 2008 Lawrence Livermore National Security.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
 # LLNL-CODE-402394.
@@ -34,12 +35,17 @@
 source ./globals
 
 set test_id      "9.1"
-set cycle_count  100
 set exit_code    0
 set file_in      "test$test_id.input"
 set file_out     "test$test_id.output"
 set job_name     "test$test_id"
 set task_cnt     $max_stress_tasks
+
+if {[test_wiki_sched] == 1} {
+	set cycle_count 5
+} else {
+	set cycle_count 100
+}
 
 if { [test_bluegene] } {
 	set node_cnt 1-2048
@@ -105,7 +111,11 @@ for {set inx 0} {$inx < $cycle_count} {incr inx} {
 		set stdout_lines [get_line_cnt $file_out]
 	}
 	if {$stdout_lines != $stdout_target} {
-		send_user "\nFAILURE: stdout is incomplete\n"
+		if {$stdout_lines == 0} {
+			send_user "\nFAILURE: stdout is empty, is current working directory writable from compute nodes?\n"
+		} else {
+			send_user "\nFAILURE:stdout is incomplete\n"
+		}
 		set cycle_count [expr $inx + 1]
 		set exit_code 1
 		break

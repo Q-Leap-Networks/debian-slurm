@@ -71,9 +71,10 @@
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
 
-#define DBD_MAGIC	0xDEAD3219
-#define MAX_AGENT_QUEUE	10000
-#define MAX_DBD_MSG_LEN 16384
+#define DBD_MAGIC		0xDEAD3219
+#define MAX_AGENT_QUEUE		10000
+#define MAX_DBD_MSG_LEN		16384
+#define SLURMDBD_TIMEOUT	60	/* Seconds SlurmDBD for response */
 
 static pthread_mutex_t agent_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  agent_cond = PTHREAD_COND_INITIALIZER;
@@ -90,14 +91,14 @@ static void * _agent(void *x);
 static void   _agent_queue_del(void *x);
 static void   _close_slurmdbd_fd(void);
 static void   _create_agent(void);
-static bool   _fd_readable(slurm_fd fd);
+static bool   _fd_readable(slurm_fd fd, int read_timeout);
 static int    _fd_writeable(slurm_fd fd);
-static int    _get_return_code(void);
+static int    _get_return_code(int read_timeout);
 static Buf    _load_dbd_rec(int fd);
 static void   _load_dbd_state(void);
 static void   _open_slurmdbd_fd(void);
 static int    _purge_job_start_req(void);
-static Buf    _recv_msg(void);
+static Buf    _recv_msg(int read_timeout);
 static void   _reopen_slurmdbd_fd(void);
 static int    _save_dbd_rec(int fd, Buf buffer);
 static void   _save_dbd_state(void);
@@ -200,12 +201,13 @@ extern int slurm_send_slurmdbd_recv_rc_msg(slurmdbd_msg_t *req, int *resp_code)
 extern int slurm_send_recv_slurmdbd_msg(slurmdbd_msg_t *req, 
 					slurmdbd_msg_t *resp)
 {
-	int rc = SLURM_SUCCESS;
+	int rc = SLURM_SUCCESS, read_timeout;
 	Buf buffer;
 
 	xassert(req);
 	xassert(resp);
 
+	read_timeout = SLURMDBD_TIMEOUT * 1000;
 	slurm_mutex_lock(&slurmdbd_lock);
 	if (slurmdbd_fd < 0) {
 		/* Either slurm_open_slurmdbd_conn() was not executed or
@@ -227,7 +229,7 @@ extern int slurm_send_recv_slurmdbd_msg(slurmdbd_msg_t *req,
 		return SLURM_ERROR;
 	}
 
-	buffer = _recv_msg();
+	buffer = _recv_msg(read_timeout);
 	if (buffer == NULL) {
 		error("slurmdbd: Getting response to message type %u", 
 		      req->msg_type);
@@ -288,7 +290,7 @@ extern int slurm_send_slurmdbd_msg(slurmdbd_msg_t *req)
 }
 
 /* Open a connection to the Slurm DBD and set slurmdbd_fd */
-static void _open_slurmdbd_fd()
+static void _open_slurmdbd_fd(void)
 {
 	slurm_addr dbd_addr;
 	uint16_t slurmdbd_port;
@@ -301,13 +303,12 @@ static void _open_slurmdbd_fd()
 
 	slurmdbd_host = slurm_get_accounting_storage_host();
 	slurmdbd_port = slurm_get_accounting_storage_port();
-	if ((slurmdbd_host == NULL) || (slurmdbd_port == 0)) {
-		error("Invalid SlurmDbd address %s:%u",
-		      slurmdbd_host, slurmdbd_port);
-		xfree(slurmdbd_host);
-		return;
-	}
-
+	if (slurmdbd_host == NULL)
+		slurmdbd_host = xstrdup(DEFAULT_STORAGE_HOST);
+	
+	if (slurmdbd_port == 0) 
+		slurmdbd_port = SLURMDBD_PORT;
+	
 	slurm_set_addr(&dbd_addr, slurmdbd_port, slurmdbd_host);
 	if (dbd_addr.sin_port == 0)
 		error("Unable to locate SlurmDBD host %s:%u", 
@@ -441,9 +442,10 @@ extern Buf pack_slurmdbd_msg(slurmdbd_msg_t *req)
 					     req->data, buffer);
 		break;
 	default:
-		error("slurmdbd: Invalid message type pack %u(%s)",
+		error("slurmdbd: Invalid message type pack %u(%s:%u)",
 		      req->msg_type,
-		      slurmdbd_msg_type_2_str(req->msg_type));
+		      slurmdbd_msg_type_2_str(req->msg_type, 1),
+		      req->msg_type);
 		free_buf(buffer);
 		return NULL;
 	}
@@ -571,7 +573,8 @@ extern int unpack_slurmdbd_msg(slurmdbd_msg_t *resp, Buf buffer)
 	default:
 		error("slurmdbd: Invalid message type unpack %u(%s)",
 		      resp->msg_type,
-		      slurmdbd_msg_type_2_str(resp->msg_type));
+		      slurmdbd_msg_type_2_str(resp->msg_type, 1),
+		      resp->msg_type);
 		return SLURM_ERROR;
 	}
 	return rc;
@@ -693,161 +696,314 @@ extern slurmdbd_msg_type_t str_2_slurmdbd_msg_type(char *msg_type)
 	return NO_VAL;
 }
 
-extern char *slurmdbd_msg_type_2_str(slurmdbd_msg_type_t msg_type)
+extern char *slurmdbd_msg_type_2_str(slurmdbd_msg_type_t msg_type, int get_enum)
 {
 	switch(msg_type) {
 	case DBD_INIT:
-		return "Init";
+		if(get_enum) {
+			return "DBD_INIT";
+		} else
+			return "Init";
 		break;
 	case DBD_FINI:
-		return "Fini";
+		if(get_enum) {
+			return "DBD_FINI";
+		} else
+			return "Fini";
 		break;
 	case DBD_ADD_ACCOUNTS:
-		return "Add Accounts";
+		if(get_enum) {
+			return "DBD_ADD_ACCOUNTS";
+		} else
+			return "Add Accounts";
 		break;
 	case DBD_ADD_ACCOUNT_COORDS:
-		return "Add Account Coord";
+		if(get_enum) {
+			return "DBD_ADD_ACCOUNT_COORDS";
+		} else
+			return "Add Account Coord";
 		break;
 	case DBD_ADD_ASSOCS:
-		return "Add Associations";
+		if(get_enum) {
+			return "DBD_ADD_ASSOCS";
+		} else
+			return "Add Associations";
 		break;
 	case DBD_ADD_CLUSTERS:
-		return "Add Clusters";
+		if(get_enum) {
+			return "DBD_ADD_CLUSTERS";
+		} else
+			return "Add Clusters";
 		break;
 	case DBD_ADD_USERS:
-		return "Add Users";
+		if(get_enum) {
+			return "DBD_ADD_USERS";
+		} else
+			return "Add Users";
 		break;
 	case DBD_CLUSTER_PROCS:
-		return "Cluster Processors";
+		if(get_enum) {
+			return "DBD_CLUSTER_PROCS";
+		} else
+			return "Cluster Processors";
 		break;
 	case DBD_FLUSH_JOBS:
-		return "Flush Jobs";
+		if(get_enum) {
+			return "DBD_FLUSH_JOBS";
+		} else
+			return "Flush Jobs";
 		break;
 	case DBD_GET_ACCOUNTS:
-		return "Get Accounts";
+		if(get_enum) {
+			return "DBD_GET_ACCOUNTS";
+		} else
+			return "Get Accounts";
 		break;
 	case DBD_GET_ASSOCS:
-		return "Get Associations";
+		if(get_enum) {
+			return "DBD_GET_ASSOCS";
+		} else
+			return "Get Associations";
 		break;
 	case DBD_GET_ASSOC_USAGE:
-		return "Get Association Usage";
+		if(get_enum) {
+			return "DBD_GET_ASSOC_USAGE";
+		} else
+			return "Get Association Usage";
 		break;
 	case DBD_GET_CLUSTERS:
-		return "Get Clusters";
+		if(get_enum) {
+			return "DBD_GET_CLUSTERS";
+		} else
+			return "Get Clusters";
 		break;
 	case DBD_GET_CLUSTER_USAGE:
-		return "Get Cluster Usage";
+		if(get_enum) {
+			return "DBD_GET_CLUSTER_USAGE";
+		} else
+			return "Get Cluster Usage";
 		break;
 	case DBD_GET_JOBS:
-		return "Get Jobs";
+		if(get_enum) {
+			return "DBD_GET_JOBS";
+		} else
+			return "Get Jobs";
 		break;
 	case DBD_GET_USERS:
-		return "Get Users";
+		if(get_enum) {
+			return "DBD_GET_USERS";
+		} else
+			return "Get Users";
 		break;
 	case DBD_GOT_ACCOUNTS:
-		return "Got Accounts";
+		if(get_enum) {
+			return "DBD_GOT_ACCOUNTS";
+		} else
+			return "Got Accounts";
 		break;
 	case DBD_GOT_ASSOCS:
-		return "Got Associations";
+		if(get_enum) {
+			return "DBD_GOT_ASSOCS";
+		} else
+			return "Got Associations";
 		break;
 	case DBD_GOT_ASSOC_USAGE:
-		return "Got Association Usage";
+		if(get_enum) {
+			return "DBD_GOT_ASSOC_USAGE";
+		} else
+			return "Got Association Usage";
 		break;
 	case DBD_GOT_CLUSTERS:
-		return "Got Clusters";
+		if(get_enum) {
+			return "DBD_GOT_CLUSTERS";
+		} else
+			return "Got Clusters";
 		break;
 	case DBD_GOT_CLUSTER_USAGE:
-		return "Got Cluster Usage";
+		if(get_enum) {
+			return "DBD_GOT_CLUSTER_USAGE";
+		} else
+			return "Got Cluster Usage";
 		break;
 	case DBD_GOT_JOBS:
-		return "Got Jobs";
+		if(get_enum) {
+			return "DBD_GOT_JOBS";
+		} else
+			return "Got Jobs";
 		break;
 	case DBD_GOT_LIST:
-		return "Got List";
+		if(get_enum) {
+			return "DBD_GOT_LIST";
+		} else
+			return "Got List";
 		break;
 	case DBD_GOT_USERS:
-		return "Got Users";
+		if(get_enum) {
+			return "DBD_GOT_USERS";
+		} else
+			return "Got Users";
 		break;
 	case DBD_JOB_COMPLETE:
-		return "Job Complete";
+		if(get_enum) {
+			return "DBD_JOB_COMPLETE";
+		} else
+			return "Job Complete";
 		break;
 	case DBD_JOB_START:
-		return "Job Start";
+		if(get_enum) {
+			return "DBD_JOB_START";
+		} else
+			return "Job Start";
 		break;
 	case DBD_JOB_START_RC:
-		return "Job Start RC";
+		if(get_enum) {
+			return "DBD_JOB_START_RC";
+		} else
+			return "Job Start RC";
 		break;
 	case DBD_JOB_SUSPEND:
-		return "Job Suspend";
+		if(get_enum) {
+			return "DBD_JOB_SUSPEND";
+		} else
+			return "Job Suspend";
 		break;
 	case DBD_MODIFY_ACCOUNTS:
-		return "Modify Accounts";
+		if(get_enum) {
+			return "DBD_MODIFY_ACCOUNTS";
+		} else
+			return "Modify Accounts";
 		break;
 	case DBD_MODIFY_ASSOCS:
-		return "Modify Associations";
+		if(get_enum) {
+			return "DBD_MODIFY_ASSOCS";
+		} else
+			return "Modify Associations";
 		break;
 	case DBD_MODIFY_CLUSTERS:
-		return "Modify Clusters";
+		if(get_enum) {
+			return "DBD_MODIFY_CLUSTERS";
+		} else
+			return "Modify Clusters";
 		break;
 	case DBD_MODIFY_USERS:
-		return "Modify Users";
+		if(get_enum) {
+			return "DBD_MODIFY_USERS";
+		} else
+			return "Modify Users";
 		break;
 	case DBD_NODE_STATE:
-		return "Node State";
+		if(get_enum) {
+			return "DBD_NODE_STATE";
+		} else
+			return "Node State";
 		break;
 	case DBD_RC:
-		return "RC";
+		if(get_enum) {
+			return "DBD_RC";
+		} else
+			return "Return Code";
 		break;
 	case DBD_REGISTER_CTLD:
-		return "Register Cluster";
+		if(get_enum) {
+			return "DBD_REGISTER_CTLD";
+		} else
+			return "Register Cluster";
 		break;
 	case DBD_REMOVE_ACCOUNTS:
-		return "Remove Accounts";
+		if(get_enum) {
+			return "DBD_REMOVE_ACCOUNTS";
+		} else
+			return "Remove Accounts";
 		break;
 	case DBD_REMOVE_ACCOUNT_COORDS:
-		return "Remove Account Coords";
+		if(get_enum) {
+			return "DBD_REMOVE_ACCOUNT_COORDS";
+		} else
+			return "Remove Account Coords";
 		break;
 	case DBD_REMOVE_ASSOCS:
-		return "Remove Associations";
+		if(get_enum) {
+			return "DBD_REMOVE_ASSOCS";
+		} else
+			return "Remove Associations";
 		break;
 	case DBD_REMOVE_CLUSTERS:
-		return "Remove Clusters";
+		if(get_enum) {
+			return "DBD_REMOVE_CLUSTERS";
+		} else
+			return "Remove Clusters";
 		break;
 	case DBD_REMOVE_USERS:
-		return "Remove Users";
+		if(get_enum) {
+			return "DBD_REMOVE_USERS";
+		} else
+			return "Remove Users";
 		break;
 	case DBD_ROLL_USAGE:
-		return "Roll Usage";
+		if(get_enum) {
+			return "DBD_ROLL_USAGE";
+		} else
+			return "Roll Usage";
 		break;
 	case DBD_STEP_COMPLETE:
-		return "Step Complete";
+		if(get_enum) {
+			return "DBD_STEP_COMPLETE";
+		} else
+			return "Step Complete";
 		break;
 	case DBD_STEP_START:
-		return "Step Start";
+		if(get_enum) {
+			return "DBD_STEP_START";
+		} else
+			return "Step Start";
 		break;
 	case DBD_UPDATE_SHARES_USED:
-		return "Update Shares Used";
+		if(get_enum) {
+			return "DBD_UPDATE_SHARES_USED";
+		} else
+			return "Update Shares Used";
 		break;
 	case DBD_GET_JOBS_COND:
-		return "Get Jobs Conditional";
+		if(get_enum) {
+			return "DBD_GET_JOBS_COND";
+		} else
+			return "Get Jobs Conditional";
 		break;
 	case DBD_GET_TXN:
-		return "Get Transations";
+		if(get_enum) {
+			return "DBD_GET_TXN";
+		} else
+			return "Get Transations";
 		break;
 	case DBD_GOT_TXN:
-		return "Got Transations";
+		if(get_enum) {
+			return "DBD_GOT_TXN";
+		} else
+			return "Got Transations";
 		break;
 	case DBD_ADD_QOS:
-		return "Add QOS";
+		if(get_enum) {
+			return "DBD_ADD_QOS";
+		} else
+			return "Add QOS";
 		break;
 	case DBD_GET_QOS:
-		return "Get QOS";
+		if(get_enum) {
+			return "DBD_GET_QOS";
+		} else
+			return "Get QOS";
 		break;
 	case DBD_GOT_QOS:
-		return "Got QOS";
+		if(get_enum) {
+			return "DBD_GOT_QOS";
+		} else
+			return "Got QOS";
 		break;
 	case DBD_REMOVE_QOS:
-		return "Remove QOS";
+		if(get_enum) {
+			return "DBD_REMOVE_QOS";
+		} else
+			return "Remove QOS";
 		break;
 	default:
 		return "Unknown";
@@ -859,7 +1015,7 @@ extern char *slurmdbd_msg_type_2_str(slurmdbd_msg_type_t msg_type)
 
 static int _send_init_msg(void)
 {
-	int rc;
+	int rc, read_timeout;
 	Buf buffer;
 	dbd_init_msg_t req;
 
@@ -876,7 +1032,8 @@ static int _send_init_msg(void)
 		return rc;
 	}
 
-	rc = _get_return_code();
+	read_timeout = slurm_get_msg_timeout() * 1000;
+	rc = _get_return_code(read_timeout);
 	return rc;
 }
 
@@ -958,7 +1115,7 @@ static int _send_msg(Buf buffer)
 	return SLURM_SUCCESS;
 }
 
-static int _get_return_code(void)
+static int _get_return_code(int read_timeout)
 {
 	Buf buffer;
 	uint16_t msg_type;
@@ -966,7 +1123,7 @@ static int _get_return_code(void)
 	dbd_job_start_rc_msg_t *js_msg;
 	int rc = SLURM_ERROR;
 
-	buffer = _recv_msg();
+	buffer = _recv_msg(read_timeout);
 	if (buffer == NULL)
 		return rc;
 
@@ -985,9 +1142,20 @@ static int _get_return_code(void)
 	case DBD_RC:
 		if (slurmdbd_unpack_rc_msg(&msg, buffer) == SLURM_SUCCESS) {
 			rc = msg->return_code;
-			if (rc != SLURM_SUCCESS)
-				error("slurmdbd: DBD_RC is %d from %u: %s",
-				      rc, msg->sent_type, msg->comment);
+			if (rc != SLURM_SUCCESS) {
+				error("slurmdbd: DBD_RC is %d from %s(%u): %s",
+				      rc,
+				      slurmdbd_msg_type_2_str(msg->sent_type,
+							       1),
+				      msg->sent_type,
+				      msg->comment);
+				if(msg->sent_type == DBD_REGISTER_CTLD &&
+				   slurm_get_accounting_storage_enforce())
+					fatal("You need to add this cluster "
+					      "to accounting if you want to "
+					      "enforce associations, or no "
+					      "jobs will ever run.");
+			}
 			slurmdbd_free_rc_msg(msg);
 		} else
 			error("slurmdbd: unpack message error");
@@ -1001,7 +1169,7 @@ unpack_error:
 	return rc;
 }
 
-static Buf _recv_msg(void)
+static Buf _recv_msg(int read_timeout)
 {
 	uint32_t msg_size, nw_size;
 	char *msg;
@@ -1011,7 +1179,7 @@ static Buf _recv_msg(void)
 	if (slurmdbd_fd < 0)
 		return NULL;
 
-	if (!_fd_readable(slurmdbd_fd))
+	if (!_fd_readable(slurmdbd_fd, read_timeout))
 		return NULL;
 	msg_read = read(slurmdbd_fd, &nw_size, sizeof(nw_size));
 	if (msg_read != sizeof(nw_size))
@@ -1027,7 +1195,7 @@ static Buf _recv_msg(void)
 	msg = xmalloc(msg_size);
 	offset = 0;
 	while (msg_size > offset) {
-		if (!_fd_readable(slurmdbd_fd))
+		if (!_fd_readable(slurmdbd_fd, read_timeout))
 			break;		/* problem with this socket */
 		msg_read = read(slurmdbd_fd, (msg + offset), 
 				(msg_size - offset));
@@ -1066,21 +1234,17 @@ static int _tot_wait (struct timeval *start_time)
 
 /* Wait until a file is readable, 
  * RET false if can not be read */
-static bool _fd_readable(slurm_fd fd)
+static bool _fd_readable(slurm_fd fd, int read_timeout)
 {
 	struct pollfd ufds;
-	static int msg_timeout = -1;
 	int rc, time_left;
 	struct timeval tstart;
-
-	if (msg_timeout == -1)
-		msg_timeout = slurm_get_msg_timeout() * 1000;
 
 	ufds.fd     = fd;
 	ufds.events = POLLIN;
 	gettimeofday(&tstart, NULL);
 	while (agent_shutdown == 0) {
-		time_left = msg_timeout - _tot_wait(&tstart);
+		time_left = read_timeout - _tot_wait(&tstart);
 		rc = poll(&ufds, 1, time_left);
 		if (rc == -1) {
 			if ((errno == EINTR) || (errno == EAGAIN))
@@ -1121,7 +1285,7 @@ static bool _fd_readable(slurm_fd fd)
 static int _fd_writeable(slurm_fd fd)
 {
 	struct pollfd ufds;
-	int msg_timeout = 5000;
+	int write_timeout = 5000;
 	int rc, time_left;
 	struct timeval tstart;
 
@@ -1129,7 +1293,7 @@ static int _fd_writeable(slurm_fd fd)
 	ufds.events = POLLOUT;
 	gettimeofday(&tstart, NULL);
 	while (agent_shutdown == 0) {
-		time_left = msg_timeout - _tot_wait(&tstart);
+		time_left = write_timeout - _tot_wait(&tstart);
 		rc = poll(&ufds, 1, time_left);
 		if (rc == -1) {
 			if ((errno == EINTR) || (errno == EAGAIN))
@@ -1237,7 +1401,8 @@ static void *_agent(void *x)
 	struct timespec abs_time;
 	static time_t fail_time = 0;
 	int sigarray[] = {SIGUSR1, 0};
-
+	int read_timeout = SLURMDBD_TIMEOUT * 1000;
+ 
 	/* Prepare to catch SIGUSR1 to interrupt pending
 	 * I/O and terminate in a timely fashion. */
 	xsignal(SIGUSR1, _sig_handler);
@@ -1290,7 +1455,7 @@ static void *_agent(void *x)
 				break;
 			error("slurmdbd: Failure sending message");
 		} else {
-			rc = _get_return_code();
+			rc = _get_return_code(read_timeout);
 			if (rc == EAGAIN) {
 				if (agent_shutdown)
 					break;
@@ -2039,6 +2204,12 @@ slurmdbd_unpack_init_msg(dbd_init_msg_t **msg, Buf buffer, char *auth_info)
 		goto unpack_error;
 	}
 	msg_ptr->uid = g_slurm_auth_get_uid(auth_cred, auth_info);
+	if(g_slurm_auth_errno(auth_cred) != SLURM_SUCCESS) {
+		error("Bad authentication: %s",
+		      g_slurm_auth_errstr(g_slurm_auth_errno(auth_cred)));
+		goto unpack_error;
+	}
+
 	g_slurm_auth_destroy(auth_cred);
 	return SLURM_SUCCESS;
 

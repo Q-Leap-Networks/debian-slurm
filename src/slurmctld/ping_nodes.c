@@ -1,6 +1,5 @@
 /*****************************************************************************\
  *  ping_nodes.c - ping the slurmd daemons to test if they respond
- *	Note: there is a global node table (node_record_table_ptr)
  *****************************************************************************
  *  Copyright (C) 2003-2006 The Regents of the University of California.
  *  Copyright (C) 2008 Lawrence Livermore National Security.
@@ -66,9 +65,6 @@
 static pthread_mutex_t lock_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int ping_count = 0;
 
-static void _run_health_check(void);
-
-/* struct timeval start_time, end_time; */
 
 /*
  * is_ping_done - test if the last node ping cycle has completed.
@@ -115,17 +111,6 @@ void ping_end (void)
 	else
 		fatal ("ping_count < 0");
 	slurm_mutex_unlock(&lock_mutex);
-
-#if 0
-	gettimeofday(&end_time, NULL);
-	start = start_time.tv_sec;
-	start *= 1000000;
-	start += start_time.tv_usec;
-	end = end_time.tv_sec;
-	end *= 1000000;
-	end += end_time.tv_usec;
-	info("done with ping took %ld",(end-start));
-#endif
 }
 
 /*
@@ -138,7 +123,6 @@ void ping_nodes (void)
 	int i;
 	time_t now, still_live_time, node_dead_time;
 	static time_t last_ping_time = (time_t) 0;
-	static time_t last_health_check = (time_t) 0;
 	uint16_t base_state, no_resp_flag;
 	bool restart_flag;
 	hostlist_t down_hostlist = NULL;
@@ -147,13 +131,6 @@ void ping_nodes (void)
 	agent_arg_t *reg_agent_args = NULL;
 
 	now = time (NULL);
-	if (slurmctld_conf.health_check_interval &&
-	    (difftime(now, last_health_check) >= 
-	     slurmctld_conf.health_check_interval)) {
-		last_health_check = now;
-		_run_health_check();
-		return;
-	}
 	
 	ping_agent_args = xmalloc (sizeof (agent_arg_t));
 	ping_agent_args->msg_type = REQUEST_PING;
@@ -164,7 +141,6 @@ void ping_nodes (void)
 	reg_agent_args->msg_type = REQUEST_NODE_REGISTRATION_STATUS;
 	reg_agent_args->retry = 0;
 	reg_agent_args->hostlist = hostlist_create("");
-	/* gettimeofday(&start_time, NULL); */
 		
 	/*
 	 * If there are a large number of down nodes, the node ping
@@ -197,13 +173,14 @@ void ping_nodes (void)
 		base_state   = node_ptr->node_state & NODE_STATE_BASE;
 		no_resp_flag = node_ptr->node_state & NODE_STATE_NO_RESPOND;
 		
-		if ((slurmctld_conf.slurmd_timeout == 0)
-		&&  (base_state != NODE_STATE_UNKNOWN))
+		if ((slurmctld_conf.slurmd_timeout == 0) &&
+		    (base_state != NODE_STATE_UNKNOWN)   &&
+		    (no_resp_flag == 0))
 			continue;
 
-		if ((node_ptr->last_response != (time_t) 0)
-		    &&  (node_ptr->last_response <= node_dead_time)
-		    &&  (base_state != NODE_STATE_DOWN)) {
+		if ((node_ptr->last_response != (time_t) 0)     &&
+		    (node_ptr->last_response <= node_dead_time) &&
+		    (base_state != NODE_STATE_DOWN)) {
 			if (down_hostlist)
 				(void) hostlist_push_host(down_hostlist,
 					node_ptr->name);
@@ -211,6 +188,7 @@ void ping_nodes (void)
 				down_hostlist = 
 					hostlist_create(node_ptr->name);
 			set_node_down(node_ptr->name, "Not responding");
+			node_ptr->not_responding = false;  /* logged below */
 			continue;
 		}
 
@@ -239,7 +217,8 @@ void ping_nodes (void)
 			continue;
 		}
 
-		if (node_ptr->last_response >= still_live_time)
+		if ((!no_resp_flag) && 
+		    (node_ptr->last_response >= still_live_time))
 			continue;
 
 		/* Do not keep pinging down nodes since this can induce
@@ -285,7 +264,8 @@ void ping_nodes (void)
 	}
 }
 
-static void _run_health_check(void)
+/* Spawn health check function for every node that is not DOWN */
+extern void run_health_check(void)
 {
 	int i;
 	uint16_t base_state;

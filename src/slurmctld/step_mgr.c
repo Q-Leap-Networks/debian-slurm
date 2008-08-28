@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  step_mgr.c - manage the job step information of slurm
- *  $Id: step_mgr.c 14548 2008-07-17 22:00:36Z jette $
+ *  $Id: step_mgr.c 14621 2008-07-24 15:24:59Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1127,7 +1127,7 @@ extern int pack_ctld_job_step_info_response_msg(uint32_t job_id,
 		while ((job_ptr = 
 				(struct job_record *) 
 				list_next(job_iterator))) {
-			if (((show_flags & SHOW_ALL) == 0) && 
+			if (((show_flags & SHOW_ALL) == 0) && (uid != 0) &&
 			    (job_ptr->part_ptr) && 
 			    (job_ptr->part_ptr->hidden))
 				continue;

@@ -1,4 +1,4 @@
-# $Id: configure.ac 14598 2008-07-21 20:12:45Z da $
+# $Id: configure.ac 14645 2008-07-28 20:32:12Z jette $
 # This file is to be processed with autoconf to generate a configure script
 
 dnl Prologue
@@ -278,6 +278,9 @@ AC_CONFIG_FILES([Makefile
 		 contribs/torque/Makefile
 		 contribs/phpext/Makefile
 		 contribs/phpext/slurm_php/config.m4
+		 contribs/python/Makefile
+		 contribs/python/hostlist/Makefile
+		 contribs/python/hostlist/test/Makefile
 		 src/Makefile 
 		 src/api/Makefile 
 		 src/common/Makefile

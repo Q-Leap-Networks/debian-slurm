@@ -593,6 +593,24 @@ char *slurm_get_accounting_storage_loc(void)
 	return storage_loc;	
 }
 
+/* slurm_get_accounting_storage_enforce
+ * returns whether or not to enforce associations
+ */
+int slurm_get_accounting_storage_enforce(void)
+{
+	int enforce = 0;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		enforce = conf->accounting_storage_enforce;
+		slurm_conf_unlock();
+	}
+	return enforce;	
+
+}
+
 /* slurm_set_accounting_storage_loc
  * IN: char *loc (name of file or database)
  * RET 0 or error code
@@ -2549,12 +2567,13 @@ int slurm_send_only_node_msg(slurm_msg_t *req)
  * IN nodelist	  - list of nodes to send to.
  * IN msg	  - a slurm_msg struct to be sent by the function
  * IN timeout	  - how long to wait in milliseconds
+ * IN quiet       - if set, reduce logging details
  * RET List	  - List containing the responses of the childern
  *		    (if any) we forwarded the message to. List
  *		    containing type (ret_data_info_t).
  */
 List slurm_send_recv_msgs(const char *nodelist, slurm_msg_t *msg, 
-			  int timeout)
+			  int timeout, bool quiet)
 {
 	List ret_list = NULL;
 	List tmp_ret_list = NULL;
@@ -2572,7 +2591,7 @@ List slurm_send_recv_msgs(const char *nodelist, slurm_msg_t *msg,
 #ifdef HAVE_FRONT_END
 	/* only send to the front end node */
 	name = nodelist_nth_host(nodelist, 0);
-	if(!name) {
+	if (!name) {
 		error("slurm_send_recv_msgs: "
 		      "can't get the first name out of %s",
 		      nodelist);
@@ -2587,19 +2606,26 @@ List slurm_send_recv_msgs(const char *nodelist, slurm_msg_t *msg,
 	while((name = hostlist_shift(hl))) {
 		
 		if(slurm_conf_get_addr(name, &msg->address) == SLURM_ERROR) {
-			error("slurm_send_recv_msgs: can't get addr for "
-			      "host %s", name);
+			if (quiet) {
+				debug("slurm_send_recv_msgs: can't get addr "
+				      "for host %s", name);
+			} else {
+				error("slurm_send_recv_msgs: can't get addr "
+				      "for host %s", name);
+			}
 			mark_as_failed_forward(&tmp_ret_list, name, 
-					       SLURM_COMMUNICATIONS_CONNECTION_ERROR);
+					SLURM_COMMUNICATIONS_CONNECTION_ERROR);
 			free(name);
 			continue;
 		}
 		
 		if ((fd = slurm_open_msg_conn(&msg->address)) < 0) {
-			error("slurm_send_recv_msgs to %s: %m", name);
-
+			if (quiet)
+				debug("slurm_send_recv_msgs to %s: %m", name);
+			else
+				error("slurm_send_recv_msgs to %s: %m", name);
 			mark_as_failed_forward(&tmp_ret_list, name, 
-					       SLURM_COMMUNICATIONS_CONNECTION_ERROR);
+					SLURM_COMMUNICATIONS_CONNECTION_ERROR);
 			free(name);
 			continue;
 		}
@@ -2617,8 +2643,15 @@ List slurm_send_recv_msgs(const char *nodelist, slurm_msg_t *msg,
 		
 		if(!(ret_list = _send_and_recv_msgs(fd, msg, timeout))) {
 			xfree(msg->forward.nodelist);
-			error("slurm_send_recv_msgs(_send_and_recv_msgs) "
-			      "to %s: %m", name);
+			if (quiet) {
+				debug("slurm_send_recv_msgs"
+				      "(_send_and_recv_msgs) to %s: %m", 
+				      name);
+			} else {
+				error("slurm_send_recv_msgs"
+				      "(_send_and_recv_msgs) to %s: %m", 
+				      name);
+			}
 			mark_as_failed_forward(&tmp_ret_list, name, errno);
 			free(name);
 			continue;

@@ -42,6 +42,12 @@ set prio3                -1
 
 print_header $test_id
 
+if {[test_wiki_sched] == 1} {
+	send_user "\nWARNING: not compatable with sched/wiki (Maui)\n"
+	send_user "         or sched/wiki2 (Moab) schedulers\n"
+	exit $exit_code
+}
+
 make_bash_script "pwd_script" { $bin_pwd }
 
 #
@@ -54,7 +60,7 @@ expect {
 		exp_continue
 	}
 	timeout {
-		send_user "\nFAILURE: srun not responding\n"
+		send_user "\nFAILURE: sbatch not responding\n"
 		slow_kill $sbatch_pid
 		exit 1
 	}
@@ -69,7 +75,7 @@ expect {
                 exp_continue
         }
         timeout {
-                send_user "\nFAILURE: srun not responding\n"
+                send_user "\nFAILURE: sbatch not responding\n"
                 slow_kill $sbatch_pid
                 exit 1
         }

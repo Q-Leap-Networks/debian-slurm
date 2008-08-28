@@ -12,7 +12,7 @@
 #
 ############################################################################
 # Copyright (C) 2008 Lawrence Livermore National Security.
-# Copyright (C) 2002-2006 The Regents of the University of California.
+# Copyright (C) 2002-2007 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
 # Additions by Joseph Donaghy <donaghy1@llnl.gov>
@@ -69,7 +69,7 @@ cset smap        "${slurm_dir}/bin/smap"
 cset squeue      "${slurm_dir}/bin/squeue"
 cset srun        "${slurm_dir}/bin/srun"
 cset sreport     "${slurm_dir}/bin/sreport"
-cset sstat        "${slurm_dir}/bin/sstat"
+cset sstat       "${slurm_dir}/bin/sstat"
 cset strigger    "${slurm_dir}/bin/strigger"
 
 cset pbsnodes    "${slurm_dir}/bin/pbsnodes"
@@ -118,7 +118,7 @@ cset bin_env	"env"
 cset bin_file	"file"
 cset bin_id	"id"
 cset bin_grep    "grep"
-cset bin_hostname "hostname"
+#cset bin_hostname "hostname" #Don't user $bin_hostname use $bin_printenv SLURMD_NODENAME
 cset bin_kill	"kill"
 cset bin_make	"make"
 cset bin_od     "od"
@@ -345,8 +345,10 @@ proc print_header { test_id } {
 #
 # Proc: wait_for_file
 #
-# Purpose:  Wait for the specified file to exist. This delay 
-# provides time for NFS files to be propogated. The 
+# Purpose:  Wait for the specified file to exist and have a 
+#           non-zero size. Note that if JobFileAppend=0 is 
+#           configured, a file can exist and be purged then
+#           be re-created.
 #
 # Returns: A non-zero return code indicates a failure.
 #
@@ -358,14 +360,8 @@ proc wait_for_file { file_name } {
 	global bin_sleep max_file_delay
 
 	for {set my_delay 0} {$my_delay <= $max_file_delay} {incr my_delay} {
-		if [file exists $file_name] {
+		if {[file exists $file_name] && [file exists $file_name]} {
 #			Add small delay for I/O buffering
-			for {} {$my_delay <= $max_file_delay} {incr my_delay} {
-				if {[file size $file_name] != 0} {
-					break
-				}
-				exec $bin_sleep 1
-			}
 			exec $bin_sleep 2
 			return 0
 		}
@@ -517,7 +513,6 @@ proc wait_for_step { step_id } {
 # Returns 1 if the system is enforcing associations, 0 otherwise
 #
 ################################################################
-
 proc test_assoc_enforced { } {
 	global scontrol
 
@@ -536,6 +531,66 @@ proc test_assoc_enforced { } {
 	log_user 1
 	
 	return $assoc_enforced
+}
+
+################################################################
+# Proc: test_wiki_sched
+#
+# Return 1 if using sched/wiki or sched/wiki2 (Maui or Moab),
+#        0 otherwise
+################################################################
+proc test_wiki_sched { } {
+	global scontrol
+
+	log_user 0
+	set sched_wiki   0
+	spawn $scontrol show config
+	expect {
+		-re "SchedulerType *= sched/wiki" {
+			set sched_wiki 1
+			exp_continue
+		}
+		eof {
+			wait
+		}
+	}
+	log_user 1
+
+	return $sched_wiki
+}
+
+################################################################
+#
+# Proc: test_account_storage
+#
+# Purpose: Determine if we are using a usable accounting storage
+# package. 
+# This is based upon 
+# the value of AccountingStorageType in the slurm.conf.
+#
+# Returns 1 if the system is running an accounting storage type
+# that is complete, 0 otherwise
+#
+################################################################
+
+proc test_account_storage { } {
+	global scontrol
+
+	log_user 0
+	set account_storage 0
+	spawn $scontrol show config
+	expect {
+		-re "(accounting_storage/slurmdbd|accounting_storage/mysql)" {
+			set account_storage 1
+			exp_continue
+		}
+		eof {
+			wait
+		}
+	}
+	log_user 1
+	
+	return $account_storage
 }
 
 ################################################################
@@ -738,7 +793,7 @@ proc test_aix {} {
 ################################################################
 
 proc test_super_user { } {
-	global alpha_numeric bin_id number scontrol super_user super_user_set
+	global alpha_numeric_under bin_id number scontrol super_user super_user_set
 
 	if {$super_user_set != 0} {
 		return $super_user
@@ -772,7 +827,7 @@ proc test_super_user { } {
 	spawn $bin_id -un
 	set user ""
 	expect {
-		-re "($alpha_numeric)" {
+		-re "($alpha_numeric_under)" {
 			set user $expect_out(1,string)
 			exp_continue
 		}
@@ -780,10 +835,10 @@ proc test_super_user { } {
 			wait
 		}
 	}
-	spawn $scontrol show control
+	spawn $scontrol show config
 	set slurm_user ""
 	expect {
-		-re "SlurmUser *= ($alpha_numeric)" {
+		-re "SlurmUser *= ($alpha_numeric_under)" {
 			set slurm_user $expect_out(1,string)
 			exp_continue
 		}
@@ -816,6 +871,22 @@ proc dec2hex16 {value} {
 	}
 }
 
+# Create a 32 bit hex number from a signed decimal number
+# Replace all non-decimal characters
+# Courtesy of Chris Cornish
+# http://aspn.activestate.com/ASPN/Cookbook/Tcl/Recipe/415982
+proc dec2hex {value} {
+	regsub -all {[^0-x\.-]} $value {} newtemp
+	set value [string trim $newtemp]
+	if {$value < 2147483647 && $value > -2147483648} {
+		set tempvalue [format "%#010X" [expr $value]]
+		return [string range $tempvalue 2 9]
+	} elseif {$value < -2147483647} {
+		return "80000000"
+	} else {
+		return "7FFFFFFF"
+	}
+}
 
 ################################################################
 #
@@ -939,19 +1010,38 @@ proc make_bash_script { script_name script_contents } {
 }
 
 ################################################################
+# Given a hostname, return it's numeric suffix
+################################################################
+proc get_suffix { hostname } {
+	set host_len [string length $hostname]
+	for {set host_inx [expr $host_len-1]} {$host_inx >= 0} {incr host_inx -1} {
+		set host_char [string index $hostname $host_inx]
+		if {[string compare $host_char "0"] < 0} { break }
+		if {[string compare $host_char "9"] > 0} { break }
+	}
+	incr host_inx
+
+	if {$host_inx == $host_len} {
+		send_user "\nHostname lacks a suffix:$hostname\n"
+		return "-1"
+	}
+	return [string range $hostname $host_inx $host_len]
+}
+
+################################################################
 # Check if we are user root or SlurmUser
 #
 # Return 1 if true, 0 if false
 ################################################################
 
 proc is_super_user { } {
-	global alpha_numeric bin_id scontrol
+	global alpha_numeric_under bin_id scontrol
 
 	log_user 0
 	set user_name "nobody"
 	spawn $bin_id -u -n
 	expect {
-		-re "($alpha_numeric)" {
+		-re "($alpha_numeric_under)" {
 			set user_name $expect_out(1,string)
 			exp_continue
 		}

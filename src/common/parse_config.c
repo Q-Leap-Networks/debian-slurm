@@ -3,7 +3,7 @@
  *
  *  NOTE: when you see the prefix "s_p_", think "slurm parser".
  *
- *  $Id: parse_config.c 14064 2008-05-15 23:53:06Z jette $
+ *  $Id: parse_config.c 14716 2008-08-07 20:11:01Z da $
  *****************************************************************************
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -478,7 +478,8 @@ static int _handle_uint16(s_p_values_t *v,
 			error("%s value (%s) is less than zero", v->key, value);
 			return -1;
 		} else if (num > 0xffff) {
-			error("%s value (%s) is greater than 65535", v->key, value);
+			error("%s value (%s) is greater than 65535", v->key,
+			      value);
 			return -1;
 		}
 		v->data = xmalloc(sizeof(uint16_t));

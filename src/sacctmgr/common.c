@@ -46,8 +46,8 @@ static pthread_t lock_warning_thread;
 
 static void *_print_lock_warn(void *no_data)
 {
-	sleep(2);
-	printf(" Waiting for lock from other user.\n");
+	sleep(5);
+	printf(" Database is busy or waiting for lock from other user.\n");
 
 	return NULL;
 }
@@ -132,6 +132,12 @@ extern char *strip_quotes(char *option, int *increased)
 			break;
 		} else if(option[i] == '\"' || option[i] == '\'')
 			option[i] = '`';
+		else {
+			char lower = tolower(option[i]);
+			if(lower != option[i])
+				option[i] = lower;
+		}
+		
 		i++;
 	}
 	end += i;
@@ -393,14 +399,19 @@ extern acct_association_rec_t *sacctmgr_find_association_from_list(
 	
 	itr = list_iterator_create(assoc_list);
 	while((assoc = list_next(itr))) {
-		if((user && (!assoc->user || strcasecmp(user, assoc->user)))
-		   || (account && (!assoc->acct 
-				   || strcasecmp(account, assoc->acct)))
-		   || (cluster && (!assoc->cluster 
-				   || strcasecmp(cluster, assoc->cluster)))
-		   || (partition && (!assoc->partition 
-				     || strcasecmp(partition, 
-						   assoc->partition))))
+		if(((!user && assoc->user)
+		    || (user && (!assoc->user
+				 || strcasecmp(user, assoc->user))))
+		   || ((!account && assoc->acct)
+		       || (account && (!assoc->acct 
+				       || strcasecmp(account, assoc->acct))))
+		   || ((!cluster && assoc->cluster)
+		       || (cluster && (!assoc->cluster 
+				       || strcasecmp(cluster, assoc->cluster))))
+		   || ((!partition && assoc->partition)
+		       || (partition && (!assoc->partition 
+					 || strcasecmp(partition, 
+						       assoc->partition)))))
 			continue;
 		break;
 	}
@@ -644,7 +655,8 @@ end_it:
 	return count;
 } 
 
-extern void sacctmgr_print_coord_list(print_field_t *field, List value)
+extern void sacctmgr_print_coord_list(
+	print_field_t *field, List value, int last)
 {
 	ListIterator itr = NULL;
 	char *print_this = NULL;
@@ -668,7 +680,10 @@ extern void sacctmgr_print_coord_list(print_field_t *field, List value)
 		list_iterator_destroy(itr);
 	}
 	
-	if(print_fields_parsable_print)
+	if(print_fields_parsable_print == PRINT_FIELDS_PARSABLE_NO_ENDING
+	   && last)
+		printf("%s", print_this);
+	else if(print_fields_parsable_print)
 		printf("%s|", print_this);
 	else {
 		if(strlen(print_this) > field->len) 
@@ -680,13 +695,16 @@ extern void sacctmgr_print_coord_list(print_field_t *field, List value)
 }
 
 extern void sacctmgr_print_qos_list(print_field_t *field, List qos_list,
-				    List value)
+				    List value, int last)
 {
 	char *print_this = NULL;
 
 	print_this = get_qos_complete_str(qos_list, value);
 	
-	if(print_fields_parsable_print)
+	if(print_fields_parsable_print == PRINT_FIELDS_PARSABLE_NO_ENDING
+	   && last)
+		printf("%s", print_this);
+	else if(print_fields_parsable_print)
 		printf("%s|", print_this);
 	else {
 		if(strlen(print_this) > field->len) 

@@ -196,6 +196,8 @@ struct node_record {
 	uint16_t node_state;		/* enum node_states, ORed with 
 					 * NODE_STATE_NO_RESPOND if not 
 					 * responding */
+	bool not_responding;		/* set if fails to respond, 
+					 * clear after logging this */
 	time_t last_response;		/* last response from the node */
 	time_t last_idle;		/* time node last become idle */
 	uint16_t cpus;			/* count of processors on the node */
@@ -235,6 +237,7 @@ extern uint32_t total_cpus;		/* count of CPUs in the entire cluster */
 extern bitstr_t *idle_node_bitmap;	/* bitmap of idle nodes */
 extern bitstr_t *share_node_bitmap;	/* bitmap of sharable nodes */
 extern bitstr_t *up_node_bitmap;	/* bitmap of up nodes, not DOWN */
+extern bool ping_nodes_now;		/* if set, ping nodes immediately */
 
 /*****************************************************************************\
  *  PARTITION parameters and data structures
@@ -515,6 +518,21 @@ enum select_data_info {
 /*****************************************************************************\
  *  Global slurmctld functions
 \*****************************************************************************/
+
+/*
+ * abort_job_on_node - Kill the specific job_id on a specific node,
+ *	the request is not processed immediately, but queued. 
+ *	This is to prevent a flood of pthreads if slurmctld restarts 
+ *	without saved state and slurmd daemons register with a 
+ *	multitude of running jobs. Slurmctld will not recognize 
+ *	these jobs and use this function to kill them - one 
+ *	agent request per node as they register.
+ * IN job_id - id of the job to be killed
+ * IN job_ptr - pointer to terminating job (NULL if unknown, e.g. orphaned)
+ * IN node_ptr - pointer to the node on which the job resides
+ */
+extern void abort_job_on_node(uint32_t job_id, struct job_record *job_ptr,
+			      struct node_record *node_ptr);
 
 /*
  * bitmap2node_name - given a bitmap, build a list of comma separated node 
@@ -993,20 +1011,14 @@ extern void job_time_limit (void);
 extern int kill_job_by_part_name(char *part_name);
 
 /*
- * kill_job_on_node - Kill the specific job_id on a specific node,
- *	the request is not processed immediately, but queued. 
- *	This is to prevent a flood of pthreads if slurmctld restarts 
- *	without saved state and slurmd daemons register with a 
- *	multitude of running jobs. Slurmctld will not recognize 
- *	these jobs and use this function to kill them - one 
+ * kill_job_on_node - Kill the specific job_id on a specific node.
  *	agent request per node as they register.
  * IN job_id - id of the job to be killed
  * IN job_ptr - pointer to terminating job (NULL if unknown, e.g. orphaned)
  * IN node_ptr - pointer to the node on which the job resides
  */
-extern void kill_job_on_node(uint32_t job_id, 
-		struct job_record *job_ptr,
-		struct node_record *node_ptr);
+extern void kill_job_on_node(uint32_t job_id, struct job_record *job_ptr,
+			     struct node_record *node_ptr);
 
 /*
  * kill_running_job_by_node_name - Given a node name, deallocate jobs 
@@ -1119,6 +1131,10 @@ extern void node_did_resp (char *name);
  * IN msg_time - time message was sent
  */
 extern void node_not_resp (char *name, time_t msg_time);
+
+/* For every node with the "not_responding" flag set, clear the flag
+ * and log that the node is not responding using a hostlist expression */
+extern void node_no_resp_msg(void);
 
 /*
  * job_alloc_info - get details about an existing job allocation
@@ -1287,6 +1303,9 @@ extern void resume_job_step(struct job_record *job_ptr);
  *	mode, assuming control when the primary controller stops responding */
 extern void run_backup(void);
 
+/* Spawn health check function for every node that is not DOWN */
+extern void run_health_check(void);
+
 /* save_all_state - save entire slurmctld state for later recovery */
 extern void save_all_state(void);
 
@@ -1301,7 +1320,7 @@ extern void set_node_down (char *name, char *reason);
 /*
  * set_slurmctld_state_loc - create state directory as needed and "cd" to it
  */
-extern int set_slurmctld_state_loc(void);
+extern void set_slurmctld_state_loc(void);
 
 /* set_slurmd_addr - establish the slurm_addr for the slurmd on each node
  *	Uses common data structures. */

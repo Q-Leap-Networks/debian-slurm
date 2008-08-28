@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/common/uid.c - uid/gid lookup utility functions
- * $Id: uid.c 13672 2008-03-19 23:10:58Z jette $
+ * $Id: uid.c 14795 2008-08-15 21:54:22Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -41,66 +41,132 @@
 #include <grp.h>
 #include <ctype.h>
 
-#include "uid.h"
+#include "src/common/uid.h"
+#include "src/common/xmalloc.h"
+#include "src/common/xstring.h"
 
 uid_t
 uid_from_string (char *name)
 {
-	struct passwd *pwd = NULL;
-	char *p = NULL;
+	struct passwd pwd, *result;
+	char buffer[PW_BUF_SIZE], *p = NULL;
+	int rc;
 	uid_t uid = (uid_t) strtoul (name, &p, 10);
 
-	if (*p != '\0')
-		pwd = getpwnam (name);
-	else
-		pwd = getpwuid (uid);
-
-	return pwd ? pwd->pw_uid : (uid_t) -1; 
+	if (*p != '\0') {
+		while (1) {
+			rc = getpwnam_r(name, &pwd, buffer, PW_BUF_SIZE, 
+					&result);
+			if (rc == EINTR)
+				continue;
+			if (rc != 0)
+				result = NULL;
+			break;
+		}
+		if (result == NULL)
+			uid = (uid_t) -1;
+		else
+			uid = result->pw_uid;
+	} else {
+		while (1) {
+			rc = getpwuid_r(uid, &pwd, buffer, PW_BUF_SIZE, 
+					&result);
+			if (rc == EINTR)
+				continue;
+			if (rc != 0)
+				result = NULL;
+			break;
+		}
+		if (result == NULL)
+			uid = (uid_t) -1;
+		/* else uid is already correct */
+	}
+	return uid; 
 }
 
 char *
 uid_to_string (uid_t uid)
 {
-	struct passwd *pwd = NULL;
+	struct passwd pwd, *result;
+	char buffer[PW_BUF_SIZE], *ustring;
+	int rc;
 
 	/* Suse Linux does not handle multiple users with UID=0 well */
 	if (uid == 0)
-		return "root";
+		return xstrdup("root");
 
-	pwd = getpwuid(uid);
-	return pwd ? pwd->pw_name : "nobody";
-}
-
-gid_t
-gid_from_uid (uid_t uid)
-{
-	struct passwd pwd, *result;
-	char buffer[PW_BUF_SIZE];
-	gid_t gid;
-	int rc;
-
-	rc = getpwuid_r(uid, &pwd, buffer, PW_BUF_SIZE, &result);
-	if (result == NULL) {
-		gid = (gid_t) -1;
-	} else {
-		gid = result->pw_gid;
+	while (1) {
+		rc = getpwuid_r(uid, &pwd, buffer, PW_BUF_SIZE, &result);
+		if (rc == EINTR)
+			continue;
+		if (rc != 0)
+			result = NULL;
+		break;
 	}
-
-	return gid;
+	if (result)
+		ustring = xstrdup(result->pw_name);
+	else
+		ustring = xstrdup("nobody");
+	return ustring;
 }
 
 gid_t
 gid_from_string (char *name)
 {
-	struct group *g = NULL;
-	char *p = NULL;
+	struct group grp, *result;
+	char buffer[PW_BUF_SIZE], *p = NULL;
+	int rc;
 	gid_t gid = (gid_t) strtoul (name, &p, 10);
 
-	if (*p != '\0')
-		g = getgrnam (name);
-	else
-		g = getgrgid (gid);
-
-	return g ? g->gr_gid : (gid_t) -1;
+	if (*p != '\0') {
+		while (1) {
+			rc = getgrnam_r(name, &grp, buffer, PW_BUF_SIZE, 
+					&result);
+			if (rc == EINTR)
+				continue;
+			if (rc != 0)
+				result = NULL;
+			break;
+		}
+		if (result == NULL)
+			gid = (gid_t) -1;
+		else
+			gid = result->gr_gid;
+	} else {
+		while (1) {
+			rc = getgrgid_r(gid, &grp, buffer, PW_BUF_SIZE, 
+					&result);
+			if (rc == EINTR)
+				continue;
+			if (rc != 0)
+				result = NULL;
+			break;
+		}
+		if (result == NULL)
+			gid = (gid_t) -1;
+		/* else gid is already correct */
+	}
+	return gid; 
 }
 
+char *
+gid_to_string (gid_t gid)
+{
+	struct group grp, *result;
+	char buffer[PW_BUF_SIZE], *gstring;
+	int rc;
+
+	while (1) {
+		rc = getgrgid_r(gid, &grp, buffer, PW_BUF_SIZE, &result);
+		if (rc == EINTR)
+			continue;
+		if (rc != 0)
+			result = NULL;
+		break;
+	}
+	if (result)
+		gstring = xstrdup(result->gr_name);
+	else
+		gstring = xstrdup("nobody");
+	return gstring;
+}

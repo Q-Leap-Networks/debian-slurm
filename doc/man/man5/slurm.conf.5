@@ -201,11 +201,7 @@ job step credentials.
 The slurmctld daemon must be restarted for a change in \fBCryptoType\fR
 to take effect.
 Acceptable values at present include "crypto/munge" and "crypto/openssl".
-OpenSSL offers the best performance and is available with an 
-Apache style open source license.
-Munge is a little slower, but is available under the Gnu General Public 
-License (GPL).
-The default value is "crypto/openssl".
+The default value is "crypto/munge".
 
 .TP
 \fBDefMemPerCPU\fR
@@ -815,10 +811,6 @@ The default value is "sched/builtin".
 Backfill scheduling will initiate lower\-priority jobs if doing 
 so does not delay the expected initiation time of any higher 
 priority job. 
-Note that this backfill scheduler implementation is relatively 
-simple. It does not support partitions configured to to share 
-resources (run multiple jobs on the same nodes) or support 
-jobs requesting specific nodes.
 When initially setting the value to "sched/wiki", any pending jobs 
 must have their priority set to zero (held).
 When changing the value from "sched/wiki", all pending jobs 
@@ -984,13 +976,15 @@ different shared memory region and lose track of any running jobs.
 \fBSlurmdTimeout\fR
 The interval, in seconds, that the SLURM controller waits for \fBslurmd\fR 
 to respond before configuring that node's state to DOWN. 
-The default value is 300 seconds.
 A value of zero indicates the node will not be tested by \fBslurmctld\fR to 
 confirm the state of \fBslurmd\fR, the node will not be automatically set to 
 a DOWN state indicating a non\-responsive \fBslurmd\fR, and some other tool 
 will take responsibility for monitoring the state of each compute node 
 and its \fBslurmd\fR daemon.
-The value may not exceed 65533.
+SLURM's hiearchical communication mechanism is used to ping the \fBslurmd\fR
+daemons in order to minimize system noise and overhead.
+The default value is 300 seconds.
+The value may not exceed 65533 seconds.
 
 .TP
 \fBSrunEpilog\fR

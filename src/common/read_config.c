@@ -70,6 +70,7 @@
 #include "src/common/parse_time.h"
 #include "src/common/slurm_selecttype_info.h"
 #include "src/common/util-net.h"
+#include "src/common/uid.h"
 
 /* Instantiation of the "extern slurm_ctl_conf_t slurmcltd_conf"
  * found in slurmctld.h */
@@ -548,13 +549,24 @@ static int parse_partitionname(void **dest, slurm_parser_enum_t type,
 			/* Only "Shared=NO" is valid on XCPU systems */
 			else if (strcasecmp(tmp, "EXCLUSIVE") == 0)
 				p->max_share = 0;
-			else if (strncasecmp(tmp, "YES:", 4) == 0)
-				p->max_share = strtol(&tmp[4], (char **) NULL, 10);
-			else if (strcasecmp(tmp, "YES") == 0) 
+			else if (strncasecmp(tmp, "YES:", 4) == 0) {
+				int i = strtol(&tmp[4], (char **) NULL, 10);
+				if (i <= 1) {
+					error("Ignoring bad Shared value: %s",
+					      tmp);
+					p->max_share = 1; /* Shared=NO */
+				} else
+					p->max_share = i;
+			} else if (strcasecmp(tmp, "YES") == 0) 
 				p->max_share = 4;
 			else if (strncasecmp(tmp, "FORCE:", 6) == 0) {
-				p->max_share = strtol(&tmp[6], (char **) NULL, 10) |
-					SHARED_FORCE;
+				int i = strtol(&tmp[6], (char **) NULL, 10);
+				if (i <= 1) {
+					error("Ignoring bad Shared value: %s",
+					      tmp);
+					p->max_share = 1; /* Shared=NO */
+				} else
+					p->max_share = i | SHARED_FORCE;
 			} else if (strcasecmp(tmp, "FORCE") == 0)
 				p->max_share = 4 | SHARED_FORCE;
 #endif
@@ -1152,6 +1164,7 @@ free_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr, bool purge_node_hash)
 	xfree (ctl_conf_ptr->propagate_rlimits);
 	xfree (ctl_conf_ptr->resume_program);
 	xfree (ctl_conf_ptr->slurm_conf);
+	xfree (ctl_conf_ptr->sched_params);
 	xfree (ctl_conf_ptr->schedtype);
 	xfree (ctl_conf_ptr->select_type);
 	xfree (ctl_conf_ptr->slurm_user_name);
@@ -1408,26 +1421,6 @@ slurm_conf_reinit(const char *file_name)
 	return rc;
 }
 
-/*
- * slurm_conf_reinit_nolock - reload the slurm configuration from a file.
- *	This does the same thing as slurm_conf_reinit, but it performs
- *	no internal locking.  You are responsible for calling slurm_conf_lock()
- *	before calling this function, and calling slurm_conf_unlock()
- *	afterwards.
- * IN file_name - name of the slurm configuration file to be read
- *	If file_name is NULL, then this routine tries to use
- *	the value in the SLURM_CONF env variable.  Failing that,
- *	it uses the compiled-in default file name.
- *	Unlike slurm_conf_init, slurm_conf_reinit will always reread the
- *	file and reinitialize the configuration structures.
- * RET SLURM_SUCCESS if conf file is reinitialized, otherwise SLURM_ERROR.
- */
-extern int 
-slurm_conf_reinit_nolock(const char *file_name)
-{
-	return _internal_reinit(file_name);
-}
-
 extern void
 slurm_conf_mutex_init(void)
 {
@@ -1557,13 +1550,10 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 	s_p_get_string(&default_storage_pass, "DefaultStoragePass", hashtbl);
 	s_p_get_string(&default_storage_loc,  "DefaultStorageLoc", hashtbl);
 	s_p_get_uint32(&default_storage_port, "DefaultStoragePort", hashtbl);
-
-	if (!s_p_get_string(&conf->job_credential_private_key,
-			    "JobCredentialPrivateKey", hashtbl))
-		fatal("JobCredentialPrivateKey not set");
-	if (!s_p_get_string(&conf->job_credential_public_certificate,
-			    "JobCredentialPublicCertificate", hashtbl))
-		fatal("JobCredentialPublicCertificate not set");
+	s_p_get_string(&conf->job_credential_private_key,
+		       "JobCredentialPrivateKey", hashtbl);
+	s_p_get_string(&conf->job_credential_public_certificate,
+		      "JobCredentialPublicCertificate", hashtbl);
 
 	if (s_p_get_uint16(&conf->max_job_cnt, "MaxJobCount", hashtbl)
 	    && conf->max_job_cnt < 1)
@@ -1580,6 +1570,13 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 
 	if (!s_p_get_string(&conf->crypto_type, "CryptoType", hashtbl))
 		 conf->crypto_type = xstrdup(DEFAULT_CRYPTO_TYPE);
+	if ((strcmp(conf->crypto_type, "crypto/openssl") == 0) &&
+	    ((conf->job_credential_private_key == NULL) ||
+	     (conf->job_credential_public_certificate == NULL))) {
+		fatal("CryptoType=crypto/openssl requires that both "
+		      "JobCredentialPrivateKey and "
+		      "JobCredentialPublicCertificate be set");
+	}
 
 	if ((s_p_get_uint32(&conf->def_mem_per_task, "DefMemPerCPU", hashtbl)) ||
 	    (s_p_get_uint32(&conf->def_mem_per_task, "DefMemPerTask", hashtbl)))
@@ -1893,6 +1890,9 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 
 	if (!s_p_get_string(&conf->schedtype, "SchedulerType", hashtbl))
 		conf->schedtype = xstrdup(DEFAULT_SCHEDTYPE);
+	else if ((strcmp(conf->schedtype, "sched/gang") == 0) &&
+		 (conf->fast_schedule == 0))
+		fatal("FastSchedule=0 is not supported with sched/gang");
 
 	if (!s_p_get_string(&conf->select_type, "SelectType", hashtbl))
 		conf->select_type = xstrdup(DEFAULT_SELECT_TYPE);
@@ -1918,14 +1918,13 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 		conf->slurm_user_name = xstrdup("root");
 		conf->slurm_user_id   = 0;
 	} else {
-		struct passwd *slurm_passwd;
-		slurm_passwd = getpwnam(conf->slurm_user_name);
-		if (slurm_passwd == NULL) {
+		uid_t my_uid = uid_from_string(conf->slurm_user_name);
+		if (my_uid == (uid_t) -1) {
 			error ("Invalid user for SlurmUser %s, ignored",
 			       conf->slurm_user_name);
 			xfree(conf->slurm_user_name);
 		} else {
-			conf->slurm_user_id = slurm_passwd->pw_uid;
+			conf->slurm_user_id = my_uid;
 		}
 	}
 

@@ -143,6 +143,7 @@ int bg_recover = DEFAULT_RECOVER;
 char *slurmctld_cluster_name = NULL; /* name of cluster */
 void *acct_db_conn = NULL;
 int accounting_enforce = 0;
+bool ping_nodes_now = false;
 
 /* Local variables */
 static int	daemonize = DEFAULT_DAEMONIZE;
@@ -198,7 +199,6 @@ int main(int argc, char *argv[])
 	slurmctld_lock_t config_write_lock = {
 		WRITE_LOCK, WRITE_LOCK, WRITE_LOCK, WRITE_LOCK };
 	assoc_init_args_t assoc_init_arg;
-	gid_t slurm_user_gid;
 
 	/*
 	 * Establish initial configuration
@@ -221,41 +221,19 @@ int main(int argc, char *argv[])
 	 */
 	_init_pidfile();
 
-	/* Determine SlurmUser gid */
-	slurm_user_gid = gid_from_uid(slurmctld_conf.slurm_user_id);
-	if (slurm_user_gid == (gid_t) -1) {
-		fatal("Failed to determine gid of SlurmUser(%d)", 
-		      slurm_user_gid);
+	/* Initialize supplementary group ID list for SlurmUser */
+	if ((getuid() == 0)
+	&&  (slurmctld_conf.slurm_user_id != getuid())
+	&&  initgroups(slurmctld_conf.slurm_user_name,
+			gid_from_string(slurmctld_conf.slurm_user_name))) {
+		error("initgroups: %m");
 	}
 
-	/* Initialize supplementary groups ID list for SlurmUser */
-	if (getuid() == 0) {
-		/* root does not need supplementary groups */
-		if ((slurmctld_conf.slurm_user_id == 0) &&
-		    (setgroups(0, NULL) != 0)) {
-			fatal("Failed to drop supplementary groups, "
-			      "setgroups: %m");
-		} else if ((slurmctld_conf.slurm_user_id != getuid()) &&
-			   initgroups(slurmctld_conf.slurm_user_name, 
-				      slurm_user_gid)) {
-			fatal("Failed to set supplementary groups, "
-			      "initgroups: %m");
-		}
-	}
-
-	/* Set GID to GID of SlurmUser */
-	if ((slurm_user_gid != getegid()) &&
-	    (setgid(slurm_user_gid))) {
-		fatal("Failed to set GID to %d", slurm_user_gid);
-	}
-
-	/* Set UID to UID of SlurmUser */
-	if ((slurmctld_conf.slurm_user_id != getuid()) &&
-	    (setuid(slurmctld_conf.slurm_user_id))) {
+	if ((slurmctld_conf.slurm_user_id != getuid())
+	&&  (setuid(slurmctld_conf.slurm_user_id))) {
 		fatal("Can not set uid to SlurmUser(%d): %m", 
-		      slurmctld_conf.slurm_user_id);
+			slurmctld_conf.slurm_user_id);
 	}
-
 	if (stat(slurmctld_conf.mail_prog, &stat_buf) != 0)
 		error("Configured MailProg is invalid");
 
@@ -285,8 +263,7 @@ int main(int argc, char *argv[])
 	/* 
 	 * Create StateSaveLocation directory if necessary.
 	 */
-	if (set_slurmctld_state_loc() < 0)
-		fatal("Unable to initialize StateSaveLocation");
+	set_slurmctld_state_loc();
 
 	if (daemonize) {
 		slurmctld_config.daemonize = 1;
@@ -315,6 +292,11 @@ int main(int argc, char *argv[])
 	} else {
 		slurmctld_config.daemonize = 0;
 	}
+
+	/* This must happen before we spawn any threads
+	 * which are not designed to handle them */
+	if (xsignal_block(controller_sigarray) < 0)
+		error("Unable to block signals");
 
 	/* This needs to be copied for other modules to access the
 	 * memory, it will report 'HashBase' if it is not duped
@@ -351,9 +333,6 @@ int main(int argc, char *argv[])
 	 * slurm_cred_ctx_set(slurmctld_config.cred_ctx, 
 	 *                    SLURM_CRED_OPT_EXPIRY_WINDOW, CRED_LIFE);
 	 */
-
-	if (xsignal_block(controller_sigarray) < 0)
-		error("Unable to block signals");
 
 	/*
 	 * Initialize plugins.
@@ -442,10 +421,11 @@ int main(int argc, char *argv[])
 				&thread_attr, _slurmctld_rpc_mgr, NULL))
 			fatal("pthread_create error %m");
 		slurm_attr_destroy(&thread_attr);
-		clusteracct_storage_g_register_ctld(
-					slurmctld_conf.cluster_name, 
-					slurmctld_conf.slurmctld_port);
 
+		clusteracct_storage_g_register_ctld(
+			slurmctld_conf.cluster_name, 
+			slurmctld_conf.slurmctld_port);
+		
 		/*
 		 * create attached thread for signal handling
 		 */
@@ -491,13 +471,13 @@ int main(int argc, char *argv[])
 				!= SLURM_SUCCESS )
 			error("failed to save node selection state");
 		switch_save(slurmctld_conf.state_save_location);
-		if (slurmctld_config.resume_backup == false)
-			break;
-		recover = 2;
 
 		/* Save any pending state save RPCs */
 		acct_storage_g_close_connection(&acct_db_conn);
-		assoc_mgr_fini();
+
+		if (slurmctld_config.resume_backup == false)
+			break;
+		recover = 2;
 	}
 
 	/* Since pidfile is created as user root (its owner is
@@ -523,6 +503,12 @@ int main(int argc, char *argv[])
 	if (i >= 10)
 		error("Left %d agent threads active", cnt);
 
+	/* Purge our local data structures */
+	job_fini();
+	part_fini();	/* part_fini() must preceed node_fini() */
+	node_fini();
+	trigger_fini();
+
 	/* Plugins are needed to purge job/node data structures,
 	 * unplug after other data structures are purged */
 	g_slurm_jobcomp_fini();
@@ -534,12 +520,6 @@ int main(int argc, char *argv[])
 	slurm_auth_fini();
 	switch_fini();
 	assoc_mgr_fini();
-
-	/* Purge our local data structures */
-	job_fini();
-	part_fini();	/* part_fini() must preceed node_fini() */
-	node_fini();
-	trigger_fini();
 
 	/* purge remaining data structures */
 	slurm_cred_ctx_destroy(slurmctld_config.cred_ctx);
@@ -1000,6 +980,8 @@ static void *_slurmctld_background(void *no_data)
 	static time_t last_sched_time;
 	static time_t last_checkpoint_time;
 	static time_t last_group_time;
+	static time_t last_health_check_time;
+	static time_t last_no_resp_msg_time;
 	static time_t last_ping_node_time;
 	static time_t last_ping_srun_time;
 	static time_t last_purge_job_time;
@@ -1008,7 +990,7 @@ static void *_slurmctld_background(void *no_data)
 	static time_t last_trigger;
 	static time_t last_node_acct;
 	time_t now;
-	int ping_interval;
+	int no_resp_msg_interval, ping_interval;
 	DEF_TIMERS;
 
 	/* Locks: Read config */
@@ -1027,6 +1009,9 @@ static void *_slurmctld_background(void *no_data)
 	/* Locks: Read node */
 	slurmctld_lock_t node_read_lock = { 
 		NO_LOCK, NO_LOCK, READ_LOCK, NO_LOCK };
+	/* Locks: Write node */
+	slurmctld_lock_t node_write_lock2 = { 
+		NO_LOCK, NO_LOCK, WRITE_LOCK, NO_LOCK };
 	/* Locks: Write partition */
 	slurmctld_lock_t part_write_lock = { 
 		NO_LOCK, NO_LOCK, NO_LOCK, WRITE_LOCK };
@@ -1034,15 +1019,19 @@ static void *_slurmctld_background(void *no_data)
 	/* Let the dust settle before doing work */
 	now = time(NULL);
 	last_sched_time = last_checkpoint_time = last_group_time = now;
-	last_purge_job_time = last_trigger = now;
+	last_purge_job_time = last_trigger = last_health_check_time = now;
 	last_timelimit_time = last_assert_primary_time = now;
+	last_no_resp_msg_time = now;
 	if (slurmctld_conf.slurmd_timeout) {
-		/* We ping nodes that haven't responded in SlurmdTimeout/2,
+		/* We ping nodes that haven't responded in SlurmdTimeout/3,
 		 * but need to do the test at a higher frequency or we might
 		 * DOWN nodes with times that fall in the gap. */
 		ping_interval = slurmctld_conf.slurmd_timeout / 3;
-	} else
-		ping_interval = 60 * 60 * 24 * 356;	/* one year */
+	} else {
+		/* This will just ping non-responding nodes
+		 * and restore them to service */
+		ping_interval = 100;	/* 100 seconds */
+	}
 	last_ping_node_time = now + (time_t)MIN_CHECKIN_TIME - ping_interval;
 	last_ping_srun_time = now;
 	last_node_acct = now;
@@ -1056,6 +1045,13 @@ static void *_slurmctld_background(void *no_data)
 
 		now = time(NULL);
 		START_TIMER;
+
+		if (slurmctld_conf.slurmctld_debug <= 3)
+			no_resp_msg_interval = 300;
+		else if (slurmctld_conf.slurmctld_debug == 4)
+			no_resp_msg_interval = 60;
+		else
+			no_resp_msg_interval = 1;
 
 		if (slurmctld_config.shutdown_time) {
 			int i;
@@ -1076,6 +1072,14 @@ static void *_slurmctld_background(void *no_data)
 			break;
 		}
 
+		if (difftime(now, last_no_resp_msg_time) >= 
+		    no_resp_msg_interval) {
+			last_no_resp_msg_time = now;
+			lock_slurmctld(node_write_lock2);
+			node_no_resp_msg();
+			unlock_slurmctld(node_write_lock2);
+		}
+
 		if (difftime(now, last_timelimit_time) >= PERIODIC_TIMEOUT) {
 			last_timelimit_time = now;
 			debug2("Performing job time limit and checkpoint test");
@@ -1085,11 +1089,23 @@ static void *_slurmctld_background(void *no_data)
 			unlock_slurmctld(job_write_lock);
 		}
 
-		if (difftime(now, last_ping_node_time) >= ping_interval) {
+		if (slurmctld_conf.health_check_interval &&
+		    (difftime(now, last_health_check_time) >=
+		     slurmctld_conf.health_check_interval)) {
+			if (is_ping_done()) {
+				last_health_check_time = now;
+				lock_slurmctld(node_write_lock);
+				run_health_check();
+				unlock_slurmctld(node_write_lock);
+			}
+		}
+		if ((difftime(now, last_ping_node_time) >= ping_interval) ||
+		    ping_nodes_now) {
 			static bool msg_sent = false;
 			if (is_ping_done()) {
 				msg_sent = false;
 				last_ping_node_time = now;
+				ping_nodes_now = false;
 				lock_slurmctld(node_write_lock);
 				ping_nodes();
 				unlock_slurmctld(node_write_lock);
@@ -1481,25 +1497,26 @@ _init_pidfile(void)
 /*
  * set_slurmctld_state_loc - create state directory as needed and "cd" to it
  */
-extern int
+extern void
 set_slurmctld_state_loc(void)
 {
-	char *tmp;
+	int rc;
+	struct stat st;
+	const char *path = slurmctld_conf.state_save_location;
 
-	if ((mkdir(slurmctld_conf.state_save_location, 0755) < 0) && 
-	    (errno != EEXIST)) {
-		fatal("mkdir(%s): %m", slurmctld_conf.state_save_location);
-		return SLURM_ERROR;
+	/* 
+	 * If state save location does not exist, try to create it.
+	 *  Otherwise, ensure path is a directory as expected, and that
+	 *  we have permission to write to it.
+	 */
+	if (((rc = stat(path, &st)) < 0) && (errno == ENOENT)) {
+		if (mkdir(path, 0755) < 0)
+			fatal("mkdir(%s): %m", path);
 	}
-
-	tmp = xstrdup(slurmctld_conf.state_save_location);
-	xstrcat(tmp, "/slurm_mkdir_test");
-	if ((mkdir(tmp, 0755) < 0) && (errno != EEXIST)) {
-		fatal("mkdir(%s): %m", tmp);
-		return SLURM_ERROR;
-	}
-	(void) unlink(tmp);
-	xfree(tmp);
-
-	return SLURM_SUCCESS;
+	else if (rc < 0)
+		fatal("Unable to stat state save loc: %s: %m", path);
+	else if (!S_ISDIR(st.st_mode))
+		fatal("State save loc: %s: Not a directory!", path);
+	else if (access(path, R_OK|W_OK|X_OK) < 0)
+		fatal("Incorrect permissions on state save loc: %s", path);
 }

@@ -110,10 +110,10 @@ static bool _slurm_authorized_user(uid_t uid);
 static void _job_limits_free(void *x);
 static int  _job_limits_match(void *x, void *key);
 static bool _job_still_running(uint32_t job_id);
-static int  _init_groups(uid_t my_uid, gid_t my_gid);
 static int  _kill_all_active_steps(uint32_t jobid, int sig, bool batch);
 static int  _terminate_all_steps(uint32_t jobid, bool batch);
 static void _rpc_launch_tasks(slurm_msg_t *);
+static void _rpc_abort_job(slurm_msg_t *);
 static void _rpc_batch_job(slurm_msg_t *);
 static void _rpc_signal_tasks(slurm_msg_t *);
 static void _rpc_checkpoint_tasks(slurm_msg_t *);
@@ -243,6 +243,12 @@ slurmd_req(slurm_msg_t *msg)
 		last_slurmctld_msg = time(NULL);
 		slurm_free_suspend_msg(msg->data);
 		break;
+	case REQUEST_ABORT_JOB:
+		debug2("Processing RPC: REQUEST_ABORT_JOB");
+		last_slurmctld_msg = time(NULL);
+		_rpc_abort_job(msg);
+		slurm_free_kill_job_msg(msg->data);
+		break;
 	case REQUEST_TERMINATE_JOB:
 		debug2("Processing RPC: REQUEST_TERMINATE_JOB");
 		last_slurmctld_msg = time(NULL);
@@ -321,15 +327,14 @@ _send_slurmstepd_init(int fd, slurmd_step_type_t type, void *req,
 	Buf buffer = NULL;
 	slurm_msg_t msg;
 	uid_t uid = (uid_t)-1;
-	struct passwd pwd, *pwd_ptr;
-	char *pwd_buf;
-	size_t buf_size;
 	gids_t *gids = NULL;
 
 	int rank;
 	int parent_rank, children, depth, max_depth;
 	char *parent_alias = NULL;
 	slurm_addr parent_addr = {0};
+	char pwd_buffer[PW_BUF_SIZE];
+	struct passwd pwd, *pwd_result;
 
 	slurm_msg_t_init(&msg);
 	/* send type over to slurmstepd */
@@ -454,10 +459,8 @@ _send_slurmstepd_init(int fd, slurmd_step_type_t type, void *req,
 	
 	/* send cached group ids array for the relevant uid */
 	debug3("_send_slurmstepd_init: call to getpwuid_r");
-	buf_size = sysconf(_SC_GETPW_R_SIZE_MAX);
-	pwd_buf = xmalloc(buf_size);
-	if (getpwuid_r(uid, &pwd, pwd_buf, buf_size, &pwd_ptr)) {
-		xfree(pwd_buf);
+	if (getpwuid_r(uid, &pwd, pwd_buffer, PW_BUF_SIZE, &pwd_result) ||
+	    (pwd_result == NULL)) {
 		error("_send_slurmstepd_init getpwuid_r: %m");
 		len = 0;
 		safe_write(fd, &len, sizeof(int));
@@ -465,7 +468,8 @@ _send_slurmstepd_init(int fd, slurmd_step_type_t type, void *req,
 	}
 	debug3("_send_slurmstepd_init: return from getpwuid_r");
 
-	if ((gids = _gids_cache_lookup(pwd.pw_name, pwd.pw_gid))) {
+	if ((gids = _gids_cache_lookup(pwd_result->pw_name, 
+				       pwd_result->pw_gid))) {
 		int i;
 		uint32_t tmp32;
 		safe_write(fd, &gids->ngids, sizeof(int));
@@ -477,7 +481,6 @@ _send_slurmstepd_init(int fd, slurmd_step_type_t type, void *req,
 		len = 0;
 		safe_write(fd, &len, sizeof(int));
 	}
-	xfree(pwd_buf);
 	return 0;
 
 rwfail:
@@ -778,6 +781,8 @@ _rpc_launch_tasks(slurm_msg_t *msg)
 	slurm_get_ip_str(cli, &port, host, sizeof(host));
 	info("launch task %u.%u request from %u.%u@%s (port %hu)", req->job_id,
 	     req->job_step_id, req->uid, req->gid, host, port);
+	env_array_append(&req->env, "SLURM_SRUN_COMM_HOST", host);
+	req->envc = envcount(req->env);
 
 	first_job_run = !slurm_cred_jobid_cached(conf->vctx, req->job_id);
 	if (_check_job_credential(req, req_uid, nodeid, &step_hset) < 0) {
@@ -896,10 +901,9 @@ _prolog_error(batch_job_launch_msg_t *req, int rc)
 static void
 _get_user_env(batch_job_launch_msg_t *req)
 {
-	struct passwd pwd, *pwd_ptr;
-	char *pwd_buf = NULL;
+	struct passwd pwd, *pwd_ptr = NULL;
+	char pwd_buf[PW_BUF_SIZE];
 	char **new_env;
-	size_t buf_size;
 	int i;
 
 	for (i=0; i<req->argc; i++) {
@@ -909,9 +913,8 @@ _get_user_env(batch_job_launch_msg_t *req)
 	if (i >= req->argc)
 		return;		/* don't need to load env */
 
-	buf_size = sysconf(_SC_GETPW_R_SIZE_MAX);
-	pwd_buf = xmalloc(buf_size);
-	if (getpwuid_r(req->uid, &pwd, pwd_buf, buf_size, &pwd_ptr)) {
+	if (getpwuid_r(req->uid, &pwd, pwd_buf, PW_BUF_SIZE, &pwd_ptr) ||
+	    (pwd_ptr == NULL)) {
 		error("getpwuid_r(%u):%m", req->uid);
 	} else {
 		verbose("get env for user %s here", pwd.pw_name);
@@ -931,7 +934,6 @@ _get_user_env(batch_job_launch_msg_t *req)
 			      "running only with passed environment");
 		}
 	}
-	xfree(pwd_buf);
 }
 
 /* The RPC currently contains a memory size limit, but we load the 
@@ -1739,7 +1741,7 @@ _rpc_timelimit(slurm_msg_t *msg)
 	slurm_close_accepted_conn(msg->conn_fd);
 	msg->conn_fd = -1;
 
-	_kill_all_active_steps(req->job_id, SIGXCPU, true);
+	_kill_all_active_steps(req->job_id, SIG_TIME_LIMIT, true);
 	nsteps = xcpu_signal(SIGTERM, req->nodes) +
 		_kill_all_active_steps(req->job_id, SIGTERM, false);
 	verbose( "Job %u: timeout: sent SIGTERM to %d active steps", 
@@ -1796,34 +1798,12 @@ static void  _rpc_pid2jid(slurm_msg_t *msg)
 }
 
 static int
-_init_groups(uid_t my_uid, gid_t my_gid)
-{
-	char *user_name = uid_to_string(my_uid);
-	int rc;
-
-	if (user_name == NULL) {
-		error("sbcast: Could not find uid %ld", (long)my_uid);
-		return -1;
-	}
-
-	rc = initgroups(user_name, my_gid);
-	xfree(user_name);
-	if (rc) {
- 		error("sbcast: Error in initgroups(%s, %ld): %m",
-		      user_name, (long)my_gid);
-		return -1;
-	}
-	return 0;
-
-}
-
-static int
 _rpc_file_bcast(slurm_msg_t *msg)
 {
 	file_bcast_msg_t *req = msg->data;
 	int fd, flags, offset, inx, rc;
 	uid_t req_uid = g_slurm_auth_get_uid(msg->auth_cred, NULL);
-	gid_t req_gid = g_slurm_auth_get_gid(msg->auth_cred, NULL);
+	uid_t req_gid = g_slurm_auth_get_gid(msg->auth_cred, NULL);
 	pid_t child;
 
 #if 0
@@ -1849,10 +1829,6 @@ _rpc_file_bcast(slurm_msg_t *msg)
 
 	/* The child actually performs the I/O and exits with 
 	 * a return code, do not return! */
-	if (_init_groups(req_uid, req_gid) < 0) {
-		error("sbcast: initgroups(%u): %m", req_uid);
-		exit(errno);
-	}
 	if (setgid(req_gid) < 0) {
 		error("sbcast: uid:%u setgid(%u): %s", req_uid, req_gid, 
 			strerror(errno));
@@ -2578,6 +2554,76 @@ _rpc_suspend_job(slurm_msg_t *msg)
 	}
 }
 
+/* Job shouldn't even be runnin here, abort it immediately */
+static void 
+_rpc_abort_job(slurm_msg_t *msg)
+{
+	kill_job_msg_t *req    = msg->data;
+	uid_t           uid    = g_slurm_auth_get_uid(msg->auth_cred, NULL);
+	char           *bg_part_id = NULL;
+
+	debug("_rpc_abort_job, uid = %d", uid);
+	/* 
+	 * check that requesting user ID is the SLURM UID
+	 */
+	if (!_slurm_authorized_user(uid)) {
+		error("Security violation: abort_job(%ld) from uid %ld",
+		      req->job_id, (long) uid);
+		if (msg->conn_fd >= 0)
+			slurm_send_rc_msg(msg, ESLURM_USER_ID_MISSING);
+		return;
+	} 
+
+	slurmd_release_resources(req->job_id);
+
+	/*
+	 * "revoke" all future credentials for this jobid
+	 */
+	if (slurm_cred_revoke(conf->vctx, req->job_id, req->time) < 0) {
+		debug("revoking cred for job %u: %m", req->job_id);
+	} else {
+		save_cred_state(conf->vctx);
+		debug("credential for job %u revoked", req->job_id);
+	}
+
+	/*
+	 *  At this point, if connection still open, we send controller
+	 *   a "success" reply to indicate that we've recvd the msg.
+	 */
+	if (msg->conn_fd >= 0) {
+		slurm_send_rc_msg(msg, SLURM_SUCCESS);
+		if (slurm_close_accepted_conn(msg->conn_fd) < 0)
+			error ("rpc_abort_job: close(%d): %m", msg->conn_fd);
+		msg->conn_fd = -1;
+	}
+
+	if ((xcpu_signal(SIGKILL, req->nodes) +
+	     _kill_all_active_steps(req->job_id, SIG_ABORT, true)) ) {
+		/*
+		 *  Block until all user processes are complete.
+		 */
+		_pause_for_job_completion (req->job_id, req->nodes, 0);
+	}
+		
+	/*
+	 *  Begin expiration period for cached information about job.
+	 *   If expiration period has already begun, then do not run
+	 *   the epilog again, as that script has already been executed 
+	 *   for this job.
+	 */
+	if (slurm_cred_begin_expiration(conf->vctx, req->job_id) < 0) {
+		debug("Not running epilog for jobid %d: %m", req->job_id);
+		return;
+	}
+
+	save_cred_state(conf->vctx);
+
+	select_g_get_jobinfo(req->select_jobinfo, SELECT_DATA_BLOCK_ID,
+		&bg_part_id);
+	_run_epilog(req->job_id, req->job_uid, bg_part_id);
+	xfree(bg_part_id);
+}
+
 static void 
 _rpc_terminate_job(slurm_msg_t *msg)
 {
@@ -3125,10 +3171,14 @@ _getgroups(void)
 extern void
 init_gids_cache(int cache)
 {
-	struct passwd *pwd;
+	struct passwd pw, *pwd;
 	int ngids;
 	gid_t *orig_gids;
 	gids_t *gids;
+	char buf[BUF_SIZE];
+#ifdef HAVE_AIX
+	FILE *fp = NULL;
+#endif
 
 	if (!cache) {
 		_gids_cache_purge();
@@ -3142,7 +3192,14 @@ init_gids_cache(int cache)
 	orig_gids = (gid_t *)xmalloc(ngids * sizeof(gid_t));
 	getgroups(ngids, orig_gids);
 
-	while ((pwd = getpwent())) {
+#ifdef HAVE_AIX
+	setpwent(&fp);
+	while (!getpwent_r(&pw, buf, BUF_SIZE, &fp)) {
+		pwd = &pw;
+#else
+	setpwent();
+	while (!getpwent_r(&pw, buf, BUF_SIZE, &pwd)) {
+#endif
 		if (_gids_cache_lookup(pwd->pw_name, pwd->pw_gid))
 			continue;
 		if (initgroups(pwd->pw_name, pwd->pw_gid)) {
@@ -3156,7 +3213,11 @@ init_gids_cache(int cache)
 			continue;
 		_gids_cache_register(pwd->pw_name, pwd->pw_gid, gids);
 	}
+#ifdef HAVE_AIX
+	endpwent_r(&fp);
+#else
 	endpwent();
+#endif
 
 	setgroups(ngids, orig_gids);		
 	xfree(orig_gids);

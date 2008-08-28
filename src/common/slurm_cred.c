@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/common/slurm_cred.c - SLURM job credential functions
- *  $Id: slurm_cred.c 14499 2008-07-11 22:54:48Z jette $
+ *  $Id: slurm_cred.c 14884 2008-08-25 21:39:19Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008 Lawrence Livermore National Security.
@@ -418,7 +418,6 @@ slurm_cred_creator_ctx_create(const char *path)
 {
 	slurm_cred_ctx_t ctx = NULL;
 	
-	xassert(path != NULL);
 	if (_slurm_crypto_init() < 0)
 		return NULL;
 
@@ -447,7 +446,6 @@ slurm_cred_verifier_ctx_create(const char *path)
 {
 	slurm_cred_ctx_t ctx = NULL;
 
-	xassert(path != NULL);
 	if (_slurm_crypto_init() < 0)
 		return NULL;
 
