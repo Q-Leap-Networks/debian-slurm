@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  sbatch.c - Submit a SLURM batch script.
  *
- *  $Id: sbatch.c 14812 2008-08-19 00:10:09Z jette $
+ *  $Id: sbatch.c 14958 2008-09-03 17:27:21Z jette $
  *****************************************************************************
  *  Copyright (C) 2006-2007 The Regents of the University of California.
  *  Copyright (C) 2008 Lawrence Livermore National Security.
@@ -347,6 +347,24 @@ static bool contains_null_char(const void *buf, int size)
 }
 
 /*
+ * Checks if the buffer contains any DOS linebreak (\r\n).
+ */
+static bool contains_dos_linebreak(const void *buf, int size)
+{
+	char *str = (char *)buf;
+	char prev_char = '\0';
+	int i;
+
+	for (i = 0; i < size; i++) {
+		if (prev_char == '\r' && str[i] == '\n')
+			return true;
+		prev_char = str[i];
+	}
+
+	return false;
+}
+
+/*
  * If "filename" is NULL, the batch script is read from standard input.
  */
 static void *get_script_buffer(const char *filename, int *size)
@@ -408,6 +426,10 @@ static void *get_script_buffer(const char *filename, int *size)
 	} else if (contains_null_char(buf, script_size)) {
 		error("The SLURM controller does not allow scripts that");
 		error("contain a NULL character '\\0'.");
+		goto fail;
+	} else if (contains_dos_linebreak(buf, script_size)) {
+		error("Batch script contains DOS line breaks (\\r\\n)");
+		error("instead of expected UNIX line breaks (\\n).");
 		goto fail;
 	}
 

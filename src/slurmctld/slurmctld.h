@@ -963,7 +963,7 @@ extern int job_req_node_filter(struct job_record *job_ptr,
  * job_requeue - Requeue a running or pending batch job
  * IN uid - user id of user issuing the RPC
  * IN job_id - id of the job to be requeued
- * IN conn_fd - file descriptor on which to send reply
+ * IN conn_fd - file descriptor on which to send reply, -1 if none
  * RET 0 on success, otherwise ESLURM error code
  */
 extern int job_requeue (uid_t uid, uint32_t job_id, slurm_fd conn_fd);
@@ -1432,6 +1432,16 @@ extern int sync_job_files(void);
  *	last_job_update - time of last job table update
  */
 extern int update_job (job_desc_msg_t * job_specs, uid_t uid);
+
+/*
+ * Modify the account associated with a pending job
+ * IN module - where this is called from
+ * IN job_ptr - pointer to job which should be modified
+ * IN new_account - desired account name
+ * RET SLURM_SUCCESS or error code
+ */
+extern int update_job_account(char *module, struct job_record *job_ptr, 
+			      char *new_account);
 
 /* Reset nodes_completing field for all jobs */
 extern void update_job_nodes_completing(void);
