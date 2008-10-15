@@ -1,6 +1,80 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 1.3.10
+=========================
+
+
+* Changes in SLURM 1.3.9
+========================
+ -- Fix jobs being cancelled by ctrl-C to have correct cancelled state in 
+    accounting.
+ -- Slurmdbd will only cache user data, made for faster start up
+ -- Improved support for job steps in FRONT_END systems
+ -- Added support to dump and load association information in the controller
+    on start up if slurmdbd is unresponsive
+ -- BLUEGENE - Added support for sched/backfill plugin
+ -- sched/backfill modified to initiate multiple jobs per cycle.
+ -- Increase buffer size in srun to hold task list expressions. Critical 
+    for jobs with 16k tasks or more.
+ -- Added support for eligible jobs and downed nodes to be sent to accounting
+    from the controller the first time accounting is turned on.
+ -- Correct srun logic to support --tasks-per-node option without task count.
+ -- Logic in place to handle multiple versions of RPCs within the slurmdbd. 
+    THE SLURMDBD MUST BE UPGRADED TO THIS VERSION BEFORE UPGRADING THE 
+    SLURMCTLD OR THEY WILL NOT TALK.  
+    Older versions of the slurmctld will continue to talk to the new slurmdbd.
+ -- Add support for new job dependency type: singleton. Only one job from a 
+    given user with a given name will execute with this dependency type.
+    From Matthieu Hautreux, CEA.
+ -- Updated contribs/python/hostlist to version 1.3: See "CHANGES" file in
+    that directory for details. From Kent Engstrom, NSC.
+ -- Add SLURM_JOB_NAME environment variable for jobs submitted using sbatch.
+    In order to prevent the job steps from all having the same name as the 
+    batch job that spawned them, the SLURM_JOB_NAME environment variable is
+    ignored when setting the name of a job step from within an existing 
+    resource allocation.
+ -- For use with sched/wiki2 (Moab only), set salloc's default shell based 
+    upon the user who the job runs as rather than the user submitting the job 
+    (user root).
+ -- Fix to sched/backfill when job specifies no time limit and the partition
+    time limit is INFINITE.
+ -- Validate a job's constraints (node features) at job submit or modification 
+    time. Major re-write of resource allocation logic to support more complex
+    job feature requests.
+ -- For sched/backfill, correct logic to support job constraint specification
+    (e.g. node features).
+ -- Correct power save logic to avoid trying to wake DOWN node. From Matthieu
+    Hautreux, CEA.
+ -- Cancel a job step when one of it's nodes goes DOWN based upon the job 
+    step's --no-kill option, by default the step is killed (previously the 
+    job step remained running even without the --no-kill option).
+ -- Fix bug in logic to remove whitespace from plugstack.conf.
+ -- Add new configuration parameter SallocDefaultCommand to control what 
+    shell that salloc launches by default.
+ -- When enforcing PrivateData configuration parameter, failures return 
+    "Access/permission denied" rather than "Invalid user id".
+ -- From sbatch and srun, if the --dependency option is specified then set 
+    the environment variable SLURM_JOB_DEPENDENCY to the same value.
+ -- In plugin jobcomp/filetxt, use ISO8601 formats for time by default (e.g. 
+    YYYY-MM-DDTHH:MM:SS rather than MM/DD-HH:MM:SS). This restores the default
+    behavior from Slurm version 1.2. Change the value of USE_ISO8601 in
+    src/plusings/jobcomp/filetxt/jobcomp_filetxt.c to revert the behavior.
+ -- Add support for configuration option of ReturnToService=2, which will 
+    return a DOWN to use if the node was previous set DOWN for any reason.
+ -- Removed Gold accounting plugin.  This plugin was to be used for accounting 
+    but has seen not been maintained and is no longer needed.  If using this
+    please contact slurm-dev@llnl.gov.
+ -- When not enforcing associations and running accounting if a user 
+    submits a job to an account that does not have an association on the 
+    cluster the account will be changed to the default account to help 
+    avoid trash in the accounting system.  If the users default account 
+    does not have an association on the cluster the requested account 
+    will be used.
+ -- Add configuration parameter "--have-front-end" to define HAVE_FRONT_END 
+    in config.h and run slurmd only on a front end (suitable only for SLURM
+    development and testing).
+
 * Changes in SLURM 1.3.8
 ========================
  -- Added PrivateData flags for Users, Usage, and Accounts to Accounting. 
@@ -469,12 +543,20 @@ documents those changes that are of interest to users and admins.
     Moved existing digital signature logic into new plugin: crypto/openssl.
     Added new support for crypto/munge (available with GPL license).
 
+* Changes in SLURM 1.2.36
+=========================
+ -- For spank_get_item(S_JOB_ARGV) for batch job with script input via STDIN,
+    set argc value to 1 (rather than 2, argv[0] still set to path of generated
+    script).
+
 * Changes in SLURM 1.2.35
 =========================
  -- Permit SPANK plugins to dynamically register options at runtime base upon
     configuration or other runtime checks.
  -- Add "include" keywork to SPANK plugstack.conf file to optionally include
     other configuration files or directories of configuration files.
+ -- Srun to wait indefinitely for resource allocation to be made. Used to
+    abort after two minutes.
 
 * Changes in SLURM 1.2.34
 =========================
@@ -3462,4 +3544,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 14961 2008-09-03 17:38:39Z da $
+$Id: NEWS 15393 2008-10-13 21:02:25Z da $

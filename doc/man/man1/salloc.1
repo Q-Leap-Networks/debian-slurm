@@ -18,7 +18,10 @@ complete, salloc relinquishes the job allocation.
 
 The command may be any program the user wishes.  Some typical commands are 
 xterm, a shell script containing srun commands, and srun (see the EXAMPLES 
-section). If no command is specified, the user's default shell.
+section). If no command is specified, then the value of 
+\fBSallocDefaultCommand\fR in slurm.conf is used. If 
+\fBSallocDefaultCommand\fR is not set, then \fBsalloc\fR runs the 
+user's default shell.
 
 .SH "OPTIONS"
 .LP 
@@ -97,6 +100,11 @@ The \fIlist\fR of constraints may include multiple features separated
 by ampersand (AND) and/or vertical bar (OR) operators.
 For example: \fB\-\-constraint="opteron&video"\fR or 
 \fB\-\-constraint="fast|faster"\fR.
+In the first example, only nodes having both the feature "opteron" AND
+the feature "video" will be used.
+There is no mechanism to specify that you want one node with feature
+"opteron" and another node with feature "video" in that case that no
+node has both features.
 If only one of a set of possible options should be used for all allocated 
 nodes, then use the OR operator and enclose the options within square brackets. 
 For example: "\fB\-\-constraint="[rack1|rack2|rack3|rack4]"\fR might 
@@ -488,6 +496,10 @@ in some failed state (non-zero exit code, node failure, timed out, etc).
 \fBafterok:job_id[:jobid...]\fR
 This job can begin execution after the specified jobs have successfully
 executed (ran to completion with non-zero exit code).
+.TP
+\fBsingleton\fR
+This job can begin execution after any previously launched jobs sharing the same
+job name and user have terminated.
 .RE
 
 .TP

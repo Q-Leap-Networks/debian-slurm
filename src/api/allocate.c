@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  allocate.c - allocate nodes for a job or step with supplied contraints
- *  $Id: allocate.c 14571 2008-07-18 22:25:56Z jette $
+ *  $Id: allocate.c 14992 2008-09-05 20:10:34Z da $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -262,7 +262,7 @@ slurm_allocate_resources_blocking (const job_desc_msg_t *user_req,
 							     timeout);
 			/* If NULL, we didn't get the allocation in 
 			   the time desired, so just free the job id */
-			if (resp == NULL) {
+			if (resp == NULL && errno != ESLURM_ALREADY_DONE) {
 				errnum = errno;
 				slurm_complete_job(job_id, -1);
 			}

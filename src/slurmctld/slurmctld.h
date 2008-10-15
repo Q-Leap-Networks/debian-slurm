@@ -166,6 +166,7 @@ extern int bg_recover;		/* state recovery mode */
 extern char *slurmctld_cluster_name; /* name of cluster */
 extern void *acct_db_conn;
 extern int accounting_enforce;
+extern int association_based_accounting;
 
 /*****************************************************************************\
  *  NODE parameters and data structures
@@ -184,6 +185,7 @@ struct config_record {
 	uint32_t weight;	/* arbitrary priority of node for 
 				 * scheduling work on */
 	char *feature;		/* arbitrary list of features associated */
+	char **feature_array;	/* array of feature names */
 	char *nodes;		/* name of nodes with this configuration */
 	bitstr_t *node_bitmap;	/* bitmap of nodes with this configuration */
 };
@@ -455,6 +457,7 @@ struct job_record {
 #define SLURM_DEPEND_AFTER_ANY		2
 #define SLURM_DEPEND_AFTER_NOT_OK	3
 #define SLURM_DEPEND_AFTER_OK		4
+#define SLURM_DEPEND_SINGLETON		5
 struct	depend_spec {
 	uint16_t	depend_type;	/* SLURM_DEPEND_* type */
 	uint32_t	job_id;		/* SLURM job_id */
@@ -543,6 +546,10 @@ extern void abort_job_on_node(uint32_t job_id, struct job_record *job_ptr,
  * NOTE: the caller must xfree the memory at node_list when no longer required
  */
 extern char * bitmap2node_name (bitstr_t *bitmap) ;
+
+/* Given a config_record, clear any existing feature_array and
+ * if feature is set, then rebuild feature_array */
+extern void  build_config_feature_array(struct config_record *config_ptr);
 
 /*
  * create_config_record - create a config_record entry and set is values to 
@@ -1309,6 +1316,16 @@ extern void run_health_check(void);
 /* save_all_state - save entire slurmctld state for later recovery */
 extern void save_all_state(void);
 
+/* sends all jobs in eligible state to accounting.  Only needed at
+ * first registration
+ */
+extern int send_jobs_to_accounting(time_t event_time);
+
+/* send all nodes in a down like state to accounting.  Only needed at
+ * first registration
+ */
+extern int send_nodes_to_accounting(time_t event_time);
+
 /*
  * set_node_down - make the specified node's state DOWN if possible
  *	(not in a DRAIN state), kill jobs as needed 
@@ -1411,7 +1428,7 @@ extern bool step_on_node(struct job_record  *job_ptr,
  * RET 0 on success, otherwise ESLURM error code
  */
 extern int step_partial_comp(step_complete_msg_t *req, int *rem,
-		int *max_rc);
+			     uint32_t *max_rc);
 
 /* Update time stamps for job step suspend */
 extern void suspend_job_step(struct job_record *job_ptr);

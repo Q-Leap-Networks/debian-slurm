@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  sbatch.c - Submit a SLURM batch script.
  *
- *  $Id: sbatch.c 14958 2008-09-03 17:27:21Z jette $
+ *  $Id: sbatch.c 15034 2008-09-09 20:24:34Z jette $
  *****************************************************************************
  *  Copyright (C) 2006-2007 The Regents of the University of California.
  *  Copyright (C) 2008 Lawrence Livermore National Security.
@@ -406,7 +406,8 @@ static void *get_script_buffer(const char *filename, int *size)
 		ptr = buf + script_size;
 		buf_left = buf_size - script_size;
 	}
-	close(fd);
+	if (filename)
+		close(fd);
 
 	/*
 	 * Finally we perform some sanity tests on the script.

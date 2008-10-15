@@ -1,12 +1,11 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 #
-# Hostlist library and utility
+# Hostlist library
 #
-# Version 1.0
-#
-# Copyright (C) 2008 Kent Engström <kent@nsc.liu.se> and
-#                    Thomas Bellman <bellman@nsc.liu.se>,
+# Copyright (C) 2008 Kent Engström <kent@nsc.liu.se>,
+#                    Thomas Bellman <bellman@nsc.liu.se> and
+#                    Pär Andersson <paran@nsc.liu.se>,
 #                    National Supercomputer Centre
 # 
 # This program is free software; you can redistribute it and/or modify
@@ -24,8 +23,18 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 # 02110-1301, USA.
 
-# WARNING: The behaviour in corner cases have not been compared for
-# compatibility with pdsh/dshbak/SLURM et al.
+"""Handle hostlist expressions.
+
+This module provides operations to expand and collect hostlist
+expressions.
+
+The hostlist expression syntax is the same as in several programs
+developed at LLNL (https://computing.llnl.gov/linux/). However in
+corner cases the behaviour of this module have not been compared for
+compatibility with pdsh/dshbak/SLURM et al.
+"""
+
+__version__ = "1.3"
 
 import re
 import itertools
@@ -39,7 +48,7 @@ MAX_SIZE = 100000
 # Hostlist expansion
 
 def expand_hostlist(hostlist, allow_duplicates=False, sort=False):
-    """Expand a Livermore hostlist string to a Python list.
+    """Expand a hostlist expression string to a Python list.
 
     Exemple: expand_hostlist("n[9-11],d[01-02]") ==> 
              ['n9', 'n10', 'n11', 'd01', 'd02']
@@ -344,83 +353,10 @@ def numeric_sort_key(x):
 
     
 #
-# The library stuff ends here. Now lets do something useful
-# when called from the command line too :-)
+# Keep this part to tell users where the command line interface went
 #
 
 if __name__ == '__main__':
-    import optparse
-    import sys
-    import operator
-    import os
-
-    def func_union(args):
-        return reduce(operator.or_, args)
-
-    def func_intersection(args):
-        return reduce(operator.and_, args)
-
-    def func_difference(args):
-        return reduce(operator.sub, args)
-
-    def func_xor(args):
-        return reduce(operator.xor, args)
-
-    op = optparse.OptionParser(usage="usage: %prog [options] {hostlist arguments}")
-    op.add_option("-u", "--union",
-                  action="store_const", dest="func", const=func_union,
-                  default=func_union,
-                  help="compute the union of the hostlist arguments (default)")
-    op.add_option("-i", "--intersection",
-                  action="store_const", dest="func", const=func_intersection,
-                  help="compute the intersection of the hostlist arguments")
-    op.add_option("-d", "--difference",
-                  action="store_const", dest="func", const=func_difference,
-                  help="compute the difference between the first hostlist argument and the rest")
-    op.add_option("-x", "--symmetric-difference",
-                  action="store_const", dest="func", const=func_xor,
-                  help="compute the symmetric difference between the first hostlist argument and the rest")
-    op.add_option("-w", "--expand",
-                  action="store_true",
-                  help="output the results as an expanded list")
-    op.add_option("-c", "--collapse",
-                  action="store_false", dest="expand",
-                  help="output the results as a hostlist expression (default)")
-    op.add_option("-n", "--count",
-                  action="store_true",
-                  help="output the number of hosts instead of a hostlist")
-    (opts, args) = op.parse_args()
-
-    func = opts.func
-
-    func_args  = []
-
-    try:
-        for a in args:
-            if a == "-":
-                for a in sys.stdin.read().split():
-                    func_args.append(set(expand_hostlist(a)))
-            else:
-                func_args.append(set(expand_hostlist(a)))
-    except BadHostlist, e:
-        sys.stderr.write("Bad hostlist ``%s'' encountered: %s\n"
-                         % ((a,) + e.args))
-        sys.exit(os.EX_DATAERR)
-
-    if not func_args:
-        op.print_help()
-        sys.exit(os.EX_USAGE)
-
-    res = func(func_args)
-
-    if opts.count:
-        print len(res)
-    elif opts.expand:
-        for host in numerically_sorted(res):
-            print host
-    else:
-        try:
-            print collect_hostlist(res)
-        except BadHostlist, e:
-            sys.stderr.write("Bad hostname encountered: %s\n" % e.args)
-            sys.exit(os.EX_DATAERR)
+    import os, sys
+    sys.stderr.write("The command line utility has been moved to a separate 'hostlist' program.\n")
+    sys.exit(os.EX_USAGE)

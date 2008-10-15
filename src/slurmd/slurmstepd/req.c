@@ -174,10 +174,16 @@ _domain_socket_create(const char *dir, const char *nodename,
 	 * First check to see if the named socket already exists.
 	 */
 	if (stat(name, &stat_buf) == 0) {
-		error("Socket %s already exists", name);
-		xfree(name);
-		errno = ESLURMD_STEP_EXISTS;
-		return -1;
+		/* Vestigial from a slurmd crash or job requeue that did not
+		 * happen properly (very rare conditions). Try another name */
+		xstrcat(name, ".ALT");
+		if (stat(name, &stat_buf) == 0) {
+			error("Socket %s already exists", name);
+			xfree(name);
+			errno = ESLURMD_STEP_EXISTS;
+			return -1;
+		}
+		error("Using alternate socket name %s", name);
 	}
 
 	fd = _create_socket(name);
@@ -719,7 +725,8 @@ _handle_signal_container(int fd, slurmd_job_t *job, uid_t uid)
 		goto done;
 	}
 
-	if ((job->nodeid == 0) && (msg_sent == 0)) {
+	if ((job->nodeid == 0) && (msg_sent == 0) && 
+	    (job->state < SLURMSTEPD_STEP_ENDING)) {
 		time_t now = time(NULL);
 		char entity[24], time_str[24];
 		if (job->stepid == SLURM_BATCH_SCRIPT) {

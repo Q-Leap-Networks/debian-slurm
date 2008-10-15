@@ -85,8 +85,10 @@ SLURM RPM?</li>
 <li><a href="#slurmdbd">Why should I use the slurmdbd instead of the
 regular database plugins?</li>
 <li><a href="#debug">How can I build SLURM with debugging symbols?</li>
-<li><a href="#state_preserve">How can I easily preserve drained node information 
-between major SLURM updates?</li>
+<li><a href="#state_preserve">How can I easily preserve drained node 
+information between major SLURM updates?</li>
+<li><a href="#health_check">Why doesn't the <i>HealthCheckProgram</i>
+execute on DOWN nodes?</li>
 </ol>
 
 <h2>For Users</h2>
@@ -735,25 +737,7 @@ of the node that it is supposed to serve on the execute line.</li>
 for this due to it's improved support for multiple slurmd daemons.
 See the
 <a href="programmer_guide.shtml#multiple_slurmd_support">Programmers Guide</a>
-for more details about configuring multiple slurmd support.
-<p>In order to emulate a really large cluster, it can be more 
-convenient to use a single <i>slurmd</i> daemon. 
-That daemon will not be able to launch many tasks, but can 
-suffice for developing or testing scheduling software.
-<ol>
-<li>Execute the <i>configure</i> program with your normal options.</li>
-<li>Add the line "<i>#define HAVE_FRONT_END 1</i>" to the resulting
-<i>config.h</i> file.</li>
-<li>Build and install SLURM in the usual manner.</li>
-<li>In <i>slurm.conf</i> define the desired node names (arbitrary
-names used only by SLURM) as <i>NodeName</i> along with the actual
-address of the <b>one</b> physical node in <i>NodeHostname</i>.
-Up to 64k nodes can be configured in this virtual cluster.</li>
-<li>Start your <i>slurmctld</i> and one <i>slurmd</i> daemon.</li>
-<li>Create job allocations as desired, but <b>do not run job steps
-with more than a couple of tasks.</b> Doing so may result in the 
-<i>slurmd</i> daemon exhausting its memory and failing.</li>
-</ol>
+for more details about configuring multiple slurmd support.</p>
 
 <p>In order to emulate a really large cluster, it can be more 
 convenient to use a single <i>slurmd</i> daemon. 
@@ -765,9 +749,9 @@ Doing so may result in the <i>slurmd</i> daemon exhausting its
 memory and failing. 
 <b>Use this method with caution.</b>
 <ol>
-<li>Execute the <i>configure</i> program with your normal options.</li>
-<li>Append the line "<i>#define HAVE_FRONT_END 1</i>" to the resulting
-<i>config.h</i> file.</li>
+<li>Execute the <i>configure</i> program with your normal options
+plus <i>--enable-front-end</i> (this will define HAVE_FRONT_END in
+the resulting <i>config.h</i> file.</li>
 <li>Build and install SLURM in the usual manner.</li>
 <li>In <i>slurm.conf</i> define the desired node names (arbitrary
 names used only by SLURM) as <i>NodeName</i> along with the actual
@@ -781,9 +765,9 @@ Be sure to use the "-c" option when switch from this mode too.</li>
 <li>Create job allocations as desired, but do not run job steps
 with more than a couple of tasks.</li>
 </ol>
+
 <pre>
-$ ./configure --enable-debug --prefix=... --sysconfdir=...
-$ echo "#define HAVE_FRONT_END 1" >>config.h
+$ ./configure --enable-debug --enable-front-end --prefix=... --sysconfdir=...
 $ make install
 $ grep NodeHostName slurm.conf
 <i>NodeName=dummy[1-1200] NodeHostName=localhost NodeAddr=127.0.0.1</i>
@@ -890,7 +874,12 @@ about these options.
 clocks on the cluster?</b></a><br>
 In general, yes. Having inconsistent clocks may cause nodes to 
 be unusable. SLURM log files should contain references to 
-expired credentials.
+expired credentials. For example:
+<pre>
+error: Munge decode failed: Expired credential
+ENCODED: Wed May 12 12:34:56 2008
+DECODED: Wed May 12 12:01:12 2008
+</pre>
 
 <p><a name="cred_invalid"><b>21. Why are &quot;Invalid job credential&quot; 
 errors generated?</b></a><br>
@@ -999,8 +988,36 @@ in a form that can be executed later to restore state.
 sinfo -t drain -h -o "scontrol update nodename='%N' state=drain reason='%E'"
 </pre>
 
+<p><a name="health_check"><b>31. Why doesn't the <i>HealthCheckProgram</i>
+execute on DOWN nodes?</b><br>
+Hierarchical communications are used for sending this message. If there
+are DOWN nodes in the communications hierarchy, messages will need to 
+be re-routed. This limits SLURM's ability to tightly synchroize the 
+execution of the <i>HealthCheckProgram</i> across the cluster, which
+could adversly impact performance of parallel applications. 
+The use of CRON or node startup scripts may be better suited to insure
+that <i>HealthCheckProgram</i> gets executed on nodes that are DOWN
+in SLURM. If you still want to have SLURM try to execute 
+<i>HealthCheckProgram</i> on DOWN nodes, apply the following patch:
+<pre>
+Index: src/slurmctld/ping_nodes.c
+===================================================================
+--- src/slurmctld/ping_nodes.c  (revision 15166)
++++ src/slurmctld/ping_nodes.c  (working copy)
+@@ -283,9 +283,6 @@
+                node_ptr   = &node_record_table_ptr[i];
+                base_state = node_ptr->node_state & NODE_STATE_BASE;
+
+-               if (base_state == NODE_STATE_DOWN)
+-                       continue;
+-
+ #ifdef HAVE_FRONT_END          /* Operate only on front-end */
+                if (i > 0)
+                        continue;
+</pre>
+
 <p class="footer"><a href="#top">top</a></p>
 
-<p style="text-align:center;">Last modified 2 September 2008</p>
+<p style="text-align:center;">Last modified 7 October 2008</p>
 
 <!--#include virtual="footer.txt"-->

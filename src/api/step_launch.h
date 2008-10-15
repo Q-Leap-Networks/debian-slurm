@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  step_launch.h - launch a parallel job step
  *
- *  $Id: step_launch.h 13672 2008-03-19 23:10:58Z jette $
+ *  $Id: step_launch.h 15262 2008-10-01 22:58:26Z jette $
  *****************************************************************************
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -58,6 +58,7 @@ struct step_launch_state {
 	bitstr_t *tasks_exited;  /* or never started correctly */
 	bool abort;
 	bool abort_action_taken;
+	bool no_kill;
 
 	/* message thread variables */
 	eio_handle_t *msg_handle;

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/srun/allocate.c - srun functions for managing node allocations
- * $Id: allocate.c 14684 2008-08-01 19:57:23Z jette $
+ * $Id: allocate.c 15262 2008-10-01 22:58:26Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -96,7 +96,7 @@ static void _signal_while_allocating(int signo)
 {
 	destroy_job = 1;
 	if (pending_job_id != 0) {
-		slurm_complete_job(pending_job_id, 0);
+		slurm_complete_job(pending_job_id, NO_VAL);
 	}
 }
 
@@ -343,7 +343,10 @@ job_desc_msg_create_from_opts ()
 	j->contiguous     = opt.contiguous;
 	j->features       = opt.constraints;
 	j->immediate      = opt.immediate;
-	j->name           = opt.job_name;
+	if (opt.job_name)
+		j->name   = opt.job_name;
+	else
+		j->name   = opt.cmd_name;
 	j->req_nodes      = xstrdup(opt.nodelist);
 	
 	/* simplify the job allocation nodelist, 
@@ -509,7 +512,7 @@ create_job_step(srun_job_t *job)
 
 	job->ctx_params.node_count = job->nhosts;
 	if (!opt.nprocs_set && (opt.ntasks_per_node != NO_VAL))
-		 opt.nprocs = job->nhosts * opt.ntasks_per_node;
+		job->ntasks = opt.nprocs = job->nhosts * opt.ntasks_per_node;
 	job->ctx_params.task_count = opt.nprocs;
 	
 	job->ctx_params.cpu_count = opt.overcommit ? job->ctx_params.node_count
@@ -547,7 +550,11 @@ create_job_step(srun_job_t *job)
 	job->ctx_params.node_list = opt.nodelist;
 	
 	job->ctx_params.network = opt.network;
-	job->ctx_params.name = opt.job_name;
+	job->ctx_params.no_kill = opt.no_kill;
+	if (opt.job_name_set_cmd && opt.job_name)
+		job->ctx_params.name = opt.job_name;
+	else
+		job->ctx_params.name = opt.cmd_name;
 	
 	debug("requesting job %u, user %u, nodes %u including (%s)", 
 	      job->ctx_params.job_id, job->ctx_params.uid,
@@ -578,7 +585,7 @@ create_job_step(srun_job_t *job)
 		}
 		
 		if (i == 0) {
-			info("Job step creation temporarily disabled, retrying");	
+			info("Job step creation temporarily disabled, retrying");
 			ointf  = xsignal(SIGINT,  _intr_handler);
 			otermf  = xsignal(SIGTERM, _intr_handler);
 			oquitf  = xsignal(SIGQUIT, _intr_handler);

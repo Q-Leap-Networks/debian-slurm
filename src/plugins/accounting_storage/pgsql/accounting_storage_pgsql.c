@@ -240,6 +240,7 @@ static int _pgsql_acct_check_tables(PGconn *acct_pgsql_db,
 		{ "associd", "bigint not null" },
 		{ "uid", "smallint not null" },
 		{ "gid", "smallint not null" },
+		{ "cluster", "text" },
 		{ "partition", "text not null" },
 		{ "blockid", "text" },
 		{ "account", "text" },
@@ -700,6 +701,22 @@ extern int init ( void )
 
 	first = 0;
 
+	if(slurmdbd_conf) {
+		error("This plugin is not fully compatible with association "
+		      "logic.  Please use the mysql plugin for full "
+		      "compatiablitly.  If you are interested in filling "
+		      "this plugin in please send email to "
+		      "slurm-dev@lists.llnl.gov. Job accounting without "
+		      "associations will continue to work.");
+	} else {
+		error("This plugin is not fully compatible with association "
+		      "logic.  Please use the mysql or slurmdbd/mysql plugin "
+		      "for full compatiablitly.  If you are interested in "
+		      "filling this plugin in please send email to "
+		      "slurm-dev@lists.llnl.gov.  Job accounting without "
+		      "associations will continue to work.");
+	}
+
 #ifdef HAVE_PGSQL
 	pgsql_db_info = _pgsql_acct_create_db_info();		
 
@@ -752,7 +769,8 @@ extern int fini ( void )
 #endif
 }
 
-extern void *acct_storage_p_get_connection(bool make_agent, bool rollback)
+extern void *acct_storage_p_get_connection(bool make_agent, int conn_num,
+					   bool rollback)
 {
 #ifdef HAVE_PGSQL
 	PGconn *acct_pgsql_db = NULL;
@@ -848,6 +866,13 @@ extern List acct_storage_p_modify_associations(
 	PGconn *acct_pgsql_db, uint32_t uid,
 	acct_association_cond_t *assoc_cond,
 	acct_association_rec_t *assoc)
+{
+	return SLURM_SUCCESS;
+}
+
+extern List acct_storage_p_modify_qos(PGconn *acct_pgsql_db, uint32_t uid,
+				      acct_qos_cond_t *qos_cond,
+				      acct_qos_rec_t *qos)
 {
 	return SLURM_SUCCESS;
 }
@@ -1098,6 +1123,7 @@ extern int clusteracct_storage_p_get_usage(
  * load into the storage the start of a job
  */
 extern int jobacct_storage_p_job_start(PGconn *acct_pgsql_db, 
+				       char *cluster_name,
 				       struct job_record *job_ptr)
 {
 #ifdef HAVE_PGSQL
@@ -1143,7 +1169,7 @@ extern int jobacct_storage_p_job_start(PGconn *acct_pgsql_db,
 	if (job_ptr->nodes && job_ptr->nodes[0])
 		nodes = job_ptr->nodes;
 	else
-		nodes = "(null)";
+		nodes = "None assigned";
 
 	if(job_ptr->batch_flag)
 		track_steps = 1;
@@ -1161,23 +1187,43 @@ extern int jobacct_storage_p_job_start(PGconn *acct_pgsql_db,
 	if(!job_ptr->db_index) {
 		query = xstrdup_printf(
 			"insert into %s "
-			"(jobid, account, associd, uid, gid, partition, "
-			"blockid, eligible, submit, start, name, track_steps, "
-			"state, priority, req_cpus, alloc_cpus, nodelist) "
-			"values (%u, '%s', %u, %u, %u, '%s', '%s', "
-			"%d, %d, %d, '%s', %u, "
-			"%u, %u, %u, %u, '%s')",
-			job_table, job_ptr->job_id, job_ptr->account, 
-			job_ptr->assoc_id,
-			job_ptr->user_id, job_ptr->group_id,
-			job_ptr->partition, block_id,
-			(int)job_ptr->details->begin_time,
-			(int)job_ptr->details->submit_time,
-			(int)job_ptr->start_time,
-			jname, track_steps,
-			job_ptr->job_state & (~JOB_COMPLETING),
-			priority, job_ptr->num_procs,
-			job_ptr->total_procs, nodes);
+			"(jobid, associd, uid, gid, nodelist, ",
+			job_table);
+
+		if(cluster_name) 
+			xstrcat(query, "cluster, ");
+		if(job_ptr->account) 
+			xstrcat(query, "account, ");
+		if(job_ptr->partition) 
+			xstrcat(query, "partition, ");
+		if(block_id) 
+			xstrcat(query, "blockid, ");
+		
+		xstrfmtcat(query, 
+			   "eligible, submit, start, name, track_steps, "
+			   "state, priority, req_cpus, alloc_cpus) "
+			   "values (%u, %u, %u, %u, '%s', ",
+			   job_ptr->job_id, job_ptr->assoc_id,
+			   job_ptr->user_id, job_ptr->group_id, nodes);
+		
+		if(cluster_name) 
+			xstrfmtcat(query, "'%s', ", cluster_name);
+		if(job_ptr->account) 
+			xstrfmtcat(query, "'%s', ", job_ptr->account);
+		if(job_ptr->partition) 
+			xstrfmtcat(query, "'%s', ", job_ptr->partition);
+		if(block_id) 
+			xstrfmtcat(query, "'%s', ", block_id);
+		
+		xstrfmtcat(query, 
+			   "%d, %d, %d, '%s', %u, %u, %u, %u, %u)",
+			   (int)job_ptr->details->begin_time,
+			   (int)job_ptr->details->submit_time,
+			   (int)job_ptr->start_time,
+			   jname, track_steps,
+			   job_ptr->job_state & (~JOB_COMPLETING),
+			   priority, job_ptr->num_procs,
+			   job_ptr->total_procs);
 	try_again:
 		if(!(job_ptr->db_index = pgsql_insert_ret_id(acct_pgsql_db,  
 							     "job_table_id_seq",
@@ -1195,16 +1241,24 @@ extern int jobacct_storage_p_job_start(PGconn *acct_pgsql_db,
 				rc = SLURM_ERROR;
 		}
 	} else {
-		query = xstrdup_printf(
-			"update %s set partition='%s', blockid='%s', start=%d, "
-			"name='%s', state=%u, alloc_cpus=%u, nodelist='%s', "
-			"account='%s', end=0 where id=%d",
-			job_table, job_ptr->partition, block_id,
-			(int)job_ptr->start_time,
-			jname, 
-			job_ptr->job_state & (~JOB_COMPLETING),
-			job_ptr->total_procs, nodes,
-			job_ptr->account, job_ptr->db_index);
+		query = xstrdup_printf("update %s set nodelist='%s', ", 
+				       job_table, nodes);
+
+		if(job_ptr->account) 
+			xstrfmtcat(query, "account='%s', ",
+				   job_ptr->account);
+		if(job_ptr->partition) 
+			xstrfmtcat(query, "partition='%s', ",
+				   job_ptr->partition);
+		if(block_id)
+			xstrfmtcat(query, "blockid='%s', ", block_id);
+
+		xstrfmtcat(query, "start=%d, name='%s', state=%u, "
+			   "alloc_cpus=%u, associd=%d where id=%d",
+			   (int)job_ptr->start_time,
+			   jname, job_ptr->job_state & (~JOB_COMPLETING),
+			   job_ptr->total_procs, job_ptr->assoc_id,
+			   job_ptr->db_index);
 		rc = pgsql_db_query(acct_pgsql_db, query);
 	}
 	xfree(block_id);
@@ -1250,19 +1304,29 @@ extern int jobacct_storage_p_job_complete(PGconn *acct_pgsql_db,
 	if (job_ptr->nodes && job_ptr->nodes[0])
 		nodes = job_ptr->nodes;
 	else
-		nodes = "(null)";
-
+		nodes = "None assigned";
+	
 	if(!job_ptr->db_index) {
-		job_ptr->db_index = _get_db_index(acct_pgsql_db,
-						  job_ptr->details->submit_time,
-						  job_ptr->job_id,
-						  job_ptr->assoc_id);
-		if(job_ptr->db_index == -1) 
-			return SLURM_ERROR;
+		if(!(job_ptr->db_index =
+		     _get_db_index(acct_pgsql_db,
+				   job_ptr->details->submit_time,
+				   job_ptr->job_id,
+				   job_ptr->assoc_id))) {
+			/* If we get an error with this just fall
+			 * through to avoid an infinite loop
+			 */
+			if(jobacct_storage_p_job_start(
+				   acct_pgsql_db, NULL, job_ptr)
+			   == SLURM_ERROR) {
+				error("couldn't add job %u at job completion",
+				      job_ptr->job_id);
+				return SLURM_SUCCESS;
+			}
+		}
 	}
-	query = xstrdup_printf("update %s set start=%u, endtime=%u, state=%d, "
-			       "nodelist='%s', comp_code=%u, "
-			       "kill_requid=%u where id=%u",
+	query = xstrdup_printf("update %s set start=%d, endtime=%d, state=%d, "
+			       "nodelist='%s', comp_code=%d, "
+			       "kill_requid=%d where id=%d",
 			       job_table, (int)job_ptr->start_time,
 			       (int)job_ptr->end_time, 
 			       job_ptr->job_state & (~JOB_COMPLETING),
@@ -1385,7 +1449,8 @@ extern int jobacct_storage_p_step_complete(PGconn *acct_pgsql_db,
 	float ave_cpu = 0, ave_cpu2 = 0;
 	char *query = NULL;
 	int rc =SLURM_SUCCESS;
-	
+	uint32_t exit_code;
+
 	if (!step_ptr->job_ptr->db_index 
 	    && (!step_ptr->job_ptr->details
 		|| !step_ptr->job_ptr->details->submit_time)) {
@@ -1425,7 +1490,12 @@ extern int jobacct_storage_p_step_complete(PGconn *acct_pgsql_db,
 
 	if ((elapsed=now-step_ptr->start_time)<0)
 		elapsed=0;	/* For *very* short jobs, if clock is wrong */
-	if (step_ptr->exit_code)
+
+	exit_code = step_ptr->exit_code;
+	if (exit_code == NO_VAL) {
+		comp_status = JOB_CANCELLED;
+		exit_code = 0;
+	} else if (exit_code)
 		comp_status = JOB_FAILED;
 	else
 		comp_status = JOB_COMPLETE;
@@ -1475,7 +1545,7 @@ extern int jobacct_storage_p_step_complete(PGconn *acct_pgsql_db,
 		step_table, (int)now,
 		comp_status,
 		step_ptr->job_ptr->requid, 
-		step_ptr->exit_code, 
+		exit_code, 
 		/* user seconds */
 		jobacct->user_cpu_sec,	
 		/* user microseconds */

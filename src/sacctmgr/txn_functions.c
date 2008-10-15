@@ -51,6 +51,9 @@ static int _set_cond(int *start, int argc, char *argv[],
 		end = parse_option_end(argv[i]);
 		if(!end && !strncasecmp(argv[i], "where", 5)) {
 			continue;
+		} if(!end && !strncasecmp(argv[i], "withassocinfo", 5)) {
+			txn_cond->with_assoc_info = 1;
+			set = 1;
 		} else if(!end
 			  || (!strncasecmp (argv[i], "Id", 1))
 			  || (!strncasecmp (argv[i], "Txn", 1))) {
@@ -61,32 +64,53 @@ static int _set_cond(int *start, int argc, char *argv[],
 			if(slurm_addto_char_list(txn_cond->id_list, 
 						 argv[i]+end))
 				set = 1;
+		} else if (!strncasecmp (argv[i], "Accounts", 3)) {
+			if(!txn_cond->acct_list)
+				txn_cond->acct_list =
+					list_create(slurm_destroy_char);
+			if(slurm_addto_char_list(txn_cond->acct_list,
+						 argv[i]+end))
+				set = 1;
 		} else if (!strncasecmp (argv[i], "Action", 4)) {
-			/* FIX ME! fill this in */
-/* 			if(!txn_cond->action_list) */
-/* 				txn_cond->action_list =  */
-/* 					list_create(slurm_destroy_char); */
+			if(!txn_cond->action_list)
+				txn_cond->action_list =
+					list_create(slurm_destroy_char);
 
-/* 			if(slurm_addto_char_list(txn_cond->action_list, */
-/* 					argv[i]+end)) */
-/* 			set = 1; */
-		} else if (!strncasecmp (argv[i], "Actors", 4)
-			   || !strncasecmp (argv[i], "User", 1)) {
+			if(addto_action_char_list(txn_cond->action_list,
+						  argv[i]+end))
+				set = 1;
+			else
+				exit_code=1;
+		} else if (!strncasecmp (argv[i], "Actors", 4)) {
 			if(!txn_cond->actor_list)
 				txn_cond->actor_list =
 					list_create(slurm_destroy_char);
 			if(slurm_addto_char_list(txn_cond->actor_list,
 						 argv[i]+end))
 				set = 1;
+		} else if (!strncasecmp (argv[i], "Clusters", 3)) {
+			if(!txn_cond->cluster_list)
+				txn_cond->cluster_list =
+					list_create(slurm_destroy_char);
+			if(slurm_addto_char_list(txn_cond->cluster_list,
+						 argv[i]+end))
+				set = 1;
 		} else if (!strncasecmp (argv[i], "End", 1)) {
-			txn_cond->time_end = parse_time(argv[i]+end);
+			txn_cond->time_end = parse_time(argv[i]+end, 1);
 			set = 1;
 		} else if (!strncasecmp (argv[i], "Format", 1)) {
 			if(format_list)
 				slurm_addto_char_list(format_list, argv[i]+end);
 		} else if (!strncasecmp (argv[i], "Start", 1)) {
-			txn_cond->time_start = parse_time(argv[i]+end);
+			txn_cond->time_start = parse_time(argv[i]+end, 1);
 			set = 1;
+		} else if (!strncasecmp (argv[i], "User", 1)) {
+			if(!txn_cond->user_list)
+				txn_cond->user_list =
+					list_create(slurm_destroy_char);
+			if(slurm_addto_char_list(txn_cond->user_list,
+						 argv[i]+end))
+				set = 1;
 		} else {
 			exit_code=1;
 			fprintf(stderr, " Unknown condition: %s\n", argv[i]);
@@ -108,6 +132,7 @@ extern int sacctmgr_list_txn(int argc, char *argv[])
 	ListIterator itr = NULL;
 	ListIterator itr2 = NULL;
 	char *object = NULL;
+	int field_count = 0;
 
 	print_field_t *field = NULL;
 
@@ -115,11 +140,14 @@ extern int sacctmgr_list_txn(int argc, char *argv[])
 	List print_fields_list; /* types are of print_field_t */
 
 	enum {
+		PRINT_ACCT,
 		PRINT_ACTION,
 		PRINT_ACTOR,
+		PRINT_CLUSTER,
 		PRINT_ID,
 		PRINT_INFO,
 		PRINT_TS,
+		PRINT_USER,
 		PRINT_WHERE
 	};
 
@@ -133,13 +161,23 @@ extern int sacctmgr_list_txn(int argc, char *argv[])
 
 	print_fields_list = list_create(destroy_print_field);
 
-	if(!list_count(format_list)) 
+	if(!list_count(format_list)) {
 		slurm_addto_char_list(format_list, "T,Action,Actor,Where,Info");
-	
+		if(txn_cond->with_assoc_info) 
+			slurm_addto_char_list(format_list, 
+					      "User,Account,Cluster");
+	}
+
 	itr = list_iterator_create(format_list);
 	while((object = list_next(itr))) {
+		char *tmp_char = NULL;
 		field = xmalloc(sizeof(print_field_t));
-		if(!strncasecmp("Action", object, 4)) {
+		if(!strncasecmp("Accounts", object, 3)) {
+			field->type = PRINT_ACCT;
+			field->name = xstrdup("Accounts");
+			field->len = 20;
+			field->print_routine = print_fields_str;
+		} else if(!strncasecmp("Action", object, 4)) {
 			field->type = PRINT_ACTION;
 			field->name = xstrdup("Action");
 			field->len = 20;
@@ -148,6 +186,11 @@ extern int sacctmgr_list_txn(int argc, char *argv[])
 			field->type = PRINT_ACTOR;
 			field->name = xstrdup("Actor");
 			field->len = 10;
+			field->print_routine = print_fields_str;
+		} else if(!strncasecmp("Clusters", object, 4)) {
+			field->type = PRINT_CLUSTER;
+			field->name = xstrdup("Clusters");
+			field->len = 20;
 			field->print_routine = print_fields_str;
 		} else if(!strncasecmp("ID", object, 2)) {
 			field->type = PRINT_ID;
@@ -164,6 +207,11 @@ extern int sacctmgr_list_txn(int argc, char *argv[])
 			field->name = xstrdup("Time");
 			field->len = 15;
 			field->print_routine = print_fields_date;
+		} else if(!strncasecmp("Users", object, 4)) {
+			field->type = PRINT_USER;
+			field->name = xstrdup("Users");
+			field->len = 20;
+			field->print_routine = print_fields_str;
 		} else if(!strncasecmp("Where", object, 1)) {
 			field->type = PRINT_WHERE;
 			field->name = xstrdup("Where");
@@ -174,6 +222,11 @@ extern int sacctmgr_list_txn(int argc, char *argv[])
 			fprintf(stderr, " Unknown field '%s'\n", object);
 			xfree(field);
 			continue;
+		}
+		if((tmp_char = strstr(object, "\%"))) {
+			int newlen = atoi(tmp_char+1);
+			if(newlen > 0) 
+				field->len = newlen;
 		}
 		list_append(print_fields_list, field);		
 	}
@@ -198,38 +251,62 @@ extern int sacctmgr_list_txn(int argc, char *argv[])
 	itr2 = list_iterator_create(print_fields_list);
 	print_fields_header(print_fields_list);
 
+	field_count = list_count(print_fields_list);
+
 	while((txn = list_next(itr))) {
+		int curr_inx = 1;
 		while((field = list_next(itr2))) {
 			switch(field->type) {
+			case PRINT_ACCT:
+				field->print_routine(field, txn->accts,
+						     (curr_inx == field_count));
+				break;
 			case PRINT_ACTION:
 				field->print_routine(
 					field, 
 					slurmdbd_msg_type_2_str(txn->action,
-								0));
+								0),
+					(curr_inx == field_count));
 				break;
 			case PRINT_ACTOR:
 				field->print_routine(field,
-						     txn->actor_name);
+						     txn->actor_name,
+						     (curr_inx == field_count));
+				break;
+			case PRINT_CLUSTER:
+				field->print_routine(field, txn->clusters,
+						     (curr_inx == field_count));
 				break;
 			case PRINT_ID:
 				field->print_routine(field,
-						     txn->id);
+						     txn->id,
+						     (curr_inx == field_count));
 				break;
 			case PRINT_INFO:
 				field->print_routine(field, 
-						     txn->set_info);
+						     txn->set_info,
+						     (curr_inx == field_count));
 				break;
 			case PRINT_TS:
 				field->print_routine(field,
-						     txn->timestamp);
+						     txn->timestamp,
+						     (curr_inx == field_count));
+				break;
+			case PRINT_USER:
+				field->print_routine(field, txn->users,
+						     (curr_inx == field_count));
 				break;
 			case PRINT_WHERE:
 				field->print_routine(field, 
-						     txn->where_query);
+						     txn->where_query,
+						     (curr_inx == field_count));
 				break;
 			default:
-				break;
+				field->print_routine(field, NULL,
+						     (curr_inx == field_count));
+					break;
 			}
+			curr_inx++;
 		}
 		list_iterator_reset(itr2);
 		printf("\n");

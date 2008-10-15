@@ -162,6 +162,13 @@ typedef struct {
 			   * client.  This should not be freed, packed
 			   * or unpacked
 			   */
+	uint32_t associd;
+	char    *cluster; /* This is a pointer to the cluster var inside
+			   * the jobacct_job_rec_t that contains this
+			   * step.  It is to be used only in the
+			   * client.  This should not be freed, packed
+			   * or unpacked
+			   */
 	uint32_t elapsed;
 	time_t end;
 	int32_t exitcode;
@@ -225,16 +232,20 @@ extern void destroy_jobacct_job_rec(void *object);
 extern void destroy_jobacct_step_rec(void *object);
 extern void destroy_jobacct_selected_step(void *object);
 
-extern void pack_jobacct_job_rec(void *object, Buf buffer);
-extern int unpack_jobacct_job_rec(void **object, Buf buffer);
+extern void pack_jobacct_job_rec(void *object,
+				 uint16_t rpc_version, Buf buffer);
+extern int unpack_jobacct_job_rec(void **object, uint16_t rpc_version, 
+				  Buf buffer);
  
-extern void pack_jobacct_step_rec(jobacct_step_rec_t *step, Buf buffer);
-extern int unpack_jobacct_step_rec(jobacct_step_rec_t **step, Buf buffer);
+extern void pack_jobacct_step_rec(jobacct_step_rec_t *step, 
+				  uint16_t rpc_version, Buf buffer);
+extern int unpack_jobacct_step_rec(jobacct_step_rec_t **step, 
+				   uint16_t rpc_version, Buf buffer);
 
 extern void pack_jobacct_selected_step(jobacct_selected_step_t *step,
-				       Buf buffer);
+				       uint16_t rpc_version, Buf buffer);
 extern int unpack_jobacct_selected_step(jobacct_selected_step_t **step,
-					Buf buffer);
+					uint16_t rpc_version, Buf buffer);
 
 /* These should only be called from the jobacct-gather plugin */
 extern int jobacct_common_init_struct(struct jobacctinfo *jobacct, 

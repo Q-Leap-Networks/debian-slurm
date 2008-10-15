@@ -1,4 +1,4 @@
-# $Id: slurm.spec 14836 2008-08-21 15:58:32Z jette $
+# $Id: slurm.spec 15324 2008-10-07 00:16:53Z da $
 #
 # Note that this package is not relocatable
 
@@ -71,14 +71,14 @@
 %endif
 
 Name:    slurm
-Version: 1.3.8
+Version: 1.3.9
 Release: 1%{?dist}
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL 
 Group: System Environment/Base
-Source: slurm-1.3.8.tar.bz2
+Source: slurm-1.3.9.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: https://computing.llnl.gov/linux/slurm/
 
@@ -256,7 +256,7 @@ SLURM process tracking plugin for SGI job containers.
 #############################################################################
 
 %prep
-%setup -n slurm-1.3.8
+%setup -n slurm-1.3.9
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \
@@ -315,8 +315,6 @@ test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/task_affinity.so &&
    echo %{_libdir}/slurm/task_affinity.so >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/crypto_openssl.so &&
    echo %{_libdir}/slurm/crypto_openssl.so >> $LIST
-test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/accounting_storage_gold.so
-   echo %{_libdir}/slurm/accounting_storage_gold.so >> $LIST
 
 
 #############################################################################

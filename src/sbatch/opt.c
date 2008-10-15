@@ -1175,7 +1175,7 @@ static void _set_options(int argc, char **argv)
 			opt.conn_type = verify_conn_type(optarg);
 			break;
 		case LONG_OPT_BEGIN:
-			opt.begin = parse_time(optarg);
+			opt.begin = parse_time(optarg, 0);
 			if (opt.begin == 0) {
 				fatal("Invalid time specification %s",
 				      optarg);
@@ -1319,7 +1319,6 @@ static void _set_options(int argc, char **argv)
 		case LONG_OPT_NETWORK:
 			xfree(opt.network);
 			opt.network = xstrdup(optarg);
-			setenv("SLURM_NETWORK", opt.network, 1);
 			break;
 		default:
 			fatal("Unrecognized command line parameter %c",
@@ -1391,7 +1390,7 @@ static void _set_pbs_options(int argc, char **argv)
 	      != -1) {
 		switch (opt_char) {
 		case 'a':
-			opt.begin = parse_time(optarg);			
+			opt.begin = parse_time(optarg, 0);			
 			break;
 		case 'A':
 			xfree(opt.account);
@@ -1738,6 +1737,8 @@ static bool _opt_verify(void)
 
 	if ((opt.job_name == NULL) && (opt.script_argc > 0))
 		opt.job_name = base_name(opt.script_argv[0]);
+	if (opt.job_name)
+		setenv("SLURM_JOB_NAME", opt.job_name, 0);
 
 	/* check for realistic arguments */
 	if (opt.nprocs <= 0) {
@@ -1894,15 +1895,16 @@ static bool _opt_verify(void)
 		error( "--propagate=%s is not valid.", opt.propagate );
 		verified = false;
 	}
+	if (opt.dependency)
+		setenvfs("SLURM_JOB_DEPENDENCY=%s", opt.dependency);
 
 	if (opt.acctg_freq >= 0)
 		setenvf(NULL, "SLURM_ACCTG_FREQ", "%d", opt.acctg_freq); 
 
 #ifdef HAVE_AIX
-	if (opt.network == NULL) {
+	if (opt.network == NULL)
 		opt.network = "us,sn_all,bulk_xfer";
-		setenv("SLURM_NETWORK", opt.network, 1);
-	}
+	setenv("SLURM_NETWORK", opt.network, 1);
 #endif
 
 	return verified;

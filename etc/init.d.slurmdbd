@@ -21,8 +21,9 @@
 
 CONFDIR=/etc/slurm
 SBINDIR=/usr/sbin
+LIBDIR=/usr/lib
 
-# Source function library.
+#Source function library.
 if [ -f /etc/rc.status ]; then
    . /etc/rc.status
    SUSE=1
@@ -44,6 +45,12 @@ else
    RETVAL=0
 fi
 
+# We can not use a starter program without losing environment 
+# variables that are critical on Blue Gene systems
+if [ -d /bgl/BlueLight/ppcfloor ]; then
+   STARTPROC=""
+fi
+
 # Source slurm specific configuration
 if [ -f /etc/sysconfig/slurm ] ; then
     . /etc/sysconfig/slurm
@@ -53,18 +60,23 @@ fi
 
 [ -f $CONFDIR/slurmdbd.conf ] || exit 1
 
+# setup library paths for slurm and munge support
+export LD_LIBRARY_PATH="$LIBDIR:$LD_LIBRARY_PATH"
+
 start() {
-    echo -n "starting slurmdbd: " 
+    prog=$1
+    shift
+    echo -n "starting $prog: " 
     unset HOME MAIL USER USERNAME 
-    $STARTPROC $SBINDIR/slurmdbd $SLURMDBD_OPTIONS
+    $STARTPROC $SBINDIR/$prog $SLURMDBD_OPTIONS
     rc_status -v
     echo
     touch /var/lock/subsys/slurmdbd
 }
 
 stop() { 
-    echo -n "stopping slurmdbd: "
-    killproc slurmdbd -TERM
+    echo -n "stopping $1: "
+    killproc $1 -TERM
     rc_status -v
     echo
     rm -f /var/lock/subsys/slurmdbd
@@ -76,7 +88,7 @@ slurmstatus() {
     local rpid
     local pidfile
 
-    pidfile=`grep -i PidFile $CONFDIR/slurmdbd.conf | grep -v '^ *#'`
+    pidfile=`grep -i pidfile $CONFDIR/slurmdbd.conf | grep -v '^ *#'`
     if [ $? = 0 ]; then
         pidfile=${pidfile##*=}
         pidfile=${pidfile%#*}
@@ -84,29 +96,51 @@ slurmstatus() {
         pidfile=/var/run/slurmdbd.pid
     fi
 
-    pid=`pidof -o $$ -o $$PPID -o %PPID -x slurmdbd`
+   pid=`pidof -o $$ -o $$PPID -o %PPID -x $1 || \
+         pidof -o $$ -o $$PPID -o %PPID -x ${base}`
 
     if [ -f $pidfile ]; then
         read rpid < $pidfile
         if [ "$rpid" != "" -a "$pid" != "" ]; then
             for i in $pid ; do
                 if [ "$i" = "$rpid" ]; then 
-                    echo $"slurmdbd (pid $pid) is running..."
+                    echo $"${base} (pid $pid) is running..."
                     return 0
                 fi     
             done
         elif [ "$rpid" != "" -a "$pid" = "" ]; then
-            echo $"slurmdbd is stopped"
-            return 1
+		echo $"${base} dead but pid file exists"
+		return 1
         fi 
 
     fi
-     
-    echo $"slurmdbd is stopped"
+
+    if [ "$base" = "slurmdbd" -a "$pid" != "" ] ; then
+        echo $"${base} (pid $pid) is running..."
+        return 0
+    fi
+    
+    echo $"${base} is stopped"
     
     return 3
 }
 
+#
+# stop slurm daemons, 
+# wait for termination to complete (up to 10 seconds) before returning
+#
+slurmstop() {
+	stop $1
+	
+	for i in 1 2 3 4
+	do
+		sleep $i
+		slurmstatus $1
+		if [ $? != 0 ]; then
+			break
+		fi
+	done
+}
 #
 # The pathname substitution in daemon command assumes prefix and
 # exec_prefix are same.  This is the default, unless the user requests
@@ -119,14 +153,14 @@ case "$1" in
 	start slurmdbd
         ;;
     stop)
-	stop slurmdbd
+	slurmstop slurmdbd
         ;;
     status)
 	slurmstatus slurmdbd
         ;;
     restart)
-	stop slurmdbd
-	start slurmdbd
+	$0 stop
+	$0 start
         ;;
     condrestart)
         if [ -f /var/lock/subsys/slurm ]; then

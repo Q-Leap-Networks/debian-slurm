@@ -250,6 +250,7 @@ libslurm.so.13 libslurm13 #MINVER#
  slurm_get_fast_schedule@Base 1.3.8
  slurm_get_health_check_program@Base 1.3.8
  slurm_get_ip_str@Base 1.3.8
+ slurm_get_is_association_based_accounting@Base 1.3.9
  slurm_get_job_steps@Base 1.3.8
  slurm_get_jobacct_gather_freq@Base 1.3.8
  slurm_get_jobacct_gather_type@Base 1.3.8
@@ -473,6 +474,8 @@ libslurm.so.13 libslurm13 #MINVER#
  slurm_shutdown_msg_engine@Base 1.3.8
  slurm_signal_job@Base 1.3.8
  slurm_signal_job_step@Base 1.3.8
+ slurm_sort_char_list_asc@Base 1.3.9
+ slurm_sort_char_list_desc@Base 1.3.9
  slurm_sprint_cpu_bind_type@Base 1.3.8
  slurm_sprint_job_info@Base 1.3.8
  slurm_sprint_job_step_info@Base 1.3.8
@@ -550,4 +553,5 @@ libslurm.so.13 libslurm13 #MINVER#
  slurm_xstrftimecat@Base 1.3.8
  slurm_xstring_is_whitespace@Base 1.3.8
  slurm_xstrndup@Base 1.3.8
+ slurm_xstrstrip@Base 1.3.9
  slurm_xstrsubstitute@Base 1.3.8

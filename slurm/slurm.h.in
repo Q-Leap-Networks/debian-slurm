@@ -760,6 +760,7 @@ typedef struct {
 				   to a node than available processors,
 				   "false" to accept at most one task per
 				   processor. "false" by default. */
+	bool no_kill;		/* true of no kill on node failure */
 	uint16_t ckpt_interval;	/* checkpoint interval in minutes */
 	char *ckpt_path;	/* path to store checkpoint image files */
 	uint16_t verbose_level; /* for extra logging decisions in step
@@ -1063,6 +1064,7 @@ typedef struct slurm_ctl_conf {
                                       * they are considered "unkillable". */
 	uint16_t use_pam;	/* enable/disable PAM support */
 	uint16_t wait_time;	/* default job --wait time */
+	char *salloc_default_command; /* default salloc command */
 } slurm_ctl_conf_t;
 
 typedef struct slurmd_status_msg {

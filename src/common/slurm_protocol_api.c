@@ -612,7 +612,7 @@ char *slurm_get_accounting_storage_loc(void)
 }
 
 /* slurm_get_accounting_storage_enforce
- * returns whether or not to enforce associations
+ * returns what level to enforce associations at
  */
 int slurm_get_accounting_storage_enforce(void)
 {
@@ -623,6 +623,29 @@ int slurm_get_accounting_storage_enforce(void)
 	} else {
 		conf = slurm_conf_lock();
 		enforce = conf->accounting_storage_enforce;
+		slurm_conf_unlock();
+	}
+	return enforce;	
+
+}
+
+/* slurm_get_is_association_based_accounting
+ * returns if we are doing accounting by associations
+ */
+int slurm_get_is_association_based_accounting(void)
+{
+	int enforce = 0;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+		return 1;
+	} else {
+		conf = slurm_conf_lock();
+		if(!strcasecmp(conf->accounting_storage_type, 
+			      "accounting_storage/slurmdbd")
+		   || strcasecmp(conf->accounting_storage_type,
+				 "accounting_storage/mysql")) 
+			enforce = 1;
 		slurm_conf_unlock();
 	}
 	return enforce;	
@@ -2303,6 +2326,7 @@ int slurm_send_rc_msg(slurm_msg_t *msg, int rc)
 	resp_msg.address  = msg->address;
 	resp_msg.msg_type = RESPONSE_SLURM_RC;
 	resp_msg.data     = &rc_msg;
+	resp_msg.flags = msg->flags;
 	resp_msg.forward = msg->forward;
 	resp_msg.forward_struct = msg->forward_struct;
 	resp_msg.ret_list = msg->ret_list;

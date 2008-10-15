@@ -202,7 +202,7 @@ extern void destroy_jobacct_selected_step(void *object)
 }
 
  
-extern void pack_jobacct_job_rec(void *object, Buf buffer)
+extern void pack_jobacct_job_rec(void *object, uint16_t rpc_version, Buf buffer)
 {
 	jobacct_job_rec_t *job = (jobacct_job_rec_t *)object;
 	ListIterator itr = NULL;
@@ -231,14 +231,14 @@ extern void pack_jobacct_job_rec(void *object, Buf buffer)
 	_pack_sacct(&job->sacct, buffer);
 	pack32(job->show_full, buffer);
 	pack_time(job->start, buffer);
-	pack16(job->state, buffer);
+	pack16((uint16_t)job->state, buffer);
 	if(job->steps)
 		count = list_count(job->steps);
 	pack32(count, buffer);
 	if(count) {
 		itr = list_iterator_create(job->steps);
 		while((step = list_next(itr))) {
-			pack_jobacct_step_rec(step, buffer);
+			pack_jobacct_step_rec(step, rpc_version, buffer);
 		}
 		list_iterator_destroy(itr);
 	}
@@ -255,13 +255,14 @@ extern void pack_jobacct_job_rec(void *object, Buf buffer)
 	pack32(job->user_cpu_usec, buffer);
 }
 
-extern int unpack_jobacct_job_rec(void **job, Buf buffer)
+extern int unpack_jobacct_job_rec(void **job, uint16_t rpc_version, Buf buffer)
 {
 	jobacct_job_rec_t *job_ptr = xmalloc(sizeof(jobacct_job_rec_t));
 	int i = 0;
 	jobacct_step_rec_t *step = NULL;
 	uint32_t count = 0;
 	uint32_t uint32_tmp;
+	uint16_t uint16_tmp;
 
 	*job = job_ptr;
 
@@ -273,26 +274,29 @@ extern int unpack_jobacct_job_rec(void **job, Buf buffer)
 	safe_unpack32(&job_ptr->elapsed, buffer);
 	safe_unpack_time(&job_ptr->eligible, buffer);
 	safe_unpack_time(&job_ptr->end, buffer);
-	safe_unpack32((uint32_t *)&job_ptr->exitcode, buffer);
+	safe_unpack32(&uint32_tmp, buffer);
+	job_ptr->exitcode = (int32_t)uint32_tmp;
 	safe_unpack32(&job_ptr->gid, buffer);
 	safe_unpack32(&job_ptr->jobid, buffer);
 	safe_unpackstr_xmalloc(&job_ptr->jobname, &uint32_tmp, buffer);
 	safe_unpack32(&job_ptr->lft, buffer);
 	safe_unpackstr_xmalloc(&job_ptr->partition, &uint32_tmp, buffer);
 	safe_unpackstr_xmalloc(&job_ptr->nodes, &uint32_tmp, buffer);
-	safe_unpack32((uint32_t *)&job_ptr->priority, buffer);
+	safe_unpack32(&uint32_tmp, buffer);
+	job_ptr->priority = (int32_t)uint32_tmp;
 	safe_unpack16(&job_ptr->qos, buffer);
 	safe_unpack32(&job_ptr->req_cpus, buffer);
 	safe_unpack32(&job_ptr->requid, buffer);
 	_pack_sacct(&job_ptr->sacct, buffer);
 	safe_unpack32(&job_ptr->show_full, buffer);
 	safe_unpack_time(&job_ptr->start, buffer);
-	safe_unpack16((uint16_t *)&job_ptr->state, buffer);
+	safe_unpack16(&uint16_tmp, buffer);
+	job_ptr->state = uint16_tmp;
 	safe_unpack32(&count, buffer);
 
 	job_ptr->steps = list_create(destroy_jobacct_step_rec);
 	for(i=0; i<count; i++) {
-		unpack_jobacct_step_rec(&step, buffer);
+		unpack_jobacct_step_rec(&step, rpc_version, buffer);
 		if(step)
 			list_append(job_ptr->steps, step);
 	}
@@ -317,7 +321,8 @@ unpack_error:
 	return SLURM_ERROR;
 }
  
-extern void pack_jobacct_step_rec(jobacct_step_rec_t *step, Buf buffer)
+extern void pack_jobacct_step_rec(jobacct_step_rec_t *step, 
+				  uint16_t rpc_version, Buf buffer)
 {
 	pack32(step->elapsed, buffer);
 	pack_time(step->end, buffer);
@@ -340,23 +345,27 @@ extern void pack_jobacct_step_rec(jobacct_step_rec_t *step, Buf buffer)
 	pack32(step->user_cpu_usec, buffer);
 }
 
-extern int unpack_jobacct_step_rec(jobacct_step_rec_t **step, Buf buffer)
+extern int unpack_jobacct_step_rec(jobacct_step_rec_t **step, 
+				   uint16_t rpc_version, Buf buffer)
 {
 	uint32_t uint32_tmp;
+	uint16_t uint16_tmp;
 	jobacct_step_rec_t *step_ptr = xmalloc(sizeof(jobacct_step_rec_t));
 
 	*step = step_ptr;
 
 	safe_unpack32(&step_ptr->elapsed, buffer);
 	safe_unpack_time(&step_ptr->end, buffer);
-	safe_unpack32((uint32_t *)&step_ptr->exitcode, buffer);
+	safe_unpack32(&uint32_tmp, buffer);
+	step_ptr->exitcode = (int32_t)uint32_tmp;
 	safe_unpack32(&step_ptr->jobid, buffer);
 	safe_unpack32(&step_ptr->ncpus, buffer);
         safe_unpackstr_xmalloc(&step_ptr->nodes, &uint32_tmp, buffer);
 	safe_unpack32(&step_ptr->requid, buffer);
 	_unpack_sacct(&step_ptr->sacct, buffer);
 	safe_unpack_time(&step_ptr->start, buffer);
-	safe_unpack16((uint16_t *)&step_ptr->state, buffer);
+	safe_unpack16(&uint16_tmp, buffer);
+	step_ptr->state = uint16_tmp;
 	safe_unpack32(&step_ptr->stepid, buffer);	/* job's step number */
 	safe_unpackstr_xmalloc(&step_ptr->stepname, &uint32_tmp, buffer);
 	safe_unpack32(&step_ptr->suspended, buffer);
@@ -376,14 +385,14 @@ unpack_error:
 } 
 
 extern void pack_jobacct_selected_step(jobacct_selected_step_t *step,
-				       Buf buffer)
+				       uint16_t rpc_version, Buf buffer)
 {
 	pack32(step->jobid, buffer);
 	pack32(step->stepid, buffer);
 }
 
 extern int unpack_jobacct_selected_step(jobacct_selected_step_t **step,
-					Buf buffer)
+					uint16_t rpc_version, Buf buffer)
 {
 	jobacct_selected_step_t *step_ptr =
 		xmalloc(sizeof(jobacct_selected_step_t));

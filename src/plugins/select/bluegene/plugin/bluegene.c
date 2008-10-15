@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  bluegene.c - blue gene node configuration processing module. 
  *
- *  $Id: bluegene.c 14952 2008-09-03 16:08:14Z da $
+ *  $Id: bluegene.c 15370 2008-10-09 23:00:27Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -488,7 +488,6 @@ extern bg_record_t *find_and_remove_org_from_bg_list(List my_list,
 		if(bit_equal(bg_record->bitmap, found_record->bitmap)
 		   && bit_equal(bg_record->ionode_bitmap,
 				found_record->ionode_bitmap)) {
-			
 			if(!strcmp(bg_record->bg_block_id,
 				   found_record->bg_block_id)) {
 				list_remove(itr);

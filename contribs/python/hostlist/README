@@ -1,5 +1,5 @@
-The Python module hostlist.py knows how to expand and collect
-LLNL hostlist expressions. Example:
+The Python module hostlist.py knows how to expand and collect hostlist
+expressions. Example:
 
   % python
   Python 2.5.1 (r251:54863, Jul 10 2008, 17:24:48) 
@@ -17,14 +17,14 @@ LLNL hostlist expressions. Example:
 Bad hostlists or hostnames will result in the hostlist.BadHostlist
 exception being raised.
 
-If you invoke hostlist.py from the command line, it doubles as a utility
-for doing set operations on hostlists. Example:
+The 'hostlist' command is provided to expand/collect hostlists and
+perform set operations on them. Example:
 
-  % ./hostlist.py n[1-10] n[5-20]
+  % hostlist n[1-10] n[5-20]
   n[1-20]
-  % ./hostlist.py --difference n[1-10] n[5-20]
+  % hostlist --difference n[1-10] n[5-20]
   n[1-4]
-  % ./hostlist.py --expand --intersection n[1-10] n[5-20] 
+  % hostlist --expand --intersection n[1-10] n[5-20] 
   n5
   n6
   n7
@@ -32,12 +32,28 @@ for doing set operations on hostlists. Example:
   n9
   n10
 
-Install by running
+Install directly by running
 
   python setup.py build   (as yourself)
   python setup.py install (as root) 
 
-or just copy the hostlist.py file to an appropriate place.
+or just copy the hostlist.py, hostlist and hostlist.1 files to appropriate places.
 
-If you have questions, suggestions, bug reports or patches, please send them
-to kent@nsc.liu.se.
+Build RPM packages by running:
+
+  rpmbuild -ta python-hostlist-VERSION.tar.gz
+
+If you do not have the tar archive, build RPM packages by running:
+
+  python setup.py sdist
+  cp dist/python-hostlist-VERSION.tar.gz ~/rpmbuild/SOURCES
+  rpmbuild -ba python-hostlist.spec  
+
+You will find new releases at:
+
+  http://www.nsc.liu.se/~kent/python-hostlist/
+
+If you have questions, suggestions, bug reports or patches, please
+send them to:
+
+  kent@nsc.liu.se.

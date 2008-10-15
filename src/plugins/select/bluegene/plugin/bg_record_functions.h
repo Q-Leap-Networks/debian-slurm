@@ -72,11 +72,11 @@ typedef struct bg_record {
 					   being modified or not at
 					   job launch usually */
 	uid_t user_uid;   		/* Owner of block uid	*/
-	rm_partition_state_t state;   	/* the allocated block   */
+	rm_partition_state_t state;     /* Current state of the block */
 	int start[BA_SYSTEM_DIMENSIONS];/* start node */
 	uint16_t geo[BA_SYSTEM_DIMENSIONS];  /* geometry */
-	rm_connection_type_t conn_type;	/* Mesh or Torus or NAV */
-	rm_partition_mode_t node_use;	/* either COPROCESSOR or VIRTUAL */
+	rm_connection_type_t conn_type;  /* MESH or Torus or NAV */
+	rm_partition_mode_t node_use;	 /* either COPROCESSOR or VIRTUAL */
 	rm_partition_t *bg_block;       /* structure to hold info from db2 */
 	List bg_block_list;             /* node list of blocks in block */
 	int bp_count;                   /* size */
