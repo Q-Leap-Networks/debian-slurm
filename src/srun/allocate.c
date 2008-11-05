@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/srun/allocate.c - srun functions for managing node allocations
- * $Id: allocate.c 15262 2008-10-01 22:58:26Z jette $
+ * $Id: allocate.c 15578 2008-11-04 01:04:21Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -590,7 +590,7 @@ create_job_step(srun_job_t *job)
 			otermf  = xsignal(SIGTERM, _intr_handler);
 			oquitf  = xsignal(SIGQUIT, _intr_handler);
 		} else
-			info("Job step creation still disabled, retrying");
+			verbose("Job step creation still disabled, retrying");
 		sleep(MIN((i*10), 60));
 	}
 	if (i > 0) {
