@@ -76,7 +76,9 @@ typedef struct bg_record {
 	int start[BA_SYSTEM_DIMENSIONS];/* start node */
 	uint16_t geo[BA_SYSTEM_DIMENSIONS];  /* geometry */
 	rm_connection_type_t conn_type;  /* MESH or Torus or NAV */
+#ifdef HAVE_BGL
 	rm_partition_mode_t node_use;	 /* either COPROCESSOR or VIRTUAL */
+#endif
 	rm_partition_t *bg_block;       /* structure to hold info from db2 */
 	List bg_block_list;             /* node list of blocks in block */
 	int bp_count;                   /* size */
@@ -98,14 +100,18 @@ typedef struct bg_record {
 					 * BLOCK_ERROR_STATE */
 	int cpus_per_bp;                /* count of cpus per base part */
 	uint32_t node_cnt;              /* count of nodes per block */
+#ifdef HAVE_BGL
 	uint16_t quarter;               /* used for small blocks 
 					   determine quarter of BP */
 	uint16_t nodecard;              /* used for small blocks 
 					   determine nodecard of quarter */
 	char *blrtsimage;              /* BlrtsImage for this block */
-	char *linuximage;              /* LinuxImage for this block */
+#endif
+	char *linuximage;              /* LinuxImage/CnloadImage for
+					* this block */
 	char *mloaderimage;            /* mloaderImage for this block */
-	char *ramdiskimage;            /* RamDiskImage for this block */
+	char *ramdiskimage;            /* RamDiskImage/IoloadImg for
+					* this block */
 	struct bg_record *original;    /* if this is a copy this is a
 					  pointer to the original */
 } bg_record_t;
@@ -117,6 +123,7 @@ extern int block_exist_in_list(List my_list, bg_record_t *bg_record);
 extern void process_nodes(bg_record_t *bg_reord, bool startup);
 extern List copy_bg_list(List in_list);
 extern void copy_bg_record(bg_record_t *fir_record, bg_record_t *sec_record);
+extern int bg_record_cmpf_inc(bg_record_t *rec_a, bg_record_t *rec_b);
 
 /* return bg_record from a bg_list */
 extern bg_record_t *find_bg_record_in_list(List my_list, char *bg_block_id);
@@ -127,9 +134,13 @@ extern bg_record_t *find_bg_record_in_list(List my_list, char *bg_block_id);
 extern int update_block_user(bg_record_t *bg_block_id, int set); 
 extern void drain_as_needed(bg_record_t *bg_record, char *reason);
 
+#ifdef HAVE_BGL
 extern int set_ionodes(bg_record_t *bg_record);
+#endif
 
 extern int add_bg_record(List records, List used_nodes, blockreq_t *blockreq);
+extern int handle_small_record_request(List records, blockreq_t *blockreq,
+				       bg_record_t *bg_record, bitoff_t start);
 
 extern int format_node_name(bg_record_t *bg_record, char *buf, int buf_size);
 

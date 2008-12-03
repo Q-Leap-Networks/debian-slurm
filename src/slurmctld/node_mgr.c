@@ -4,7 +4,7 @@
  *	hash table (node_hash_table), time stamp (last_node_update) and 
  *	configuration list (config_list)
  *
- *  $Id: node_mgr.c 15324 2008-10-07 00:16:53Z da $
+ *  $Id: node_mgr.c 15793 2008-12-02 22:03:28Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1119,8 +1119,8 @@ int update_node ( update_node_msg_t * update_node_msg )
 			else if (state_val == NODE_STATE_ALLOCATED) {
 				if (!(node_ptr->node_state & (NODE_STATE_DRAIN
 						| NODE_STATE_FAIL)))
-					bit_set (up_node_bitmap, node_inx);
-				bit_set   (avail_node_bitmap, node_inx);
+					bit_set(avail_node_bitmap, node_inx);
+				bit_set (up_node_bitmap, node_inx);
 				bit_clear (idle_node_bitmap, node_inx);
 			}
 			else if (state_val == NODE_STATE_DRAIN) {
@@ -2458,6 +2458,10 @@ extern int send_nodes_to_accounting(time_t event_time)
 {
 	int rc = SLURM_SUCCESS, i = 0;
 	struct node_record *node_ptr;
+	slurmctld_lock_t node_read_lock = { 
+		READ_LOCK, NO_LOCK, READ_LOCK, WRITE_LOCK };
+
+ 	lock_slurmctld(node_read_lock);
 	/* send nodes not in not 'up' state */
 	node_ptr = node_record_table_ptr;
 	for (i = 0; i < node_record_count; i++, node_ptr++) {
@@ -2475,6 +2479,7 @@ extern int send_nodes_to_accounting(time_t event_time)
 		   == SLURM_ERROR) 
 			break;
 	}
+	unlock_slurmctld(node_read_lock);
 	return rc;
 }
 

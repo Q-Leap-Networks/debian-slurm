@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  bg_block_info.c - bluegene block information from the db2 database.
  *
- *  $Id: bg_block_info.c 14904 2008-08-26 21:19:57Z da $
+ *  $Id: bg_block_info.c 15717 2008-11-17 23:20:37Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -88,15 +88,15 @@ static int _block_is_deallocating(bg_record_t *bg_record)
 	if(bg_record->modifying)
 		return SLURM_SUCCESS;
 
-	slurm_conf_lock();
-	user_name = xstrdup(slurmctld_conf.slurm_user_name);
+	
+	user_name = xstrdup(bg_slurm_user_name);
 	if(remove_all_users(bg_record->bg_block_id, NULL) 
 	   == REMOVE_USER_ERR) {
 		error("Something happened removing "
 		      "users from block %s", 
 		      bg_record->bg_block_id);
 	} 
-	slurm_conf_unlock();
+	
 	
 	if(bg_record->target_name && bg_record->user_name) {
 		if(!strcmp(bg_record->target_name, user_name)) {
@@ -213,13 +213,17 @@ extern void pack_block(bg_record_t *bg_record, Buf buffer)
 	packstr(bg_record->bg_block_id, buffer);
 	pack16((uint16_t)bg_record->state, buffer);
 	pack16((uint16_t)bg_record->conn_type, buffer);
+#ifdef HAVE_BGL
 	pack16((uint16_t)bg_record->node_use, buffer);	
 	pack16((uint16_t)bg_record->quarter, buffer);	
 	pack16((uint16_t)bg_record->nodecard, buffer);	
+#endif
 	pack32((uint32_t)bg_record->node_cnt, buffer);
 	pack_bit_fmt(bg_record->bitmap, buffer);
 	pack_bit_fmt(bg_record->ionode_bitmap, buffer);
+#ifdef HAVE_BGL
 	packstr(bg_record->blrtsimage, buffer);
+#endif
 	packstr(bg_record->linuximage, buffer);
 	packstr(bg_record->mloaderimage, buffer);
 	packstr(bg_record->ramdiskimage, buffer);
@@ -231,7 +235,9 @@ extern int update_block_list()
 #ifdef HAVE_BG_FILES
 	int rc;
 	rm_partition_t *block_ptr = NULL;
+#ifdef HAVE_BGL
 	rm_partition_mode_t node_use;
+#endif
 	rm_partition_state_t state;
 	char *name = NULL;
 	bg_record_t *bg_record = NULL;
@@ -277,6 +283,7 @@ extern int update_block_list()
 			continue;
 		}
 				
+#ifdef HAVE_BGL
 		if ((rc = bridge_get_data(block_ptr, RM_PartitionMode,
 					  &node_use))
 		    != STATUS_OK) {
@@ -293,7 +300,7 @@ extern int update_block_list()
 			bg_record->node_use = node_use;
 			updated = 1;
 		}
-		
+#endif		
 		if ((rc = bridge_get_data(block_ptr, RM_PartitionState,
 					  &state))
 		    != STATUS_OK) {
@@ -337,10 +344,10 @@ extern int update_block_list()
 				debug3("checking to make sure user %s "
 				       "is the user.",
 				       bg_record->target_name);
-				slurm_conf_lock();
+				
 				if(update_block_user(bg_record, 0) == 1)
 					last_bg_update = time(NULL);
-				slurm_conf_unlock();
+				
 				break;
 			case RM_PARTITION_ERROR:
 				error("block in an error state");
@@ -397,6 +404,12 @@ extern int update_block_list()
 				       "free state.",
 				       bg_record->bg_block_id);
 				break;
+#ifndef HAVE_BGL
+			case RM_PARTITION_REBOOTING:
+				debug2("Block %s is rebooting.",
+				       bg_record->bg_block_id);
+				break;
+#endif
 			default:
 				debug("Hey the state of block "
 				      "%s is %d(%s) doing nothing.",

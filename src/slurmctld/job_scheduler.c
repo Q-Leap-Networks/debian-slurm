@@ -83,7 +83,7 @@ static char **_xduparray(uint16_t size, char ** array);
  * RET number of entries in job_queue
  * NOTE: the buffer at *job_queue must be xfreed by the caller
  */
-static int _build_user_job_list(uint32_t user_id,char* job_name,
+static int _build_user_job_list(uint32_t user_id, char* job_name,
 			        struct job_queue **job_queue)
 {
 	ListIterator job_iterator;
@@ -100,7 +100,8 @@ static int _build_user_job_list(uint32_t user_id,char* job_name,
 		xassert (job_ptr->magic == JOB_MAGIC);
 		if (job_ptr->user_id != user_id)
 			continue;
-		if (job_name && strcmp(job_name,job_ptr->name))
+		if (job_name && job_ptr->name &&
+		    strcmp(job_name, job_ptr->name))
 			continue;
 		if (job_buffer_size <= job_queue_size) {
 			job_buffer_size += 200;
@@ -340,8 +341,7 @@ extern int schedule(void)
 		job_ptr = job_queue[i].job_ptr;
 		if (job_ptr->priority == 0)	/* held */
 			continue;
-		if (!acct_policy_job_runnable(job_ptr))
-			continue;
+
 		if (_failed_partition(job_ptr->part_ptr, failed_parts, 
 				      failed_part_cnt)) {
 			job_ptr->state_reason = WAIT_PRIORITY;
@@ -416,8 +416,9 @@ extern int schedule(void)
 			else
 				srun_allocate(job_ptr->job_id);
 			job_cnt++;
-		} else if (error_code !=
-		           ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE) {
+		} else if ((error_code !=
+			    ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE)
+			   && (error_code != ESLURM_ACCOUNTING_POLICY)) {
 			info("schedule: JobId=%u non-runnable: %s",
 				job_ptr->job_id, 
 				slurm_strerror(error_code));
@@ -810,7 +811,7 @@ extern int update_job_dependency(struct job_record *job_ptr, char *new_depend)
 		if ((sep_ptr == NULL) && (job_id == 0)) {
 			job_id = strtol(tok, &sep_ptr, 10);
 			if ((sep_ptr == NULL) || (sep_ptr[0] != '\0') ||
-			    (job_id <= 0) || (job_id == job_ptr->job_id)) {
+			    (job_id < 0) || (job_id == job_ptr->job_id)) {
 				rc = EINVAL;
 				break;
 			}
@@ -846,7 +847,7 @@ extern int update_job_dependency(struct job_record *job_ptr, char *new_depend)
 		while (rc == SLURM_SUCCESS) {
 			job_id = strtol(sep_ptr, &sep_ptr2, 10);
 			if ((sep_ptr2 == NULL) || 
-			    (job_id <= 0) || (job_id == job_ptr->job_id) ||
+			    (job_id < 0) || (job_id == job_ptr->job_id) ||
 			    ((sep_ptr2[0] != '\0') && (sep_ptr2[0] != ',') && 
 			     (sep_ptr2[0] != ':'))) {
 				rc = EINVAL;

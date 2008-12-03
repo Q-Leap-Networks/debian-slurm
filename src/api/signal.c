@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  signal.c - Send a signal to a slurm job or job step
- *  $Id: signal.c 14725 2008-08-08 20:42:06Z jette $
+ *  $Id: signal.c 15602 2008-11-04 23:36:01Z jette $
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -227,8 +227,8 @@ static int _signal_batch_script_step(
 	msg.data = &rpc;
 	if(slurm_conf_get_addr(name, &msg.address) == SLURM_ERROR) {
 		error("_signal_batch_script_step: "
-		      "can't get address for "
-		      "host %s", name);
+		      "can't find address for host %s, check slurm.conf", 
+		      name);
 		free(name);
 		return -1;
 	}
@@ -391,8 +391,8 @@ static int _terminate_batch_script_step(
 
 	if(slurm_conf_get_addr(name, &msg.address) == SLURM_ERROR) {
 		error("_signal_batch_script_step: "
-		      "can't get address for "
-		      "host %s", name);
+		      "can't find address for host %s, check slurm.conf", 
+		      name);
 		free(name);
 		return -1;
 	}

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  step_mgr.c - manage the job step information of slurm
- *  $Id: step_mgr.c 15550 2008-10-31 18:52:47Z jette $
+ *  $Id: step_mgr.c 15728 2008-11-18 23:02:04Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -467,7 +467,8 @@ _pick_step_nodes (struct job_record  *job_ptr,
 			avail = job_ptr->alloc_lps[j] - job_ptr->used_lps[j];
 			tot_cpus += job_ptr->alloc_lps[j];
 			if ((avail <= 0) ||
-			    (cpus_picked_cnt >= step_spec->cpu_count))
+			    ((cpus_picked_cnt > 0) &&
+			     (cpus_picked_cnt >= step_spec->cpu_count)))
 				bit_clear(nodes_avail, i);
 			else
 				cpus_picked_cnt += avail;
@@ -616,7 +617,7 @@ _pick_step_nodes (struct job_record  *job_ptr,
 				/ job_ptr->cpus_per_node[0];
 		step_spec->node_count = (i > step_spec->node_count) ? 
 						i : step_spec->node_count ;
-		step_spec->cpu_count = 0;
+		//step_spec->cpu_count = 0;
 	}
 
 	if (step_spec->node_count) {
@@ -726,8 +727,10 @@ extern void step_alloc_lps(struct step_record *step_ptr)
 		if (!bit_test(step_ptr->step_node_bitmap, i_node))
 			continue;
 		step_node_inx++;
-		job_ptr->used_lps[job_node_inx] += 
-			step_ptr->step_layout->tasks[step_node_inx];
+		if (step_ptr->cpus_per_task) {
+			job_ptr->used_lps[job_node_inx] +=
+				step_ptr->step_layout->tasks[step_node_inx];
+		}
 #if 0
 		info("step alloc of %s procs: %u of %u", 
 			node_record_table_ptr[i_node].name,
@@ -760,7 +763,9 @@ static void _step_dealloc_lps(struct step_record *step_ptr)
 		if (!bit_test(step_ptr->step_node_bitmap, i_node))
 			continue;
 		step_node_inx++;
-		if (job_ptr->used_lps[job_node_inx] >=
+		if (step_ptr->cpus_per_task == 0)
+			;	/* no CPUs allocated */
+		else if (job_ptr->used_lps[job_node_inx] >=
 		    step_ptr->step_layout->tasks[step_node_inx]) {
 			job_ptr->used_lps[job_node_inx] -= 
 				step_ptr->step_layout->tasks[step_node_inx];
@@ -800,7 +805,7 @@ step_create(job_step_create_request_msg_t *step_specs,
 	struct step_record *step_ptr;
 	struct job_record  *job_ptr;
 	bitstr_t *nodeset;
-	int node_count, ret_code;
+	int cpus_per_task, node_count, ret_code;
 	time_t now = time(NULL);
 	char *step_node_list = NULL;
 
@@ -876,6 +881,18 @@ step_create(job_step_create_request_msg_t *step_specs,
 	     (strlen(step_specs->ckpt_path) > MAX_STR_LEN)))
 		return ESLURM_PATHNAME_TOO_LONG;
 
+	/* we can figure out the cpus_per_task here by reversing what happens
+	 * in srun, record argument, plus save/restore in slurm v1.4 */
+	if (step_specs->cpu_count == 0)
+		cpus_per_task = 0;
+	else if (step_specs->num_tasks < 1)
+		cpus_per_task = 1;
+	else {
+		cpus_per_task = step_specs->cpu_count / step_specs->num_tasks;
+		if (cpus_per_task < 1)
+			cpus_per_task = 1;
+	}
+
 	/* if the overcommit flag is checked we 0 out the cpu_count
 	 * which makes it so we don't check to see the available cpus
 	 */	 
@@ -945,6 +962,7 @@ step_create(job_step_create_request_msg_t *step_specs,
 	step_ptr->port = step_specs->port;
 	step_ptr->host = xstrdup(step_specs->host);
 	step_ptr->batch_step = batch_step;
+	step_ptr->cpus_per_task = cpus_per_task;
 	step_ptr->mem_per_task = step_specs->mem_per_task;
 	step_ptr->ckpt_interval = step_specs->ckpt_interval;
 	step_ptr->ckpt_time = now;
@@ -970,6 +988,7 @@ step_create(job_step_create_request_msg_t *step_specs,
 					   step_node_list,
 					   step_specs->node_count,
 					   step_specs->num_tasks,
+					   (uint16_t)cpus_per_task,
 					   step_specs->task_dist,
 					   step_specs->plane_size);
 		if (!step_ptr->step_layout)
@@ -1007,6 +1026,7 @@ extern slurm_step_layout_t *step_layout_create(struct step_record *step_ptr,
 					       char *step_node_list,
 					       uint16_t node_count,
 					       uint32_t num_tasks,
+					       uint16_t cpus_per_task,
 					       uint16_t task_dist,
 					       uint32_t plane_size)
 {
@@ -1037,7 +1057,7 @@ extern slurm_step_layout_t *step_layout_create(struct step_record *step_ptr,
 						  (num_tasks - set_cpus));
 			} else
 				usable_cpus = job_ptr->alloc_lps[pos];
-			debug2("step_layout cpus = %d pos = %d", 
+			debug3("step_layout cpus = %d pos = %d", 
 			       usable_cpus, pos);
 			
 			if ((cpu_inx == -1) ||
@@ -1054,11 +1074,13 @@ extern slurm_step_layout_t *step_layout_create(struct step_record *step_ptr,
 				break;
 		}
 	}
-
+	
 	/* layout the tasks on the nodes */
 	return slurm_step_layout_create(step_node_list,
 					cpus_per_node, cpu_count_reps, 
-					node_count, num_tasks, task_dist,
+					node_count, num_tasks,
+					cpus_per_task,
+					task_dist,
 					plane_size);
 }
 
@@ -1825,6 +1847,7 @@ extern int load_step_state(struct job_record *job_ptr, Buf buffer)
 	step_ptr->pre_sus_time = pre_sus_time;
 	step_ptr->tot_sus_time = tot_sus_time;
 	step_ptr->ckpt_time    = ckpt_time;
+	step_ptr->cpus_per_task = 1;	/* Need to save/restore in v1.4 */
 
 	slurm_step_layout_destroy(step_ptr->step_layout);
 	step_ptr->step_layout  = step_layout;

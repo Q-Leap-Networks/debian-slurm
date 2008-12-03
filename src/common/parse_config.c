@@ -2,10 +2,9 @@
  *  parse_config.c - parse any slurm.conf-like configuration file
  *
  *  NOTE: when you see the prefix "s_p_", think "slurm parser".
- *
- *  $Id: parse_config.c 14716 2008-08-07 20:11:01Z da $
  *****************************************************************************
- *  Copyright (C) 2006 The Regents of the University of California.
+ *  Copyright (C) 2006-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>.
  *  LLNL-CODE-402394.
@@ -68,7 +67,7 @@
 static regex_t keyvalue_re;
 static char *keyvalue_pattern =
 	"^[[:space:]]*"
-	"([[:alpha:]]+)" /* key */
+	"([[:alnum:]]+)" /* key */
 	"[[:space:]]*=[[:space:]]*"
 	"((\"([^\"]*)\")|([^[:space:]]+))" /* value: quoted with whitespace,
 					    * or unquoted and no whitespace */
@@ -236,6 +235,7 @@ static int _keyvalue_regex(const char *line,
 	*value = NULL;
 	*remaining = (char *)line;
 	memset(pmatch, 0, sizeof(regmatch_t)*nmatch);
+	
 	if (regexec(&keyvalue_re, line, nmatch, pmatch, 0)
 	    == REG_NOMATCH) {
 		return -1;
@@ -243,7 +243,6 @@ static int _keyvalue_regex(const char *line,
 
 	*key = (char *)(xstrndup(line + pmatch[1].rm_so,
 				 pmatch[1].rm_eo - pmatch[1].rm_so));
-
 
 	if (pmatch[4].rm_so != -1) {
 		*value = (char *)(xstrndup(line + pmatch[4].rm_so,
@@ -474,7 +473,7 @@ static int _handle_uint16(s_p_values_t *v,
 		} else if (errno == ERANGE) {
 			error("%s value (%s) is out of range", v->key, value);
 			return -1;
-		} else if (num < 0) {
+		} else if (value[0] == '-') {
 			error("%s value (%s) is less than zero", v->key, value);
 			return -1;
 		} else if (num > 0xffff) {
@@ -529,7 +528,7 @@ static int _handle_uint32(s_p_values_t *v,
 		} else if (errno == ERANGE) {
 			error("%s value (%s) is out of range", v->key, value);
 			return -1;
-		} else if (num < 0) {
+		} else if (value[0] == '-') {
 			error("%s value (%s) is less than zero", v->key, value);
 			return -1;
 		} else if (num > 0xffffffff) {

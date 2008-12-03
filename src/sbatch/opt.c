@@ -1423,7 +1423,7 @@ static void _set_pbs_options(int argc, char **argv)
 			break;
 		case 'm':
 			opt.mail_type |= _parse_pbs_mail_type(optarg);
-			if (opt.mail_type == 0)
+			if ((opt.mail_type == 0) && strcasecmp(optarg, "n"))
 				fatal("-m=%s invalid", optarg);
 			break;
 		case 'M':
@@ -1891,6 +1891,8 @@ static bool _opt_verify(void)
 		else
 			setenvf(NULL, "SLURM_OPEN_MODE", "t");
 	}
+	if (opt.cpus_per_task > 1)
+		setenvfs("SLURM_CPUS_PER_TASK=%d", opt.cpus_per_task); 
 	if (opt.dependency)
 		setenvfs("SLURM_JOB_DEPENDENCY=%s", opt.dependency);
 

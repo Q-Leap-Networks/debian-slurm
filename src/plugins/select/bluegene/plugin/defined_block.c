@@ -83,10 +83,18 @@ extern int create_defined_blocks(bg_layout_t overlapped,
 					
 					if ((bit_equal(bg_record->bitmap, 
 						       found_record->bitmap))
+#ifdef HAVE_BGL
 					    && (bg_record->quarter ==
 						found_record->quarter)
 					    && (bg_record->nodecard ==
-						found_record->nodecard)) {
+						found_record->nodecard)
+#else
+					    && (bit_equal(bg_record->
+							  ionode_bitmap, 
+							  found_record->
+							  ionode_bitmap))
+#endif
+						) {
 						/* don't reboot this one */
 						break;	
 					}
@@ -161,11 +169,11 @@ extern int create_defined_blocks(bg_layout_t overlapped,
 							&block_state_mutex);
 						return SLURM_ERROR;
 					}
-					slurm_conf_lock();
+					
 					snprintf(temp, sizeof(temp), "%s%s",
-						 slurmctld_conf.node_prefix,
+						 bg_slurm_node_prefix,
 						 name);
-					slurm_conf_unlock();
+					
 					xfree(name);
 					if(strcmp(temp, bg_record->nodes)) {
 						fatal("given list of %s "
@@ -270,18 +278,18 @@ extern int create_full_system_block(List bg_found_block_list)
 /* 	geo[Y] = max_dim[Y]; */
 /* 	geo[Z] = max_dim[Z]; */
 /* #endif */
-	slurm_conf_lock();
-	i = (10+strlen(slurmctld_conf.node_prefix));
+	
+	i = (10+strlen(bg_slurm_node_prefix));
 	name = xmalloc(i);
 	if((geo[X] == 0) && (geo[Y] == 0) && (geo[Z] == 0))
 		snprintf(name, i, "%s000",
-			 slurmctld_conf.node_prefix);
+			 bg_slurm_node_prefix);
 	else
 		snprintf(name, i, "%s[000x%c%c%c]",
-			 slurmctld_conf.node_prefix,
+			 bg_slurm_node_prefix,
 			 alpha_num[geo[X]], alpha_num[geo[Y]],
 			 alpha_num[geo[Z]]);
-	slurm_conf_unlock();
+	
 			
 	if(bg_found_block_list) {
 		itr = list_iterator_create(bg_found_block_list);
@@ -318,14 +326,11 @@ extern int create_full_system_block(List bg_found_block_list)
 	}
 
 	records = list_create(destroy_bg_record);
+
+	memset(&blockreq, 0, sizeof(blockreq_t));
 	blockreq.block = name;
-	blockreq.blrtsimage = NULL;
-	blockreq.linuximage = NULL;
-	blockreq.mloaderimage = NULL;
-	blockreq.ramdiskimage = NULL;
 	blockreq.conn_type = SELECT_TORUS;
-	blockreq.nodecards = 0;
-	blockreq.quarters = 0;
+
 	add_bg_record(records, NULL, &blockreq);
 	xfree(name);
 	

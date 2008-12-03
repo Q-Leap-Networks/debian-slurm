@@ -456,6 +456,7 @@ libslurm.so.13 libslurm13 #MINVER#
  slurm_send_slurmdbd_msg@Base 1.3.8
  slurm_send_slurmdbd_recv_rc_msg@Base 1.3.8
  slurm_set_accounting_storage_loc@Base 1.3.8
+ slurm_set_accounting_storage_port@Base 1.3.11
  slurm_set_addr@Base 1.3.8
  slurm_set_addr_any@Base 1.3.8
  slurm_set_addr_char@Base 1.3.8
@@ -463,6 +464,7 @@ libslurm.so.13 libslurm13 #MINVER#
  slurm_set_api_config@Base 1.3.8
  slurm_set_auth_type@Base 1.3.8
  slurm_set_debug_level@Base 1.3.8
+ slurm_set_jobcomp_port@Base 1.3.11
  slurm_set_stream_blocking@Base 1.3.8
  slurm_set_stream_non_blocking@Base 1.3.8
  slurm_set_tree_width@Base 1.3.8

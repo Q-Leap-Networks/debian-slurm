@@ -2,7 +2,7 @@
  *  agent.h - data structures and function definitions for parallel 
  *	background communications
  *
- *  $Id: agent.h 13672 2008-03-19 23:10:58Z jette $
+ *  $Id: agent.h 15775 2008-11-26 19:13:32Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -47,7 +47,7 @@
 #define AGENT_IS_THREAD  	 1	/* set if agent itself a thread of 
 					 * slurmctld, 0 for function call */
 #define AGENT_THREAD_COUNT	10	/* maximum active threads per agent */
-#define COMMAND_TIMEOUT 	10	/* command requeue or error, seconds */
+#define COMMAND_TIMEOUT 	30	/* command requeue or error, seconds */
 #define MAX_AGENT_CNT		(MAX_SERVER_THREADS / (AGENT_THREAD_COUNT + 2))
 					/* maximum simultaneous agents, note 
 					 *   total thread count is product of

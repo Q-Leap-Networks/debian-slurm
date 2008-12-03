@@ -2,7 +2,7 @@
  *  bg_job_run.c - blue gene job execution (e.g. initiation and termination) 
  *  functions.
  *
- *  $Id: bg_job_run.c 15085 2008-09-16 20:24:05Z da $ 
+ *  $Id: bg_job_run.c 15611 2008-11-05 23:28:45Z da $ 
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -197,21 +197,20 @@ static int _reset_block(bg_record_t *bg_record)
 		}
 		/* remove user from list */
 		
-		slurm_conf_lock();
+		
 		if(bg_record->target_name) {
 			if(strcmp(bg_record->target_name, 
-				  slurmctld_conf.slurm_user_name)) {
+				  bg_slurm_user_name)) {
 				xfree(bg_record->target_name);
 				bg_record->target_name = 
-					xstrdup(slurmctld_conf.
-						slurm_user_name);
+					xstrdup(bg_slurm_user_name);
 			}
 			update_block_user(bg_record, 1);
 		} else {
 			bg_record->target_name = 
-				xstrdup(slurmctld_conf.slurm_user_name);
+				xstrdup(bg_slurm_user_name);
 		}	
-		slurm_conf_unlock();
+		
 			
 		bg_record->boot_state = 0;
 		bg_record->boot_count = 0;
@@ -445,6 +444,7 @@ static void _start_agent(bg_update_t *bg_update_ptr)
 	}
 
 	rc = 0;
+#ifdef HAVE_BGL
 	if(bg_update_ptr->blrtsimage 
 	   && strcasecmp(bg_update_ptr->blrtsimage, bg_record->blrtsimage)) {
 		debug3("changing BlrtsImage from %s to %s",
@@ -453,10 +453,16 @@ static void _start_agent(bg_update_t *bg_update_ptr)
 		bg_record->blrtsimage = xstrdup(bg_update_ptr->blrtsimage);
 		rc = 1;
 	}
+#endif
 	if(bg_update_ptr->linuximage
 	   && strcasecmp(bg_update_ptr->linuximage, bg_record->linuximage)) {
+#ifdef HAVE_BGL
 		debug3("changing LinuxImage from %s to %s",
 		       bg_record->linuximage, bg_update_ptr->linuximage);
+#else
+		debug3("changing CnloadImage from %s to %s",
+		       bg_record->linuximage, bg_update_ptr->linuximage);
+#endif
 		xfree(bg_record->linuximage);
 		bg_record->linuximage = xstrdup(bg_update_ptr->linuximage);
 		rc = 1;
@@ -473,8 +479,13 @@ static void _start_agent(bg_update_t *bg_update_ptr)
 	if(bg_update_ptr->ramdiskimage
 	   && strcasecmp(bg_update_ptr->ramdiskimage,
 			 bg_record->ramdiskimage)) {
+#ifdef HAVE_BGL
 		debug3("changing RamDiskImage from %s to %s",
 		       bg_record->ramdiskimage, bg_update_ptr->ramdiskimage);
+#else
+		debug3("changing IoloadImage from %s to %s",
+		       bg_record->ramdiskimage, bg_update_ptr->ramdiskimage);
+#endif
 		xfree(bg_record->ramdiskimage);
 		bg_record->ramdiskimage = xstrdup(bg_update_ptr->ramdiskimage);
 		rc = 1;
@@ -488,6 +499,7 @@ static void _start_agent(bg_update_t *bg_update_ptr)
 			
 		bg_free_block(bg_record);
 #ifdef HAVE_BG_FILES
+#ifdef HAVE_BGL
 		if ((rc = bridge_modify_block(bg_record->bg_block_id,
 					      RM_MODIFY_BlrtsImg,   
 					      bg_record->blrtsimage))
@@ -503,25 +515,46 @@ static void _start_agent(bg_update_t *bg_update_ptr)
 			      bg_err_str(rc));
 		
 		if ((rc = bridge_modify_block(bg_record->bg_block_id,
+					      RM_MODIFY_RamdiskImg, 
+					      bg_record->ramdiskimage))
+		    != STATUS_OK)
+			error("bridge_modify_block(RM_MODIFY_RamdiskImg)", 
+			      bg_err_str(rc));
+
+#else
+		if ((rc = bridge_modify_block(bg_record->bg_block_id,
+					      RM_MODIFY_CnloadImg,   
+					      bg_record->linuximage))
+		    != STATUS_OK) 
+			error("bridge_modify_block(RM_MODIFY_CnloadImg)",
+			      bg_err_str(rc));
+		
+		if ((rc = bridge_modify_block(bg_record->bg_block_id,
+					      RM_MODIFY_IoloadImg, 
+					      bg_record->ramdiskimage))
+		    != STATUS_OK)
+			error("bridge_modify_block(RM_MODIFY_IoloadImg)", 
+			      bg_err_str(rc));
+
+#endif
+		if ((rc = bridge_modify_block(bg_record->bg_block_id,
 					      RM_MODIFY_MloaderImg, 
 					      bg_record->mloaderimage))
 		    != STATUS_OK)
 			error("bridge_modify_block(RM_MODIFY_MloaderImg)", 
 			      bg_err_str(rc));
 		
-		if ((rc = bridge_modify_block(bg_record->bg_block_id,
-					      RM_MODIFY_RamdiskImg, 
-					      bg_record->ramdiskimage))
-		    != STATUS_OK)
-			error("bridge_modify_block(RM_MODIFY_RamdiskImg)", 
-			      bg_err_str(rc));
 #endif
 		slurm_mutex_lock(&block_state_mutex);
 		bg_record->modifying = 0;		
 		slurm_mutex_unlock(&block_state_mutex);		
 	} else if(bg_update_ptr->reboot) 
+#ifdef HAVE_BGL
 		bg_free_block(bg_record);
-	
+#else
+		bg_reboot_block(bg_record);
+#endif
+
 	if(bg_record->state == RM_PARTITION_FREE) {
 		if((rc = boot_block(bg_record)) != SLURM_SUCCESS) {
 			slurm_mutex_lock(&block_state_mutex);
@@ -950,12 +983,14 @@ extern int start_job(struct job_record *job_ptr)
 	select_g_get_jobinfo(job_ptr->select_jobinfo,
 			     SELECT_DATA_REBOOT, 
 			     &(bg_update_ptr->reboot));
+#ifdef HAVE_BGL
 	if(!bg_update_ptr->blrtsimage) {
 		bg_update_ptr->blrtsimage = xstrdup(default_blrtsimage);
 		select_g_set_jobinfo(job_ptr->select_jobinfo,
 				     SELECT_DATA_BLRTS_IMAGE, 
 				     bg_update_ptr->blrtsimage);
 	}
+#endif
 	select_g_get_jobinfo(job_ptr->select_jobinfo,
 			     SELECT_DATA_LINUX_IMAGE, 
 			     &(bg_update_ptr->linuximage));
@@ -1074,9 +1109,11 @@ extern int sync_jobs(List job_list)
 			select_g_get_jobinfo(job_ptr->select_jobinfo,
 					     SELECT_DATA_BLOCK_ID, 
 					     &(bg_update_ptr->bg_block_id));
+#ifdef HAVE_BGL
 			select_g_get_jobinfo(job_ptr->select_jobinfo,
 					     SELECT_DATA_BLRTS_IMAGE, 
 					     &(bg_update_ptr->blrtsimage));
+#endif
 			select_g_get_jobinfo(job_ptr->select_jobinfo,
 					     SELECT_DATA_LINUX_IMAGE, 
 					     &(bg_update_ptr->linuximage));
@@ -1160,25 +1197,19 @@ extern int sync_jobs(List job_list)
 extern int boot_block(bg_record_t *bg_record)
 {
 #ifdef HAVE_BG_FILES
-	int rc;
-	
-	
-	slurm_conf_lock();
+	int rc;	
+		
 	if ((rc = bridge_set_block_owner(bg_record->bg_block_id, 
-					 slurmctld_conf.slurm_user_name)) 
+					 bg_slurm_user_name)) 
 	    != STATUS_OK) {
 		error("bridge_set_part_owner(%s,%s): %s", 
 		      bg_record->bg_block_id, 
-		      slurmctld_conf.slurm_user_name,
+		      bg_slurm_user_name,
 		      bg_err_str(rc));
-		slurm_conf_unlock();
-		
 		return SLURM_ERROR;
-	}
-	slurm_conf_unlock();
+	}	
 			
-	info("Booting block %s", 
-	     bg_record->bg_block_id);
+	info("Booting block %s", bg_record->bg_block_id);
 	if ((rc = bridge_create_block(bg_record->bg_block_id)) 
 	    != STATUS_OK) {
 		error("bridge_create_block(%s): %s",

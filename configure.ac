@@ -1,4 +1,4 @@
-# $Id: configure.ac 15551 2008-10-31 19:47:35Z da $
+# $Id: configure.ac 15786 2008-12-02 18:20:32Z jette $
 # This file is to be processed with autoconf to generate a configure script
 
 dnl Prologue
@@ -135,6 +135,9 @@ LIBS="$PTHREAD_LIBS $LIBS"
 
 X_AC_BGL
 X_AC_BGP
+AM_CONDITIONAL(BLUEGENE_LOADED, test "x$ac_bluegene_loaded" = "xyes")
+AC_SUBST(BLUEGENE_LOADED)
+
 X_AC_CFLAGS
 X_AC_XCPU
 X_AC_SLURM_SEMAPHORE
@@ -387,11 +390,12 @@ AC_CONFIG_FILES([Makefile
 		 testsuite/Makefile
 		 testsuite/expect/Makefile
 		 testsuite/slurm_unit/Makefile
+		 testsuite/slurm_unit/api/Makefile
+		 testsuite/slurm_unit/api/manual/Makefile
 		 testsuite/slurm_unit/common/Makefile
 		 testsuite/slurm_unit/slurmctld/Makefile
 		 testsuite/slurm_unit/slurmd/Makefile
-		 testsuite/slurm_unit/api/Makefile
-		 testsuite/slurm_unit/api/manual/Makefile
+		 testsuite/slurm_unit/slurmdbd/Makefile
 		 ]
 )
 

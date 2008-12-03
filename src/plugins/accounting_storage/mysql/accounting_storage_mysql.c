@@ -2034,8 +2034,10 @@ static mysql_db_info_t *_mysql_acct_create_db_info()
 {
 	mysql_db_info_t *db_info = xmalloc(sizeof(mysql_db_info_t));
 	db_info->port = slurm_get_accounting_storage_port();
-	if(!db_info->port) 
+	if(!db_info->port) {
 		db_info->port = 3306;
+		slurm_set_accounting_storage_port(db_info->port);
+	}
 	db_info->host = slurm_get_accounting_storage_host();	
 	db_info->user = slurm_get_accounting_storage_user();	
 	db_info->pass = slurm_get_accounting_storage_pass();	
@@ -2520,8 +2522,11 @@ extern int init ( void )
 
 	debug2("mysql_connect() called for db %s", mysql_db_name);
 	
-	mysql_get_db_connection(&db_conn, mysql_db_name, mysql_db_info);
-		
+	if(mysql_get_db_connection(&db_conn, mysql_db_name, mysql_db_info) 
+	   != SLURM_SUCCESS)
+		fatal("The database must be up when starting "
+		      "the MYSQL plugin.");
+
 	rc = _mysql_acct_check_tables(db_conn);
 
 	mysql_close_db_connection(&db_conn);
@@ -6880,7 +6885,12 @@ empty:
 		   && row[ASSOC_REQ_PARENT][0]) {
 			assoc->parent_acct = xstrdup(row[ASSOC_REQ_PARENT]);
 			parent_acct = row[ASSOC_REQ_PARENT];
-		} 
+		} else if(!assoc->user) {
+			/* This is the root association so we have no
+			   parent id */
+			parent_acct = NULL;
+			parent_id = 0;
+		}
 
 		if(row[ASSOC_REQ_PART][0])
 			assoc->partition = xstrdup(row[ASSOC_REQ_PART]);
@@ -6889,7 +6899,7 @@ empty:
 		else
 			assoc->fairshare = 1;
 
-		if(!without_parent_info && 
+		if(!without_parent_info && parent_acct &&
 		   (!last_acct || !last_cluster 
 		    || strcmp(parent_acct, last_acct)
 		    || strcmp(row[ASSOC_REQ_CLUSTER], last_cluster))) {
@@ -8619,6 +8629,9 @@ extern int jobacct_storage_p_job_start(mysql_conn_t *mysql_conn,
 	 * them by zeroing out the end.
 	 */
 	if(!job_ptr->db_index) {
+		if(!job_ptr->details->begin_time)
+			job_ptr->details->begin_time = 
+				job_ptr->details->submit_time;
 		query = xstrdup_printf(
 			"insert into %s "
 			"(jobid, associd, uid, gid, nodelist, ",
@@ -9240,10 +9253,11 @@ extern int acct_storage_p_flush_jobs_on_cluster(
 	 * the suspend table and the step table 
 	 */
 	query = xstrdup_printf(
-		"select t1.id, t1.state from %s as t1, %s as t2 "
-		"where ((t2.id=t1.associd and t2.cluster=\"%s\") "
-		"|| !t1.associd) && t1.end=0;",
-		job_table, assoc_table, cluster);
+		"select distinct t1.id, t1.state from %s as t1 where "
+		"t1.cluster=\"%s\" && t1.end=0;",
+		job_table, cluster);
+	debug3("%d(%d) query\n%s",
+	       mysql_conn->conn, __LINE__, query);
 	if(!(result =
 	     mysql_db_query_ret(mysql_conn->db_conn, query, 0))) {
 		xfree(query);
