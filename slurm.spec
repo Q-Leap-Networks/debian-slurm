@@ -71,14 +71,14 @@
 %endif
 
 Name:    slurm
-Version: 1.3.11
+Version: 1.3.12
 Release: 1%{?dist}
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL 
 Group: System Environment/Base
-Source: slurm-1.3.11.tar.bz2
+Source: slurm-1.3.12.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: https://computing.llnl.gov/linux/slurm/
 
@@ -256,7 +256,7 @@ SLURM process tracking plugin for SGI job containers.
 #############################################################################
 
 %prep
-%setup -n slurm-1.3.11
+%setup -n slurm-1.3.12
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \

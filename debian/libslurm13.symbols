@@ -237,6 +237,7 @@ libslurm.so.13 libslurm13 #MINVER#
  slurm_get_api_config@Base 1.3.8
  slurm_get_auth_type@Base 1.3.8
  slurm_get_avail_procs@Base 1.3.8
+ slurm_get_batch_start_timeout@Base 1.3.12
  slurm_get_checkpoint_file_path@Base 1.3.8
  slurm_get_checkpoint_type@Base 1.3.8
  slurm_get_cluster_name@Base 1.3.8
@@ -287,6 +288,7 @@ libslurm.so.13 libslurm13 #MINVER#
  slurm_get_task_plugin@Base 1.3.8
  slurm_get_task_plugin_param@Base 1.3.8
  slurm_get_task_prolog@Base 1.3.8
+ slurm_get_track_wckey@Base 1.3.12
  slurm_get_tree_width@Base 1.3.8
  slurm_get_triggers@Base 1.3.8
  slurm_get_wait_time@Base 1.3.8

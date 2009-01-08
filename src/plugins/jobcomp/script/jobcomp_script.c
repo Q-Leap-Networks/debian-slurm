@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  jobcomp_script.c - Script running slurm job completion logging plugin.
- *  $Id: jobcomp_script.c 15366 2008-10-09 19:56:24Z da $
+ *  $Id: jobcomp_script.c 15983 2008-12-17 00:39:14Z jette $
  *****************************************************************************
  *  Produced at Center for High Performance Computing, North Dakota State
  *  University
@@ -570,18 +570,14 @@ static int _wait_for_thread (pthread_t thread_id)
 {
 	int i;
 
-	for (i=0; i<4; i++) {
+	for (i=0; i<20; i++) {
+		pthread_cond_broadcast(&comp_list_cond);
+		usleep(1000 * i);
 		if (pthread_kill(thread_id, 0))
 			return SLURM_SUCCESS;
-		usleep(1000);
 	}
 
-	/*
-	 * jobcomp thread appears to be stuck, try harder:
-	 */
-	if (pthread_kill(thread_id, SIGKILL))
-		error("Could not kill jobcomp script pthread");
-
+	error("Could not kill jobcomp script pthread");
 	return SLURM_ERROR;
 }
 
@@ -594,7 +590,6 @@ extern int fini ( void )
 	if (script_thread) {
 		verbose("Script Job Completion plugin shutting down");
 		agent_exit = 1;
-		pthread_cond_broadcast(&comp_list_cond);
 		rc = _wait_for_thread(script_thread);
 		script_thread = 0;
 	}

@@ -95,7 +95,12 @@ int inline slurm_set_api_config(slurm_protocol_config_t * protocol_conf);
  * returns a pointer to the current slurm_protocol_config object
  * RET slurm_protocol_config_t	- current slurm_protocol_config object
  */
-inline slurm_protocol_config_t *slurm_get_api_config();
+inline slurm_protocol_config_t *slurm_get_api_config(void);
+
+/* slurm_get_batch_start_timeout
+ * RET BatchStartTimeout value from slurm.conf
+ */
+uint16_t slurm_get_batch_start_timeout(void);
 
 /* slurm_get_def_mem_per_task
  * RET DefMemPerTask value from slurm.conf
@@ -216,6 +221,11 @@ extern char *slurm_get_crypto_type(void);
  * returns the value of fast_schedule in slurmctld_conf object
  */
 extern uint16_t slurm_get_fast_schedule(void);
+
+/* slurm_get_track_wckey
+ * returns the value of track_wckey in slurmctld_conf object
+ */
+extern uint16_t slurm_get_track_wckey(void);
 
 /* slurm_set_tree_width
  * sets the value of tree_width in slurmctld_conf object

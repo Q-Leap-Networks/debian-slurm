@@ -1,7 +1,7 @@
 /****************************************************************************\
  *  opts.c - srun command line option parsing
  *
- *  $Id: opts.c 15448 2008-10-17 21:49:29Z jette $
+ *  $Id: opts.c 15808 2008-12-02 23:38:47Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -622,6 +622,11 @@ extern int parse_format( char* format )
 				                          field_size, 
 				                          right_justify, 
 				                          suffix );
+			else if (field[0] == 'w')
+				job_format_add_wckey( params.format_list, 
+						      field_size, 
+						      right_justify, 
+						      suffix );
 			else if (field[0] == 'x')
 				job_format_add_exc_nodes( params.format_list, 
 				                          field_size, 

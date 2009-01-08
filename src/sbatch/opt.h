@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  opt.h - definitions for srun option processing
- *  $Id: opt.h 14469 2008-07-09 18:15:23Z jette $
+ *  $Id: opt.h 15808 2008-12-02 23:38:47Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -140,6 +140,7 @@ typedef struct sbatch_options {
 	char *efname;		/* error file name		*/
 	int get_user_env_time;	/* --get-user-env[=timeout]	*/
 	int get_user_env_mode;	/* --get-user-env=[S|L]         */
+	char *wckey;            /* --wckey workload characterization key */
 } opt_t;
 
 extern opt_t opt;

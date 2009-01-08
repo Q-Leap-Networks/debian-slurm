@@ -48,14 +48,16 @@
 static List local_association_list = NULL;
 static List local_qos_list = NULL;
 static List local_user_list = NULL;
+static List assoc_mgr_wckey_list = NULL;
 static char *local_cluster_name = NULL;
 
 void (*remove_assoc_notify) (acct_association_rec_t *rec) = NULL;
 
 pthread_mutex_t assoc_mgr_association_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t local_file_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t local_qos_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t local_user_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_mutex_t local_file_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t assoc_mgr_wckey_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* 
  * Comparator used for sorting assocs largest cpu to smallest cpu
@@ -197,11 +199,16 @@ static int _local_update_assoc_qos_list(acct_association_rec_t *assoc,
 
 /* locks should be put in place before calling this function */
 static int _set_assoc_parent_and_user(acct_association_rec_t *assoc,
-				      List assoc_list)
+				      List assoc_list, int reset)
 {
 	static acct_association_rec_t *last_acct_parent = NULL;
 	static acct_association_rec_t *last_parent = NULL;
 
+	if(reset) {
+		last_acct_parent = NULL;
+		last_parent = NULL;
+	}
+	
 	if(!assoc || !assoc_list) {
 		error("you didn't give me an association");
 		return SLURM_ERROR;
@@ -261,6 +268,7 @@ static int _post_association_list(List assoc_list)
 {
 	acct_association_rec_t *assoc = NULL;
 	ListIterator itr = NULL;
+	int reset = 1;
 	//DEF_TIMERS;
 
 	if(!assoc_list)
@@ -268,8 +276,10 @@ static int _post_association_list(List assoc_list)
 
 	itr = list_iterator_create(assoc_list);
 	//START_TIMER;
-	while((assoc = list_next(itr))) 
-		_set_assoc_parent_and_user(assoc, assoc_list);
+	while((assoc = list_next(itr))) {
+		_set_assoc_parent_and_user(assoc, assoc_list, reset);
+		reset = 0;
+	}
 	list_iterator_destroy(itr);
 	//END_TIMER2("load_associations");
 	return SLURM_SUCCESS;
@@ -284,7 +294,8 @@ static int _post_user_list(List user_list)
 		uid_t pw_uid = uid_from_string(user->name);
 		if(pw_uid == (uid_t) -1) {
 			if(slurmdbd_conf)
-				debug("couldn't get a uid for user %s",
+				debug("post user: couldn't get a "
+				      "uid for user %s",
 				      user->name);
 			user->uid = (uint32_t)NO_VAL;
 		} else
@@ -294,10 +305,29 @@ static int _post_user_list(List user_list)
 	return SLURM_SUCCESS;
 }
 
+static int _post_wckey_list(List wckey_list)
+{
+	acct_wckey_rec_t *wckey = NULL;
+	ListIterator itr = list_iterator_create(wckey_list);
+	//START_TIMER;
+	while((wckey = list_next(itr))) {
+		uid_t pw_uid = uid_from_string(wckey->user);
+		if(pw_uid == (uid_t) -1) {
+			if(slurmdbd_conf)
+				debug("post wckey: couldn't get a uid "
+				      "for user %s",
+				      wckey->user);
+			wckey->uid = (uint32_t)NO_VAL;
+		} else
+			wckey->uid = pw_uid;
+	}
+	list_iterator_destroy(itr);
+	return SLURM_SUCCESS;
+}
+
 static int _get_local_association_list(void *db_conn, int enforce)
 {
 	acct_association_cond_t assoc_q;
-	char *cluster_name = NULL;
 	uid_t uid = getuid();
 
 //	DEF_TIMERS;
@@ -307,16 +337,12 @@ static int _get_local_association_list(void *db_conn, int enforce)
 
 	memset(&assoc_q, 0, sizeof(acct_association_cond_t));
 	if(local_cluster_name) {
-		assoc_q.cluster_list = list_create(slurm_destroy_char);
-		cluster_name = xstrdup(local_cluster_name);
-		if(!cluster_name) {
-			if(enforce && !slurmdbd_conf) {
-				error("_get_local_association_list: "
-				      "no cluster name here going to get "
-				      "all associations.");
-			}
-		} else 
-			list_append(assoc_q.cluster_list, cluster_name);
+		assoc_q.cluster_list = list_create(NULL);
+		list_append(assoc_q.cluster_list, local_cluster_name);
+	} else if(enforce && !slurmdbd_conf) {
+		error("_get_local_association_list: "
+		      "no cluster name here going to get "
+		      "all associations.");
 	}
 
 //	START_TIMER;
@@ -403,11 +429,61 @@ static int _get_local_user_list(void *db_conn, int enforce)
 	return SLURM_SUCCESS;
 }
 
+static int _get_local_wckey_list(void *db_conn, int enforce)
+{
+	acct_wckey_cond_t wckey_q;
+	uid_t uid = getuid();
+
+//	DEF_TIMERS;
+	slurm_mutex_lock(&assoc_mgr_wckey_lock);
+	if(assoc_mgr_wckey_list)
+		list_destroy(assoc_mgr_wckey_list);
+
+	memset(&wckey_q, 0, sizeof(acct_wckey_cond_t));
+	if(local_cluster_name) {
+		wckey_q.cluster_list = list_create(NULL);
+		list_append(wckey_q.cluster_list, local_cluster_name);
+	} else if(enforce && !slurmdbd_conf) {
+		error("_get_local_wckey_list: "
+		      "no cluster name here going to get "
+		      "all wckeys.");
+	}
+
+//	START_TIMER;
+	assoc_mgr_wckey_list =
+		acct_storage_g_get_wckeys(db_conn, uid, &wckey_q);
+//	END_TIMER2("get_wckeys");
+	
+	if(wckey_q.cluster_list)
+		list_destroy(wckey_q.cluster_list);
+	
+	if(!assoc_mgr_wckey_list) {
+		/* create list so we don't keep calling this if there
+		   isn't anything there */
+		assoc_mgr_wckey_list = list_create(NULL);
+		slurm_mutex_unlock(&assoc_mgr_wckey_lock);
+		if(enforce) {
+			error("_get_local_wckey_list: "
+			      "no list was made.");
+			return SLURM_ERROR;
+		} else {
+			debug3("not enforcing wckeys and no "
+			       "list was given so we are giving a blank list");
+			return SLURM_SUCCESS;
+		}
+	} 
+
+	_post_wckey_list(assoc_mgr_wckey_list);
+	
+	slurm_mutex_unlock(&assoc_mgr_wckey_lock);
+
+	return SLURM_SUCCESS;
+}
+
 static int _refresh_local_association_list(void *db_conn, int enforce)
 {
 	acct_association_cond_t assoc_q;
 	List current_assocs = NULL;
-	char *cluster_name = NULL;
 	uid_t uid = getuid();
 	ListIterator curr_itr = NULL;
 	ListIterator local_itr = NULL;
@@ -416,18 +492,13 @@ static int _refresh_local_association_list(void *db_conn, int enforce)
 
 	memset(&assoc_q, 0, sizeof(acct_association_cond_t));
 	if(local_cluster_name) {
-		assoc_q.cluster_list = list_create(slurm_destroy_char);
-		cluster_name = xstrdup(local_cluster_name);
-		if(!cluster_name) {
-			if(enforce && !slurmdbd_conf) {
-				error("_get_local_association_list: "
-				      "no cluster name here going to get "
-				      "all associations.");
-			}
-		} else 
-			list_append(assoc_q.cluster_list, cluster_name);
+		assoc_q.cluster_list = list_create(NULL);
+		list_append(assoc_q.cluster_list, local_cluster_name);
+	} else if(enforce && !slurmdbd_conf) {
+		error("_refresh_local_association_list: "
+		      "no cluster name here going to get "
+		      "all associations.");
 	}
-
 
 	slurm_mutex_lock(&assoc_mgr_association_lock);
 
@@ -470,9 +541,6 @@ static int _refresh_local_association_list(void *db_conn, int enforce)
 				break;
 		}
 		
-		if(!assoc) 
-			continue;
-
 		while(assoc) {
 			_addto_used_info(assoc, curr_assoc);
 			/* get the parent last since this pointer is
@@ -553,6 +621,45 @@ static int _refresh_local_user_list(void *db_conn, int enforce)
 	return SLURM_SUCCESS;
 }
 
+/* This only gets a new list if available dropping the old one if
+ * needed
+ */
+static int _refresh_local_wckey_list(void *db_conn, int enforce)
+{
+	acct_wckey_cond_t wckey_q;
+	List current_wckeys = NULL;
+	uid_t uid = getuid();
+
+	memset(&wckey_q, 0, sizeof(acct_wckey_cond_t));
+	if(local_cluster_name) {
+		wckey_q.cluster_list = list_create(NULL);
+		list_append(wckey_q.cluster_list, local_cluster_name);
+	} else if(enforce && !slurmdbd_conf) {
+		error("_refresh_local_wckey_list: "
+		      "no cluster name here going to get "
+		      "all wckeys.");
+	}
+
+	current_wckeys = acct_storage_g_get_wckeys(db_conn, uid, &wckey_q);
+
+	if(!current_wckeys) {
+		error("_refresh_local_wckey_list: "
+		      "no new list given back keeping cached one.");
+		return SLURM_ERROR;
+	}
+
+	_post_user_list(current_wckeys);
+
+	slurm_mutex_lock(&assoc_mgr_wckey_lock);
+	if(assoc_mgr_wckey_list)
+		list_destroy(assoc_mgr_wckey_list);
+
+	assoc_mgr_wckey_list = current_wckeys;
+	slurm_mutex_unlock(&assoc_mgr_wckey_lock);
+
+	return SLURM_SUCCESS;
+}
+
 extern int assoc_mgr_init(void *db_conn, assoc_init_args_t *args)
 {
 	static uint16_t enforce = 0;
@@ -578,6 +685,10 @@ extern int assoc_mgr_init(void *db_conn, assoc_init_args_t *args)
 		local_cluster_name = slurm_get_cluster_name();
 	}
 
+	/* check if we can't talk to the db yet */
+	if(errno == ESLURM_ACCESS_DENIED)
+		return SLURM_ERROR;
+	
 	if((!local_association_list) && (cache_level & ASSOC_MGR_CACHE_ASSOC)) 
 		if(_get_local_association_list(db_conn, enforce) == SLURM_ERROR)
 			return SLURM_ERROR;
@@ -588,6 +699,10 @@ extern int assoc_mgr_init(void *db_conn, assoc_init_args_t *args)
 
 	if((!local_user_list) && (cache_level & ASSOC_MGR_CACHE_USER))
 		if(_get_local_user_list(db_conn, enforce) == SLURM_ERROR)
+			return SLURM_ERROR;
+
+	if((!assoc_mgr_wckey_list) && (cache_level & ASSOC_MGR_CACHE_WCKEY))
+		if(_get_local_wckey_list(db_conn, enforce) == SLURM_ERROR)
 			return SLURM_ERROR;
 
 	return SLURM_SUCCESS;
@@ -604,10 +719,13 @@ extern int assoc_mgr_fini(char *state_save_location)
 		list_destroy(local_qos_list);
 	if(local_user_list)
 		list_destroy(local_user_list);
+	if(assoc_mgr_wckey_list)
+		list_destroy(assoc_mgr_wckey_list);
 	xfree(local_cluster_name);
 	local_association_list = NULL;
 	local_qos_list = NULL;
 	local_user_list = NULL;
+	assoc_mgr_wckey_list = NULL;
 
 	return SLURM_SUCCESS;
 }
@@ -656,7 +774,7 @@ extern int assoc_mgr_fill_in_assoc(void *db_conn, acct_association_rec_t *assoc,
 			}					
 			assoc->user = user.name;
 			assoc->acct = user.default_acct;
-		} 
+		}		
 		
 		if(!assoc->cluster)
 			assoc->cluster = local_cluster_name;
@@ -728,6 +846,8 @@ extern int assoc_mgr_fill_in_assoc(void *db_conn, acct_association_rec_t *assoc,
 	assoc->id = ret_assoc->id;
 	if(!assoc->user)
 		assoc->user = ret_assoc->user;
+	assoc->uid = ret_assoc->uid;
+
 	if(!assoc->acct)
 		assoc->acct = ret_assoc->acct;
 	if(!assoc->cluster)
@@ -781,20 +901,162 @@ extern int assoc_mgr_fill_in_user(void *db_conn, acct_user_rec_t *user,
 	slurm_mutex_lock(&local_user_lock);
 	itr = list_iterator_create(local_user_list);
 	while((found_user = list_next(itr))) {
-		if(user->uid == found_user->uid) 
-			break;
-		else if(user->name && !strcasecmp(user->name, found_user->name))
+		if(user->uid != NO_VAL) {
+			if(user->uid == found_user->uid)
+				break;
+		} else if(user->name 
+			  && !strcasecmp(user->name, found_user->name))
 			break;
 	}
 	list_iterator_destroy(itr);
 
 	if(found_user) {
+		/* This needs to be here just incase we don't have a
+		   list since it gets checked outside here and needs
+		   to exist. */
+		if(!found_user->coord_accts)
+			found_user->coord_accts = 
+				list_create(destroy_acct_coord_rec);
 		memcpy(user, found_user, sizeof(acct_user_rec_t));		
 		slurm_mutex_unlock(&local_user_lock);
 		return SLURM_SUCCESS;
 	}
 	slurm_mutex_unlock(&local_user_lock);
 	return SLURM_ERROR;
+}
+
+extern int assoc_mgr_fill_in_wckey(void *db_conn, acct_wckey_rec_t *wckey,
+				   int enforce, 
+				   acct_wckey_rec_t **wckey_pptr)
+{
+	ListIterator itr = NULL;
+	acct_wckey_rec_t * found_wckey = NULL;
+	acct_wckey_rec_t * ret_wckey = NULL;
+
+	if (wckey_pptr)
+		*wckey_pptr = NULL;
+	if(!assoc_mgr_wckey_list) {
+		if(_get_local_wckey_list(db_conn, enforce) == SLURM_ERROR)
+			return SLURM_ERROR;
+	}
+	if((!assoc_mgr_wckey_list || !list_count(assoc_mgr_wckey_list))
+	   && !enforce) 
+		return SLURM_SUCCESS;
+
+	if(!wckey->id) {
+		if(!wckey->name) {
+			acct_user_rec_t user;
+
+			if(wckey->uid == (uint32_t)NO_VAL && !wckey->user) {
+				if(enforce) {
+					error("get_wckey_id: "
+					      "Not enough info to "
+					      "get an wckey");
+					return SLURM_ERROR;
+				} else {
+					return SLURM_SUCCESS;
+				}
+			}
+			memset(&user, 0, sizeof(acct_user_rec_t));
+			user.uid = wckey->uid;
+			user.name = wckey->user;
+			if(assoc_mgr_fill_in_user(db_conn, &user, enforce) 
+			   == SLURM_ERROR) {
+				if(enforce) 
+					return SLURM_ERROR;
+				else {
+					return SLURM_SUCCESS;
+				}
+			}
+			if(!wckey->user)
+				wckey->user = user.name;
+			wckey->name = user.default_wckey;
+		} else if(wckey->uid == (uint32_t)NO_VAL && !wckey->user) {
+			if(enforce) {
+				error("get_wckey_id: "
+				      "Not enough info 2 to "
+				      "get an wckey");
+				return SLURM_ERROR;
+			} else {
+				return SLURM_SUCCESS;
+			}
+		}
+			
+		
+		if(!wckey->cluster)
+			wckey->cluster = local_cluster_name;
+	}
+/* 	info("looking for wckey of user=%s(%u), name=%s, " */
+/* 	     "cluster=%s", */
+/* 	     wckey->user, wckey->uid, wckey->name, */
+/* 	     wckey->cluster); */
+	slurm_mutex_lock(&assoc_mgr_wckey_lock);
+	itr = list_iterator_create(assoc_mgr_wckey_list);
+	while((found_wckey = list_next(itr))) {
+		if(wckey->id) {
+			if(wckey->id == found_wckey->id) {
+				ret_wckey = found_wckey;
+				break;
+			}
+			continue;
+		} else {
+			if(wckey->uid != NO_VAL) {
+				if(wckey->uid != found_wckey->uid) {
+					debug4("not the right user %u != %u",
+					       wckey->uid, found_wckey->uid);
+					continue;
+				}
+			} else if(wckey->user && strcasecmp(wckey->user,
+							    found_wckey->user))
+				continue;
+			
+			if(wckey->name
+			   && (!found_wckey->name 
+			       || strcasecmp(wckey->name, found_wckey->name))) {
+				debug4("not the right name %s != %s",
+				       wckey->name, found_wckey->name);
+				continue;
+			}
+			
+			/* only check for on the slurmdbd */
+			if(!local_cluster_name && found_wckey->cluster
+			   && strcasecmp(wckey->cluster,
+					 found_wckey->cluster)) {
+				debug4("not the right cluster");
+				continue;
+			}
+		}
+		ret_wckey = found_wckey;
+		break;
+	}
+	list_iterator_destroy(itr);
+	
+	if(!ret_wckey) {
+		slurm_mutex_unlock(&assoc_mgr_wckey_lock);
+		if(enforce) 
+			return SLURM_ERROR;
+		else
+			return SLURM_SUCCESS;
+	}
+	debug3("found correct wckey %u", ret_wckey->id);
+	if (wckey_pptr)
+		*wckey_pptr = ret_wckey;
+
+	wckey->id = ret_wckey->id;
+	
+	if(!wckey->user)
+		wckey->user = ret_wckey->user;
+	wckey->uid = ret_wckey->uid;
+	
+	if(!wckey->name)
+		wckey->name = ret_wckey->name;
+	if(!wckey->cluster)
+		wckey->cluster = ret_wckey->cluster;
+
+
+	slurm_mutex_unlock(&assoc_mgr_wckey_lock);
+
+	return SLURM_SUCCESS;
 }
 
 extern acct_admin_level_t assoc_mgr_get_admin_level(void *db_conn,
@@ -914,20 +1176,20 @@ extern int assoc_mgr_update_local_assocs(acct_update_object_t *update)
 					continue;
 				}
 				
-				/* only check for on the slurmdbd */
-				if(!local_cluster_name && object->acct
-				   && (!rec->cluster
-				       || strcasecmp(object->cluster,
-						     rec->cluster))) {
-					debug4("not the right cluster");
-					continue;
-				}
-				
 				if(object->partition
 				   && (!rec->partition 
 				       || strcasecmp(object->partition, 
 						     rec->partition))) {
 					debug4("not the right partition");
+					continue;
+				}
+
+				/* only check for on the slurmdbd */
+				if(!local_cluster_name && object->cluster
+				   && (!rec->cluster
+				       || strcasecmp(object->cluster,
+						     rec->cluster))) {
+					debug4("not the right cluster");
 					continue;
 				}
 				break;
@@ -940,7 +1202,7 @@ extern int assoc_mgr_update_local_assocs(acct_update_object_t *update)
 				rc = SLURM_ERROR;
 				break;
 			}
-			debug("updating assoc %u", rec->id);
+
 			if(object->fairshare != NO_VAL) 
 				rec->fairshare = object->fairshare;
 			
@@ -992,11 +1254,12 @@ extern int assoc_mgr_update_local_assocs(acct_update_object_t *update)
 					object->qos_list = NULL;
 				}
 			}
-			
-			slurm_mutex_lock(&local_qos_lock);
-			log_assoc_rec(rec, local_qos_list);
-			slurm_mutex_unlock(&local_qos_lock);
-			
+			if(!slurmdbd_conf) {
+				debug("updating assoc %u", rec->id);
+				slurm_mutex_lock(&local_qos_lock);
+				log_assoc_rec(rec, local_qos_list);
+				slurm_mutex_unlock(&local_qos_lock);
+			}
 			break;
 		case ACCT_ADD_ASSOC:
 			if(rec) {
@@ -1028,6 +1291,7 @@ extern int assoc_mgr_update_local_assocs(acct_update_object_t *update)
 	 * we may have added the parent which wasn't in the list before
 	 */
 	if(parents_changed) {
+		int reset = 1;
 		list_sort(local_association_list, 
 			  (ListCmpF)_sort_assoc_dec);
 
@@ -1041,7 +1305,8 @@ extern int assoc_mgr_update_local_assocs(acct_update_object_t *update)
 				object->used_shares = 0;
 			}
 			_set_assoc_parent_and_user(
-				object, local_association_list);
+				object, local_association_list, reset);
+			reset = 0;
 		}
 		/* Now that we have set up the parents correctly we
 		   can update the used limits
@@ -1065,6 +1330,103 @@ extern int assoc_mgr_update_local_assocs(acct_update_object_t *update)
 
 	list_iterator_destroy(itr);
 	slurm_mutex_unlock(&assoc_mgr_association_lock);
+
+	return rc;	
+}
+
+extern int assoc_mgr_update_local_wckeys(acct_update_object_t *update)
+{
+	acct_wckey_rec_t * rec = NULL;
+	acct_wckey_rec_t * object = NULL;
+	ListIterator itr = NULL;
+	int rc = SLURM_SUCCESS;
+	uid_t pw_uid;
+
+	if(!assoc_mgr_wckey_list)
+		return SLURM_SUCCESS;
+
+	slurm_mutex_lock(&assoc_mgr_wckey_lock);
+	itr = list_iterator_create(assoc_mgr_wckey_list);
+	while((object = list_pop(update->objects))) {
+		if(object->cluster && local_cluster_name) {
+			/* only update the local clusters assocs */
+			if(strcasecmp(object->cluster, local_cluster_name)) {
+				destroy_acct_wckey_rec(object);	
+				continue;
+			}
+		}
+		list_iterator_reset(itr);
+		while((rec = list_next(itr))) {
+			if(object->id) {
+				if(object->id == rec->id) {
+					break;
+				}
+				continue;
+			} else {
+				if(object->uid != rec->uid) {
+					debug4("not the right user");
+					continue;
+				}
+				
+				if(object->name
+				   && (!rec->name 
+				       || strcasecmp(object->name,
+						     rec->name))) {
+					debug4("not the right wckey");
+					continue;
+				}
+				
+				/* only check for on the slurmdbd */
+				if(!local_cluster_name && object->cluster
+				   && (!rec->cluster
+				       || strcasecmp(object->cluster,
+						     rec->cluster))) {
+					debug4("not the right cluster");
+					continue;
+				}
+				break;
+			}			
+		}
+		//info("%d WCKEY %u", update->type, object->id);
+		switch(update->type) {
+		case ACCT_MODIFY_WCKEY:
+			if(!rec) {
+				rc = SLURM_ERROR;
+				break;
+			}
+			/* nothing yet */
+			break;
+		case ACCT_ADD_WCKEY:
+			if(rec) {
+				//rc = SLURM_ERROR;
+				break;
+			}
+			pw_uid = uid_from_string(object->user);
+			if(pw_uid == (uid_t) -1) {
+				debug("wckey add couldn't get a uid "
+				      "for user %s",
+				      object->name);
+				object->uid = NO_VAL;
+			} else
+				object->uid = pw_uid;
+			list_append(assoc_mgr_wckey_list, object);
+			object = NULL;
+			break;
+		case ACCT_REMOVE_WCKEY:
+			if(!rec) {
+				//rc = SLURM_ERROR;
+				break;
+			}
+			list_delete_item(itr);
+			break;
+		default:
+			break;
+		}
+		
+		destroy_acct_wckey_rec(object);			
+	}
+	list_iterator_destroy(itr);
+	slurm_mutex_unlock(&assoc_mgr_wckey_lock);
 
 	return rc;	
 }
@@ -1104,6 +1466,12 @@ extern int assoc_mgr_update_local_users(acct_update_object_t *update)
 				object->default_acct = NULL;
 			}
 
+			if(object->default_wckey) {
+				xfree(rec->default_wckey);
+				rec->default_wckey = object->default_wckey;
+				object->default_wckey = NULL;
+			}
+
 			if(object->admin_level != ACCT_ADMIN_NOTSET) 
 				rec->admin_level = object->admin_level;
 
@@ -1115,7 +1483,7 @@ extern int assoc_mgr_update_local_users(acct_update_object_t *update)
 			}
 			pw_uid = uid_from_string(object->name);
 			if(pw_uid == (uid_t) -1) {
-				debug("couldn't get a uid for user %s",
+				debug("user add couldn't get a uid for user %s",
 				      object->name);
 				object->uid = NO_VAL;
 			} else
@@ -1334,6 +1702,17 @@ extern int dump_assoc_mgr_state(char *state_save_location)
 		slurm_mutex_unlock(&local_qos_lock);
 	}
 
+	if(assoc_mgr_wckey_list) {		
+		memset(&msg, 0, sizeof(dbd_list_msg_t));
+		slurm_mutex_lock(&assoc_mgr_wckey_lock);
+		msg.my_list = assoc_mgr_wckey_list;
+		/* let us know what to unpack */
+		pack16(DBD_ADD_WCKEYS, buffer);
+		slurmdbd_pack_list_msg(SLURMDBD_VERSION, 
+				       DBD_ADD_WCKEYS, &msg, buffer);	
+		slurm_mutex_unlock(&assoc_mgr_wckey_lock);
+	}
+
 	/* write the buffer to file */
 	old_file = xstrdup(state_save_location);
 	xstrcat(old_file, "/assoc_mgr_state.old");
@@ -1500,6 +1879,23 @@ extern int load_assoc_mgr_state(char *state_save_location)
 			msg->my_list = NULL;
 			slurmdbd_free_list_msg(SLURMDBD_VERSION, msg);	
 			break;
+		case DBD_ADD_WCKEYS:
+			error_code = slurmdbd_unpack_list_msg(
+				SLURMDBD_VERSION, DBD_ADD_WCKEYS, &msg, buffer);
+			if (error_code != SLURM_SUCCESS)
+				goto unpack_error;
+			else if(!msg->my_list) {
+				error("No qos retrieved");
+				break;
+			}
+			slurm_mutex_lock(&assoc_mgr_wckey_lock);
+			assoc_mgr_wckey_list = msg->my_list;
+			debug("Recovered %u wckeys", 
+			      list_count(assoc_mgr_wckey_list));
+			slurm_mutex_unlock(&assoc_mgr_wckey_lock);
+			msg->my_list = NULL;
+			slurmdbd_free_list_msg(SLURMDBD_VERSION, msg);	
+			break;
 		default:
 			error("unknown type %u given", type);
 			goto unpack_error;
@@ -1543,6 +1939,10 @@ extern int assoc_mgr_refresh_lists(void *db_conn, assoc_init_args_t *args)
 
 	if(cache_level & ASSOC_MGR_CACHE_USER)
 		if(_refresh_local_user_list(db_conn, enforce) == SLURM_ERROR)
+			return SLURM_ERROR;
+
+	if(cache_level & ASSOC_MGR_CACHE_WCKEY)
+		if(_refresh_local_wckey_list(db_conn, enforce) == SLURM_ERROR)
 			return SLURM_ERROR;
 
 	running_cache = 0;

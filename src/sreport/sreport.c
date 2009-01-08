@@ -262,16 +262,24 @@ static void _cluster_rep (int argc, char *argv[])
 
 	if (strncasecmp (argv[0], "AccountUtilizationByUser", 1) == 0) {
 		error_code = cluster_account_by_user((argc - 1), &argv[1]);
-	} else if (strncasecmp (argv[0], "UserUtilizationByAccount", 2) == 0) {
+	} else if ((strncasecmp (argv[0], "UserUtilizationByAccount", 18) == 0)
+		   || (strncasecmp (argv[0], "UA", 2) == 0)) {
 		error_code = cluster_user_by_account((argc - 1), &argv[1]);
+	} else if ((strncasecmp (argv[0], "UserUtilizationByWckey", 18) == 0)
+		   || (strncasecmp (argv[0], "UW", 2) == 0)) {
+		error_code = cluster_user_by_wckey((argc - 1), &argv[1]);
 	} else if (strncasecmp (argv[0], "Utilization", 2) == 0) {
 		error_code = cluster_utilization((argc - 1), &argv[1]);
+	} else if (strncasecmp (argv[0], "WCKeyUtilizationByUser", 1) == 0) {
+		error_code = cluster_wckey_by_user((argc - 1), &argv[1]);
 	} else {
 		exit_code = 1;
 		fprintf(stderr, "Not valid report %s\n", argv[0]);
 		fprintf(stderr, "Valid cluster reports are, ");
 		fprintf(stderr, "\"AccountUtilizationByUser\", "
-			"\"UserUtilizationByAccount\", and \"Utilization\"\n");
+			"\"UserUtilizationByAccount\", "
+			"\"UserUtilizationByWckey\", \"Utilization\", "
+			"and \"WCKeyUtilizationByUser\"\n");
 	}
 	
 	if (error_code) {
@@ -592,7 +600,8 @@ sreport [<OPTION>] [<COMMAND>]                                             \n\
      user <REPORT> <OPTIONS>                                               \n\
                                                                            \n\
   <REPORT> is different for each report type.                              \n\
-     cluster - AccountUtilizationByUser, UserUtilizationByAccount, Utilization\n\
+     cluster - AccountUtilizationByUser, UserUtilizationByAccount,         \n\
+               UserUtilizationByWckey, Utilization, WCKeyUtilizationByUser \n\
      job     - Sizes                                                       \n\
      user    - TopUsage                                                    \n\
                                                                            \n\

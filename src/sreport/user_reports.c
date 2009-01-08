@@ -177,7 +177,15 @@ static int _setup_print_fields_list(List format_list)
 	itr = list_iterator_create(format_list);
 	while((object = list_next(itr))) {
 		char *tmp_char = NULL;
-		int command_len = strlen(object);
+		int command_len = 0;
+		int newlen = 0;
+		
+		if((tmp_char = strstr(object, "\%"))) {
+			newlen = atoi(tmp_char+1);
+			tmp_char[0] = '\0';
+		} 
+
+		command_len = strlen(object);
 
 		field = xmalloc(sizeof(print_field_t));
 		if(!strncasecmp("Accounts", object, MAX(command_len, 1))) {
@@ -217,11 +225,10 @@ static int _setup_print_fields_list(List format_list)
 			xfree(field);
 			continue;
 		}
-		if((tmp_char = strstr(object, "\%"))) {
-			int newlen = atoi(tmp_char+1);
-			if(newlen > 0) 
-				field->len = newlen;
-		}
+
+		if(newlen > 0) 
+			field->len = newlen;
+		
 		list_append(print_fields_list, field);		
 	}
 	list_iterator_destroy(itr);
@@ -328,9 +335,16 @@ extern int user_top(int argc, char *argv[])
 					while((sreport_user 
 					       = list_next(user_itr))) {
 						if(sreport_user->uid 
-						   == user->uid) {
-							break;
-						}
+						   != NO_VAL) {
+							if(sreport_user->uid 
+							   == user->uid)
+								break;
+						} else if(sreport_user->name 
+							  && !strcasecmp(
+								  sreport_user->
+								  name,
+								  user->name))
+							break;		
 					}
 					list_iterator_destroy(user_itr);
 				new_user:
@@ -401,11 +415,11 @@ extern int user_top(int argc, char *argv[])
 
 	list_iterator_reset(cluster_itr);
 	while((sreport_cluster = list_next(cluster_itr))) {
+		int count = 0;
 		list_sort(sreport_cluster->user_list, (ListCmpF)sort_user_dec);
 	
 		itr = list_iterator_create(sreport_cluster->user_list);
 		while((sreport_user = list_next(itr))) {
-			int count = 0;
 			int curr_inx = 1;
 			while((field = list_next(itr2))) {
 				char *tmp_char = NULL;

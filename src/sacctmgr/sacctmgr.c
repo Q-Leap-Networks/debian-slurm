@@ -187,7 +187,12 @@ main (int argc, char *argv[])
 	/* always do a rollback.  If you don't then if there is an
 	 * error you can not rollback ;)
 	 */
+	errno = 0;
 	db_conn = acct_storage_g_get_connection(false, 0, 1);
+	if(errno != SLURM_SUCCESS) {
+		error("sacctmgr: %m");
+		exit(1);
+	}
 	my_uid = getuid();
 
 	if (input_field_count)
@@ -568,15 +573,17 @@ static void _show_it (int argc, char *argv[])
 	} else if (strncasecmp (argv[0], "Transactions", 
 				MAX(command_len, 1)) == 0) {
 		error_code = sacctmgr_list_txn((argc - 1), &argv[1]);
-	} else if (strncasecmp (argv[0], "User", MAX(command_len, 1)) == 0) {
+	} else if (strncasecmp (argv[0], "Users", MAX(command_len, 1)) == 0) {
 		error_code = sacctmgr_list_user((argc - 1), &argv[1]);
+	} else if (strncasecmp (argv[0], "WCKeys", MAX(command_len, 1)) == 0) {
+		error_code = sacctmgr_list_wckey((argc - 1), &argv[1]);
 	} else {
 		exit_code = 1;
 		fprintf(stderr, "No valid entity in list command\n");
 		fprintf(stderr, "Input line must include ");
 		fprintf(stderr, "\"Account\", \"Association\", ");
 		fprintf(stderr, "\"Cluster\", \"QOS\", \"Transaction\", ");
-		fprintf(stderr, "or \"User\"\n");
+		fprintf(stderr, "\"User\", or \"WCKey\"\n");
 	} 
 	
 	if (error_code == SLURM_ERROR) {
@@ -726,7 +733,8 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
      !!                       Repeat the last command entered.             \n\
                                                                            \n\
   <ENTITY> may be \"account\", \"association\", \"cluster\",               \n\
-                  \"coordinator\", \"qos\", \"transaction\", or \"user\".  \n\
+                  \"coordinator\", \"qos\", \"transaction\", \"user\",     \n\
+                  or \"wckey\"                                             \n\
                                                                            \n\
   <SPECS> are different for each command entity pair.                      \n\
        list account       - Clusters=, Descriptions=, Format=, Names=,     \n\
@@ -747,7 +755,7 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
        delete account     - Clusters=, Descriptions=, Names=,              \n\
                             Organizations=, and Parents=                   \n\
                                                                            \n\
-       list associations  - Accounts=, Clusters=, Format=, ID=,            \n\
+       list associations  - Accounts=, Clusters=, Format=, IDs=,            \n\
                             Partitions=, Parent=, Tree, Users=,            \n\
                             WithSubAccounts, WithDeleted, WOPInfo,         \n\
                             and WOPLimits                                  \n\
@@ -772,26 +780,32 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
                             GrpNodes=, GrpSubmitJob=, GrpWall=, JobFlags=, \n\
                             MaxCPUMins=, MaxJobs=, MaxNodes=, MaxWall=,    \n\
                             Preemptee=, Preemptor=, Priority=, and Names=  \n\
-       delete qos         - Descriptions=, Ids=, and Names=                \n\
+       delete qos         - Descriptions=, IDs=, and Names=                \n\
                                                                            \n\
        list transactions  - Accounts=, Action=, Actor=, Clusters=, End=,   \n\
-                            Format=, ID=, Start=, User=, and WithAssoc     \n\
+                            Format=, IDs=, Start=, User=, and WithAssoc    \n\
                                                                            \n\
-       list user          - AdminLevel=, DefaultAccounts=, Format=, Names=,\n\
+       list user          - AdminLevel=, DefaultAccounts=,                 \n\
+                            DefaultWCKeys=, Format=, Names=,               \n\
                             QosLevel=, WithAssocs, WithCoordinators,       \n\
                             WithRawQOS, and WOPLimits                      \n\
        add user           - Accounts=, AdminLevel=, Clusters=,             \n\
-                            DefaultAccount=, Fairshare=, MaxCPUMins=       \n\
+                            DefaultAccount=, DefaultWCKey=,                \n\
+                            Fairshare=, MaxCPUMins=                        \n\
                             MaxCPUs=, MaxJobs=, MaxNodes=, MaxWall=,       \n\
                             Names=, Partitions=, and QosLevel=             \n\
        modify user        - (set options) AdminLevel=, DefaultAccount=,    \n\
-                            Fairshare=, MaxCPUMins=, MaxCPUs= MaxJobs=,    \n\
+                            DefaultWCKey=, Fairshare=, MaxCPUMins=,        \n\
+                            MaxCPUs= MaxJobs=,                             \n\
                             MaxNodes=, MaxWall=, and QosLevel=             \n\
                             (where options) Accounts=, AdminLevel=,        \n\
                             Clusters=, DefaultAccounts=, Names=,           \n\
                             Partitions=, and QosLevel=                     \n\
        delete user        - Accounts=, AdminLevel=, Clusters=,             \n\
-                            DefaultAccounts=, and Names=                   \n\
+                            DefaultAccounts=, DefaultWCKeys=, and Names=   \n\
+                                                                           \n\
+       list wckey         - Clusters=, End=, Format=, IDs=, Names=,        \n\
+                            Start=, User=, and WCKeys=                     \n\
                                                                            \n\
   Format options are different for listing each entity pair.               \n\
                                                                            \n\
@@ -815,7 +829,9 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
        Transactions       - Action, Actor, Info, TimeStamp, Where          \n\
                                                                            \n\
        User               - AdminLevel, CoordinatorList, DefaultAccount,   \n\
-                            User                                           \n\
+                            DefaultWCKey, User                             \n\
+                                                                           \n\
+       WCKey              - Cluster, ID, Name, User                        \n\
                                                                            \n\
        Account/User WithAssoc option will also honor                       \n\
        all of the options for Association.                                 \n\

@@ -105,10 +105,13 @@ extern int parse_option_end(char *option)
 	if(!option)
 		return 0;
 
-	while(option[end] && (option[end] != '=' 
-			      && option[end] != '+' 
-			      && option[end] != '-'))
-		end++;
+	while(option[end]) {
+		if((option[end] == '=')
+		   || (option[end] == '+' && option[end+1] == '=')
+		   || (option[end] == '-' && option[end+1] == '='))
+			break;
+		end++;		
+	}
 
 	if(!option[end])
 		return 0;
@@ -545,6 +548,35 @@ extern acct_cluster_rec_t *sacctmgr_find_cluster_from_list(
 	list_iterator_destroy(itr);
 	
 	return cluster;
+}
+
+extern acct_wckey_rec_t *sacctmgr_find_wckey_from_list(
+	List wckey_list, char *user, char *name, char *cluster)
+{
+	ListIterator itr = NULL;
+	acct_wckey_rec_t * wckey = NULL;
+	
+	if(!wckey_list)
+		return NULL;
+	
+	itr = list_iterator_create(wckey_list);
+	while((wckey = list_next(itr))) {
+		if(((!user && wckey->user)
+		    || (user && (!wckey->user
+				 || strcasecmp(user, wckey->user))))
+		   || ((!name && wckey->name)
+		       || (name && (!wckey->name 
+				    || strcasecmp(name, wckey->name))))
+		   || ((!cluster && wckey->cluster)
+		       || (cluster && (!wckey->cluster 
+				       || strcasecmp(cluster,
+						     wckey->cluster)))))
+			continue;
+		break;
+	}
+	list_iterator_destroy(itr);
+	
+	return wckey;
 }
 
 extern int get_uint(char *in_value, uint32_t *out_value, char *type)

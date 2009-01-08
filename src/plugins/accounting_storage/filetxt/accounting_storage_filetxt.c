@@ -292,6 +292,12 @@ extern int acct_storage_p_add_qos(void *db_conn, uint32_t uid,
 	return SLURM_SUCCESS;
 }
 
+extern int acct_storage_p_add_wckeys(void *db_conn, uint32_t uid, 
+				  List wckey_list)
+{
+	return SLURM_SUCCESS;
+}
+
 extern List acct_storage_p_modify_users(void *db_conn, uint32_t uid,
 				       acct_user_cond_t *user_q,
 				       acct_user_rec_t *user)
@@ -323,6 +329,13 @@ extern List acct_storage_p_modify_associations(void *db_conn, uint32_t uid,
 extern List acct_storage_p_modify_qos(void *db_conn, uint32_t uid,
 				      acct_qos_cond_t *qos_cond,
 				      acct_qos_rec_t *qos)
+{
+	return SLURM_SUCCESS;
+}
+
+extern List acct_storage_p_modify_wckeys(void *db_conn, uint32_t uid,
+				      acct_wckey_cond_t *wckey_cond,
+				      acct_wckey_rec_t *wckey)
 {
 	return SLURM_SUCCESS;
 }
@@ -364,6 +377,12 @@ extern List acct_storage_p_remove_qos(void *db_conn, uint32_t uid,
 	return NULL;
 }
 
+extern List acct_storage_p_remove_wckeys(void *db_conn, uint32_t uid, 
+				      acct_wckey_cond_t *wckey_cond)
+{
+	return NULL;
+}
+
 extern List acct_storage_p_get_users(void *db_conn, uid_t uid,
 				     acct_user_cond_t *user_q)
 {
@@ -394,6 +413,12 @@ extern List acct_storage_p_get_qos(void *db_conn, uid_t uid,
 	return NULL;
 }
 
+extern List acct_storage_p_get_wckeys(void *db_conn, uid_t uid,
+				      acct_wckey_cond_t *wckey_cond)
+{
+	return NULL;
+}
+
 extern List acct_storage_p_get_txn(void *db_conn, uid_t uid,
 				   acct_txn_cond_t *txn_cond)
 {
@@ -401,7 +426,7 @@ extern List acct_storage_p_get_txn(void *db_conn, uid_t uid,
 }
 
 extern int acct_storage_p_get_usage(void *db_conn, uid_t uid,
-				    acct_association_rec_t *acct_assoc,
+				    void *in, int type,
 				    time_t start, time_t end)
 {
 	int rc = SLURM_SUCCESS;
@@ -449,7 +474,7 @@ extern int clusteracct_storage_p_cluster_procs(void *db_conn,
 
 extern int clusteracct_storage_p_get_usage(
 	void *db_conn, uid_t uid, 
-	acct_cluster_rec_t *cluster_rec, time_t start, time_t end)
+	acct_cluster_rec_t *cluster_rec, int type, time_t start, time_t end)
 {
 
 	return SLURM_SUCCESS;
@@ -462,9 +487,9 @@ extern int jobacct_storage_p_job_start(void *db_conn, char *cluster_name,
 				       struct job_record *job_ptr)
 {
 	int	i,
-		rc=SLURM_SUCCESS,
-		tmp;
+		rc=SLURM_SUCCESS;
 	char	buf[BUFFER_SIZE], *jname, *account, *nodes;
+	char    *wckey = NULL;
 	long	priority;
 	int track_steps = 0;
 
@@ -486,15 +511,30 @@ extern int jobacct_storage_p_job_start(void *db_conn, char *cluster_name,
 	priority = (job_ptr->priority == NO_VAL) ?
 		-1L : (long) job_ptr->priority;
 
-	if (job_ptr->name && (tmp = strlen(job_ptr->name))) {
-		jname = xmalloc(++tmp);
-		for (i=0; i<tmp; i++) {
-			if (isspace(job_ptr->name[i]))
-				jname[i]='_';
-			else
-				jname[i]=job_ptr->name[i];
+	if (job_ptr->name && job_ptr->name[0]) {
+		char *temp = NULL;
+		/* first set the jname to the job_ptr->name */
+		jname = xstrdup(job_ptr->name);
+		/* then grep for " since that is the delimiter for
+		   the wckey */
+		temp = strchr(jname, '\"');
+		if(temp) {
+			/* if we have a wckey set the " to NULL to
+			 * end the jname */
+			temp[0] = '\0';
+			/* increment and copy the remainder */
+			temp++;
+			wckey = xstrdup(temp);
 		}
-	} else {
+
+		for (i=0; jname[i]; i++) 
+			if (isspace(jname[i]))
+				jname[i]='_';
+	}
+
+	if(!jname || !jname[0]) {
+		/* free jname if something is allocated here */
+		xfree(jname);
 		jname = xstrdup("allocation");
 		track_steps = 1;
 	}
@@ -514,15 +554,16 @@ extern int jobacct_storage_p_job_start(void *db_conn, char *cluster_name,
 	job_ptr->requid = -1; /* force to -1 for sacct to know this
 			       * hasn't been set yet */
 
-	tmp = snprintf(buf, BUFFER_SIZE,
-		       "%d %s %d %ld %u %s %s",
-		       JOB_START, jname,
-		       track_steps, priority, job_ptr->total_procs,
-		       nodes, account);
+	snprintf(buf, BUFFER_SIZE,
+		 "%d %s %d %ld %u %s %s",
+		 JOB_START, jname,
+		 track_steps, priority, job_ptr->total_procs,
+		 nodes, account);
 
 	rc = _print_record(job_ptr, job_ptr->start_time, buf);
 	
 	xfree(jname);
+	xfree(wckey);
 	return rc;
 }
 

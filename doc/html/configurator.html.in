@@ -183,6 +183,7 @@ function displayfile()
    get_task_plugin_param() + "<br>" +
    get_field("TaskProlog",document.config.task_prolog) + "<br>" +
    "#TmpFs=/tmp <br>" +
+   "#TrackWCKey=no <br>" +
    "#TreeWidth= <br>" +
    "#UnkillableStepProgram= <br>" +
    "#UnkillableStepTimeout= <br>" +
@@ -190,6 +191,7 @@ function displayfile()
    "# <br>" +
    "# <br>" +
    "# TIMERS <br>" +
+   "#BatchStartTimeout=10 <br>" +
    "#EpilogMsgTime=2000 <br>" +
    "#GetEnvTimeout=2 <br>" +
    "#HealthCheckInterval=0 <br>" +

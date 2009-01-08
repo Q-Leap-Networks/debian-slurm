@@ -2,7 +2,7 @@
  *  select_cons_res.c - node selection plugin supporting consumable 
  *  resources policies.
  *
- *  $Id: select_cons_res.c 15113 2008-09-19 00:35:14Z jette $
+ *  $Id: select_cons_res.c 15841 2008-12-05 00:45:29Z jette $
  *****************************************************************************\
  *
  *  The following example below illustrates how four jobs are allocated
@@ -1894,6 +1894,22 @@ static int _select_nodes(struct job_record *job_ptr, bitstr_t * bitmap,
 	int i, b, count, ec, most_tasks = 0;
 	bitstr_t *origmap, *reqmap = NULL;
 
+	if (job_ptr->details->req_node_bitmap)
+		reqmap = job_ptr->details->req_node_bitmap;
+
+	/* clear nodes from the bitmap that don't have available resources */
+	for (i = 0, b = 0; i < array_size; i++) {
+		for (count = 0; count < freq[i]; count++, b++) {
+			if (bit_test(bitmap, b) && task_cnt[i] < 1) {
+				if (reqmap && bit_test(reqmap, b)) {
+					/* can't clear a required node! */
+					return SLURM_ERROR;
+				}
+				bit_clear(bitmap, b); 
+			}
+		}
+	}
+
 	/* allocated node count should never exceed num_procs, right? 
 	 * if so, then this should be done earlier and max_nodes
 	 * could be used to make this process more efficient (truncate
@@ -1921,9 +1937,6 @@ static int _select_nodes(struct job_record *job_ptr, bitstr_t * bitmap,
 			most_tasks = task_cnt[i];
 	}
 
-	if (job_ptr->details->req_node_bitmap)
-		reqmap = job_ptr->details->req_node_bitmap;
-	
 	for (count = 0; count < most_tasks; count++) {
 		int nochange = 1;
 		bit_or(bitmap, origmap);
