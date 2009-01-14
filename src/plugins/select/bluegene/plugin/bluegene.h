@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  bluegene.h - header for blue gene configuration processing module. 
  *
- *  $Id: bluegene.h 15717 2008-11-17 23:20:37Z da $
+ *  $Id: bluegene.h 16146 2009-01-06 18:20:48Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -108,6 +108,9 @@ extern int num_unused_cpus;
 #define MAX_AGENT_COUNT      30
 #define BUFSIZE 4096
 #define BITSIZE 128
+/* Change BLOCK_STATE_VERSION value when changing the state save
+ * format i.e. pack_block() */
+#define BLOCK_STATE_VERSION      "VER001"
 
 #include "bg_block_info.h"
 #include "bg_job_place.h"
@@ -160,11 +163,13 @@ extern void *mult_free_block(void *args);
 extern void *mult_destroy_block(void *args);
 extern int free_block_list(List delete_list);
 extern int read_bg_conf(void);
+extern int validate_current_blocks(char *dir);
 
 /* block_sys.c */
 /*****************************************************/
 extern int configure_block(bg_record_t * bg_conf_record);
 extern int read_bg_blocks();
+extern int load_state_file(char *dir_name);
 
 /* bg_switch_connections.c */
 /*****************************************************/

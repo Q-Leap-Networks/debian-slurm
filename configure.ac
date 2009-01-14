@@ -1,4 +1,4 @@
-# $Id: configure.ac 15786 2008-12-02 18:20:32Z jette $
+# $Id: configure.ac 16088 2008-12-29 21:56:17Z jette $
 # This file is to be processed with autoconf to generate a configure script
 
 dnl Prologue
@@ -137,6 +137,8 @@ X_AC_BGL
 X_AC_BGP
 AM_CONDITIONAL(BLUEGENE_LOADED, test "x$ac_bluegene_loaded" = "xyes")
 AC_SUBST(BLUEGENE_LOADED)
+
+X_AC_SUN_CONST
 
 X_AC_CFLAGS
 X_AC_XCPU

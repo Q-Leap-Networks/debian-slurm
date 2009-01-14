@@ -59,3 +59,8 @@ changes for the Shared and Priority parameters, so those portions of
 your old slurml.conf file may be copied into the new file.
 More information about the configuration file changes are available
 in /usr/share/doc/slurm-llnl/RELEASE_NOTES.gz.
+
+Upgrading slurmdbd from version before to 1.3.12
+================================================
+If you use SlurmDBD for archiving accounting records in a database,
+you must upgrade slurmdbd before upgrading the rest of your clusters.

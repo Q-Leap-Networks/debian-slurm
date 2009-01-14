@@ -1188,16 +1188,22 @@ extern int kill_running_job_by_node_name(char *node_name, bool step_test)
 					job_ptr->end_time = now;
 				
 				/* We want this job to look like it
-				 * was cancelled in the accounting
-				 * logs. Set a new submit time so the restarted
+				 * was terminateded in the accounting logs.
+				 * Set a new submit time so the restarted
 				 * job looks like a new job. */
-				job_ptr->job_state  = JOB_CANCELLED;
+				job_ptr->job_state  = JOB_NODE_FAIL;
 				deallocate_nodes(job_ptr, false, suspended);
 				job_completion_logger(job_ptr);
+				job_ptr->db_index = 0;
 				job_ptr->job_state = JOB_PENDING;
 				if (job_ptr->node_cnt)
 					job_ptr->job_state |= JOB_COMPLETING;
 				job_ptr->details->submit_time = now;
+				/* Since the job completion logger
+				   removes the submit we need to add it
+				   again.
+				*/
+				acct_policy_add_job_submit(job_ptr);
 			} else {
 				info("Killing job_id %u on failed node %s",
 				     job_ptr->job_id, node_name);
@@ -1564,8 +1570,7 @@ extern int job_allocate(job_desc_msg_t * job_specs, int immediate,
 		slurm_sched_schedule();	/* work for external scheduler */
 	}
 
-	if (accounting_enforce == ACCOUNTING_ENFORCE_WITH_LIMITS)
-		acct_policy_add_job_submit(job_ptr);
+	acct_policy_add_job_submit(job_ptr);
 
 	if ((error_code == ESLURM_NODES_BUSY) ||
 	    (error_code == ESLURM_JOB_HELD) ||
@@ -4878,6 +4883,7 @@ kill_job_on_node(uint32_t job_id, struct job_record *job_ptr,
 	if (job_ptr) {  /* NULL if unknown */
 		kill_req->select_jobinfo = 
 			select_g_copy_jobinfo(job_ptr->select_jobinfo);
+		kill_req->job_state = job_ptr->job_state;
 	}
 
 	agent_info = xmalloc(sizeof(agent_arg_t));
@@ -5086,6 +5092,7 @@ extern bool job_epilog_complete(uint32_t job_id, char *node_name,
 		uint32_t return_code)
 {
 	struct job_record  *job_ptr = find_job_record(job_id);
+	struct node_record *node_ptr;
 
 	if (job_ptr == NULL)
 		return true;
@@ -5099,15 +5106,23 @@ extern bool job_epilog_complete(uint32_t job_id, char *node_name,
 	 * hasn't really started. Very rare obviously. */
 	if ((job_ptr->job_state == JOB_PENDING)
 	||  (job_ptr->node_bitmap == NULL)) {
-		error("Epilog complete request for non-running job %u, "
-			"slurmctld and slurmd out of sync", job_id);
+		uint16_t base_state = NODE_STATE_UNKNOWN;
+		node_ptr = find_node_record(node_name);
+		if (node_ptr)
+			base_state = node_ptr->node_state & NODE_STATE_BASE;
+		if (base_state == NODE_STATE_DOWN) {
+			debug("Epilog complete response for job %u from DOWN "
+			      "node %s", job_id, node_name);
+		} else {
+			error("Epilog complete response for non-running job "
+			      "%u, slurmctld and slurmd out of sync", job_id);
+		}
 		return false;
 	}
 
 #ifdef HAVE_FRONT_END		/* operate only on front-end node */
 {
 	int i;
-	struct node_record *node_ptr;
 
 	if (return_code)
 		error("Epilog error on %s, setting DOWN", 
@@ -5127,7 +5142,7 @@ extern bool job_epilog_complete(uint32_t job_id, char *node_name,
 		error("Epilog error on %s, setting DOWN", node_name);
 		set_node_down(node_name, "Epilog error");
 	} else {
-		struct node_record *node_ptr = find_node_record(node_name);
+		node_ptr = find_node_record(node_name);
 		if (node_ptr)
 			make_node_idle(node_ptr, job_ptr);
 	}
@@ -5172,8 +5187,7 @@ extern void job_completion_logger(struct job_record  *job_ptr)
 
 	xassert(job_ptr);
 
-	if (accounting_enforce == ACCOUNTING_ENFORCE_WITH_LIMITS)
-		acct_policy_remove_job_submit(job_ptr);
+	acct_policy_remove_job_submit(job_ptr);
 
 	/* make sure all parts of the job are notified */
 	srun_job_complete(job_ptr);
@@ -5700,10 +5714,15 @@ extern int job_requeue (uid_t uid, uint32_t job_id, slurm_fd conn_fd)
 	deallocate_nodes(job_ptr, false, suspended);
 	xfree(job_ptr->details->req_node_layout);
 	job_completion_logger(job_ptr);
+	job_ptr->db_index = 0;
 	job_ptr->job_state = JOB_PENDING;
 	if (job_ptr->node_cnt)
 		job_ptr->job_state |= JOB_COMPLETING;
 	job_ptr->details->submit_time = now;
+	/* Since the job completion logger removes the submit we need
+	   to add it again.
+	*/
+	acct_policy_add_job_submit(job_ptr);
 
     reply:
 	if (conn_fd >= 0) {

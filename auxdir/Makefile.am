@@ -1,5 +1,5 @@
 ##****************************************************************************
-## $Id: Makefile.am 14089 2008-05-20 21:17:09Z da $
+## $Id: Makefile.am 16088 2008-12-29 21:56:17Z jette $
 ##****************************************************************************
 ## Process this file with automake to produce Makefile.in.
 ##****************************************************************************
@@ -23,4 +23,5 @@ EXTRA_DIST = \
     x_ac_ptrace.m4 \
     x_ac_readline.m4 \
     x_ac_setproctitle.m4 \
-    x_ac_slurm_ssl.m4 
+    x_ac_slurm_ssl.m4 \
+    x_ac_sun_const.m4 

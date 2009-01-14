@@ -94,6 +94,10 @@ static int _set_cond(int *start, int argc, char *argv[],
 			if(slurm_addto_char_list(qos_cond->description_list,
 						 argv[i]+end))
 				set = 1;
+		} else if (!strncasecmp (argv[i], "Format", 
+					 MAX(command_len, 1))) {
+			if(format_list)
+				slurm_addto_char_list(format_list, argv[i]+end);
 		} else if(!strncasecmp (argv[i], "Ids", MAX(command_len, 1))) {
 			ListIterator itr = NULL;
 			char *temp = NULL;
@@ -167,13 +171,13 @@ static int _set_rec(int *start, int argc, char *argv[],
 					 MAX(command_len, 1))) {
 			if(!qos->description)
 				qos->description =
-					strip_quotes(argv[i]+end, NULL);
+					strip_quotes(argv[i]+end, NULL, 1);
 			set = 1;
 		} else if (!strncasecmp (argv[i], "JobFlags",
 					 MAX(command_len, 1))) {
 			if(!qos->job_flags)
 				qos->job_flags =
-					strip_quotes(argv[i]+end, NULL);
+					strip_quotes(argv[i]+end, NULL, 1);
 			set = 1;			
 		} else if (!strncasecmp (argv[i], "GrpCPUMins",
 					 MAX(command_len, 7))) {

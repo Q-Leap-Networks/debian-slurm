@@ -128,7 +128,7 @@ typedef enum {
 	QOS_LEVEL_MODIFY
 } qos_level_t;
 
-static int normal_qos_id = NO_VAL;
+static char *default_qos_str = NULL;
 
 extern int acct_storage_p_commit(mysql_conn_t *mysql_conn, bool commit);
 
@@ -400,7 +400,7 @@ static char *_fix_double_quotes(char *str)
 			char *tmp = xstrndup(str+start, i-start);
 			xstrfmtcat(fixed, "%s\\\"", tmp);
 			xfree(tmp);
-			start = i + 1;
+			start = i+1;
 		} 
 		
 		i++;
@@ -607,13 +607,13 @@ static int _setup_association_limits(acct_association_rec_t *assoc,
 		
 		
 		xstrfmtcat(*vals, ", '%s'", qos_val); 		
-		xstrfmtcat(*extra, ", %s='%s'", qos_type, qos_val); 
+		xstrfmtcat(*extra, ", %s=\"%s\"", qos_type, qos_val); 
 		xfree(qos_val);
-	} else if((qos_level == QOS_LEVEL_SET) && (normal_qos_id != NO_VAL)) { 
-		/* Add normal qos to the account */
+	} else if((qos_level == QOS_LEVEL_SET) && default_qos_str) { 
+		/* Add default qos to the account */
 		xstrcat(*cols, ", qos");
-		xstrfmtcat(*vals, ", ',%d'", normal_qos_id);
-		xstrfmtcat(*extra, ", qos=',%d'", normal_qos_id);
+		xstrfmtcat(*vals, ", '%s'", default_qos_str);
+		xstrfmtcat(*extra, ", qos=\"%s\"", default_qos_str);
 	}
 
 	return SLURM_SUCCESS;
@@ -832,6 +832,7 @@ static int _setup_association_cond_limits(acct_association_cond_t *assoc_cond,
 	ListIterator itr = NULL;
 	char *object = NULL;
 	char *prefix = "t1";
+
 	if(!assoc_cond)
 		return 0;
 
@@ -1127,6 +1128,10 @@ static int _setup_association_cond_limits(acct_association_cond_t *assoc_cond,
 		}
 		list_iterator_destroy(itr);
 		xstrcat(*extra, ")");
+	} else if(assoc_cond->user_list) {
+		/* we want all the users, but no non-user associations */
+		set = 1;
+		xstrfmtcat(*extra, " && (%s.user!='')", prefix);		
 	}
 
 	if(assoc_cond->partition_list 
@@ -1382,9 +1387,9 @@ static int _move_account(mysql_conn_t *mysql_conn, uint32_t lft, uint32_t rgt,
 	}
 	xfree(query);
 	if(!(row = mysql_fetch_row(result))) {
-		error("no row");
+		debug4("Can't move a none existant association");
 		mysql_free_result(result);
-		return SLURM_ERROR;
+		return SLURM_SUCCESS;
 	}
 	par_left = atoi(row[0]);
 	mysql_free_result(result);
@@ -2765,16 +2770,54 @@ static int _mysql_acct_check_tables(MYSQL *db_conn)
 	   == SLURM_ERROR)
 		return SLURM_ERROR;
 	else {
-		query = xstrdup_printf(
-			"insert into %s "
-			"(creation_time, mod_time, name, description) "
-			"values (%d, %d, 'normal', 'Normal QOS default') "
-			"on duplicate key update id=LAST_INSERT_ID(id), "
-			"deleted=0;",
-			qos_table, now, now);
-		//debug3("%s", query);
-		normal_qos_id = mysql_insert_ret_id(db_conn, query);
-		xfree(query);		
+		int qos_id = 0;
+		if(slurmdbd_conf && slurmdbd_conf->default_qos) {
+			List char_list = list_create(slurm_destroy_char);
+			char *qos = NULL;
+			ListIterator itr = NULL;
+			slurm_addto_char_list(char_list, 
+					      slurmdbd_conf->default_qos);
+			/* NOTE: you can not use list_pop, or list_push
+			   anywhere either, since mysql is
+			   exporting something of the same type as a macro,
+			   which messes everything up 
+			   (my_list.h is the bad boy).
+			*/
+			itr = list_iterator_create(char_list);
+			while((qos = list_next(itr))) {
+				query = xstrdup_printf(
+					"insert into %s "
+					"(creation_time, mod_time, name, "
+					"description) "
+					"values (%d, %d, '%s', "
+					"'Added as default') "
+					"on duplicate key update "
+					"id=LAST_INSERT_ID(id), deleted=0;",
+					qos_table, now, now, qos);
+				qos_id = mysql_insert_ret_id(db_conn, query);
+				if(!qos_id)
+					fatal("problem added qos '%s", qos);
+				xstrfmtcat(default_qos_str, ",%d", qos_id);
+				xfree(query);	
+			}			
+			list_iterator_destroy(itr);
+			list_destroy(char_list);
+		} else {
+			query = xstrdup_printf(
+				"insert into %s "
+				"(creation_time, mod_time, name, description) "
+				"values (%d, %d, 'normal', "
+				"'Normal QOS default') "
+				"on duplicate key update "
+				"id=LAST_INSERT_ID(id), deleted=0;",
+				qos_table, now, now);
+			//debug3("%s", query);
+			qos_id = mysql_insert_ret_id(db_conn, query);
+			if(!qos_id)
+				fatal("problem added qos 'normal");
+			xstrfmtcat(default_qos_str, ",%d", qos_id);
+			xfree(query);		
+		}
 	}
 	if(mysql_db_create_table(db_conn, step_table,
 				 step_table_fields, 
@@ -2929,6 +2972,7 @@ extern int fini ( void )
 #ifdef HAVE_MYSQL
 	destroy_mysql_db_info(mysql_db_info);		
 	xfree(mysql_db_name);
+	xfree(default_qos_str);
 	mysql_cleanup();
 	return SLURM_SUCCESS;
 #else
@@ -3478,7 +3522,8 @@ extern int acct_storage_p_add_clusters(mysql_conn_t *mysql_conn, uint32_t uid,
 	ListIterator itr = NULL;
 	int rc = SLURM_SUCCESS;
 	acct_cluster_rec_t *object = NULL;
-	char *cols = NULL, *vals = NULL, *extra = NULL, *query = NULL;
+	char *cols = NULL, *vals = NULL, *extra = NULL, 
+		*query = NULL, *tmp_extra = NULL;
 	time_t now = time(NULL);
 	char *user_name = NULL;
 	int affect_rows = 0;
@@ -3566,14 +3611,21 @@ extern int acct_storage_p_add_clusters(mysql_conn_t *mysql_conn, uint32_t uid,
 			added=0;
 			break;
 		}
+
+		/* we always have a ', ' as the first 2 chars */
+		tmp_extra = _fix_double_quotes(extra+2);
+
 		xstrfmtcat(query,
 			   "insert into %s "
 			   "(timestamp, action, name, actor, info) "
 			   "values (%d, %u, \"%s\", \"%s\", \"%s\");",
 			   txn_table, now, DBD_ADD_CLUSTERS, 
-			   object->name, user_name, extra);
+			   object->name, user_name, tmp_extra);
+		xfree(tmp_extra);			
 		xfree(extra);			
-		debug4("query\n%s",query);
+		debug4("%d(%d) query\n%s",
+		       mysql_conn->conn, __LINE__, query);
+
 		rc = mysql_db_query(mysql_conn->db_conn, query);
 		xfree(query);
 		if(rc != SLURM_SUCCESS) {
@@ -3691,20 +3743,22 @@ extern int acct_storage_p_add_associations(mysql_conn_t *mysql_conn,
 			   "where cluster=\"%s\" && acct=\"%s\"",
 			   object->cluster, object->acct); 
 
-		xstrfmtcat(extra, ", mod_time=%d", now);
+		xstrfmtcat(extra, ", mod_time=%d, cluster=\"%s\", "
+			   "acct=\"%s\"", now, object->cluster, object->acct);
 		if(!object->user) {
 			xstrcat(cols, ", parent_acct");
 			xstrfmtcat(vals, ", \"%s\"", parent);
-			xstrfmtcat(extra, ", parent_acct=\"%s\"", parent);
-			xstrfmtcat(update, " && user=''"); 
+			xstrfmtcat(extra, ", parent_acct=\"%s\", user=\"\"",
+				   parent);
+			xstrfmtcat(update, " && user=\"\""); 
 		} else {
 			char *part = object->partition;
 			xstrcat(cols, ", user");
 			xstrfmtcat(vals, ", \"%s\"", object->user); 		
-			xstrfmtcat(update, " && user=\"%s\"",
-				   object->user); 
+			xstrfmtcat(update, " && user=\"%s\"", object->user); 
+			xstrfmtcat(extra, ", user=\"%s\"", object->user);
 
-			/* We need to give a partition wiether it be
+			/* We need to give a partition whether it be
 			 * '' or the actual partition name given
 			 */
 			if(!part)
@@ -3712,6 +3766,7 @@ extern int acct_storage_p_add_associations(mysql_conn_t *mysql_conn,
 			xstrcat(cols, ", partition");
 			xstrfmtcat(vals, ", \"%s\"", part);
 			xstrfmtcat(update, " && partition=\"%s\"", part);
+			xstrfmtcat(extra, ", partition=\"%s\"", part);
 		}
 
 		_setup_association_limits(object, &cols, &vals, &extra, 
@@ -4005,6 +4060,8 @@ end_it:
 	if(rc != SLURM_ERROR) {
 		if(txn_query) {
 			xstrcat(txn_query, ";");
+			debug4("%d(%d) query\n%s",
+			       mysql_conn->conn, __LINE__, txn_query);
 			rc = mysql_db_query(mysql_conn->db_conn,
 					    txn_query);
 			xfree(txn_query);
@@ -6145,7 +6202,7 @@ extern List acct_storage_p_remove_clusters(mysql_conn_t *mysql_conn,
 	/* We should not need to delete any cluster usage just set it
 	 * to deleted */
 	xstrfmtcat(query,
-		   "update %s set period_end=%d where (%s);"
+		   "update %s set period_end=%d where period_end=0 && (%s);"
 		   "update %s set mod_time=%d, deleted=1 where (%s);"
 		   "update %s set mod_time=%d, deleted=1 where (%s);"
 		   "update %s set mod_time=%d, deleted=1 where (%s);",
@@ -6666,7 +6723,6 @@ extern List acct_storage_p_get_users(mysql_conn_t *mysql_conn, uid_t uid,
 	MYSQL_ROW row;
 	uint16_t private_data = 0;
 	acct_user_rec_t user;
-	acct_wckey_cond_t *wckey_cond = NULL;
 
 	/* if this changes you will need to edit the corresponding enum */
 	char *user_req_inx[] = {
@@ -6800,33 +6856,6 @@ empty:
 
 	user_list = list_create(destroy_acct_user_rec);
 
-	if(user_cond && user_cond->with_assocs) {
-		/* We are going to be freeing the inners of
-		   this list in the user->name so we don't
-		   free it here
-		*/
-		if(!user_cond->assoc_cond) 
-			user_cond->assoc_cond = xmalloc(
-				sizeof(acct_association_cond_t));
-		
-		if(user_cond->assoc_cond->user_list)
-			list_destroy(user_cond->assoc_cond->user_list);
-		user_cond->assoc_cond->user_list = list_create(NULL);
-	}
-
-	if(user_cond && user_cond->with_wckeys) {
-		/* We are going to be freeing the inners of
-		   this list in the user->name so we don't
-		   free it here
-		*/
-		wckey_cond = xmalloc(sizeof(acct_wckey_cond_t));
-		wckey_cond->user_list = list_create(NULL);
-
-		if(user_cond->assoc_cond && user_cond->assoc_cond->cluster_list)
-			wckey_cond->cluster_list =
-				user_cond->assoc_cond->cluster_list;
-	}
-
 	while((row = mysql_fetch_row(result))) {
 		acct_user_rec_t *user = xmalloc(sizeof(acct_user_rec_t));
 /* 		uid_t pw_uid; */
@@ -6853,23 +6882,26 @@ empty:
 
 		if(user_cond && user_cond->with_coords) 
 			_get_user_coords(mysql_conn, user);
-		
-
-		if(user_cond && user_cond->with_assocs) 
-			list_append(user_cond->assoc_cond->user_list,
-				    user->name);
-		
-		if(user_cond && user_cond->with_wckeys) 
-			list_append(wckey_cond->user_list, user->name);
 	}
 	mysql_free_result(result);
 
-	if(user_cond && user_cond->with_assocs 
-	   && list_count(user_cond->assoc_cond->user_list)) {
+	if(user_cond && user_cond->with_assocs) {
 		ListIterator assoc_itr = NULL;
 		acct_user_rec_t *user = NULL;
 		acct_association_rec_t *assoc = NULL;
-		List assoc_list = acct_storage_p_get_associations(
+		List assoc_list = NULL;
+
+		/* Make sure we don't get any non-user associations
+		 * this is done by at least having a user_list
+		 * defined */
+		if(!user_cond->assoc_cond) 
+			user_cond->assoc_cond = 
+				xmalloc(sizeof(acct_association_cond_t));
+
+		if(!user_cond->assoc_cond->user_list) 
+			user_cond->assoc_cond->user_list = list_create(NULL);
+
+		assoc_list = acct_storage_p_get_associations(
 			mysql_conn, uid, user_cond->assoc_cond);
 
 		if(!assoc_list) {
@@ -6899,15 +6931,22 @@ empty:
 	}
 
 get_wckeys:
-	if(wckey_cond) {
+	if(user_cond && user_cond->with_wckeys) {
 		ListIterator wckey_itr = NULL;
 		acct_user_rec_t *user = NULL;
 		acct_wckey_rec_t *wckey = NULL;
-		List wckey_list = acct_storage_p_get_wckeys(
-			mysql_conn, uid, wckey_cond);
+		List wckey_list = NULL;
+		acct_wckey_cond_t wckey_cond;
 
-		wckey_cond->cluster_list = NULL;
-		destroy_acct_wckey_cond(wckey_cond);
+		memset(&wckey_cond, 0, sizeof(acct_wckey_cond_t));
+		if(user_cond->assoc_cond) {
+			wckey_cond.user_list =
+				user_cond->assoc_cond->user_list;
+			wckey_cond.cluster_list =
+				user_cond->assoc_cond->cluster_list;
+		}		
+		wckey_list = acct_storage_p_get_wckeys(
+			mysql_conn, uid, &wckey_cond);
 
 		if(!wckey_list) {
 			error("no wckeys");
@@ -7277,6 +7316,12 @@ empty:
 
 	memset(&assoc_cond, 0, sizeof(acct_association_cond_t));
 
+	if(cluster_cond) {
+		/* I don't think we want the with_usage flag here.
+		 * We do need the with_deleted though. */
+		//assoc_cond.with_usage = cluster_cond->with_usage;
+		assoc_cond.with_deleted = cluster_cond->with_deleted;
+	}
 	assoc_cond.cluster_list = list_create(NULL);
 
 	while((row = mysql_fetch_row(result))) {
@@ -8288,9 +8333,10 @@ extern List acct_storage_p_get_txn(mysql_conn_t *mysql_conn, uid_t uid,
 
 			xstrfmtcat(assoc_extra, "acct=\"%s\"", object);
 
-			xstrfmtcat(name_extra, "(name like \"%%\"%s\"%%\""
-				   " || name=\"%s\")", object, object);
-
+			xstrfmtcat(name_extra, "(name like \"%%\\\"%s\\\"%%\""
+				   " || name=\"%s\")"
+				   " || (info like \"%%acct=\\\"%s\\\"%%\")",
+				   object, object, object);
 			set = 1;
 		}
 		list_iterator_destroy(itr);
@@ -8318,9 +8364,10 @@ extern List acct_storage_p_get_txn(mysql_conn_t *mysql_conn, uid_t uid,
 			}
 			xstrfmtcat(assoc_extra, "cluster=\"%s\"", object);
 
-			xstrfmtcat(name_extra, "(name like \"%%\"%s\"%%\""
-				   " || name=\"%s\")", object, object);
-
+			xstrfmtcat(name_extra, "(name like \"%%\\\"%s\\\"%%\""
+				   " || name=\"%s\")"
+				   " || (info like \"%%cluster=\\\"%s\\\"%%\")",
+				   object, object, object);
 			set = 1;
 		}
 		list_iterator_destroy(itr);
@@ -8348,8 +8395,10 @@ extern List acct_storage_p_get_txn(mysql_conn_t *mysql_conn, uid_t uid,
 			}
 			xstrfmtcat(assoc_extra, "user=\"%s\"", object);
 
-			xstrfmtcat(name_extra, "(name like \"%%\"%s\"%%\""
-				   " || name=\"%s\")", object, object);
+			xstrfmtcat(name_extra, "(name like \"%%\\\"%s\\\"%%\""
+				   " || name=\"%s\")"
+				   " || (info like \"%%user=\\\"%s\\\"%%\")",
+				   object, object, object);
 
 			set = 1;
 		}
@@ -8377,24 +8426,29 @@ extern List acct_storage_p_get_txn(mysql_conn_t *mysql_conn, uid_t uid,
 			xstrcat(extra, " where (");
 
 		set = 0;
-	
-		if(name_extra) {
-			xstrfmtcat(extra, "(%s) || (", name_extra);
+
+		if(mysql_num_rows(result)) {
+			if(name_extra) {
+				xstrfmtcat(extra, "(%s) || (", name_extra);
+				xfree(name_extra);
+			} else 
+				xstrcat(extra, "(");			
+			while((row = mysql_fetch_row(result))) {
+				if(set) 
+					xstrcat(extra, " || ");
+				
+				xstrfmtcat(extra, "(name like '%%id=%s %%' "
+					   "|| name like '%%id=%s)' "
+					   "|| name=%s)",
+					   row[0], row[0], row[0]);
+				set = 1;
+			}
+			xstrcat(extra, "))");
+		} else if(name_extra) {
+			xstrfmtcat(extra, "(%s))", name_extra);
 			xfree(name_extra);
-		} else 
-			xstrcat(extra, "(");			
-		
-		while((row = mysql_fetch_row(result))) {
-			if(set) 
-				xstrcat(extra, " || ");
-						
-			xstrfmtcat(extra, "(name like '%%id=%s %%' "
-				   "|| name like '%%id=%s)')", row[0], row[0]);
-			set = 1;
 		}
 		mysql_free_result(result);
-		if(set)
-			xstrcat(extra, "))");
 	}
 	
 	/*******************************************/
@@ -9999,52 +10053,6 @@ extern int jobacct_storage_p_suspend(mysql_conn_t *mysql_conn,
  * returns List of job_rec_t *
  * note List needs to be freed when called
  */
-extern List jobacct_storage_p_get_jobs(mysql_conn_t *mysql_conn, uid_t uid, 
-				       List selected_steps,
-				       List selected_parts,
-				       sacct_parameters_t *params)
-{
-	List job_list = NULL;
-#ifdef HAVE_MYSQL
-	acct_job_cond_t job_cond;
-
-	if(_check_connection(mysql_conn) != SLURM_SUCCESS)
-		return NULL;
-	memset(&job_cond, 0, sizeof(acct_job_cond_t));
-
-	job_cond.acct_list = selected_steps;
-	job_cond.step_list = selected_steps;
-	job_cond.partition_list = selected_parts;
-	job_cond.cluster_list = params->opt_cluster_list;
-
-	if (params->opt_uid >=0) {
-		char *temp = xstrdup_printf("%u", params->opt_uid);
-		job_cond.userid_list = list_create(NULL);
-		list_append(job_cond.userid_list, temp);
-	}	
-
-	if (params->opt_gid >=0) {
-		char *temp = xstrdup_printf("%u", params->opt_gid);
-		job_cond.groupid_list = list_create(NULL);
-		list_append(job_cond.groupid_list, temp);
-	}	
-
-	job_list = mysql_jobacct_process_get_jobs(mysql_conn, uid, &job_cond);
-
-	if(job_cond.userid_list)
-		list_destroy(job_cond.userid_list);
-	if(job_cond.groupid_list)
-		list_destroy(job_cond.groupid_list);
-		
-#endif
-	return job_list;
-}
-
-/* 
- * get info from the storage 
- * returns List of job_rec_t *
- * note List needs to be freed when called
- */
 extern List jobacct_storage_p_get_jobs_cond(mysql_conn_t *mysql_conn, 
 					    uid_t uid, 
 					    acct_job_cond_t *job_cond)
@@ -10061,17 +10069,31 @@ extern List jobacct_storage_p_get_jobs_cond(mysql_conn_t *mysql_conn,
 /* 
  * expire old info from the storage 
  */
-extern void jobacct_storage_p_archive(mysql_conn_t *mysql_conn, 
-				      List selected_parts,
-				      void *params)
+extern int jobacct_storage_p_archive(mysql_conn_t *mysql_conn, 
+				     acct_archive_cond_t *arch_cond)
 {
 #ifdef HAVE_MYSQL
 	if(_check_connection(mysql_conn) != SLURM_SUCCESS)
-		return;
-	mysql_jobacct_process_archive(mysql_conn,
-				      selected_parts, params);
+		return SLURM_ERROR;
+	
+	return mysql_jobacct_process_archive(mysql_conn, arch_cond);
 #endif
-	return;
+	return SLURM_ERROR;
+}
+
+/* 
+ * load old info into the storage 
+ */
+extern int jobacct_storage_p_archive_load(mysql_conn_t *mysql_conn, 
+					  acct_archive_rec_t *arch_rec)
+{
+#ifdef HAVE_MYSQL
+	if(_check_connection(mysql_conn) != SLURM_SUCCESS)
+		return SLURM_ERROR;
+
+	return mysql_jobacct_process_archive_load(mysql_conn, arch_rec);
+#endif
+	return SLURM_ERROR;
 }
 
 extern int acct_storage_p_update_shares_used(mysql_conn_t *mysql_conn, 
