@@ -216,7 +216,7 @@ crypto_verify_sign(void * key, char *buffer, unsigned int buf_size,
 
 	rc = EVP_VerifyFinal(&ectx, (unsigned char *) signature, 
 		sig_size, (EVP_PKEY *) key);
-	if (!rc)
+	if (rc <= 0)
 		rc = SLURM_ERROR;
 	else
 		rc = SLURM_SUCCESS;
