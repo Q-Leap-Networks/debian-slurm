@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  block_allocator.c - Assorted functions for layout of bluegene blocks, 
  *	 wiring, mapping for smap, etc.
- *  $Id: block_allocator.c 16088 2008-12-29 21:56:17Z jette $
+ *  $Id: block_allocator.c 17225 2009-04-10 19:25:52Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -62,16 +62,20 @@ List path = NULL;
 List best_path = NULL;
 int best_count;
 int color_count = 0;
-bool *passthrough = NULL;
+uint16_t *deny_pass = NULL;
 
 /* extern Global */
+my_bluegene_t *bg = NULL;
+uint16_t ba_deny_pass = 0;
 List bp_map_list = NULL;
 char letters[62];
 char colors[6];
 #ifdef HAVE_3D
 int DIM_SIZE[BA_SYSTEM_DIMENSIONS] = {0,0,0};
+int REAL_DIM_SIZE[BA_SYSTEM_DIMENSIONS] = {0,0,0};
 #else
 int DIM_SIZE[BA_SYSTEM_DIMENSIONS] = {0};
+int REAL_DIM_SIZE[BA_SYSTEM_DIMENSIONS] = {0};
 #endif
 
 s_p_options_t bg_conf_file_options[] = {
@@ -88,6 +92,7 @@ s_p_options_t bg_conf_file_options[] = {
 	{"AltCnloadImage", S_P_ARRAY, parse_image, NULL},
 	{"AltIoloadImage", S_P_ARRAY, parse_image, NULL},
 #endif
+	{"DenyPassthrough", S_P_STRING},
 	{"LayoutMode", S_P_STRING},
 	{"MloaderImage", S_P_STRING},
 	{"BridgeAPILogFile", S_P_STRING},
@@ -206,6 +211,7 @@ static int _set_one_dim(int *start, int *end, int *coord);
 /* */
 static void _destroy_geo(void *object);
 
+
 extern char *bg_block_state_string(rm_partition_state_t state)
 {
 	static char tmp[16];
@@ -237,6 +243,28 @@ extern char *bg_block_state_string(rm_partition_state_t state)
 	snprintf(tmp, sizeof(tmp), "%d", state);
 	return tmp;
 }
+
+extern char *ba_passthroughs_string(uint16_t passthrough)
+{
+	char *pass = NULL;
+	if(passthrough & PASS_FOUND_X)
+		xstrcat(pass, "X");
+	if(passthrough & PASS_FOUND_Y) {
+		if(pass)
+			xstrcat(pass, ",Y");
+		else
+			xstrcat(pass, "Y");
+	}
+	if(passthrough & PASS_FOUND_Z) {
+		if(pass)
+			xstrcat(pass, ",Z");
+		else
+			xstrcat(pass, "Z");
+	}
+	
+	return pass;
+}
+
 
 extern int parse_blockreq(void **dest, slurm_parser_enum_t type,
 			  const char *key, const char *value, 
@@ -485,8 +513,11 @@ extern int new_ba_request(ba_request_t* ba_request)
 	geo[X] = ba_request->geometry[X];
 	geo[Y] = ba_request->geometry[Y];
 	geo[Z] = ba_request->geometry[Z];
-	passthrough = &ba_request->passthrough;
-
+	if(ba_request->deny_pass == (uint16_t)NO_VAL) 
+		ba_request->deny_pass = ba_deny_pass;
+	
+	deny_pass = &ba_request->deny_pass;
+	
 	if(geo[X] != (uint16_t)NO_VAL) { 
 		for (i=0; i<BA_SYSTEM_DIMENSIONS; i++){
 			if ((geo[i] < 1) 
@@ -566,7 +597,7 @@ extern int new_ba_request(ba_request_t* ba_request)
 				  ba_request->elongate_geos,
 				  ba_request->rotate);
 		}	
-	startagain:		
+//	startagain:		
 		picked=0;
 		for(i=0;i<8;i++)
 			checked[i]=0;
@@ -617,9 +648,21 @@ extern int new_ba_request(ba_request_t* ba_request)
 							break;
 					}		
 				}				
+				/* This size can not be made into a
+				   block return.  If you want to try
+				   until we find the next largest block
+				   uncomment the code below and the goto
+				   above. If a user specifies a max
+				   node count the job will never
+				   run.  
+				*/
 				if(i2==1) {
-					ba_request->size +=1;
-					goto startagain;
+					error("Can't make a block of "
+					      "%d into a cube.",
+					      ba_request->size);
+					return 0;
+/* 					ba_request->size +=1; */
+/* 					goto startagain; */
 				}
 						
 			} else {
@@ -856,7 +899,6 @@ extern void ba_init(node_info_msg_t *node_info_ptr)
 	int end[BA_SYSTEM_DIMENSIONS];
 	
 #ifdef HAVE_BG_FILES
-	my_bluegene_t *bg = NULL;
 	rm_size3D_t bp_size;
 	int rc = 0;
 #endif /* HAVE_BG_FILES */
@@ -943,6 +985,10 @@ extern void ba_init(node_info_msg_t *node_info_ptr)
 		DIM_SIZE[X]++;
 		DIM_SIZE[Y]++;
 		DIM_SIZE[Z]++;
+		/* this will probably be reset below */
+		REAL_DIM_SIZE[X] = DIM_SIZE[X];
+		REAL_DIM_SIZE[Y] = DIM_SIZE[Y];
+		REAL_DIM_SIZE[Z] = DIM_SIZE[Z];
 #else
 		DIM_SIZE[X] = node_info_ptr->record_count;
 #endif
@@ -950,28 +996,6 @@ extern void ba_init(node_info_msg_t *node_info_ptr)
 	} 
 #ifdef HAVE_3D
 node_info_error:
-
-#ifdef HAVE_BG_FILES
-	if (have_db2
-	    && ((DIM_SIZE[X]==0) || (DIM_SIZE[Y]==0) || (DIM_SIZE[Z]==0))) {
-		if ((rc = bridge_get_bg(&bg)) != STATUS_OK) {
-			error("bridge_get_BG(): %d", rc);
-			return;
-		}
-		
-		if ((bg != NULL)
-		&&  ((rc = bridge_get_data(bg, RM_Msize, &bp_size)) 
-		     == STATUS_OK)) {
-			DIM_SIZE[X]=bp_size.X;
-			DIM_SIZE[Y]=bp_size.Y;
-			DIM_SIZE[Z]=bp_size.Z;
-		} else {
-			error("bridge_get_data(RM_Msize): %d", rc);	
-		}
-		if ((rc = bridge_free_bg(bg)) != STATUS_OK)
-			error("bridge_free_BG(): %d", rc);
-	}
-#endif
 
 	if ((DIM_SIZE[X]==0) || (DIM_SIZE[Y]==0) || (DIM_SIZE[Z]==0)) {
 		debug("Setting dimensions from slurm.conf file");
@@ -1025,9 +1049,58 @@ node_info_error:
 		DIM_SIZE[X]++;
 		DIM_SIZE[Y]++;
 		DIM_SIZE[Z]++;
+		/* this will probably be reset below */
+		REAL_DIM_SIZE[X] = DIM_SIZE[X];
+		REAL_DIM_SIZE[Y] = DIM_SIZE[Y];
+		REAL_DIM_SIZE[Z] = DIM_SIZE[Z];
 	}
-	debug("DIM_SIZE = %c%c%c\n", alpha_num[DIM_SIZE[X]],
-	      alpha_num[DIM_SIZE[Y]], alpha_num[DIM_SIZE[Z]]);
+#ifdef HAVE_BG_FILES
+	/* sanity check.  We can only request part of the system, but
+	   we don't want to allow more than we have. */
+	if (have_db2) {
+		verbose("Attempting to contact MMCS");
+		if ((rc = bridge_get_bg(&bg)) != STATUS_OK) {
+			fatal("bridge_get_BG() failed.  This usually means "
+			      "there is something wrong with the database.  "
+			      "You might want to run slurmctld in daemon "
+			      "mode (-D) to see what the real error from "
+			      "the api was.  The return code was %d", rc);
+			return;
+		}
+		
+		if ((bg != NULL)
+		&&  ((rc = bridge_get_data(bg, RM_Msize, &bp_size)) 
+		     == STATUS_OK)) {
+			verbose("BlueGene configured with "
+				"%d x %d x %d base blocks", 
+				bp_size.X, bp_size.Y, bp_size.Z);
+			REAL_DIM_SIZE[X] = bp_size.X;
+			REAL_DIM_SIZE[Y] = bp_size.Y;
+			REAL_DIM_SIZE[Z] = bp_size.Z;
+			if((DIM_SIZE[X] > bp_size.X)
+			   || (DIM_SIZE[Y] > bp_size.Y)
+			   || (DIM_SIZE[Z] > bp_size.Z)) {
+				fatal("You requested a %c%c%c system, "
+				      "but we only have a system of %c%c%c.  "
+				      "Change your slurm.conf.",
+				      alpha_num[DIM_SIZE[X]],
+				      alpha_num[DIM_SIZE[Y]],
+				      alpha_num[DIM_SIZE[Z]],
+				      alpha_num[bp_size.X],
+				      alpha_num[bp_size.Y],
+				      alpha_num[bp_size.Z]);
+			}
+		} else {
+			error("bridge_get_data(RM_Msize): %d", rc);	
+		}
+	}
+#endif
+
+
+	debug("We are using %c x %c x %c of the system.", 
+	      alpha_num[DIM_SIZE[X]],
+	      alpha_num[DIM_SIZE[Y]],
+	      alpha_num[DIM_SIZE[Z]]);
 	
 #else 
 	if (DIM_SIZE[X]==0) {
@@ -1120,6 +1193,9 @@ extern void ba_fini()
 		best_path = NULL;
 	}
 #ifdef HAVE_BG_FILES
+	if(bg)
+		bridge_free_bg(bg);
+
 	if (bp_map_list) {
 		list_destroy(bp_map_list);
 		bp_map_list = NULL;
@@ -1529,13 +1605,23 @@ extern char *set_bg_block(List results, int *start,
 	/* This midplane should have already been checked if it was in
 	   use or not */
 	list_append(results, ba_node);
-	if(conn_type == SELECT_SMALL) {
+	if(conn_type >= SELECT_SMALL) {
 		/* adding the ba_node and ending */
 		ba_node->used = true;
 		name = xstrdup_printf("%c%c%c",
 				      alpha_num[ba_node->coord[X]],
 				      alpha_num[ba_node->coord[Y]],
 				      alpha_num[ba_node->coord[Z]]);
+		if(ba_node->letter == '.') {
+			ba_node->letter = letters[color_count%62];
+			ba_node->color = colors[color_count%6];
+			debug3("count %d setting letter = %c "
+			       "color = %d",
+			       color_count,
+			       ba_node->letter,
+			       ba_node->color);
+			color_count++;
+		}
 		goto end_it; 
 	}
 	found = _find_x_path(results, ba_node,
@@ -1959,7 +2045,6 @@ extern char *bg_err_str(status_t inx)
 extern int set_bp_map(void)
 {
 #ifdef HAVE_BG_FILES
-	static my_bluegene_t *bg = NULL;
 	int rc;
 	rm_BP_t *my_bp = NULL;
 	ba_bp_map_t *bp_map = NULL;
@@ -1978,15 +2063,19 @@ extern int set_bp_map(void)
 		return -1;
 	}
 
+#ifdef HAVE_BGL
 	if (!getenv("DB2INSTANCE") || !getenv("VWSPATH")) {
-		fatal("Missing DB2INSTANCE or VWSPATH env var."
-			"Execute 'db2profile'");
+		fatal("Missing DB2INSTANCE or VWSPATH env var.  "
+		      "Execute 'db2profile'");
 		return -1;
 	}
+#endif
 	
-	if ((rc = bridge_get_bg(&bg)) != STATUS_OK) {
-		error("bridge_get_BG(): %d", rc);
-		return -1;
+	if (!bg) {
+		if((rc = bridge_get_bg(&bg)) != STATUS_OK) {
+			error("bridge_get_BG(): %d", rc);
+			return -1;
+		}
 	}
 	
 	if ((rc = bridge_get_data(bg, RM_BPNum, &bp_num)) != STATUS_OK) {
@@ -2052,10 +2141,6 @@ extern int set_bp_map(void)
 		
 		free(bp_id);		
 	}
-
-	if ((rc = bridge_free_bg(bg)) != STATUS_OK)
-		error("bridge_free_BG(): %s", rc);	
-	
 #endif
 	_bp_map_initialized = true;
 	return 1;
@@ -2070,17 +2155,40 @@ extern int *find_bp_loc(char* bp_id)
 #ifdef HAVE_BG_FILES
 	ba_bp_map_t *bp_map = NULL;
 	ListIterator itr;
-	
+	char *check = NULL;
+
 	if(!bp_map_list) {
 		if(set_bp_map() == -1)
 			return NULL;
 	}
+
+	check = xstrdup(bp_id);
+	/* with BGP they changed the names of the rack midplane action from
+	 * R000 to R00-M0 so we now support both formats for each of the
+	 * systems */
+#ifdef HAVE_BGL
+	if(check[3] == '-') {
+		if(check[5]) {
+			check[3] = check[5];
+			check[4] = '\0';
+		}
+	}
+#else
+	if(check[3] != '-') {
+		xfree(check);
+		check = xstrdup_printf("R%c%c-M%c",
+				       bp_id[1], bp_id[2], bp_id[3]);
+	}
+#endif
+
 	itr = list_iterator_create(bp_map_list);
-	while ((bp_map = list_next(itr)) != NULL)
-		if (!strcasecmp(bp_map->bp_id, bp_id)) 
+	while ((bp_map = list_next(itr)))  
+		if (!strcasecmp(bp_map->bp_id, check)) 
 			break;	/* we found it */
-	
 	list_iterator_destroy(itr);
+
+	xfree(check);
+
 	if(bp_map != NULL)
 		return bp_map->coord;
 	else
@@ -2599,6 +2707,42 @@ end_it:
 	
 }
 
+/* */
+extern int validate_coord(int *coord)
+{
+#ifdef HAVE_BG_FILES
+	if(coord[X]>=REAL_DIM_SIZE[X] 
+	   || coord[Y]>=REAL_DIM_SIZE[Y]
+	   || coord[Z]>=REAL_DIM_SIZE[Z]) {
+		error("got coord %c%c%c greater than system dims "
+		      "%c%c%c",
+		      alpha_num[coord[X]],
+		      alpha_num[coord[Y]],
+		      alpha_num[coord[Z]],
+		      alpha_num[REAL_DIM_SIZE[X]],
+		      alpha_num[REAL_DIM_SIZE[Y]],
+		      alpha_num[REAL_DIM_SIZE[Z]]);
+		return 0;
+	}
+
+	if(coord[X]>=DIM_SIZE[X] 
+	   || coord[Y]>=DIM_SIZE[Y]
+	   || coord[Z]>=DIM_SIZE[Z]) {
+		debug4("got coord %c%c%c greater than what we are using "
+		       "%c%c%c",
+		       alpha_num[coord[X]],
+		       alpha_num[coord[Y]],
+		       alpha_num[coord[Z]],
+		       alpha_num[DIM_SIZE[X]],
+		       alpha_num[DIM_SIZE[Y]],
+		       alpha_num[DIM_SIZE[Z]]);
+		return 0;
+	}
+#endif
+	return 1;
+}
+
+
 /********************* Local Functions *********************/
 
 #ifdef HAVE_BG
@@ -2727,7 +2871,9 @@ static int _append_geo(int *geometry, List geos, int rotate)
 	if(rotate) {
 		for (i = (BA_SYSTEM_DIMENSIONS - 1); i >= 0; i--) {
 			for (j = 1; j <= i; j++) {
-				if (geometry[j-1] > geometry[j]) {
+				if ((geometry[j-1] > geometry[j])
+				    && (geometry[j] <= DIM_SIZE[j-i])
+				    && (geometry[j-1] <= DIM_SIZE[j])) {
 					temp_geo = geometry[j-1];
 					geometry[j-1] = geometry[j];
 					geometry[j] = temp_geo;
@@ -2760,7 +2906,7 @@ static int _append_geo(int *geometry, List geos, int rotate)
 
 /*
  * Fill in the paths and extra midplanes we need for the block.
- * Basically copy the x path sent in with the start_list in each Y anx
+ * Basically copy the x path sent in with the start_list in each Y and
  * Z dimension filling in every midplane for the block and then
  * completing the Y and Z wiring, tying the whole block together.
  *
@@ -2795,14 +2941,12 @@ static int _fill_in_coords(List results, List start_list,
 		curr_switch = &check_node->axis_switch[X];
 	
 		for(y=0; y<geometry[Y]; y++) {
-			if((check_node->coord[Y]+y) 
-			   >= DIM_SIZE[Y]) {
+			if((check_node->coord[Y]+y) >= DIM_SIZE[Y]) {
 				rc = 0;
 				goto failed;
 			}
 			for(z=0; z<geometry[Z]; z++) {
-				if((check_node->coord[Z]+z) 
-				   >= DIM_SIZE[Z]) {
+				if((check_node->coord[Z]+z) >= DIM_SIZE[Z]) {
 					rc = 0;
 					goto failed;
 				}
@@ -2853,6 +2997,19 @@ static int _fill_in_coords(List results, List start_list,
 			goto failed;
 		}
 	}
+
+	if(deny_pass) {
+		if((*deny_pass & PASS_DENY_Y)
+		   && (*deny_pass & PASS_FOUND_Y)) {
+			debug("We don't allow Y passthoughs");
+			rc = 0;
+		} else if((*deny_pass & PASS_DENY_Z)
+		   && (*deny_pass & PASS_FOUND_Z)) {
+			debug("We don't allow Z passthoughs");
+			rc = 0;
+		}
+	}
+
 failed:
 	list_iterator_destroy(itr);				
 				
@@ -3056,7 +3213,16 @@ static int _find_yz_path(ba_node_t *ba_node, int *first,
 					dim_curr_switch->int_wire[2].port_tar
 						= 0;
 					dim_curr_switch = dim_next_switch;
-									
+
+					if(deny_pass
+					   && (node_tar[i2] != first[i2])) {
+						if(i2 == 1) 
+							*deny_pass |=
+								PASS_FOUND_Y;
+						else 
+							*deny_pass |=
+								PASS_FOUND_Z;
+					}
 					while(node_tar[i2] != first[i2]) {
 						debug3("on dim %d at %d "
 						       "looking for %d",
@@ -3070,6 +3236,7 @@ static int _find_yz_path(ba_node_t *ba_node, int *first,
 							       "here 3");
 							return 0;
 						} 
+						
 						dim_curr_switch->
 							int_wire[2].used = 1;
 						dim_curr_switch->
@@ -3147,7 +3314,7 @@ static int _find_yz_path(ba_node_t *ba_node, int *first,
 				      geometry[i2], i2, count);
 				return 0;
 			}
-		} else if(geometry[i2] == 1) {
+		} else if((geometry[i2] == 1) && (conn_type == SELECT_TORUS)) {
 			/* FIX ME: This is put here because we got
 			   into a state where the Y dim was not being
 			   processed correctly.  This will set up the
@@ -3643,26 +3810,40 @@ static int _set_external_wires(int dim, int count, ba_node_t* source,
 			       ba_node_t* target)
 {
 #ifdef HAVE_BG_FILES
-	my_bluegene_t *bg = NULL;
+#ifdef HAVE_BGL
+
+#define UNDER_POS  7
+#define NODE_LEN 5
+#define VAL_NAME_LEN 12
+
+#else
+
+#define UNDER_POS  9
+#define NODE_LEN 7
+#define VAL_NAME_LEN 16
+
+#endif
 	int rc;
 	int i;
 	rm_wire_t *my_wire = NULL;
 	rm_port_t *my_port = NULL;
 	char *wire_id = NULL;
-	char from_node[5];
-	char to_node[5];
 	int from_port, to_port;
 	int wire_num;
 	int *coord;
+	char from_node[NODE_LEN];
+	char to_node[NODE_LEN];
 
 	if (!have_db2) {
 		error("Can't access DB2 library, run from service node");
 		return -1;
 	}
 	
-	if ((rc = bridge_get_bg(&bg)) != STATUS_OK) {
-		error("bridge_get_BG(): %d", rc);
-		return -1;
+	if (!bg) {
+		if((rc = bridge_get_bg(&bg)) != STATUS_OK) {
+			error("bridge_get_BG(): %d", rc);
+			return -1;
+		}
 	}
 		
 	if (bg == NULL) 
@@ -3700,7 +3881,7 @@ static int _set_external_wires(int dim, int count, ba_node_t* source,
 			continue;
 		}
 
-		if(wire_id[7] != '_') 
+		if(wire_id[UNDER_POS] != '_') 
 			continue;
 		switch(wire_id[0]) {
 		case 'X':
@@ -3713,17 +3894,17 @@ static int _set_external_wires(int dim, int count, ba_node_t* source,
 			dim = Z;
 			break;
 		}
-		if(strlen(wire_id)<12) {
+		if(strlen(wire_id) < VAL_NAME_LEN) {
 			error("Wire_id isn't correct %s",wire_id);
 			continue;
 		}
-		strncpy(from_node, wire_id+2, 4);
-		strncpy(to_node, wire_id+8, 4);
 		
+                memset(&from_node, 0, sizeof(from_node));
+                memset(&to_node, 0, sizeof(to_node));
+                strncpy(from_node, wire_id+2, NODE_LEN-1);
+                strncpy(to_node, wire_id+UNDER_POS+1, NODE_LEN-1);
 		free(wire_id);
-		
-		from_node[4] = '\0';
-		to_node[4] = '\0';
+
 		if ((rc = bridge_get_data(my_wire, RM_WireFromPort, &my_port))
 		    != STATUS_OK) {
 			error("bridge_get_data(RM_FirstWire): %d", rc);
@@ -3750,20 +3931,9 @@ static int _set_external_wires(int dim, int count, ba_node_t* source,
 			error("1 find_bp_loc: bpid %s not known", from_node);
 			continue;
 		}
-		
-		if(coord[X]>=DIM_SIZE[X] 
-		   || coord[Y]>=DIM_SIZE[Y]
-		   || coord[Z]>=DIM_SIZE[Z]) {
-			error("got coord %c%c%c greater than system dims "
-			      "%c%c%c",
-			      alpha_num[coord[X]],
-			      alpha_num[coord[Y]],
-			      alpha_num[coord[Z]],
-			      alpha_num[DIM_SIZE[X]],
-			      alpha_num[DIM_SIZE[Y]],
-			      alpha_num[DIM_SIZE[Z]]);
+		if(!validate_coord(coord))
 			continue;
-		}
+
 		source = &ba_system_ptr->
 			grid[coord[X]][coord[Y]][coord[Z]];
 		coord = find_bp_loc(to_node);
@@ -3771,19 +3941,9 @@ static int _set_external_wires(int dim, int count, ba_node_t* source,
 			error("2 find_bp_loc: bpid %s not known", to_node);
 			continue;
 		}
-		if(coord[X]>=DIM_SIZE[X] 
-		   || coord[Y]>=DIM_SIZE[Y]
-		   || coord[Z]>=DIM_SIZE[Z]) {
-			error("got coord %c%c%c greater than system dims "
-			      "%c%c%c",
-			      alpha_num[coord[X]],
-			      alpha_num[coord[Y]],
-			      alpha_num[coord[Z]],
-			      alpha_num[DIM_SIZE[X]],
-			      alpha_num[DIM_SIZE[Y]],
-			      alpha_num[DIM_SIZE[Z]]);
+		if(!validate_coord(coord))
 			continue;
-		}
+
 		target = &ba_system_ptr->
 			grid[coord[X]][coord[Y]][coord[Z]];
 		_switch_config(source, 
@@ -3803,9 +3963,6 @@ static int _set_external_wires(int dim, int count, ba_node_t* source,
 		       alpha_num[target->coord[Z]],
 		       _port_enum(to_port));
 	}
-	if ((rc = bridge_free_bg(bg)) != STATUS_OK)
-		error("bridge_free_BG(): %s", rc);
-	
 #else
 
 	_switch_config(source, source, dim, 0, 0);
@@ -4100,10 +4257,16 @@ static int _find_x_path(List results, ba_node_t *ba_node,
 
 	/* we don't need to go any further */
 	if(x_size == 1) {
-		curr_switch->int_wire[source_port].used = 1;
-		curr_switch->int_wire[source_port].port_tar = target_port;
-		curr_switch->int_wire[target_port].used = 1;
-		curr_switch->int_wire[target_port].port_tar = source_port;
+		/* Only set this if Torus since mesh doesn't have any
+		 * connections in this path */
+		if(conn_type == SELECT_TORUS) {
+			curr_switch->int_wire[source_port].used = 1;
+			curr_switch->int_wire[source_port].port_tar = 
+				target_port;
+			curr_switch->int_wire[target_port].used = 1;
+			curr_switch->int_wire[target_port].port_tar = 
+				source_port;
+		}
 		return 1;
 	}
 
@@ -4203,6 +4366,11 @@ static int _find_x_path(List results, ba_node_t *ba_node,
 				goto found_path;
 			} else if(found == x_size) {
 				debug2("Algo(%d) finishing the torus!", algo);
+
+				if(deny_pass && (*deny_pass & PASS_DENY_X)) {
+					info("we don't allow passthroughs 1");
+					return 0;
+				}
 
 				if(best_path)
 					list_flush(best_path);
@@ -4358,7 +4526,13 @@ static int _find_x_path(List results, ba_node_t *ba_node,
 			debug2("Algo(%d) yes found next free %d", algo,
 			       best_count);
 			node_tar = _set_best_path();
-			
+
+			if(deny_pass && (*deny_pass & PASS_DENY_X)
+			   && (*deny_pass & PASS_FOUND_X)) {
+				debug("We don't allow X passthoughs.");
+				return 0;
+			}
+
 			next_node = &ba_system_ptr->grid[node_tar[X]]
 #ifdef HAVE_3D
 				[node_tar[Y]]
@@ -4776,9 +4950,9 @@ static int *_set_best_path()
 
 	itr = list_iterator_create(best_path);
 	while((path_switch = (ba_path_switch_t*) list_next(itr))) {
-		if(passthrough && path_switch->in > 1 && path_switch->out > 1) {
-			*passthrough = true;
-			debug2("got a passthrough");
+		if(deny_pass && path_switch->in > 1 && path_switch->out > 1) {
+			*deny_pass |= PASS_FOUND_X;
+			debug2("got a passthrough in X");
 		}
 #ifdef HAVE_3D
 		debug3("mapping %c%c%c %d->%d",
@@ -4837,7 +5011,8 @@ static int _set_one_dim(int *start, int *end, int *coord)
 	return 1;
 }
 
-static void _destroy_geo(void *object) {
+static void _destroy_geo(void *object) 
+{
 	int *geo_ptr = (int *)object;
 	xfree(geo_ptr);
 }

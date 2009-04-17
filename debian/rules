@@ -74,7 +74,7 @@ ifneq "$(wildcard /usr/share/misc/config.sub)" ""
   install-indep:
 	  dh_testdir
 	  dh_testroot
-	  dh_clean -k -i 
+	  dh_prep -i 
 	  dh_installdirs -i
 	  $(MAKE) -C doc/html install DESTDIR=$(CURDIR)/debian/slurm-llnl-doc
 	  dh_install -pslurm-llnl-doc debian/slurm-llnl-doc/usr/share/doc/slurm-[0-9]*/html usr/share/doc/slurm-llnl-doc
@@ -86,7 +86,7 @@ ifneq "$(wildcard /usr/share/misc/config.sub)" ""
   install-arch:
 	dh_testdir
 	dh_testroot
-	dh_clean -k -s 
+	dh_prep -s 
 	dh_installdirs -s
 
 	# Add here commands to install the arch part of the package into 

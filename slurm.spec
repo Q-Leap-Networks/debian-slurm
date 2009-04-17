@@ -1,4 +1,4 @@
-# $Id: slurm.spec 16103 2008-12-29 23:24:59Z jette $
+# $Id: slurm.spec 16983 2009-03-24 16:33:55Z da $
 #
 # Note that this package is not relocatable
 
@@ -73,14 +73,14 @@
 %endif
 
 Name:    slurm
-Version: 1.3.13
+Version: 1.3.15
 Release: 1%{?dist}
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL 
 Group: System Environment/Base
-Source: slurm-1.3.13.tar.bz2
+Source: slurm-1.3.15.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: https://computing.llnl.gov/linux/slurm/
 
@@ -230,9 +230,16 @@ SLURM plugins (loadable shared objects)
 %package torque
 Summary: Torque/PBS wrappers for transitition from Torque/PBS to SLURM.
 Group: Development/System
-Requires: slurm
+Requires: slurm-perlapi
 %description torque
 Torque wrapper scripts used for helping migrate from Torque/PBS to SLURM.
+
+%package slurmdb-direct
+Summary: Wrappers to write directly to the slurmdb.
+Group: Development/System
+Requires: slurm-perlapi
+%description slurmdb-direct
+Wrappers to write directly to the slurmdb.
 
 %if %{slurm_with aix}
 %package aix-federation
@@ -258,7 +265,7 @@ SLURM process tracking plugin for SGI job containers.
 #############################################################################
 
 %prep
-%setup -n slurm-1.3.13
+%setup -n slurm-1.3.15
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \
@@ -287,6 +294,7 @@ if [ -d /etc/init.d ]; then
    install -D -m755 etc/init.d.slurmdbd $RPM_BUILD_ROOT/etc/init.d/slurmdbd
 fi
 install -D -m644 etc/slurm.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/slurm.conf.example
+install -D -m644 etc/slurmdbd.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/slurmdbd.conf.example
 install -D -m755 etc/slurm.epilog.clean ${RPM_BUILD_ROOT}%{_sysconfdir}/slurm.epilog.clean
 
 # Delete unpackaged files:
@@ -426,6 +434,7 @@ rm -rf $RPM_BUILD_ROOT
 %{_sbindir}/slurmdbd
 %{_mandir}/man5/slurmdbd.*
 %{_mandir}/man8/slurmdbd.*
+%config %{_sysconfdir}/slurmdbd.conf.example
 #############################################################################
 
 %files -f plugins.files plugins
@@ -478,6 +487,12 @@ rm -rf $RPM_BUILD_ROOT
 %{_bindir}/qstat
 %{_bindir}/qsub
 %{_bindir}/mpiexec
+#############################################################################
+
+%files slurmdb-direct
+%defattr(-,root,root)
+%config (noreplace) %{_perldir}/config.slurmdb.pl
+%{_sbindir}/moab_2_slurmdb
 #############################################################################
 
 %if %{slurm_with aix}

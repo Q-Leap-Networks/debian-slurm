@@ -217,7 +217,7 @@ job step credentials.
 The slurmctld daemon must be restarted for a change in \fBCryptoType\fR
 to take effect.
 Acceptable values at present include "crypto/munge" and "crypto/openssl".
-The default value is "crypto/munge".
+The default value is "crypto/openssl".
 
 .TP
 \fBDefMemPerCPU\fR
@@ -379,7 +379,11 @@ The default value is zero, which disables execution.
 \fBHealthCheckProgram\fR
 Fully qualified pathname of a script to execute as user root periodically 
 on all compute nodes that are not in the DOWN state. This may be used to 
-verify the node is fully operational and DRAIN the it otherwise.
+verify the node is fully operational and DRAIN the node or send email
+if a problem is detected. 
+Any action to be taken must be explicitly performed by the program
+(e.g. execute "scontrol update NodeName=foo State=drain Reason=tmp_file_system_full"
+to drain a node).
 The interval is controlled using the \fBHealthCheckInterval\fR parameter.
 Note that the \fBHealthCheckProgram\fR will be executed at the same time 
 on all nodes to minimize its impact upon parallel programs.
@@ -1222,6 +1226,9 @@ available to identify the process ID of the task being started.
 Standard output from this program of the form 
 "export NAME=value" will be used to set environment variables 
 for the task being spawned. 
+Standard output from this program of the form
+"print ..." will cause that line (without the leading "print ")
+to be printed to the job's standard output.
 The order of task prolog/epilog execution is as follows:
 .RS
 .TP
@@ -1641,7 +1648,7 @@ The default value is "NO".
 
 .TP
 \fBMaxNodes\fR
-Maximum count of nodes (or base partitions for BlueGene systems) which 
+Maximum count of nodes (c\-nodes for BlueGene systems) which 
 may be allocated to any single job.
 The default value is "UNLIMITED", which is represented internally as \-1.
 This limit does not apply to jobs executed by SlurmUser or user root.

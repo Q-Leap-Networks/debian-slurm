@@ -112,7 +112,9 @@ static int _set_cond(int *start, int argc, char *argv[],
 						 argv[i]+end)) 
 				u_set = 1;
 		} else if (!strncasecmp (argv[i], "Account",
-					 MAX(command_len, 2))) {
+					 MAX(command_len, 2))
+			   || !strncasecmp (argv[i], "Acct",
+					    MAX(command_len, 4))) {
 			if(!assoc_cond->acct_list) {
 				assoc_cond->acct_list = 
 					list_create(slurm_destroy_char);
@@ -157,6 +159,8 @@ static int _set_cond(int *start, int argc, char *argv[],
 			if(format_list)
 				slurm_addto_char_list(format_list, argv[i]+end);
 		} else if (!strncasecmp (argv[i], "FairShare", 
+					 MAX(command_len, 1))
+			   || !strncasecmp (argv[i], "Shares",
 					 MAX(command_len, 1))) {
 			if(!assoc_cond->fairshare_list)
 				assoc_cond->fairshare_list =
@@ -370,6 +374,8 @@ static int _set_rec(int *start, int argc, char *argv[],
 				strip_quotes(argv[i]+end, NULL, 1);
 			u_set = 1;
 		} else if (!strncasecmp (argv[i], "FairShare",
+					 MAX(command_len, 1))
+			   || !strncasecmp (argv[i], "Shares",
 					 MAX(command_len, 1))) {
 			if(!assoc)
 				continue;
@@ -518,7 +524,7 @@ static int _set_rec(int *start, int argc, char *argv[],
 
 /*
  * IN: user_cond - used for the assoc_cond pointing to the user and
- *     acct list 
+ *     account list 
  * IN: check - whether or not to check if the existance of the above lists
  */
 static int _check_coord_request(acct_user_cond_t *user_cond, bool check)
@@ -704,7 +710,9 @@ extern int sacctmgr_add_user(int argc, char *argv[])
 			slurm_addto_char_list(assoc_cond->user_list,
 					      argv[i]+end);
 		} else if (!strncasecmp (argv[i], "Accounts", 
-					 MAX(command_len, 2))) {
+					 MAX(command_len, 2))
+			   || !strncasecmp (argv[i], "Acct",
+					    MAX(command_len, 4))) {
 			slurm_addto_char_list(assoc_cond->acct_list,
 					argv[i]+end);
 		} else if (!strncasecmp (argv[i], "AdminLevel", 
@@ -739,6 +747,8 @@ extern int sacctmgr_add_user(int argc, char *argv[])
 			slurm_addto_char_list(wckey_cond->name_list,
 					      default_wckey);
 		} else if (!strncasecmp (argv[i], "FairShare",
+					 MAX(command_len, 1))
+			   || !strncasecmp (argv[i], "Shares",
 					 MAX(command_len, 1))) {
 			if (get_uint(argv[i]+end, &start_assoc.fairshare, 
 			    "FairShare") == SLURM_SUCCESS)
@@ -967,7 +977,7 @@ extern int sacctmgr_add_user(int argc, char *argv[])
 			destroy_acct_wckey_cond(wckey_cond);
 			destroy_acct_association_cond(assoc_cond);
 			exit_code=1;
-			fprintf(stderr, " Need name of acct to "
+			fprintf(stderr, " Need name of account to "
 				"add user to.\n"); 
 			return SLURM_ERROR;
 		}
@@ -1538,7 +1548,8 @@ extern int sacctmgr_list_user(int argc, char *argv[])
 		command_len = strlen(object);
 
 		field = xmalloc(sizeof(print_field_t));
-		if(!strncasecmp("Account", object, MAX(command_len, 2))) {
+		if(!strncasecmp("Account", object, MAX(command_len, 2))
+		   || !strncasecmp ("Acct", object, MAX(command_len, 4))) {
 			field->type = PRINT_ACCOUNT;
 			field->name = xstrdup("Account");
 			field->len = 10;
@@ -1680,6 +1691,12 @@ extern int sacctmgr_list_user(int argc, char *argv[])
 			field->name = xstrdup("Partition");
 			field->len = 10;
 			field->print_routine = print_fields_str;
+		} else if(!strncasecmp("Shares", object,
+				       MAX(command_len, 1))) {
+			field->type = PRINT_FAIRSHARE;
+			field->name = xstrdup("Shares");
+			field->len = 9;
+			field->print_routine = print_fields_uint;
 		} else if(!strncasecmp("User", object, MAX(command_len, 1))
 			  || !strncasecmp("Name", object, 
 					  MAX(command_len, 2))) {

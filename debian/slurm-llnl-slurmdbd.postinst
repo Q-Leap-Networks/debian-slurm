@@ -18,7 +18,6 @@ set -e
 #
 case "$1" in
     configure)
-      chown slurm:slurm /var/run/slurm-llnl
       chown slurm:slurm /var/log/slurm-llnl
     ;;
 

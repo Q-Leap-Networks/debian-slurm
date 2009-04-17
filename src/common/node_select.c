@@ -9,7 +9,7 @@
  *  the plugin. This is because functions required by the plugin can not be 
  *  resolved on the front-end nodes, so we can't load the plugins there.
  *
- *  $Id: node_select.c 15717 2008-11-17 23:20:37Z da $
+ *  $Id: node_select.c 17005 2009-03-24 21:57:43Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -268,13 +268,14 @@ static slurm_select_context_t *_select_context_create(const char *select_type)
  */
 static int _select_context_destroy( slurm_select_context_t *c )
 {
+	int rc = SLURM_SUCCESS;
 	/*
 	 * Must check return code here because plugins might still
 	 * be loaded and active.
 	 */
 	if ( c->plugin_list ) {
 		if ( plugrack_destroy( c->plugin_list ) != SLURM_SUCCESS ) {
-			return SLURM_ERROR;
+			rc = SLURM_ERROR;
 		}
 	} else {
 		plugin_unload(c->cur_plugin);
@@ -283,7 +284,7 @@ static int _select_context_destroy( slurm_select_context_t *c )
 	xfree( c->select_type );
 	xfree( c );
 
-	return SLURM_SUCCESS;
+	return rc;
 }
 
 /*
@@ -772,14 +773,33 @@ unpack_error:
 
 static char *_job_conn_type_string(uint16_t inx)
 {
-	if (inx == SELECT_TORUS)
+	switch(inx) {
+	case SELECT_TORUS:
 		return "torus";
-	else if (inx == SELECT_MESH)
+		break;
+	case SELECT_MESH:
 		return "mesh";
-	else if (inx == SELECT_SMALL)
+		break;
+	case SELECT_SMALL:
 		return "small";
-	else
+		break;
+#ifndef HAVE_BGL
+	case SELECT_HTC_S:
+		return "htc_s";
+		break;
+	case SELECT_HTC_D:
+		return "htc_d";
+		break;
+	case SELECT_HTC_V:
+		return "htc_v";
+		break;
+	case SELECT_HTC_L:
+		return "htc_l";
+		break;
+#endif
+	default: 
 		return "n/a";
+	}
 }
 
 static char *_yes_no_string(uint16_t inx)

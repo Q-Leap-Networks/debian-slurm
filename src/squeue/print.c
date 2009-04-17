@@ -653,7 +653,9 @@ int _print_job_num_procs(job_info_t * job, int width, bool right, char* suffix)
 	if (job == NULL)	/* Print the Header instead */
 		_print_str("CPUS", width, right, true);
 	else {
-		if (job->job_state == JOB_RUNNING) {
+		if ((job->num_cpu_groups > 0) &&
+		    (job->cpus_per_node) &&
+		    (job->cpu_count_reps)) {
 			uint32_t cnt = 0, i;
 			for (i=0; i<job->num_cpu_groups; i++) {
 				cnt += job->cpus_per_node[i] * 
@@ -1273,7 +1275,7 @@ static int _filter_job(job_info_t * job)
 	ListIterator iterator;
 	uint32_t *job_id, *user;
 	enum job_states *state_id;
-	char *part;
+	char *part, *account;
 
 	if (params.job_list) {
 		filter = 1;
@@ -1294,6 +1296,21 @@ static int _filter_job(job_info_t * job)
 		iterator = list_iterator_create(params.part_list);
 		while ((part = list_next(iterator))) {
 			if (strcmp(part, job->partition) == 0) {
+				filter = 0;
+				break;
+			}
+		}
+		list_iterator_destroy(iterator);
+		if (filter == 1)
+			return 2;
+	}
+	
+	if (params.account_list) {
+		filter = 1;
+		iterator = list_iterator_create(params.account_list);
+		while ((account = list_next(iterator))) {
+			 if ((job->account != NULL) &&
+			     (strcmp(account, job->account) == 0)) {
 				filter = 0;
 				break;
 			}

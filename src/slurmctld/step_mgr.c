@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  step_mgr.c - manage the job step information of slurm
- *  $Id: step_mgr.c 15827 2008-12-04 20:17:23Z jette $
+ *  $Id: step_mgr.c 16584 2009-02-18 19:03:40Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1100,7 +1100,7 @@ extern slurm_step_layout_t *step_layout_create(struct step_record *step_ptr,
 					error("step_layout_create exclusive");
 					return NULL;
 				}
-				usable_cpus = MAX(usable_cpus, 
+				usable_cpus = MIN(usable_cpus, 
 						  (num_tasks - set_cpus));
 			} else
 				usable_cpus = job_ptr->alloc_lps[pos];

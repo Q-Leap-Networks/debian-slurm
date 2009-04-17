@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  bg_block_info.c - bluegene block information from the db2 database.
  *
- *  $Id: bg_block_info.c 15717 2008-11-17 23:20:37Z da $
+ *  $Id: bg_block_info.c 17202 2009-04-09 16:56:23Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -64,6 +64,8 @@
 #include "src/common/xstring.h"
 #include "src/slurmctld/proc_req.h"
 #include "src/api/job_info.h"
+#include "src/slurmctld/trigger_mgr.h"
+#include "src/slurmctld/locks.h"
 #include "bluegene.h"
 
 #define _DEBUG 0
@@ -87,7 +89,6 @@ static int _block_is_deallocating(bg_record_t *bg_record)
 
 	if(bg_record->modifying)
 		return SLURM_SUCCESS;
-
 	
 	user_name = xstrdup(bg_slurm_user_name);
 	if(remove_all_users(bg_record->bg_block_id, NULL) 
@@ -95,13 +96,12 @@ static int _block_is_deallocating(bg_record_t *bg_record)
 		error("Something happened removing "
 		      "users from block %s", 
 		      bg_record->bg_block_id);
-	} 
-	
+	} 	
 	
 	if(bg_record->target_name && bg_record->user_name) {
 		if(!strcmp(bg_record->target_name, user_name)) {
 			if(strcmp(bg_record->target_name, bg_record->user_name)
-			   || (jobid > -1)) {
+			   || (jobid > NO_JOB_RUNNING)) {
 				kill_job_struct_t *freeit =
 					xmalloc(sizeof(freeit));
 				freeit->jobid = jobid;
@@ -113,13 +113,6 @@ static int _block_is_deallocating(bg_record_t *bg_record)
 				      bg_record->bg_block_id,
 				      bg_record->user_name,
 				      jobid);
-
-				if(remove_from_bg_list(bg_job_block_list, 
-						       bg_record) 
-				   == SLURM_SUCCESS) {
-					num_unused_cpus += bg_record->bp_count
-						* bg_record->cpus_per_bp;
-				} 
 			} else {
 				debug("Block %s was in a ready state "
 				      "but is being freed. No job running.",
@@ -130,7 +123,6 @@ static int _block_is_deallocating(bg_record_t *bg_record)
 			      "for block %s.",
 			      bg_record->bg_block_id);
 		}
-		remove_from_bg_list(bg_booted_block_list, bg_record);
 	} else if(bg_record->user_name) {
 		error("Target Name was not set "
 		      "not set for block %s.",
@@ -143,6 +135,10 @@ static int _block_is_deallocating(bg_record_t *bg_record)
 		bg_record->user_name = xstrdup(user_name);
 		bg_record->target_name = xstrdup(bg_record->user_name);
 	}
+
+	if(remove_from_bg_list(bg_job_block_list, bg_record) == SLURM_SUCCESS) 
+		num_unused_cpus += bg_record->cpu_cnt;			       
+	remove_from_bg_list(bg_booted_block_list, bg_record);
 
 	xfree(user_name);
 			
@@ -201,6 +197,8 @@ extern int block_ready(struct job_record *job_ptr)
 		xfree(block_id);
 	} else
 		rc = READY_JOB_ERROR;
+/* 	info("returning %d for job %u %d %d", */
+/* 	     rc, job_ptr->job_id, READY_JOB_ERROR, READY_JOB_FATAL); */
 	return rc;
 }				
 
@@ -215,8 +213,8 @@ extern void pack_block(bg_record_t *bg_record, Buf buffer)
 	pack16((uint16_t)bg_record->conn_type, buffer);
 #ifdef HAVE_BGL
 	pack16((uint16_t)bg_record->node_use, buffer);	
-	pack16((uint16_t)bg_record->quarter, buffer);	
-	pack16((uint16_t)bg_record->nodecard, buffer);	
+	pack16((uint16_t)0, buffer);	
+	pack16((uint16_t)0, buffer);	
 #endif
 	pack32((uint32_t)bg_record->node_cnt, buffer);
 	pack_bit_fmt(bg_record->bitmap, buffer);
@@ -244,6 +242,8 @@ extern int update_block_list()
 	time_t now;
 	kill_job_struct_t *freeit = NULL;
 	ListIterator itr = NULL;
+	slurmctld_lock_t job_write_lock = {
+		NO_LOCK, WRITE_LOCK, WRITE_LOCK, NO_LOCK };
 	
 	if(!kill_job_list)
 		kill_job_list = list_create(_destroy_kill_struct);
@@ -300,6 +300,50 @@ extern int update_block_list()
 			bg_record->node_use = node_use;
 			updated = 1;
 		}
+#else
+		if((bg_record->node_cnt < bluegene_bp_node_cnt) 
+		   || (bluegene_bp_node_cnt == bluegene_nodecard_node_cnt)) {
+			char *mode = NULL;
+			uint16_t conn_type = SELECT_SMALL;
+			if ((rc = bridge_get_data(block_ptr,
+						  RM_PartitionOptions,
+						  &mode))
+			    != STATUS_OK) {
+				error("bridge_get_data(RM_PartitionOptions): "
+				      "%s", bg_err_str(rc));
+				updated = -1;
+				goto next_block;
+			} else if(mode) {
+				switch(mode[0]) {
+				case 's':
+					conn_type = SELECT_HTC_S;
+					break;
+				case 'd':
+					conn_type = SELECT_HTC_D;
+					break;
+				case 'v':
+					conn_type = SELECT_HTC_V;
+					break;
+				case 'l':
+					conn_type = SELECT_HTC_L;
+					break;
+				default:
+					conn_type = SELECT_SMALL;
+					break;
+				}
+				free(mode);
+			}
+			
+			if(bg_record->conn_type != conn_type) {
+				debug("mode of small Block %s was %u "
+				      "and now is %u",
+				      bg_record->bg_block_id, 
+				      bg_record->conn_type, 
+				      conn_type);
+				bg_record->conn_type = conn_type;
+				updated = 1;
+			}
+		}
 #endif		
 		if ((rc = bridge_get_data(block_ptr, RM_PartitionState,
 					  &state))
@@ -320,18 +364,56 @@ extern int update_block_list()
 			   check to make sure block went 
 			   through freeing correctly 
 			*/
-			if(bg_record->state != RM_PARTITION_DEALLOCATING
+			if((bg_record->state != RM_PARTITION_DEALLOCATING
+			    && bg_record->state != RM_PARTITION_ERROR)
 			   && state == RM_PARTITION_FREE)
 				skipped_dealloc = 1;
+			else if((bg_record->state == RM_PARTITION_READY)
+				&& (state == RM_PARTITION_CONFIGURING)) {
+				/* This means the user did a reboot through
+				   mpirun but we missed the state
+				   change */
+				debug("Block %s skipped rebooting, "
+				      "but it really is.  "
+				      "Setting target_name back to %s",
+				      bg_record->bg_block_id,
+				      bg_record->user_name);
+				xfree(bg_record->target_name);
+				bg_record->target_name =
+					xstrdup(bg_record->user_name);
+			}
 
 			bg_record->state = state;
 
 			if(bg_record->state == RM_PARTITION_DEALLOCATING
-			   || skipped_dealloc) {
+			   || skipped_dealloc) 
 				_block_is_deallocating(bg_record);
-			} else if(bg_record->state == RM_PARTITION_CONFIGURING)
+#ifndef HAVE_BGL
+			else if(bg_record->state == RM_PARTITION_REBOOTING) {
+				/* This means the user did a reboot through
+				   mpirun */
+				debug("Block %s rebooting.  "
+				      "Setting target_name back to %s",
+				      bg_record->bg_block_id,
+				      bg_record->user_name);
+				xfree(bg_record->target_name);
+				bg_record->target_name =
+					xstrdup(bg_record->user_name);
+			}
+#endif
+			else if(bg_record->state == RM_PARTITION_CONFIGURING) 
 				bg_record->boot_state = 1;
+			else if(bg_record->state == RM_PARTITION_FREE) {
+				if(remove_from_bg_list(bg_job_block_list, 
+						       bg_record) 
+				   == SLURM_SUCCESS) {
+					num_unused_cpus += bg_record->cpu_cnt;
+				}
+				remove_from_bg_list(bg_booted_block_list,
+						    bg_record);
+			} 
 			updated = 1;
+			
 		}
 
 		/* check the boot state */
@@ -350,7 +432,33 @@ extern int update_block_list()
 				
 				break;
 			case RM_PARTITION_ERROR:
-				error("block in an error state");
+				bg_record->boot_state = 0;
+				bg_record->boot_count = 0;
+				if(bg_record->job_running > NO_JOB_RUNNING) {
+					error("Block %s in an error "
+					      "state while booting.  "
+					      "Failing job %u.",
+					      bg_record->bg_block_id,
+					      bg_record->job_running);
+					freeit = xmalloc(
+						sizeof(kill_job_struct_t));
+					freeit->jobid = bg_record->job_running;
+					list_push(kill_job_list, freeit);
+					if(remove_from_bg_list(
+						   bg_job_block_list, 
+						   bg_record) 
+					   == SLURM_SUCCESS) {
+						num_unused_cpus += 
+							bg_record->cpu_cnt;
+					} 
+				} else 
+					error("block %s in an error "
+					      "state while booting.",
+					      bg_record->bg_block_id);
+				remove_from_bg_list(bg_booted_block_list,
+						    bg_record);
+				trigger_block_error();
+				break;
 			case RM_PARTITION_FREE:
 				if(bg_record->boot_count < RETRY_BOOT_COUNT) {
 					slurm_mutex_unlock(&block_state_mutex);
@@ -386,6 +494,16 @@ extern int update_block_list()
 					slurm_mutex_lock(&block_state_mutex);
 					bg_record->boot_state = 0;
 					bg_record->boot_count = 0;
+					if(remove_from_bg_list(
+						   bg_job_block_list, 
+						   bg_record) 
+					   == SLURM_SUCCESS) {
+						num_unused_cpus += 
+							bg_record->cpu_cnt;
+					} 
+					remove_from_bg_list(
+						bg_booted_block_list,
+						bg_record);
 				}
 				break;
 			case RM_PARTITION_READY:
@@ -431,8 +549,15 @@ extern int update_block_list()
 	
 	/* kill all the jobs from unexpectedly freed blocks */
 	while((freeit = list_pop(kill_job_list))) {
-		debug2("killing job %d", freeit->jobid);
-		(void) slurm_fail_job(freeit->jobid);
+		debug2("Trying to requeue job %d", freeit->jobid);
+		lock_slurmctld(job_write_lock);
+		if((rc = job_requeue(0, freeit->jobid, -1))) {
+			error("couldn't requeue job %u, failing it: %s",
+			      freeit->jobid, 
+			      slurm_strerror(rc));
+			(void) job_fail(freeit->jobid);
+		}
+		unlock_slurmctld(job_write_lock);
 		_destroy_kill_struct(freeit);
 	}
 		
@@ -501,6 +626,7 @@ extern int update_freeing_block_list()
 			      state);
 
 			bg_record->state = state;
+			updated = 1;
 		}
 	next_block:
 		if ((rc = bridge_free_block(block_ptr)) 

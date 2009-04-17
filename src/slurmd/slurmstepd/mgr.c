@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/mgr.c - job manager functions for slurmstepd
- *  $Id: mgr.c 15835 2008-12-04 23:59:29Z jette $
+ *  $Id: mgr.c 17040 2009-03-26 15:03:18Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008 Lawrence Livermore National Security.
@@ -949,6 +949,7 @@ _fork_all_tasks(slurmd_job_t *job)
 			goto fail2;
 		} else if (pid == 0)  { /* child */
 			int j;
+
 #ifdef HAVE_AIX
 			(void) mkcrid(0);
 #endif

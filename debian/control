@@ -3,8 +3,8 @@ Section: admin
 Priority: extra
 Maintainer: Gennaro Oliva <oliva.g@na.icar.cnr.it>
 Uploaders: Dirk Eddelbuettel <edd@debian.org>
-Build-Depends: debhelper (>= 4.0.0), autotools-dev, libmunge-dev, libncurses5-dev, libssl-dev, po-debconf, python, libglade2-dev, libgtk2.0-dev, libmysqlclient15-dev, postgresql-server-dev-8.3
-Standards-Version: 3.8.0
+Build-Depends: debhelper (>= 7.0.0), autotools-dev, libmunge-dev, libncurses5-dev, libssl-dev, po-debconf, python, libglade2-dev, libgtk2.0-dev, libmysqlclient15-dev, postgresql-server-dev-8.3
+Standards-Version: 3.8.1
 Homepage: https://computing.llnl.gov/linux/slurm/
 
 Package: slurm-llnl
@@ -47,7 +47,7 @@ Package: libpmi0-dev
 Section: libdevel
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}, libpmi0 (= ${binary:Version}), libslurm13 (= ${binary:Version})
-Description: SLURM PMI library implementation
+Description: SLURM PMI library implementation development files
  SLURM, the Simple Linux Utility for Resource Management,
  is an open-source cluster resource management and job scheduling.
  This package contains the SLURM PMI implementation static library and header
@@ -63,10 +63,9 @@ Description: SLURM docmentation
  This package contains the SLURM html documentation.
 
 Package: slurm-llnl-basic-plugins
-Section: admin
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
-Description: SLURM docmentation
+Description: SLURM basic plugins
  SLURM, the Simple Linux Utility for Resource Management,
  is an open-source cluster resource management and job scheduling.
  This package contains the SLURM basic plugins
@@ -75,7 +74,7 @@ Package: slurm-llnl-basic-plugins-dev
 Section: devel
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}, slurm-llnl-basic-plugins (= ${binary:Version})
-Description: SLURM docmentation
+Description: SLURM basic plugins development files
  SLURM, the Simple Linux Utility for Resource Management,
  is an open-source cluster resource management and job scheduling.
  This package contains development files for the SLURM basic plugins

@@ -336,6 +336,8 @@ static sacctmgr_file_opts_t *_parse_options(char *options)
 					 MAX(command_len, 3))) {
 			file_opts->desc = xstrdup(option);
 		} else if (!strncasecmp (sub, "FairShare", 
+					 MAX(command_len, 1))
+			   || !strncasecmp (sub, "Shares",
 					 MAX(command_len, 1))) {
 			if (get_uint(option, &file_opts->fairshare, 
 			    "FairShare") != SLURM_SUCCESS) {
@@ -584,7 +586,9 @@ static List _set_up_print_fields(List format_list)
 			field->len = 20;
 			field->print_routine = print_fields_str;
 		} else if(!strncasecmp("FairShare", object, 
-				       MAX(command_len, 1))) {
+				       MAX(command_len, 1))
+			  || !strncasecmp("Shares", object, 
+					  MAX(command_len, 1))) {
 			field->type = PRINT_FAIRSHARE;
 			field->name = xstrdup("FairShare");
 			field->len = 9;
@@ -1119,7 +1123,7 @@ static int _mod_user(sacctmgr_file_opts_t *file_opts,
 
 		user->wckey_list = list_create(destroy_acct_wckey_rec);
 		wckey_itr = list_iterator_create(file_opts->wckey_list);
-		printf(" Adding WCKey(s) '");
+		printf(" Adding WCKey(s) ");
 		while((temp_char = list_next(wckey_itr))) {
 			wckey = xmalloc(sizeof(acct_wckey_rec_t));
 			wckey->name = xstrdup(temp_char);
@@ -1128,13 +1132,13 @@ static int _mod_user(sacctmgr_file_opts_t *file_opts,
 			list_push(user->wckey_list, wckey);
 
 			if(first) {
-				printf(" %s", temp_char);
+				printf("'%s'", temp_char);
 				first = 0;
 			} else
-				printf(", %s", temp_char);
+				printf(", '%s'", temp_char);
 		}
 		list_iterator_destroy(wckey_itr);
-		printf("' for user '%s'\n", user->name);
+		printf(" for user '%s'\n", user->name);
 		set = 1;
 		notice_thread_init();
 		rc = acct_storage_g_add_wckeys(db_conn, my_uid, 
@@ -1587,7 +1591,7 @@ static acct_account_rec_t *_set_acct_up(sacctmgr_file_opts_t *file_opts,
 		acct->organization = xstrdup(parent);
 	else
 		acct->organization = xstrdup(file_opts->name);
-	/* info("adding acct %s (%s) (%s)", */
+	/* info("adding account %s (%s) (%s)", */
 /* 	        acct->name, acct->description, */
 /* 		acct->organization); */
 
@@ -1686,7 +1690,9 @@ static int _print_file_acct_hierarchical_rec_childern(FILE *fd,
 			if(user_rec) {
 				xstrfmtcat(line, ":DefaultAccount='%s'",
 					   user_rec->default_acct);
-				if(track_wckey)
+				if(track_wckey 
+				   && user_rec->default_wckey 
+				   && user_rec->default_wckey[0])
 					xstrfmtcat(line, ":DefaultWCKey='%s'",
 						   user_rec->default_wckey);
 					

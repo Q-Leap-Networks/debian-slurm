@@ -1,7 +1,7 @@
 /****************************************************************************\
  *  opts.c - srun command line option parsing
  *
- *  $Id: opts.c 15808 2008-12-02 23:38:47Z da $
+ *  $Id: opts.c 16350 2009-01-29 18:16:08Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -68,7 +68,7 @@
 
 /* FUNCTIONS */
 static List  _build_job_list( char* str );
-static List  _build_part_list( char* str );
+static List  _build_str_list( char* str );
 static List  _build_state_list( char* str );
 static List  _build_all_states_list( void );
 static List  _build_step_list( char* str );
@@ -107,6 +107,7 @@ parse_command_line( int argc, char* argv[] )
 		{"states",     required_argument, 0, 't'},
 		{"user",       required_argument, 0, 'u'},
 		{"users",      required_argument, 0, 'u'},
+		{"account",    required_argument, 0, 'U'},
 		{"verbose",    no_argument,       0, 'v'},
 		{"version",    no_argument,       0, 'V'},
 		{"help",       no_argument,       0, OPT_LONG_HELP},
@@ -122,7 +123,7 @@ parse_command_line( int argc, char* argv[] )
 	if ( ( env_val = getenv("SQUEUE_SORT") ) )
 		params.sort = xstrdup(env_val);
 
-	while((opt_char = getopt_long(argc, argv, "ahi:j::ln:o:p:s::S:t:u:vV",
+	while((opt_char = getopt_long(argc, argv, "ahi:j::ln:o:p:s::S:t:u:U:vV",
 			long_options, &option_index)) != -1) {
 		switch (opt_char) {
 			case (int)'?':
@@ -172,7 +173,13 @@ parse_command_line( int argc, char* argv[] )
 				xfree(params.partitions);
 				params.partitions = xstrdup(optarg);
 				params.part_list = 
-					_build_part_list( params.partitions );
+					_build_str_list( params.partitions );
+				break;
+			case (int) 'U':
+				xfree(params.accounts);
+				params.accounts = xstrdup(optarg);
+				params.account_list = 
+					_build_str_list( params.accounts );
 				break;
 			case (int) 's':
 				if (optarg) {
@@ -271,7 +278,13 @@ parse_command_line( int argc, char* argv[] )
 	if ( ( params.partitions == NULL ) && 
 	     ( env_val = getenv("SQUEUE_PARTITION") ) ) {
 		params.partitions = xstrdup(env_val);
-		params.part_list = _build_part_list( params.partitions );
+		params.part_list = _build_str_list( params.partitions );
+	}
+
+	if ( ( params.accounts == NULL ) && 
+	     ( env_val = getenv("SQUEUE_ACCOUNT") ) ) {
+		params.accounts = xstrdup(env_val);
+		params.account_list = _build_str_list( params.accounts );
 	}
 
 	if ( ( params.states == NULL ) && 
@@ -838,12 +851,12 @@ _build_job_list( char* str )
 }
 
 /*
- * _build_part_list- build a list of partition names
- * IN str - comma separated list of partition names
- * RET List of partition names
+ * _build_str_list- build a list of strings
+ * IN str - comma separated list of strings
+ * RET List of strings
  */
 static List 
-_build_part_list( char* str )
+_build_str_list( char* str )
 {
 	List my_list;
 	char *part = NULL, *tmp_char = NULL, *my_part_list = NULL;

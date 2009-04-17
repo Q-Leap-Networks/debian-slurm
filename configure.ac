@@ -1,4 +1,4 @@
-# $Id: configure.ac 16088 2008-12-29 21:56:17Z jette $
+# $Id: configure.ac 16936 2009-03-18 22:02:01Z da $
 # This file is to be processed with autoconf to generate a configure script
 
 dnl Prologue
@@ -23,6 +23,12 @@ AM_INIT_AUTOMAKE(slurm, $VERSION)
 AM_MAINTAINER_MODE
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_HEADERS([slurm/slurm.h])
+
+dnl This needs to be close to the front to set CFLAGS=-m64
+X_AC_BGL
+X_AC_BGP
+AM_CONDITIONAL(BLUEGENE_LOADED, test "x$ac_bluegene_loaded" = "xyes")
+AC_SUBST(BLUEGENE_LOADED)
 
 X_AC_AIX
 
@@ -132,11 +138,6 @@ AC_DEFINE(WITH_PTHREADS,1,[Define if you have pthreads.])
 LDFLAGS="$LDFLAGS "
 CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
 LIBS="$PTHREAD_LIBS $LIBS"
-
-X_AC_BGL
-X_AC_BGP
-AM_CONDITIONAL(BLUEGENE_LOADED, test "x$ac_bluegene_loaded" = "xyes")
-AC_SUBST(BLUEGENE_LOADED)
 
 X_AC_SUN_CONST
 
@@ -296,6 +297,7 @@ AC_CONFIG_FILES([Makefile
 		 contribs/python/Makefile
 		 contribs/python/hostlist/Makefile
 		 contribs/python/hostlist/test/Makefile
+		 contribs/slurmdb-direct/Makefile
 		 src/Makefile 
 		 src/api/Makefile 
 		 src/common/Makefile

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmd/slurmd.c - main slurm node server daemon
- *  $Id: slurmd.c 15572 2008-11-03 23:14:27Z jette $
+ *  $Id: slurmd.c 17177 2009-04-07 18:09:43Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008 Lawrence Livermore National Security.
@@ -43,6 +43,7 @@
 #endif
 
 #include <fcntl.h>
+#include <grp.h>
 #include <string.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -158,6 +159,18 @@ main (int argc, char *argv[])
 	 */
 	for (i=3; i<256; i++)
 		(void) close(i);
+
+	/*
+	 * Drop supplementary groups.
+	 */
+	if (geteuid() == 0) {
+		if (setgroups(0, NULL) != 0) {
+			fatal("Failed to drop supplementary groups, "
+			      "setgroups: %m");
+		}
+	} else {
+		info("Not running as root. Can't drop supplementary groups");
+	}
 
 	/*
 	 * Create and set default values for the slurmd global

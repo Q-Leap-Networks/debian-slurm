@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  sfree.c - free specified block or all blocks.
- *  $Id: sfree.c 15597 2008-11-04 22:05:21Z da $
+ *  $Id: sfree.c 16357 2009-01-30 18:05:07Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -284,7 +284,8 @@ static int _free_block(delete_record_t *delete_record)
 		if (delete_record->state != (rm_partition_state_t)NO_VAL
 		    && delete_record->state != RM_PARTITION_FREE 
 		    && delete_record->state != RM_PARTITION_DEALLOCATING) {
-			info("bridge_destroy %s",delete_record->bg_block_id);
+			info("bridge_destroy %s", delete_record->bg_block_id);
+#ifdef HAVE_BG_FILES
 			if ((rc = bridge_destroy_block(
 				     delete_record->bg_block_id))
 			    != STATUS_OK) {
@@ -296,6 +297,9 @@ static int _free_block(delete_record_t *delete_record)
 				      delete_record->bg_block_id,
 				      _bg_err_str(rc));
 			}
+#else
+			bg_record->state = RM_PARTITION_FREE;	
+#endif
 		}
 		
 		if(!wait_full) {
@@ -306,8 +310,12 @@ static int _free_block(delete_record_t *delete_record)
 		}
 
 		if ((delete_record->state == RM_PARTITION_FREE)
-		    ||  (delete_record->state == RM_PARTITION_ERROR))
+#ifdef HAVE_BGL
+		    ||  (delete_record->state == RM_PARTITION_ERROR)
+#endif
+			) {
 			break;
+		}
 		sleep(3);
 	}
 	info("bgblock %s is freed", delete_record->bg_block_id);

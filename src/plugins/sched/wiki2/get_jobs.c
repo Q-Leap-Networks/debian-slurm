@@ -439,6 +439,13 @@ static void	_get_job_comment(struct job_record *job_ptr,
 		field_sep = "?";
 	}
 
+	/* JOBFLAGS:RESTARTABLE */
+	if (job_ptr->details && job_ptr->details->requeue) {
+		size += snprintf((buffer + size), (buf_size - size),
+			"%sJOBFLAGS:RESTARTABLE", field_sep);
+		field_sep = "?";
+	}
+
 	/* COMMENT SET BY MOAB */
 	if (job_ptr->comment && job_ptr->comment[0]) {
 		size += snprintf((buffer + size), (buf_size - size),
@@ -487,7 +494,7 @@ static uint32_t	_get_job_max_nodes(struct job_record *job_ptr)
 		return max_nodes;	/* should never reach here */
 
 	if (job_ptr->details->max_nodes) {
-			max_nodes = job_ptr->details->max_nodes;
+		max_nodes = job_ptr->details->max_nodes;
 		if (job_ptr->part_ptr->max_nodes != INFINITE) {
 			max_nodes = MIN(max_nodes, 
 					job_ptr->part_ptr->max_nodes);
