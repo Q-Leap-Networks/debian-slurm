@@ -1,8 +1,14 @@
+slurm-llnl (1.3.6-1lenny3) stable-security; urgency=high
+
+  * Add missing include to prevent ia64 build problems.
+
+ -- Thijs Kinkhorst <thijs@debian.org>  Sat, 18 Apr 2009 11:06:27 +0200
+
 slurm-llnl (1.3.6-1lenny2) stable-security; urgency=high
 
   * Security patch to fix supplementary group flaw 
 
- -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Mon, 13 Apr 2009 02:46:20 +0200
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Fri, 17 Apr 2009 10:06:56 +0200
 
 slurm-llnl (1.3.6-1lenny1) testing-security; urgency=high
 

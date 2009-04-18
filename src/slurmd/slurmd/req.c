@@ -70,6 +70,7 @@
 #include "src/common/xstring.h"
 #include "src/common/xmalloc.h"
 #include "src/common/list.h"
+#include "src/common/uid.h"
 #include "src/common/util-net.h"
 #include "src/common/forward.h"
 #include "src/common/read_config.h"
