@@ -4,10 +4,11 @@
  *  Copyright (C) 2003 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -92,7 +93,8 @@ const char plugin_type[]       	= "jobcomp/filetxt";
 const uint32_t plugin_version	= 100;
 
 #define JOB_FORMAT "JobId=%lu UserId=%s(%lu) GroupId=%s(%lu) Name=%s JobState=%s Partition=%s "\
-		"TimeLimit=%s StartTime=%s EndTime=%s NodeList=%s NodeCnt=%u ProcCnt=%u %s\n"
+		"TimeLimit=%s StartTime=%s EndTime=%s NodeList=%s NodeCnt=%u ProcCnt=%u "\
+		"WorkDir=%s %s\n"
  
 /* Type for error string table entries */
 typedef struct {
@@ -245,7 +247,7 @@ extern int slurm_jobcomp_log_record ( struct job_record *job_ptr )
 	int rc = SLURM_SUCCESS;
 	char job_rec[1024];
 	char usr_str[32], grp_str[32], start_str[32], end_str[32], lim_str[32];
-	char select_buf[128];
+	char select_buf[128], *work_dir;
 	size_t offset = 0, tot_size, wrote;
 	enum job_states job_state;
 
@@ -271,6 +273,11 @@ extern int slurm_jobcomp_log_record ( struct job_record *job_ptr )
 	_make_time_str(&(job_ptr->start_time), start_str, sizeof(start_str));
 	_make_time_str(&(job_ptr->end_time), end_str, sizeof(end_str));
 
+	if (job_ptr->details && job_ptr->details->work_dir)
+		work_dir = job_ptr->details->work_dir;
+	else
+		work_dir = "unknown";
+
 	select_g_sprint_jobinfo(job_ptr->select_jobinfo,
 		select_buf, sizeof(select_buf), SELECT_PRINT_MIXED);
 
@@ -281,7 +288,7 @@ extern int slurm_jobcomp_log_record ( struct job_record *job_ptr )
 		 job_state_string(job_state), 
 		 job_ptr->partition, lim_str, start_str, 
 		 end_str, job_ptr->nodes, job_ptr->node_cnt,
-		 job_ptr->total_procs,
+		 job_ptr->total_procs, work_dir,
 		 select_buf);
 	tot_size = strlen(job_rec);
 

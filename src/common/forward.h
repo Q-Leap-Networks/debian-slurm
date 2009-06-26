@@ -6,10 +6,11 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <auble1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -87,6 +88,21 @@ if (forward_msg(forward_struct, &header) == SLURM_ERROR) {
 extern int forward_msg(forward_struct_t *forward_struct, 
 		       header_t *header);
 
+
+/*
+ * start_msg_tree  - logic to begin the forward tree and
+ *                   accumulate the return codes from processes getting the
+ *                   the forwarded message
+ *
+ * IN: hl          - hostlist_t   - list of every node to send message to
+ * IN: msg         - slurm_msg_t  - message to send.
+ * IN: timeout     - int          - how long to wait in milliseconds.
+ * RET List 	   - List containing the responses of the childern
+ *		     (if any) we forwarded the message to. List
+ *		     containing type (ret_data_info_t).
+ */
+extern List start_msg_tree(hostlist_t hl, slurm_msg_t *msg, int timeout);
+
 /*
  * mark_as_failed_forward- mark a node as failed and add it to "ret_list"
  *
@@ -128,6 +144,5 @@ if(!ret_list || list_count(ret_list) == 0) {
 extern void destroy_data_info(void *object);
 extern void destroy_forward(forward_t *forward);
 extern void destroy_forward_struct(forward_struct_t *forward_struct);
-extern void destroy_ret_types(void *object);
 	
 #endif

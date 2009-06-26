@@ -3,13 +3,14 @@
  *	parallel jobs.
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona@llnl.gov>, et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -68,7 +69,6 @@
 #include <signal.h>
 #include <termios.h>
 #include <unistd.h>
-#include <fcntl.h>
 #include <grp.h>
 
 
@@ -93,6 +93,7 @@
 #include "src/srun/srun.h"
 #include "src/srun/srun_pty.h"
 #include "src/srun/multi_prog.h"
+#include "src/srun/task_state.h"
 #include "src/api/pmi_server.h"
 #include "src/api/step_launch.h"
 
@@ -101,6 +102,13 @@
  extern char *strsignal(int);
 #  endif
 #endif /* defined HAVE_DECL_STRSIGNAL && !HAVE_DECL_STRSIGNAL */
+
+#ifndef OPEN_MPI_PORT_ERROR
+/* This exit code indicates the launched Open MPI tasks could 
+ *	not open the reserved port. It was already open by some
+ *	other process. */
+#define OPEN_MPI_PORT_ERROR 108
+#endif
 
 #define MAX_RETRIES 20
 #define MAX_ENTRIES 50
@@ -113,13 +121,12 @@ mpi_plugin_client_info_t mpi_job_info[1];
 static struct termios termdefaults;
 uint32_t global_rc = 0;
 srun_job_t *job = NULL;
+task_state_t task_state;
 
-struct {
-	bitstr_t *start_success;
-	bitstr_t *start_failure;
-	bitstr_t *finish_normal;
-	bitstr_t *finish_abnormal;
-} task_state;
+#define MAX_STEP_RETRIES 4
+time_t launch_start_time;
+bool   retry_step_begin = false;
+int    retry_step_cnt = 0;
 
 /*
  * forward declaration of static funcs
@@ -145,9 +152,6 @@ static int   _set_umask_env(void);
 static int   _slurm_debug_env_val (void);
 static void  _task_start(launch_tasks_response_msg_t *msg);
 static void  _task_finish(task_exit_msg_t *msg);
-static void  _task_state_struct_init(int num_tasks);
-static void  _task_state_struct_print(void);
-static void  _task_state_struct_free(void);
 static char *_uint16_array_to_str(int count, const uint16_t *array);
 
 int srun(int ac, char **av)
@@ -167,7 +171,7 @@ int srun(int ac, char **av)
 	env->nodeid = -1;
 	env->cli = NULL;
 	env->env = NULL;
-	env->ckpt_path = NULL;
+	env->ckpt_dir = NULL;
 
 	debug_level = _slurm_debug_env_val();
 	logopt.stderr_level += debug_level;
@@ -198,6 +202,9 @@ int srun(int ac, char **av)
 		exit (1);
 	}
 	record_ppid();
+
+	if (spank_init_post_opt() < 0)
+		fatal("Plugin stack post-option processing failed.");
 	
 	/* reinit log with new verbosity (if changed by command line)
 	 */
@@ -234,7 +241,7 @@ int srun(int ac, char **av)
 	} else if (opt.no_alloc) {
 		info("do not allocate resources");
 		job = job_create_noalloc(); 
-		if (create_job_step(job) < 0) {
+		if (create_job_step(job, false) < 0) {
 			exit(1);
 		}
 	} else if ((resp = existing_allocation())) {
@@ -248,7 +255,11 @@ int srun(int ac, char **av)
 		job = job_step_create_allocation(resp);
 		slurm_free_resource_allocation_response_msg(resp);
 
-		if (!job || create_job_step(job) < 0)
+		if (opt.begin != 0)
+			error("--begin is ignored because nodes"
+				" are already allocated.");
+
+		if (!job || create_job_step(job, false) < 0)
 			exit(1);
 	} else {
 		/* Combined job allocation and job step launch */
@@ -273,8 +284,8 @@ int srun(int ac, char **av)
 			/* use SLURM_JOB_NAME env var */
 			opt.job_name_set_cmd = true;
 		}
-		if (!job || create_job_step(job) < 0) {
-			slurm_complete_job(job->jobid, 1);
+		if (!job || create_job_step(job, true) < 0) {
+			slurm_complete_job(resp->job_id, 1);
 			exit(1);
 		}
 		
@@ -290,7 +301,6 @@ int srun(int ac, char **av)
 	/*
 	 *  Enhance environment for job
 	 */
-	env->nprocs = opt.nprocs;
 	env->cpus_per_task = opt.cpus_per_task;
 	if (opt.ntasks_per_node != NO_VAL)
 		env->ntasks_per_node = opt.ntasks_per_node;
@@ -309,14 +319,13 @@ int srun(int ac, char **av)
 	env->slurmd_debug = opt.slurmd_debug;
 	env->labelio = opt.labelio;
 	env->comm_port = slurmctld_comm_addr.port;
-	env->comm_hostname = slurmctld_comm_addr.hostname;
+	env->batch_flag = 0;
 	if (job) {
 		uint16_t *tasks = NULL;
 		slurm_step_ctx_get(job->step_ctx, SLURM_STEP_CTX_TASKS, 
 				   &tasks);
 
 		env->select_jobinfo = job->select_jobinfo;
-		env->nhosts = job->nhosts;
 		env->nodelist = job->nodelist;
 		env->task_count = _uint16_array_to_str(
 			job->nhosts, tasks);
@@ -346,7 +355,8 @@ int srun(int ac, char **av)
 	xfree(env->task_count);
 	xfree(env);
 	
-	_task_state_struct_init(opt.nprocs);
+ re_launch:
+	task_state = task_state_create(opt.nprocs);
 	slurm_step_launch_params_t_init(&launch_params);
 	launch_params.gid = opt.gid;
 	launch_params.argc = opt.argc;
@@ -369,15 +379,14 @@ int srun(int ac, char **av)
 	if (opt.acctg_freq >= 0)
 		launch_params.acctg_freq = opt.acctg_freq;
 	launch_params.pty = opt.pty;
-	launch_params.max_sockets     = opt.max_sockets_per_node;
-	launch_params.max_cores       = opt.max_cores_per_socket;
-	launch_params.max_threads     = opt.max_threads_per_core;
-	launch_params.cpus_per_task = opt.cpus_per_task;
-	launch_params.ntasks_per_node   = opt.ntasks_per_node;
-	launch_params.ntasks_per_socket = opt.ntasks_per_socket;
-	launch_params.ntasks_per_core   = opt.ntasks_per_core;
-	launch_params.ckpt_path = xstrdup(opt.ckpt_path);
-
+	launch_params.max_sockets	= opt.max_sockets_per_node;
+	launch_params.max_cores		= opt.max_cores_per_socket;
+	launch_params.max_threads	= opt.max_threads_per_core;
+	launch_params.cpus_per_task	= opt.cpus_per_task;
+	launch_params.task_dist         = opt.distribution;
+	launch_params.ckpt_dir		= opt.ckpt_dir;
+	launch_params.restart_dir       = opt.restart_dir;
+	launch_params.preserve_env      = opt.preserve_env;
 	/* job structure should now be filled in */
 	_setup_signals();
 
@@ -403,8 +412,9 @@ int srun(int ac, char **av)
 	}
 
 	update_job_state(job, SRUN_JOB_LAUNCHING);
-	if (slurm_step_launch(job->step_ctx, slurmctld_comm_addr.hostname, 
-	    &launch_params, &callbacks) != SLURM_SUCCESS) {
+	launch_start_time = time(NULL);
+	if (slurm_step_launch(job->step_ctx, &launch_params, &callbacks) != 
+	    SLURM_SUCCESS) {
 		error("Application launch failed: %m");
 		global_rc = 1;
 		goto cleanup;
@@ -414,7 +424,7 @@ int srun(int ac, char **av)
 	if (slurm_step_launch_wait_start(job->step_ctx) == SLURM_SUCCESS) {
 		update_job_state(job, SRUN_JOB_RUNNING);
 		/* Only set up MPIR structures if the step launched
-		   correctly. */
+		 * correctly. */
 		if (opt.multi_prog)
 			mpir_set_multi_name(job->ctx_params.task_count,
 					    launch_params.argv[0]);
@@ -430,32 +440,65 @@ int srun(int ac, char **av)
 	}
 
 	slurm_step_launch_wait_finish(job->step_ctx);
+	if (retry_step_begin && (retry_step_cnt < MAX_STEP_RETRIES)) {
+		retry_step_begin = false;
+		slurm_step_ctx_destroy(job->step_ctx);
+		if (got_alloc) {
+			if (create_job_step(job, true) < 0)
+				exit(1);
+		} else {
+			if (create_job_step(job, false) < 0)
+				exit(1);
+		}
+		task_state_destroy(task_state);
+		goto re_launch;
+	}
 
 cleanup:
 	if(got_alloc) {
 		cleanup_allocation();
-		slurm_complete_job(job->jobid, global_rc);
+
+		/* send the controller we were cancelled */
+		if (job->state >= SRUN_JOB_CANCELLED)
+			slurm_complete_job(job->jobid, NO_VAL);
+		else
+			slurm_complete_job(job->jobid, global_rc);
 	}
+
 	_run_srun_epilog(job);
 	slurm_step_ctx_destroy(job->step_ctx);
 	mpir_cleanup();
-	_task_state_struct_free();
+	task_state_destroy(task_state);
 	log_fini();
 
+	if (WIFEXITED(global_rc))
+		global_rc = WEXITSTATUS(global_rc);
 	return (int)global_rc;
+}
+
+static slurm_step_layout_t *
+_get_slurm_step_layout(srun_job_t *job)
+{
+	job_step_create_response_msg_t *resp;
+
+	if (!job || !job->step_ctx)
+		return (NULL);
+
+	slurm_step_ctx_get(job->step_ctx, SLURM_STEP_CTX_RESP, &resp);
+	if (!resp)
+	    return (NULL);
+	return (resp->step_layout);
 }
 
 static int _call_spank_local_user (srun_job_t *job)
 {
 	struct spank_launcher_job_info info[1];
-	job_step_create_response_msg_t *step_resp;
 
 	info->uid = opt.uid;
 	info->gid = opt.gid;
 	info->jobid = job->jobid;
 	info->stepid = job->stepid;
-	slurm_step_ctx_get(job->step_ctx, SLURM_STEP_CTX_RESP, &step_resp);
-	info->step_layout = step_resp->step_layout;
+	info->step_layout = _get_slurm_step_layout(job);
 	info->argc = opt.argc;
 	info->argv = opt.argv;
 
@@ -601,7 +644,7 @@ static void _set_cpu_env_var(resource_allocation_response_msg_t *resp)
 	if (getenv("SLURM_JOB_CPUS_PER_NODE"))
 		return;
 
-	tmp = uint32_compressed_to_str((uint32_t)resp->num_cpu_groups,
+	tmp = uint32_compressed_to_str(resp->num_cpu_groups,
 				       resp->cpus_per_node,
 				       resp->cpu_count_reps);
 	if (setenvf(NULL, "SLURM_JOB_CPUS_PER_NODE", "%s", tmp) < 0)
@@ -746,7 +789,7 @@ static int _run_srun_script (srun_job_t *job, char *script)
 		if (waitpid(cpid, &status, 0) < 0) {
 			if (errno == EINTR)
 				continue;
-			error("waidpid: %m");
+			error("waitpid: %m");
 			return 0;
 		} else
 			return status;
@@ -799,14 +842,10 @@ _set_stdio_fds(srun_job_t *job, slurm_step_io_fds_t *cio_fds)
 				fatal("Could not open stdin file: %m");
 		}
 		if (job->ifname->type == IO_ONE) {
-			job_step_create_response_msg_t *step_resp = NULL;
-			
-			slurm_step_ctx_get(job->step_ctx, SLURM_STEP_CTX_RESP,
-					   &step_resp);
-		
 			cio_fds->in.taskid = job->ifname->taskid;
 			cio_fds->in.nodeid = slurm_step_layout_host_id(
-				step_resp->step_layout, job->ifname->taskid);
+				_get_slurm_step_layout(job),
+				job->ifname->taskid);
 		}
 	}
 
@@ -902,9 +941,9 @@ _task_start(launch_tasks_response_msg_t *msg)
 		table->pid = msg->local_pids[i];
 
 		if (msg->return_code == 0) {
-			bit_set(task_state.start_success, taskid);
+			task_state_update(task_state, taskid, TS_START_SUCCESS);
 		} else {
-			bit_set(task_state.start_failure, taskid);
+			task_state_update(task_state, taskid, TS_START_FAILURE);
 		}
 	}
 
@@ -918,6 +957,7 @@ _terminate_job_step(slurm_step_ctx_t *step_ctx)
 	slurm_step_ctx_get(step_ctx, SLURM_STEP_CTX_JOBID, &job_id);
 	slurm_step_ctx_get(step_ctx, SLURM_STEP_CTX_STEPID, &step_id);
 	info("Terminating job step %u.%u", job_id, step_id);
+	update_job_state(job, SRUN_JOB_CANCELLED);
 	slurm_kill_job_step(job_id, step_id, SIGKILL);
 }
 
@@ -925,199 +965,221 @@ static void
 _handle_max_wait(int signo)
 {
 	info("First task exited %ds ago", opt.max_wait);
-	_task_state_struct_print();
+	task_state_print(task_state, (log_f) info);
 	_terminate_job_step(job->step_ctx);
 }
 
 static char *
-_taskids_to_nodelist(bitstr_t *tasks_exited)
+_hostset_to_string(hostset_t hs)
+{
+	size_t n = 1024;
+	size_t maxsize = 1024*64;
+	char *str = NULL;
+
+	do {
+		str = xrealloc(str, n);
+	} while (hostset_ranged_string(hs, n*=2, str) < 0 && (n < maxsize));
+
+	/*
+	 *  If string was truncated, indicate this with a '+' suffix.
+	 */
+	if (n >= maxsize)
+		strcpy(str + (maxsize - 2), "+");
+
+	return str;
+}
+
+/* Convert an array of task IDs into a list of host names
+ * RET: the string, caller must xfree() this value */ 
+static char *
+_task_ids_to_host_list(int ntasks, uint32_t taskids[])
 {
 	int i;
-	char *hostname, *hostlist_str;
-	hostlist_t hostlist;
-	job_step_create_response_msg_t *step_resp;
-	slurm_step_layout_t *step_layout;
+	hostset_t hs;
+	char *hosts;
+	slurm_step_layout_t *sl;
 
-	if (!job->step_ctx) {
-		error("No step_ctx");
-		hostlist_str = xstrdup("Unknown");
-		return hostlist_str;
+	if ((sl = _get_slurm_step_layout(job)) == NULL)
+		return (xstrdup("Unknown"));
+
+	hs = hostset_create(NULL);
+	for (i = 0; i < ntasks; i++) {
+		char *host = slurm_step_layout_host_name(sl, taskids[i]);
+		if (host) {
+			hostset_insert(hs, host);
+			free(host);
+		} else {
+			error("Could not identify host name for task %u",
+			      taskids[i]);
+		}
 	}
 
-	slurm_step_ctx_get(job->step_ctx, SLURM_STEP_CTX_RESP, &step_resp);
-	step_layout = step_resp->step_layout;
-	hostlist = hostlist_create(NULL);
-	for (i=0; i<job->ntasks; i++) {
-		if (!bit_test(tasks_exited, i))
-			continue;
-		hostname = slurm_step_layout_host_name(step_layout, i);
-		hostlist_push(hostlist, hostname);
+	hosts = _hostset_to_string(hs);
+	hostset_destroy(hs);
+
+	return (hosts);
+}
+
+/* Convert an array of task IDs into a string.
+ * RET: the string, caller must xfree() this value
+ * NOTE: the taskids array is not necessarily in numeric order, 
+ *       so we use existing bitmap functions to format */
+static char *
+_task_array_to_string(int ntasks, uint32_t taskids[])
+{
+	bitstr_t *tasks_bitmap = NULL;
+	char *str;
+	int i;
+
+	tasks_bitmap = bit_alloc(job->ntasks);
+	if (!tasks_bitmap)
+		fatal("bit_alloc: memory allocation failure");
+	for (i=0; i<ntasks; i++)
+		bit_set(tasks_bitmap, taskids[i]);
+	str = xmalloc(2048);
+	bit_fmt(str, 2048, tasks_bitmap);
+	bit_free(tasks_bitmap);
+
+	return str;
+}
+
+static void
+_update_task_exit_state(uint32_t ntasks, uint32_t taskids[], int abnormal)
+{
+	int i;
+	task_state_type_t t = abnormal ? TS_ABNORMAL_EXIT : TS_NORMAL_EXIT;
+
+	for (i = 0; i < ntasks; i++)
+		task_state_update(task_state, taskids[i], t);
+}
+
+static int _kill_on_bad_exit(void)
+{
+	return (opt.kill_bad_exit || slurm_get_kill_on_bad_exit());
+}
+
+static void _setup_max_wait_timer(void)
+{
+	/*  If these are the first tasks to finish we need to
+	 *   start a timer to kill off the job step if the other
+	 *   tasks don't finish within opt.max_wait seconds.
+	 */
+	verbose("First task exited. Terminating job in %ds.", opt.max_wait);
+	xsignal(SIGALRM, _handle_max_wait);
+	alarm(opt.max_wait);
+}
+
+static const char *
+_taskstr(int n)
+{
+	if (n == 1)
+		return "task";
+	else
+		return "tasks";
+}
+
+static int
+_is_openmpi_port_error(int errcode)
+{
+	if (errcode != OPEN_MPI_PORT_ERROR)
+		return 0;
+	if (opt.resv_port_cnt == NO_VAL)
+		return 0;
+	if (difftime(time(NULL), launch_start_time) > slurm_get_msg_timeout())
+		return 0;
+	return 1;
+}
+
+static void
+_handle_openmpi_port_error(const char *tasks, const char *hosts)
+{
+	char *msg = "retrying";
+
+	if (!retry_step_begin) {
+		retry_step_begin = true;
+		retry_step_cnt++;
 	}
-	hostlist_uniq(hostlist);
-	hostlist_str = xmalloc(2048);
-	hostlist_ranged_string(hostlist, 2048, hostlist_str);
-	hostlist_destroy(hostlist);
-	return hostlist_str;
+	if (retry_step_cnt >= MAX_STEP_RETRIES) {
+		msg = "aborting";
+		opt.kill_bad_exit = true;
+	}
+	error("%s: tasks %s unable to claim reserved port, %s.",
+	      hosts, tasks, msg);
 }
 
 static void
 _task_finish(task_exit_msg_t *msg)
 {
-	bitstr_t *tasks_exited = NULL;
-	char buf[65536], *core_str = "", *msg_str, *node_list = NULL;
-	static bool first_done = true;
-	static bool first_error = true;
+	char *tasks;
+	char *hosts;
 	uint32_t rc = 0;
-	int i;
+	int normal_exit = 0;
 
-	verbose("%u tasks finished (rc=%u)",
-		msg->num_tasks, msg->return_code);
-	tasks_exited = bit_alloc(job->ntasks);
-	for (i=0; i<msg->num_tasks; i++)
-		bit_set(tasks_exited,  msg->task_id_list[i]);
-	bit_fmt(buf, sizeof(buf), tasks_exited);
+	const char *task_str = _taskstr(msg->num_tasks);
+
+	verbose("Received task exit notification for %d %s (status=0x%04x).",
+	      msg->num_tasks, task_str, msg->return_code);
+
+	tasks = _task_array_to_string(msg->num_tasks, msg->task_id_list);
+	hosts = _task_ids_to_host_list(msg->num_tasks, msg->task_id_list);
+
 	if (WIFEXITED(msg->return_code)) {
-		rc = WEXITSTATUS(msg->return_code);
-		if (rc != 0) {
-			bit_or(task_state.finish_abnormal, tasks_exited);
-			node_list = _taskids_to_nodelist(tasks_exited);
-			error("%s: task %s: Exited with exit code %d", 
-			      node_list, buf, rc);
-		} else {
-			bit_or(task_state.finish_normal, tasks_exited);
-			verbose("task %s: Completed", buf);
+		if ((rc = WEXITSTATUS(msg->return_code)) == 0) {
+			verbose("%s: %s %s: Completed", hosts, task_str, tasks);
+			normal_exit = 1;
 		}
-	} else if (WIFSIGNALED(msg->return_code)) {
-		bit_or(task_state.finish_abnormal, tasks_exited);
-		msg_str = strsignal(WTERMSIG(msg->return_code));
+		else if (_is_openmpi_port_error(rc))
+			_handle_openmpi_port_error(tasks, hosts);
+		else
+			error("%s: %s %s: Exited with exit code %d",
+			      hosts, task_str, tasks, rc);
+		if (!WIFEXITED(global_rc) || (rc > WEXITSTATUS(global_rc)))
+			global_rc = msg->return_code;
+	}
+	else if (WIFSIGNALED(msg->return_code)) {
+		const char *signal_str = strsignal(WTERMSIG(msg->return_code));
+		char * core_str = "";
 #ifdef WCOREDUMP
 		if (WCOREDUMP(msg->return_code))
 			core_str = " (core dumped)";
 #endif
-		node_list = _taskids_to_nodelist(tasks_exited);
 		if (job->state >= SRUN_JOB_CANCELLED) {
-			rc = NO_VAL;
-			verbose("%s: task %s: %s%s", 
-				node_list, buf, msg_str, core_str);
+			verbose("%s: %s %s: %s%s",
+				hosts, task_str, tasks, signal_str, core_str);
 		} else {
 			rc = msg->return_code;
-			error("%s: task %s: %s%s", 
-			      node_list, buf, msg_str, core_str);
+			error("%s: %s %s: %s%s",
+			      hosts, task_str, tasks, signal_str, core_str);
 		}
-	}
-	xfree(node_list);
-	bit_free(tasks_exited);
-	global_rc = MAX(global_rc, rc);
-
-	if (first_error && rc > 0 && opt.kill_bad_exit) {
-		first_error = false;
-		_terminate_job_step(job->step_ctx);
-	} else if (first_done && opt.max_wait > 0) {
-		/* If these are the first tasks to finish we need to
-		 * start a timer to kill off the job step if the other
-		 * tasks don't finish within opt.max_wait seconds.
-		 */
-		first_done = false;
-		debug2("First task has exited");
-		xsignal(SIGALRM, _handle_max_wait);
-		verbose("starting alarm of %d seconds", opt.max_wait);
-		alarm(opt.max_wait);
-	}
-}
-
-static void
-_task_state_struct_init(int num_tasks)
-{
-	task_state.start_success = bit_alloc(num_tasks);
-	task_state.start_failure = bit_alloc(num_tasks);
-	task_state.finish_normal = bit_alloc(num_tasks);
-	task_state.finish_abnormal = bit_alloc(num_tasks);
-}
-
-/*
- * Tasks will most likely have bits set in multiple of the task_state
- * bit strings (e.g. a task can start normally and then later exit normally)
- * so we ensure that a task is only "seen" once.
- */
-static void
-_task_state_struct_print(void)
-{
-	bitstr_t *tmp, *seen, *not_seen;
-	char buf[65536];
-	int len;
-
-	len = bit_size(task_state.finish_abnormal); /* all the same length */
-	tmp = bit_alloc(len);
-	seen = bit_alloc(len);
-	not_seen = bit_alloc(len);
-	bit_not(not_seen);
-
-	if (bit_set_count(task_state.finish_abnormal) > 0) {
-		bit_copybits(tmp, task_state.finish_abnormal);
-		bit_and(tmp, not_seen);
-		bit_fmt(buf, sizeof(buf), tmp);
-		info("task %s: exited abnormally", buf);
-		bit_or(seen, tmp);
-		bit_copybits(not_seen, seen);
-		bit_not(not_seen);
+		if (global_rc == 0)
+			global_rc = msg->return_code;
 	}
 
-	if (bit_set_count(task_state.finish_normal) > 0) {
-		bit_copybits(tmp, task_state.finish_normal);
-		bit_and(tmp, not_seen);
-		bit_fmt(buf, sizeof(buf), tmp);
-		info("task %s: exited", buf);
-		bit_or(seen, tmp);
-		bit_copybits(not_seen, seen);
-		bit_not(not_seen);
-	}
+	xfree(tasks);
+	xfree(hosts);
 
-	if (bit_set_count(task_state.start_failure) > 0) {
-		bit_copybits(tmp, task_state.start_failure);
-		bit_and(tmp, not_seen);
-		bit_fmt(buf, sizeof(buf), tmp);
-		info("task %s: failed to start", buf);
-		bit_or(seen, tmp);
-		bit_copybits(not_seen, seen);
-		bit_not(not_seen);
-	}
+	_update_task_exit_state(msg->num_tasks, msg->task_id_list,
+			!normal_exit);
 
-	if (bit_set_count(task_state.start_success) > 0) {
-		bit_copybits(tmp, task_state.start_success);
-		bit_and(tmp, not_seen);
-		bit_fmt(buf, BUFSIZ, tmp);
-		info("task %s: running", buf);
-		bit_or(seen, tmp);
-		bit_copybits(not_seen, seen);
-		bit_not(not_seen);
-	}
-}
+	if (task_state_first_abnormal_exit(task_state) && _kill_on_bad_exit())
+  		_terminate_job_step(job->step_ctx);
 
-static void
-_task_state_struct_free(void)
-{
-	bit_free(task_state.start_success);
-	bit_free(task_state.start_failure);
-	bit_free(task_state.finish_normal);
-	bit_free(task_state.finish_abnormal);
+	if (task_state_first_exit(task_state) && (opt.max_wait > 0))
+		_setup_max_wait_timer();
 }
 
 static void _handle_intr()
 {
 	static time_t last_intr      = 0;
 	static time_t last_intr_sent = 0;
-	if (opt.quit_on_intr) {
-		job_force_termination(job);
-		slurm_step_launch_abort(job->step_ctx);
-		return;
-	}
 
-	if (((time(NULL) - last_intr) > 1) && !opt.disable_status) {
+	if (!opt.quit_on_intr && 
+	    (((time(NULL) - last_intr) > 1) && !opt.disable_status)) {
 		if (job->state < SRUN_JOB_FORCETERM)
 			info("interrupt (one more within 1 sec to abort)");
 		else
 			info("interrupt (abort already in progress)");
-		_task_state_struct_print();
+		task_state_print(task_state, (log_f) info);
 		last_intr = time(NULL);
 	} else  { /* second Ctrl-C in half as many seconds */
 		update_job_state(job, SRUN_JOB_CANCELLED);

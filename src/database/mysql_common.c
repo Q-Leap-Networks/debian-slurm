@@ -7,7 +7,8 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -47,33 +48,7 @@
 pthread_mutex_t mysql_lock = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
-#ifdef HAVE_MYSQL
-
 static char *table_defs_table = "table_defs_table";
-
-static int _clear_results(MYSQL *mysql_db)
-{
-	MYSQL_RES *result = NULL;
-	int rc = 0;
-	do {
-		/* did current statement return data? */
-		if((result = mysql_store_result(mysql_db)))
-			mysql_free_result(result);
-		
-		/* more results? -1 = no, >0 = error, 0 = yes (keep looping) */
-		if ((rc = mysql_next_result(mysql_db)) > 0)
-			error("Could not execute statement %d %s\n",
-			      mysql_errno(mysql_db),
-			      mysql_error(mysql_db));
-	} while (rc == 0);
-
-	if(rc > 0) {
-		errno = rc;
-		return SLURM_ERROR;
-	} 
-
-	return SLURM_SUCCESS;
-}
 
 static MYSQL_RES *_get_first_result(MYSQL *mysql_db)
 {
@@ -346,6 +321,9 @@ static int _create_db(char *db_name, mysql_db_info_t *db_info)
 	char create_line[50];
 	MYSQL *mysql_db = NULL;
 	int rc = SLURM_ERROR;
+	
+	MYSQL *db_ptr = NULL;
+	char *db_host = NULL;
 
 	while(rc == SLURM_ERROR) {
 		rc = SLURM_SUCCESS;
@@ -355,10 +333,25 @@ static int _create_db(char *db_name, mysql_db_info_t *db_info)
 		if(!(mysql_db = mysql_init(mysql_db)))
 			fatal("mysql_init failed: %s", mysql_error(mysql_db));
 		
-		if(mysql_real_connect(mysql_db, 
-				      db_info->host, db_info->user,
-				      db_info->pass, NULL, 
-				      db_info->port, NULL, 0)) {
+		db_host = db_info->host;
+		db_ptr = mysql_real_connect(mysql_db,
+					    db_host, db_info->user,
+					    db_info->pass, NULL,
+					    db_info->port, NULL, 0);
+
+		if (!db_ptr && db_info->backup) {
+			info("Connection failed to host = %s "
+			     "user = %s port = %u",
+			     db_host, db_info->user,
+			     db_info->port);  
+			db_host = db_info->backup;
+			db_ptr = mysql_real_connect(mysql_db, db_host,
+						    db_info->user,
+						    db_info->pass, NULL,
+						    db_info->port, NULL, 0);
+		}
+
+		if (db_ptr) {
 			snprintf(create_line, sizeof(create_line),
 				 "create database %s", db_name);
 			if(mysql_query(mysql_db, create_line)) {
@@ -369,9 +362,9 @@ static int _create_db(char *db_name, mysql_db_info_t *db_info)
 			mysql_close_db_connection(&mysql_db);
 		} else {
 			info("Connection failed to host = %s "
-			     "user = %s pass = %s port = %u",
-			     db_info->host, db_info->user,
-			     db_info->pass, db_info->port);
+			     "user = %s port = %u",
+			     db_host, db_info->user,
+			     db_info->port);
 #ifdef MYSQL_NOT_THREAD_SAFE
 			slurm_mutex_unlock(&mysql_lock);
 #endif
@@ -392,6 +385,7 @@ static int _create_db(char *db_name, mysql_db_info_t *db_info)
 extern int *destroy_mysql_db_info(mysql_db_info_t *db_info)
 {
 	if(db_info) {
+		xfree(db_info->backup);
 		xfree(db_info->host);
 		xfree(db_info->user);
 		xfree(db_info->pass);
@@ -406,6 +400,8 @@ extern int mysql_get_db_connection(MYSQL **mysql_db, char *db_name,
 	int rc = SLURM_SUCCESS;
 	bool storage_init = false;
 	
+	char *db_host = db_info->host;
+
 	if(!(*mysql_db = mysql_init(*mysql_db)))
 		fatal("mysql_init failed: %s", mysql_error(*mysql_db));
 	else {
@@ -418,7 +414,7 @@ extern int mysql_get_db_connection(MYSQL **mysql_db, char *db_name,
 		mysql_options(*mysql_db, MYSQL_OPT_CONNECT_TIMEOUT,
 			      (char *)&my_timeout);
 		while(!storage_init) {
-			if(!mysql_real_connect(*mysql_db, db_info->host,
+			if(!mysql_real_connect(*mysql_db, db_host,
 					       db_info->user, db_info->pass,
 					       db_name, db_info->port,
 					       NULL, CLIENT_MULTI_STATEMENTS)) {
@@ -431,6 +427,11 @@ extern int mysql_get_db_connection(MYSQL **mysql_db, char *db_name,
 					      "%d %s",
 					      mysql_errno(*mysql_db),
 					      mysql_error(*mysql_db));
+					if ((db_host == db_info->host)
+					    && db_info->backup) {
+						db_host = db_info->backup;
+						continue;
+					}
 					rc = SLURM_ERROR;
 					break;
 				}
@@ -468,6 +469,30 @@ extern int mysql_cleanup()
 	return SLURM_SUCCESS;
 }
 
+extern int mysql_clear_results(MYSQL *mysql_db)
+{
+	MYSQL_RES *result = NULL;
+	int rc = 0;
+	do {
+		/* did current statement return data? */
+		if((result = mysql_store_result(mysql_db)))
+			mysql_free_result(result);
+		
+		/* more results? -1 = no, >0 = error, 0 = yes (keep looping) */
+		if ((rc = mysql_next_result(mysql_db)) > 0)
+			error("Could not execute statement %d %s\n",
+			      mysql_errno(mysql_db),
+			      mysql_error(mysql_db));
+	} while (rc == 0);
+
+	if(rc > 0) {
+		errno = rc;
+		return SLURM_ERROR;
+	} 
+
+	return SLURM_SUCCESS;
+}
+
 extern int mysql_db_query(MYSQL *mysql_db, char *query)
 {
 	if(!mysql_db)
@@ -476,13 +501,9 @@ extern int mysql_db_query(MYSQL *mysql_db, char *query)
 	slurm_mutex_lock(&mysql_lock);
 #endif
 	/* clear out the old results so we don't get a 2014 error */
-	_clear_results(mysql_db);		
+	mysql_clear_results(mysql_db);		
 //try_again:
 	if(mysql_query(mysql_db, query)) {
-		/* if(mysql_errno(mysql_db) == CR_SERVER_GONE_ERROR) { */
-/* 			/\* FIX ME: this means the connection went away *\/ */
-/* 		} */
-
 		error("mysql_query failed: %d %s\n%s",
 		      mysql_errno(mysql_db),
 		      mysql_error(mysql_db), query);
@@ -490,6 +511,14 @@ extern int mysql_db_query(MYSQL *mysql_db, char *query)
 #ifdef MYSQL_NOT_THREAD_SAFE
 		slurm_mutex_unlock(&mysql_lock);
 #endif
+		/* FIXME: If we get ER_LOCK_WAIT_TIMEOUT here we need
+		to restart the connections, but it appears restarting
+		the calling program is the only way to handle this.
+		If anyone in the future figures out a way to handle
+		this, super.  Until then we will need to restart the
+		calling program if you ever get this error. 
+		*/
+
 		return SLURM_ERROR;
 	}
 
@@ -502,7 +531,7 @@ extern int mysql_db_query(MYSQL *mysql_db, char *query)
 extern int mysql_db_ping(MYSQL *mysql_db)
 {
 	/* clear out the old results so we don't get a 2014 error */
-	_clear_results(mysql_db);		
+	mysql_clear_results(mysql_db);		
 	return mysql_ping(mysql_db);
 }
 
@@ -512,7 +541,7 @@ extern int mysql_db_commit(MYSQL *mysql_db)
 	slurm_mutex_lock(&mysql_lock);
 #endif
 	/* clear out the old results so we don't get a 2014 error */
-	_clear_results(mysql_db);		
+	mysql_clear_results(mysql_db);		
 	if(mysql_commit(mysql_db)) {
 		error("mysql_commit failed: %d %s",
 		      mysql_errno(mysql_db),
@@ -535,7 +564,7 @@ extern int mysql_db_rollback(MYSQL *mysql_db)
 	slurm_mutex_lock(&mysql_lock);
 #endif
 	/* clear out the old results so we don't get a 2014 error */
-	_clear_results(mysql_db);		
+	mysql_clear_results(mysql_db);		
 	if(mysql_rollback(mysql_db)) {
 		error("mysql_commit failed: %d %s",
 		      mysql_errno(mysql_db),
@@ -578,7 +607,7 @@ extern int mysql_db_query_check_after(MYSQL *mysql_db, char *query)
 	int rc = SLURM_SUCCESS;
 		
 	if((rc = mysql_db_query(mysql_db, query)) != SLURM_ERROR)  
-		rc = _clear_results(mysql_db);
+		rc = mysql_clear_results(mysql_db);
 	
 	return rc;
 }
@@ -655,7 +684,3 @@ extern int mysql_db_create_table(MYSQL *mysql_db, char *table_name,
 	return _mysql_make_table_current(mysql_db, table_name,
 					 first_field, ending);
 }
-
-
-#endif
-

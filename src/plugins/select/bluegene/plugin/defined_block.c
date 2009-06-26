@@ -8,7 +8,8 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -66,7 +67,6 @@ extern int create_defined_blocks(bg_layout_t overlapped,
 #ifdef HAVE_BG_FILES
 	init_wires();
 #endif
- 		
 	/* Locks are already in place to protect part_list here */
 	itr = list_iterator_create(part_list);
 	while ((part_ptr = list_next(itr))) {
@@ -84,15 +84,15 @@ extern int create_defined_blocks(bg_layout_t overlapped,
 	
 	slurm_mutex_lock(&block_state_mutex);
 	reset_ba_system(false);
-	if(bg_list) {
-		itr = list_iterator_create(bg_list);
+	if(bg_lists->main) {
+		itr = list_iterator_create(bg_lists->main);
 		while((bg_record = list_next(itr))) {
 			if(bg_found_block_list) {
 				itr_found = list_iterator_create(
 					bg_found_block_list);
 				while ((found_record = (bg_record_t*) 
 					list_next(itr_found)) != NULL) {
-/* 					info("%s[%s[ ?= %s[%s]\n", */
+/* 					info("%s[%s] ?= %s[%s]\n", */
 /* 					     bg_record->nodes, */
 /* 					     bg_record->ionodes, */
 /* 					     found_record->nodes, */
@@ -105,7 +105,7 @@ extern int create_defined_blocks(bg_layout_t overlapped,
 							  found_record->
 							  ionode_bitmap))
 						) {
-						/* don't reboot this one */
+						/* don't remake this one */
 						break;	
 					}
 				}
@@ -116,7 +116,7 @@ extern int create_defined_blocks(bg_layout_t overlapped,
 			}
 			if(bg_record->bp_count > 0 
 			   && !bg_record->full_block
-			   && bg_record->cpu_cnt >= procs_per_node) {
+			   && bg_record->cpu_cnt >= bg_conf->procs_per_bp) {
 				char *name = NULL;
 
 				if(overlapped == LAYOUT_OVERLAP) {
@@ -130,7 +130,7 @@ extern int create_defined_blocks(bg_layout_t overlapped,
 				if(set_all_bps_except(bg_record->nodes)
 				   != SLURM_SUCCESS)
 					fatal("something happened in "
-					      "the load of %s"
+					      "the load of %s.  "
 					      "Did you use smap to "
 					      "make the "
 					      "bluegene.conf file?",
@@ -185,7 +185,7 @@ extern int create_defined_blocks(bg_layout_t overlapped,
 					}
 					
 					snprintf(temp, sizeof(temp), "%s%s",
-						 bg_slurm_node_prefix,
+						 bg_conf->slurm_node_prefix,
 						 name);
 					
 					xfree(name);
@@ -237,7 +237,7 @@ extern int create_defined_blocks(bg_layout_t overlapped,
 		}
 		list_iterator_destroy(itr);
 	} else {
-		error("create_defined_blocks: no bg_list 2");
+		error("create_defined_blocks: no bg_lists->main 2");
 		slurm_mutex_unlock(&block_state_mutex);
 		xfree(non_usable_nodes);
 		return SLURM_ERROR;
@@ -248,12 +248,12 @@ extern int create_defined_blocks(bg_layout_t overlapped,
 	create_full_system_block(bg_found_block_list);
 
 	slurm_mutex_lock(&block_state_mutex);
-	sort_bg_record_inc_size(bg_list);
+	sort_bg_record_inc_size(bg_lists->main);
 	slurm_mutex_unlock(&block_state_mutex);
 	
 #ifdef _PRINT_BLOCKS_AND_EXIT
-	if(bg_list) {
-		itr = list_iterator_create(bg_list);
+	if(bg_lists->main) {
+		itr = list_iterator_create(bg_lists->main);
 		debug("\n\n");
 		while ((found_record = (bg_record_t *) list_next(itr)) 
 		       != NULL) {
@@ -261,7 +261,7 @@ extern int create_defined_blocks(bg_layout_t overlapped,
 		}
 		list_iterator_destroy(itr);
 	} else {
-		error("create_defined_blocks: no bg_list 5");
+		error("create_defined_blocks: no bg_lists->main 5");
 	}
  	exit(0);
 #endif	/* _PRINT_BLOCKS_AND_EXIT */
@@ -318,14 +318,14 @@ extern int create_full_system_block(List bg_found_block_list)
 /* 	geo[Z] = max_dim[Z]; */
 /* #endif */
 	
-	i = (10+strlen(bg_slurm_node_prefix));
+	i = (10+strlen(bg_conf->slurm_node_prefix));
 	name = xmalloc(i);
 	if((geo[X] == 0) && (geo[Y] == 0) && (geo[Z] == 0))
 		snprintf(name, i, "%s000",
-			 bg_slurm_node_prefix);
+			 bg_conf->slurm_node_prefix);
 	else
 		snprintf(name, i, "%s[000x%c%c%c]",
-			 bg_slurm_node_prefix,
+			 bg_conf->slurm_node_prefix,
 			 alpha_num[geo[X]], alpha_num[geo[Y]],
 			 alpha_num[geo[Z]]);
 	
@@ -345,8 +345,8 @@ extern int create_full_system_block(List bg_found_block_list)
 		error("create_full_system_block: no bg_found_block_list 2");
 	}
 	
-	if(bg_list) {
-		itr = list_iterator_create(bg_list);
+	if(bg_lists->main) {
+		itr = list_iterator_create(bg_lists->main);
 		while ((bg_record = (bg_record_t *) list_next(itr)) 
 		       != NULL) {
 			if (!strcmp(name, bg_record->nodes)) {
@@ -359,7 +359,7 @@ extern int create_full_system_block(List bg_found_block_list)
 		list_iterator_destroy(itr);
 	} else {
 		xfree(name);
-		error("create_overlapped_blocks: no bg_list 3");
+		error("create_overlapped_blocks: no bg_lists->main 3");
 		rc = SLURM_ERROR;
 		goto no_total;
 	}
@@ -417,7 +417,7 @@ extern int create_full_system_block(List bg_found_block_list)
 	}
 
 	print_bg_record(bg_record);
-	list_append(bg_list, bg_record);
+	list_append(bg_lists->main, bg_record);
 
 no_total:
 	if(records)

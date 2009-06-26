@@ -9,7 +9,8 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -145,6 +146,12 @@ extern int acct_storage_p_add_wckeys(void *db_conn, uint32_t uid,
 	return SLURM_SUCCESS;
 }
 
+extern int acct_storage_p_add_reservation(void *db_conn,
+					  acct_reservation_rec_t *resv)
+{
+	return SLURM_SUCCESS;
+}
+
 extern List acct_storage_p_modify_users(void *db_conn, uint32_t uid,
 				       acct_user_cond_t *user_q,
 				       acct_user_rec_t *user)
@@ -183,6 +190,12 @@ extern List acct_storage_p_modify_qos(void *db_conn, uint32_t uid,
 extern List acct_storage_p_modify_wckeys(void *db_conn, uint32_t uid,
 				      acct_wckey_cond_t *wckey_cond,
 				      acct_wckey_rec_t *wckey)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int acct_storage_p_modify_reservation(void *db_conn,
+					     acct_reservation_rec_t *resv)
 {
 	return SLURM_SUCCESS;
 }
@@ -230,6 +243,12 @@ extern List acct_storage_p_remove_wckeys(void *db_conn, uint32_t uid,
 	return NULL;
 }
 
+extern int acct_storage_p_remove_reservation(void *db_conn,
+					     acct_reservation_rec_t *resv)
+{
+	return SLURM_SUCCESS;
+}
+
 extern List acct_storage_p_get_users(void *db_conn, uid_t uid,
 				     acct_user_cond_t *user_q)
 {
@@ -244,6 +263,11 @@ extern List acct_storage_p_get_accts(void *db_conn, uid_t uid,
 
 extern List acct_storage_p_get_clusters(void *db_conn, uid_t uid,
 					acct_account_cond_t *cluster_q)
+{
+	return NULL;
+}
+
+extern List acct_storage_p_get_config(void *db_conn)
 {
 	return NULL;
 }
@@ -266,6 +290,12 @@ extern List acct_storage_p_get_wckeys(void *db_conn, uid_t uid,
 	return NULL;
 }
 
+extern List acct_storage_p_get_reservations(void *mysql_conn, uid_t uid,
+					    acct_reservation_cond_t *resv_cond)
+{
+	return NULL;
+}
+
 extern List acct_storage_p_get_txn(void *db_conn, uid_t uid,
 				   acct_txn_cond_t *txn_cond)
 {
@@ -282,7 +312,8 @@ extern int acct_storage_p_get_usage(void *db_conn, uid_t uid,
 }
 
 extern int acct_storage_p_roll_usage(void *db_conn, 
-				     time_t sent_start)
+				     time_t sent_start, time_t sent_end,
+				     uint16_t archive_data)
 {
 	int rc = SLURM_SUCCESS;
 
@@ -313,6 +344,7 @@ extern int clusteracct_storage_p_register_ctld(void *db_conn,
 
 extern int clusteracct_storage_p_cluster_procs(void *db_conn,
 					       char *cluster,
+					       char *cluster_nodes,
 					       uint32_t procs,
 					       time_t event_time)
 {

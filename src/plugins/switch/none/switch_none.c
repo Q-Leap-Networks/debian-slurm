@@ -1,13 +1,15 @@
 /*****************************************************************************\
  *  switch_none.c - Library for managing a switch with no special handling.
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -221,11 +223,6 @@ extern int switch_p_get_jobinfo(switch_jobinfo_t switch_job,
 /*
  * switch functions for other purposes
  */
-bool switch_p_no_frag ( void )
-{
-	return false;
-}
-
 extern int switch_p_get_errno(void)
 {
 	return SLURM_SUCCESS;

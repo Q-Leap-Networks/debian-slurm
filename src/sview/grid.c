@@ -5,10 +5,11 @@
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>, et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -37,6 +38,10 @@
 \*****************************************************************************/
 #include "sview.h"
 
+#ifdef HAVE_BG
+#include "src/plugins/select/bluegene/plugin/bluegene.h"
+#endif
+
 List grid_button_list = NULL;
 List blinking_button_list = NULL;
 
@@ -45,6 +50,8 @@ char *sview_colors[] = {"#0000FF", "#00FF00", "#00FFFF", "#FFFF00",
 			"#715627", "#6A8CA2", "#4C7127", "#25B9B9",
 			"#A020F0", "#8293ED", "#FFA500", "#FFC0CB",
 			"#8B6914", "#18A24E", "#F827FC", "#B8A40C"};
+char *blank_color = "#919191";
+
 int sview_colors_cnt = 20;
 
 GStaticMutex blinking_mutex = G_STATIC_MUTEX_INIT;
@@ -167,6 +174,7 @@ void _put_button_as_down(grid_button_t *grid_button, int state)
 	GdkColor color;
 
 	if(GTK_IS_EVENT_BOX(grid_button->button)) {
+		//gtk_widget_set_sensitive (grid_button->button, TRUE);
 		return;
 	}
 	gtk_widget_destroy(grid_button->button);		
@@ -212,11 +220,43 @@ void _put_button_as_down(grid_button_t *grid_button, int state)
 void _put_button_as_up(grid_button_t *grid_button)
 {
 	if(GTK_IS_BUTTON(grid_button->button)) {
+		//gtk_widget_set_sensitive (grid_button->button, TRUE);
 		return;
 	}
 	gtk_widget_destroy(grid_button->button);		
 	grid_button->button = gtk_button_new();
 	gtk_widget_set_size_request(grid_button->button, 10, 10);
+	gtk_tooltips_set_tip(grid_button->tip,
+			     grid_button->button,
+			     grid_button->node_name,
+			     "click for node stats");
+	g_signal_connect(G_OBJECT(grid_button->button), 
+			 "button-press-event",
+			 G_CALLBACK(_open_node),
+			 grid_button);
+	if(grid_button->table) 
+		gtk_table_attach(grid_button->table, grid_button->button,
+				 grid_button->table_x,
+				 (grid_button->table_x+1), 
+				 grid_button->table_y,
+				 (grid_button->table_y+1),
+				 GTK_SHRINK, GTK_SHRINK,
+				 1, 1);
+	gtk_widget_show_all(grid_button->button);
+	return;
+}
+
+void _put_button_as_inactive(grid_button_t *grid_button)
+{
+	if(GTK_IS_BUTTON(grid_button->button)) {
+		//gtk_widget_set_sensitive (grid_button->button, FALSE);
+		return;
+	}
+	gtk_widget_destroy(grid_button->button);		
+	grid_button->button = gtk_button_new();
+	gtk_widget_set_size_request(grid_button->button, 10, 10);
+	//gtk_widget_set_sensitive (grid_button->button, FALSE);
+
 	gtk_tooltips_set_tip(grid_button->tip,
 			     grid_button->button,
 			     grid_button->node_name,
@@ -281,14 +321,20 @@ extern grid_button_t *create_grid_button_from_another(
 		return NULL;
 	if(color_inx >= 0)
 		color_inx %= sview_colors_cnt;
-			
+       			
 	send_grid_button = xmalloc(sizeof(grid_button_t));
 	memcpy(send_grid_button, grid_button, sizeof(grid_button_t));
 	node_base_state = send_grid_button->state & NODE_STATE_BASE;
 	/* need to set the table to empty because we will want to fill
 	   this into the new table later */
 	send_grid_button->table = NULL;
-	if((color_inx >= 0) && node_base_state == NODE_STATE_DOWN) {
+	if(color_inx == MAKE_BLACK) {
+		send_grid_button->button = gtk_button_new();
+		//gtk_widget_set_sensitive (send_grid_button->button, FALSE);
+		gdk_color_parse(blank_color, &color);
+		gtk_widget_modify_bg(send_grid_button->button, 
+				     GTK_STATE_NORMAL, &color);
+	} else if((color_inx >= 0) && node_base_state == NODE_STATE_DOWN) {
 		GtkWidget *image = gtk_image_new_from_stock(
 			GTK_STOCK_CANCEL,
 			GTK_ICON_SIZE_SMALL_TOOLBAR);
@@ -349,8 +395,9 @@ extern grid_button_t *create_grid_button_from_another(
 	return send_grid_button;
 }
 
+/* start == -1 for all */
 extern char *change_grid_color(List button_list, int start, int end,
-			       int color_inx)
+			       int color_inx, bool change_unused)
 {
 	ListIterator itr = NULL;
 	grid_button_t *grid_button = NULL;
@@ -360,27 +407,73 @@ extern char *change_grid_color(List button_list, int start, int end,
 	if(!button_list)
 		return NULL;
 
+	if(color_inx >= 0) {
+		color_inx %= sview_colors_cnt;
+		gdk_color_parse(sview_colors[color_inx], &color);
+	} else if(color_inx == MAKE_BLACK) 
+		gdk_color_parse(blank_color, &color);
+	else 
+		gdk_color_parse("#FFFFFF", &color);
+
 	itr = list_iterator_create(button_list);
-	color_inx %= sview_colors_cnt;
-	gdk_color_parse(sview_colors[color_inx], &color);
 	while((grid_button = list_next(itr))) {
-		if ((grid_button->inx < start)
-		    ||  (grid_button->inx > end)) 
+		if(start != -1)
+			if ((grid_button->inx < start)
+			    ||  (grid_button->inx > end)) 
+				continue;
+		
+		if(!change_unused && !grid_button->used)
 			continue;
+
+		if(color_inx == MAKE_BLACK) {
+			_put_button_as_inactive(grid_button);
+			grid_button->color = blank_color;
+			gtk_widget_modify_bg(grid_button->button, 
+					     GTK_STATE_NORMAL, &color);
+
+			continue;
+		}
+
 		node_base_state = grid_button->state & NODE_STATE_BASE;
+	
 		if (node_base_state == NODE_STATE_DOWN) {
 			_put_button_as_down(grid_button, NODE_STATE_DOWN);
 		} else if (grid_button->state & NODE_STATE_DRAIN) {
 			_put_button_as_down(grid_button, NODE_STATE_DRAIN);
 		} else {
 			_put_button_as_up(grid_button);
-			grid_button->color = sview_colors[color_inx];
+			if(color_inx == MAKE_WHITE) 
+				grid_button->color = "#FFFFFF";
+			else
+				grid_button->color = sview_colors[color_inx];
 			gtk_widget_modify_bg(grid_button->button, 
 					     GTK_STATE_NORMAL, &color);
 		}
 	}
 	list_iterator_destroy(itr);
 	return sview_colors[color_inx];
+}
+
+extern void set_grid_used(List button_list, int start, int end,
+			  bool used)
+{
+	ListIterator itr = NULL;
+	grid_button_t *grid_button = NULL;
+
+	if(!button_list)
+		return;
+
+	itr = list_iterator_create(button_list);
+	while((grid_button = list_next(itr))) {
+		if(start != -1)
+			if ((grid_button->inx < start)
+			    ||  (grid_button->inx > end)) 
+				continue;
+		grid_button->used = used;
+	}
+	list_iterator_destroy(itr);
+
+	return;
 }
 
 extern void get_button_list_from_main(List *button_list, int start, int end,
@@ -423,7 +516,7 @@ extern void get_button_list_from_main(List *button_list, int start, int end,
 	return;
 }
 
-extern List copy_main_button_list()
+extern List copy_main_button_list(int initial_color)
 {
 	ListIterator itr = NULL;
 	grid_button_t *grid_button = NULL;
@@ -433,12 +526,13 @@ extern List copy_main_button_list()
 	itr = list_iterator_create(grid_button_list);
 	while((grid_button = list_next(itr))) {
 		send_grid_button = create_grid_button_from_another(
-			grid_button, grid_button->node_name, -1);
+			grid_button, grid_button->node_name, initial_color);
 		if(send_grid_button) {
 			g_signal_connect(G_OBJECT(send_grid_button->button),
 					 "button-press-event",
 					 G_CALLBACK(_open_node),
 					 send_grid_button);
+			send_grid_button->used = false;
 			list_append(button_list, send_grid_button);
 		}
 	}
@@ -785,7 +879,7 @@ end_it:
 
 extern void sview_init_grid()
 {
-	node_info_msg_t *node_info_ptr = NULL;
+	static node_info_msg_t *node_info_ptr = NULL;
 	int error_code = SLURM_SUCCESS;
 	node_info_t *node_ptr = NULL;
 	int i = 0;
@@ -794,12 +888,156 @@ extern void sview_init_grid()
 	grid_button_t *grid_button = NULL;
 	GdkColor color;
 
+#ifdef HAVE_BG
+	int bg_error_code = SLURM_SUCCESS;
+	int part_error_code = SLURM_SUCCESS;
+	bg_info_record_t *bg_info_record = NULL;
+	static partition_info_msg_t *part_info_ptr = NULL;
+	static node_select_info_msg_t *node_select_ptr = NULL;
+	int j = 0;
+	static int node_scaling = 0;
+	int alter = 0;
+#endif
+
 	if((error_code = get_new_info_node(&node_info_ptr, force_refresh))
 	   == SLURM_NO_CHANGE_IN_DATA) { 
+#ifdef HAVE_BG
+		goto get_bg;
+#else
+		/* need to clear out old data */
+		sview_reset_grid();
 		return;
+#endif
 	} else if (error_code != SLURM_SUCCESS) {
 		return;
 	}
+
+#ifdef HAVE_BG
+get_bg:
+	if((part_error_code = get_new_info_part(&part_info_ptr, force_refresh))
+	   == SLURM_NO_CHANGE_IN_DATA) { 
+		// just goto the new info node 
+	} else if(part_error_code != SLURM_SUCCESS) {
+		return;
+	}
+
+	if((bg_error_code = get_new_info_node_select(&node_select_ptr, 
+						     force_refresh))
+	   == SLURM_NO_CHANGE_IN_DATA) {
+		if(error_code == SLURM_NO_CHANGE_IN_DATA
+		   && part_error_code == SLURM_NO_CHANGE_IN_DATA) {
+			/* need to clear out old data */
+			sview_reset_grid();
+			return;		
+		}
+	} else if(bg_error_code != SLURM_SUCCESS) {
+		return;
+	}
+
+	node_scaling = part_info_ptr->partition_array[0].node_scaling;
+
+	/* Here we need to reset the nodes off of what the blocks say */
+	for (i=0; i<node_info_ptr->record_count; i++) {
+		node_ptr = &(node_info_ptr->node_array[i]);
+		/* in each node_ptr we overload the threads var
+		 * with the number of cnodes in the used_cpus var
+		 * will be used to tell how many cnodes are
+		 * allocated and the cores will represent the cnodes
+		 * in an error state. So we can get an idle count by
+		 * subtracting those 2 numbers from the total possible
+		 * cnodes (which are the idle cnodes).
+		 */
+		node_ptr->threads = node_scaling;
+		node_ptr->cores = 0;
+		node_ptr->used_cpus = 0;
+		if((node_ptr->node_state & NODE_STATE_BASE) == NODE_STATE_DOWN) 
+			continue;
+
+		if(node_ptr->node_state & NODE_STATE_DRAIN) {
+			if(node_ptr->node_state & NODE_STATE_FAIL) {
+				node_ptr->node_state &= ~NODE_STATE_DRAIN;
+				node_ptr->node_state &= ~NODE_STATE_FAIL;
+			} else {
+				node_ptr->cores += node_scaling;
+			}
+		}
+		node_ptr->node_state |= NODE_STATE_IDLE;
+	}
+
+	for (i=0; i<node_select_ptr->record_count; i++) {
+		bg_info_record = &(node_select_ptr->bg_info_array[i]);
+
+		/* this block is idle we won't mark it */
+		if (bg_info_record->job_running == NO_JOB_RUNNING)
+			continue;
+
+		if(bg_info_record->conn_type == SELECT_SMALL) 
+			alter = bg_info_record->node_cnt;
+		else
+			alter = node_scaling;
+
+/* 		g_print("Got here for %s with %d and %d\n", */
+/* 			bg_info_record->bg_block_id, */
+/* 			bg_info_record->state, */
+/* 			bg_info_record->job_running); */
+		/*adjust the drained or error blocks and jobs running
+		  on other blocks as explained below. */
+		j = 0;
+		while(bg_info_record->bp_inx[j] >= 0) {
+			int i2 = 0;
+			for(i2 = bg_info_record->bp_inx[j];
+			    i2 <= bg_info_record->bp_inx[j+1];
+			    i2++) {
+				node_ptr = &(node_info_ptr->node_array[i2]);
+				/* cores is overloaded to be the
+				 * cnodes in an error state and
+				 * used_cpus is overloaded to be the nodes in
+				 * use.  No block should be sent in
+				 * here if it isn't in use (that
+				 * doesn't mean in a free state, it means
+				 * the user isn't slurm or the block 
+				 * is in an error state.  
+				 */
+				if((node_ptr->node_state & NODE_STATE_BASE) 
+				   == NODE_STATE_DOWN) 
+					continue;
+				
+				if(bg_info_record->state
+				   == RM_PARTITION_ERROR) {
+					node_ptr->cores += alter;
+					node_ptr->node_state 
+						|= NODE_STATE_DRAIN;
+					node_ptr->node_state
+						|= NODE_STATE_FAIL;
+				} else if(bg_info_record->job_running
+					  > NO_JOB_RUNNING)  
+					node_ptr->used_cpus += alter;
+				else 
+					g_print("Hey we didn't get anything "
+						"here\n");
+			}
+			j += 2;
+		}
+	}
+	
+	/* now set up the extra nodes with the correct
+	   information */
+	/* for (i=0; i<node_info_ptr->record_count; i++) { */
+/* 		node_ptr = &(node_info_ptr->node_array[i]); */
+		
+/* 		if((node_ptr->node_state & NODE_STATE_BASE) == NODE_STATE_DOWN)  */
+/* 			continue; */
+		
+/* 		/\* get the error node count *\/ */
+/* 		if(!node_ptr->cores) { */
+/* 			node_ptr->node_state &= ~NODE_STATE_DRAIN; */
+/* 			continue; */
+/* 		} */
+/* 		/\* just to get this on all the charts we will drain it */
+/* 		   here.  This must be removed in the part info *\/ */
+/* 		node_ptr->node_state |= NODE_STATE_DRAIN; */
+/* 	} */
+#endif
 
 	if(!grid_button_list) {
 		g_print("you need to run get_system_stats() first\n");
@@ -807,7 +1045,6 @@ extern void sview_init_grid()
 	}
 	
 	gdk_color_parse("white", &color);
-	
 	itr = list_iterator_create(grid_button_list);
 	for(i=0; i<node_info_ptr->record_count; i++) {
 		node_ptr = &node_info_ptr->node_array[i];
@@ -860,4 +1097,47 @@ extern void sview_reset_grid()
 				     GTK_STATE_NORMAL, &color);
 	}
 	list_iterator_destroy(itr);
+}
+
+/* clear the grid */
+extern void setup_popup_grid_list(popup_info_t *popup_win)
+{
+	int def_color = MAKE_BLACK;
+
+	if(!popup_win->model) 
+		def_color = MAKE_WHITE;
+
+	if(popup_win->grid_button_list) {
+		change_grid_color(popup_win->grid_button_list, -1, -1,
+				  def_color, true);
+		set_grid_used(popup_win->grid_button_list, -1, -1, false);
+	} else {	     
+		popup_win->grid_button_list =
+			copy_main_button_list(def_color);
+		put_buttons_in_table(popup_win->grid_table,
+				     popup_win->grid_button_list);
+		popup_win->full_grid = 1;
+	}
+
+	/* refresh the pointer */
+	if(popup_win->model) 
+		gtk_tree_model_get(popup_win->model, &popup_win->iter,
+				   popup_win->node_inx_id,
+				   &popup_win->node_inx, -1);
+
+	if(popup_win->node_inx) {
+		int j=0;
+		while(popup_win->node_inx[j] >= 0) {
+			set_grid_used(popup_win->grid_button_list,
+				      popup_win->node_inx[j],
+				      popup_win->node_inx[j+1], true);
+			change_grid_color(
+				popup_win->grid_button_list,
+				popup_win->node_inx[j],
+				popup_win->node_inx[j+1], MAKE_WHITE, true);
+			j += 2;
+		}
+	} else
+		set_grid_used(popup_win->grid_button_list, -1, -1, true);	
+
 }

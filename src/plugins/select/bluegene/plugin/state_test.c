@@ -2,14 +2,15 @@
  *  state_test.c - Test state of Bluegene base partitions and switches. 
  *  DRAIN nodes in SLURM that are not usable. 
  *
- *  $Id: state_test.c 17202 2009-04-09 16:56:23Z da $
+ *  $Id: state_test.c 17317 2009-04-21 21:39:50Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Dan Phung <phung4@llnl.gov> and Morris Jette <jette1@llnl.gov>
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -121,7 +122,7 @@ static void _configure_node_down(rm_bp_id_t bp_id, my_bluegene_t *my_bg)
 		}
 		
 		snprintf(bg_down_node, sizeof(bg_down_node), "%s%c%c%c", 
-			 bg_slurm_node_prefix,
+			 bg_conf->slurm_node_prefix,
 			 alpha_num[bp_loc.X], alpha_num[bp_loc.Y],
 			 alpha_num[bp_loc.Z]);
 		
@@ -157,7 +158,7 @@ static int _test_down_nodecards(rm_BP_t *bp_ptr)
 	//int io_cnt = 1;
 
 	/* Translate 1 nodecard count to ionode count */
-/* 	if((io_cnt *= bluegene_io_ratio)) */
+/* 	if((io_cnt *= bg_conf->io_ratio)) */
 /* 		io_cnt--; */
 
 	if ((rc = bridge_get_data(bp_ptr, RM_BPID, &bp_id))
@@ -182,9 +183,18 @@ static int _test_down_nodecards(rm_BP_t *bp_ptr)
 		rc = SLURM_ERROR;
 		goto clean_up;
 	}
-	
+
+	/* make sure we have this midplane in the system */
+	if(coord[X] >= DIM_SIZE[X]
+	   || coord[Y] >= DIM_SIZE[Y]
+	   || coord[Z] >= DIM_SIZE[Z]) {
+		debug4("node %s isn't configured", bp_id);
+		rc = SLURM_SUCCESS;
+		goto clean_up;
+	}
+
 	node_name = xstrdup_printf("%s%c%c%c",
-				   bg_slurm_node_prefix,
+				   bg_conf->slurm_node_prefix,
 				   alpha_num[coord[X]], 
 				   alpha_num[coord[Y]],
 				   alpha_num[coord[Z]]);
@@ -253,20 +263,37 @@ static int _test_down_nodecards(rm_BP_t *bp_ptr)
 			error("bridge_get_data(CardQuarter): %d",rc);
 			goto clean_up;
 		}
-		io_start *= bluegene_quarter_ionode_cnt;
-		io_start += bluegene_nodecard_ionode_cnt * (i%4);
+		io_start *= bg_conf->quarter_ionode_cnt;
+		io_start += bg_conf->nodecard_ionode_cnt * (i%4);
 #else
 		/* From the first nodecard id we can figure
 		   out where to start from with the alloc of ionodes.
 		*/
 		io_start = atoi((char*)nc_name+1);
-		io_start *= bluegene_io_ratio;
+		io_start *= bg_conf->io_ratio;
 #endif
-
+		/* On small systems with less than a midplane the
+		   database may see the nodecards there but in missing
+		   state.  To avoid getting a bunch of warnings here just
+		   skip over the ones missing.
+		*/
+		if(io_start >= bg_conf->numpsets) {
+			if(state == RM_NODECARD_MISSING) {
+				debug3("Nodecard %s is missing continue",
+				       nc_name);
+			} else {
+				error("We don't have the system configured "
+				      "for this nodecard %s, we only have "
+				      "%d ionodes and this starts at %d", 
+				      nc_name, io_start, bg_conf->numpsets);
+			}
+			free(nc_name);
+			continue;
+		}
 /* 		if(!ionode_bitmap)  */
-/* 			ionode_bitmap = bit_alloc(bluegene_numpsets); */
-/* 		info("setting %d-%d of %d", */
-/* 		     io_start, io_start+io_cnt, bluegene_numpsets); */
+/* 			ionode_bitmap = bit_alloc(bg_conf->numpsets); */
+/* 		info("setting %s start %d of %d", */
+/* 		     nc_name,  io_start, bg_conf->numpsets); */
 /* 		bit_nset(ionode_bitmap, io_start, io_start+io_cnt); */
 		/* we have to handle each nodecard separately to make
 		   sure we don't create holes in the system */
@@ -294,7 +321,7 @@ static int _test_down_nodecards(rm_BP_t *bp_ptr)
 /* 		info("no ionode_bitmap"); */
 /* 		ListIterator itr = NULL; */
 /* 		slurm_mutex_lock(&block_state_mutex); */
-/* 		itr = list_iterator_create(bg_list); */
+/* 		itr = list_iterator_create(bg_lists->main); */
 /* 		while ((bg_record = list_next(itr))) { */
 /* 			if(bg_record->job_running != BLOCK_ERROR_STATE) */
 /* 				continue; */

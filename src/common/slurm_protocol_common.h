@@ -5,10 +5,11 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov>, et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -62,7 +63,12 @@
 #define SLURM_PROTOCOL_MAX_MESSAGE_BUFFER_SIZE (512*1024)
 
 /* slurm protocol header defines, based upon config.h, 16 bits */ 
+/* A new SLURM_PROTOCOL_VERSION needs to be made each time the version
+ * changes so the slurmdbd can talk all versions for update messages.
+ * In slurm_protocol_util.h init_header(), and check_header_version()
+ * need to be updated also when changes are added */
 #define SLURM_PROTOCOL_VERSION ((SLURM_API_MAJOR << 8) | SLURM_API_AGE)
+#define SLURM_1_3_PROTOCOL_VERSION ((13 << 8) | 0)
 
 /* used to set flags to empty */
 #define SLURM_PROTOCOL_NO_FLAGS 0 

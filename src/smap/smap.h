@@ -5,10 +5,11 @@
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -102,7 +103,7 @@
 #define OPT_LONG_USAGE	0x101
 #define OPT_LONG_HIDE	0x102
 
-enum { JOBS, SLURMPART, BGPART, COMMANDS };
+enum { JOBS, RESERVATIONS, SLURMPART, BGPART, COMMANDS };
 
 //typedef void (*sighandler_t) (int);
 
@@ -152,12 +153,13 @@ extern int set_grid_bg(int *start, int *end, int count, int set);
 extern void print_grid(int dir);
 
 extern void parse_command_line(int argc, char *argv[]);
-extern void print_date();
+extern void print_date(void);
 extern void clear_window(WINDOW *win);
 
-extern void get_slurm_part();
-extern void get_bg_part();
-extern void get_job();
-extern void get_command();
+extern void get_slurm_part(void);
+extern void get_bg_part(void);
+extern void get_job(void);
+extern void get_command(void);
+extern void get_reservation(void);
 
 #endif

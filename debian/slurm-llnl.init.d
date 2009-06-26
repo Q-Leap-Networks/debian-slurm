@@ -43,7 +43,7 @@ if [ ! -f $CONFDIR/slurm.conf ] ; then
     fi
       echo slurm.conf was not found in $CONFDIR
       echo Please follow the instructions in \
-            /usr/share/doc/slurm-llnl/README.Debian
+            /usr/share/doc/slurm-llnl/README.Debian.gz
     exit 0
 fi
 
@@ -87,11 +87,11 @@ checkcertkey()
   certfile=""
 
   if [ "$1" = "slurmd" ] ; then 
-    certfile=$(grep JobCredentialPublicCertificate $CONFDIR/slurm.conf \
+    keyfile=$(grep JobCredentialPublicCertificate $CONFDIR/slurm.conf \
                   | grep -v "^ *#")
-    certfile=${certfile##*=}
-    certfile=${certfile%#*}
-    [ -e $certfile ] || MISSING="$certfile"
+    keyfile=${keyfile##*=}
+    keyfile=${keyfile%#*}
+    [ -e $keyfile ] || MISSING="$keyfile"
   elif [ "$1" = "slurmctld" ] ; then 
     keyfile=$(grep JobCredentialPrivateKey $CONFDIR/slurm.conf | grep -v "^ *#")
     keyfile=${keyfile##*=}
@@ -103,15 +103,13 @@ checkcertkey()
     echo Not starting slurm-llnl
     echo $MISSING not found
     echo Please follow the instructions in \
-  	  /usr/share/doc/slurm-llnl/README.Debian
+  	  /usr/share/doc/slurm-llnl/README.cryptotype-openssl
     exit 0
   fi
 
-  if [ -f $keyfile ] ; then
+  if [ -f "$keyfile" ] && [ "$1" = "slurmctld" ] ; then
     keycheck=$(openssl-vulnkey $keyfile | cut -d : -f 1)
     if [ "$keycheck" = "COMPROMISED" ] ; then 
-
-
       echo Your slurm key stored in the file $keyfile
       echo is vulnerable because has been created with a buggy openssl.
       echo Please rebuild it with openssl version \>= 0.9.8g-9
@@ -140,8 +138,38 @@ start() {
   CRYPTOTYPE=$(grep CryptoType $CONFDIR/slurm.conf | grep -v "^ *#")
   CRYPTOTYPE=${CRYPTOTYPE##*=}
   CRYPTOTYPE=${CRYPTOTYPE%#*}
-  if [ "$CRYPTOTYPE" = "crypto/openssl" ] || [ "$CRYPTOTYPE" = "" ] ; then
+  if [ "$CRYPTOTYPE" = "crypto/openssl" ] ; then
     checkcertkey $1
+  fi
+
+  # Create run-time variable data
+  mkdir -p /var/run/slurm-llnl
+  chown slurm:slurm /var/run/slurm-llnl
+
+  # Checking if SlurmdSpoolDir is under run
+  if [ "$1" = "slurmd" ] ; then
+    SDIRLOCATION=$(grep SlurmdSpoolDir /etc/slurm-llnl/slurm.conf \
+                       | grep -v "^ *#")
+    SDIRLOCATION=${SDIRLOCATION##*=}
+    SDIRLOCATION=${SDIRLOCATION%#*}
+    if [ "${SDIRLOCATION}" = "/var/run/slurm-llnl/slurmd" ] ; then
+      if ! [ -e /var/run/slurm-llnl/slurmd ] ; then
+        ln -s /var/lib/slurm-llnl/slurmd /var/run/slurm-llnl/slurmd
+      fi
+    fi
+  fi
+    
+  # Checking if StateSaveLocation is under run
+  if [ "$1" = "slurmctld" ] ; then
+    SDIRLOCATION=$(grep StateSaveLocation /etc/slurm-llnl/slurm.conf \
+                       | grep -v "^ *#")
+    SDIRLOCATION=${SDIRLOCATION##*=}
+    SDIRLOCATION=${SDIRLOCATION%#*}
+    if [ "${SDIRLOCATION}" = "/var/run/slurm-llnl/slurmctld" ] ; then
+      if ! [ -e /var/run/slurm-llnl/slurmctld ] ; then
+        ln -s /var/lib/slurm-llnl/slurmctld /var/run/slurm-llnl/slurmctld
+      fi
+    fi
   fi
 
   desc="$(get_daemon_description $1)"

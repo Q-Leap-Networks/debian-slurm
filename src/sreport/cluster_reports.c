@@ -6,10 +6,11 @@
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -46,6 +47,7 @@ enum {
 	PRINT_CLUSTER_ACPU,
 	PRINT_CLUSTER_DCPU,
 	PRINT_CLUSTER_ICPU,
+	PRINT_CLUSTER_PDCPU,
 	PRINT_CLUSTER_OCPU,
 	PRINT_CLUSTER_RCPU,
 	PRINT_CLUSTER_TOTAL,
@@ -390,7 +392,7 @@ static int _setup_print_fields_list(List format_list)
 			field->type = PRINT_CLUSTER_ACCT;
 			field->name = xstrdup("Account");
 			if(tree_display)
-				field->len = 20;
+				field->len = -20;
 			else
 				field->len = 15;
 			field->print_routine = print_fields_str;
@@ -411,7 +413,7 @@ static int _setup_print_fields_list(List format_list)
 			field->name = xstrdup("Cluster");
 			field->len = 9;
 			field->print_routine = print_fields_str;
-		} else if(!strncasecmp("cpu_count", object, 
+		} else if(!strncasecmp("cpucount", object, 
 				       MAX(command_len, 2))) {
 			field->type = PRINT_CLUSTER_CPUS;
 			field->name = xstrdup("CPU count");
@@ -453,7 +455,18 @@ static int _setup_print_fields_list(List format_list)
 			else
 				field->len = 9;
 			field->print_routine = sreport_print_time;
-		} else if(!strncasecmp("Proper", object, MAX(command_len, 1))) {
+		} else if(!strncasecmp("PlannedDown", object,
+				       MAX(command_len, 2))) {
+			field->type = PRINT_CLUSTER_PDCPU;
+			field->name = xstrdup("PLND Down");
+			if(time_format == SREPORT_TIME_SECS_PER
+			   || time_format == SREPORT_TIME_MINS_PER
+			   || time_format == SREPORT_TIME_HOURS_PER)
+				field->len = 18;
+			else
+				field->len = 10;
+			field->print_routine = sreport_print_time;
+		} else if(!strncasecmp("Proper", object, MAX(command_len, 2))) {
 			field->type = PRINT_CLUSTER_USER_PROPER;
 			field->name = xstrdup("Proper Name");
 			field->len = 15;
@@ -505,7 +518,7 @@ static int _setup_print_fields_list(List format_list)
 			continue;
 		}
 
-		if(newlen > 0) 
+		if(newlen) 
 			field->len = newlen;
 		
 		list_append(print_fields_list, field);		
@@ -550,7 +563,8 @@ static List _get_cluster_list(int argc, char *argv[], uint32_t *total_time,
 		       "----------------------------------------\n");
 		printf("%s %s - %s (%d*cpus secs)\n", 
 		       report_name, start_char, end_char, 
-		       (cluster_cond->usage_end - cluster_cond->usage_start));
+		       (int)(cluster_cond->usage_end
+			     - cluster_cond->usage_start));
 		switch(time_format) {
 		case SREPORT_TIME_PERCENT:
 			printf("Time reported in %s\n", time_format_string);
@@ -596,14 +610,15 @@ extern int cluster_account_by_user(int argc, char *argv[])
 
 	print_fields_list = list_create(destroy_print_field);
 
-	bzero(&cluster_cond, sizeof(acct_cluster_cond_t));
+	memset(&cluster_cond, 0, sizeof(acct_cluster_cond_t));
 
 	assoc_cond->with_sub_accts = 1;
 
 	_set_assoc_cond(&i, argc, argv, assoc_cond, format_list);
 
 	if(!list_count(format_list)) 
-		slurm_addto_char_list(format_list, "Cluster,Ac,L,P,Used");
+		slurm_addto_char_list(format_list, 
+				      "Cluster,Ac,Login,Proper,Used");
 
 	_setup_print_fields_list(format_list);
 	list_destroy(format_list);
@@ -723,7 +738,7 @@ extern int cluster_account_by_user(int argc, char *argv[])
 		       "----------------------------------------\n");
 		printf("Cluster/Account/User Utilization %s - %s (%d secs)\n", 
 		       start_char, end_char, 
-		       (assoc_cond->usage_end - assoc_cond->usage_start));
+		       (int)(assoc_cond->usage_end - assoc_cond->usage_start));
 		
 		switch(time_format) {
 		case SREPORT_TIME_PERCENT:
@@ -782,7 +797,6 @@ extern int cluster_account_by_user(int argc, char *argv[])
 						print_acct = get_tree_acct_name(
 							local_acct,
 							parent_acct,
-							sreport_cluster->name,
 							tree_list);
 						xfree(local_acct);
 					} else {
@@ -900,12 +914,13 @@ extern int cluster_user_by_account(int argc, char *argv[])
 
 	print_fields_list = list_create(destroy_print_field);
 
-	bzero(&cluster_cond, sizeof(acct_cluster_cond_t));
+	memset(&cluster_cond, 0, sizeof(acct_cluster_cond_t));
 
 	_set_assoc_cond(&i, argc, argv, assoc_cond, format_list);
 
 	if(!list_count(format_list)) 
-		slurm_addto_char_list(format_list, "Cluster,L,P,Ac,Used");
+		slurm_addto_char_list(format_list,
+				      "Cluster,Login,Proper,Ac,Used");
 
 	_setup_print_fields_list(format_list);
 	list_destroy(format_list);
@@ -1047,7 +1062,7 @@ extern int cluster_user_by_account(int argc, char *argv[])
 		       "----------------------------------------\n");
 		printf("Cluster/User/Account Utilization %s - %s (%d secs)\n", 
 		       start_char, end_char, 
-		       (assoc_cond->usage_end - assoc_cond->usage_start));
+		       (int)(assoc_cond->usage_end - assoc_cond->usage_start));
 		
 		switch(time_format) {
 		case SREPORT_TIME_PERCENT:
@@ -1186,12 +1201,13 @@ extern int cluster_user_by_wckey(int argc, char *argv[])
 
 	print_fields_list = list_create(destroy_print_field);
 
-	bzero(&cluster_cond, sizeof(acct_cluster_cond_t));
+	memset(&cluster_cond, 0, sizeof(acct_cluster_cond_t));
 
 	_set_wckey_cond(&i, argc, argv, wckey_cond, format_list);
 
 	if(!list_count(format_list)) 
-		slurm_addto_char_list(format_list, "Cluster,L,P,WCkey,Used");
+		slurm_addto_char_list(format_list, 
+				      "Cluster,Login,Proper,WCkey,Used");
 
 	_setup_print_fields_list(format_list);
 	list_destroy(format_list);
@@ -1315,7 +1331,7 @@ extern int cluster_user_by_wckey(int argc, char *argv[])
 		       "----------------------------------------\n");
 		printf("Cluster/User/WCKey Utilization %s - %s (%d secs)\n", 
 		       start_char, end_char, 
-		       (wckey_cond->usage_end - wckey_cond->usage_start));
+		       (int)(wckey_cond->usage_end - wckey_cond->usage_start));
 		
 		switch(time_format) {
 		case SREPORT_TIME_PERCENT:
@@ -1455,7 +1471,7 @@ extern int cluster_utilization(int argc, char *argv[])
 		goto end_it;
 
 	if(!list_count(format_list)) 
-		slurm_addto_char_list(format_list, "Cl,al,d,i,res,rep");
+		slurm_addto_char_list(format_list, "Cl,al,d,planned,i,res,rep");
 
 	_setup_print_fields_list(format_list);
 	list_destroy(format_list);
@@ -1484,6 +1500,7 @@ extern int cluster_utilization(int argc, char *argv[])
 		while((accting = list_next(itr3))) {
 			total_acct.alloc_secs += accting->alloc_secs;
 			total_acct.down_secs += accting->down_secs;
+			total_acct.pdown_secs += accting->pdown_secs;
 			total_acct.idle_secs += accting->idle_secs;
 			total_acct.resv_secs += accting->resv_secs;
 			total_acct.over_secs += accting->over_secs;
@@ -1496,7 +1513,8 @@ extern int cluster_utilization(int argc, char *argv[])
 		local_total_time =
 			(uint64_t)total_time * (uint64_t)total_acct.cpu_count;
 		total_reported = total_acct.alloc_secs + total_acct.down_secs 
-			+ total_acct.idle_secs + total_acct.resv_secs;
+			+ total_acct.pdown_secs + total_acct.idle_secs
+			+ total_acct.resv_secs;
 
 		while((field = list_next(itr2))) {
 			switch(field->type) {
@@ -1543,6 +1561,13 @@ extern int cluster_utilization(int argc, char *argv[])
 			case PRINT_CLUSTER_OCPU:
 					field->print_routine(field,
 						     total_acct.over_secs,
+						     total_reported,
+						     (curr_inx == 
+						      field_count));
+				break;
+			case PRINT_CLUSTER_PDCPU:
+					field->print_routine(field,
+						     total_acct.pdown_secs,
 						     total_reported,
 						     (curr_inx == 
 						      field_count));
@@ -1605,7 +1630,6 @@ extern int cluster_wckey_by_user(int argc, char *argv[])
 	sreport_cluster_rec_t *sreport_cluster = NULL;
 	print_field_t *field = NULL;
 	int field_count = 0;
-	char *print_acct = NULL;
 
 	print_fields_list = list_create(destroy_print_field);
 
@@ -1614,7 +1638,8 @@ extern int cluster_wckey_by_user(int argc, char *argv[])
 	_set_wckey_cond(&i, argc, argv, wckey_cond, format_list);
 
 	if(!list_count(format_list)) 
-		slurm_addto_char_list(format_list, "Cluster,WCKey,L,P,Used");
+		slurm_addto_char_list(format_list, 
+				      "Cluster,WCKey,Login,Proper,Used");
 
 	_setup_print_fields_list(format_list);
 	list_destroy(format_list);
@@ -1748,7 +1773,7 @@ extern int cluster_wckey_by_user(int argc, char *argv[])
 		       "----------------------------------------\n");
 		printf("Cluster/WCKey/User Utilization %s - %s (%d secs)\n", 
 		       start_char, end_char, 
-		       (wckey_cond->usage_end - wckey_cond->usage_start));
+		       (int)(wckey_cond->usage_end - wckey_cond->usage_start));
 		
 		switch(time_format) {
 		case SREPORT_TIME_PERCENT:
@@ -1788,35 +1813,9 @@ extern int cluster_wckey_by_user(int argc, char *argv[])
 				struct passwd *pwd = NULL;
 				switch(field->type) {
 				case PRINT_CLUSTER_WCKEY:
-					if(tree_display) {
-						char *local_acct = NULL;
-						char *parent_acct = NULL;
-						if(sreport_assoc->user) {
-							local_acct =
-								xstrdup_printf(
-									"|%s", 
-									sreport_assoc->acct);
-							parent_acct =
-								sreport_assoc->acct;
-						} else {
-							local_acct = xstrdup(
-								sreport_assoc->acct);
-							parent_acct = sreport_assoc->
-								parent_acct;
-						}
-						print_acct = get_tree_acct_name(
-							local_acct,
-							parent_acct,
-							sreport_cluster->name,
-							tree_list);
-						xfree(local_acct);
-					} else {
-						print_acct =
-							sreport_assoc->acct;
-					}
 					field->print_routine(
 						field, 
-						print_acct,
+						sreport_assoc->acct,
 						(curr_inx == field_count));
 					
 					break;

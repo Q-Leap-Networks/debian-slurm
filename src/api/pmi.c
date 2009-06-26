@@ -49,10 +49,11 @@
  *  Copyright (C) 2005-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -184,7 +185,7 @@ int PMI_Init( int *spawned )
 	if (pmi_init)
 		goto replay;
 
-	env = getenv("SLURM_JOBID");
+	env = getenv("SLURM_JOB_ID");
 	if (env)
 		pmi_jobid = atoi(env);
 	else
@@ -445,7 +446,7 @@ int PMI_Get_appnum( int *appnum )
 	if (appnum == NULL)
 		return PMI_ERR_INVALID_ARG;
 
-	env = getenv("SLURM_JOBID");
+	env = getenv("SLURM_JOB_ID");
 	if (env) {
 		*appnum = atoi(env);
 		return PMI_SUCCESS;
@@ -711,9 +712,14 @@ int PMI_Get_clique_size( int *size )
 	if (size == NULL)
 		return PMI_ERR_INVALID_ARG;
 
-	env = getenv("SLURM_CPUS_ON_NODE");
+	env = getenv("SLURM_GTIDS");
 	if (env) {
-		*size = atoi(env);
+		int i, tids=1;
+		for (i=0; env[i]; i++) {
+			if (env[i] == ',')
+				tids++;
+		}
+		*size = tids;
 		return PMI_SUCCESS;
 	}
 	return PMI_FAIL;
@@ -742,7 +748,7 @@ communicate through IPC mechanisms (e.g., shared memory) and other network
 mechanisms.
 
 @*/
-int PMI_Get_clique_ranks( char ranks[], int length )
+int PMI_Get_clique_ranks( int ranks[], int length )
 {
 	char *env;
 
@@ -754,7 +760,19 @@ int PMI_Get_clique_ranks( char ranks[], int length )
 
 	env = getenv("SLURM_GTIDS");
 	if (env) {
-		strcpy(ranks, env);
+		int i = 0;
+		char *tid, *tids, *last = NULL;
+		tids = strdup(env);
+		tid = strtok_r(tids, ",", &last);
+		while (tid) {
+			if (i >= length) {
+				free(tids);
+				return PMI_ERR_INVALID_LENGTH;
+			}
+			ranks[i++] = atoi(tid);
+			tid = strtok_r(NULL, ",", &last);
+		}
+		free(tids);
 		return PMI_SUCCESS;
 	}
 

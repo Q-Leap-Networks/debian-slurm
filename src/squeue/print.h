@@ -4,10 +4,11 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -169,6 +170,8 @@ int job_format_add_function(List list, int width, bool right_justify,
 	job_format_add_function(list,wid,right,suffix,_print_job_select_jobinfo)
 #define job_format_add_comment(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_job_comment)
+#define job_format_add_reservation(list,wid,right,suffix) \
+	job_format_add_function(list,wid,right,suffix,_print_job_reservation)
 
 /*****************************************************************************
  * Job Line Print Functions
@@ -262,6 +265,8 @@ int _print_job_dependency(job_info_t * job, int width, bool right_justify,
 int _print_job_select_jobinfo(job_info_t * job, int width, bool right_justify,
 			char* suffix);
 int _print_job_comment(job_info_t * job, int width, bool right_justify,
+			char* suffix);
+int _print_job_reservation(job_info_t * job, int width, bool right_justify,
 			char* suffix);
 
 /*****************************************************************************

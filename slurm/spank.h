@@ -4,10 +4,11 @@
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -68,7 +69,13 @@ typedef int (spank_f) (spank_t spank, int ac, char *argv[]);
  *               `-> user_init ()  
  *               + for each task
  *               |       + fork ()
- *               |       `-> user_task_init ()
+ *               |       |
+ *               |       + reclaim privileges
+ *               |       `-> task_init_privileged ()
+ *               |       |
+ *               |       + become_user ()
+ *               |       `-> task_init ()
+ *               |       |
  *               |       + execve ()
  *               |
  *               + reclaim privileges
@@ -78,9 +85,13 @@ typedef int (spank_f) (spank_t spank, int ac, char *argv[]);
  *               + for each task
  *               |       + wait ()
  *               |          `-> task_exit ()
- *               `-> fini ()
+ *               `-> exit ()
  *
- *   In srun only the init() and local_user_init() callbacks are used.
+ *   In srun only the init(), init_post_opt() and local_user_init(), and exit()
+ *    callbacks are used.
+ *
+ *   In sbatch/salloc only the init(), init_post_opt(), and exit() callbacks
+ *    are used.
  *
  */
 
@@ -88,6 +99,7 @@ extern spank_f slurm_spank_init;
 extern spank_f slurm_spank_init_post_opt;
 extern spank_f slurm_spank_local_user_init;
 extern spank_f slurm_spank_user_init;
+extern spank_f slurm_spank_task_init_privileged;
 extern spank_f slurm_spank_task_init;
 extern spank_f slurm_spank_task_post_fork;
 extern spank_f slurm_spank_task_exit;
@@ -154,10 +166,23 @@ enum spank_err {
     ESPANK_NOSPACE     = 6, /* Buffer too small.                             */
     ESPANK_NOT_REMOTE  = 7, /* Function only may be called in remote context */
     ESPANK_NOEXIST     = 8, /* Id/pid doesn't exist on this node             */
-    ESPANK_NOT_EXECD   = 9  /* Lookup by pid requested, but no tasks running */
+    ESPANK_NOT_EXECD   = 9, /* Lookup by pid requested, but no tasks running */
+    ESPANK_NOT_AVAIL   = 10,/* SPANK item not available from this callback   */
 };
 
 typedef enum spank_err spank_err_t;
+
+/*
+ *  SPANK plugin context
+ */
+enum spank_context {
+    S_CTX_ERROR,             /* Error obtaining current context              */
+    S_CTX_LOCAL,             /* Local context (srun)                         */
+    S_CTX_REMOTE,            /* Remote context (slurmd)                      */
+    S_CTX_ALLOCATOR          /* Allocator context (sbatch/salloc)            */
+};
+
+typedef enum spank_context spank_context_t;
 
 /*
  *  SPANK plugin options
@@ -182,9 +207,10 @@ struct spank_option {
 };
 
 /*
- *  Plugin may declare spank_options option table:
- *   [Note: options may also be declared with spank_option_register(),
- *    defined below.]
+ *  Plugins may export a spank_options option table as symbol "spank_options".
+ *   This method only works in "local" and "remote" mode. To register options
+ *   in "allocator" mode (sbatch/salloc), use the preferred
+ *   spank_option_register function described below.
  */
 extern struct spank_option spank_options [];
 
@@ -204,6 +230,11 @@ extern struct spank_option spank_options [];
 BEGIN_C_DECLS
 
 /*
+ *  Return the string representation of a spank_err_t error code.
+ */
+const char *spank_strerror (spank_err_t err);
+
+/*
  *  Determine whether a given spank plugin symbol is supported
  *   in this version of SPANK interface.
  *
@@ -215,20 +246,33 @@ BEGIN_C_DECLS
 int spank_symbol_supported (const char *symbol);
 
 /*
- *  Determine whether plugin is loaded "local" or "remote."
+ *  Determine whether plugin is loaded in "remote" context
  * 
  *  Returns:
  *  = 1   remote context, i.e. plugin is loaded in slurmd.
- *  = 0   local context, i.e. plugin loaded in srun.
+ *  = 0   not remote context
  *  < 0   spank handle was not valid.
  */
 int spank_remote (spank_t spank);
 
 /*
+ *  Return the context in which the calling plugin is loaded.
+ *
+ *  Returns the spank_context for the calling plugin, or SPANK_CTX_ERROR
+ *   if the current context cannot be determined.
+ */
+spank_context_t spank_context (void);
+
+/*
  *  Register a plugin-provided option dynamically. This function
  *   is only valid when called from slurm_spank_init(), and must
- *   be called in both remote (slurmd) and local (srun) contexts.
- *   May be called multiple times to register many options.
+ *   be guaranteed to be called in all contexts in which it is
+ *   used (local, remote, allocator).
+ *
+ *  This function is the only method to register options in
+ *   allocator context.
+ *
+ *  May be called multiple times to register many options.
  *
  *  Returns ESPANK_SUCCESS on successful registration of the option
  *   or ESPANK_BAD_ARG if not called from slurm_spank_init().

@@ -1,14 +1,16 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/slurmstepd_job.h  slurmd_job_t definition
- *  $Id: slurmstepd_job.h 14702 2008-08-05 22:18:13Z jette $
+ *  $Id: slurmstepd_job.h 17056 2009-03-26 23:35:52Z dbremer $
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -119,14 +121,12 @@ typedef struct slurmd_job {
 	uint32_t       cpus_per_task;	/* number of cpus desired per task  */
 	uint32_t       debug;  /* debug level for job slurmd                */
 	uint32_t       job_mem;  /* MB of memory reserved for the job       */
-	uint32_t       task_mem; /* MB of memory reserved for each task     */ 
 	uint16_t       cpus;   /* number of cpus to use for this job        */
 	uint16_t       argc;   /* number of commandline arguments           */
 	char         **env;    /* job environment                           */
 	char         **argv;   /* job argument vector                       */
 	char          *cwd;    /* path to current working directory         */
-       	task_dist_states_t task_dist;/* -m distribution                     */
-        uint32_t       plane_size; /* -m plane=plane_size                   */
+	task_dist_states_t task_dist;/* -m distribution                     */
 	char          *node_name; /* node name of node running job
 				   * needed for front-end systems           */
 	cpu_bind_type_t cpu_bind_type; /* --cpu_bind=                       */
@@ -150,8 +150,8 @@ typedef struct slurmd_job {
 	eio_handle_t  *eio;
 	List 	       sruns; /* List of srun_info_t pointers               */
 	List           clients; /* List of struct client_io_info pointers   */
-	List stdout_eio_objs;
-	List stderr_eio_objs;
+	List stdout_eio_objs; /* List of objs that gather stdout from tasks */
+	List stderr_eio_objs; /* List of objs that gather stderr from tasks */
 	List free_incoming;   /* List of free struct io_buf * for incoming
 			       * traffic. "incoming" means traffic from srun
 			       * to the tasks.
@@ -164,8 +164,8 @@ typedef struct slurmd_job {
 			       * including free_incoming buffers and
 			       * buffers in use.
 			       */
-	int outgoing_count;   /* Count of total incoming message buffers
-			       * including free_incoming buffers and
+	int outgoing_count;   /* Count of total outgoing message buffers
+			       * including free_outgoing buffers and
 			       * buffers in use.
 			       */
 
@@ -176,6 +176,7 @@ typedef struct slurmd_job {
 	uint8_t	buffered_stdio; /* stdio buffering flag, 1 for line-buffering,
 				 * 0 for no buffering
 				 */
+	uint8_t labelio;	/* 1 for labelling output with the task id */
 
 	pthread_t      ioid;  /* pthread id of IO thread                    */
 	pthread_t      msgid; /* pthread id of message thread               */
@@ -193,9 +194,13 @@ typedef struct slurmd_job {
 	char          *batchdir;
 	jobacctinfo_t *jobacct;
 	uint8_t        open_mode;	/* stdout/err append or truncate */
-	uint8_t        pty;		/* set if creating pseudo tty       */
+	uint8_t        pty;		/* set if creating pseudo tty	*/
 	job_options_t  options;
-	char          *ckpt_path;
+	char          *ckpt_dir;
+	time_t         ckpt_timestamp;
+	char          *restart_dir;	/* restart from context */
+	char          *resv_id;		/* Cray/BASIL reservation ID	*/
+	uint16_t       restart_cnt;	/* batch job restart count	*/
 } slurmd_job_t;
 
 

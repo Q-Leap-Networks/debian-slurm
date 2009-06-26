@@ -10,10 +10,11 @@
 # Copyright (C) 2005 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# LLNL-CODE-402394.
+# CODE-OCEC-09-009. All rights reserved.
 # 
 # This file is part of SLURM, a resource management program.
-# For details, see <http://www.llnl.gov/linux/slurm/>.
+# For details, see <https://computing.llnl.gov/linux/slurm/>.
+# Please also read the included file: DISCLAIMER.
 #  
 # SLURM is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
@@ -61,9 +62,9 @@ proc _get_mem {prog} {
 	set ave_used -1
 	set exit_code 0
 
-	spawn $prog --noheader --job=$job_id.0 --fields vsize
+	spawn $prog --noheader -p --job=$job_id.0 --fields maxvmsize,maxvmsizetask,avevmsize
 	expect {
-		-re "($float)(\[KMG\]*)/.*:($number) - ($float)(\[KMG\]*)" {
+		-re "($float)(\[KMG\]*).($number).($float)(\[KMG\]*)" {
 			set mem_used  $expect_out(1,string)
 			set scale1    $expect_out(2,string)
 			set mem_task  $expect_out(3,string)
@@ -230,7 +231,7 @@ if {[wait_for_job $job_id "DONE"] != 0} {
 # Report basic sacct info
 #
  
-spawn $sacct --noheader --job=$job_id.0 --fields jobid,jobname,status,exitcode
+spawn $sacct --noheader -P --job=$job_id.0 --fields jobid,jobname,state,exitcode
 expect {
 	-re "$job_id\.0" {
 		incr matches
@@ -267,7 +268,7 @@ if {$matches < 4} {
 #   expected integer but got "08" (looks like invalid octal number)
 #
 set elapsed_time 0
-spawn $sacct --noheader  --job=$job_id.0 --fields elapsed
+spawn $sacct --noheader -P --job=$job_id.0 --fields elapsed
 expect {
 	-re "($number):($number):(\[0-9\])(\[0-9\])" {
 		set hours $expect_out(1,string)

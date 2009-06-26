@@ -3,14 +3,15 @@
  *  file
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Portions Copyright (C) 2008 Vijay Ramasubramanian.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Mette <jette1@llnl.gov>.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -54,12 +55,14 @@ extern char *default_plugstack;
 #define ACCOUNTING_ENFORCE_LIMITS 0x0002
 #define ACCOUNTING_ENFORCE_WCKEYS 0x0004
 
+#define DEFAULT_ACCOUNTING_DB      "slurm_acct_db"
 #define DEFAULT_ACCOUNTING_ENFORCE  0
 #define DEFAULT_ACCOUNTING_STORAGE_TYPE "accounting_storage/none"
-#define DEFAULT_AUTH_TYPE          "auth/none"
+#define DEFAULT_AUTH_TYPE          "auth/munge"
 #define DEFAULT_BATCH_START_TIMEOUT 10
 #define DEFAULT_CACHE_GROUPS        0
-#define DEFAULT_CRYPTO_TYPE        "crypto/openssl"
+#define DEFAULT_COMPLETE_WAIT       0
+#define DEFAULT_CRYPTO_TYPE        "crypto/munge"
 #define DEFAULT_EPILOG_MSG_TIME     2000
 #define DEFAULT_FAST_SCHEDULE       1
 #define DEFAULT_FIRST_JOB_ID        1
@@ -72,8 +75,11 @@ extern char *default_plugstack;
 #define ACCOUNTING_STORAGE_TYPE_NONE "accounting_storage/none"
 #define DEFAULT_DISABLE_ROOT_JOBS   0
 #define DEFAULT_ENFORCE_PART_LIMITS 0
+#define DEFAULT_JOB_CKPT_DIR        "/var/slurm/checkpoint"
 #define DEFAULT_JOB_COMP_TYPE       "jobcomp/none"
 #define DEFAULT_JOB_COMP_LOC        "/var/log/slurm_jobcomp.log"
+#define DEFAULT_JOB_COMP_DB         "slurm_jobcomp_db"
+#define DEFAULT_KILL_ON_BAD_EXIT    0
 #define DEFAULT_KILL_TREE           0
 #define DEFAULT_KILL_WAIT           30
 #define DEFAULT_MAIL_PROG           "/bin/mail"
@@ -90,9 +96,12 @@ extern char *default_plugstack;
 #  define DEFAULT_CHECKPOINT_TYPE   "checkpoint/none"
 #  define DEFAULT_PROCTRACK_TYPE    "proctrack/pgid"
 #endif
+#define DEFAULT_PRIORITY_DECAY      604800 /* 7 days */
+#define DEFAULT_PRIORITY_TYPE       "priority/basic"
 #define DEFAULT_PROPAGATE_PRIO_PROCESS 0
 #define DEFAULT_RETURN_TO_SERVICE   0
-#define DEFAULT_RESUME_RATE         60
+#define DEFAULT_RESUME_RATE         300
+#define DEFAULT_RESUME_TIMEOUT      60
 #define DEFAULT_SAVE_STATE_LOC      "/tmp"
 #define DEFAULT_SCHEDROOTFILTER     1
 #define DEFAULT_SCHEDULER_PORT      7321
@@ -112,11 +121,19 @@ extern char *default_plugstack;
 #define DEFAULT_STORAGE_LOC         "/var/log/slurm_jobacct.log"
 #define DEFAULT_STORAGE_USER        "root"
 #define DEFAULT_STORAGE_PORT        0
+#define DEFAULT_PGSQL_PORT          5432
+#define DEFAULT_MYSQL_PORT          3306
 #define DEFAULT_SUSPEND_RATE        60
 #define DEFAULT_SUSPEND_TIME        0
+#define DEFAULT_SUSPEND_TIMEOUT     30
 #define DEFAULT_SWITCH_TYPE         "switch/none"
 #define DEFAULT_TASK_PLUGIN         "task/none"
 #define DEFAULT_TMP_FS              "/tmp"
+#ifdef HAVE_3D
+#  define DEFAULT_TOPOLOGY_PLUGIN     "topology/3d_torus"
+#else
+#  define DEFAULT_TOPOLOGY_PLUGIN     "topology/none"
+#endif
 #define DEFAULT_WAIT_TIME           0
 #define DEFAULT_TREE_WIDTH          50
 #define DEFAULT_UNKILLABLE_TIMEOUT  60 /* seconds */
@@ -140,25 +157,30 @@ typedef struct slurm_conf_node {
 } slurm_conf_node_t;
 
 typedef struct slurm_conf_partition {
+	char *allow_alloc_nodes;/* comma delimited list of allowed
+				 * allocating nodes 
+				 * NULL indicates all */
+	char *allow_groups;	/* comma delimited list of groups, 
+				 * NULL indicates all */
+	bool default_flag;	/* Set if default partition */
+	uint32_t default_time;	/* minutes or INFINITE */
 	uint16_t disable_root_jobs; /* if set then user root can't run
 				     * jobs if NO_VAL use global
 				     * default */
-	char	*name;		/* name of the partition */
+
 	bool     hidden_flag;	/* 1 if hidden by default */
+	uint16_t max_share;	/* number of jobs to gang schedule */
 	uint32_t max_time;	/* minutes or INFINITE */
 	uint32_t max_nodes;	/* per job or INFINITE */
 	uint32_t min_nodes;	/* per job */
-	uint32_t total_nodes;	/* total number of nodes in the partition */
-	uint32_t total_cpus;	/* total number of cpus in the partition */
+	char	*name;		/* name of the partition */
+	char 	*nodes;		/* comma delimited list names of nodes */
 	uint16_t priority;	/* scheduling priority for jobs */
 	bool     root_only_flag;/* 1 if allocate/submit RPC can only be 
 				   issued by user root */
-	uint16_t max_share;	/* number of jobs to gang schedule */
 	bool     state_up_flag;	/* 1 if state is up, 0 if down */
-	char *nodes;		/* comma delimited list names of nodes */
-	char *allow_groups;	/* comma delimited list of groups, 
-				 * NULL indicates all */
-	bool default_flag;
+	uint32_t total_nodes;	/* total number of nodes in the partition */
+	uint32_t total_cpus;	/* total number of cpus in the partition */
 } slurm_conf_partition_t;
 
 typedef struct slurm_conf_downnodes {
@@ -166,6 +188,11 @@ typedef struct slurm_conf_downnodes {
 	char *reason;
 	char *state;
 } slurm_conf_downnodes_t;
+
+typedef struct {
+	char *name;
+	char *value;
+} config_key_pair_t;
 
 /*
  * slurm_conf_init - load the slurm configuration from the a file.
@@ -232,7 +259,7 @@ extern int slurm_conf_partition_array(slurm_conf_partition_t **ptr_array[]);
 
 /*
  * Set "ptr_array" with the pointer to an array of pointers to
- * slurm_conf_node_t structures.
+ * slurm_conf_downnodes_t structures.
  * 
  * Return value is the length of the array.
  */
@@ -251,12 +278,18 @@ extern char *slurm_conf_get_hostname(const char *node_name);
 /*
  * slurm_conf_get_nodename - Return the NodeName for given NodeHostname
  *
- * Returned string was allocated with xmalloc(), and must be freed by
- * the caller using xfree().
- *
+ * NOTE: Call xfree() to release returned value's memory.
  * NOTE: Caller must NOT be holding slurm_conf_lock().
  */
 extern char *slurm_conf_get_nodename(const char *node_hostname);
+
+/*
+ * slurm_conf_get_nodeaddr - Return the NodeAddr for given NodeHostname
+ *
+ * NOTE: Call xfree() to release returned value's memory.
+ * NOTE: Caller must NOT be holding slurm_conf_lock().
+ */
+extern char *slurm_conf_get_nodeaddr(const char *node_hostname);
 
 /*
  * slurm_conf_get_aliased_nodename - Return the NodeName matching an alias
@@ -332,5 +365,24 @@ extern int gethostname_short (char *name, size_t len);
  */
 extern char *slurm_conf_expand_slurmd_path(const char *path,
 					   const char *node_name);
+
+/*
+ * debug_flags2str - convert a DebugFlags uint32_t to the equivalent string
+ * Returns an xmalloc()ed string which the caller must free with xfree().
+ */
+extern char *debug_flags2str(uint32_t debug_flags);
+
+/*
+ * debug_str2flags - Convert a DebugFlags string to the equivalent uint32_t
+ * Returns NO_VAL if invalid
+ */
+extern uint32_t debug_str2flags(char *debug_flags);
+
+extern void destroy_config_key_pair(void *object);
+extern void pack_config_key_pair(void *in, uint16_t rpc_version, Buf buffer);
+extern int unpack_config_key_pair(void **object, uint16_t rpc_version, 
+				  Buf buffer);
+extern int sort_key_pairs(config_key_pair_t *key_a, config_key_pair_t *key_b);
+
 
 #endif /* !_READ_CONFIG_H */

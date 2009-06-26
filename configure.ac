@@ -1,4 +1,4 @@
-# $Id: configure.ac 16936 2009-03-18 22:02:01Z da $
+# $Id: configure.ac 16996 2009-03-24 20:21:41Z jette $
 # This file is to be processed with autoconf to generate a configure script
 
 dnl Prologue
@@ -98,6 +98,14 @@ dnl
 dnl Check for PAM module support
 X_AC_PAM
 
+dnl
+dnl Check for ISO compliance
+X_AC_ISO
+
+dnl
+dnl Check if we want to load .login with sbatch --get-user-env option
+X_AC_ENV_LOGIC
+
 dnl Checks for types.
 dnl
 X_AC_SLURM_BIGENDIAN
@@ -139,6 +147,7 @@ LDFLAGS="$LDFLAGS "
 CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
 LIBS="$PTHREAD_LIBS $LIBS"
 
+X_AC_CRAY
 X_AC_SUN_CONST
 
 X_AC_CFLAGS
@@ -216,30 +225,6 @@ dnl Check for compilation of SLURM auth modules:
 dnl
 X_AC_MUNGE
 
-dnl Check if srun --get-user-env (for Moab) should load user's environment 
-dnl based upon a login. This may be temporary.
-dnl
-AC_MSG_CHECKING([if user env vars should be based upon login])
-AC_ARG_ENABLE(
-  [load-env-no-login],
-  AS_HELP_STRING(--enable-load-env-no-login,
-                 [enable --get-user-env option to load user environment without login]),
-  [ case "$enableval" in
-     yes) x_ac_load_env_no_login=yes ;;
-      no) x_ac_load_env_no_login=no ;;
-       *) AC_MSG_RESULT([doh!])
-          AC_MSG_ERROR([bad value "$enableval" for --enable-load-env-no-login]) ;;
-   esac
-  ]
-)
-if test "$x_ac_load_env_no_login" = yes; then
-  AC_DEFINE(LOAD_ENV_NO_LOGIN, 1, 
-            [Define to 1 for --get-user-env to load user environment without login.])
-  AC_MSG_RESULT([yes])
-else
-  AC_MSG_RESULT([no])
-fi
-
 dnl
 dnl Check if multiple-slurmd support is requested and define MULTIPLE_SLURMD
 dnl if it is.
@@ -283,6 +268,12 @@ dnl Add LSD-Tools defines:
 AC_DEFINE(WITH_LSD_FATAL_ERROR_FUNC, 1, [Have definition of lsd_fatal_error()])
 AC_DEFINE(WITH_LSD_NOMEM_ERROR_FUNC, 1, [Have definition of lsd_nomem_error()])
 
+dnl
+dnl Check for compilation of SLURM with BLCR support:
+dnl
+X_AC_BLCR
+
+
 dnl All slurm Makefiles:
 
 AC_CONFIG_FILES([Makefile
@@ -306,10 +297,13 @@ AC_CONFIG_FILES([Makefile
 		 src/sacctmgr/Makefile
 		 src/sreport/Makefile
 		 src/sstat/Makefile
+		 src/sshare/Makefile
 		 src/salloc/Makefile 
 		 src/sbatch/Makefile 
 		 src/sattach/Makefile
+		 src/sprio/Makefile
 		 src/srun/Makefile 
+		 src/srun_cr/Makefile 
 		 src/slurmd/Makefile 
 		 src/slurmd/slurmd/Makefile 
 		 src/slurmd/slurmstepd/Makefile 
@@ -339,6 +333,9 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/checkpoint/none/Makefile
 		 src/plugins/checkpoint/ompi/Makefile
 		 src/plugins/checkpoint/xlch/Makefile
+		 src/plugins/checkpoint/blcr/Makefile
+		 src/plugins/checkpoint/blcr/cr_checkpoint.sh
+		 src/plugins/checkpoint/blcr/cr_restart.sh
 		 src/plugins/crypto/Makefile
 		 src/plugins/crypto/munge/Makefile
 		 src/plugins/crypto/openssl/Makefile
@@ -352,6 +349,9 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/jobcomp/script/Makefile
 		 src/plugins/jobcomp/mysql/Makefile
 		 src/plugins/jobcomp/pgsql/Makefile
+		 src/plugins/priority/Makefile
+		 src/plugins/priority/basic/Makefile
+		 src/plugins/priority/multifactor/Makefile
 		 src/plugins/proctrack/Makefile
 		 src/plugins/proctrack/aix/Makefile
 		 src/plugins/proctrack/pgid/Makefile
@@ -369,8 +369,8 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/select/bluegene/Makefile
 		 src/plugins/select/bluegene/block_allocator/Makefile
 		 src/plugins/select/bluegene/plugin/Makefile
-		 src/plugins/select/linear/Makefile
 		 src/plugins/select/cons_res/Makefile
+		 src/plugins/select/linear/Makefile
 		 src/plugins/switch/Makefile
 		 src/plugins/switch/elan/Makefile
 		 src/plugins/switch/none/Makefile
@@ -387,6 +387,10 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/task/Makefile
 		 src/plugins/task/affinity/Makefile
 		 src/plugins/task/none/Makefile
+		 src/plugins/topology/Makefile
+		 src/plugins/topology/3d_torus/Makefile
+		 src/plugins/topology/none/Makefile
+		 src/plugins/topology/tree/Makefile
 		 doc/Makefile
 		 doc/man/Makefile
 		 doc/html/Makefile

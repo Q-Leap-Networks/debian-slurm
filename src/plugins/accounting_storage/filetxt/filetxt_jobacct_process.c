@@ -9,7 +9,8 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -250,11 +251,15 @@ static jobacct_step_rec_t *_create_jobacct_step_rec(
 {
 	jobacct_step_rec_t *jobacct_step = create_jobacct_step_rec();
 	
-	jobacct_step->jobid = filetxt_step->header.jobnum;
 	jobacct_step->elapsed = filetxt_step->elapsed;
 	jobacct_step->end = filetxt_step->header.timestamp;
 	jobacct_step->exitcode = filetxt_step->exitcode;
 	jobacct_step->ncpus = filetxt_step->ncpus;
+	if(filetxt_step->nodes) {
+		hostlist_t hl = hostlist_create(filetxt_step->nodes);
+		jobacct_step->nnodes = hostlist_count(hl);
+		hostlist_destroy(hl);
+	}
 	jobacct_step->nodes = xstrdup(filetxt_step->nodes);
 	jobacct_step->requid = filetxt_step->requid;
 	memcpy(&jobacct_step->sacct, &filetxt_step->sacct, sizeof(sacct_t));
@@ -315,6 +320,11 @@ no_cond:
 	jobacct_job->partition = xstrdup(filetxt_job->header.partition);
 	jobacct_job->req_cpus = filetxt_job->ncpus;
 	jobacct_job->alloc_cpus = filetxt_job->ncpus;
+	if(filetxt_job->nodes) {
+		hostlist_t hl = hostlist_create(filetxt_job->nodes);
+		jobacct_job->alloc_nodes = hostlist_count(hl);
+		hostlist_destroy(hl);
+	}
 	jobacct_job->nodes = xstrdup(filetxt_job->nodes);
 	jobacct_job->priority = filetxt_job->priority;
 	jobacct_job->requid = filetxt_job->requid;
@@ -328,8 +338,14 @@ no_cond:
 	if(filetxt_job->steps) {
 		itr = list_iterator_create(filetxt_job->steps);
 		while((filetxt_step = list_next(itr))) {
-			list_append(jobacct_job->steps,
-				    _create_jobacct_step_rec(filetxt_step));
+			jobacct_step_rec_t *step =
+				_create_jobacct_step_rec(filetxt_step);
+			if(step) {
+				step->job_ptr = jobacct_job;
+				if(!jobacct_job->first_step_ptr)
+					jobacct_job->first_step_ptr = step;
+				list_append(jobacct_job->steps, step);
+			}
 		}
 		list_iterator_destroy(itr);
 	}

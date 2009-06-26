@@ -1,6 +1,6 @@
 <!--
 Copyright (C) 2005-2007 The Regents of the University of California.
-Copyright (C) 2008 Lawrence Livermore National Security.
+Copyright (C) 2008-2009 Lawrence Livermore National Security.
 Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 Written by Morris Jette <jette1@llnl.gov> and Danny Auble <da@llnl.gov>
 
@@ -150,24 +150,30 @@ function displayfile()
    "#DisableRootJobs=NO <br>" +
    "#EnforcePartLimits=NO <br>" +
    get_field("Epilog",document.config.epilog) + "<br>" +
+   "#PrologSlurmctld= <br>" +
    "#FirstJobId=1 <br>" +
+   "#JobCheckpointDir=/var/slurm/checkpoint <br>" +
    get_field("JobCredentialPrivateKey", document.config.private_key) + "<br>" +
    get_field("JobCredentialPublicCertificate", document.config.public_key) + "<br>" +
    "#JobFileAppend=0 <br>" +
    "#JobRequeue=1 <br>" +
+   "#KillOnBadExit=0 <br>" +
    "#Licenses=foo*4,bar <br>" +
    "#MailProg=/bin/mail <br>" +
    "#MaxJobCount=5000 <br>" +
    "MpiDefault=" + get_radio_value(document.config.mpi_default) + "<br>" +
+   "#MpiParams=ports:#-# <br>" +
    "#PluginDir= <br>" +
    "#PlugStackConfig= <br>" +
    "#PrivateData=jobs <br>" +
    "ProctrackType=proctrack/" + get_radio_value(document.config.proctrack_type) + "<br>" +
    get_field("Prolog",document.config.prolog) + "<br>" +
+   "#PrologSlurmctld= <br>" +
    "#PropagatePrioProcess=0 <br>" +
    "#PropagateResourceLimits= <br>" +
    "#PropagateResourceLimitsExcept= <br>" +
    "ReturnToService=" + get_radio_value(document.config.return_to_service) + "<br>" +
+   "#SallocDefaultCommand= <br>" +
    "SlurmctldPidFile=" + document.config.slurmctld_pid_file.value + "<br>" +
    "SlurmctldPort=" + document.config.slurmctld_port.value + "<br>" +
    "SlurmdPidFile=" + document.config.slurmd_pid_file.value + "<br>" +
@@ -182,6 +188,7 @@ function displayfile()
    "TaskPlugin=task/" + get_radio_value(document.config.task_plugin) + "<br>" +
    get_task_plugin_param() + "<br>" +
    get_field("TaskProlog",document.config.task_prolog) + "<br>" +
+   "#TopologyPlugin=topology/tree <br>" +
    "#TmpFs=/tmp <br>" +
    "#TrackWCKey=no <br>" +
    "#TreeWidth= <br>" +
@@ -192,14 +199,17 @@ function displayfile()
    "# <br>" +
    "# TIMERS <br>" +
    "#BatchStartTimeout=10 <br>" +
+   "#CompleteWait=0 <br>" +
    "#EpilogMsgTime=2000 <br>" +
    "#GetEnvTimeout=2 <br>" +
    "#HealthCheckInterval=0 <br>" +
    "#HealthCheckProgram= <br>" +
    "InactiveLimit=" + document.config.inactive_limit.value + "<br>" +
-   "MinJobAge=" + document.config.min_job_age.value + "<br>" +
    "KillWait=" + document.config.kill_wait.value + "<br>" +
    "#MessageTimeout=10 <br>" +
+   "#ResvOverRun=0 <br>" +
+   "MinJobAge=" + document.config.min_job_age.value + "<br>" +
+   "#OverTimeLimit=0 <br>" +
    "SlurmctldTimeout=" + document.config.slurmctld_timeout.value + "<br>" +
    "SlurmdTimeout=" + document.config.slurmd_timeout.value + "<br>" +
    "#UnkillableStepProgram= <br>" +
@@ -219,6 +229,19 @@ function displayfile()
    get_select_type_params() + "<br>" +
    "# <br>" +
    "# <br>" +
+   "# JOB PRIORITY <br>" +
+   "#PriorityType=priority/basic <br>" +
+   "#PriorityDecayHalfLife= <br>" +
+   "#PriorityFavorSmall= <br>" +
+   "#PriorityMaxAge= <br>" +
+   "#PriorityUsageResetPeriod= <br>" +
+   "#PriorityWeightAge= <br>" +
+   "#PriorityWeightFairshare= <br>" +
+   "#PriorityWeightJobSize= <br>" +
+   "#PriorityWeightPartition= <br>" +
+   "#PriorityWeightQOS= <br>" +
+   "# <br>" +
+   "# <br>" +
    "# LOGGING AND ACCOUNTING <br>" +
    "#AccountingStorageEnforce=0 <br>" +
    get_field("AccountingStorageHost",document.config.accounting_storage_host) + "<br>" +
@@ -228,6 +251,7 @@ function displayfile()
    "AccountingStorageType=accounting_storage/" + get_accounting_storage_type_field(get_radio_value(document.config.job_acct_gather_type), document.config.accounting_storage_type) + "<br>" +
    get_field("AccountingStorageUser",document.config.accounting_storage_user) + "<br>" +
    get_field("ClusterName",document.config.cluster_name) + "<br>" +
+   "#DebugFlags= <br>" +
    get_field("JobCompHost",document.config.job_comp_host) + "<br>" +
    get_field("JobCompLoc",document.config.job_comp_loc) + "<br>" +
    get_field("JobCompPass",document.config.job_comp_pass) + "<br>" +
@@ -245,6 +269,8 @@ function displayfile()
    "# POWER SAVE SUPPORT FOR IDLE NODES (optional) <br>" +
    "#SuspendProgram= <br>" +
    "#ResumeProgram= <br>" +
+   "#SuspendTimeout= <br>" +
+   "#ResumeTimeout= <br>" +
    "#ResumeRate= <br>" +
    "#SuspendExcNodes= <br>" +
    "#SuspendExcParts= <br>" +
@@ -256,7 +282,7 @@ function displayfile()
    "NodeName=" + document.config.node_name.value +
    get_field2(" NodeAddr",document.config.node_addr) +
    get_field2(" Procs",document.config.procs) +
-   get_field2(" Memory",document.config.memory) +
+   get_field2(" RealMemory",document.config.memory) +
    get_field2(" Sockets",document.config.sockets) +
    get_field2(" CoresPerSocket",document.config.cores_per_socket) +
    get_field2(" ThreadsPerCore",document.config.threads_per_core) +
@@ -367,8 +393,9 @@ Name of the one partition to be created
 <input type="text" name="max_time" value="INFINITE"> <B>MaxTime</B>: 
 Maximum time limit of jobs in minutes or INFINITE
 <P>
-The following parameters are optional,
-but can be specified when using FastSchedule=1:
+The following parameters describe a node's configuration.
+Set a value for <B>Procs</B>.
+The other parameters are optional, but provide more control over scheduled resources:
 <P>
 <input type="text" name="procs" value="1"> <B>Procs</B>: Count of processors 
 on each compute node.
@@ -391,7 +418,7 @@ the logical number of processors per socket.
 <B>ThreadsPerCore</B>:
 Number of logical threads in a single physical core.
 <P>
-<input type="text" name="memory" value=""> <B>Memory</B>: Amount 
+<input type="text" name="memory" value=""> <B>RealMemory</B>: Amount 
 of real memory. This parameter is required when specifying Memory as a 
 consumable resource with the select/cons_res plug-in. See below 
 under Resource Selection. 
@@ -454,8 +481,8 @@ Select one value for <B>CryptoType</B>:<BR>
 <A href="http://www.openssl.org/">OpenSSL</A> 
 <P>
 Define the location of public and private keys used by SLURM's 
-cryptographic signature generation plugin (CryptoType).
-These values are only used if CryptoType=OpenSSL.
+cryptographic signature generation plugin (CryptoType).<br>
+<b>These values are only used if CryptoType=OpenSSL.</b><br>
 These files need to be generated by the SLURM administrator.
 Specify fully qualified pathnames.
 <P>
@@ -814,6 +841,6 @@ before terminating all remaining tasks. A value of zero indicates unlimited wait
 </FORM>
 <HR>
 <P class="footer">LLNL-WEB-402631<BR>
-Last modified 17 July 2008</P>
+Last modified 13 May 2009</P>
 </BODY>
 

@@ -5,7 +5,8 @@
  *  Copyright (C) 2005 Hewlett-Packard Development Company, L.P.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -92,7 +93,9 @@
 #include "src/common/util-net.h"
 #include "src/common/slurm_resource_info.h"
 
+#ifndef CPUSET_DIR
 #define CPUSET_DIR "/dev/cpuset"
+#endif
 
 /*** from affinity.c ***/
 void	slurm_chkaffinity(cpu_set_t *mask, slurmd_job_t *job, int statval);
@@ -112,8 +115,9 @@ int	slurm_set_cpuset(char *base, char *path, pid_t pid, size_t size,
 
 /*** from numa.c ***/
 #ifdef HAVE_NUMA
-int	get_memset(nodemask_t *mask, slurmd_job_t *job);
-void	slurm_chk_memset(nodemask_t *mask, slurmd_job_t *job);
+int	 get_memset(nodemask_t *mask, slurmd_job_t *job);
+void	 slurm_chk_memset(nodemask_t *mask, slurmd_job_t *job);
+uint16_t slurm_get_numa_node(uint16_t cpuid);
 #endif
 
 /*** from schedutils.c ***/

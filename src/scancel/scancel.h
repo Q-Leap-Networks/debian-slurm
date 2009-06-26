@@ -4,10 +4,11 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette<jette1@llnl.gov>, et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -57,6 +58,8 @@ typedef struct scancel_options {
 	uint16_t job_cnt;	/* count of job_id's specified	*/
 	uint32_t *job_id;	/* list of job_id's		*/
 	uint32_t *step_id;	/* list of job step id's	*/
+	char *wckey;		/* --wckey			*/
+	char *nodelist;		/* --nodelist, -w		*/
 } opt_t;
 
 opt_t opt;

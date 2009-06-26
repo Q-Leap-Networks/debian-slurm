@@ -6,10 +6,11 @@
  *  Copyright (C) 2005 Hewlett-Packard Development Company, L.P.
  *  Written by Chris Holmes, <cholmes@hp.com>, who borrowed heavily
  *  from other parts of SLURM.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -62,7 +63,7 @@
  * NOTE: allocates memory that should be xfreed by caller
  */
 extern slurm_step_layout_t *slurm_step_layout_create(const char *tlist,
-						     uint32_t *cpus_per_node, 
+						     uint16_t *cpus_per_node, 
 						     uint32_t *cpu_count_reps,
 						     uint32_t node_cnt, 
 						     uint32_t task_cnt,
@@ -86,7 +87,7 @@ extern slurm_step_layout_t *slurm_step_layout_create(const char *tlist,
  */
 extern slurm_step_layout_t *fake_slurm_step_layout_create(
 	const char *tlist,
-	uint32_t *cpus_per_node, 
+	uint16_t *cpus_per_node, 
 	uint32_t *cpu_count_reps,
 	uint32_t node_cnt, 
 	uint32_t task_cnt);
@@ -107,4 +108,5 @@ extern int slurm_step_layout_destroy(slurm_step_layout_t *step_layout);
 extern int slurm_step_layout_host_id (slurm_step_layout_t *s, int taskid);
 extern char *slurm_step_layout_host_name (slurm_step_layout_t *s, int hostid);
 
+extern char *slurm_step_layout_type_name(task_dist_states_t task_dist);
 #endif /* !_SLURM_STEP_LAYOUT_H */

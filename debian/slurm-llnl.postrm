@@ -46,10 +46,15 @@ case "$1" in
          rm -f /etc/slurm-llnl/slurm.conf
          rm -rf /var/run/slurm-llnl/slurmctld
          rm -rf /var/run/slurm-llnl/slurmd
+         rm -rf /var/lib/slurm-llnl/slurmctld
+         rm -rf /var/lib/slurm-llnl/slurmd
          rm -f /var/log/slurm-llnl/slurmd*.log*
          rm -f /var/log/slurm-llnl/slurmctld*.log*
 	 if [ ! -e /usr/sbin/slurmdbd ] ; then 
+	    # Killing all slurm owned process
+            pkill -9 -u slurm
 	    deluser --quiet slurm
+            rm -rf /var/run/slurm-llnl
 	 fi
          ;;
 

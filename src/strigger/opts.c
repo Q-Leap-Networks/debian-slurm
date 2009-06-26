@@ -5,10 +5,11 @@
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -367,7 +368,8 @@ Usage: strigger [--set | --get | --clear] [OPTIONS]\n\
   -p, --program=path  pathname of program to execute when triggered\n\
   -r, --reconfig      trigger event on configuration changes\n\
   -t, --time          trigger event on job's time limit\n\
-  -u, --up            trigger event when node returned to service from DOWN state\n\
+  -u, --up            trigger event when node returned to service from DOWN \n\
+                      state\n\
       --user          a user name or ID to filter triggers by\n\
   -v, --verbose       print detailed event logging\n\
   -V, --version       print version information and exit\n\

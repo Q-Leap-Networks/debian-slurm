@@ -4,10 +4,11 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov> et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -41,6 +42,7 @@
 #include "src/common/plugin.h"
 #include "src/common/log.h"
 #include "src/slurmctld/slurmctld.h"
+#include "src/common/slurm_priority.h"
 
 const char		plugin_name[]	= "SLURM Built-in Scheduler plugin";
 const char		plugin_type[]	= "sched/builtin";
@@ -109,10 +111,7 @@ u_int32_t
 slurm_sched_plugin_initial_priority( u_int32_t last_prio,
 				     struct job_record *job_ptr )
 {
-	if (last_prio >= 2)
-		return (last_prio - 1);
-	else
-		return 1;
+	return priority_g_set(last_prio, job_ptr);
 }
 
 /**************************************************************************/

@@ -2,13 +2,14 @@
  *  read_config.h - functions and declarations for reading slurmdbd.conf
  *****************************************************************************
  *  Copyright (C) 2003-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -53,6 +54,7 @@
 #endif  /* HAVE_CONFIG_H */
 
 #include <time.h>
+#include "src/common/list.h"
 
 #define DEFAULT_SLURMDBD_AUTHTYPE	"auth/none"
 //#define DEFAULT_SLURMDBD_JOB_PURGE	12
@@ -63,6 +65,8 @@
 /* SlurmDBD configuration parameters */
 typedef struct slurm_dbd_conf {
 	time_t		last_update;	/* time slurmdbd.conf read	*/
+	uint16_t	archive_events;	/* flag if we are to
+					 * archive events */
 	uint16_t	archive_jobs;	/* flag if we are to
 					 * archive jobs	*/
 	char *		archive_dir;    /* location to localy
@@ -71,23 +75,34 @@ typedef struct slurm_dbd_conf {
 	char *		archive_script;	/* script to archive old data	*/
 	uint16_t	archive_steps;	/* flag if we are to
 					 * archive steps	        */
+	uint16_t	archive_suspend;/* flag if we are to
+					 * archive suspend data         */
 	char *		auth_info;	/* authentication info		*/
 	char *		auth_type;	/* authentication mechanism	*/
+	uint16_t        control_timeout;/* how long to wait before
+					 * backup takes control         */   
 	char *		dbd_addr;	/* network address of Slurm DBD	*/
+	char *		dbd_backup;	/* hostname of Slurm DBD backup */
 	char *		dbd_host;	/* hostname of Slurm DBD	*/
 	uint16_t	dbd_port;	/* port number for RPCs to DBD	*/
 	uint16_t	debug_level;	/* Debug level, default=3	*/
 	char *   	default_qos;	/* default qos setting when
 					 * adding clusters              */
-	uint16_t	job_purge;	/* purge time for job info	*/ 
 	char *		log_file;	/* Log file			*/
 	uint16_t        msg_timeout;    /* message timeout		*/   
 	char *		pid_file;	/* where to store current PID	*/
 	char *		plugindir;	/* dir to look for plugins	*/
 	uint16_t        private_data;   /* restrict information         */
+	uint16_t        purge_event;    /* purge events older than
+					 * this in months */
+	uint16_t	purge_job;	/* purge time for job info	*/ 
+	uint16_t	purge_step;	/* purge time for step info	*/
+	uint16_t        purge_suspend;  /* purge suspend data older than this
+					 * in months */
 	uint32_t	slurm_user_id;	/* uid of slurm_user_name	*/
 	char *		slurm_user_name;/* user that slurmcdtld runs as	*/
-	uint16_t	step_purge;	/* purge time for step info	*/
+	char *		storage_backup_host;/* backup host where DB is
+					     * running */
 	char *		storage_host;	/* host where DB is running	*/
 	char *		storage_loc;	/* database name		*/
 	char *		storage_pass;   /* password for DB write	*/
@@ -123,5 +138,9 @@ extern void log_config(void);
  * RET SLURM_SUCCESS if no error, otherwise an error code
  */
 extern int read_slurmdbd_conf(void);
+
+/* Dump the configuration in name,value pairs for output to 
+ *	"sacctmgr show config", caller must call list_destroy() */
+extern List dump_config(void);
 
 #endif /* !_DBD_READ_CONFIG_H */

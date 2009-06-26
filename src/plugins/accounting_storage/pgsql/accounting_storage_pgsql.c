@@ -9,7 +9,8 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -76,7 +77,6 @@ const uint32_t plugin_version = 100;
 #ifndef HAVE_PGSQL
 typedef void PGconn;
 #else
-#define DEFAULT_ACCT_DB "slurm_acct_db"
 
 static pgsql_db_info_t *pgsql_db_info = NULL;
 static char *pgsql_db_name = NULL;
@@ -137,7 +137,7 @@ static pgsql_db_info_t *_pgsql_acct_create_db_info()
 	/* it turns out it is better if using defaults to let postgres
 	   handle them on it's own terms */
 	if(!db_info->port) {
-		db_info->port = 5432;
+		db_info->port = DEFAULT_PGSQL_PORT;
 		slurm_set_accounting_storage_port(db_info->port);
 	}
 	db_info->host = slurm_get_accounting_storage_host();
@@ -731,20 +731,20 @@ extern int init ( void )
 
 	location = slurm_get_accounting_storage_loc();
 	if(!location)
-		pgsql_db_name = xstrdup(DEFAULT_ACCT_DB);
+		pgsql_db_name = xstrdup(DEFAULT_ACCOUNTING_DB);
 	else {
 		int i = 0;
 		while(location[i]) {
 			if(location[i] == '.' || location[i] == '/') {
 				debug("%s doesn't look like a database "
 				      "name using %s",
-				      location, DEFAULT_ACCT_DB);
+				      location, DEFAULT_ACCOUNTING_DB);
 				break;
 			}
 			i++;
 		}
 		if(location[i]) {
-			pgsql_db_name = xstrdup(DEFAULT_ACCT_DB);
+			pgsql_db_name = xstrdup(DEFAULT_ACCOUNTING_DB);
 			xfree(location);
 		} else
 			pgsql_db_name = location;
@@ -852,7 +852,13 @@ extern int acct_storage_p_add_qos(PGconn *acct_pgsql_db, uint32_t uid,
 }
 
 extern int acct_storage_p_add_wckeys(PGconn *acct_pgsql_db, uint32_t uid, 
-				  List wckey_list)
+				     List wckey_list)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int acct_storage_p_add_reservation(PGconn *acct_pgsql_db, 
+					   acct_reservation_rec_t *resv)
 {
 	return SLURM_SUCCESS;
 }
@@ -896,6 +902,12 @@ extern List acct_storage_p_modify_qos(PGconn *acct_pgsql_db, uint32_t uid,
 extern List acct_storage_p_modify_wckeys(PGconn *acct_pgsql_db, uint32_t uid,
 				      acct_wckey_cond_t *wckey_cond,
 				      acct_wckey_rec_t *wckey)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int acct_storage_p_modify_reservation(PGconn *acct_pgsql_db, 
+					     acct_reservation_rec_t *resv)
 {
 	return SLURM_SUCCESS;
 }
@@ -944,6 +956,12 @@ extern List acct_storage_p_remove_wckeys(void *db_conn, uint32_t uid,
 	return NULL;
 }
 
+extern int acct_storage_p_remove_reservation(PGconn *acct_pgsql_db, 
+					     acct_reservation_rec_t *resv)
+{
+	return SLURM_SUCCESS;
+}
+
 extern List acct_storage_p_get_users(PGconn *acct_pgsql_db, uid_t uid,
 				     acct_user_cond_t *user_cond)
 {
@@ -958,6 +976,11 @@ extern List acct_storage_p_get_accts(PGconn *acct_pgsql_db, uid_t uid,
 
 extern List acct_storage_p_get_clusters(PGconn *acct_pgsql_db, uid_t uid,
 					acct_account_cond_t *cluster_cond)
+{
+	return NULL;
+}
+
+extern List acct_storage_p_get_config(void *db_conn)
 {
 	return NULL;
 }
@@ -980,6 +1003,12 @@ extern List acct_storage_p_get_wckeys(void *db_conn, uid_t uid,
 	return NULL;
 }
 
+extern List acct_storage_p_get_reservations(void *mysql_conn, uid_t uid,
+					    acct_reservation_cond_t *resv_cond)
+{
+	return NULL;
+}
+
 extern List acct_storage_p_get_txn(PGconn *acct_pgsql_db, uid_t uid,
 				   acct_txn_cond_t *txn_cond)
 {
@@ -996,7 +1025,8 @@ extern int acct_storage_p_get_usage(PGconn *acct_pgsql_db, uid_t uid,
 }
 
 extern int acct_storage_p_roll_usage(PGconn *acct_pgsql_db, 
-				     time_t sent_start)
+				     time_t sent_start, time_t sent_end,
+				     uint16_t archive_data)
 {
 	int rc = SLURM_SUCCESS;
 
@@ -1077,6 +1107,7 @@ extern int clusteracct_storage_p_register_ctld(PGconn *acct_pgsql_db,
 
 extern int clusteracct_storage_p_cluster_procs(PGconn *acct_pgsql_db,
 					       char *cluster,
+					       char *cluster_nodes,
 					       uint32_t procs,
 					       time_t event_time)
 {
@@ -1170,7 +1201,6 @@ extern int jobacct_storage_p_job_start(PGconn *acct_pgsql_db,
 	char *block_id = NULL;
 	char *query = NULL;
 	int reinit = 0;
-	char *wckey = NULL;
 
 	if (!job_ptr->details || !job_ptr->details->submit_time) {
 		error("jobacct_storage_p_job_start: "
@@ -1188,25 +1218,9 @@ extern int jobacct_storage_p_job_start(PGconn *acct_pgsql_db,
 	priority = (job_ptr->priority == NO_VAL) ?
 		-1L : (long) job_ptr->priority;
 
-	if (job_ptr->name && job_ptr->name[0]) {
-		char *temp = NULL;
-		/* first set the jname to the job_ptr->name */
+	if (job_ptr->name && job_ptr->name[0]) 
 		jname = xstrdup(job_ptr->name);
-		/* then grep for " since that is the delimiter for
-		   the wckey */
-		if((temp = strchr(jname, '\"'))) {
-			/* if we have a wckey set the " to NULL to
-			 * end the jname */
-			temp[0] = '\0';
-			/* increment and copy the remainder */
-			temp++;
-			wckey = xstrdup(temp);
-		}
-	}
-
-	if(!jname || !jname[0]) {
-		/* free jname if something is allocated here */
-		xfree(jname);
+	else {
 		jname = xstrdup("allocation");
 		track_steps = 1;
 	}
@@ -1243,7 +1257,7 @@ extern int jobacct_storage_p_job_start(PGconn *acct_pgsql_db,
 			xstrcat(query, "partition, ");
 		if(block_id) 
 			xstrcat(query, "blockid, ");
-		if(wckey) 
+		if(job_ptr->wckey) 
 			xstrcat(query, "wckey, ");
 		
 		xstrfmtcat(query, 
@@ -1261,8 +1275,8 @@ extern int jobacct_storage_p_job_start(PGconn *acct_pgsql_db,
 			xstrfmtcat(query, "'%s', ", job_ptr->partition);
 		if(block_id) 
 			xstrfmtcat(query, "'%s', ", block_id);
-		if(wckey) 
-			xstrfmtcat(query, "\"%s\", ", wckey);
+		if(job_ptr->wckey) 
+			xstrfmtcat(query, "\"%s\", ", job_ptr->wckey);
 		
 		xstrfmtcat(query, 
 			   "%d, %d, %d, '%s', %u, %u, %u, %u, %u)",
@@ -1301,8 +1315,8 @@ extern int jobacct_storage_p_job_start(PGconn *acct_pgsql_db,
 				   job_ptr->partition);
 		if(block_id)
 			xstrfmtcat(query, "blockid='%s', ", block_id);
-		if(wckey) 
-			xstrfmtcat(query, ", wckey=\"%s\"", wckey);
+		if(job_ptr->wckey) 
+			xstrfmtcat(query, ", wckey=\"%s\"", job_ptr->wckey);
 
 		xstrfmtcat(query, "start=%d, name='%s', state=%u, "
 			   "alloc_cpus=%u, associd=%d where id=%d",
@@ -1314,8 +1328,6 @@ extern int jobacct_storage_p_job_start(PGconn *acct_pgsql_db,
 	}
 	xfree(block_id);
 	xfree(jname);
-	xfree(wckey);
-
 	xfree(query);
 	
 	return rc;
@@ -1519,7 +1531,7 @@ extern int jobacct_storage_p_step_complete(PGconn *acct_pgsql_db,
 	
 	if (jobacct == NULL) {
 		/* JobAcctGather=jobacct_gather/none, no data to process */
-		bzero(&dummy_jobacct, sizeof(dummy_jobacct));
+		memset(&dummy_jobacct, 0, sizeof(dummy_jobacct));
 		jobacct = &dummy_jobacct;
 	}
 

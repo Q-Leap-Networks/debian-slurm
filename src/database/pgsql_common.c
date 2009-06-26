@@ -7,7 +7,8 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -42,8 +43,6 @@
 #include <stdlib.h>
 
 pthread_mutex_t pgsql_lock = PTHREAD_MUTEX_INITIALIZER;
-
-#ifdef HAVE_PGSQL
 
 extern int *destroy_pgsql_db_info(pgsql_db_info_t *db_info)
 {
@@ -384,7 +383,3 @@ extern int pgsql_db_make_table_current(PGconn *pgsql_db, char *table_name,
 	END_TIMER2("make table current");
 	return SLURM_SUCCESS;
 }
-
-
-#endif
-

@@ -6,10 +6,11 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -40,25 +41,22 @@
 #include "sstat.h"
 
 
-void find_hostname(uint32_t pos, char *hosts, char *host)
+char *find_hostname(uint32_t pos, char *hosts)
 {
 	hostlist_t hostlist = NULL;
-	char *temp = NULL;
+	char *temp = NULL, *host = NULL;
 
-	if(pos == (uint32_t)NO_VAL) {
-		snprintf(host, 50, "'N/A'");
-		return;
-	}
+	if(!hosts || (pos == (uint32_t)NO_VAL))
+		return NULL;
+	
 	hostlist = hostlist_create(hosts);
 	temp = hostlist_nth(hostlist, pos);
 	if(temp) {
-		snprintf(host, 50, "%s", temp);
+		host = xstrdup(temp);
 		free(temp);
-	} else {
-		snprintf(host, 50, "'N/A'");
-	}
+	} 
 	hostlist_destroy(hostlist);
-	return;
+	return host;
 }
 
 void aggregate_sacct(sacct_t *dest, sacct_t *from)

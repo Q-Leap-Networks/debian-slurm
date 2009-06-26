@@ -4,10 +4,11 @@
  *
  *  Copyright (C) 2005 Hewlett-Packard Development Company, L.P.
  *  Written by Danny Auble, <da@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -88,24 +89,30 @@ typedef struct {
 
 typedef struct {
 	uint32_t alloc_cpus;
-	uint32_t associd;
+	uint32_t alloc_nodes;
 	char    *account;
+	uint32_t associd;
 	char	*blockid;
 	char    *cluster;
 	uint32_t elapsed;
 	time_t eligible;
 	time_t end;
 	int32_t	exitcode;
+	void *first_step_ptr; /* this pointer to a jobacct_step_rec_t 
+				 is set up on the
+				 client side so does not need to
+				 be packed */
 	uint32_t gid;
 	uint32_t jobid;
 	char	*jobname;
 	uint32_t lft;
 	char	*partition;
 	char	*nodes;
-	int32_t priority;
+	uint32_t priority;
 	uint16_t qos;
 	uint32_t req_cpus;
 	uint32_t requid;
+	uint32_t resvid;
 	sacct_t sacct;
 	uint32_t show_full;
 	time_t start;
@@ -115,6 +122,7 @@ typedef struct {
 	uint32_t suspended;
 	uint32_t sys_cpu_sec;
 	uint32_t sys_cpu_usec;
+	uint32_t timelimit;
 	uint32_t tot_cpu_sec;
 	uint32_t tot_cpu_usec;
 	uint16_t track_steps;
@@ -127,25 +135,16 @@ typedef struct {
 } jobacct_job_rec_t;
 
 typedef struct {
-	char    *account; /* This is a pointer to the account var inside
-			   * the jobacct_job_rec_t that contains this
-			   * step.  It is to be used only in the
-			   * client.  This should not be freed, packed
-			   * or unpacked
-			   */
-	uint32_t associd;
-	char    *cluster; /* This is a pointer to the cluster var inside
-			   * the jobacct_job_rec_t that contains this
-			   * step.  It is to be used only in the
-			   * client.  This should not be freed, packed
-			   * or unpacked
-			   */
 	uint32_t elapsed;
 	time_t end;
 	int32_t exitcode;
-	uint32_t jobid;
+	jobacct_job_rec_t *job_ptr; /* this pointer is set up on the
+				       client side so does not need to
+				       be packed */
 	uint32_t ncpus;
+	uint32_t nnodes;
 	char *nodes;
+	uint32_t ntasks;
 	uint32_t requid;
 	sacct_t sacct;
 	time_t start;
@@ -155,6 +154,7 @@ typedef struct {
 	uint32_t suspended;
 	uint32_t sys_cpu_sec;
 	uint32_t sys_cpu_usec;
+	uint16_t task_dist;
 	uint32_t tot_cpu_sec;
 	uint32_t tot_cpu_usec;
 	uint32_t user_cpu_sec;

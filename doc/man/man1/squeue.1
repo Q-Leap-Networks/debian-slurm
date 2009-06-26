@@ -1,4 +1,4 @@
-.TH SQUEUE "1" "May 2008" "squeue 1.3" "Slurm components"
+.TH SQUEUE "1" "May 2008" "squeue 2.0" "Slurm components"
 
 .SH "NAME"
 squeue \- view information about jobs located in the SLURM scheduling queue.
@@ -39,10 +39,8 @@ specified (in seconds).
 By default, prints a time stamp with the header.
 
 .TP
-\fB\-j\fR, \fB\-\-jobs\fR
-Specify the jobs to view.  This flag indicates that a comma separated list 
-of jobs to view follows without an equal sign (see examples).
-Defaults to all jobs.
+\fB\-j <job_id_list>\fR, \fB\-\-jobs=<job_id_list>\fR
+Requests a comma separated list of job ids to display.  Defaults to all jobs.
 
 .TP
 \fB\-l\fR, \fB\-\-long\fR
@@ -65,10 +63,10 @@ The default formats with various options are
 .RS
 .TP 15
 \fIdefault\fR
-"%.7i %.9P %.8j %.8u %.2t %.9M %.6D %R"
+"%.7i %.9P %.8j %.8u %.2t %.10M %.6D %R"
 .TP
 \fI\-l, \-\-long\fR
-".7i %.9P %.8j %.8u %.8T %.9M %.9l %.6D %R"
+"%.7i %.9P %.8j %.8u %.8T %.10M %.9l %.6D %R"
 .TP
 \fI\-s, \-\-steps\fR
 "%10i %.8j %.9P %.8u %.9M %N"
@@ -247,6 +245,9 @@ User name for a job or job step.
 \fB%U\fR 
 User ID for a job or job step.
 .TP
+\fB%v\fR 
+Reservation for the job.
+.TP
 \fB%x\fR 
 List of node names explicitly excluded by the job.
 .TP
@@ -287,7 +288,7 @@ This uses the same field specifciation as the <output_format>.
 Multiple sorts may be performed by listing multiple sort fields 
 separated by commas.
 The field specifications may be preceeded by "+" or "\-" for 
-assending (default) and desending order respectively. 
+ascending (default) and descending order respectively. 
 For example, a sort value of "P,U" will sort the
 records by partition name then by user id. 
 The default value of sort for jobs is "P,t,\-p" (increasing partition 
@@ -310,8 +311,8 @@ See the \fBJOB STATE CODES\fR section below for more information.
 
 .TP
 \fB\-u <user_list>\fR, \fB\-\-user=<user_list>\fR
-Specifies a comma separated list of users whose jobs or job steps are to be
-reported. The list can consist of user names or user id numbers.
+Request jobs or job steps from a comma separated list of users.  The
+list can consist of user names or user id numbers.
 
 .TP
 \fB\-\-usage\fR
@@ -494,7 +495,7 @@ Print information only about job step 65552.1:
 .SH "COPYING"
 Copyright (C) 2002\-2007 The Regents of the University of California.
 Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
-LLNL\-CODE\-402394.
+CODE\-OCEC\-09\-009. All rights reserved.
 .LP
 This file is part of SLURM, a resource management program.
 For details, see <https://computing.llnl.gov/linux/slurm/>.

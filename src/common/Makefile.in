@@ -54,14 +54,18 @@ am__aclocal_m4_deps = $(top_srcdir)/auxdir/acx_pthread.m4 \
 	$(top_srcdir)/auxdir/x_ac__system_configuration.m4 \
 	$(top_srcdir)/auxdir/x_ac_affinity.m4 \
 	$(top_srcdir)/auxdir/x_ac_aix.m4 \
+	$(top_srcdir)/auxdir/x_ac_blcr.m4 \
 	$(top_srcdir)/auxdir/x_ac_bluegene.m4 \
 	$(top_srcdir)/auxdir/x_ac_cflags.m4 \
+	$(top_srcdir)/auxdir/x_ac_cray.m4 \
 	$(top_srcdir)/auxdir/x_ac_databases.m4 \
 	$(top_srcdir)/auxdir/x_ac_debug.m4 \
 	$(top_srcdir)/auxdir/x_ac_elan.m4 \
+	$(top_srcdir)/auxdir/x_ac_env.m4 \
 	$(top_srcdir)/auxdir/x_ac_federation.m4 \
 	$(top_srcdir)/auxdir/x_ac_gpl_licensed.m4 \
 	$(top_srcdir)/auxdir/x_ac_gtk.m4 \
+	$(top_srcdir)/auxdir/x_ac_iso.m4 \
 	$(top_srcdir)/auxdir/x_ac_munge.m4 \
 	$(top_srcdir)/auxdir/x_ac_ncurses.m4 \
 	$(top_srcdir)/auxdir/x_ac_pam.m4 \
@@ -80,19 +84,21 @@ CONFIG_HEADER = $(top_builddir)/config.h $(top_builddir)/slurm/slurm.h
 CONFIG_CLEAN_FILES =
 LTLIBRARIES = $(noinst_LTLIBRARIES)
 libcommon_la_DEPENDENCIES =
-am__libcommon_la_SOURCES_DIST = assoc_mgr.c assoc_mgr.h xmalloc.c \
-	xmalloc.h xassert.c xassert.h xstring.c xstring.h xsignal.c \
-	xsignal.h forward.c forward.h strlcpy.c strlcpy.h list.c \
-	list.h net.c net.h fd.c fd.h log.c log.h cbuf.c cbuf.h \
-	safeopen.c safeopen.h bitstring.c bitstring.h mpi.c mpi.h \
-	pack.c pack.h parse_config.c parse_config.h parse_spec.c \
-	parse_spec.h plugin.c plugin.h plugrack.c plugrack.h \
-	print_fields.c print_fields.h read_config.c read_config.h \
-	node_select.c node_select.h env.c env.h slurm_cred.h \
-	slurm_cred.c slurm_errno.c slurm_protocol_api.c \
-	slurm_protocol_api.h slurm_protocol_pack.c \
-	slurm_protocol_pack.h slurm_protocol_util.c \
-	slurm_protocol_util.h slurm_protocol_socket_implementation.c \
+am__libcommon_la_SOURCES_DIST = assoc_mgr.c assoc_mgr.h \
+	basil_resv_conf.c basil_resv_conf.h xmalloc.c xmalloc.h \
+	xassert.c xassert.h xstring.c xstring.h xsignal.c xsignal.h \
+	forward.c forward.h strlcpy.c strlcpy.h list.c list.h net.c \
+	net.h fd.c fd.h log.c log.h cbuf.c cbuf.h safeopen.c \
+	safeopen.h bitstring.c bitstring.h mpi.c mpi.h pack.c pack.h \
+	parse_config.c parse_config.h parse_spec.c parse_spec.h \
+	plugin.c plugin.h plugrack.c plugrack.h print_fields.c \
+	print_fields.h read_config.c read_config.h node_select.c \
+	node_select.h env.c env.h slurm_cred.h slurm_cred.c \
+	slurm_errno.c slurm_priority.c slurm_priority.h \
+	slurm_protocol_api.c slurm_protocol_api.h \
+	slurm_protocol_pack.c slurm_protocol_pack.h \
+	slurm_protocol_util.c slurm_protocol_util.h \
+	slurm_protocol_socket_implementation.c \
 	slurm_protocol_socket_common.h slurm_protocol_common.h \
 	slurm_protocol_interface.h slurm_protocol_defs.c \
 	slurm_protocol_defs.h slurm_rlimits_info.h \
@@ -106,26 +112,29 @@ am__libcommon_la_SOURCES_DIST = assoc_mgr.c assoc_mgr.h xmalloc.c \
 	slurm_selecttype_info.c slurm_resource_info.c \
 	slurm_resource_info.h hostlist.c hostlist.h \
 	slurm_step_layout.c slurm_step_layout.h checkpoint.c \
-	checkpoint.h parse_time.c parse_time.h job_options.c \
-	job_options.h global_defaults.c timers.c timers.h \
-	slurm_xlator.h stepd_api.c stepd_api.h proc_args.c proc_args.h
+	checkpoint.h select_job_res.c select_job_res.h parse_time.c \
+	parse_time.h job_options.c job_options.h global_defaults.c \
+	timers.c timers.h slurm_xlator.h stepd_api.c stepd_api.h \
+	write_labelled_message.c write_labelled_message.h proc_args.c \
+	proc_args.h slurm_strcasestr.c slurm_strcasestr.h
 @HAVE_UNSETENV_FALSE@am__objects_1 = unsetenv.lo
-am_libcommon_la_OBJECTS = assoc_mgr.lo xmalloc.lo xassert.lo \
-	xstring.lo xsignal.lo forward.lo strlcpy.lo list.lo net.lo \
-	fd.lo log.lo cbuf.lo safeopen.lo bitstring.lo mpi.lo pack.lo \
-	parse_config.lo parse_spec.lo plugin.lo plugrack.lo \
+am_libcommon_la_OBJECTS = assoc_mgr.lo basil_resv_conf.lo xmalloc.lo \
+	xassert.lo xstring.lo xsignal.lo forward.lo strlcpy.lo list.lo \
+	net.lo fd.lo log.lo cbuf.lo safeopen.lo bitstring.lo mpi.lo \
+	pack.lo parse_config.lo parse_spec.lo plugin.lo plugrack.lo \
 	print_fields.lo read_config.lo node_select.lo env.lo \
-	slurm_cred.lo slurm_errno.lo slurm_protocol_api.lo \
-	slurm_protocol_pack.lo slurm_protocol_util.lo \
-	slurm_protocol_socket_implementation.lo slurm_protocol_defs.lo \
-	slurm_rlimits_info.lo slurmdbd_defs.lo uid.lo util-net.lo \
-	slurm_auth.lo jobacct_common.lo slurm_accounting_storage.lo \
-	slurm_jobacct_gather.lo slurm_jobcomp.lo switch.lo arg_desc.lo \
-	malloc.lo getopt.lo getopt1.lo $(am__objects_1) \
-	slurm_selecttype_info.lo slurm_resource_info.lo hostlist.lo \
-	slurm_step_layout.lo checkpoint.lo parse_time.lo \
-	job_options.lo global_defaults.lo timers.lo stepd_api.lo \
-	proc_args.lo
+	slurm_cred.lo slurm_errno.lo slurm_priority.lo \
+	slurm_protocol_api.lo slurm_protocol_pack.lo \
+	slurm_protocol_util.lo slurm_protocol_socket_implementation.lo \
+	slurm_protocol_defs.lo slurm_rlimits_info.lo slurmdbd_defs.lo \
+	uid.lo util-net.lo slurm_auth.lo jobacct_common.lo \
+	slurm_accounting_storage.lo slurm_jobacct_gather.lo \
+	slurm_jobcomp.lo switch.lo arg_desc.lo malloc.lo getopt.lo \
+	getopt1.lo $(am__objects_1) slurm_selecttype_info.lo \
+	slurm_resource_info.lo hostlist.lo slurm_step_layout.lo \
+	checkpoint.lo select_job_res.lo parse_time.lo job_options.lo \
+	global_defaults.lo timers.lo stepd_api.lo \
+	write_labelled_message.lo proc_args.lo slurm_strcasestr.lo
 am__EXTRA_libcommon_la_SOURCES_DIST = unsetenv.c unsetenv.h
 libcommon_la_OBJECTS = $(am_libcommon_la_OBJECTS)
 libcommon_la_LINK = $(LIBTOOL) --tag=CC $(AM_LIBTOOLFLAGS) \
@@ -184,6 +193,10 @@ AUTOHEADER = @AUTOHEADER@
 AUTOMAKE = @AUTOMAKE@
 AWK = @AWK@
 BG_INCLUDES = @BG_INCLUDES@
+BLCR_CPPFLAGS = @BLCR_CPPFLAGS@
+BLCR_HOME = @BLCR_HOME@
+BLCR_LDFLAGS = @BLCR_LDFLAGS@
+BLCR_LIBS = @BLCR_LIBS@
 BLUEGENE_LOADED = @BLUEGENE_LOADED@
 CC = @CC@
 CCDEPMODE = @CCDEPMODE@
@@ -357,6 +370,7 @@ noinst_LTLIBRARIES = \
 
 libcommon_la_SOURCES = \
 	assoc_mgr.c assoc_mgr.h 	\
+	basil_resv_conf.c basil_resv_conf.h \
 	xmalloc.c xmalloc.h 		\
 	xassert.c xassert.h		\
 	xstring.c xstring.h		\
@@ -383,6 +397,8 @@ libcommon_la_SOURCES = \
 	slurm_cred.h       		\
 	slurm_cred.c			\
 	slurm_errno.c			\
+	slurm_priority.c		\
+	slurm_priority.h		\
 	slurm_protocol_api.c		\
 	slurm_protocol_api.h		\
 	slurm_protocol_pack.c		\
@@ -417,13 +433,17 @@ libcommon_la_SOURCES = \
 	hostlist.c hostlist.h		\
 	slurm_step_layout.c slurm_step_layout.h	\
 	checkpoint.c checkpoint.h	\
+	select_job_res.c select_job_res.h	\
 	parse_time.c parse_time.h	\
 	job_options.c job_options.h	\
 	global_defaults.c		\
 	timers.c timers.h		\
 	slurm_xlator.h			\
 	stepd_api.c stepd_api.h		\
-	proc_args.c proc_args.h		
+	write_labelled_message.c	\
+	write_labelled_message.h	\
+	proc_args.c proc_args.h		\
+	slurm_strcasestr.c slurm_strcasestr.h		
 
 EXTRA_libcommon_la_SOURCES = \
 	$(extra_unsetenv_src)
@@ -444,15 +464,15 @@ libspank_la_SOURCES = \
 libcommon_la_LIBADD = -ldl 
 libcommon_la_LDFLAGS = $(LIB_LDFLAGS) -module --export-dynamic
 
-# This was made so we chould export all symbols from libcommon 
+# This was made so we could export all symbols from libcommon 
 # on multiple platforms
 libcommon_o_SOURCES = 
 
-# This was made so we chould export all symbols from libeio 
+# This was made so we could export all symbols from libeio 
 # on multiple platforms
 libeio_o_SOURCES = 
 
-# This was made so we chould export all symbols from libspank 
+# This was made so we could export all symbols from libspank 
 # on multiple platforms
 libspank_o_SOURCES = 
 all: all-am
@@ -521,6 +541,7 @@ distclean-compile:
 
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/arg_desc.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/assoc_mgr.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/basil_resv_conf.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/bitstring.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/cbuf.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/checkpoint.Plo@am__quote@
@@ -554,12 +575,14 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/proc_args.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/read_config.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/safeopen.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/select_job_res.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurm_accounting_storage.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurm_auth.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurm_cred.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurm_errno.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurm_jobacct_gather.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurm_jobcomp.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurm_priority.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurm_protocol_api.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurm_protocol_defs.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurm_protocol_pack.Plo@am__quote@
@@ -569,6 +592,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurm_rlimits_info.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurm_selecttype_info.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurm_step_layout.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurm_strcasestr.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurmdbd_defs.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/stepd_api.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/strlcpy.Plo@am__quote@
@@ -577,6 +601,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/uid.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/unsetenv.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/util-net.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/write_labelled_message.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/xassert.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/xmalloc.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/xsignal.Plo@am__quote@
@@ -786,7 +811,7 @@ uninstall-am:
 	tags uninstall uninstall-am
 
 libcommon.o :  $(libcommon_la_OBJECTS) $(libcommon_la_DEPENDENCIES) 
-	$(libcommon_la_LINK)  $(libcommon_la_OBJECTS) 
+	$(LINK)  $(libcommon_la_OBJECTS) 
 libeio.o :  $(libeio_la_OBJECTS) $(libeio_la_DEPENDENCIES) 
 	$(LINK)  $(libeio_la_OBJECTS) 
 libspank.o :  $(libspank_la_OBJECTS) $(libspank_la_DEPENDENCIES) 

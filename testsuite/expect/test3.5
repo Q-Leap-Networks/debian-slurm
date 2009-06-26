@@ -10,10 +10,11 @@
 # Copyright (C) 2002 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# LLNL-CODE-402394.
+# CODE-OCEC-09-009. All rights reserved.
 # 
 # This file is part of SLURM, a resource management program.
-# For details, see <http://www.llnl.gov/linux/slurm/>.
+# For details, see <https://computing.llnl.gov/linux/slurm/>.
+# Please also read the included file: DISCLAIMER.
 #  
 # SLURM is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
@@ -37,6 +38,11 @@ set exit_code      0
 set part_name      "QA_TEST"
 
 print_header $test_id
+
+if {[test_super_user] == 0} {
+	send_user "\nWARNING: can not test more unless SlurmUser or root\n"
+	exit $exit_code
+}
 
 #
 # Confirm the partition name does not already exist
@@ -107,13 +113,8 @@ if {[string compare $def_node ""] == 0} {
 #
 # Create a new partition
 #
-spawn $scontrol update PartitionName=$part_name Nodes=$def_node
+spawn $scontrol create PartitionName=$part_name Nodes=$def_node
 expect {
-	-re "slurm_update error: Invalid user" {
-		send_user "\nWARNING: user not authorized to create partition\n"
-		exit $exit_code
-		exp_continue
-	}
 	-re "error" {
 		send_user "\nFAILURE: something bad happened on partitiion create\n"
 		set exit_code 1

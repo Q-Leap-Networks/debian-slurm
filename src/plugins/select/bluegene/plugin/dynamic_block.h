@@ -8,7 +8,8 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -45,12 +46,7 @@ extern List create_dynamic_block(List block_list,
 				 ba_request_t *request, List my_block_list,
 				 bool track_down_nodes);
 
-#ifdef HAVE_BGQ 
-extern bg_record_t *create_small_record(bg_record_t *bg_record, 
-					uint16_t quarter, uint16_t nodecard);
-#else
 extern bg_record_t *create_small_record(bg_record_t *bg_record, 
 					bitstr_t *ionodes, int size);
-#endif
 
 #endif /* _BLUEGENE_DYNAMIC_BLOCK_H_ */

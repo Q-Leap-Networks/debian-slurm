@@ -1,14 +1,14 @@
 /*****************************************************************************\
  *  src/common/slurm_cred.h  - SLURM job credential operations
- *  $Id: slurm_cred.h 14499 2008-07-11 22:54:48Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona1@llnl.gov>.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -51,6 +51,7 @@
 #  include <sys/types.h>
 #endif
 
+#include "src/common/bitstring.h"
 #include "src/common/macros.h"
 #include "src/common/pack.h"
 
@@ -124,17 +125,28 @@ int  slurm_cred_ctx_unpack(slurm_cred_ctx_t ctx, Buf buffer);
 
 
 /*
- * Container for SLURM credential create and verify arguments:
+ * Container for SLURM credential create and verify arguments
+ *
+ * The core_bitmap, cores_per_socket, sockets_per_node, and 
+ * sock_core_rep_count is based upon the nodes allocated to the
+ * JOB, but the bits set in core_bitmap are those cores allocated
+ * to this STEP
  */
 typedef struct {
 	uint32_t jobid;
 	uint32_t stepid;
-	uint32_t job_mem;	/* MB of memory reserved for job */
-	uint32_t task_mem;	/* MB of memory reserved per task */
+	uint32_t job_mem;	/* MB of memory reserved per node OR
+				 * real memory per CPU | MEM_PER_CPU,
+				 * default=0 (no limit) */
 	uid_t    uid;
 	char    *hostlist;
-	uint32_t alloc_lps_cnt;
-        uint32_t *alloc_lps;
+
+	bitstr_t *core_bitmap;
+	uint16_t *cores_per_socket;
+	uint16_t *sockets_per_node;
+	uint32_t *sock_core_rep_count;
+	uint32_t  job_nhosts;	/* count of nodes allocated to JOB */
+	char     *job_hostlist;	/* list of nodes allocated to JOB */
 } slurm_cred_arg_t;
 
 /* Terminate the plugin and release all memory. */
@@ -268,17 +280,11 @@ slurm_cred_t slurm_cred_unpack(Buf buffer);
  */
 int slurm_cred_get_signature(slurm_cred_t cred, char **datap, int *len);
 
-
 /*
  * Print a slurm job credential using the info() call
  */
 void slurm_cred_print(slurm_cred_t cred);
 
-/*
- * Get count of allocated LPS (processors) by node
- */
-int slurm_cred_get_alloc_lps(slurm_cred_t cred, char **nodes, 
-			     uint32_t *alloc_lps_cnt, uint32_t **alloc_lps);
 #ifdef DISABLE_LOCALTIME
 extern char * timestr (const time_t *tp, char *buf, size_t n);
 #endif

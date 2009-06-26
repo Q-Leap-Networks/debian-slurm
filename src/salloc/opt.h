@@ -2,14 +2,15 @@
  *  opt.h - definitions for salloc option processing
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona1@llnl.gov>,
  *    Christopher J. Morrone <morrone2@llnl.gov>, et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -72,6 +73,9 @@ typedef struct salloc_options {
 	int ntasks_per_socket; /* --ntasks-per-socket=n     */
 	int ntasks_per_core;   /* --ntasks-per-core=n	    */
 	cpu_bind_type_t cpu_bind_type; /* --cpu_bind=           */
+	char *cpu_bind;		/* binding map for map/mask_cpu */
+	mem_bind_type_t mem_bind_type; /* --mem_bind=		*/
+	char *mem_bind;		/* binding map for map/mask_mem	*/
 	bool extra_set;		/* true if extra node info explicitly set */
 	int  time_limit;	/* --time,   -t	(int minutes)	*/
 	char *time_limit_str;	/* --time,   -t (string)	*/
@@ -135,6 +139,7 @@ typedef struct salloc_options {
 	int get_user_env_time;	/* --get-user-env[=secs]	*/
 	int get_user_env_mode; 	/* --get-user-env=[S|L]		*/
 	char *cwd;		/* current working directory	*/
+	char *reservation;	/* --reservation		*/
 	char *wckey;            /* --wckey workload characterization key */
 } opt_t;
 

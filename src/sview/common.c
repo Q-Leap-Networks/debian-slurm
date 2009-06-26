@@ -1,14 +1,16 @@
 /*****************************************************************************\
  *  common.c - common functions used by tabs in sview
  *****************************************************************************
- *  Copyright (C) 2004-2006 The Regents of the University of California.
+ *  Copyright (C) 2004-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -165,6 +167,67 @@ cleanup:
 	return ret;
 }
 
+/* Make a BlueGene node name into a numeric representation of 
+ * its location. 
+ * Value is low_coordinate * 1,000,000 + 
+ *          high_coordinate * 1,000 + I/O node (999 if none)
+ * (e.g. bg123[4] -> 123,123,004, bg[234x235] -> 234,235,999)
+ */
+static int _bp_coordinate(const char *name)
+{
+	int i, io_val = 999, low_val = -1, high_val;
+
+	for (i=0; name[i]; i++) {
+		if (name[i] == '[') {
+			i++;
+			if (low_val < 0) {
+				char *end_ptr;
+				low_val = strtol(name+i, &end_ptr, 10);
+				if ((end_ptr[0] != '\0') &&
+				    (isdigit(end_ptr[1])))
+					high_val = atoi(end_ptr + 1);
+				else
+					high_val = low_val;
+			} else
+				io_val = atoi(name+i);
+			break;
+		} else if ((low_val < 0) && (isdigit(name[i])))
+			low_val = high_val = atoi(name+i);
+	}
+
+	if (low_val < 0)
+		return low_val;
+	return ((low_val * 1000000) + (high_val * 1000) + io_val);
+}
+
+static int _sort_iter_compare_func_bp_list(GtkTreeModel *model,
+					   GtkTreeIter  *a,
+					   GtkTreeIter  *b,
+					   gpointer      userdata)
+{
+	int sortcol = GPOINTER_TO_INT(userdata);
+	int ret = 0;
+	gchar *name1 = NULL, *name2 = NULL;
+	
+	gtk_tree_model_get(model, a, sortcol, &name1, -1);
+	gtk_tree_model_get(model, b, sortcol, &name2, -1);
+	
+	if ((name1 == NULL) || (name2 == NULL)) {
+		if ((name1 == NULL) && (name2 == NULL))
+			goto cleanup; /* both equal => ret = 0 */
+		
+		ret = (name1 == NULL) ? -1 : 1;
+	} else {
+		/* Sort in numeric order based upon coordinates */
+		ret = _bp_coordinate(name1) - _bp_coordinate(name2);
+	}
+cleanup:
+	g_free(name1);
+	g_free(name2);
+	
+	return ret;
+}
+
 static void _editing_started(GtkCellRenderer *cell,
 			     GtkCellEditable *editable,
 			     const gchar     *path,
@@ -287,6 +350,10 @@ static void _selected_page(GtkMenuItem *menuitem,
 		popup_all_block(treedata->model, &treedata->iter, 
 				display_data->id);
 		break;
+	case RESV_PAGE: 
+		popup_all_resv(treedata->model, &treedata->iter, 
+			       display_data->id);
+		break;
 	case ADMIN_PAGE:
 		switch(display_data->id) {
 		case JOB_PAGE:
@@ -300,6 +367,10 @@ static void _selected_page(GtkMenuItem *menuitem,
 		case BLOCK_PAGE:
 			admin_block(treedata->model, &treedata->iter, 
 				    display_data->name);
+			break;
+		case RESV_PAGE:
+			admin_resv(treedata->model, &treedata->iter, 
+				   display_data->name);
 			break;
 		case NODE_PAGE:
 			admin_node(treedata->model, &treedata->iter, 
@@ -591,7 +662,7 @@ extern GtkTreeStore *create_treestore(GtkTreeView *tree_view,
 	
 	treestore = gtk_tree_store_newv(count, types);
 	if(!treestore) {
-		g_error("Can't create treestore.\n");
+		g_print("Can't create treestore.\n");
 		return NULL;
 	}
 	
@@ -612,11 +683,22 @@ extern GtkTreeStore *create_treestore(GtkTreeView *tree_view,
 			
 			break;
 		case G_TYPE_STRING:
-			if(!strcasecmp(display_data[i].name, "Nodes")) {
+			if(!strcasecmp(display_data[i].name, "Nodes")
+			   || !strcasecmp(display_data[i].name, "Real Memory")
+			   || !strcasecmp(display_data[i].name, "Tmp Disk")) {
 				gtk_tree_sortable_set_sort_func(
 					GTK_TREE_SORTABLE(treestore), 
 					display_data[i].id, 
 					_sort_iter_compare_func_nodes,
+					GINT_TO_POINTER(display_data[i].id), 
+					NULL); 
+				break;
+			} else if(!strcasecmp(display_data[i].name,
+					      "BP List")) {
+				gtk_tree_sortable_set_sort_func(
+					GTK_TREE_SORTABLE(treestore), 
+					display_data[i].id, 
+					_sort_iter_compare_func_bp_list,
 					GINT_TO_POINTER(display_data[i].id), 
 					NULL); 
 				break;
@@ -702,7 +784,7 @@ extern popup_info_t *create_popup_info(int type, int dest_type, char *title)
 	GtkWidget *label = NULL;
 	GtkWidget *table = NULL;
 	popup_info_t *popup_win = xmalloc(sizeof(popup_info_t));
-	
+
 	list_push(popup_list, popup_win);
 	
 	popup_win->spec_info = xmalloc(sizeof(specific_info_t));
@@ -712,7 +794,7 @@ extern popup_info_t *create_popup_info(int type, int dest_type, char *title)
 	popup_win->spec_info->search_info->gchar_data = NULL;
 	popup_win->spec_info->search_info->int_data = NO_VAL;
 	popup_win->spec_info->search_info->int_data2 = NO_VAL;
-	
+
 	popup_win->spec_info->type = type;
 	popup_win->spec_info->title = xstrdup(title);
 	popup_win->popup = gtk_dialog_new_with_buttons(
@@ -760,17 +842,9 @@ extern popup_info_t *create_popup_info(int type, int dest_type, char *title)
 	bin = GTK_BIN(&view->bin);
 	popup_win->grid_table = GTK_TABLE(bin->child);
 	popup_win->grid_button_list = NULL;
-#ifdef HAVE_BG
-	if(dest_type != NODE_PAGE || type != INFO_PAGE) {
-//	gtk_widget_set_size_request(GTK_WIDGET(window), 164, -1);
-		popup_win->grid_button_list = copy_main_button_list();
-		put_buttons_in_table(popup_win->grid_table,
-				     popup_win->grid_button_list);
-	}
-#endif
 
 	table = gtk_table_new(1, 2, FALSE);
-
+	
 	gtk_table_attach(GTK_TABLE(table), GTK_WIDGET(window), 0, 1, 0, 1,
 			 GTK_SHRINK, GTK_EXPAND | GTK_FILL,
 			 0, 0);
@@ -934,6 +1008,9 @@ extern void *popup_thr(popup_info_t *popup_win)
 		break;
 	case BLOCK_PAGE: 
 		specifc_info = specific_info_block;
+		break;
+	case RESV_PAGE: 
+		specifc_info = specific_info_resv;
 		break;
 	case SUBMIT_PAGE: 
 	default:

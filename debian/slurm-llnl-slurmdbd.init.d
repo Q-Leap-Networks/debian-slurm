@@ -61,6 +61,11 @@ getpidfile() {
 }
 
 start() {
+
+    # Create run-time variable data
+    mkdir -p /var/run/slurm-llnl
+    chown slurm:slurm /var/run/slurm-llnl
+
     unset HOME MAIL USER USERNAME 
     log_daemon_msg "Starting $DESCRIPTION"
     STARTERRORMSG="$(start-stop-daemon --start --oknodo \

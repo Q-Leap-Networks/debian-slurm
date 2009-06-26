@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  log.c - slurm logging facilities
- *  $Id: log.c 15367 2008-10-09 20:51:36Z da $
+ *  $Id: log.c 16616 2009-02-20 17:00:27Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  Much of this code was derived or adapted from the log.c component of 
  *  openssh which contains the following notices:
@@ -400,9 +400,15 @@ static char *vxstrfmt(const char *fmt, va_list ap)
 			case 'T': 	/* "%T" => "dd Mon yyyy hh:mm:ss off" */
 				xstrftimecat(buf, "%a %d %b %Y %H:%M:%S %z");   
 				break;
+#ifdef USE_ISO_8601
+			case 'M':       /* "%M" => "yyyy-mm-ddThh:mm:ss"          */
+				xstrftimecat(buf, "%Y-%m-%dT%T");
+				break;
+#else
 			case 'M':       /* "%M" => "Mon DD hh:mm:ss"          */
 				xstrftimecat(buf, "%b %d %T");
 				break;
+#endif
 			case 's':	/* "%s" => append string */
 				/* we deal with this case for efficiency */
 				if (unprocessed == 0) 

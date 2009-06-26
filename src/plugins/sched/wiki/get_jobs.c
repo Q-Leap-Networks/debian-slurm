@@ -1,13 +1,15 @@
 /*****************************************************************************\
  *  get_jobs.c - Process Wiki get job info request
  *****************************************************************************
- *  Copyright (C) 2006 The Regents of the University of California.
+ *  Copyright (C) 2006-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -15,7 +17,7 @@
  *  any later version.
  *
  *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
+ *  to link the code of portions of this program with the OpenSSL library under
  *  certain conditions as described in each individual source file, and 
  *  distribute linked combinations including the two. You must obey the GNU 
  *  General Public License in all respects for all of the code used other than 
@@ -49,6 +51,7 @@
 static char *	_dump_all_jobs(int *job_cnt, time_t update_time);
 static char *	_dump_job(struct job_record *job_ptr, time_t update_time);
 static uint16_t _get_job_cpus_per_task(struct job_record *job_ptr);
+static uint16_t _get_job_tasks_per_node(struct job_record *job_ptr);
 static uint32_t	_get_job_end_time(struct job_record *job_ptr);
 static char *	_get_job_features(struct job_record *job_ptr);
 static uint32_t	_get_job_min_disk(struct job_record *job_ptr);
@@ -81,16 +84,19 @@ static char *	_task_list(struct job_record *job_ptr);
  *	WCLIMIT=<secs>;			wall clock time limit, seconds
  *	TASKS=<cpus>;			CPUs required
  *	[NODES=<nodes>;]		count of nodes required
+ *	[TASKSPERNODE=<cnt>;]		tasks required per node
  *	DPROCS=<cpus_per_task>;		count of CPUs required per task
  *	QUEUETIME=<uts>;		submission time
  *	STARTTIME=<uts>;		time execution started
  *	PARTITIONMASK=<partition>;	partition name
+ *	[DMEM=<mbytes>;]		MB of memory required per cpu
  *	RMEM=<MB>;			MB of memory required
  *	RDISK=<MB>;			MB of disk space required
  *	[COMPLETETIME=<uts>;]		termination time
  *	[SUSPENDTIME=<secs>;]		seconds that job has been suspended
- *	[QOS=<quality_of_service>];	quality of service
- *	[ACCOUNT=<bank_account>];	bank account name
+ *	[ACCOUNT=<bank_account>;]	bank account name
+ *	[QOS=<quality_of_service>;]	quality of service
+ *	[RCLASS=<resource_class>;]	resource class
  *	[COMMENT=<whatever>;]		job dependency or account number
  *	UNAME=<user_name>;		user name
  *	GNAME=<group_name>;		group name
@@ -203,7 +209,7 @@ static char *	_dump_job(struct job_record *job_ptr, time_t update_time)
 {
 	char tmp[16384], *buf = NULL;
 	char *uname, *gname;
-	uint32_t end_time, suspend_time;
+	uint32_t end_time, suspend_time, min_mem;
 
 	if (!job_ptr)
 		return NULL;
@@ -265,10 +271,18 @@ static char *	_dump_job(struct job_record *job_ptr, time_t update_time)
 	xstrcat(buf, tmp);
 
 	if (!IS_JOB_FINISHED(job_ptr)) {
+	        uint16_t tpn;
 		snprintf(tmp, sizeof(tmp),
 			"NODES=%u;",
 			_get_job_min_nodes(job_ptr));
 		xstrcat(buf, tmp);
+		tpn = _get_job_tasks_per_node(job_ptr);
+		if (tpn > 0) {
+			snprintf(tmp, sizeof(tmp),
+				 "TASKPERNODE=%u;",
+				 tpn);
+			xstrcat(buf, tmp);
+		}
 	}
 
 	snprintf(tmp, sizeof(tmp),
@@ -282,6 +296,13 @@ static char *	_dump_job(struct job_record *job_ptr, time_t update_time)
 		(uint32_t) job_ptr->start_time,
 		job_ptr->partition);
 	xstrcat(buf, tmp);
+
+	min_mem = _get_job_min_mem(job_ptr);
+	if (min_mem & MEM_PER_CPU) {
+		snprintf(tmp, sizeof(tmp),
+			"DMEM=%u;", min_mem & (~MEM_PER_CPU));
+		xstrcat(buf, tmp);
+	}
 
 	snprintf(tmp, sizeof(tmp),
 		"RMEM=%u;RDISK=%u;",
@@ -305,7 +326,7 @@ static char *	_dump_job(struct job_record *job_ptr, time_t update_time)
 
 	if (job_ptr->account) {
 		/* allow QOS spec in form "qos-name" */
-		if (!strncmp(job_ptr->account,"qos-",4)) {
+		if (!strncmp(job_ptr->account, "qos-", 4)) {
 			snprintf(tmp, sizeof(tmp),
 				 "QOS=%s;", job_ptr->account + 4);
 		} else {
@@ -316,9 +337,33 @@ static char *	_dump_job(struct job_record *job_ptr, time_t update_time)
 	}
 
 	if (job_ptr->comment && job_ptr->comment[0]) {
-		snprintf(tmp,sizeof(tmp),
-			"COMMENT=%s;", job_ptr->comment);
-		xstrcat(buf,tmp);
+		/* Parse comment for class/qos spec */
+		char *copy;
+		char *cred, *value;
+		copy = xstrdup(job_ptr->comment);
+		cred = strtok(copy, ",");
+		while (cred != NULL) {
+			if (!strncmp(cred, "qos:", 4)) {
+				value = &cred[4];
+				if (value[0] != '\0') {
+					snprintf(tmp, sizeof(tmp),
+						 "QOS=%s;", value);
+					xstrcat(buf, tmp);
+				}
+			} else if (!strncmp(cred, "class:", 6)) {
+				value = &cred[6];
+				if (value[0] != '\0') {
+					snprintf(tmp, sizeof(tmp),
+						"RCLASS=%s;", value);
+					xstrcat(buf, tmp);
+				}
+			}
+			cred = strtok(NULL, ",");
+		}
+		xfree(copy);
+		snprintf(tmp, sizeof(tmp),
+			 "COMMENT=%s;", job_ptr->comment);
+		xstrcat(buf, tmp);
 	}
 
 	if (job_ptr->details &&
@@ -343,6 +388,16 @@ static uint16_t _get_job_cpus_per_task(struct job_record *job_ptr)
 	if (job_ptr->details && job_ptr->details->cpus_per_task)
 		cpus_per_task = job_ptr->details->cpus_per_task;
 	return cpus_per_task;
+}
+
+
+static uint16_t _get_job_tasks_per_node(struct job_record *job_ptr)
+{
+	uint16_t tasks_per_node = 0;
+
+	if (job_ptr->details && job_ptr->details->ntasks_per_node)
+		tasks_per_node = job_ptr->details->ntasks_per_node;
+	return tasks_per_node;
 }
 
 static uint32_t _get_job_min_mem(struct job_record *job_ptr)
@@ -526,20 +581,22 @@ static char * _task_list(struct job_record *job_ptr)
 	int i, j, task_cnt;
 	char *buf = NULL, *host;
 	hostlist_t hl = hostlist_create(job_ptr->nodes);
+	select_job_res_t select_ptr = job_ptr->select_job;
 
+	xassert(select_ptr && select_ptr->cpus);
 	buf = xstrdup("");
 	if (hl == NULL)
 		return buf;
 
-	for (i=0; i<job_ptr->alloc_lps_cnt; i++) {
+	for (i=0; i<select_ptr->nhosts; i++) {
 		host = hostlist_shift(hl);
 		if (host == NULL) {
-			error("bad alloc_lps_cnt for job %u (%s, %d)", 
+			error("bad node_cnt for job %u (%s, %d)", 
 				job_ptr->job_id, job_ptr->nodes,
-				job_ptr->alloc_lps_cnt);
+				job_ptr->node_cnt);
 			break;
 		}
-		task_cnt = job_ptr->alloc_lps[i];
+		task_cnt = select_ptr->cpus[i];
 		if (job_ptr->details && job_ptr->details->cpus_per_task)
 			task_cnt /= job_ptr->details->cpus_per_task;
 		for (j=0; j<task_cnt; j++) {

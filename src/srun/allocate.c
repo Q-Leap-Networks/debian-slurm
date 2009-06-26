@@ -1,14 +1,15 @@
 /*****************************************************************************\
- * src/srun/allocate.c - srun functions for managing node allocations
- * $Id: allocate.c 15808 2008-12-02 23:38:47Z da $
+ *  src/srun/allocate.c - srun functions for managing node allocations
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -61,6 +62,19 @@
 #include "src/srun/opt.h"
 #include "src/srun/debugger.h"
 
+#ifdef HAVE_BG
+#include "src/api/job_info.h"
+#include "src/api/node_select_info.h"
+#include "src/common/node_select.h"
+#include "src/plugins/select/bluegene/plugin/bg_boot_time.h"
+#include "src/plugins/select/bluegene/wrap_rm_api.h"
+#endif
+
+#ifdef HAVE_CRAY_XT
+#include "src/common/node_select.h"
+#endif
+
+
 #define MAX_ALLOC_WAIT 60	/* seconds */
 #define MIN_ALLOC_WAIT  5	/* seconds */
 #define MAX_RETRIES    10
@@ -83,6 +97,18 @@ static void _set_pending_job_id(uint32_t job_id);
 static void _exit_on_signal(int signo);
 static void _signal_while_allocating(int signo);
 static void  _intr_handler(int signo);
+
+#ifdef HAVE_BG
+#define POLL_SLEEP 3			/* retry interval in seconds  */
+static int _wait_bluegene_block_ready(
+			resource_allocation_response_msg_t *alloc);
+static int _blocks_dealloc();
+#endif
+
+#ifdef HAVE_CRAY_XT
+static int  _claim_reservation(resource_allocation_response_msg_t *alloc);
+#endif
+
 
 static sig_atomic_t destroy_job = 0;
 
@@ -165,6 +191,13 @@ static bool _retry()
 		else
 			return false;
 		sleep (++retries);
+	} else if (errno == EINTR) {
+		/* srun may be interrupted by the BLCR checkpoint signal */
+		/*
+		 * XXX: this will cause the old job cancelled and a new job allocated
+		 */
+		debug("Syscall interrupted while allocating resources, retrying.");
+		return true;
 	} else {
 		error("Unable to allocate resources: %m");
 		return false;
@@ -181,6 +214,120 @@ _intr_handler(int signo)
 {
 	destroy_job = 1;
 }
+
+#ifdef HAVE_BG
+/* returns 1 if job and nodes are ready for job to begin, 0 otherwise */
+static int _wait_bluegene_block_ready(resource_allocation_response_msg_t *alloc)
+{
+	int is_ready = 0, i, rc;
+	char *block_id = NULL;
+	int cur_delay = 0;
+	int max_delay = BG_FREE_PREVIOUS_BLOCK + BG_MIN_BLOCK_BOOT +
+		(BG_INCR_BLOCK_BOOT * alloc->node_cnt);
+
+	pending_job_id = alloc->job_id;
+	select_g_get_jobinfo(alloc->select_jobinfo, SELECT_DATA_BLOCK_ID,
+			     &block_id);
+
+	for (i=0; (cur_delay < max_delay); i++) {
+		if(i == 1)
+			debug("Waiting for block %s to become ready for job",
+			     block_id);
+		if (i) {
+			sleep(POLL_SLEEP);
+			rc = _blocks_dealloc();
+			if ((rc == 0) || (rc == -1)) 
+				cur_delay += POLL_SLEEP;
+			debug2("still waiting");
+		}
+
+		rc = slurm_job_node_ready(alloc->job_id);
+
+		if (rc == READY_JOB_FATAL)
+			break;				/* fatal error */
+		if (rc == READY_JOB_ERROR)		/* error */
+			continue;			/* retry */
+		if ((rc & READY_JOB_STATE) == 0)	/* job killed */
+			break;
+		if (rc & READY_NODE_STATE) {		/* job and node ready */
+			is_ready = 1;
+			break;
+		}
+	}
+	if (is_ready)
+     		debug("Block %s is ready for job", block_id);
+	else if(!destroy_job)
+		error("Block %s still not ready", block_id);
+	else /* this should never happen, but if destroy_job
+		send back not ready */
+		is_ready = 0;
+
+	xfree(block_id);
+	pending_job_id = 0;
+
+	return is_ready;
+}
+
+/*
+ * Test if any BG blocks are in deallocating state since they are
+ * probably related to this job we will want to sleep longer
+ * RET	1:  deallocate in progress
+ *	0:  no deallocate in progress
+ *     -1: error occurred
+ */
+static int _blocks_dealloc()
+{
+	static node_select_info_msg_t *bg_info_ptr = NULL, *new_bg_ptr = NULL;
+	int rc = 0, error_code = 0, i;
+	
+	if (bg_info_ptr) {
+		error_code = slurm_load_node_select(bg_info_ptr->last_update, 
+						   &new_bg_ptr);
+		if (error_code == SLURM_SUCCESS)
+			select_g_free_node_info(&bg_info_ptr);
+		else if (slurm_get_errno() == SLURM_NO_CHANGE_IN_DATA) {
+			error_code = SLURM_SUCCESS;
+			new_bg_ptr = bg_info_ptr;
+		}
+	} else {
+		error_code = slurm_load_node_select((time_t) NULL, &new_bg_ptr);
+	}
+
+	if (error_code) {
+		error("slurm_load_partitions: %s\n",
+		      slurm_strerror(slurm_get_errno()));
+		return -1;
+	}
+	for (i=0; i<new_bg_ptr->record_count; i++) {
+		if(new_bg_ptr->bg_info_array[i].state 
+		   == RM_PARTITION_DEALLOCATING) {
+			rc = 1;
+			break;
+		}
+	}
+	bg_info_ptr = new_bg_ptr;
+	return rc;
+}
+#endif	/* HAVE_BG */
+
+#ifdef HAVE_CRAY_XT
+/* returns 1 if job and nodes are ready for job to begin, 0 otherwise */
+static int _claim_reservation(resource_allocation_response_msg_t *alloc)
+{
+	int rc = 0;
+	char *resv_id = NULL;
+
+	select_g_get_jobinfo(alloc->select_jobinfo, SELECT_DATA_RESV_ID,
+			     &resv_id);
+	if (resv_id == NULL)
+		return rc;
+	if (basil_resv_conf(resv_id, alloc->job_id) == SLURM_SUCCESS)
+		rc = 1;
+	xfree(resv_id);
+	return rc;
+}
+#endif
+
 
 int
 allocate_test(void)
@@ -242,6 +389,30 @@ allocate_nodes(void)
 		}
 	}
 	
+	if(resp && !destroy_job) {
+		/*
+		 * Allocation granted!
+		 */
+#ifdef HAVE_BG
+		if (!_wait_bluegene_block_ready(resp)) {
+			if(!destroy_job)
+				error("Something is wrong with the "
+				      "boot of the block.");
+			goto relinquish;
+		}
+#endif
+#ifdef HAVE_CRAY_XT
+		if (!_claim_reservation(resp)) {
+			if(!destroy_job)
+				error("Something is wrong with the ALPS "
+				      "resource reservation.");
+			goto relinquish;
+		}
+#endif
+	} else if (destroy_job) {
+		goto relinquish;
+	}
+
 	xsignal(SIGHUP, _exit_on_signal);
 	xsignal(SIGINT, ignore_signal);
 	xsignal(SIGQUIT, ignore_signal);
@@ -253,6 +424,14 @@ allocate_nodes(void)
 	job_desc_msg_destroy(j);
 
 	return resp;
+
+relinquish:
+
+	slurm_free_resource_allocation_response_msg(resp);
+	if(!destroy_job)
+		slurm_complete_job(resp->job_id, 1);
+	exit(1);
+	return NULL;
 }
 
 void
@@ -287,7 +466,7 @@ existing_allocation(void)
                 else
                         error ("Unable to confirm allocation for job %u: %m",
                               old_job_id);
-                info ("Check SLURM_JOBID environment variable "
+                info ("Check SLURM_JOB_ID environment variable "
                       "for expired or invalid job.");
                 exit(1);
         }
@@ -307,7 +486,6 @@ slurmctld_msg_init(void)
 		return slurmctld_fd;
 
 	slurmctld_fd = -1;
-	slurmctld_comm_addr.hostname = NULL;
 	slurmctld_comm_addr.port = 0;
 
 	if ((slurmctld_fd = slurm_init_msg_engine_port(0)) < 0)
@@ -318,11 +496,8 @@ slurmctld_msg_init(void)
 	/* hostname is not set,  so slurm_get_addr fails
 	   slurm_get_addr(&slurm_address, &port, hostname, sizeof(hostname)); */
 	port = ntohs(slurm_address.sin_port);
-	slurmctld_comm_addr.hostname = xstrdup(opt.ctrl_comm_ifhn);
 	slurmctld_comm_addr.port     = port;
-	debug2("slurmctld messages to host=%s,port=%u", 
-	       slurmctld_comm_addr.hostname, 
-	       slurmctld_comm_addr.port);
+	debug2("srun PMI messages to port=%u", slurmctld_comm_addr.port);
 
 	return slurmctld_fd;
 }
@@ -347,9 +522,8 @@ job_desc_msg_create_from_opts ()
 		j->name   = xstrdup(opt.job_name);
 	else
 		j->name   = xstrdup(opt.cmd_name);
-
-	if (opt.wckey) 
-		xstrfmtcat(j->name, "\"%s", opt.wckey);
+	j->reservation    = xstrdup(opt.reservation);
+	j->wckey          = xstrdup(opt.wckey);
 	
 	j->req_nodes      = xstrdup(opt.nodelist);
 	
@@ -387,9 +561,19 @@ job_desc_msg_create_from_opts ()
 	j->dependency     = opt.dependency;
 	if (opt.nice)
 		j->nice   = NICE_OFFSET + opt.nice;
-	j->task_dist      = opt.distribution;
+
+	if (opt.cpu_bind)
+		j->cpu_bind       = opt.cpu_bind;
+	if (opt.cpu_bind_type)
+		j->cpu_bind_type  = opt.cpu_bind_type;
+	if (opt.mem_bind)
+		j->mem_bind       = opt.mem_bind;
+	if (opt.mem_bind_type)
+		j->mem_bind_type  = opt.mem_bind_type;
 	if (opt.plane_size != NO_VAL)
 		j->plane_size     = opt.plane_size;
+	j->task_dist      = opt.distribution;
+
 	j->group_id       = opt.gid;
 	j->mail_type      = opt.mail_type;
 
@@ -500,8 +684,8 @@ job_desc_msg_destroy(job_desc_msg_t *j)
 	}
 }
 
-int
-create_job_step(srun_job_t *job)
+extern int
+create_job_step(srun_job_t *job, bool use_all_cpus)
 {
 	int i, rc;
 	SigFunc *oquitf = NULL, *ointf = NULL, *otermf = NULL;
@@ -518,16 +702,23 @@ create_job_step(srun_job_t *job)
 	if (!opt.nprocs_set && (opt.ntasks_per_node != NO_VAL))
 		job->ntasks = opt.nprocs = job->nhosts * opt.ntasks_per_node;
 	job->ctx_params.task_count = opt.nprocs;
-	
-	job->ctx_params.cpu_count = opt.overcommit ? job->ctx_params.node_count
-		: (opt.nprocs*opt.cpus_per_task);
+
+	if (use_all_cpus)
+		job->ctx_params.cpu_count = job->cpu_count;
+	else if (opt.overcommit)
+		job->ctx_params.cpu_count = job->ctx_params.node_count;
+	else
+		job->ctx_params.cpu_count = opt.nprocs*opt.cpus_per_task;
 	
 	job->ctx_params.relative = (uint16_t)opt.relative;
 	job->ctx_params.ckpt_interval = (uint16_t)opt.ckpt_interval;
-	job->ctx_params.ckpt_path = opt.ckpt_path;
+	job->ctx_params.ckpt_dir = opt.ckpt_dir;
 	job->ctx_params.exclusive = (uint16_t)opt.exclusive;
 	job->ctx_params.immediate = (uint16_t)opt.immediate;
 	job->ctx_params.verbose_level = (uint16_t)_verbose;
+	if (opt.resv_port_cnt != NO_VAL)
+		job->ctx_params.resv_port_cnt = (uint16_t) opt.resv_port_cnt;
+
 	switch (opt.distribution) {
 	case SLURM_DIST_BLOCK:
 	case SLURM_DIST_ARBITRARY:
@@ -546,6 +737,7 @@ create_job_step(srun_job_t *job)
 		job->ctx_params.task_dist = (job->ctx_params.task_count <= 
 			job->ctx_params.node_count) 
 			? SLURM_DIST_CYCLIC : SLURM_DIST_BLOCK;
+		opt.distribution = job->ctx_params.task_dist;
 		break;
 
 	}
@@ -583,19 +775,22 @@ create_job_step(srun_job_t *job)
 		rc = slurm_get_errno();
 
 		if (opt.immediate ||
-		    ((rc != ESLURM_NODES_BUSY) && (rc != ESLURM_DISABLED))) {
+		    ((rc != ESLURM_NODES_BUSY) && (rc != ESLURM_PORTS_BUSY) &&
+		     (rc != ESLURM_PROLOG_RUNNING) && 
+		     (rc != ESLURM_DISABLED))) {
 			error ("Unable to create job step: %m");
 			return -1;
 		}
 		
 		if (i == 0) {
-			info("Job step creation temporarily disabled, retrying");
+			info("Job step creation temporarily disabled, "
+			     "retrying");
 			ointf  = xsignal(SIGINT,  _intr_handler);
 			otermf  = xsignal(SIGTERM, _intr_handler);
 			oquitf  = xsignal(SIGQUIT, _intr_handler);
 		} else
 			verbose("Job step creation still disabled, retrying");
-		sleep(MIN((i*10), 60));
+		sleep(MIN((i*10+1), 60));
 	}
 	if (i > 0) {
 		xsignal(SIGINT,  ointf);
@@ -609,7 +804,7 @@ create_job_step(srun_job_t *job)
 
 	slurm_step_ctx_get(job->step_ctx, SLURM_STEP_CTX_STEPID, &job->stepid);
 	/*  Number of hosts in job may not have been initialized yet if 
-	 *    --jobid was used or only SLURM_JOBID was set in user env.
+	 *    --jobid was used or only SLURM_JOB_ID was set in user env.
 	 *    Reset the value here just in case.
 	 */
 	slurm_step_ctx_get(job->step_ctx, SLURM_STEP_CTX_NUM_HOSTS,
@@ -622,4 +817,5 @@ create_job_step(srun_job_t *job)
 
 	return 0;
 }
+
 

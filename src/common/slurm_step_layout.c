@@ -6,10 +6,11 @@
  *  Copyright (C) 2005 Hewlett-Packard Development Company, L.P.
  *  Written by Chris Holmes, <cholmes@hp.com>, who borrowed heavily
  *  from other parts of SLURM.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -55,16 +56,16 @@
 /* build maps for task layout on nodes */
 static int _init_task_layout(slurm_step_layout_t *step_layout, 
 			     const char *arbitrary_nodes, 
-			     uint32_t *cpus_per_node, uint32_t *cpu_count_reps,
+			     uint16_t *cpus_per_node, uint32_t *cpu_count_reps,
 			     uint16_t cpus_per_task,
 			     uint16_t task_dist, uint16_t plane_size);
 
 static int _task_layout_block(slurm_step_layout_t *step_layout, 
-			      uint32_t *cpus);
+			      uint16_t *cpus);
 static int _task_layout_cyclic(slurm_step_layout_t *step_layout, 
-			       uint32_t *cpus);
+			       uint16_t *cpus);
 static int _task_layout_plane(slurm_step_layout_t *step_layout,
-			       uint32_t *cpus);
+			       uint16_t *cpus);
 #ifndef HAVE_FRONT_END
 static int _task_layout_hostfile(slurm_step_layout_t *step_layout,
 				 const char *arbitrary_nodes);
@@ -89,7 +90,7 @@ static int _task_layout_hostfile(slurm_step_layout_t *step_layout,
  */
 slurm_step_layout_t *slurm_step_layout_create(
 	const char *tlist,
-	uint32_t *cpus_per_node, uint32_t *cpu_count_reps, 
+	uint16_t *cpus_per_node, uint32_t *cpu_count_reps, 
 	uint32_t num_hosts, 
 	uint32_t num_tasks,
 	uint16_t cpus_per_task,
@@ -99,10 +100,11 @@ slurm_step_layout_t *slurm_step_layout_create(
 	char *arbitrary_nodes = NULL;
 	slurm_step_layout_t *step_layout = 
 		xmalloc(sizeof(slurm_step_layout_t));
-		
+
+	step_layout->task_dist = task_dist;
 	if(task_dist == SLURM_DIST_ARBITRARY) {
 		hostlist_t hl = NULL;
-		char buf[8192];
+		char buf[65536];
 		/* set the node list for the task layout later if user
 		   supplied could be different that the job allocation */
 		arbitrary_nodes = xstrdup(tlist);
@@ -156,7 +158,7 @@ slurm_step_layout_t *slurm_step_layout_create(
  */
 slurm_step_layout_t *fake_slurm_step_layout_create(
 	const char *tlist,
-	uint32_t *cpus_per_node, 
+	uint16_t *cpus_per_node, 
 	uint32_t *cpu_count_reps,
 	uint32_t node_cnt, 
 	uint32_t task_cnt) 
@@ -165,14 +167,12 @@ slurm_step_layout_t *fake_slurm_step_layout_create(
 	int cpu_cnt = 0, cpu_inx = 0, i, j;
 /* 	char *name = NULL; */
 	hostlist_t hl = NULL;
-	slurm_step_layout_t *step_layout = 
-		xmalloc(sizeof(slurm_step_layout_t));
+	slurm_step_layout_t *step_layout = NULL;
 
-	if(node_cnt <= 0 || (task_cnt <= 0 && !cpus_per_node) || !tlist) {
+	if((node_cnt <= 0) || (task_cnt <= 0 && !cpus_per_node) || !tlist) {
 		error("there is a problem with your fake_step_layout request\n"
 		      "node_cnt = %u, task_cnt = %u, tlist = %s",
 		      node_cnt, task_cnt, tlist);
-		xfree(step_layout);
 		return NULL;
 	}
 
@@ -261,6 +261,7 @@ extern slurm_step_layout_t *slurm_step_layout_copy(
 	layout->node_list = xstrdup(step_layout->node_list);
 	layout->node_cnt = step_layout->node_cnt;
 	layout->task_cnt = step_layout->task_cnt;
+	layout->task_dist = step_layout->task_dist;
 	
 /* 	layout->node_addr = xmalloc(sizeof(slurm_addr) * layout->node_cnt); */
 /* 	memcpy(layout->node_addr, step_layout->node_addr,  */
@@ -293,6 +294,7 @@ extern void pack_slurm_step_layout(slurm_step_layout_t *step_layout,
 	packstr(step_layout->node_list, buffer);
 	pack32(step_layout->node_cnt, buffer);
 	pack32(step_layout->task_cnt, buffer);
+	pack16(step_layout->task_dist, buffer);
 /* 	slurm_pack_slurm_addr_array(step_layout->node_addr,  */
 /* 				    step_layout->node_cnt, buffer); */
 
@@ -323,6 +325,7 @@ extern int unpack_slurm_step_layout(slurm_step_layout_t **layout, Buf buffer)
 	safe_unpackstr_xmalloc(&step_layout->node_list, &uint32_tmp, buffer);
 	safe_unpack32(&step_layout->node_cnt, buffer);
 	safe_unpack32(&step_layout->task_cnt, buffer);
+	safe_unpack16(&step_layout->task_dist, buffer);
 	
 /* 	if (slurm_unpack_slurm_addr_array(&(step_layout->node_addr),  */
 /* 					  &uint32_tmp, buffer)) */
@@ -393,14 +396,14 @@ char *slurm_step_layout_host_name (slurm_step_layout_t *s, int taskid)
 /* build maps for task layout on nodes */
 static int _init_task_layout(slurm_step_layout_t *step_layout,
 			     const char *arbitrary_nodes,
-			     uint32_t *cpus_per_node, uint32_t *cpu_count_reps,
+			     uint16_t *cpus_per_node, uint32_t *cpu_count_reps,
 			     uint16_t cpus_per_task,
 			     uint16_t task_dist, uint16_t plane_size)
 {
 	int cpu_cnt = 0, cpu_inx = 0, i;
 	hostlist_t hl = NULL;
 /* 	char *name = NULL; */
-	uint32_t cpus[step_layout->node_cnt];
+	uint16_t cpus[step_layout->node_cnt];
 
 	if (step_layout->node_cnt == 0)
 		return SLURM_ERROR;
@@ -419,7 +422,7 @@ static int _init_task_layout(slurm_step_layout_t *step_layout,
 
 	hl = hostlist_create(step_layout->node_list);
 	/* make sure the number of nodes we think we have 
-	   is the correct number */
+	 * is the correct number */
 	i = hostlist_count(hl);
 	if(step_layout->node_cnt > i)
 		step_layout->node_cnt = i;
@@ -442,6 +445,12 @@ static int _init_task_layout(slurm_step_layout_t *step_layout,
 /* 		debug2("host %d = %s", i, name); */
 /* 		free(name); */
 		cpus[i] = (cpus_per_node[cpu_inx] / cpus_per_task);
+		if (cpus[i] == 0) {
+			/* this can be a result of a heterogeneous allocation
+			 * (e.g. 4 cpus on one node and 2 on the second with
+			 *  cpus_per_task=3)  */
+			cpus[i] = 1;
+		}
 		//info("got %d cpus", cpus[i]);
 		if ((++cpu_cnt) >= cpu_count_reps[cpu_inx]) {
 			/* move to next record */
@@ -552,7 +561,7 @@ static int _task_layout_hostfile(slurm_step_layout_t *step_layout,
 /* to effectively deal with heterogeneous nodes, we fake a cyclic
  * distribution to figure out how many tasks go on each node and
  * then make those assignments in a block fashion */
-static int _task_layout_block(slurm_step_layout_t *step_layout, uint32_t *cpus)
+static int _task_layout_block(slurm_step_layout_t *step_layout, uint16_t *cpus)
 {
 	int i, j, taskid = 0;
 	bool over_subscribe = false;
@@ -600,7 +609,7 @@ static int _task_layout_block(slurm_step_layout_t *step_layout, uint32_t *cpus)
  *                     12 13 14 15  etc.
  */
 static int _task_layout_cyclic(slurm_step_layout_t *step_layout, 
-			       uint32_t *cpus)
+			       uint16_t *cpus)
 {
 	int i, j, taskid = 0;
 	bool over_subscribe = false;
@@ -647,7 +656,7 @@ static int _task_layout_cyclic(slurm_step_layout_t *step_layout,
  *                     12 13 14 15  etc.
  */
 static int _task_layout_plane(slurm_step_layout_t *step_layout,
-			       uint32_t *cpus)
+			       uint16_t *cpus)
 {
 	int i, j, k, taskid = 0;
 
@@ -703,4 +712,45 @@ static int _task_layout_plane(slurm_step_layout_t *step_layout,
 #endif	  
 	
 	return SLURM_SUCCESS;
+}
+
+extern char *slurm_step_layout_type_name(task_dist_states_t task_dist)
+{
+	switch(task_dist) {
+	case SLURM_DIST_CYCLIC:
+		return "Cyclic";
+		break;
+	case SLURM_DIST_BLOCK:	/* distribute tasks filling node by node */
+		return "Block";
+		break;
+	case SLURM_DIST_ARBITRARY:	/* arbitrary task distribution  */
+		return "Arbitrary";
+		break;
+	case SLURM_DIST_PLANE:	/* distribute tasks by filling up
+				   planes of lllp first and then by
+				   going across the nodes See
+				   documentation for more
+				   information */
+		return "Plane";
+		break;
+	case SLURM_DIST_CYCLIC_CYCLIC:/* distribute tasks 1 per node:
+				   round robin: same for lowest
+				   level of logical processor (lllp) */
+		return "CCyclic";
+		break;
+	case SLURM_DIST_CYCLIC_BLOCK: /* cyclic for node and block for lllp  */
+		return "CBlock";
+		break;
+	case SLURM_DIST_BLOCK_CYCLIC: /* block for node and cyclic for lllp  */
+		return "BCyclic";
+		break;
+	case SLURM_DIST_BLOCK_BLOCK:	/* block for node and block for lllp  */
+		return "BBlock";
+		break;
+	case SLURM_NO_LLLP_DIST:	/* No distribution specified for lllp */
+	case SLURM_DIST_UNKNOWN:
+	default:
+		return "Unknown";
+
+	}
 }

@@ -24,7 +24,9 @@ case "$1" in
          rm -rf /etc/slurm-llnl/slurmdbd.conf
          rm -rf /var/log/slurm-llnl/slurmdbd*log*
 	 if [ ! -e /usr/sbin/slurmctld ] ; then 
+           pkill -9 -u slurm
 	   deluser --quiet slurm
+           rm -rf /var/run/slurm-llnl
 	 fi
         ;;
 

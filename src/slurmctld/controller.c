@@ -2,13 +2,14 @@
  *  controller.c - main control machine daemon for slurm
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>, Kevin Tew <tew1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -59,6 +60,7 @@
 
 #include <slurm/slurm_errno.h>
 
+#include "src/common/assoc_mgr.h"
 #include "src/common/checkpoint.h"
 #include "src/common/daemonize.h"
 #include "src/common/fd.h"
@@ -72,24 +74,28 @@
 #include "src/common/slurm_accounting_storage.h"
 #include "src/common/slurm_auth.h"
 #include "src/common/slurm_jobcomp.h"
+#include "src/common/slurm_priority.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/switch.h"
 #include "src/common/uid.h"
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
-#include "src/common/assoc_mgr.h"
 
 #include "src/slurmctld/agent.h"
+#include "src/slurmctld/basil_interface.h"
 #include "src/slurmctld/job_scheduler.h"
 #include "src/slurmctld/licenses.h"
 #include "src/slurmctld/locks.h"
 #include "src/slurmctld/ping_nodes.h"
+#include "src/slurmctld/port_mgr.h"
 #include "src/slurmctld/proc_req.h"
 #include "src/slurmctld/read_config.h"
+#include "src/slurmctld/reservation.h"
 #include "src/slurmctld/slurmctld.h"
 #include "src/slurmctld/sched_plugin.h"
 #include "src/slurmctld/srun_comm.h"
 #include "src/slurmctld/state_save.h"
+#include "src/slurmctld/topo_plugin.h"
 #include "src/slurmctld/trigger_mgr.h"
 
 
@@ -145,6 +151,9 @@ void *acct_db_conn = NULL;
 int accounting_enforce = 0;
 int association_based_accounting = 0;
 bool ping_nodes_now = false;
+int      cluster_procs = 0;
+struct switch_record *switch_record_table = NULL;
+int switch_record_cnt = 0;
 
 /* Local variables */
 static int	daemonize = DEFAULT_DAEMONIZE;
@@ -156,7 +165,7 @@ static int	recover   = DEFAULT_RECOVER;
 static pthread_cond_t server_thread_cond = PTHREAD_COND_INITIALIZER;
 static pid_t	slurmctld_pid;
 static char    *slurm_conf_filename;
-
+static int      primary = 1 ;
 /*
  * Static list of signals to block in this process
  * *Must be zero-terminated*
@@ -186,6 +195,7 @@ inline static void  _update_cred_key(void);
 inline static void  _usage(char *prog_name);
 static bool         _wait_for_server_thread(void);
 static void *       _assoc_cache_mgr(void *no_data);
+static void         _become_slurm_user(void);
 
 typedef struct connection_arg {
 	int newsockfd;
@@ -201,8 +211,7 @@ int main(int argc, char *argv[])
 	slurmctld_lock_t config_write_lock = {
 		WRITE_LOCK, WRITE_LOCK, WRITE_LOCK, WRITE_LOCK };
 	assoc_init_args_t assoc_init_arg;
-	pthread_t assoc_cache_thread = 0;
-	gid_t slurm_user_gid;
+	pthread_t assoc_cache_thread;
 
 	/*
 	 * Establish initial configuration
@@ -224,43 +233,7 @@ int main(int argc, char *argv[])
 	 * able to write a core dump.
 	 */
 	_init_pidfile();
-
-	/* Determine SlurmUser gid */
-	slurm_user_gid = gid_from_uid(slurmctld_conf.slurm_user_id);
-	if (slurm_user_gid == (gid_t) -1) {
-		fatal("Failed to determine gid of SlurmUser(%d)", 
-		      slurm_user_gid);
-	}
-
-	/* Initialize supplementary groups ID list for SlurmUser */
-	if (getuid() == 0) {
-		/* root does not need supplementary groups */
-		if ((slurmctld_conf.slurm_user_id == 0) &&
-		    (setgroups(0, NULL) != 0)) {
-			fatal("Failed to drop supplementary groups, "
-			      "setgroups: %m");
-		} else if ((slurmctld_conf.slurm_user_id != getuid()) &&
-			   initgroups(slurmctld_conf.slurm_user_name, 
-				      slurm_user_gid)) {
-			fatal("Failed to set supplementary groups, "
-			      "initgroups: %m");
-		}
-	} else {
-		info("Not running as root. Can't drop supplementary groups");
-	}
-
-	/* Set GID to GID of SlurmUser */
-	if ((slurm_user_gid != getegid()) &&
-	    (setgid(slurm_user_gid))) {
-		fatal("Failed to set GID to %d", slurm_user_gid);
-	}
-
-	/* Set UID to UID of SlurmUser */
-	if ((slurmctld_conf.slurm_user_id != getuid()) &&
-	    (setuid(slurmctld_conf.slurm_user_id))) {
-		fatal("Can not set uid to SlurmUser(%d): %m", 
-		      slurmctld_conf.slurm_user_id);
-	}
+	_become_slurm_user();
 
 	if (stat(slurmctld_conf.mail_prog, &stat_buf) != 0)
 		error("Configured MailProg is invalid");
@@ -372,20 +345,26 @@ int main(int argc, char *argv[])
 			fatal("slurmdbd and/or database must be up at "
 			      "slurmctld start time");
 		}
-	}
+	}  
+
+	/* Now load the usage from a flat file since it isn't kept in
+	   the database No need to check for an error since if this
+	   fails we will get an error message and we will go on our
+	   way.  If we get an error we can't do anything about it. 
+	*/
+	load_assoc_usage(slurmctld_conf.state_save_location);
 
 	/* This thread is looking for when we get correct data from
 	   the database so we can update the assoc_ptr's in the jobs
 	*/
-	if(running_cache) {
+	if (running_cache) {
 		slurm_attr_init(&thread_attr);
-		if (pthread_create(
-			    &assoc_cache_thread, 
-			    &thread_attr, _assoc_cache_mgr, NULL))
+		if (pthread_create(&assoc_cache_thread, &thread_attr, 
+				  _assoc_cache_mgr, NULL))
 			fatal("pthread_create error %m");
 		slurm_attr_destroy(&thread_attr);
 	}
-
+	
 	info("slurmctld version %s started on cluster %s",
 	     SLURM_VERSION, slurmctld_cluster_name);
 
@@ -429,10 +408,11 @@ int main(int argc, char *argv[])
 		    (strcmp(node_name,
 			    slurmctld_conf.backup_controller) == 0)) {
 			slurm_sched_fini();	/* make sure shutdown */
+			primary = 0;
 			run_backup();
 		} else if (slurmctld_conf.control_machine &&
-			 (strcmp(node_name, slurmctld_conf.control_machine) 
-			  == 0)) {
+			   (strcmp(node_name, slurmctld_conf.control_machine)
+			    == 0)) {
 			(void) _shutdown_backup_controller(SHUTDOWN_WAIT);
 			/* Now recover the remaining state information */
 			if (switch_restore(slurmctld_conf.state_save_location,
@@ -448,6 +428,8 @@ int main(int argc, char *argv[])
 			
 			if (recover == 0) 
 				_accounting_mark_all_nodes_down("cold-start");
+
+			primary = 1;
 			
 		} else {
 			error("this host (%s) not valid controller (%s or %s)",
@@ -456,7 +438,7 @@ int main(int argc, char *argv[])
 			exit(0);
 		}
 
-		if(!acct_db_conn) {
+		if (!acct_db_conn) {
 			acct_db_conn = 
 				acct_storage_g_get_connection(true, 0, false);
 			/* We only send in a variable the first time
@@ -480,8 +462,13 @@ int main(int argc, char *argv[])
 			slurmctld_conf.slurmctld_port);
 		
 		_accounting_cluster_ready();
+
+		if (slurm_priority_init() != SLURM_SUCCESS)
+			fatal("failed to initialize priority plugin");
+
 		if (slurm_sched_init() != SLURM_SUCCESS)
 			fatal("failed to initialize scheduling plugin");
+
 
 		/*
 		 * create attached thread to process RPCs
@@ -500,8 +487,8 @@ int main(int argc, char *argv[])
 		 */
 		slurm_attr_init(&thread_attr);
 		if (pthread_create(&slurmctld_config.thread_id_sig,
-				 &thread_attr, _slurmctld_signal_hand,
-				 NULL))
+				   &thread_attr, _slurmctld_signal_hand,
+				   NULL))
 			fatal("pthread_create %m");
 		slurm_attr_destroy(&thread_attr);
 
@@ -510,8 +497,8 @@ int main(int argc, char *argv[])
 		 */
 		slurm_attr_init(&thread_attr);
 		if (pthread_create(&slurmctld_config.thread_id_save,
-				&thread_attr, slurmctld_state_save,
-				NULL))
+				   &thread_attr, slurmctld_state_save,
+				   NULL))
 			fatal("pthread_create %m");
 		slurm_attr_destroy(&thread_attr);
 
@@ -520,8 +507,8 @@ int main(int argc, char *argv[])
 		 */
 		slurm_attr_init(&thread_attr);
 		if (pthread_create(&slurmctld_config.thread_id_power,
-				&thread_attr, init_power_save,
-				NULL))
+				   &thread_attr, init_power_save,
+				   NULL))
 			fatal("pthread_create %m");
 		slurm_attr_destroy(&thread_attr);
 
@@ -531,14 +518,16 @@ int main(int argc, char *argv[])
 		_slurmctld_background(NULL);
 
 		/* termination of controller */
+		slurm_priority_fini();
 		shutdown_state_save();
 		pthread_join(slurmctld_config.thread_id_sig,  NULL);
 		pthread_join(slurmctld_config.thread_id_rpc,  NULL);
 		pthread_join(slurmctld_config.thread_id_save, NULL);
-		pthread_join(slurmctld_config.thread_id_power,NULL);
-		if(assoc_cache_thread) {
-			/* end the thread here just say we aren't
-			 * running cache so it ends */
+
+		if (running_cache) {
+			/* break out and end the association cache
+			 * thread since we are shuting down, no reason
+			 * to wait for current info from the database */
 			slurm_mutex_lock(&assoc_cache_mutex);
 			running_cache = (uint16_t)NO_VAL;
 			pthread_cond_signal(&assoc_cache_cond);
@@ -553,17 +542,30 @@ int main(int argc, char *argv[])
 		/* Save any pending state save RPCs */
 		acct_storage_g_close_connection(&acct_db_conn);
 
+		/* join the power save thread after saving all state
+		 * since it could wait a while waiting for spawned
+		 * processes to exit */
+		pthread_join(slurmctld_config.thread_id_power, NULL);
+
 		if (slurmctld_config.resume_backup == false)
 			break;
+
+		/* primary controller doesn't resume backup mode */
+		if ((slurmctld_config.resume_backup == true) &&
+		    (primary == 1))
+			break;
+
 		recover = 2;
 	}
 
 	/* Since pidfile is created as user root (its owner is
 	 *   changed to SlurmUser) SlurmUser may not be able to 
 	 *   remove it, so this is not necessarily an error. */
-	if (unlink(slurmctld_conf.slurmctld_pidfile) < 0)
+	if (unlink(slurmctld_conf.slurmctld_pidfile) < 0) {
 		verbose("Unable to remove pidfile '%s': %m",
 			slurmctld_conf.slurmctld_pidfile);
+	}
+	
 	
 #ifdef MEMORY_LEAK_DEBUG
 	/* This should purge all allocated memory,   *\
@@ -581,21 +583,24 @@ int main(int argc, char *argv[])
 	if (i >= 10)
 		error("Left %d agent threads active", cnt);
 
-	slurm_sched_fini();
+	slurm_sched_fini();	/* Stop all scheduling */
 
 	/* Purge our local data structures */
 	job_fini();
 	part_fini();	/* part_fini() must preceed node_fini() */
 	node_fini();
+	resv_fini();
 	trigger_fini();
 	assoc_mgr_fini(slurmctld_conf.state_save_location);
+	reserve_port_config(NULL);
 
-	/* Plugins are needed to purge job/node data structures,
+	/* Some plugins are needed to purge job/node data structures,
 	 * unplug after other data structures are purged */
 	g_slurm_jobcomp_fini();
 	slurm_acct_storage_fini();
 	slurm_jobacct_gather_fini();
 	slurm_select_fini();
+	slurm_topo_fini();
 	checkpoint_fini();
 	slurm_auth_fini();
 	switch_fini();
@@ -621,7 +626,7 @@ int main(int argc, char *argv[])
 	xfree(slurmctld_cluster_name);
 	if (cnt) {
 		info("Slurmctld shutdown completing with %d active agent "
-			"threads\n\n", cnt);
+		     "thread", cnt);
 	}
 	log_fini();
 	
@@ -677,7 +682,11 @@ static void  _init_config(void)
 }
 
 /* Read configuration file.
- * Same name as API function for use in accounting_storage plugin */
+ * Same name as API function for use in accounting_storage plugin.
+ * Anything you add to this function must be added to the
+ * _slurm_rpc_reconfigure_controller function inside proc_req.c try
+ * to keep these in sync.  
+ */
 extern int slurm_reconfigure(void)
 {
 	/* Locks: Write configuration, job, node, and partition */
@@ -702,6 +711,8 @@ extern int slurm_reconfigure(void)
 	trigger_reconfig();
 	slurm_sched_partition_change();	/* notify sched plugin */
 	select_g_reconfigure();		/* notify select plugin too */
+	priority_g_reconfig();          /* notify priority plugin too */
+
 	return rc;
 }
 
@@ -798,6 +809,7 @@ static void *_slurmctld_rpc_mgr(void *no_data)
 	slurmctld_lock_t config_read_lock = { 
 		READ_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
 	int sigarray[] = {SIGUSR1, 0};
+	char* node_addr = NULL;
 
 	(void) pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 	(void) pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
@@ -809,12 +821,26 @@ static void *_slurmctld_rpc_mgr(void *no_data)
 	    (&thread_attr_rpc_req, PTHREAD_CREATE_DETACHED))
 		fatal("pthread_attr_setdetachstate %m");
 
+	/* set node_addr to bind to (NULL means any) */
+	if (slurmctld_conf.backup_controller && slurmctld_conf.backup_addr &&
+	    (strcmp(node_name, slurmctld_conf.backup_controller) == 0) &&
+	    (strcmp(slurmctld_conf.backup_controller,
+		    slurmctld_conf.backup_addr) != 0)) {
+		node_addr = slurmctld_conf.backup_addr ;
+	}
+	else if ((strcmp(node_name,slurmctld_conf.control_machine) == 0) &&
+		 (strcmp(slurmctld_conf.control_machine,
+			 slurmctld_conf.control_addr) != 0)) {
+		node_addr = slurmctld_conf.control_addr ;
+	}
+
 	/* initialize port for RPCs */
 	lock_slurmctld(config_read_lock);
-	if ((sockfd = slurm_init_msg_engine_port(slurmctld_conf.
-						 slurmctld_port))
+	if ((sockfd = slurm_init_msg_engine_addrname_port(node_addr,
+							  slurmctld_conf.
+							  slurmctld_port))
 	    == SLURM_SOCKET_ERROR)
-		fatal("slurm_init_msg_engine_port error %m");
+		fatal("slurm_init_msg_engine_addrname_port error %m");
 	unlock_slurmctld(config_read_lock);
 	slurm_get_stream_addr(sockfd, &srv_addr);
 	slurm_get_ip_str(&srv_addr, &port, ip, sizeof(ip));
@@ -973,11 +999,13 @@ static void _free_server_thread(void)
 
 static int _accounting_cluster_ready()
 {
-	uint32_t procs = 0;
 	struct node_record *node_ptr;
 	int i;
 	int rc = SLURM_ERROR;
 	time_t event_time = time(NULL);
+	int procs = 0;
+	bitstr_t *total_node_bitmap = NULL;
+	char *cluster_nodes = NULL;
 
 	node_ptr = node_record_table_ptr;
 	for (i = 0; i < node_record_count; i++, node_ptr++) {
@@ -993,9 +1021,25 @@ static int _accounting_cluster_ready()
 #endif
 	}
 
+	/* Since cluster_procs is used else where we need to keep a
+	   local var here to avoid race conditions on cluster_procs
+	   not being correct.
+	*/
+	cluster_procs = procs;
+
+	/* Now get the names of all the nodes on the cluster at this
+	   time and send it also.
+	*/
+	total_node_bitmap = bit_alloc(node_record_count);
+	bit_nset(total_node_bitmap, 0, node_record_count-1);
+	cluster_nodes = bitmap2node_name(total_node_bitmap);
+	FREE_NULL_BITMAP(total_node_bitmap);
+
 	rc = clusteracct_storage_g_cluster_procs(acct_db_conn,
 						 slurmctld_cluster_name,
-						 procs, event_time);
+						 cluster_nodes,
+						 cluster_procs, event_time);
+	xfree(cluster_nodes);
 	if(rc == ACCOUNTING_FIRST_REG) {
 		/* see if we are running directly to a database
 		 * instead of a slurmdbd.
@@ -1004,6 +1048,12 @@ static int _accounting_cluster_ready()
 		rc = SLURM_SUCCESS;
 	}
 
+	/* just incase the numbers change we need to
+	   update the proc count on the cluster inside
+	   the priority plugin */
+	priority_g_set_max_cluster_usage(cluster_procs,
+					 slurmctld_conf.priority_decay_hl);
+		
 	return rc;
 }
 
@@ -1076,6 +1126,7 @@ static void *_slurmctld_background(void *no_data)
 	static time_t last_ping_node_time;
 	static time_t last_ping_srun_time;
 	static time_t last_purge_job_time;
+	static time_t last_resv_time;
 	static time_t last_timelimit_time;
 	static time_t last_assert_primary_time;
 	static time_t last_trigger;
@@ -1112,7 +1163,7 @@ static void *_slurmctld_background(void *no_data)
 	last_sched_time = last_checkpoint_time = last_group_time = now;
 	last_purge_job_time = last_trigger = last_health_check_time = now;
 	last_timelimit_time = last_assert_primary_time = now;
-	last_no_resp_msg_time = now;
+	last_no_resp_msg_time = last_resv_time = now;
 	if (slurmctld_conf.slurmd_timeout) {
 		/* We ping nodes that haven't responded in SlurmdTimeout/3,
 		 * but need to do the test at a higher frequency or we might
@@ -1163,6 +1214,13 @@ static void *_slurmctld_background(void *no_data)
 			break;
 		}
 
+		if (difftime(now, last_resv_time) >= 2) {
+			last_resv_time = now;
+			lock_slurmctld(node_write_lock);
+			set_node_maint_mode();
+			unlock_slurmctld(node_write_lock);
+		}
+
 		if (difftime(now, last_no_resp_msg_time) >= 
 		    no_resp_msg_interval) {
 			last_no_resp_msg_time = now;
@@ -1187,6 +1245,9 @@ static void *_slurmctld_background(void *no_data)
 				last_health_check_time = now;
 				lock_slurmctld(node_write_lock);
 				run_health_check();
+#ifdef HAVE_CRAY_XT
+				basil_query();
+#endif
 				unlock_slurmctld(node_write_lock);
 			}
 		}
@@ -1297,8 +1358,9 @@ void save_all_state(void)
 {
 	/* Each of these functions lock their own databases */
 	schedule_job_save();
-	schedule_part_save();
 	schedule_node_save();
+	schedule_part_save();
+	schedule_resv_save();
 	schedule_trigger_save();
 	select_g_state_save(slurmctld_conf.state_save_location);
 	dump_assoc_mgr_state(slurmctld_conf.state_save_location);
@@ -1314,6 +1376,7 @@ extern void send_all_to_accounting(time_t event_time)
 	debug2("send_all_to_accounting: called");
 	send_jobs_to_accounting();
 	send_nodes_to_accounting(event_time);
+	send_resvs_to_accounting();
 }
 
 /* 
@@ -1642,6 +1705,7 @@ static void *_assoc_cache_mgr(void *no_data)
 {
 	ListIterator itr = NULL;
 	struct job_record *job_ptr = NULL;
+	acct_qos_rec_t qos_rec;
 	acct_association_rec_t assoc_rec;
 	/* Write lock on jobs, read lock on nodes and partitions */
 	slurmctld_lock_t job_write_lock =
@@ -1665,12 +1729,28 @@ static void *_assoc_cache_mgr(void *no_data)
 	}
 	
 	debug2("got real data from the database "
-	       "refreshing the association ptr's %d", list_count(job_list));
+	       "refreshing the association ptr's for %d jobs",
+	       list_count(job_list));
 	itr = list_iterator_create(job_list);
 	while ((job_ptr = list_next(itr))) {
+		if(job_ptr->qos) {
+			memset(&qos_rec, 0, sizeof(acct_qos_rec_t));
+			qos_rec.id = job_ptr->qos;
+			if((assoc_mgr_fill_in_qos(
+				    acct_db_conn, &qos_rec,
+				    accounting_enforce,
+				    (acct_qos_rec_t **)&job_ptr->qos_ptr))
+			   != SLURM_SUCCESS) {
+				verbose("Invalid qos (%u) for job_id %u",
+					job_ptr->qos, job_ptr->job_id);
+				/* not a fatal error, qos could have
+				 * been removed */
+			} 
+		}
 		if(job_ptr->assoc_id) {
 			memset(&assoc_rec, 0, sizeof(acct_association_rec_t));
 			assoc_rec.id = job_ptr->assoc_id;
+
 			debug("assoc is %x (%d) for job %u", 
 			      job_ptr->assoc_ptr, job_ptr->assoc_id, 
 			      job_ptr->job_id);
@@ -1686,6 +1766,7 @@ static void *_assoc_cache_mgr(void *no_data)
 				/* not a fatal error, association could have
 				 * been removed */
 			}
+
 			debug("now assoc is %x (%d) for job %u", 
 			      job_ptr->assoc_ptr, job_ptr->assoc_id, 
 			      job_ptr->job_id);
@@ -1698,3 +1779,47 @@ static void *_assoc_cache_mgr(void *no_data)
 	_accounting_cluster_ready();
 	return NULL;
 }
+
+static void _become_slurm_user(void)
+{
+	gid_t slurm_user_gid;
+
+	/* Determine SlurmUser gid */
+	slurm_user_gid = gid_from_uid(slurmctld_conf.slurm_user_id);
+	if (slurm_user_gid == (gid_t) -1) {
+		fatal("Failed to determine gid of SlurmUser(%d)", 
+		      slurm_user_gid);
+	}
+
+	/* Initialize supplementary groups ID list for SlurmUser */
+	if (getuid() == 0) {
+		/* root does not need supplementary groups */
+		if ((slurmctld_conf.slurm_user_id == 0) &&
+		    (setgroups(0, NULL) != 0)) {
+			fatal("Failed to drop supplementary groups, "
+			      "setgroups: %m");
+		} else if ((slurmctld_conf.slurm_user_id != getuid()) &&
+			   initgroups(slurmctld_conf.slurm_user_name, 
+				      slurm_user_gid)) {
+			fatal("Failed to set supplementary groups, "
+			      "initgroups: %m");
+		}
+	} else {
+		info("Not running as root. Can't drop supplementary groups");
+	}
+
+	/* Set GID to GID of SlurmUser */
+	if ((slurm_user_gid != getegid()) &&
+	    (setgid(slurm_user_gid))) {
+		fatal("Failed to set GID to %d", slurm_user_gid);
+	}
+
+	/* Set UID to UID of SlurmUser */
+	if ((slurmctld_conf.slurm_user_id != getuid()) &&
+	    (setuid(slurmctld_conf.slurm_user_id))) {
+		fatal("Can not set uid to SlurmUser(%d): %m",
+		      slurmctld_conf.slurm_user_id);
+	}
+}
+
+

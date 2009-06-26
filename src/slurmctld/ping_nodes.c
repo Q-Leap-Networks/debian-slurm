@@ -1,14 +1,15 @@
 /*****************************************************************************\
  *  ping_nodes.c - ping the slurmd daemons to test if they respond
  *****************************************************************************
- *  Copyright (C) 2003-2006 The Regents of the University of California.
+ *  Copyright (C) 2003-2007 The Regents of the University of California.
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -176,7 +177,10 @@ void ping_nodes (void)
 		node_ptr = &node_record_table_ptr[i];
 		base_state   = node_ptr->node_state & NODE_STATE_BASE;
 		no_resp_flag = node_ptr->node_state & NODE_STATE_NO_RESPOND;
-		
+
+		if ((base_state == NODE_STATE_FUTURE) ||
+		    (node_ptr->node_state & NODE_STATE_POWER_SAVE))
+			continue;
 		if ((slurmctld_conf.slurmd_timeout == 0) &&
 		    (base_state != NODE_STATE_UNKNOWN)   &&
 		    (no_resp_flag == 0))
@@ -241,7 +245,7 @@ void ping_nodes (void)
 		hostlist_uniq(ping_agent_args->hostlist);
 		hostlist_ranged_string(ping_agent_args->hostlist, 
 			sizeof(host_str), host_str);
-		verbose("Spawning ping agent for %s", host_str);
+		debug("Spawning ping agent for %s", host_str);
 		ping_begin();
 		agent_queue_request(ping_agent_args);
 	}
@@ -253,8 +257,8 @@ void ping_nodes (void)
 		hostlist_uniq(reg_agent_args->hostlist);
 		hostlist_ranged_string(reg_agent_args->hostlist, 
 			sizeof(host_str), host_str);
-		verbose("Spawning registration agent for %s %d hosts", 
-			host_str, reg_agent_args->node_count);
+		debug("Spawning registration agent for %s %d hosts", 
+		      host_str, reg_agent_args->node_count);
 		ping_begin();
 		agent_queue_request(reg_agent_args);
 	}
@@ -287,7 +291,8 @@ extern void run_health_check(void)
 		node_ptr   = &node_record_table_ptr[i];
 		base_state = node_ptr->node_state & NODE_STATE_BASE;
 
-		if (base_state == NODE_STATE_DOWN)
+		if ((base_state == NODE_STATE_DOWN) ||
+		    (base_state == NODE_STATE_FUTURE))
 			continue;
 
 #ifdef HAVE_FRONT_END		/* Operate only on front-end */
@@ -306,7 +311,7 @@ extern void run_health_check(void)
 		hostlist_uniq(check_agent_args->hostlist);
 		hostlist_ranged_string(check_agent_args->hostlist, 
 			sizeof(host_str), host_str);
-		verbose("Spawning health check agent for %s", host_str);
+		debug("Spawning health check agent for %s", host_str);
 		ping_begin();
 		agent_queue_request(check_agent_args);
 	}

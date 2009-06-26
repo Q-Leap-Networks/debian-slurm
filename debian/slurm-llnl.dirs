@@ -4,7 +4,8 @@ usr/share/man/man1
 usr/share/man/man5
 usr/share/man/man8
 etc/slurm-llnl
-var/run/slurm-llnl
-var/run/slurm-llnl/slurmd
-var/run/slurm-llnl/slurmctld
+var/lib/slurm-llnl
+var/lib/slurm-llnl/slurmd
+var/lib/slurm-llnl/slurmctld
+var/lib/slurm-llnl/checkpoint
 var/log/slurm-llnl

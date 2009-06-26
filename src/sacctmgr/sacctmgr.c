@@ -3,14 +3,15 @@
  *	         provides interface to read, write, update, and configure
  *               accounting.
  *****************************************************************************
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -77,15 +78,15 @@ main (int argc, char *argv[])
 	int option_index;
 	static struct option long_options[] = {
 		{"help",     0, 0, 'h'},
+		{"usage",    0, 0, 'h'},
 		{"immediate",0, 0, 'i'},
+		{"noheader",0, 0, 'n'},
 		{"oneliner", 0, 0, 'o'},
-		{"no_header", 0, 0, 'n'},
 		{"parsable", 0, 0, 'p'},
 		{"parsable2", 0, 0, 'P'},
 		{"quiet",    0, 0, 'q'},
 		{"readonly", 0, 0, 'r'},
 		{"associations", 0, 0, 's'},
-		{"usage",    0, 0, 'h'},
 		{"verbose",  0, 0, 'v'},
 		{"version",  0, 0, 'V'},
 		{NULL,       0, 0, 0}
@@ -185,13 +186,18 @@ main (int argc, char *argv[])
 		exit(1);
 	}
 	xfree(temp);
+
 	/* always do a rollback.  If you don't then if there is an
 	 * error you can not rollback ;)
 	 */
 	errno = 0;
 	db_conn = acct_storage_g_get_connection(false, 0, 1);
 	if(errno != SLURM_SUCCESS) {
-		error("sacctmgr: %m");
+		if((input_field_count == 2) &&
+		   (!strncasecmp(argv[2], "Configuration", strlen(argv[1]))) &&
+		   ((!strncasecmp(argv[1], "list", strlen(argv[0]))) || 
+		    (!strncasecmp(argv[1], "show", strlen(argv[0])))))
+			sacctmgr_list_config(false);
 		exit(1);
 	}
 	my_uid = getuid();
@@ -405,7 +411,8 @@ _process_command (int argc, char *argv[])
 	} else if ((strncasecmp (argv[0], "show", MAX(command_len, 3)) == 0) ||
 		   (strncasecmp (argv[0], "list", MAX(command_len, 3)) == 0)) {
 		_show_it((argc - 1), &argv[1]);
-	} else if (strncasecmp (argv[0], "modify", MAX(command_len, 1)) == 0) {
+	} else if (!strncasecmp (argv[0], "modify", MAX(command_len, 1))
+		   || !strncasecmp (argv[0], "update", MAX(command_len, 1))) {
 		_modify_it((argc - 1), &argv[1]);
 	} else if ((strncasecmp (argv[0], "delete",
 				 MAX(command_len, 3)) == 0) ||
@@ -430,8 +437,10 @@ _process_command (int argc, char *argv[])
 		}		
 		readonly_flag = 1;
 	} else if (strncasecmp (argv[0], "rollup", MAX(command_len, 2)) == 0) {
-		time_t my_time = 0;
-		if (argc > 2) {
+		time_t my_start = 0;
+		time_t my_end = 0;
+		uint16_t archive_data = 0;
+		if (argc > 4) {
 			exit_code = 1;
 			fprintf (stderr,
 				 "too many arguments for %s keyword\n",
@@ -439,8 +448,13 @@ _process_command (int argc, char *argv[])
 		}
 
 		if(argc > 1)
-			my_time = parse_time(argv[1], 1);
-		if(acct_storage_g_roll_usage(db_conn, my_time)
+			my_start = parse_time(argv[1], 1);
+		if(argc > 2)
+			my_end = parse_time(argv[2], 1);
+		if(argc > 3)
+			archive_data = atoi(argv[3]);
+		if(acct_storage_g_roll_usage(db_conn, my_start, 
+					     my_end, archive_data)
 		   == SLURM_SUCCESS) {
 			if(commit_check("Would you like to commit rollup?")) {
 				acct_storage_g_commit(db_conn, 1);
@@ -586,6 +600,9 @@ static void _show_it (int argc, char *argv[])
 	} else if (strncasecmp (argv[0], "Clusters", 
 				MAX(command_len, 1)) == 0) {
 		error_code = sacctmgr_list_cluster((argc - 1), &argv[1]);
+	} else if (strncasecmp (argv[0], "Configuration", 
+				MAX(command_len, 1)) == 0) {
+		error_code = sacctmgr_list_config(true);
 	} else if (strncasecmp (argv[0], "QOS", MAX(command_len, 1)) == 0) {
 		error_code = sacctmgr_list_qos((argc - 1), &argv[1]);
 	} else if (strncasecmp (argv[0], "Transactions", 
@@ -714,7 +731,7 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
     Valid <OPTION> values are:                                             \n\
      -h or --help: equivalent to \"help\" command                          \n\
      -i or --immediate: commit changes immediately                         \n\
-     -n or --no_header: no header will be added to the beginning of output \n\
+     -n or --noheader: no header will be added to the beginning of output  \n\
      -o or --oneliner: equivalent to \"oneliner\" command                  \n\
      -p or --parsable: output will be '|' delimited with a '|' at the end  \n\
      -P or --parsable2: output will be '|' delimited without a '|' at the end\n\
@@ -758,17 +775,17 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
      oneliner                 report output one record per line.           \n\
      parsable                 output will be | delimited with an ending '|'\n\
      parsable2                output will be | delimited without an ending '|'\n\
-     readonly                 makes it so no modification can happen.      \n\
      quiet                    print no messages other than error messages. \n\
      quit                     terminate this command.                      \n\
+     readonly                 makes it so no modification can happen.      \n\
      show                     same as list                                 \n\
      verbose                  enable detailed logging.                     \n\
      version                  display tool version number.                 \n\
      !!                       Repeat the last command entered.             \n\
                                                                            \n\
   <ENTITY> may be \"account\", \"association\", \"cluster\",               \n\
-                  \"coordinator\", \"qos\", \"transaction\", \"user\",     \n\
-                  or \"wckey\"                                             \n\
+                  \"configuration\", \"coordinator\", \"qos\",             \n\
+                  \"transaction\", \"user\",or \"wckey\"                   \n\
                                                                            \n\
   <SPECS> are different for each command entity pair.                      \n\
        list account       - Clusters=, Descriptions=, Format=, Names=,     \n\
@@ -789,19 +806,18 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
        delete account     - Clusters=, Descriptions=, Names=,              \n\
                             Organizations=, and Parents=                   \n\
                                                                            \n\
-       list associations  - Accounts=, Clusters=, Format=, IDs=,            \n\
+       list associations  - Accounts=, Clusters=, Format=, IDs=,           \n\
                             Partitions=, Parent=, Tree, Users=,            \n\
                             WithSubAccounts, WithDeleted, WOPInfo,         \n\
                             and WOPLimits                                  \n\
                                                                            \n\
        list cluster       - Format=, Names=                                \n\
-       add cluster        - Fairshare=, GrpCPUMins=, GrpCPUs=, GrpJobs=,   \n\
-                            GrpNodes=, GrpSubmitJob=, GrpWall=, MaxCPUMins=\n\
+       add cluster        - Fairshare=, GrpCPUs=, GrpJobs=,                \n\
+                            GrpNodes=, GrpSubmitJob=, MaxCPUMins=          \n\
                             MaxJobs=, MaxNodes=, MaxWall=, and Name=       \n\
-       modify cluster     - (set options) Fairshare=, GrpCPUMins=,         \n\
+       modify cluster     - (set options) Fairshare=,                      \n\
                             GrpCPUs=, GrpJobs=, GrpNodes=, GrpSubmitJob=,  \n\
-                            GrpWall=, MaxCPUMins=, MaxJobs=, MaxNodes=,    \n\
-                            and MaxWall=                                   \n\
+                            MaxCPUMins=, MaxJobs=, MaxNodes=, and MaxWall= \n\
                             (where options) Names=                         \n\
        delete cluster     - Names=                                         \n\
                                                                            \n\
@@ -841,8 +857,9 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
        list wckey         - Clusters=, End=, Format=, IDs=, Names=,        \n\
                             Start=, User=, and WCKeys=                     \n\
                                                                            \n\
-       archive dump       - Directory=, Jobs, PurgeJobsBefore=,            \n\
-                            PurgeStepsBefore=, Script=, and Steps          \n\
+       archive dump       - Directory=, Events, Jobs, PurgeEventMonths=,   \n\
+                            PurgeJobMonths=, PurgeStepMonths=,             \n\
+                            PurgeSuspendMonths=, Script=, Steps and Suspend\n\
                                                                            \n\
        archive load       - File=, or Insert=                              \n\
                                                                            \n\
@@ -858,10 +875,11 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
                             ParentID, ParentName, Partition, RawQOS, RGT,  \n\
                             User                                           \n\
                                                                            \n\
-       Cluster            - Cluster, ControlHost, ControlPort, Fairshare   \n\
-                            GrpCPUMins, GrpCPUs, GrpJobs, GrpNodes,        \n\
-                            GrpSubmitJob, GrpWall, MaxCPUs, MaxCPUMins,    \n\
-                            MaxJobs, MaxNodes, MaxSubmitJobs, MaxWall      \n\
+       Cluster            - Cluster, ControlHost, ControlPort, CpuCount,   \n\
+                            Fairshare, GrpCPUs, GrpJobs,                   \n\
+                            GrpNodes, GrpSubmitJob, MaxCPUs,               \n\
+                            MaxCPUMins, MaxJobs, MaxNodes, MaxSubmitJobs,  \n\
+                            MaxWall, NodeCount, NodeNames                  \n\
                                                                            \n\
        QOS                - Description, ID, Name                          \n\
                                                                            \n\

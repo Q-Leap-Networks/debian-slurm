@@ -5,10 +5,11 @@
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -653,6 +654,30 @@ extern int get_uint64(char *in_value, uint64_t *out_value, char *type)
 	return SLURM_SUCCESS;
 }
 
+extern int get_double(char *in_value, double *out_value, char *type)
+{
+	char *ptr = NULL, *meat = NULL;
+	double num;
+	
+	if(!(meat = strip_quotes(in_value, NULL, 1))) {
+		error("Problem with strip_quotes");
+		return SLURM_ERROR;
+	}
+	num = strtod(meat, &ptr);
+	if ((num == 0) && ptr && ptr[0]) {
+		error("Invalid value for %s (%s)", type, meat);
+		xfree(meat);
+		return SLURM_ERROR;
+	}
+	xfree(meat);
+	
+	if (num < 0)
+		*out_value = (double) INFINITE;		/* flag to clear */
+	else
+		*out_value = (double) num;
+	return SLURM_SUCCESS;
+}
+
 extern int addto_qos_char_list(List char_list, List qos_list, char *names, 
 			       int option)
 {
@@ -970,6 +995,7 @@ extern List copy_char_list(List char_list)
 extern void sacctmgr_print_coord_list(
 	print_field_t *field, List value, int last)
 {
+	int abs_len = abs(field->len);
 	ListIterator itr = NULL;
 	char *print_this = NULL;
 	acct_coord_rec_t *object = NULL;
@@ -998,10 +1024,13 @@ extern void sacctmgr_print_coord_list(
 	else if(print_fields_parsable_print)
 		printf("%s|", print_this);
 	else {
-		if(strlen(print_this) > field->len) 
-			print_this[field->len-1] = '+';
+		if(strlen(print_this) > abs_len)
+			print_this[abs_len-1] = '+';
 		
-		printf("%-*.*s ", field->len, field->len, print_this);
+		if(field->len == abs_len)
+			printf("%*.*s ", abs_len, abs_len, print_this);
+		else
+			printf("%-*.*s ", abs_len, abs_len, print_this);
 	}
 	xfree(print_this);
 }
@@ -1009,6 +1038,7 @@ extern void sacctmgr_print_coord_list(
 extern void sacctmgr_print_qos_list(print_field_t *field, List qos_list,
 				    List value, int last)
 {
+	int abs_len = abs(field->len);
 	char *print_this = NULL;
 
 	print_this = get_qos_complete_str(qos_list, value);
@@ -1019,10 +1049,13 @@ extern void sacctmgr_print_qos_list(print_field_t *field, List qos_list,
 	else if(print_fields_parsable_print)
 		printf("%s|", print_this);
 	else {
-		if(strlen(print_this) > field->len) 
-			print_this[field->len-1] = '+';
+		if(strlen(print_this) > abs_len) 
+			print_this[abs_len-1] = '+';
 		
-		printf("%-*.*s ", field->len, field->len, print_this);
+		if(field->len == abs_len)
+			printf("%*.*s ", abs_len, abs_len, print_this);
+		else
+			printf("%-*.*s ", abs_len, abs_len, print_this);
 	}
 	xfree(print_this);
 }
@@ -1032,10 +1065,10 @@ extern void sacctmgr_print_assoc_limits(acct_association_rec_t *assoc)
 	if(!assoc)
 		return;
 
-	if(assoc->fairshare == INFINITE)
+	if(assoc->shares_raw == INFINITE)
 		printf("  Fairshare     = NONE\n");
-	else if(assoc->fairshare != NO_VAL) 
-		printf("  Fairshare     = %u\n", assoc->fairshare);
+	else if(assoc->shares_raw != NO_VAL) 
+		printf("  Fairshare     = %u\n", assoc->shares_raw);
 
 	if(assoc->grp_cpu_mins == INFINITE)
 		printf("  GrpCPUMins    = NONE\n");

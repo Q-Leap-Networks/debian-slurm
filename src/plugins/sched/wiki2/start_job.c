@@ -4,10 +4,11 @@
  *  Copyright (C) 2006-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -190,7 +191,7 @@ static int	_start_job(uint32_t jobid, int task_cnt, char *hostlist,
 	static uint32_t cr_test = 0, cr_enabled = 0;
 
 	if (cr_test == 0) {
-		select_g_get_info_from_plugin(SELECT_CR_PLUGIN,
+		select_g_get_info_from_plugin(SELECT_CR_PLUGIN, NULL,
 						&cr_enabled);
 		cr_test = 1;
 	}
@@ -334,6 +335,7 @@ static int	_start_job(uint32_t jobid, int task_cnt, char *hostlist,
 			}
 			wait_string = job_reason_string(wait_reason);
 			job_ptr->state_reason = WAIT_HELD;
+			xfree(job_ptr->state_desc);
 		}
 		*err_code = -910 - wait_reason;
 		snprintf(tmp_msg, sizeof(tmp_msg),

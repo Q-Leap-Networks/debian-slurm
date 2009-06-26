@@ -1,14 +1,16 @@
 /*****************************************************************************\
  * src/slurmd/slurmd/slurmd.h - header for slurmd
- * $Id: slurmd.h 13690 2008-03-21 18:17:38Z jette $
+ * $Id: slurmd.h 17386 2009-05-01 19:40:09Z jette $
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -94,7 +96,8 @@ typedef struct slurmd_config {
 	uint16_t      cr_type;           /* Consumable Resource Type:       *
 					 * CR_SOCKET, CR_CORE, CR_MEMORY,  *
 					 * CR_DEFAULT, etc.                */
-        char         *node_name;        /* node name                       */
+	char         *node_name;	/* node name                       */
+	char         *node_addr;	/* node's address                  */
 	char         *conffile;		/* config filename                 */
 	char         *logfile;		/* slurmd logfile, if any          */
 	char         *spooldir;		/* SlurmdSpoolDir	           */
@@ -104,6 +107,7 @@ typedef struct slurmd_config {
 	char         *pubkey;		/* location of job cred public key */
 	char         *epilog;		/* Path to Epilog script	   */
 	char         *prolog;		/* Path to prolog script           */
+	char         *stepd_loc;	/* Non-standard slurmstepd path    */
 	char         *task_prolog;	/* per-task prolog script          */
 	char         *task_epilog;	/* per-task epilog script          */
 	int           port;	        /* local slurmd port               */
@@ -121,7 +125,8 @@ typedef struct slurmd_config {
 	pthread_mutex_t config_mutex;	/* lock for slurmd_config access   */
 	uint16_t        job_acct_gather_freq;
 	uint16_t	use_pam;
-	uint16_t	use_cpusets;	/* Use cpusets, if available       */
+	uint16_t	task_plugin_param; /* TaskPluginParams, expressed
+					 * using cpu_bind_type_t flags */
 	uint16_t	propagate_prio;	/* PropagatePrioProcess flag       */
 } slurmd_conf_t;
 

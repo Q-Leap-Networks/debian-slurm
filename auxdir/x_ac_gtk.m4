@@ -23,7 +23,6 @@ AC_DEFUN([X_AC_GTK],
 	    PKG_CONFIG_PATH="/usr/lib64/pkgconfig/"
     fi
  
-
 ### Check for pkg-config program
     AC_ARG_WITH(
 	    [pkg-config],

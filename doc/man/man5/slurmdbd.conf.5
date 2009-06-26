@@ -1,4 +1,4 @@
-.TH "slurmdbd.conf" "5" "Feb 2009" "slurmdbd.conf 1.3" "Slurm configuration file"
+.TH "slurmdbd.conf" "5" "February 2009" "slurmdbd.conf 2.0" "Slurm configuration file"
 .SH "NAME"
 slurmdbd.conf \- Slurm Database Daemon (SlurmDBD) configuration file 
 
@@ -28,6 +28,10 @@ read in anytime with sacctmgr load filename.  This directory is where the
 file will be placed archive has ran.  Default is /tmp.
 
 .TP
+\fBArchiveEvents\fR
+Boolean, yes to archive event data, no other wise.  Default is no.
+
+.TP
 \fBArchiveJobs\fR
 Boolean, yes to archive job data, no other wise.  Default is no.
 
@@ -38,22 +42,39 @@ records out of the database into an archive. The script is executed
 with a no arguments, The following environment variables are set.
 .RS
 .TP
-\fBSLURM_ARCHIVE_STEPS\fR 
-1 for archive steps 0 otherwise.
+\fBSLURM_ARCHIVE_EVENTS\fR 
+1 for archive events 0 otherwise.
 .TP
-\fBSLURM_ARCHIVE_LAST_STEP\fR
-Time of last step start to archive.
+\fBSLURM_ARCHIVE_LAST_EVENT\fR
+Time of last event start to archive.
 .TP
 \fBSLURM_ARCHIVE_JOBS\fR
 1 for achive jobs 0 otherwise.
 .TP
 \fBSLURM_ARCHIVE_LAST_JOB\fR
 Time of last job submit to archive.
+.TP
+\fBSLURM_ARCHIVE_STEPS\fR 
+1 for archive steps 0 otherwise.
+.TP
+\fBSLURM_ARCHIVE_LAST_STEP\fR
+Time of last step start to archive.
+.TP
+\fBSLURM_ARCHIVE_SUSPEND\fR 
+1 for archive suspend data 0 otherwise.
+.TP
+\fBSLURM_ARCHIVE_LAST_SUSPEND\fR
+Time of last suspend start to archive.
+.TP
 .RE
 
 .TP
 \fBArchiveSteps\fR
 Boolean, yes to archive step data, no other wise.  Default is no.
+
+.TP
+\fBArchiveSuspend\fR
+Boolean, yes to archive suspend data, no other wise.  Default is no.
 
 .TP
 \fBAuthInfo\fR
@@ -86,22 +107,20 @@ SlurmDbd must be terminated prior to changing the value of \fBAuthType\fR
 and later restarted.
 
 .TP
-\fBDbdAddr\fR
-Name that \fBDbdHost\fR should be referred to in 
-establishing a communications path to the Slurm Database Daemon. 
-This name will be used as an argument to the gethostbyname() 
-function for identification. For example, "elx0000" might be used 
-to designate the ethernet address for node "lx0000". 
-By default the \fBDbdAddr\fR will be identical in value to 
-\fBDbdHost\fR.
-This value must be equal to the \fBSlurmDbdAddr\fR parameter in 
-the slurm.conf file.
+\fBDbdBackupHost\fR
+The name of the machine where the backup Slurm Database Daemon is executed. 
+This host must have access to the same underlying database specified by
+the 'Storage' options mentioned below.
+This should be a node name without the full domain name.  I.e., the hostname
+returned by the \fIgethostname()\fR function cut at the first dot (e.g. use 
+"tux001" rather than "tux001.my.com").
 
 .TP
 \fBDbdHost\fR
 The name of the machine where the Slurm Database Daemon is executed. 
-This should be a node name without the full domain name (e.g. "lx0001"). 
-This value must be specified.
+This should be a node name without the full domain name.  I.e., the hostname
+returned by the \fIgethostname()\fR function cut at the first dot (e.g. use 
+"tux001" rather than "tux001.my.com").  This value must be specified.
 
 .TP
 \fBDbdPort\fR
@@ -123,13 +142,6 @@ The default value is 3.
 When adding a new cluster this will be used as the qos for the cluster 
 unless something is explicitly set by the admin with the create.
  
-.TP
-\fBJobPurge\fR
-Individual job records over this age are purged from the database.
-Aggregated information will be preserved indefinitely.
-The time is a numeric value and is a number of months.
-If zero (default), then job records are never purged.
-
 .TP
 \fBLogFile\fR
 Fully qualified pathname of a file into which the Slurm Database Daemon's 
@@ -173,17 +185,50 @@ prevents users from viewing job records belonging
 to other users unless they are coordinators of the association running the job
 when using sacct.
 .TP
+\fBreservations\fR 
+restricts getting reservation information to users with operator status 
+and above.
+.TP
+\fBusage\fR  
+prevents users from viewing usage of any other user.  
+This applys to sreport.
+.TP
 \fBusers\fR  
 prevents users from viewing information of any user 
 other than themselves, this also makes it so users can only see 
 associations they deal with.  
 Coordinators can see associations of all users they are coordinator of, 
 but can only see themselves when listing users.
-.TP
-\fBusage\fR  
-prevents users from viewing usage of any other user.  
-This applys to sreport.
 .RE
+
+.TP
+\fBPurgeEventMonths\fR
+Events happening on the cluster over this age are purged from the database.
+This includeds node down times and such.
+The time is a numeric value and is a number of months.
+If zero (default), then job step records are never purged.
+
+.TP
+\fBPurgeJobMonths\fR
+Individual job records over this age are purged from the database.
+Aggregated information will be preserved indefinitely.
+The time is a numeric value and is a number of months.
+If zero (default), then job records are never purged.
+
+.TP
+\fBPurgeStepMonths\fR
+Individual job step records over this age are purged from the database.
+Aggregated information will be preserved indefinitely.
+The time is a numeric value and is a number of months.
+If zero (default), then job step records are never purged.
+
+.TP
+\fBPurgeSuspendMonths\fR
+Records of individual suspend times for jobs over this age are purged from the 
+database.
+Aggregated information will be preserved indefinitely.
+The time is a numeric value and is a number of months.
+If zero (default), then job step records are never purged.
 
 .TP
 \fBSlurmUser\fR
@@ -194,17 +239,16 @@ For security purposes, a user other than "root" is recommended.
 The default value is "root". 
 
 .TP
-\fBStepPurge\fR
-Individual job step records over this age are purged from the database.
-Aggregated information will be preserved indefinitely.
-The time is a numeric value and is a number of months.
-If zero (default), then job step records are never purged.
-
-.TP
 \fBStorageHost\fR
 Define the name of the host the database is running where we are going
 to store the data.
 Ideally this should be the host on which slurmdbd executes.
+
+.TP
+\fBStorageBackupHost\fR
+Define the name of the backup host the database is running where we are going
+to store the data.
+Default is none.
 
 .TP
 \fBStorageLoc\fR
@@ -260,9 +304,13 @@ Characterization Key. Must be set to track wckey usage.
 .br
 #
 .br
+ArchiveEvents=yes
+.br
 ArchiveJobs=yes
 .br
 ArchiveSteps=no
+.br
+ArchiveSuspend=no
 .br
 #ArchiveScript=/usr/sbin/slurm.dbd.archive
 .br
@@ -274,9 +322,13 @@ DbdHost=db_host
 .br
 DebugLevel=4
 .br
-JobPurge=12
+PurgeEventMonths=1
 .br
-StepPurge=1
+PurgeJobMonths=12
+.br
+PurgeStepMonths=1
+.br
+PurgeSuspendMonths=1
 .br
 LogFile=/var/log/slurmdbd.log
 .br
@@ -293,7 +345,7 @@ StorageUser=database_mgr
 .SH "COPYING"
 Copyright (C) 2008 Lawrence Livermore National Security.
 Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
-LLNL\-CODE\-402394.
+CODE\-OCEC\-09\-009. All rights reserved.
 .LP
 This file is part of SLURM, a resource management program.
 For details, see <https://computing.llnl.gov/linux/slurm/>.

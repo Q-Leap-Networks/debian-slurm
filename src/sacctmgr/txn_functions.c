@@ -6,10 +6,11 @@
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -190,7 +191,13 @@ extern int sacctmgr_list_txn(int argc, char *argv[])
 		PRINT_WHERE
 	};
 
-	_set_cond(&i, argc, argv, txn_cond, format_list);
+	for (i=0; i<argc; i++) {
+		int command_len = strlen(argv[i]);
+		if (!strncasecmp (argv[i], "Where", MAX(command_len, 5))
+		    || !strncasecmp (argv[i], "Set", MAX(command_len, 3))) 
+			i++;		
+		_set_cond(&i, argc, argv, txn_cond, format_list);
+	}
 
 	if(exit_code) {
 		destroy_acct_txn_cond(txn_cond);
@@ -264,7 +271,7 @@ extern int sacctmgr_list_txn(int argc, char *argv[])
 				       MAX(command_len, 1))) {
 			field->type = PRINT_TS;
 			field->name = xstrdup("Time");
-			field->len = 15;
+			field->len = 19;
 			field->print_routine = print_fields_date;
 		} else if(!strncasecmp("Users", object, MAX(command_len, 4))) {
 			field->type = PRINT_USER;
@@ -283,7 +290,7 @@ extern int sacctmgr_list_txn(int argc, char *argv[])
 			continue;
 		}
 
-		if(newlen > 0) 
+		if(newlen) 
 			field->len = newlen;
 		
 		list_append(print_fields_list, field);		

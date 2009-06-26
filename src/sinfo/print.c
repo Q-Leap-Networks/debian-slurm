@@ -2,13 +2,15 @@
  *  print.c - sinfo print job functions
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov> and 
  *  Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *   
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -485,6 +487,25 @@ int _print_groups(sinfo_data_t * sinfo_data, int width,
 	return SLURM_SUCCESS;
 }
 
+int _print_alloc_nodes(sinfo_data_t * sinfo_data, int width,
+		       bool right_justify, char *suffix)
+{
+	if (sinfo_data) {
+		if (sinfo_data->part_info == NULL)
+			_print_str("n/a", width, right_justify, true);
+		else if (sinfo_data->part_info->allow_alloc_nodes)
+			_print_str(sinfo_data->part_info->allow_alloc_nodes, 
+				   width, right_justify, true);
+		else
+			_print_str("all", width, right_justify, true);
+	} else
+		_print_str("ALLOCNODES", width, right_justify, true);
+	
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
 int _print_memory(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix)
 {
@@ -799,6 +820,26 @@ int _print_time(sinfo_data_t * sinfo_data, int width,
 					width, right_justify, true);
 	} else
 		_print_str("TIMELIMIT", width, right_justify, true);
+
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
+int _print_default_time(sinfo_data_t * sinfo_data, int width,
+				bool right_justify, char *suffix)
+{
+	if (sinfo_data) {
+		if ((sinfo_data->part_info == NULL) ||
+		    (sinfo_data->part_info->default_time == NO_VAL))	      
+			_print_str("n/a", width, right_justify, true);
+		else if (sinfo_data->part_info->default_time == INFINITE)
+			_print_str("infinite", width, right_justify, true);
+		else
+			_print_secs((sinfo_data->part_info->default_time * 60L),
+					width, right_justify, true);
+	} else
+		_print_str("DEFAULTTIME", width, right_justify, true);
 
 	if (suffix)
 		printf("%s", suffix);

@@ -1,14 +1,15 @@
 /*****************************************************************************\
  *  sacctmgr.h - definitions for all sacctmgr modules.
  *****************************************************************************
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -109,6 +110,7 @@ extern int sacctmgr_list_association(int argc, char *argv[]);
 extern int sacctmgr_list_user(int argc, char *argv[]);
 extern int sacctmgr_list_account(int argc, char *argv[]);
 extern int sacctmgr_list_cluster(int argc, char *argv[]);
+extern int sacctmgr_list_config(bool have_db_conn);
 extern int sacctmgr_list_qos(int argc, char *argv[]);
 extern int sacctmgr_list_wckey(int argc, char *argv[]);
 
@@ -138,6 +140,7 @@ extern int commit_check(char *warning);
 extern int get_uint(char *in_value, uint32_t *out_value, char *type);
 extern int get_uint16(char *in_value, uint16_t *out_value, char *type);
 extern int get_uint64(char *in_value, uint64_t *out_value, char *type);
+extern int get_double(char *in_value, double *out_value, char *type);
 extern int addto_qos_char_list(List char_list, List qos_list, char *names, 
 			       int option);
 extern int addto_action_char_list(List char_list, char *names);

@@ -1,14 +1,15 @@
 /*****************************************************************************\
  *  src/slurmd/slurmd/req.c - slurmd request handling
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -101,7 +102,7 @@ typedef struct {
 
 static int  _abort_job(uint32_t job_id);
 static int  _abort_step(uint32_t job_id, uint32_t step_id);
-static char ** _build_env(uint32_t jobid, uid_t uid, char *bg_part_id);
+static char ** _build_env(uint32_t jobid, uid_t uid, char *resv_id);
 static void _delay_rpc(int host_inx, int host_cnt, int usec_per_rpc);
 static void _destroy_env(char **env);
 static bool _slurm_authorized_user(uid_t uid);
@@ -132,8 +133,8 @@ static int  _rpc_health_check(slurm_msg_t *);
 static int  _rpc_step_complete(slurm_msg_t *msg);
 static int  _rpc_stat_jobacct(slurm_msg_t *msg);
 static int  _rpc_daemon_status(slurm_msg_t *msg);
-static int  _run_prolog(uint32_t jobid, uid_t uid, char *bg_part_id);
-static int  _run_epilog(uint32_t jobid, uid_t uid, char *bg_part_id);
+static int  _run_prolog(uint32_t jobid, uid_t uid, char *resv_id);
+static int  _run_epilog(uint32_t jobid, uid_t uid, char *resv_id);
 
 static bool _pause_for_job_completion(uint32_t jobid, char *nodes, 
 		int maxtime);
@@ -543,7 +544,7 @@ _forkexec_slurmstepd(slurmd_step_type_t type, void *req,
 		}
 		if (read(to_slurmd[0], &rc, sizeof(int)) != sizeof(int)) {
 			error("Error reading return code message "
-			      " from slurmstepd: %m");
+			      "from slurmstepd: %m");
 			rc = SLURM_FAILURE;
 		}
 
@@ -560,8 +561,14 @@ _forkexec_slurmstepd(slurmd_step_type_t type, void *req,
 		char slurm_stepd_path[MAXPATHLEN];
 		char *const argv[2] = { slurm_stepd_path, NULL};
 		int failed = 0;
-		snprintf(slurm_stepd_path, sizeof(slurm_stepd_path),
-			 "%s/sbin/slurmstepd", SLURM_PREFIX);
+		if (conf->stepd_loc) {
+			snprintf(slurm_stepd_path, sizeof(slurm_stepd_path),
+				 "%s", conf->stepd_loc);
+		} else {
+			snprintf(slurm_stepd_path, sizeof(slurm_stepd_path),
+				 "%s/sbin/slurmstepd", SLURM_PREFIX);
+		}
+
 		/*
 		 * Child forks and exits
 		 */
@@ -615,7 +622,7 @@ _forkexec_slurmstepd(slurmd_step_type_t type, void *req,
  * The job(step) credential is the only place to get a definitive
  * list of the nodes allocated to a job step.  We need to return
  * a hostset_t of the nodes. Validate the incoming RPC, updating 
- * job_mem and task_mem as needed.
+ * job_mem needed.
  */
 static int
 _check_job_credential(launch_tasks_request_msg_t *req, uid_t uid,
@@ -631,6 +638,8 @@ _check_job_credential(launch_tasks_request_msg_t *req, uid_t uid,
 	uint32_t         jobid = req->job_id;
 	uint32_t         stepid = req->job_step_id;
 	int              tasks_to_launch = req->tasks_to_launch[node_id];
+	uint32_t         alloc_lps = 0;
+
 	/*
 	 * First call slurm_cred_verify() so that all valid
 	 * credentials are checked
@@ -684,56 +693,72 @@ _check_job_credential(launch_tasks_request_msg_t *req, uid_t uid,
 		goto fail;
 	}
 
-        if ((arg.alloc_lps_cnt > 0) && (tasks_to_launch > 0)) {
-                host_index = hostset_find(hset, conf->node_name);
-
-#if(0)
-		/* Left for debugging purposes */
-                if (host_index >= 0)
-                  info(" cons_res %u alloc_lps_cnt %u "
-			"task[%d] = %u = task_to_launch %d host %s ", 
-			arg.jobid, arg.alloc_lps_cnt, host_index, 
-			arg.alloc_lps[host_index], 
-			tasks_to_launch, conf->node_name);
-#endif
-
-                if (host_index < 0) { 
+        if ((arg.job_nhosts > 0) && (tasks_to_launch > 0)) {
+		uint32_t i, i_first_bit=0, i_last_bit=0;
+		host_index = hostset_find(hset, conf->node_name);
+		if ((host_index < 0) || (host_index >= arg.job_nhosts)) { 
                         error("job cr credential invalid host_index %d for "
 			      "job %u", host_index, arg.jobid);
                         goto fail; 
                 }
-		if (host_index > arg.alloc_lps_cnt)
-			error("host_index > alloc_lps_cnt in credential");
-                else if (arg.alloc_lps[host_index] == 0)
-			error("cons_res: zero processors allocated to step");
-                if (tasks_to_launch > arg.alloc_lps[host_index]) {
-			/* This is expected with the --overcommit option */
-			verbose("cons_res: More than one tasks per logical "
-				"processor (%d > %u) on host [%u.%u %ld %s] ",
-				tasks_to_launch, arg.alloc_lps[host_index], 
-				arg.jobid, arg.stepid, (long) arg.uid, 
-				arg.hostlist);
-			verbose("cons_res: Use task/affinity plug-in to bind "
-				"the tasks to the allocated resources");
+		host_index++;	/* change from 0-origin to 1-origin */
+		for (i=0; host_index; i++) {
+			if (host_index > arg.sock_core_rep_count[i]) {
+				i_first_bit += arg.sockets_per_node[i] *
+					       arg.cores_per_socket[i] *
+					       arg.sock_core_rep_count[i];
+				host_index -= arg.sock_core_rep_count[i];
+			} else {
+				i_first_bit += arg.sockets_per_node[i] *
+					       arg.cores_per_socket[i] *
+					       (host_index - 1);
+				i_last_bit = i_first_bit +
+					     arg.sockets_per_node[i] *
+					     arg.cores_per_socket[i];
+				break;
+			}
 		}
-        }
+		/* Now count the allocated processors */
+		for (i = i_first_bit; i < i_last_bit; i++) {
+			if (bit_test(arg.core_bitmap, i))
+				alloc_lps++;
+		}
+                if (alloc_lps == 0) {
+			error("cons_res: zero processors allocated to step");
+			alloc_lps = 1;
+		}
+		if (tasks_to_launch > alloc_lps) {
+			/* This is expected with the --overcommit option
+			 * or hyperthreads */
+			debug("cons_res: More than one tasks per logical "
+			      "processor (%d > %u) on host [%u.%u %ld %s] ",
+			      tasks_to_launch, alloc_lps, arg.jobid,
+			      arg.stepid, (long) arg.uid, arg.hostlist);
+		}
+		/* NOTE: alloc_lps is the count of allocated resources
+		 * (typically cores). Convert to CPU count as needed */
+		if (i_last_bit <= i_first_bit)
+			error("step credential has no CPUs selected");
+		else {
+			i = conf->conf_cpus / (i_last_bit - i_first_bit);
+			if (i > 1)
+				alloc_lps *= i;
+		}
+	} else
+		alloc_lps = 1;
 
 	/* Overwrite any memory limits in the RPC with contents of the 
 	 * memory limit within the credential. 
 	 * Reset the CPU count on this node to correct value. */
 	if (arg.job_mem & MEM_PER_CPU) {
 		req->job_mem = arg.job_mem & (~MEM_PER_CPU);
-		if ((host_index >= 0) && (host_index < arg.alloc_lps_cnt) &&
-		    (arg.alloc_lps[host_index] > 0))
-			req->job_mem *= arg.alloc_lps[host_index];
+		req->job_mem *= alloc_lps;
 	} else
 		req->job_mem = arg.job_mem;
-	req->task_mem = arg.task_mem;	/* Defunct */
-	if ((host_index >= 0) && (host_index < arg.alloc_lps_cnt))
-		req->cpus_allocated[node_id] = arg.alloc_lps[host_index];
+	req->cpus_allocated[node_id] = alloc_lps;
 #if 0
 	info("mem orig:%u cpus:%u limit:%u", 
-	     arg.job_mem, arg.alloc_lps[host_index], req->job_mem);
+	     arg.job_mem, alloc_lps, req->job_mem);
 #endif
 
 	*step_hset = hset;
@@ -949,11 +974,35 @@ _set_batch_job_limits(slurm_msg_t *msg)
 
 	if (slurm_cred_get_args(req->cred, &arg) != SLURM_SUCCESS)
 		return;
-
+		
 	if (arg.job_mem & MEM_PER_CPU) {
+		int i;
+		uint32_t alloc_lps = 0, last_bit = 0;   
+		if (arg.job_nhosts > 0) {
+			last_bit = arg.sockets_per_node[0] * 
+				   arg.cores_per_socket[0];
+			for (i=0; i<last_bit; i++) {
+				if (bit_test(arg.core_bitmap, i))
+					alloc_lps++;
+			}
+		}
+		if (alloc_lps == 0) {
+			error("_set_batch_job_limit: alloc_lps is zero");
+			alloc_lps = 1;
+		}
+
+		/* NOTE: alloc_lps is the count of allocated resources
+		 * (typically cores). Convert to CPU count as needed */
+		if (last_bit < 1)
+			error("Batch job credential allocates no CPUs");
+		else {
+			i = conf->conf_cpus / last_bit;
+			if (i > 1)
+				alloc_lps *= i;
+		}
+
 		req->job_mem = arg.job_mem & (~MEM_PER_CPU);
-		if (arg.alloc_lps_cnt > 1)
-			req->job_mem *= arg.alloc_lps_cnt;
+		req->job_mem *= alloc_lps;
 	} else
 		req->job_mem = arg.job_mem;
 
@@ -967,7 +1016,7 @@ _rpc_batch_job(slurm_msg_t *msg)
 	bool     first_job_run = true;
 	int      rc = SLURM_SUCCESS;
 	uid_t    req_uid = g_slurm_auth_get_uid(msg->auth_cred, NULL);
-	char    *bg_part_id = NULL;
+	char    *resv_id = NULL;
 	bool	 replied = false;
 	slurm_addr *cli = &msg->orig_addr;
 	
@@ -984,6 +1033,8 @@ _rpc_batch_job(slurm_msg_t *msg)
 		rc = ESLURMD_CREDENTIAL_REVOKED;	/* job already ran */
 		goto done;
 	}
+
+	slurmd_batch_request(req->job_id, req);	/* determine task affinity */
 
 	if ((req->step_id != SLURM_BATCH_SCRIPT) && (req->step_id != 0))
 		first_job_run = false;
@@ -1015,12 +1066,16 @@ _rpc_batch_job(slurm_msg_t *msg)
 		/* 
 	 	 * Run job prolog on this node
 	 	 */
+#ifdef HAVE_BG
 		select_g_get_jobinfo(req->select_jobinfo, 
-				     SELECT_DATA_BLOCK_ID, 
-				     &bg_part_id);
-
-		rc = _run_prolog(req->job_id, req->uid, bg_part_id);
-		xfree(bg_part_id);
+				     SELECT_DATA_BLOCK_ID, &resv_id);
+#endif
+#ifdef HAVE_CRAY_XT
+		select_g_get_jobinfo(req->select_jobinfo, 
+				     SELECT_DATA_RESV_ID, &resv_id);
+#endif
+		rc = _run_prolog(req->job_id, req->uid, resv_id);
+		xfree(resv_id);
 		if (rc) {
 			int term_sig, exit_status;
 			if (WIFSIGNALED(rc)) {
@@ -1356,12 +1411,18 @@ _rpc_ping(slurm_msg_t *msg)
 {
 	int        rc = SLURM_SUCCESS;
 	uid_t req_uid = g_slurm_auth_get_uid(msg->auth_cred, NULL);
+	static bool first_msg = true;
 
 	if (!_slurm_authorized_user(req_uid)) {
 		error("Security violation, ping RPC from uid %u",
 		      (unsigned int) req_uid);
+		if (first_msg) {
+			error("Do you have SlurmUser configured as uid %u?",
+			     (unsigned int) req_uid);
+		}
 		rc = ESLURM_USER_ID_MISSING;	/* or bad in this case */
 	}
+	first_msg = false;
 
 	/* Return result. If the reply can't be sent this indicates that
 	 * 1. The network is broken OR
@@ -1387,7 +1448,7 @@ _rpc_health_check(slurm_msg_t *msg)
 	uid_t req_uid = g_slurm_auth_get_uid(msg->auth_cred, NULL);
 
 	if (!_slurm_authorized_user(req_uid)) {
-		error("Security violation, ping RPC from uid %u",
+		error("Security violation, health check RPC from uid %u",
 		      (unsigned int) req_uid);
 		rc = ESLURM_USER_ID_MISSING;	/* or bad in this case */
 	}
@@ -1513,7 +1574,7 @@ _rpc_checkpoint_tasks(slurm_msg_t *msg)
 		goto done3;
 	}
 
-	rc = stepd_checkpoint(fd, req->signal, req->timestamp);
+	rc = stepd_checkpoint(fd, req->timestamp, req->image_dir);
 	if (rc == -1)
 		rc = ESLURMD_JOB_NOTRUNNING;
 
@@ -2565,7 +2626,8 @@ _rpc_suspend_job(slurm_msg_t *msg)
 		while ((stepd = list_next(i))) {
 			if (stepd->jobid != req->job_id) {
 				/* multiple jobs expected on shared nodes */
-				debug3("Step from other job: jobid=%u (this jobid=%u)",
+				debug3("Step from other job: jobid=%u "
+				       "(this jobid=%u)",
 				      stepd->jobid, req->job_id);
 				continue;
 			}
@@ -2625,7 +2687,7 @@ _rpc_abort_job(slurm_msg_t *msg)
 {
 	kill_job_msg_t *req    = msg->data;
 	uid_t           uid    = g_slurm_auth_get_uid(msg->auth_cred, NULL);
-	char           *bg_part_id = NULL;
+	char           *resv_id = NULL;
 
 	debug("_rpc_abort_job, uid = %d", uid);
 	/* 
@@ -2682,11 +2744,16 @@ _rpc_abort_job(slurm_msg_t *msg)
 	}
 
 	save_cred_state(conf->vctx);
-
+#ifdef HAVE_BG
 	select_g_get_jobinfo(req->select_jobinfo, SELECT_DATA_BLOCK_ID,
-		&bg_part_id);
-	_run_epilog(req->job_id, req->job_uid, bg_part_id);
-	xfree(bg_part_id);
+			     &resv_id);
+#endif
+#ifdef HAVE_CRAY_XT
+	select_g_get_jobinfo(req->select_jobinfo, SELECT_DATA_RESV_ID,
+			     &resv_id);
+#endif
+	_run_epilog(req->job_id, req->job_uid, resv_id);
+	xfree(resv_id);
 }
 
 static void 
@@ -2697,7 +2764,7 @@ _rpc_terminate_job(slurm_msg_t *msg)
 	uid_t           uid    = g_slurm_auth_get_uid(msg->auth_cred, NULL);
 	int             nsteps = 0;
 	int		delay;
-	char           *bg_part_id = NULL;
+	char           *resv_id = NULL;
 	uint16_t	base_job_state = req->job_state & (~JOB_COMPLETING);
 	slurm_ctl_conf_t *cf;
 
@@ -2824,10 +2891,16 @@ _rpc_terminate_job(slurm_msg_t *msg)
 
 	save_cred_state(conf->vctx);
 
+#ifdef HAVE_BG
 	select_g_get_jobinfo(req->select_jobinfo, SELECT_DATA_BLOCK_ID,
-		&bg_part_id);
-	rc = _run_epilog(req->job_id, req->job_uid, bg_part_id);
-	xfree(bg_part_id);
+			     &resv_id);
+#endif
+#ifdef HAVE_CRAY_XT
+	select_g_get_jobinfo(req->select_jobinfo, SELECT_DATA_RESV_ID,
+			     &resv_id);
+#endif
+	rc = _run_epilog(req->job_id, req->job_uid, resv_id);
+	xfree(resv_id);
 	
 	if (rc) {
 		int term_sig, exit_status;
@@ -3035,17 +3108,28 @@ _rpc_update_time(slurm_msg_t *msg)
 	slurm_send_rc_msg(msg, rc);
 }
 
-/* NOTE: xfree returned value */
+/* NOTE: call _destroy_env() to free returned value */
 static char **
-_build_env(uint32_t jobid, uid_t uid, char *bg_part_id)
+_build_env(uint32_t jobid, uid_t uid, char *resv_id)
 {
+	char *name;
 	char **env = xmalloc(sizeof(char *));
+
 	env[0]  = NULL;
+	setenvf(&env, "SLURM_JOB_ID", "%u", jobid);
+	setenvf(&env, "SLURM_JOB_UID",   "%u", uid);
+	name = uid_to_string(uid);
+	setenvf(&env, "SLURM_JOB_USER", "%s", name);
+	xfree(name);
 	setenvf(&env, "SLURM_JOBID", "%u", jobid);
 	setenvf(&env, "SLURM_UID",   "%u", uid);
-	if (bg_part_id) {
-		setenvf(&env, "MPIRUN_PARTITION",
-			"%s", bg_part_id);
+	if (resv_id) {
+#ifdef HAVE_BG
+		setenvf(&env, "MPIRUN_PARTITION", "%s", resv_id);
+#endif
+#ifdef HAVE_CRAY_XT
+		setenvf(&env, "BASIL_RESERVATION_ID", "%s", resv_id);
+#endif
 	}
 	return env;
 }
@@ -3066,11 +3150,13 @@ _destroy_env(char **env)
 }
 
 static int 
-_run_prolog(uint32_t jobid, uid_t uid, char *bg_part_id)
+_run_prolog(uint32_t jobid, uid_t uid, char *resv_id)
 {
 	int error_code;
 	char *my_prolog;
-	char **my_env = _build_env(jobid, uid, bg_part_id);
+	char **my_env = _build_env(jobid, uid, resv_id);
+	time_t start_time = time(NULL), diff_time;
+	static uint16_t msg_timeout = 0;
 
 	slurm_mutex_lock(&conf->config_mutex);
 	my_prolog = xstrdup(conf->prolog);
@@ -3080,15 +3166,23 @@ _run_prolog(uint32_t jobid, uid_t uid, char *bg_part_id)
 	xfree(my_prolog);
 	_destroy_env(my_env);
 
+	diff_time = difftime(time(NULL), start_time);
+	if (msg_timeout == 0)
+		msg_timeout = slurm_get_msg_timeout();
+	if (diff_time >= msg_timeout) {
+		error("prolog for job %u ran for %d seconds", 
+		      jobid, diff_time);
+	}
+
 	return error_code;
 }
 
 static int 
-_run_epilog(uint32_t jobid, uid_t uid, char *bg_part_id)
+_run_epilog(uint32_t jobid, uid_t uid, char *resv_id)
 {
 	int error_code;
 	char *my_epilog;
-	char **my_env = _build_env(jobid, uid, bg_part_id);
+	char **my_env = _build_env(jobid, uid, resv_id);
 
 	slurm_mutex_lock(&conf->config_mutex);
 	my_epilog = xstrdup(conf->epilog);

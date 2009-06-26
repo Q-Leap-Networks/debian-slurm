@@ -3,15 +3,16 @@
  *      owned by this user. This is executed via SLURM to synchronize the 
  *      user's job execution with slurmctld configuration of partitions.
  *
- * $Id: slurm_epilog.c 13672 2008-03-19 23:10:58Z jette $
+ * $Id: slurm_epilog.c 17313 2009-04-21 20:28:06Z lipari $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -78,15 +79,15 @@ int main(int argc, char *argv[])
 	char *job_id_char = NULL;
 	uint32_t job_id;
 
-	job_id_char = getenv("SLURM_JOBID");		/* get SLURM job ID */
+	job_id_char = getenv("SLURM_JOB_ID");		/* get SLURM job ID */
 	if (!job_id_char) {
-		fprintf(stderr, "SLURM_JOBID not set\n");
+		fprintf(stderr, "SLURM_JOB_ID not set\n");
 		exit(0);
 	}
 
 	job_id = (uint32_t) atol(job_id_char);
 	if (job_id == 0) {
-		fprintf(stderr, "SLURM_JOBID invalid: %s\n", job_id_char);
+		fprintf(stderr, "SLURM_JOB_ID invalid: %s\n", job_id_char);
 		exit(0);
 	}
 

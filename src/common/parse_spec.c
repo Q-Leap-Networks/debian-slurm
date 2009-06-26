@@ -1,14 +1,15 @@
-/* $Id: parse_spec.c 13672 2008-03-19 23:10:58Z jette $ */
+/* $Id: parse_spec.c 17458 2009-05-12 21:35:36Z dbremer $ */
 /*****************************************************************************\
  * parse_spec.c - configuration file parser
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -40,6 +41,10 @@
 #  include "config.h"
 #endif
 
+#ifndef   _GNU_SOURCE
+#  define _GNU_SOURCE
+#endif
+
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,6 +56,7 @@
 #include "src/common/parse_spec.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
+#include "src/common/slurm_strcasestr.h"
 
 
 #define BUFFER_SIZE 1024
@@ -59,7 +65,6 @@
 static int   _load_long (long *destination, char *keyword, char *in_line) ;
 static int   _load_integer (int *destination, char *keyword, char *in_line) ;
 static int   _load_float (float *destination, char *keyword, char *in_line) ;
-static char *_strcasestr(char *haystack, char *needle);
 
 /* 
  * slurm_parser - parse the supplied specification into keyword/value pairs
@@ -136,7 +141,7 @@ _load_float (float *destination, char *keyword, char *in_line)
 	char *str_ptr1, *str_ptr2, *str_ptr3;
 	int i, str_len1, str_len2;
 
-	str_ptr1 = (char *) _strcasestr (in_line, keyword);
+	str_ptr1 = (char *) slurm_strcasestr (in_line, keyword);
 	if (str_ptr1 != NULL) {
 		str_len1 = strlen (keyword);
 		strcpy (scratch, str_ptr1 + str_len1);
@@ -174,7 +179,7 @@ _load_integer (int *destination, char *keyword, char *in_line)
 	char *str_ptr1, *str_ptr2, *str_ptr3;
 	int i, str_len1, str_len2;
 
-	str_ptr1 = (char *) _strcasestr (in_line, keyword);
+	str_ptr1 = (char *) slurm_strcasestr (in_line, keyword);
 	if (str_ptr1 != NULL) {
 		str_len1 = strlen (keyword);
 		strcpy (scratch, str_ptr1 + str_len1);
@@ -231,7 +236,7 @@ _load_long (long *destination, char *keyword, char *in_line)
 	char *str_ptr1, *str_ptr2, *str_ptr3;
 	int i, str_len1, str_len2;
 
-	str_ptr1 = (char *) _strcasestr (in_line, keyword);
+	str_ptr1 = (char *) slurm_strcasestr (in_line, keyword);
 	if (str_ptr1 != NULL) {
 		str_len1 = strlen (keyword);
 		strcpy (scratch, str_ptr1 + str_len1);
@@ -289,7 +294,7 @@ load_string  (char **destination, char *keyword, char *in_line)
 	char *str_ptr1, *str_ptr2, *str_ptr3;
 	int i, str_len1, str_len2;
 
-	str_ptr1 = (char *) _strcasestr (in_line, keyword);
+	str_ptr1 = (char *) slurm_strcasestr (in_line, keyword);
 	if (str_ptr1 != NULL) {
 		int quoted = 0;
 		str_len1 = strlen (keyword);
@@ -314,28 +319,4 @@ load_string  (char **destination, char *keyword, char *in_line)
 			str_ptr1[i] = ' ';
 	}
 	return 0;
-}
-
-/* case insensitve version of strstr() */
-static char *
-_strcasestr(char *haystack, char *needle)
-{
-	int hay_inx,  hay_size  = strlen(haystack);
-	int need_inx, need_size = strlen(needle);
-	char *hay_ptr = haystack;
-
-	for (hay_inx=0; hay_inx<hay_size; hay_inx++) {
-		for (need_inx=0; need_inx<need_size; need_inx++) {
-			if (tolower((int) hay_ptr[need_inx]) != 
-			    tolower((int) needle [need_inx]))
-				break;		/* mis-match */
-		}
-
-		if (need_inx == need_size)	/* it matched */
-			return hay_ptr;
-		else				/* keep looking */
-			hay_ptr++;
-	}
-
-	return NULL;	/* no match anywhere in string */
 }

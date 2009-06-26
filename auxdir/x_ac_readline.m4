@@ -1,5 +1,5 @@
 ##*****************************************************************************
-## $Id: x_ac_readline.m4 8192 2006-05-25 00:15:05Z morrone $
+## $Id: x_ac_readline.m4 17615 2009-05-27 21:17:29Z jette $
 ##*****************************************************************************
 #  AUTHOR:
 #    Jim Garlick <garlick@llnl.gov>
@@ -39,7 +39,7 @@ AC_DEFUN([X_AC_READLINE],
 	#include <readline/history.h>]], [[
 	char *line = readline("in:");]])],[AC_DEFINE([HAVE_READLINE], [1], 
                  [Define if you are compiling with readline.])],[READLINE_LIBS=""])
-    LIBS="$savedLIBS"
+    LIBS="$saved_LIBS"
   fi
   AC_SUBST(READLINE_LIBS)
 ])

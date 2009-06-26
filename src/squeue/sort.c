@@ -4,10 +4,11 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>, et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -75,6 +76,7 @@ static int _sort_job_by_partition(void *void1, void *void2);
 static int _sort_job_by_priority(void *void1, void *void2);
 static int _sort_job_by_user_id(void *void1, void *void2);
 static int _sort_job_by_user_name(void *void1, void *void2);
+static int _sort_job_by_reservation(void *void1, void *void2);
 
 static int _sort_step_by_id(void *void1, void *void2);
 static int _sort_step_by_node_list(void *void1, void *void2);
@@ -157,6 +159,8 @@ void sort_job_list(List job_list)
 			list_sort(job_list, _sort_job_by_user_name);
 		else if (params.sort[i] == 'U')
 			list_sort(job_list, _sort_job_by_user_id);
+		else if (params.sort[i] == 'v')
+			list_sort(job_list, _sort_job_by_reservation);
 		else if (params.sort[i] == 'X')
 			list_sort(job_list, _sort_job_by_num_sockets);
 		else if (params.sort[i] == 'Y')
@@ -621,6 +625,24 @@ static int _sort_job_by_user_name(void *void1, void *void2)
 	diff = strcmp(name1, name2);
 	xfree(name1);
 	xfree(name2);
+
+	if (reverse_order)
+		diff = -diff;
+	return diff;
+}
+
+static int _sort_job_by_reservation(void *void1, void *void2)
+{
+	int diff;
+	job_info_t *job1 = (job_info_t *) void1;
+	job_info_t *job2 = (job_info_t *) void2;
+	char *val1 = "", *val2 = "";
+
+	if (job1->resv_name)
+		val1 = job1->resv_name;
+	if (job2->resv_name)
+		val2 = job2->resv_name;
+	diff = strcmp(val1, val2);
 
 	if (reverse_order)
 		diff = -diff;

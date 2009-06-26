@@ -3,10 +3,11 @@
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -65,9 +66,15 @@ struct spank_launcher_job_info {
 
 int spank_init (slurmd_job_t *job);
 
+int spank_init_allocator (void);
+
+int spank_init_post_opt (void);
+
 int spank_user (slurmd_job_t *job);
 
 int spank_local_user (struct spank_launcher_job_info *job);
+
+int spank_task_privileged (slurmd_job_t *job, int taskid);
 
 int spank_user_task (slurmd_job_t *job, int taskid);
 
@@ -124,6 +131,12 @@ int spank_print_options (FILE *fp, int width, int left_pad);
  */
 int spank_set_remote_options (job_options_t options);
 
+/*  Set all registered remote options (i.e. those passed to
+ *   spank_process_option) in the current environment for later
+ *   retreival by spank_get_remote_options_env().
+ */
+int spank_set_remote_options_env (void);
+
 /*  Register any remote spank options that exist in `options'
  *    to their respective spank plugins. This function ends up invoking
  *    all plugin option callbacks, and will fail (return < 0) if
@@ -133,5 +146,15 @@ int spank_set_remote_options (job_options_t options);
  *   in the job_options structure, but the funtion does not return failure.
  */
 int spank_get_remote_options (job_options_t options);
+
+/*  Register any remote spank options that exist in the environment `env'
+ *    to their respective spank plugins. This function ends up invoking
+ *    all plugin option callbacks, and will fail (return < 0) if
+ *    a *required* plugin callback returns < 0.
+ *
+ *  A warning is printed if no plugin matches a remote option
+ *   in the job_options structure, but the funtion does not return failure.
+ */
+int spank_get_remote_options_env (char **env);
 
 #endif /* !_PLUGSTACK_H */

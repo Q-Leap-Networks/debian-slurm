@@ -1,13 +1,14 @@
 ############################################################################
-# Copyright (C) 2008 Lawrence Livermore National Security.
 # Copyright (C) 2002-2007 The Regents of the University of California.
+# Copyright (C) 2008-2009 Lawrence Livermore National Security.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
 # Additionals by Joseph Donaghy <donaghy1@llnl.gov>
-# LLNL-CODE-402394.
+# CODE-OCEC-09-009. All rights reserved.
 #
 # This file is part of SLURM, a resource management program.
-# For details, see <http://www.llnl.gov/linux/slurm/>.
+# For details, see <https://computing.llnl.gov/linux/slurm/>.
+# Please also read the supplied file: DISCLAIMER.
 #
 # SLURM is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
@@ -139,7 +140,7 @@ test1.41   Validate SLURM debugger infrastructure (--debugger-test option).
 test1.42   Test of job dependencies (--dependency option).
 test1.43   Test of slurm_job_will_run API, (srun --test-only option).
 test1.44   Read srun's stdout slowly and test for lost data.   
-test1.45   REMOVED
+test1.45   Test srun option --preserve-env
 test1.46   Test srun option --kill-on-bad-exit
 test1.47   Test of job dependencies with singleton parameter.
 test1.48   Test of srun mail options (--mail-type and --mail-user options).
@@ -156,6 +157,7 @@ test1.56   Test buffered standard IO with really long lines
 test1.57   Test of srun --jobid for a new job allocation (used by Moab)
 test1.58   Test of srun --jobid for an existing job allocation
 test1.59   Test of hostfile logic for job steps
+test1.60   Test of labelling output when writing a file per task or per node
 
 **NOTE**   The following tests attempt to utilize multiple CPUs or partitions,
            The test will print "WARNING" and terminate with an exit code of 
@@ -197,6 +199,7 @@ test2.8    Validate scontrol show commands for jobs and steps.
 test2.9    Validate scontrol completing command.
 test2.10   Validate scontrol oneliner mode (--oneliner option).
 test2.11   Validate scontrol listpids command.
+test2.12   Validate scontrol show topology option.
 
 
 test3.#    Testing of scontrol options (best run as SlurmUser or root). 
@@ -211,6 +214,7 @@ test3.7    Test of job suspend/resume.
 test3.8    Test of batch job requeue.
 test3.9    Test of "scontrol show slurmd"
 test3.10   Test of "scontrol notify <jobid> <message>"
+test3.11   Validate scontrol create, delete, and update of reservations.
 UNTESTED   "scontrol abort"    would stop slurm 
 UNTESTED   "scontrol shutdown" would stop slurm
 
@@ -267,6 +271,7 @@ test6.11   Validate scancel quiet option, no warning if job gone
 test6.12   Test scancel signal to batch script (--batch option)
 test6.13   Test routing all signals through slurmctld rather than directly 
            to slurmd (undocumented --ctld option).
+test6.14   Test scancel nodelist option (--nodelist or -w)
 
 test7.#    Testing of other functionality.
 ==========================================
@@ -299,7 +304,7 @@ test8.1    Test of Blue Gene specific sbatch command line options
 test8.2    Test of Blue Gene specific sbatch environment variables
 test8.3    Test of Blue Gene specific job geometry support
 test8.4    Test of Blue Gene MPI job execution
-test8.5    Confirm we can make a 32, 128, and 512 cnode block.
+test8.5    Test creation of all blocks 1 midplane and smaller.
 test8.6    Stress test Dynamic mode block creation.
 test8.7    Test of Blue Gene scheduling with sched/wik2 plugin.
 
@@ -351,9 +356,9 @@ test12.#   Testing of sacct command and options
 test12.1   Test sacct --help option.
 test12.2   Test validity/accuracy of accounting data for exit code, 
            memory and real-time information along with stating a running job.
-(There are many more tests that should probably be added, but HP 
-is taking responsibility for validating this code, so we'll stick 
-with the basics here.)
+test12.3   (EMPTY)
+test12.4   Test sacct --b, g, j, l, n, p, u, v options.
+test12.5   Test sacct --helpformat option.
 
 
 test13.#   Testing of switch plugins
@@ -455,8 +460,7 @@ test17.17  Confirm that node sharing flags are respected  (--nodelist and
            --share options)
 test17.18  Test of job dependencies and deferred begin time (--depedency 
            and --begin options).
-test17.19  Test the launch of a batch job within an existing job allocation.
-           This logic is used by LSF
+test17.19  REMOVED
 test17.20  Test of mail options (--mail-type and --mail-user options)
 test17.21  Tests #SLURM entry functionality in a batch script
 test17.22  Test of running non-existant job, confirm timely termination.
@@ -521,3 +525,25 @@ test21.21  sacctmgr add an account to this cluster and try using it with
 test21.22  sacctmgr load file
 test21.23  sacctmgr wckey
 test21.24  sacctmgr dump file
+test21.25  sacctmgr show config
+
+test22.#   Testing of sreport commands and options. 
+           These also test the sacctmgr archive dump/load functions.
+=================================================
+test22.1   sreport cluster utilization report
+test22.2   sreport h, n, p, P, t, V options
+
+test23.#   Testing of sstat commands and options.
+=================================================
+test23.1   sstat -e, h, usage and V options
+test23.2   sstat --helpformat
+test23.3   sstat -a, n, o, p, P, v options
+
+test24.#   Testing of sshare/priority multifactor plugin.
+=================================================
+test24.1   multifactor plugin algo test
+test24.2   sshare h, n, p, P, v, and V options.
+
+test25.#   Testing of sprio command and options.
+=================================================
+test25.1   sprio all options

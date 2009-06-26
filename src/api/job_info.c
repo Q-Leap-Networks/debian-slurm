@@ -2,13 +2,14 @@
  *  job_info.c - get/print the job state information of slurm
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -40,9 +41,10 @@
 #  include "config.h"
 #endif
 
+#include <ctype.h>
 #include <errno.h>
-#include <pwd.h>
 #include <grp.h>
+#include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -54,13 +56,13 @@
 #include <slurm/slurm_errno.h>
 
 #include "src/api/job_info.h"
+#include "src/common/forward.h"
 #include "src/common/node_select.h"
 #include "src/common/parse_time.h"
 #include "src/common/slurm_auth.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/uid.h"
 #include "src/common/xstring.h"
-#include "src/common/forward.h"
 
 /*
  * slurm_print_job_info_msg - output information about all Slurm 
@@ -125,7 +127,6 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 {
 	int i, j;
 	char time_str[32], select_buf[122], *group_name, *user_name;
-	char *wckey = NULL, *jname = NULL;
 	char tmp1[128], tmp2[128], *tmp3_ptr;
 	char tmp_line[512];
 	char *ionodes = NULL;
@@ -159,26 +160,11 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 		xstrcat(out, "\n   ");
 
 	/****** Line 2 ******/
-	if (job_ptr->name && job_ptr->name[0]) {
-		char *temp = NULL;
-		/* first set the jname to the job_ptr->name */
-		jname = xstrdup(job_ptr->name);
-		/* then grep for " since that is the delimiter for
-		   the wckey */
-		if((temp = strchr(jname, '\"'))) {
-			/* if we have a wckey set the " to NULL to
-			 * end the jname */
-			temp[0] = '\0';
-			/* increment and copy the remainder */
-			temp++;
-			wckey = xstrdup(temp);
-		}
-	}
 	if(slurm_get_track_wckey())
 		snprintf(tmp_line, sizeof(tmp_line), "Name=%s WCKey=%s",
-			 jname, wckey);
+			 job_ptr->name, job_ptr->wckey);
 	else
-		snprintf(tmp_line, sizeof(tmp_line), "Name=%s", jname);
+		snprintf(tmp_line, sizeof(tmp_line), "Name=%s", job_ptr->name);
 		
 	xstrcat(out, tmp_line);
 	if (one_liner)
@@ -188,9 +174,9 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 
 	/****** Line 3 ******/
 	snprintf(tmp_line, sizeof(tmp_line), 
-		"Priority=%u Partition=%s BatchFlag=%u", 
-		job_ptr->priority, job_ptr->partition, 
-		job_ptr->batch_flag);
+		 "Priority=%u Partition=%s BatchFlag=%u Reservation=%s", 
+		 job_ptr->priority, job_ptr->partition, 
+		 job_ptr->batch_flag, job_ptr->resv_name);
 	xstrcat(out, tmp_line);
 	if (one_liner)
 		xstrcat(out, " ");
@@ -408,8 +394,9 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 
 	/****** Line 11 ******/
 	snprintf(tmp_line, sizeof(tmp_line), 
-		"Dependency=%s Account=%s Requeue=%u",
-		job_ptr->dependency, job_ptr->account, job_ptr->requeue);
+		"Dependency=%s Account=%s Requeue=%u Restarts=%u",
+		job_ptr->dependency, job_ptr->account, job_ptr->requeue,
+		job_ptr->restart_cnt);
 	xstrcat(out, tmp_line);
 	if (one_liner)
 		xstrcat(out, " ");
@@ -417,10 +404,18 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 		xstrcat(out, "\n   ");
 
 	/****** Line 12 ******/
+	if (job_ptr->state_desc) {
+		/* Replace white space with underscore for easier parsing */
+		for (j=0; job_ptr->state_desc[j]; j++) {
+			if (isspace(job_ptr->state_desc[j]))
+				job_ptr->state_desc[j] = '_';
+		}
+		tmp3_ptr = job_ptr->state_desc;
+	} else
+		tmp3_ptr = job_reason_string(job_ptr->state_reason);
 	snprintf(tmp_line, sizeof(tmp_line), 
 		"Reason=%s Network=%s",
-		job_reason_string(job_ptr->state_reason), 
-		job_ptr->network);
+		tmp3_ptr, job_ptr->network);
 	xstrcat(out, tmp_line);
 	if (one_liner)
 		xstrcat(out, " ");
@@ -516,6 +511,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 			xstrcat(out, "\n   ");
 		xstrcat(out, select_buf);
 	}
+#ifdef HAVE_BG
 	/****** Line 20 (optional) ******/
 	select_g_sprint_jobinfo(job_ptr->select_jobinfo,
 				select_buf, sizeof(select_buf),
@@ -578,6 +574,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 #endif
 		xstrcat(out, tmp_line);
 	}
+#endif
 	xstrcat(out, "\n\n");
 
 	return out;
@@ -688,15 +685,21 @@ slurm_pid2jobid (pid_t job_pid, uint32_t *jobid)
 	slurm_msg_t req_msg;
 	slurm_msg_t resp_msg;
 	job_id_request_msg_t req;
-	
+	char this_host[256], *this_addr;
+
 	slurm_msg_t_init(&req_msg);
 	slurm_msg_t_init(&resp_msg);
 
 	/*
 	 *  Set request message address to slurmd on localhost
 	 */
+	gethostname_short(this_host, sizeof(this_host));
+	this_addr = slurm_conf_get_nodeaddr(this_host);
+	if (this_addr == NULL)
+		this_addr = xstrdup("localhost");
 	slurm_set_addr(&req_msg.address, (uint16_t)slurm_get_slurmd_port(), 
-		       "localhost");
+		       this_addr);
+	xfree(this_addr);
 
 	req.job_pid      = job_pid;
 	req_msg.msg_type = REQUEST_JOB_ID;
@@ -770,11 +773,11 @@ extern int32_t islurm_get_rem_time__(uint32_t *jobid)
 extern int32_t islurm_get_rem_time2__()
 {
 	uint32_t jobid;
-	char *slurm_jobid = getenv("SLURM_JOBID");
+	char *slurm_job_id = getenv("SLURM_JOB_ID");
 
-	if (slurm_jobid == NULL)
+	if (slurm_job_id == NULL)
 		return 0;
-	jobid = atol(slurm_jobid);
+	jobid = atol(slurm_job_id);
 	return islurm_get_rem_time__(&jobid);
 }
 
@@ -809,7 +812,7 @@ slurm_get_end_time(uint32_t jobid, time_t *end_time_ptr)
 		if (jobid_env) {
 			jobid = jobid_env;
 		} else {
-			char *env = getenv("SLURM_JOBID");
+			char *env = getenv("SLURM_JOB_ID");
 			if (env) {
 				jobid = (uint32_t) atol(env);
 				jobid_env = jobid;

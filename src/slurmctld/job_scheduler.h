@@ -7,10 +7,11 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette@llnl.gov>, et. al.
  *  Derived from dsh written by Jim Garlick <garlick1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -66,6 +67,14 @@ extern int build_feature_list(struct job_record *job_ptr);
 extern int build_job_queue(struct job_queue **job_queue);
 
 /*
+ * epilog_slurmctld - execute the prolog_slurmctld for a job that has just
+ *	terminated.
+ * IN job_ptr - pointer to job that has been terminated
+ * RET SLURM_SUCCESS(0) or error code
+ */
+extern int epilog_slurmctld(struct job_record *job_ptr);
+
+/*
  * job_is_completing - Determine if jobs are in the process of completing.
  * RET - True of any job is in the process of completing
  * NOTE: This function can reduce resource fragmentation, which is a 
@@ -99,6 +108,14 @@ extern int make_batch_job_cred(batch_job_launch_msg_t *launch_msg_ptr,
 
 /* Print a job's dependency information based upon job_ptr->depend_list */
 extern void print_job_dependency(struct job_record *job_ptr);
+
+/*
+ * prolog_slurmctld - execute the prolog_slurmctld for a job that has just
+ *	been allocated resources.
+ * IN job_ptr - pointer to job that will be initiated
+ * RET SLURM_SUCCESS(0) or error code
+ */
+extern int prolog_slurmctld(struct job_record *job_ptr);
 
 /* 
  * schedule - attempt to schedule all pending jobs

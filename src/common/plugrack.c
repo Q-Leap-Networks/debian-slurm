@@ -4,10 +4,11 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jay Windley <jwindley@lnxi.com>.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -547,7 +548,7 @@ plugrack_load_all( plugrack_t rack )
         it = list_iterator_create( rack->entries );
         while ( ( e = list_next( it ) ) != NULL ) {
                 if ( e->plug == PLUGIN_INVALID_HANDLE ) {
-                        e->plug = plugin_load_from_file( e->fq_path );
+                        plugin_load_from_file(&e->plug, e->fq_path);
                 }
         }
 
@@ -584,7 +585,7 @@ plugrack_use_by_type( plugrack_t rack,
 		
                 /* See if plugin is loaded. */
                 if ( e->plug == PLUGIN_INVALID_HANDLE ) 
-			e->plug = plugin_load_from_file( e->fq_path );
+                        plugin_load_from_file(&e->plug, e->fq_path);
 
                 /* If load was successful, increment the reference count. */
                 if ( e->plug == PLUGIN_INVALID_HANDLE )

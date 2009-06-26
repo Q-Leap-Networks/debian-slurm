@@ -3,7 +3,7 @@
 AUTOMAKE_OPTIONS = foreign
 CLEANFILES = core.*
 
-INCLUDES = -I$(top_srcdir) 
+INCLUDES = -I$(top_srcdir) $(BG_INCLUDES)
 
 bin_PROGRAMS = srun
 
@@ -21,6 +21,7 @@ srun_SOURCES = \
 	core-format.c \
 	core-format.h \
 	multi_prog.c multi_prog.h \
+	task_state.c task_state.h \
 	srun.wrapper.c
 
 convenience_libs = \

@@ -4,10 +4,11 @@
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -96,14 +97,14 @@ int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t *job,
 	env_array_overwrite_fmt(env, "GMPI_SLAVE",  "%s", addrbuf);
 	env_array_overwrite_fmt(env, "GMPI_ID",  "%u", job->gtaskid);
 	if (!getenv("GMPI_RECV")) {
-		env_array_overwrite_fmt(env, "GMPI_RECV",  "%u", "hybrid");
+		env_array_overwrite_fmt(env, "GMPI_RECV",  "%s", "hybrid");
 	}
 
 	env_array_overwrite_fmt(env, "MXMPI_MASTER", "%s", addr);
 	env_array_overwrite_fmt(env, "MXMPI_ID", "%u", job->gtaskid);
 	env_array_overwrite_fmt(env, "MXMPI_SLAVE", "%s", addrbuf);
 	if (!getenv("MXMPI_RECV")) {
-		env_array_overwrite_fmt(env, "MXMPI_RECV",  "%u", "hybrid");
+		env_array_overwrite_fmt(env, "MXMPI_RECV",  "%s", "hybrid");
 	}
 	debug2("init for mpi rank %u\n", job->gtaskid);
 	

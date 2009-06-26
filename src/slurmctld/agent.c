@@ -3,14 +3,15 @@
  *	logic could be placed for broadcast communications.
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>, et. al.
  *  Derived from pdsh written by Jim Garlick <garlick1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -153,6 +154,8 @@ typedef struct task_info {
 
 typedef struct queued_request {
 	agent_arg_t* agent_arg_ptr;	/* The queued request */
+	time_t       first_attempt;	/* Time of first check for batch 
+					 * launch RPC *only* */
 	time_t       last_attempt;	/* Time of last xmit attempt */
 } queued_request_t;
 
@@ -162,6 +165,7 @@ typedef struct mail_info {
 } mail_info_t;
 
 static void _sig_handler(int dummy);
+static int  _batch_launch_defer(queued_request_t *queued_req_ptr);
 static inline int _comm_err(char *node_name);
 static void _list_delete_retry(void *retry_entry);
 static agent_info_t *_make_agent_info(agent_arg_t *agent_arg_ptr);
@@ -384,13 +388,14 @@ static agent_info_t *_make_agent_info(agent_arg_t *agent_arg_ptr)
 	agent_info_ptr->msg_type       = agent_arg_ptr->msg_type;
 	agent_info_ptr->msg_args_pptr  = &agent_arg_ptr->msg_args;
 	
-	if ((agent_arg_ptr->msg_type != REQUEST_SHUTDOWN)
-	&&  (agent_arg_ptr->msg_type != REQUEST_RECONFIGURE)
-	&&  (agent_arg_ptr->msg_type != SRUN_EXEC)
-	&&  (agent_arg_ptr->msg_type != SRUN_TIMEOUT)
-	&&  (agent_arg_ptr->msg_type != SRUN_NODE_FAIL)
-	&&  (agent_arg_ptr->msg_type != SRUN_USER_MSG)
-	&&  (agent_arg_ptr->msg_type != SRUN_JOB_COMPLETE)) {
+	if ((agent_arg_ptr->msg_type != REQUEST_SHUTDOWN)	&&
+	    (agent_arg_ptr->msg_type != REQUEST_RECONFIGURE)	&&
+	    (agent_arg_ptr->msg_type != SRUN_EXEC)		&&
+	    (agent_arg_ptr->msg_type != SRUN_TIMEOUT)		&&
+	    (agent_arg_ptr->msg_type != SRUN_NODE_FAIL)		&&
+	    (agent_arg_ptr->msg_type != SRUN_USER_MSG)		&&
+	    (agent_arg_ptr->msg_type != SRUN_STEP_MISSING)	&&
+	    (agent_arg_ptr->msg_type != SRUN_JOB_COMPLETE)) {
 		/* Sending message to a possibly large number of slurmd.
 		 * Push all message forwarding to slurmd in order to 
 		 * offload as much work from slurmctld as possible. */
@@ -509,13 +514,14 @@ static void *_wdog(void *args)
 	thd_complete_t thd_comp;
 	ret_data_info_t *ret_data_info = NULL;
 
-	if ( (agent_ptr->msg_type == SRUN_JOB_COMPLETE)
-	||   (agent_ptr->msg_type == SRUN_EXEC)
-	||   (agent_ptr->msg_type == SRUN_PING)
-	||   (agent_ptr->msg_type == SRUN_TIMEOUT)
-	||   (agent_ptr->msg_type == SRUN_USER_MSG)
-	||   (agent_ptr->msg_type == RESPONSE_RESOURCE_ALLOCATION)
-	||   (agent_ptr->msg_type == SRUN_NODE_FAIL) )
+	if ( (agent_ptr->msg_type == SRUN_JOB_COMPLETE)			||
+	     (agent_ptr->msg_type == SRUN_STEP_MISSING)			||
+	     (agent_ptr->msg_type == SRUN_EXEC)				||
+	     (agent_ptr->msg_type == SRUN_PING)				||
+	     (agent_ptr->msg_type == SRUN_TIMEOUT)			||
+	     (agent_ptr->msg_type == SRUN_USER_MSG)			||
+	     (agent_ptr->msg_type == RESPONSE_RESOURCE_ALLOCATION)	||
+	     (agent_ptr->msg_type == SRUN_NODE_FAIL) )
 		srun_agent = true;
 
 	thd_comp.max_delay = 0;
@@ -597,9 +603,10 @@ static void _notify_slurmctld_jobs(agent_info_t *agent_ptr)
 			*agent_ptr->msg_args_pptr;
 		job_id  = msg->job_id;
 		step_id = NO_VAL;
-	} else if ((agent_ptr->msg_type == SRUN_JOB_COMPLETE)
-	||         (agent_ptr->msg_type == SRUN_EXEC)
-	||         (agent_ptr->msg_type == SRUN_USER_MSG)) {
+	} else if ((agent_ptr->msg_type == SRUN_JOB_COMPLETE)		||
+		   (agent_ptr->msg_type == SRUN_STEP_MISSING)		||
+	           (agent_ptr->msg_type == SRUN_EXEC)			||
+	           (agent_ptr->msg_type == SRUN_USER_MSG)) {
 		return;		/* no need to note srun response */
 	} else if (agent_ptr->msg_type == SRUN_NODE_FAIL) {
 		return;		/* no need to note srun response */
@@ -805,13 +812,14 @@ static void *_thread_per_group_rpc(void *args)
 	xassert(args != NULL);
 	xsignal(SIGUSR1, _sig_handler);
 	xsignal_unblock(sig_array);
-	is_kill_msg = (	(msg_type == REQUEST_KILL_TIMELIMIT) ||
+	is_kill_msg = (	(msg_type == REQUEST_KILL_TIMELIMIT)	||
 			(msg_type == REQUEST_TERMINATE_JOB) );
-	srun_agent = (	(msg_type == SRUN_PING)    ||
-			(msg_type == SRUN_EXEC)    ||
-			(msg_type == SRUN_JOB_COMPLETE) ||
-			(msg_type == SRUN_TIMEOUT) ||
-			(msg_type == SRUN_USER_MSG) ||
+	srun_agent = (	(msg_type == SRUN_PING)			||
+			(msg_type == SRUN_EXEC)			||
+			(msg_type == SRUN_JOB_COMPLETE)		||
+			(msg_type == SRUN_STEP_MISSING)		||
+			(msg_type == SRUN_TIMEOUT)		||
+			(msg_type == SRUN_USER_MSG)		||
 			(msg_type == RESPONSE_RESOURCE_ALLOCATION) ||
 			(msg_type == SRUN_NODE_FAIL) );
 
@@ -1121,7 +1129,7 @@ static void _list_delete_retry(void *retry_entry)
  */
 extern int agent_retry (int min_wait, bool mail_too)
 {
-	int list_size = 0;
+	int list_size = 0, rc;
 	time_t now = time(NULL);
 	queued_request_t *queued_req_ptr = NULL;
 	agent_arg_t *agent_arg_ptr = NULL;
@@ -1163,6 +1171,17 @@ extern int agent_retry (int min_wait, bool mail_too)
 		retry_iter = list_iterator_create(retry_list);
 		while ((queued_req_ptr = (queued_request_t *)
 				list_next(retry_iter))) {
+			rc = _batch_launch_defer(queued_req_ptr);
+			if (rc == -1) {		/* abort request */
+				_purge_agent_args(queued_req_ptr->
+						  agent_arg_ptr);
+				xfree(queued_req_ptr);
+				list_remove(retry_iter);
+				list_size--;
+				continue;
+			}
+			if (rc > 0)
+				continue;
  			if (queued_req_ptr->last_attempt == 0) {
 				list_remove(retry_iter);
 				list_size--;
@@ -1181,6 +1200,17 @@ extern int agent_retry (int min_wait, bool mail_too)
 		/* next try to find an older record to retry */
 		while ((queued_req_ptr = (queued_request_t *) 
 				list_next(retry_iter))) {
+			rc = _batch_launch_defer(queued_req_ptr);
+			if (rc == -1) { 	/* abort request */
+				_purge_agent_args(queued_req_ptr->
+						  agent_arg_ptr);
+				xfree(queued_req_ptr);
+				list_remove(retry_iter);
+				list_size--;
+				continue;
+			}
+			if (rc > 0)
+				continue;
 			age = difftime(now, queued_req_ptr->last_attempt);
 			if (age > min_wait) {
 				list_remove(retry_iter);
@@ -1443,3 +1473,73 @@ extern void mail_job_info (struct job_record *job_ptr, uint16_t mail_type)
 	return;
 }
 
+/* return true if the requests is to launch a batch job and the message
+ * destination is not yet powered up, otherwise return false */
+/* Test if a batch launch request should be defered
+ * RET -1: abort the request, pending job cancelled
+ *      0: execute the request now
+ *      1: defer the request
+ */
+static int _batch_launch_defer(queued_request_t *queued_req_ptr)
+{
+	char hostname[512];
+	agent_arg_t *agent_arg_ptr;
+	batch_job_launch_msg_t *launch_msg_ptr;
+	struct node_record *node_ptr;
+	time_t now = time(NULL);
+	struct job_record  *job_ptr;
+
+	agent_arg_ptr = queued_req_ptr->agent_arg_ptr;
+	if (agent_arg_ptr->msg_type != REQUEST_BATCH_JOB_LAUNCH)
+		return 0;
+
+	if (difftime(now, queued_req_ptr->last_attempt) < 10) {
+		/* Reduce overhead by only testing once every 10 secs */
+		return 1;
+	}
+
+	launch_msg_ptr = (batch_job_launch_msg_t *)agent_arg_ptr->msg_args;
+	job_ptr = find_job_record(launch_msg_ptr->job_id);
+	if ((job_ptr == NULL) || (job_ptr->job_state != JOB_RUNNING)) {
+		info("agent(batch_launch): removed pending request for "
+		     "cancelled job %u",
+		     launch_msg_ptr->job_id);
+		return -1;	/* job cancelled while waiting */
+	}
+
+	hostlist_deranged_string(agent_arg_ptr->hostlist, 
+				 sizeof(hostname), hostname);
+	node_ptr = find_node_record(hostname);
+	if (node_ptr == NULL) {
+		error("agent(batch_launch) removed pending request for job "
+		      "%s, missing node %s",
+		      launch_msg_ptr->job_id, agent_arg_ptr->hostlist);
+		return -1;	/* invalid request?? */
+	}
+
+	if (((node_ptr->node_state & NODE_STATE_POWER_SAVE) == 0) &&
+	    ((node_ptr->node_state & NODE_STATE_NO_RESPOND) == 0)) {
+		/* ready to launch, adjust time limit for boot time */
+		if (job_ptr->time_limit != INFINITE)
+			job_ptr->end_time = now + (job_ptr->time_limit * 60);
+		queued_req_ptr->last_attempt = (time_t) 0;
+		return 0;
+	}
+
+	if (queued_req_ptr->last_attempt == 0) {
+		queued_req_ptr->first_attempt = now;
+		queued_req_ptr->last_attempt  = now;
+	} else if (difftime(now, queued_req_ptr->first_attempt) >= 
+				 slurm_get_resume_timeout()) {
+		error("agent waited too long for node %s to respond, "
+		      "sending batch request anyway...", 
+		      node_ptr->name);
+		if (job_ptr->time_limit != INFINITE)
+			job_ptr->end_time = now + (job_ptr->time_limit * 60);
+		queued_req_ptr->last_attempt = (time_t) 0;
+		return 0;
+	}
+
+	queued_req_ptr->last_attempt  = now;
+	return 1;
+}

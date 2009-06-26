@@ -5,10 +5,11 @@
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -68,7 +69,7 @@
 #include "src/common/list.h"
 
 typedef struct {
-	uint16_t len;  /* what is the width of the print */          
+	int len;  /* what is the width of the print */          
 	char *name;  /* name to be printed in header */
 	void (*print_routine) (); /* what is the function to print with  */
 	uint16_t type; /* defined in the local function */
@@ -88,12 +89,19 @@ extern void print_fields_header(List print_fields_list);
 extern void print_fields_date(print_field_t *field, time_t value, int last);
 extern void print_fields_str(print_field_t *field, char *value, int last);
 extern void print_fields_int(print_field_t *field, int value, int last);
+extern void print_fields_double(print_field_t *field, double value, int last);
+extern void print_fields_long_double(
+	print_field_t *field, long double value, int last);
 extern void print_fields_uint32(
 	print_field_t *field, uint32_t value, int last);
 extern void print_fields_uint64(
 	print_field_t *field, uint64_t value, int last);
-extern void print_fields_time(print_field_t *field, uint32_t value, int last);
+extern void print_fields_time_from_mins(print_field_t *field,
+					uint32_t value, int last);
+extern void print_fields_time_from_secs(print_field_t *field, 
+					uint32_t value, int last);
 extern void print_fields_char_list(print_field_t *field, List value, int last);
 
 #define print_fields_uint print_fields_uint32
+#define print_fields_time print_fields_time_from_mins
 #endif

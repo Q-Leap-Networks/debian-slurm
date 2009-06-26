@@ -6,10 +6,11 @@
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -377,6 +378,17 @@ static int _set_cond(int *start, int argc, char *argv[],
 			}
 			
 			set = 1;
+		} else if(!strncasecmp (argv[i], "Nodes", 
+					 MAX(command_len, 1))) {
+			if(job_cond->used_nodes) {
+				error("You already specified nodes '%s' "
+				      " combine your request into 1 nodes=.",
+				      job_cond->used_nodes);
+				exit_code = 1;
+				break;
+			}
+			job_cond->used_nodes = xstrdup(argv[i]+end);
+			set = 1;
 		} else if (!strncasecmp (argv[i], "Partitions",
 					 MAX(command_len, 2))) {
 			if(!job_cond->partition_list)
@@ -517,7 +529,7 @@ static int _setup_print_fields_list(List format_list)
 			continue;
 		}
 
-		if(newlen > 0) 
+		if(newlen) 
 			field->len = newlen;
 		
 		list_append(print_fields_list, field);		
@@ -571,7 +583,7 @@ static int _setup_grouping_print_fields_list(List grouping_list)
 		last_object = object;
 		if((tmp_char = strstr(object, "\%"))) {
 			int newlen = atoi(tmp_char+1);
-			if(newlen > 0) 
+			if(newlen) 
 				field->len = newlen;
 		}
 		list_append(grouping_print_fields_list, field);		
@@ -584,7 +596,7 @@ static int _setup_grouping_print_fields_list(List grouping_list)
 			field->type = PRINT_JOB_COUNT;
 		else
 			field->type = PRINT_JOB_SIZE;
-		field->name = xstrdup_printf("> %u cpus", last_size);
+		field->name = xstrdup_printf(">= %u cpus", last_size);
 		if(time_format == SREPORT_TIME_SECS_PER
 		   || time_format == SREPORT_TIME_MINS_PER
 		   || time_format == SREPORT_TIME_HOURS_PER)
@@ -597,7 +609,7 @@ static int _setup_grouping_print_fields_list(List grouping_list)
 			field->print_routine = sreport_print_time;
 		if((tmp_char = strstr(last_object, "\%"))) {
 			int newlen = atoi(tmp_char+1);
-			if(newlen > 0) 
+			if(newlen) 
 				field->len = newlen;
 		}
 		list_append(grouping_print_fields_list, field);		
@@ -688,7 +700,7 @@ extern int job_sizes_grouped_by_top_acct(int argc, char *argv[])
 		       "----------------------------------------\n");
 		printf("Job Sizes %s - %s (%d secs)\n", 
 		       start_char, end_char, 
-		       (job_cond->usage_end - job_cond->usage_start));
+		       (int)(job_cond->usage_end - job_cond->usage_start));
 		if(print_job_count)
 			printf("Units are in number of jobs ran\n");
 		else
@@ -1083,7 +1095,7 @@ extern int job_sizes_grouped_by_wckey(int argc, char *argv[])
 		       "----------------------------------------\n");
 		printf("Job Sizes by Wckey %s - %s (%d secs)\n", 
 		       start_char, end_char, 
-		       (job_cond->usage_end - job_cond->usage_start));
+		       (int)(job_cond->usage_end - job_cond->usage_start));
 		if(print_job_count)
 			printf("Units are in number of jobs ran\n");
 		else

@@ -6,10 +6,11 @@
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -42,6 +43,8 @@
 extern void sreport_print_time(print_field_t *field,
 			       uint64_t value, uint64_t total_time, int last)
 {
+	int abs_len = abs(field->len);
+
 	if(!total_time) 
 		total_time = 1;
 
@@ -54,7 +57,7 @@ extern void sreport_print_time(print_field_t *field,
 		else if(print_fields_parsable_print)
 			printf("|");	
 		else				
-			printf("%-*s ", field->len, " ");
+			printf("%-*s ", abs_len, " ");
 	} else {
 		char *output = NULL;
 		double percent = (double)value;
@@ -109,8 +112,11 @@ extern void sreport_print_time(print_field_t *field,
 			printf("%s", output);
 		else if(print_fields_parsable_print)
 			printf("%s|", output);	
+		else if(field->len == abs_len)
+			printf("%*.*s ", abs_len, abs_len, output);
 		else
-			printf("%*.*s ", field->len, field->len, output);
+			printf("%-*.*s ", abs_len, abs_len, output);
+
 		xfree(output);
 	}
 }
@@ -429,6 +435,45 @@ extern int sort_assoc_dec(sreport_assoc_rec_t *assoc_a,
 	else if (diff < 0)
 		return -1;
 	
+
+	return 0;
+}
+
+/* 
+ * Comparator used for sorting resvs largest cpu to smallest cpu
+ * 
+ * returns: 1: resv_a > resv_b   0: resv_a == resv_b   -1: resv_a < resv_b
+ * 
+ */
+extern int sort_reservations_dec(acct_reservation_rec_t *resv_a, 
+				 acct_reservation_rec_t *resv_b)
+{
+	int diff = 0;
+
+	if(!resv_a->cluster || !resv_b->cluster)
+		return 0;
+
+	diff = strcmp(resv_a->cluster, resv_b->cluster);
+
+	if (diff > 0)
+		return 1;
+	else if (diff < 0)
+		return -1;
+
+	if(!resv_a->name || !resv_b->name)
+		return 0;
+
+	diff = strcmp(resv_a->name, resv_b->name);
+
+	if (diff > 0)
+		return 1;
+	else if (diff < 0)
+		return -1;
+	
+	if(resv_a->time_start < resv_b->time_start)
+		return 1;
+	else if(resv_a->time_start > resv_b->time_start)
+		return -1;
 
 	return 0;
 }

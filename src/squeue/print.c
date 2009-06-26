@@ -6,10 +6,11 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>, 
  *             Morris Jette <jette1@llnl.gov>, et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *    
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -37,11 +38,11 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#include <time.h>
+#include <grp.h>
+#include <pwd.h>
 #include <stdio.h>
 #include <string.h>
-#include <pwd.h>
-#include <grp.h>
+#include <time.h>
 #include <sys/types.h>
 
 #include "src/common/hostlist.h"
@@ -49,11 +50,11 @@
 #include "src/common/macros.h"
 #include "src/common/node_select.h"
 #include "src/common/parse_time.h"
+#include "src/squeue/print.h"
+#include "src/squeue/squeue.h"
 #include "src/common/uid.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
-#include "src/squeue/print.h"
-#include "src/squeue/squeue.h"
 
 static int	_adjust_completing (job_info_t *j, node_info_msg_t **ni);
 static int	_filter_job(job_info_t * job);
@@ -333,9 +334,12 @@ int _print_job_reason(job_info_t * job, int width, bool right, char* suffix)
 	if (job == NULL)        /* Print the Header instead */
 		_print_str("REASON", width, right, true);
 	else {
-		char id[FORMAT_STRING_SIZE];
-		snprintf(id, FORMAT_STRING_SIZE, "%s", 
-			job_reason_string(job->state_reason));
+		char id[FORMAT_STRING_SIZE], *reason;
+		if (job->state_desc)
+			reason = job->state_desc;
+		else
+			reason = job_reason_string(job->state_reason);
+		snprintf(id, FORMAT_STRING_SIZE, "%s", reason);
 		_print_str(id, width, right, true);
 	}
 	if (suffix)
@@ -347,20 +351,9 @@ int _print_job_name(job_info_t * job, int width, bool right, char* suffix)
 {
 	if (job == NULL)	/* Print the Header instead */
 		_print_str("NAME", width, right, true);
-	else {
-		char *temp = NULL, *jname = NULL;
-		if (job->name) {
-			/* first set the jname to the job_ptr->name */
-			jname = xstrdup(job->name);
-			/* then grep for " since that is the delimiter
-			 * for the wckey and set to NULL */
-			if((temp = strchr(jname, '\"')))
-				temp[0] = '\0';
-		}
+	else 
+		_print_str(job->name, width, right, true);
 		
-		_print_str(jname, width, right, true);
-		xfree(jname);
-	}
 	if (suffix)
 		printf("%s", suffix);
 	return SLURM_SUCCESS;
@@ -370,16 +363,9 @@ int _print_job_wckey(job_info_t * job, int width, bool right, char* suffix)
 {
 	if (job == NULL)	/* Print the Header instead */
 		_print_str("WCKEY", width, right, true);
-	else {
-		char *temp = NULL;
-		/* grep for " since that is the delimiter for
-		   the wckey */
-		temp = strchr(job->name, '\"');
-		if(temp) 
-			temp++;
-				
-		_print_str(temp, width, right, true);
-	}
+	else				
+		_print_str(job->wckey, width, right, true);
+	
 	if (suffix)
 		printf("%s", suffix);
 	return SLURM_SUCCESS;
@@ -602,9 +588,12 @@ int _print_job_reason_list(job_info_t * job, int width, bool right,
 	} else if ((job->job_state == JOB_PENDING)
 	||         (job->job_state == JOB_TIMEOUT)
 	||         (job->job_state == JOB_FAILED)) {
-		char id[FORMAT_STRING_SIZE];
-		snprintf(id, FORMAT_STRING_SIZE, "(%s)", 
-			job_reason_string(job->state_reason));
+		char id[FORMAT_STRING_SIZE], *reason;
+		if (job->state_desc)
+			reason = job->state_desc;
+		else
+			reason = job_reason_string(job->state_reason);
+		snprintf(id, FORMAT_STRING_SIZE, "(%s)", reason);
 		_print_str(id, width, right, true);
 	} else {
 #ifdef HAVE_BG
@@ -1078,6 +1067,18 @@ int _print_job_select_jobinfo(job_info_t * job, int width, bool right_justify,
 
 	if (suffix)
 		printf("%s", suffix); 
+	return SLURM_SUCCESS;
+}
+
+int _print_job_reservation(job_info_t * job, int width, bool right_justify,
+			char* suffix)
+{
+	if (job == NULL)	 /* Print the Header instead */
+		_print_str("RESERVATION", width, right_justify, true);
+	else
+		_print_str(job->resv_name, width, right_justify, true);
+	if (suffix)
+		printf("%s", suffix);
 	return SLURM_SUCCESS;
 }
 

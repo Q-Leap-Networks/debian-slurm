@@ -4,10 +4,11 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -116,8 +117,12 @@ int  print_sinfo_list(List sinfo_list);
 	format_add_function(list,wid,right,suffix,_print_state_long)
 #define format_add_time(list,wid,right,suffix) \
 	format_add_function(list,wid,right,suffix,_print_time)
+#define format_add_default_time(list,wid,right,suffix) \
+	format_add_function(list,wid,right,suffix,_print_default_time)
 #define format_add_weight(list,wid,right,suffix) \
 	format_add_function(list,wid,right,suffix,_print_weight)
+#define format_add_alloc_nodes(list,wid,right,suffix) \
+	format_add_function(list,wid,right,suffix,_print_alloc_nodes)
 
 /*****************************************************************************
  * Print Field Functions
@@ -173,7 +178,11 @@ int _print_state_long(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
 int _print_time(sinfo_data_t * sinfo_data, int width, 
 			bool right_justify, char *suffix);
+int _print_default_time(sinfo_data_t * sinfo_data, int width, 
+			bool right_justify, char *suffix);
 int _print_weight(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
+int _print_alloc_nodes(sinfo_data_t * sinfo_data, int width,
+		       bool right_justify, char *suffix);
 
 #endif

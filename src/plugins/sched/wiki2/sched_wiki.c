@@ -2,12 +2,14 @@
  *  sched_wiki.c - Wiki plugin for Moab and Maui schedulers.
  *****************************************************************************
  *  Copyright (C) 2006-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -39,6 +41,7 @@
 
 #include "src/common/plugin.h"
 #include "src/common/log.h"
+#include "src/common/slurm_priority.h"
 #include "./msg.h"
 
 const char		plugin_name[]	= "Wiki (Maui and Moab) Scheduler plugin";
@@ -118,12 +121,9 @@ slurm_sched_plugin_initial_priority( uint32_t last_prio,
 		return 0;
 	}
 
-	if (init_prio_mode == PRIO_DECREMENT) {
-		if (last_prio >= 2)
-			return (last_prio - 1);
-		else
-			return 1;
-	}
+	if (init_prio_mode == PRIO_DECREMENT) 
+		return priority_g_set(last_prio, job_ptr);
+	
 	return 0;
 }
 
@@ -140,7 +140,9 @@ void slurm_sched_plugin_job_is_pending( void )
 /**************************************************************************/
 int slurm_sched_plugin_reconfig( void )
 {
-	return parse_wiki_config();
+	int rc = parse_wiki_config();
+	(void) event_notify(1235, "Partition change");
+	return rc;
 }
 
 /**************************************************************************/

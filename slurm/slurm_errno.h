@@ -1,14 +1,16 @@
 /*****************************************************************************\
  *  slurm_errno.h - error codes and functions for slurm
  ******************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov>, 
  *	Jim Garlick <garlick@llnl.gov>, et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -16,7 +18,7 @@
  *  any later version.
  *
  *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
+ *  to link the code of portions of this program with the OpenSSL library under
  *  certain conditions as described in each individual source file, and 
  *  distribute linked combinations including the two. You must obey the GNU 
  *  General Public License in all respects for all of the code used other than 
@@ -159,7 +161,16 @@ enum {
 	ESLURM_NEED_RESTART,
 	ESLURM_ACCOUNTING_POLICY,
 	ESLURM_INVALID_TIME_LIMIT,
+	ESLURM_RESERVATION_ACCESS,
+	ESLURM_RESERVATION_INVALID,
+	ESLURM_INVALID_TIME_VALUE,
+	ESLURM_RESERVATION_BUSY,
+	ESLURM_RESERVATION_NOT_USABLE,
 	ESLURM_INVALID_WCKEY,
+	ESLURM_RESERVATION_OVERLAP,
+	ESLURM_PORTS_BUSY,
+	ESLURM_PORTS_INVALID,
+	ESLURM_PROLOG_RUNNING,
 
 	/* switch specific error codes, specific values defined in plugin module */
 	ESLURM_SWITCH_MIN = 3000,

@@ -19,10 +19,9 @@ slurmctld_SOURCES = 	\
 	agent.c  	\
 	agent.h		\
 	backup.c	\
+	basil_interface.c \
+	basil_interface.h \
 	controller.c 	\
-	hilbert.c	\
-	hilbert.h	\
-	hilbert_slurm.c	\
 	job_mgr.c 	\
 	job_scheduler.c \
 	job_scheduler.h \
@@ -36,11 +35,15 @@ slurmctld_SOURCES = 	\
 	partition_mgr.c \
 	ping_nodes.c	\
 	ping_nodes.h	\
+	port_mgr.c	\
+	port_mgr.h	\
 	power_save.c	\
 	proc_req.c	\
 	proc_req.h	\
 	read_config.c	\
 	read_config.h	\
+	reservation.c	\
+	reservation.h	\
 	sched_plugin.c	\
 	sched_plugin.h	\
 	slurmctld.h	\
@@ -49,6 +52,8 @@ slurmctld_SOURCES = 	\
 	state_save.c	\
 	state_save.h	\
 	step_mgr.c	\
+	topo_plugin.c	\
+	topo_plugin.h	\
 	trigger_mgr.c	\
 	trigger_mgr.h
 

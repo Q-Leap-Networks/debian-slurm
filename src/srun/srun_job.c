@@ -5,10 +5,11 @@
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona@llnl.gov>.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -76,8 +77,8 @@ typedef struct allocation_info {
 	uint32_t                stepid;
 	char                   *nodelist;
 	uint32_t                nnodes;
-	uint16_t                num_cpu_groups;
-	uint32_t               *cpus_per_node;
+	uint32_t                num_cpu_groups;
+	uint16_t               *cpus_per_node;
 	uint32_t               *cpu_count_reps;
 	select_jobinfo_t select_jobinfo;
 } allocation_info_t;
@@ -101,7 +102,7 @@ job_create_noalloc(void)
 {
 	srun_job_t *job = NULL;
 	allocation_info_t *ai = xmalloc(sizeof(*ai));
-	uint32_t cpn = 1;
+	uint16_t cpn = 1;
 	hostlist_t  hl = hostlist_create(opt.nodelist);
 
 	if (!hl) {
@@ -448,7 +449,8 @@ static srun_job_t *
 _job_create_structure(allocation_info_t *ainfo)
 {
 	srun_job_t *job = xmalloc(sizeof(srun_job_t));
-	
+	int i;
+
 	_set_nprocs(ainfo);
 	debug2("creating job with %d tasks", opt.nprocs);
 
@@ -476,12 +478,21 @@ _job_create_structure(allocation_info_t *ainfo)
 			error("Are required nodes explicitly excluded?");
 		}
 		return NULL;
-	}	
+	}
+	if ((ainfo->cpus_per_node == NULL) || 
+	    (ainfo->cpu_count_reps == NULL)) {
+		error("cpus_per_node array is not set");
+		return NULL;
+	}
 #endif
 	job->select_jobinfo = ainfo->select_jobinfo;
 	job->jobid   = ainfo->jobid;
 	
 	job->ntasks  = opt.nprocs;
+	for (i=0; i<ainfo->num_cpu_groups; i++) {
+		job->cpu_count += ainfo->cpus_per_node[i] *
+				  ainfo->cpu_count_reps[i];
+	}
 
 	job->rc       = -1;
 	

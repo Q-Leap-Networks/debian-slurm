@@ -12,10 +12,11 @@
 # Copyright (C) 2008 Lawrence Livermore National Security.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# LLNL-CODE-402394.
+# CODE-OCEC-09-009. All rights reserved.
 # 
 # This file is part of SLURM, a resource management program.
-# For details, see <http://www.llnl.gov/linux/slurm/>.
+# For details, see <https://computing.llnl.gov/linux/slurm/>.
+# Please also read the included file: DISCLAIMER.
 #  
 # SLURM is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
@@ -96,11 +97,11 @@ expect {
 		set num_sockets $expect_out(1,string)
 		exp_continue
 	}
-	-re "Cores=($number)" {
+	-re "CoresPerSocket=($number)" {
 	   	set num_cores $expect_out(1,string)
 		exp_continue
 	}
-	-re "Threads=($number)" {
+	-re "ThreadsPerCore=($number)" {
 	   	set num_threads $expect_out(1,string)
 		exp_continue
 	}
@@ -387,8 +388,9 @@ while {$this_cnt <= $task_cnt} {
 #############################################################################
 #
 # Run a job step with plane distribution to exercise option
+# Automatic binding in slurm version 2.0 will bind one task per core
 #
-set expected_mask [ expr ((1 << $task_cnt) - 1) * $task_cnt ]
+set expected_mask [ expr ((1 << $task_cnt) - 1) ]
 set task_mask 0
 send "$srun -n $task_cnt -m plane=4 $file_prog\n"
 expect {

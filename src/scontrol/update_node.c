@@ -4,10 +4,11 @@
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -49,30 +50,76 @@ extern int
 scontrol_update_node (int argc, char *argv[]) 
 {
 	int i, j, k, rc = 0, update_cnt = 0;
+
 	uint16_t state_val;
 	update_node_msg_t node_msg;
 	char *reason_str = NULL;
 	char *user_name;
+	char *tag, *val;
+	int taglen, vallen;
 
-	node_msg.node_names = NULL;
-	node_msg.features = NULL;
-	node_msg.reason = NULL;
-	node_msg.node_state = (uint16_t) NO_VAL;
+	slurm_init_update_node_msg(&node_msg);
 	for (i=0; i<argc; i++) {
-		if (strncasecmp(argv[i], "NodeName=", 9) == 0)
-			node_msg.node_names = &argv[i][9];
-		else if (strncasecmp(argv[i], "Features=", 9) == 0) {
-			node_msg.features = &argv[i][9];
+		tag = argv[i];
+		val = strchr(argv[i], '=');
+		if (val) {
+			taglen = val - argv[i];
+			val++;
+			vallen = strlen(val);
+		} else {
+			exit_code = 1;
+			error("Invalid input: %s  Request aborted", argv[i]);
+			return -1;
+		}
+		if (strncasecmp(tag, "NodeName", MAX(taglen, 1)) == 0)
+			node_msg.node_names = val;
+		else if (strncasecmp(tag, "Features", MAX(taglen, 1)) == 0) {
+			node_msg.features = val;
 			update_cnt++;
-		} else if (strncasecmp(argv[i], "Reason=", 7) == 0) {
+		} else if (strncasecmp(tag, "Weight", MAX(taglen,1)) == 0) {
+			/* Logic borrowed from function _handle_uint32 */
+			char *endptr;
+			unsigned long num;
+			errno = 0;
+			num = strtoul(val, &endptr, 0);
+			if ((endptr[0] == 'k') || (endptr[0] == 'K')) {
+				num *= 1024;
+				endptr++;
+			}
+			if ((num == 0 && errno == EINVAL)
+        		            || (*endptr != '\0')) {
+				if ((strcasecmp(val, "UNLIMITED") == 0) ||
+				    (strcasecmp(val, "INFINITE")  == 0)) {
+					num = (uint32_t) INFINITE;
+				} else {
+					error("Weight value (%s) is not a "
+					      "valid number", val);
+					break;
+				}
+			} else if (errno == ERANGE) {
+				error("Weight value (%s) is out of range", 
+				      val);
+				break;
+			} else if (val[0] == '-') {
+				error("Weight value (%s) is less than zero", 
+				      val);
+				break;
+			} else if (num > 0xfffffff0) {
+				error("Weight value (%s) is greater than %u",
+					val, 0xfffffff0);
+				break;
+			}
+			node_msg.weight = num;
+			update_cnt++;
+		} else if (strncasecmp(tag, "Reason", MAX(taglen, 1)) == 0) {
 			char time_buf[64], time_str[32];
 			time_t now;
-			int len = strlen(&argv[i][7]);
+			int len = strlen(val);
 			reason_str = xmalloc(len+1);
-			if (argv[i][7] == '"')
-				strcpy(reason_str, &argv[i][8]);
+			if (*val == '"')
+				strcpy(reason_str, val+1);
 			else
-				strcpy(reason_str, &argv[i][7]);
+				strcpy(reason_str, val);
 
 			len = strlen(reason_str) - 1;
 			if ((len >= 0) && (reason_str[len] == '"'))
@@ -89,35 +136,46 @@ scontrol_update_node (int argc, char *argv[])
 			}
 			now = time(NULL);
 			slurm_make_time_str(&now, time_str, sizeof(time_str));
-			snprintf(time_buf, sizeof(time_buf), "@%s]", time_str); 
+			snprintf(time_buf, sizeof(time_buf), "@%s]", time_str);
 			xstrcat(reason_str, time_buf);
 				
 			node_msg.reason = reason_str;
 			update_cnt++;
 		}
-		else if (strncasecmp(argv[i], "State=NoResp", 12) == 0) {
-			node_msg.node_state = NODE_STATE_NO_RESPOND;
-			update_cnt++;
-		}
-		else if (strncasecmp(argv[i], "State=DRAIN", 11) == 0) {
-			node_msg.node_state = NODE_STATE_DRAIN;
-			update_cnt++;
-		}
-		else if (strncasecmp(argv[i], "State=FAIL", 10) == 0) {
-			node_msg.node_state = NODE_STATE_FAIL;
-			update_cnt++;
-		}
-		else if (strncasecmp(argv[i], "State=RES", 9) == 0) {
-			node_msg.node_state = NODE_RESUME;
-			update_cnt++;
-		}
-		else if (strncasecmp(argv[i], "State=", 6) == 0) {
-			state_val = (uint16_t) NO_VAL;
-			for (j = 0; j <= NODE_STATE_END; j++) {
-				if (strcasecmp (node_state_string(j), 
-				                &argv[i][6]) == 0) {
-					state_val = (uint16_t) j;
-					break;
+		else if (strncasecmp(tag, "State", MAX(taglen, 1)) == 0) {
+			if (strncasecmp(val, "NoResp", 
+				        MAX(vallen, 3)) == 0) {
+				node_msg.node_state = NODE_STATE_NO_RESPOND;
+				update_cnt++;
+			} else if (strncasecmp(val, "DRAIN", 
+				   MAX(vallen, 3)) == 0) {
+				node_msg.node_state = NODE_STATE_DRAIN;
+				update_cnt++;
+			} else if (strncasecmp(val, "FAIL", 
+				   MAX(vallen, 3)) == 0) {
+				node_msg.node_state = NODE_STATE_FAIL;
+				update_cnt++;
+			} else if (strncasecmp(val, "RESUME", 
+				   MAX(vallen, 3)) == 0) {
+				node_msg.node_state = NODE_RESUME;
+				update_cnt++;
+			} else if (strncasecmp(val, "POWER_DOWN", 
+				   MAX(vallen, 7)) == 0) {
+				node_msg.node_state = NODE_STATE_POWER_SAVE;
+				update_cnt++;
+			} else if (strncasecmp(val, "POWER_UP", 
+				   MAX(vallen, 7)) == 0) {
+				node_msg.node_state = NODE_STATE_POWER_UP;
+				update_cnt++;
+			} else {
+				state_val = (uint16_t) NO_VAL;
+				for (j = 0; j < NODE_STATE_END; j++) {
+					if (strncasecmp (node_state_string(j), 
+							 val, 
+							 MAX(vallen, 3)) == 0) {
+						state_val = (uint16_t) j;
+						break;
+					}
 				}
 				if (j == NODE_STATE_END) {
 					exit_code = 1;
@@ -125,21 +183,24 @@ scontrol_update_node (int argc, char *argv[])
 						argv[i]);
 					fprintf (stderr, "Request aborted\n");
 					fprintf (stderr, "Valid states are: ");
-					fprintf (stderr, "NoResp DRAIN FAIL RESUME ");
+					fprintf (stderr,
+						 "NoResp DRAIN FAIL RESUME "
+						 "POWER_DOWN POWER_UP ");
 					for (k = 0; k < NODE_STATE_END; k++) {
 						fprintf (stderr, "%s ", 
 						         node_state_string(k));
 					}
 					fprintf (stderr, "\n");
-					fprintf (stderr, "Not all states are valid given a "
-						 "node's prior state\n");
+					fprintf (stderr, 
+						 "Not all states are valid "
+						 "given a node's prior "
+						 "state\n");
 					goto done;
 				}
+				node_msg.node_state = state_val;
+				update_cnt++;
 			}
-			node_msg.node_state = state_val;
-			update_cnt++;
-		}
-		else {
+		} else {
 			exit_code = 1;
 			fprintf (stderr, "Invalid input: %s\n", argv[i]);
 			fprintf (stderr, "Request aborted\n");

@@ -2,13 +2,14 @@
  *  init_msg.c - initialize RPC messages contents
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -51,7 +52,7 @@
 /*
  * slurm_init_job_desc_msg - initialize job descriptor with 
  *	default values 
- * OUT job_desc_msg - user defined job descriptor
+ * IN/OUT job_desc_msg - user defined job descriptor
  */
 void slurm_init_job_desc_msg(job_desc_msg_t * job_desc_msg)
 {
@@ -64,9 +65,13 @@ void slurm_init_job_desc_msg(job_desc_msg_t * job_desc_msg)
 	job_desc_msg->argv		= ((char **) NULL);
 	job_desc_msg->begin_time	= 0;
 	job_desc_msg->blrtsimage	= NULL;
+	job_desc_msg->ckpt_dir          = NULL;
+	job_desc_msg->ckpt_interval     = 0;
 	job_desc_msg->comment		= NULL;
 	job_desc_msg->conn_type		= (uint16_t) NO_VAL;
 	job_desc_msg->contiguous	= (uint16_t) NO_VAL;
+	job_desc_msg->cpu_bind		= NULL;
+	job_desc_msg->cpu_bind_type	= (uint16_t) NO_VAL;
 	job_desc_msg->cpus_per_task	= (uint16_t) NO_VAL;
 	job_desc_msg->dependency	= NULL;
 	job_desc_msg->environment	= ((char **) NULL);
@@ -100,6 +105,8 @@ void slurm_init_job_desc_msg(job_desc_msg_t * job_desc_msg)
 	job_desc_msg->max_nodes		= NO_VAL;
 	job_desc_msg->max_sockets	= (uint16_t) NO_VAL;
 	job_desc_msg->max_threads	= (uint16_t) NO_VAL;
+	job_desc_msg->mem_bind		= NULL;
+	job_desc_msg->mem_bind_type	= (uint16_t) NO_VAL;
 	job_desc_msg->min_cores		= (uint16_t) NO_VAL;
 	job_desc_msg->min_nodes		= NO_VAL;
 	job_desc_msg->min_sockets	= (uint16_t) NO_VAL;
@@ -125,6 +132,7 @@ void slurm_init_job_desc_msg(job_desc_msg_t * job_desc_msg)
 	job_desc_msg->resp_host		= NULL;
 	job_desc_msg->req_nodes		= NULL;
 	job_desc_msg->requeue		= (uint16_t) NO_VAL;
+	job_desc_msg->reservation	= NULL;
 	job_desc_msg->rotate		= (uint16_t) NO_VAL;
 	job_desc_msg->script		= NULL;
 	job_desc_msg->select_jobinfo	= NULL;
@@ -132,19 +140,21 @@ void slurm_init_job_desc_msg(job_desc_msg_t * job_desc_msg)
 	job_desc_msg->task_dist		= (uint16_t) NO_VAL;
 	job_desc_msg->time_limit	= NO_VAL;
 	job_desc_msg->user_id		= NO_VAL;
+	job_desc_msg->wckey		= NULL;
 	job_desc_msg->work_dir		= NULL;
 }
 
 /*
  * slurm_init_part_desc_msg - initialize partition descriptor with 
  *	default values 
- * OUT job_desc_msg - user defined partition descriptor
+ * IN/OUT update_part_msg - user defined partition descriptor
  */
 void slurm_init_part_desc_msg (update_part_msg_t * update_part_msg)
 {
 	update_part_msg->name 		= NULL;
 	update_part_msg->nodes 		= NULL;
 	update_part_msg->allow_groups 	= NULL;
+	update_part_msg->default_time   = (uint32_t) NO_VAL;
 	update_part_msg->max_time 	= (uint32_t) NO_VAL;
 	update_part_msg->max_nodes 	= NO_VAL;
 	update_part_msg->min_nodes 	= NO_VAL;
@@ -154,5 +164,38 @@ void slurm_init_part_desc_msg (update_part_msg_t * update_part_msg)
 	update_part_msg->max_share 	= (uint16_t) NO_VAL;
 	update_part_msg->priority 	= (uint16_t) NO_VAL;
 	update_part_msg->state_up 	= (uint16_t) NO_VAL;
+	update_part_msg->allow_alloc_nodes = NULL;
 }
 
+/*
+ * slurm_init_resv_desc_msg - initialize reservation descriptor with 
+ *	default values 
+ * OUT job_desc_msg - user defined partition descriptor
+ */
+void slurm_init_resv_desc_msg (resv_desc_msg_t * resv_msg)
+{
+	resv_msg->name		= NULL;
+	resv_msg->start_time	= (time_t) NO_VAL;
+	resv_msg->end_time	= (time_t) NO_VAL;
+	resv_msg->duration	= NO_VAL;
+	resv_msg->flags		= (uint16_t) NO_VAL;
+	resv_msg->node_cnt	= NO_VAL;
+	resv_msg->node_list	= NULL;
+	resv_msg->features	= NULL;
+	resv_msg->partition	= NULL;
+	resv_msg->users		= NULL;
+	resv_msg->accounts	= NULL;
+}
+
+/*
+ * slurm_init_update_node_msg - initialize node update message
+ * OUT update_node_msg - user defined node descriptor
+ */
+void slurm_init_update_node_msg (update_node_msg_t * update_node_msg)
+{
+	update_node_msg->node_names = NULL;
+	update_node_msg->features = NULL;
+	update_node_msg->reason = NULL;
+	update_node_msg->node_state = (uint16_t) NO_VAL;
+	update_node_msg->weight = (uint32_t) NO_VAL;
+}

@@ -1,13 +1,15 @@
 /*****************************************************************************\
  *  opt.c - options processing for scancel
  *****************************************************************************
- *  Copyright (C) 2002 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona1@llnl.gov>, et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -71,6 +73,7 @@
 #define OPT_LONG_HELP  0x100
 #define OPT_LONG_USAGE 0x101
 #define OPT_LONG_CTLD  0x102
+#define OPT_LONG_WCKEY 0x103
 
 #define SIZE(a) (sizeof(a)/sizeof(a[0]))
 
@@ -229,6 +232,8 @@ static void _opt_default()
 	opt.user_name	= NULL;
 	opt.user_id	= 0;
 	opt.verbose	= 0;
+	opt.wckey	= NULL;
+	opt.nodelist	= NULL;
 }
 
 /*
@@ -302,6 +307,10 @@ static void _opt_env()
 			error ("Unrecognized SCANCEL_VERBOSE value: %s",
 				val);
 	}
+
+	if ( (val=getenv("SCANCEL_WCKEY")) ) {
+		opt.wckey = xstrdup(val);
+	}
 }
 
 /*
@@ -323,12 +332,14 @@ static void _opt_args(int argc, char **argv)
 		{"user",        required_argument, 0, 'u'},
 		{"verbose",     no_argument,       0, 'v'},
 		{"version",     no_argument,       0, 'V'},
+		{"nodelist",    required_argument, 0, 'w'},
+		{"wckey",       required_argument, 0, OPT_LONG_WCKEY},
 		{"help",        no_argument,       0, OPT_LONG_HELP},
 		{"usage",       no_argument,       0, OPT_LONG_USAGE},
 		{NULL,          0,                 0, 0}
 	};
 
-	while((opt_char = getopt_long(argc, argv, "bin:p:qs:t:u:vV",
+	while((opt_char = getopt_long(argc, argv, "bin:p:qs:t:u:vVw:",
 			long_options, &option_index)) != -1) {
 		switch (opt_char) {
 			case (int)'?':
@@ -369,6 +380,12 @@ static void _opt_args(int argc, char **argv)
 			case (int)'V':
 				_print_version();
 				exit(0);
+			case (int)'w':
+				opt.nodelist = xstrdup(optarg);
+				break;
+			case OPT_LONG_WCKEY:
+				opt.wckey = xstrdup(optarg);
+				break;
 			case OPT_LONG_HELP:
 				_help();
 				exit(0);
@@ -454,7 +471,9 @@ _opt_verify(void)
 	    (opt.partition == NULL) &&
 	    (opt.state == JOB_END) &&
 	    (opt.user_name == NULL) &&
-	    (opt.job_cnt == 0)) {
+	    (opt.wckey == NULL) &&
+	    (opt.job_cnt == 0) &&
+	    (opt.nodelist == NULL)) {
 		error("No job identification provided");
 		verified = false;	/* no job specification */
 	}
@@ -478,6 +497,8 @@ static void _opt_list(void)
 	info("user_id        : %u", opt.user_id);
 	info("user_name      : %s", opt.user_name);
 	info("verbose        : %d", opt.verbose);
+	info("wckey          : %s", opt.wckey);
+	info("nodelist       : %s", opt.nodelist);
 
 	for (i=0; i<opt.job_cnt; i++) {
 		info("job_steps      : %u.%u ", opt.job_id[i], opt.step_id[i]);
@@ -488,7 +509,7 @@ static void _usage(void)
 {
 	printf("Usage: scancel [-n job_name] [-u user] [-p partition] [-q] [-s name | integer]\n");
 	printf("               [--batch] [-t PENDING | RUNNING | SUSPENDED] [--usage] [-v] [-V]\n");
-	printf("               [job_id[.step_id]]\n");
+	printf("               [-w hosts...] [job_id[.step_id]]\n");
 }
 
 static void _help(void)
@@ -501,12 +522,13 @@ static void _help(void)
 	printf("  -p, --partition=partition       name of job's partition\n");
 	printf("  -q, --quiet                     disable warnings\n");
 	printf("  -s, --signal=name | integer     signal to send to job, default is SIGKILL\n");
-	printf("  -t, --state=state               state of the jobs to be signaled\n");
-	printf("                                  valid options are either pending,\n");
-	printf("                                  running, or suspended\n");
-	printf("  -u, --user=user                 name or id of user to have jobs signaled\n");
+	printf("  -t, --state=states              states of jobs to be signaled,\n");
+	printf("                                  default is pending, running, and\n");
+	printf("                                  suspended\n");
+	printf("  -u, --user=user                 name or id of user to have jobs cancelled\n");
 	printf("  -v, --verbose                   verbosity level\n");
 	printf("  -V, --version                   output version information and exit\n");
+	printf("  -w, --nodelist                  cancel jobs using any of these nodes\n");
 	printf("\nHelp options:\n");
 	printf("  --help                          show this help message\n");
 	printf("  --usage                         display brief usage message\n");

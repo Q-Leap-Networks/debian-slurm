@@ -9,7 +9,8 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -48,7 +49,6 @@
 #include "src/common/jobacct_common.h"
 #include "src/common/slurm_accounting_storage.h"
 
-#ifdef HAVE_MYSQL
 extern MYSQL *jobcomp_mysql_db;
 extern int jobcomp_db_init;
 
@@ -85,6 +85,5 @@ enum {
 extern List mysql_jobcomp_process_get_jobs(acct_job_cond_t *job_cond);
 
 extern int mysql_jobcomp_process_archive(acct_archive_cond_t *arch_cond);
-#endif
 
 #endif

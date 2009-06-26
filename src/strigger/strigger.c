@@ -5,10 +5,11 @@
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -98,7 +99,7 @@ static int _clear_trigger(void)
 	trigger_info_t ti;
 	char tmp_c[128];
 
-	bzero(&ti, sizeof(trigger_info_t));
+	memset(&ti, 0, sizeof(trigger_info_t));
 	ti.trig_id	= params.trigger_id;
 	ti.user_id	= params.user_id;
 	if (params.job_id) {
@@ -128,7 +129,7 @@ static int _set_trigger(void)
 	trigger_info_t ti;
 	char tmp_c[128];
 
-	bzero(&ti, sizeof(trigger_info_t));
+	memset(&ti, 0, sizeof(trigger_info_t));
 	if (params.job_id) {
 		ti.res_type = TRIGGER_RES_TYPE_JOB;
 		snprintf(tmp_c, sizeof(tmp_c), "%u", params.job_id);

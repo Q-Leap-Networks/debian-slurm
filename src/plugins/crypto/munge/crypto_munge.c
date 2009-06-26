@@ -2,12 +2,14 @@
  *  crypto_munge.c - Munge based cryptographic signature plugin
  *****************************************************************************
  *  Copyright (C) 2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark A. Grondona <mgrondona@llnl.gov>.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -94,7 +96,17 @@ const char plugin_name[]        = "Munge cryptographic signature plugin";
 const char plugin_type[]        = "crypto/munge";
 const uint32_t plugin_version   = 90;
 
-static munge_err_t munge_err;
+
+/*
+ *  Error codes local to this plugin:
+ */
+enum local_error_code {
+	ESIG_BUF_DATA_MISMATCH = 5000,
+	ESIG_BUF_SIZE_MISMATCH,
+	ESIG_BAD_USERID,
+};
+
+static uid_t slurm_user = 0;
 
 /*
  * init() is called when the plugin is loaded, before any other functions
@@ -126,102 +138,122 @@ crypto_destroy_key(void *key)
 extern void *
 crypto_read_private_key(const char *path)
 {
-	return (void *) munge_ctx_create();
-}
+	munge_ctx_t ctx;
+	munge_err_t err;
 
+	if ((ctx = munge_ctx_create()) == NULL) {
+		error ("crypto_read_private_key: munge_ctx_create failed");
+		return (NULL);
+	}
+
+	/*
+	 *   Only allow slurmd_user (usually root) to decode job
+	 *   credentials created by
+	 *   slurmctld. This provides a slight layer of extra security,
+	 *   as non-privileged users cannot get at the contents of job
+	 *   credentials.
+	 */
+	err = munge_ctx_set(ctx, MUNGE_OPT_UID_RESTRICTION, 
+			    slurm_get_slurmd_user_id());
+
+	if (err != EMUNGE_SUCCESS) {
+		error("Unable to set uid restriction on munge credentials: %s",
+		      munge_ctx_strerror (ctx));
+		munge_ctx_destroy(ctx);
+		return(NULL);
+	}
+
+	return ((void *) ctx);
+}
 
 extern void *
 crypto_read_public_key(const char *path)
 {
+	/*
+	 * Get slurm user id once. We use it later to verify credentials.
+	 */
+	slurm_user = slurm_get_slurm_user_id();
+
 	return (void *) munge_ctx_create();
 }
 
-extern char *
-crypto_str_error(void)
+extern const char *
+crypto_str_error(int errnum)
 {
-	return (char *) munge_strerror(munge_err); 
+	if (errnum == ESIG_BUF_DATA_MISMATCH)
+		return "Credential data mismatch";
+	else if (errnum == ESIG_BUF_SIZE_MISMATCH)
+		return "Credential data size mismatch";
+	else if (errnum == ESIG_BAD_USERID)
+		return "Credential created by invalid user";
+	else
+		return munge_strerror ((munge_err_t) errnum);
 }
 
 /* NOTE: Caller must xfree the signature returned by sig_pp */
 extern int
 crypto_sign(void * key, char *buffer, int buf_size, char **sig_pp, 
-		unsigned int *sig_size_p) 
+	    unsigned int *sig_size_p) 
 {
 	char *cred;
+	munge_err_t err;
 
-	munge_err = munge_encode(&cred, (munge_ctx_t) key,
-				 buffer, buf_size);
+	err = munge_encode(&cred, (munge_ctx_t) key,
+			   buffer, buf_size);
 
-	if (munge_err != EMUNGE_SUCCESS)
-		return SLURM_ERROR;
+	if (err != EMUNGE_SUCCESS)
+		return err;
 
 	*sig_size_p = strlen(cred) + 1;
 	*sig_pp = xstrdup(cred);
 	free(cred); 
-	return SLURM_SUCCESS;
+	return 0;
 }
 
 extern int
 crypto_verify_sign(void * key, char *buffer, unsigned int buf_size, 
-		char *signature, unsigned int sig_size)
+		   char *signature, unsigned int sig_size)
 {
-	static uid_t slurm_user = 0;
-	static int got_slurm_user = 0;
 	uid_t uid;
 	gid_t gid;
 	void *buf_out;
 	int   buf_out_size;
+	int   rc = 0;
+	munge_err_t err;
 
-	munge_err = munge_decode(signature, (munge_ctx_t) key,
-				 &buf_out, &buf_out_size, 
-				 &uid, &gid);
+	err = munge_decode(signature, (munge_ctx_t) key,
+			   &buf_out, &buf_out_size, 
+			   &uid, &gid);
 
-	if (munge_err != EMUNGE_SUCCESS) {
+	if (err != EMUNGE_SUCCESS) {
 #ifdef MULTIPLE_SLURMD
 		/* In multple slurmd mode this will happen all the
 		 * time since we are authenticating with the same
 		 * munged.
 		 */
-		if (munge_err != EMUNGE_CRED_REPLAYED) {
-			return SLURM_ERROR;
+		if (err != EMUNGE_CRED_REPLAYED) {
+			return err;
 		} else {
 			debug2("We had a replayed crypto, "
 			       "but this is expected in multiple "
 			       "slurmd mode.");
-			munge_err = 0;
 		}
 #else
-		return SLURM_ERROR;
+		return err;
 #endif
 	}
 
-	if (!got_slurm_user) {
-		slurm_user = slurm_get_slurm_user_id();
-		got_slurm_user = 1;
-	}
 
 	if ((uid != slurm_user) && (uid != 0)) {
-		error("crypto/munge: bad user id (%d != %d)", 
-			(int) slurm_user, (int) uid);
-		munge_err = EMUNGE_CRED_UNAUTHORIZED;
-		free(buf_out);
-		return SLURM_ERROR;
+		error("crypto/munge: Unexpected uid (%d) != SLURM uid (%d)",
+		      (int) uid, (int) slurm_user);
+		rc = ESIG_BAD_USERID;
 	}
-
-	if (buf_size != buf_out_size) {
-		error("crypto/munge: buf_size bad");
-		munge_err = EMUNGE_CRED_INVALID;
-		free(buf_out);
-		return SLURM_ERROR;
-	}
-
-	if (memcmp(buffer, buf_out, buf_size)) {
-		error("crypto/munge: buffers different");
-		munge_err = EMUNGE_CRED_INVALID;
-		free(buf_out);
-		return SLURM_ERROR;
-	}
+	else if (buf_size != buf_out_size)
+		rc = ESIG_BUF_SIZE_MISMATCH;
+	else if (memcmp(buffer, buf_out, buf_size))
+		rc = ESIG_BUF_DATA_MISMATCH;
 
 	free(buf_out);
-	return SLURM_SUCCESS;
+	return rc;
 }

@@ -1,16 +1,17 @@
 /*****************************************************************************\
  *  src/common/stepd_api.c - slurmstepd message API
- *  $Id: stepd_api.c 14503 2008-07-14 17:27:40Z jette $
+ *  $Id: stepd_api.c 16867 2009-03-12 16:35:42Z jette $
  *****************************************************************************
  *  Copyright (C) 2005-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Portions Copyright (C) 2008 Vijay Ramasubramanian
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher Morrone <morrone2@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -324,14 +325,21 @@ rwfail:
  * Send a checkpoint request to all tasks of a job step.
  */
 int
-stepd_checkpoint(int fd, int signal, time_t timestamp)
+stepd_checkpoint(int fd, time_t timestamp, char *image_dir)
 {
 	int req = REQUEST_CHECKPOINT_TASKS;
 	int rc;
 
 	safe_write(fd, &req, sizeof(int));
-	safe_write(fd, &signal, sizeof(int));
 	safe_write(fd, &timestamp, sizeof(time_t));
+	if (image_dir) {
+		rc = strlen(image_dir) + 1;
+		safe_write(fd, &rc, sizeof(int));
+		safe_write(fd, image_dir, rc);
+	} else {
+		rc = 0;
+		safe_write(fd, &rc, sizeof(int));
+	}
 
 	/* Receive the return code */
 	safe_read(fd, &rc, sizeof(int));
@@ -455,9 +463,9 @@ _sockname_regex_init(regex_t *re, const char *nodename)
 	xstrcat(pattern, "_([[:digit:]]*)\\.([[:digit:]]*)$");
 
 	if (regcomp(re, pattern, REG_EXTENDED) != 0) {
-                error("sockname regex compilation failed\n");
-                return -1;
-        }
+		error("sockname regex compilation failed\n");
+		return -1;
+	}
 
 	xfree(pattern);
 
@@ -468,9 +476,9 @@ static int
 _sockname_regex(regex_t *re, const char *filename,
 		uint32_t *jobid, uint32_t *stepid)
 {
-        size_t nmatch = 5;
-        regmatch_t pmatch[5];
-        char *match;
+	size_t nmatch = 5;
+	regmatch_t pmatch[5];
+	char *match;
 
 	memset(pmatch, 0, sizeof(regmatch_t)*nmatch);
 	if (regexec(re, filename, nmatch, pmatch, 0) == REG_NOMATCH) {

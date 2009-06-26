@@ -1,14 +1,15 @@
 /*****************************************************************************\
  *  bluegene.h - header for blue gene configuration processing module. 
  *
- *  $Id: bluegene.h 17102 2009-03-31 23:23:01Z da $
+ *  $Id: bluegene.h 17534 2009-05-19 00:58:46Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Dan Phung <phung4@llnl.gov> and Danny Auble <da@llnl.gov>
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -49,55 +50,61 @@ typedef enum bg_layout_type {
 	LAYOUT_DYNAMIC	/* slurm will make all blocks */
 } bg_layout_t;
 
-/* Global variables */
+typedef struct {
 #ifdef HAVE_BGL
-extern char *default_blrtsimage;
+	List blrts_list;
 #endif
-extern char *default_linuximage;
-extern char *default_mloaderimage;
-extern char *default_ramdiskimage;
-extern char *bridge_api_file;
-extern char *bg_slurm_user_name;
-extern char *bg_slurm_node_prefix;
-extern bg_layout_t bluegene_layout_mode;
-extern double bluegene_io_ratio;
-extern double bluegene_nc_ratio;
-extern uint32_t bluegene_smallest_block;
-extern uint16_t bluegene_proc_ratio;
-extern uint16_t bluegene_numpsets;
-extern uint16_t bluegene_bp_node_cnt;
-extern uint16_t bluegene_bp_nodecard_cnt;
-extern uint16_t bluegene_nodecard_node_cnt;
-extern uint16_t bluegene_nodecard_ionode_cnt;
-extern uint16_t bluegene_quarter_node_cnt;
-extern uint16_t bluegene_quarter_ionode_cnt;
+	uint16_t bp_node_cnt;
+	uint16_t bp_nodecard_cnt;
+	char *bridge_api_file;
+	uint16_t bridge_api_verb;
+#ifdef HAVE_BGL
+	char *default_blrtsimage;
+#endif
+	char *default_linuximage;
+	char *default_mloaderimage;
+	char *default_ramdiskimage;
+	uint16_t deny_pass;
+	double io_ratio;
+	bg_layout_t layout_mode;
+	List linux_list;
+	List mloader_list;
+	double nc_ratio;
+	uint16_t nodecard_node_cnt;
+	uint16_t nodecard_ionode_cnt;
+	uint16_t numpsets;
+	uint16_t proc_ratio;
+	uint32_t procs_per_bp;
+	uint16_t quarter_node_cnt;
+	uint16_t quarter_ionode_cnt;
+	List ramdisk_list;
+	char *slurm_user_name;
+	char *slurm_node_prefix;
+	uint32_t smallest_block;
+} bg_config_t;
 
+typedef struct {
+	List booted;         /* blocks that are booted */
+	List job_running;    /* jobs running in these blocks */
+	List freeing;        /* blocks that being freed */
+	List main;	    /* List of configured BG blocks */
+	List valid_small32;
+	List valid_small64;
+	List valid_small128;
+	List valid_small256;
+} bg_lists_t;
+
+/* Global variables */
+extern bg_config_t *bg_conf;
+extern bg_lists_t *bg_lists;
 extern ba_system_t *ba_system_ptr;
 extern time_t last_bg_update;
-
-extern List bg_curr_block_list; 	/* Initial bg block state */
-extern List bg_list;			/* List of configured BG blocks */
-extern List bg_job_block_list;  	/* jobs running in these blocks */
-extern List bg_booted_block_list;  	/* blocks that are booted */
-extern List bg_freeing_list;  	        /* blocks that being freed */
-#ifdef HAVE_BGL
-extern List bg_blrtsimage_list;
-#endif
-extern List bg_linuximage_list;
-extern List bg_mloaderimage_list;
-extern List bg_ramdiskimage_list;
-extern List bg_valid_small32;
-extern List bg_valid_small64;
-extern List bg_valid_small128;
-extern List bg_valid_small256;
-
 extern bool agent_fini;
 extern pthread_mutex_t block_state_mutex;
 extern pthread_mutex_t request_list_mutex;
 extern int num_block_to_free;
 extern int num_block_freed;
 extern int blocks_are_created;
-extern int procs_per_node;
 extern int num_unused_cpus;
 
 #define MAX_PTHREAD_RETRIES  1
@@ -109,7 +116,7 @@ extern int num_unused_cpus;
 #define BITSIZE 128
 /* Change BLOCK_STATE_VERSION value when changing the state save
  * format i.e. pack_block() */
-#define BLOCK_STATE_VERSION      "VER001"
+#define BLOCK_STATE_VERSION      "VER002"
 
 #include "bg_block_info.h"
 #include "bg_job_place.h"
@@ -161,14 +168,14 @@ extern bg_record_t *find_org_in_bg_list(List my_list, bg_record_t *bg_record);
 extern void *mult_free_block(void *args);
 extern void *mult_destroy_block(void *args);
 extern int free_block_list(List delete_list);
-extern int read_bg_conf(void);
+extern int read_bg_conf();
 extern int validate_current_blocks(char *dir);
 
 /* block_sys.c */
 /*****************************************************/
 extern int configure_block(bg_record_t * bg_conf_record);
 extern int read_bg_blocks();
-extern int load_state_file(char *dir_name);
+extern int load_state_file(List curr_block_list, char *dir_name);
 
 /* bg_switch_connections.c */
 /*****************************************************/

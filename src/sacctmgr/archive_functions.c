@@ -6,10 +6,11 @@
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -38,6 +39,8 @@
 \*****************************************************************************/
 
 #include "src/sacctmgr/sacctmgr.h"
+#include <sys/param.h>		/* MAXPATHLEN */
+#include "src/common/proc_args.h"
 
 /* returns number of objects added to list */
 extern int _addto_uid_char_list(List char_list, char *names)
@@ -175,6 +178,10 @@ static int _set_cond(int *start, int argc, char *argv[],
 		if(!end && !strncasecmp(argv[i], "where",
 					MAX(command_len, 5))) {
 			continue;
+		} else if(!end && !strncasecmp(argv[i], "events",
+					  MAX(command_len, 1))) {
+			arch_cond->archive_events = 1;
+			set = 1;
 		} else if(!end && !strncasecmp(argv[i], "jobs",
 					  MAX(command_len, 1))) {
 			arch_cond->archive_jobs = 1;
@@ -182,6 +189,10 @@ static int _set_cond(int *start, int argc, char *argv[],
 		} else if(!end && !strncasecmp(argv[i], "steps",
 					  MAX(command_len, 1))) {
 			arch_cond->archive_steps = 1;
+			set = 1;
+		} else if(!end && !strncasecmp(argv[i], "suspend",
+					  MAX(command_len, 1))) {
+			arch_cond->archive_suspend = 1;
 			set = 1;
 		} else if(!end 
 			  || !strncasecmp (argv[i], "Clusters",
@@ -261,18 +272,34 @@ static int _set_cond(int *start, int argc, char *argv[],
 			slurm_addto_char_list(job_cond->partition_list,
 					      argv[i]+end);
 			set = 1;
-		} else if (!strncasecmp (argv[i], "PurgeJobsBefore",
+		} else if (!strncasecmp (argv[i], "PurgeEventMonths",
 					 MAX(command_len, 6))) {
-			if (get_uint16(argv[i]+end, &arch_cond->job_purge,
-				       "PurgeJobsBefore")
+			if (get_uint16(argv[i]+end, &arch_cond->purge_event,
+				       "PurgeEventMonths")
 			    != SLURM_SUCCESS) {
 				exit_code = 1;
 			} else
 				set = 1;
-		} else if (!strncasecmp (argv[i], "PurgeStepsBefore",
+		} else if (!strncasecmp (argv[i], "PurgeJobMonths",
 					 MAX(command_len, 6))) {
-			if (get_uint16(argv[i]+end, &arch_cond->step_purge,
-				       "PurgeStepsBefore")
+			if (get_uint16(argv[i]+end, &arch_cond->purge_job,
+				       "PurgeJobMonths")
+			    != SLURM_SUCCESS) {
+				exit_code = 1;
+			} else
+				set = 1;
+		} else if (!strncasecmp (argv[i], "PurgeStepMonths",
+					 MAX(command_len, 7))) {
+			if (get_uint16(argv[i]+end, &arch_cond->purge_step,
+				       "PurgeStepMonths")
+			    != SLURM_SUCCESS) {
+				exit_code = 1;
+			} else
+				set = 1;
+		} else if (!strncasecmp (argv[i], "PurgeSuspendMonths",
+					 MAX(command_len, 7))) {
+			if (get_uint16(argv[i]+end, &arch_cond->purge_suspend,
+				       "PurgeSuspendMonths")
 			    != SLURM_SUCCESS) {
 				exit_code = 1;
 			} else
@@ -309,15 +336,26 @@ extern int sacctmgr_archive_dump(int argc, char *argv[])
 {
 	int rc = SLURM_SUCCESS;
 	acct_archive_cond_t *arch_cond = xmalloc(sizeof(acct_archive_cond_t));
-	int i=0, set=0;
+	int i=0;
 	struct stat st;
 
+	arch_cond->archive_events = (uint16_t)NO_VAL;
 	arch_cond->archive_jobs = (uint16_t)NO_VAL;
 	arch_cond->archive_steps = (uint16_t)NO_VAL;
-	arch_cond->job_purge = (uint16_t)NO_VAL;
-	arch_cond->step_purge = (uint16_t)NO_VAL;
+	arch_cond->archive_suspend = (uint16_t)NO_VAL;
+	arch_cond->purge_event = (uint16_t)NO_VAL;
+	arch_cond->purge_job = (uint16_t)NO_VAL;
+	arch_cond->purge_step = (uint16_t)NO_VAL;
+	arch_cond->purge_suspend = (uint16_t)NO_VAL;
 
-	set = _set_cond(&i, argc, argv, arch_cond);
+	for (i=0; i<argc; i++) {
+		int command_len = strlen(argv[i]);
+		if (!strncasecmp (argv[i], "Where", MAX(command_len, 5))
+		    || !strncasecmp (argv[i], "Set", MAX(command_len, 3))) 
+			i++;		
+		_set_cond(&i, argc, argv, arch_cond);
+	}
+
 	if(exit_code) {
 		destroy_acct_archive_cond(arch_cond);
 		return SLURM_ERROR;
@@ -426,20 +464,34 @@ extern int sacctmgr_archive_load(int argc, char *argv[])
 			fprintf(stderr, " Unknown option: %s\n", argv[i]);
 		}		
 	}
-
+	
 	if(exit_code) {
 		destroy_acct_archive_rec(arch_rec);
 		return SLURM_ERROR;
 	} 
+	
+	if (arch_rec->archive_file) {
+		char *fullpath;
+		char cwd[MAXPATHLEN + 1];
+		int  mode = R_OK;
 
-	if (arch_rec->archive_file 
-	    && (stat(arch_rec->archive_file, &st) < 0)) {
-		exit_code = errno;
-		fprintf(stderr, " load: Failed to stat %s: %m\n "
-			"Note: For archive load, the file must be on "
-			"the calling host.\n",
-			arch_rec->archive_file);
-		return SLURM_ERROR;
+		if ((getcwd(cwd, MAXPATHLEN)) == NULL) 
+			fatal("getcwd failed: %m");		
+		
+		if ((fullpath = search_path(cwd, arch_rec->archive_file,
+					    true, mode))) {
+			xfree(arch_rec->archive_file);
+			arch_rec->archive_file = fullpath;
+		} 
+		
+		if(stat(arch_rec->archive_file, &st) < 0) {
+			exit_code = errno;
+			fprintf(stderr, " load: Failed to stat %s: %m\n "
+				"Note: For archive load, the file must be on "
+				"the calling host.\n",
+				arch_rec->archive_file);
+			return SLURM_ERROR;
+		}
 	}
 
 	rc = jobacct_storage_g_archive_load(db_conn, arch_rec);

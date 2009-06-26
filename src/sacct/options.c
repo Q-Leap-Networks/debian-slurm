@@ -5,10 +5,11 @@
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -51,15 +52,10 @@ List selected_parts = NULL;
 List selected_steps = NULL;
 void *acct_db_conn = NULL;
 
-void _show_rec(char *f[])
-{
-	int 	i;
-	fprintf(stderr, "rec>");
-	for (i=0; f[i]; i++)
-		fprintf(stderr, " %s", f[i]);
-	fprintf(stderr, "\n");
-	return;
-}
+List print_fields_list = NULL;
+ListIterator print_fields_itr = NULL;
+int field_count = 0;
+List qos_list = NULL;
 
 void _help_fields_msg(void)
 {
@@ -67,10 +63,10 @@ void _help_fields_msg(void)
 
 	for (i = 0; fields[i].name; i++) {
 		if (i & 3)
-			printf("  ");
-		else
+			printf(" ");
+		else if(i)
 			printf("\n");
-		printf("%-10s", fields[i].name);
+		printf("%-13s", fields[i].name);
 	}
 	printf("\n");
 	return;
@@ -385,153 +381,122 @@ static int _addto_step_list(List step_list, char *names)
 
 void _help_msg(void)
 {
-	slurm_ctl_conf_t *conf = slurm_conf_lock();
-	printf("\n"
-	       "By default, sacct displays accounting data for all jobs and job\n"
-	       "steps that are present in the log.\n"
-	       "\n"
-	       "Notes:\n"
-	       "\n"
-	       "    * If --dump is specified,\n"
-	       "          * The field selection options (--brief, --fields, ...)\n"
-	       "	    have no effect\n"
-	       "	  * Elapsed time fields are presented as 2 fields, integral\n"
-	       "	    seconds and integral microseconds\n"
-	       "    * If --dump is not specified, elapsed time fields are presented\n"
-	       "      as [[days-]hours:]minutes:seconds.hundredths\n"
-	       "    * The default input file is the file named in the \"jobacct_logfile\"\n"
-	       "      parameter in %s.\n"
-	       "\n"
-	       "Options:\n"
-	       "\n"
-	       "-a, --all\n"
-	       "    Display job accounting data for all users. By default, only\n"
-	       "    data for the current user is displayed for users other than\n"
-	       "    root.\n"
-	       "-A, --accounts\n"
-	       "    Only send data about these accounts.  Default is all.\n"
-	       "-b, --brief\n"
-	       "    Equivalent to \"--fields=jobstep,state,error\". This option\n"
-	       "    has no effect if --dump is specified.\n"
-	       "-c, --completion\n"
-	       "    Use job completion instead of accounting data.\n"
-	       "-C, --clusters\n"
-	       "    Only send data about these clusters.  -1 for all clusters.\n"
-	       "-d, --dump\n"
-	       "    Dump the raw data records\n"
-	       "--duplicates\n"
-	       "    If SLURM job ids are reset, but the job accounting log file\n"
-	       "    isn't reset at the same time (with -e, for example), some\n"
-	       "    job numbers will probably appear more than once in the\n"
-	       "    accounting log file to refer to different jobs; such jobs\n"
-	       "    can be distinguished by the \"submit\" time stamp in the\n"
-	       "    data records.\n"
-	       "      When data for specific jobs are requested with\n"
-	       "    the --jobs option, we assume that the user\n"
-	       "    wants to see only the most recent job with that number. This\n"
-	       "    behavior can be overridden by specifying --duplicates, in\n"
-	       "    which case all records that match the selection criteria\n"
-	       "    will be returned.\n"
-	       "      When --jobs is not specified, we report\n"
-	       "    data for all jobs that match the selection criteria, even if\n"
-	       "    some of the job numbers are reused. Specify that you only\n"
-	       "    want the most recent job for each selected job number with\n"
-	       "    the --noduplicates option.\n"
-	       "-e <timespec>, --expire=<timespec>\n"
-	       "    Remove jobs from SLURM's current accounting log file (or the\n"
-	       "    file specified with --file) that completed more than <timespec>\n"
-	       "    ago.  If <timespec> is an integer, it is interpreted as\n" 
-	       "    minutes. If <timespec> is an integer followed by \"h\", it is\n"
-	       "    interpreted as a number of hours. If <timespec> is an integer\n"
-	       "    followed by \"d\", it is interpreted as number of days. For\n"
-	       "    example, \"--expire=14d\" means that you wish to purge the job\n"
-	       "    accounting log of all jobs that completed more than 14 days ago.\n" 
-	       "--endtime:                                                   \n"
-               "    Select jobs eligible before this time.                   \n"
-	       "-F <format-list>, --format=<format-list>\n"
-	       "    Display the specified data (use \"--helpformat\" for a\n"
-	       "    list of available fields). If no format option is specified,\n"
-	       "    we use \"--format=jobstep,jobname,partition,alloc_cpus,state,error\".\n"
-	       "-f<file>, --file=<file>\n"
-	       "    Read data from the specified file, rather than SLURM's current\n"
-	       "    accounting log file.\n"
-	       "-l, --long\n"
-	       "    Equivalent to specifying\n"
-	       "    \"--fields=jobstep,usercpu,systemcpu,minflt,majflt,nprocs,\n"
-	       "    alloc_cpus,elapsed,state,exitcode\"\n"
-	       "-O, --formatted_dump\n"
-	       "    Dump accounting records in an easy-to-read format, primarily\n"
-	       "    for debugging.\n"
-	       "-g <gid>, --gid <gid>\n"
-	       "    Select only jobs submitted from the <gid> group.\n"
-	       "-h, --help\n"
-	       "    Print a general help message.\n"
-	       "--help-fields\n"
-	       "    Print a list of fields that can be specified with the\n"
-	       "    \"--fields\" option\n"
-	       "-j <job(.step)>, --jobs=<job(.step)>\n"
-	       "    Display information about this job or comma-separated\n"
-	       "    list of jobs. The default is all jobs. Adding .step will\n"
-	       "    display the specfic job step of that job.\n"
-	       "--noduplicates\n"
-	       "    See the discussion under --duplicates.\n"
-	       "--noheader\n"
-	       "    Print (or don't print) a header. The default is to print a\n"
-	       "    header; the option has no effect if --dump is specified\n"
-	       "-p <part_list>, --partition=<part_list>\n"
-	       "    Display or purge information about jobs and job steps in the\n"
-	       "    <part_list> partition(s). The default is all partitions.\n"
-	       "-P --purge\n"
-	       "    Used in conjunction with --expire to remove invalid data\n"
-	       "    from the job accounting log.\n"
-	       "-s <state-list>, --state=<state-list>\n"
-	       "    Select jobs based on their current state: running (r),\n"
-	       "    completed (cd), failed (f), timeout (to), and node_fail (nf).\n"
-	       "-S, --stat\n"
-	       "    Get real time state of a jobstep supplied by the -j\n"
-	       "    option\n" 
-	       "--starttime:                                                 \n"
-               "    Select jobs eligible after this time.                    \n"
-	       "-t, --total\n"
-	       "    Only show cumulative statistics for each job, not the\n"
-	       "    intermediate steps\n"
-	       "-u <uid>, --uid <uid>\n"
-	       "    Select only jobs submitted by the user with uid <uid>.  Only\n"
-	       "    root users are allowed to specify a uid other than their own -1 for all users.\n"
-	       "--usage\n"
-	       "    Pointer to this message.\n"
-	       "-v, --verbose\n"
-	       "    Primarily for debugging purposes, report the state of various\n"
-	       "    variables during processing.\n"
-	       "-W, --wckeys\n"
-	       "    Only send data about these wckeys.  Default is all.\n"
-	       "\n"
-	       "Note, valid start/end time formats are...\n"
-	       "    HH:MM[:SS] [AM|PM]\n"
-	       "    MMDD[YY] or MM/DD[/YY] or MM.DD[.YY]\n"
-	       "    MM/DD[/YY]-HH:MM[:SS]\n"
-	       , conf->slurm_conf);
-
-	slurm_conf_unlock();
+	printf("\
+sacct [<OPTION>]                                                            \n\
+    Valid <OPTION> values are:                                              \n\
+     -a, --allusers:                                                        \n\
+	           Display jobs for all users. By default, only the         \n\
+                   current user's jobs are displayed.  If ran by user root  \n\
+                   this is the default.                                     \n\
+     -A, --accounts:                                                        \n\
+	           Use this comma seperated list of accounts to select jobs \n\
+                   to display.  By default, all accounts are selected.      \n\
+     -b, --brief:                                                           \n\
+	           Equivalent to '--format=jobstep,state,error'. This option\n\
+	           has no effect if --dump is specified.                    \n\
+     -c, --completion: Use job completion instead of accounting data.       \n\
+     -C, --clusters:                                                        \n\
+                   Only send data about these clusters. -1 for all clusters.\n\
+     -d, --dump:   Dump the raw data records                                \n\
+     -D, --duplicates:                                                      \n\
+	           If SLURM job ids are reset, some job numbers will        \n\
+	           probably appear more than once refering to different jobs.\n\
+	           Without this option only the most recent jobs will be    \n\
+                   displayed.                                               \n\
+     -e, --helpformat:                                                      \n\
+	           Print a list of fields that can be specified with the    \n\
+	           '--format' option                                        \n\
+     -E, --endtime:                                                         \n\
+                   Select jobs started before this time.                    \n\
+     -f, --file=file:                                                       \n\
+	           Read data from the specified file, rather than SLURM's   \n\
+                   current accounting log file. (Only appliciable when      \n\
+                   running the filetxt plugin.)                             \n\
+     -g, --gid, --group:                                                    \n\
+	           Use this comma seperated list of gids or group names     \n\
+                   to select jobs to display.  By default, all groups are   \n\
+                   selected.                                                \n\
+     -h, --help:   Print this description of use.                           \n\
+     -j, --jobs:                                                            \n\
+	           Format is <job(.step)>. Display information about this   \n\
+                   job or comma-separated list of jobs. The default is all  \n\
+                   jobs. Adding .step will display the specfic job step of  \n\
+                   that job.                                                \n\
+     -l, --long:                                                            \n\
+	           Equivalent to specifying                                 \n\
+	           '--fields=jobid,jobname,partition,maxvsize,maxvsizenode, \n\
+                             maxvsizetask,avevsize,maxrss,maxrssnode,       \n\
+                             maxrsstask,averss,maxpages,maxpagesnode,       \n\
+                             maxpagestask,avepages,mincpu,mincpunode,       \n\
+                             mincputask,avecpu,ntasks,alloccpus,elapsed,    \n\
+	                     state,exitcode'                                \n\
+     -L, --allclusters:                                                     \n\
+	           Display jobs ran on all clusters. By default, only jobs  \n\
+                   ran on the cluster from where sacct is called are        \n\
+                   displayed.                                               \n\
+     -n, --noheader:                                                        \n\
+	           No header will be added to the beginning of output.      \n\
+                   The default is to print a header; the option has no effect\n\
+                   if --dump is specified                                   \n\
+     -N, --nodes:                                                           \n\
+                   A comma separated list of nodes where jobs ran           \n\
+     -o, --format:                                                          \n\
+	           Comma seperated list of fields. (use \"--helpformat\"    \n\
+                   for a list of available fields).                         \n\
+     -O, --formatted_dump:                                                  \n\
+	           Dump accounting records in an easy-to-read format,       \n\
+                   primarily for debugging.                                 \n\
+     -p, --parsable: output will be '|' delimited with a '|' at the end     \n\
+     -P, --parsable2: output will be '|' delimited without a '|' at the end \n\
+     -r, --partition:                                                       \n\
+	           Comma seperated list of partitions to select jobs and    \n\
+                   job steps from. The default is all partitions.           \n\
+     -s, --state:                                                           \n\
+	           Select jobs based on their current state: running (r),   \n\
+	           completed (cd), failed (f), timeout (to), and            \n\
+                   node_fail (nf).                                          \n\
+     -S, --starttime:                                                       \n\
+                   Select jobs eligible after this time.  Default is        \n\
+                   midnight of current day.                                 \n\
+     -T, --truncate:                                                        \n\
+                   Truncate time.  So if a job started before --starttime   \n\
+                   the start time would be truncated to --starttime.        \n\
+                   The same for end time and --endtime.                     \n\
+     -u, --uid, --user:                                                     \n\
+	           Use this comma seperated list of uids or user names      \n\
+                   to select jobs to display.  By default, the running      \n\
+                   user's uid is used.                                      \n\
+     --usage:      Display brief usage message.                             \n\
+     -v, --verbose:                                                         \n\
+	           Primarily for debugging purposes, report the state of    \n\
+                   various variables during processing.                     \n\
+     -V, --version: Print version.                                          \n\
+     -W, --wckeys:                                                          \n\
+                   Only send data about these wckeys.  Default is all.      \n\
+     -X, --allocations:                                                     \n\
+	           Only show cumulative statistics for each job, not the    \n\
+	           intermediate steps.                                      \n\
+	                                                                    \n\
+     Note, valid start/end time formats are...                              \n\
+	           HH:MM[:SS] [AM|PM]                                       \n\
+	           MMDD[YY] or MM/DD[/YY] or MM.DD[.YY]                     \n\
+	           MM/DD[/YY]-HH:MM[:SS]                                    \n\
+	           YYYY-MM-DD[THH[:MM[:SS]]]                                \n\
+\n");
 
 	return;
 }
 
 void _usage(void)
 {
-	printf("\nUsage: sacct [options]\n\tUse --help for help\n");
+	printf("Usage: sacct [options]\n\tUse --help for help\n");
 }
 
 void _init_params()
 {
 	memset(&params, 0, sizeof(sacct_parameters_t));
-	params.arch_cond = xmalloc(sizeof(acct_archive_cond_t));
-	params.arch_cond->archive_jobs = (uint16_t)NO_VAL;
-	params.arch_cond->archive_steps = (uint16_t)NO_VAL;
-	params.arch_cond->job_purge = (uint16_t)NO_VAL;
-	params.arch_cond->step_purge = (uint16_t)NO_VAL;
-
-	params.arch_cond->job_cond = xmalloc(sizeof(acct_job_cond_t));
+	params.job_cond = xmalloc(sizeof(acct_job_cond_t));
+	params.job_cond->without_usage_truncation = 1;
 }
 
 int decode_state_char(char *state)
@@ -563,7 +528,7 @@ int get_data(void)
 
 	ListIterator itr = NULL;
 	ListIterator itr_step = NULL;
-	acct_job_cond_t *job_cond = params.arch_cond->job_cond;
+	acct_job_cond_t *job_cond = params.job_cond;
 	
 	if(params.opt_completion) {
 		jobs = g_slurm_jobcomp_get_jobs(job_cond);
@@ -630,41 +595,40 @@ void parse_command_line(int argc, char **argv)
 	bool brief_output = FALSE, long_output = FALSE;
 	bool all_users = 0;
 	bool all_clusters = 0;
-	acct_archive_cond_t *arch_cond = params.arch_cond;
-	acct_job_cond_t *job_cond = arch_cond->job_cond;
+	acct_job_cond_t *job_cond = params.job_cond;
+	log_options_t opts = LOG_OPTS_STDERR_ONLY ;
+	int verbosity;		/* count of -v options */
 
 	static struct option long_options[] = {
-		{"all", 0,0, 'a'},
+		{"allusers", 0,0, 'a'},
 		{"accounts", 1, 0, 'A'},
-		{"begin", 1, 0, 'B'},
+		{"allocations", 0, &params.opt_allocs,  1},
 		{"brief", 0, 0, 'b'},
-		{"clusters", 1, 0, 'C'},
 		{"completion", 0, &params.opt_completion, 'c'},
-		{"duplicates", 0, &params.opt_dup, 1},
+		{"clusters", 1, 0, 'C'},
 		{"dump", 0, 0, 'd'},
-		{"end", 1, 0, 'E'},
+		{"duplicates", 0, &params.opt_dup, 1},
+		{"helpformat", 0, 0, 'e'},
+		{"help-fields", 0, 0, 'e'},
 		{"endtime", 1, 0, 'E'},
-		{"expire", 1, 0, 'e'},
-		{"fields", 1, 0, 'F'},
-		{"format", 1, 0, 'F'},
 		{"file", 1, 0, 'f'},
-		{"formatted_dump", 0, 0, 'O'},
 		{"gid", 1, 0, 'g'},
 		{"group", 1, 0, 'g'},
-		{"help", 0, &params.opt_help, 1},
-		{"help-fields", 0, &params.opt_help, 2},
+		{"help", 0, 0, 'h'},
 		{"helpformat", 0, &params.opt_help, 2},
 		{"jobs", 1, 0, 'j'},
 		{"long", 0, 0, 'l'},
-		{"big_logfile", 0, &params.opt_lowmem, 1},
-		{"noduplicates", 0, &params.opt_dup, 0},
-		{"noheader", 0, &params.opt_noheader, 1},
-		{"partition", 1, 0, 'p'},
-		{"purge", 0, 0, 'P'},
+		{"nodes", 1, 0, 'N'},
+		{"noheader", 0, 0, 'n'},
+		{"fields", 1, 0, 'o'},
+		{"format", 1, 0, 'o'},
+		{"formatted_dump", 0, 0, 'O'},
+		{"parsable", 0, 0, 'p'},
+		{"parsable2", 0, 0, 'P'},
+		{"partition", 1, 0, 'r'},
 		{"state", 1, 0, 's'},
-		{"stat", 0, 0, 'S'},
-		{"starttime", 1, 0, 'B'},
-		{"total", 0, 0,  't'},
+		{"starttime", 1, 0, 'S'},
+		{"truncate", 0, 0, 'T'},
 		{"uid", 1, 0, 'u'},
 		{"usage", 0, &params.opt_help, 3},
 		{"user", 1, 0, 'u'},
@@ -676,11 +640,13 @@ void parse_command_line(int argc, char **argv)
 	params.opt_uid = getuid();
 	params.opt_gid = getgid();
 
+	verbosity         = 0;
+	log_init("sacct", opts, SYSLOG_FACILITY_DAEMON, NULL);
 	opterr = 1;		/* Let getopt report problems to the user */
 
 	while (1) {		/* now cycle through the command line */
 		c = getopt_long(argc, argv,
-				"aA:bB:cC:deE:F:f:g:hj:lOP:p:s:StUu:VvW:",
+				"aA:bcC:deE:f:g:hj:lnN:o:OpPr:s:S:tu:vVW:X",
 				long_options, &optionIndex);
 		if (c == -1)
 			break;
@@ -696,9 +662,6 @@ void parse_command_line(int argc, char **argv)
 			break;
 		case 'b':
 			brief_output = true;
-			break;
-		case 'B':
-			job_cond->usage_start = parse_time(optarg, 1);
 			break;
 		case 'c':
 			params.opt_completion = 1;
@@ -717,35 +680,28 @@ void parse_command_line(int argc, char **argv)
 		case 'd':
 			params.opt_dump = 1;
 			break;	
+		case 'D':
+			params.opt_dup = 1;
+			break;
 		case 'e':
-			params.opt_expire = 1;
+			params.opt_help = 2;
 			break;
 		case 'E':
 			job_cond->usage_end = parse_time(optarg, 1);
 			break;
-		case 'F':
-			if(params.opt_stat)
-				xfree(params.opt_field_list);
-			
-			xstrfmtcat(params.opt_field_list, "%s,", optarg);
-			break;
-
 		case 'f':
-			xfree(arch_cond->archive_dir);
-			arch_cond->archive_dir = xstrdup(optarg);
+			xfree(params.opt_filein);
+			params.opt_filein = xstrdup(optarg);
 			break;
-
 		case 'g':
 			if(!job_cond->groupid_list)
 				job_cond->groupid_list = 
 					list_create(slurm_destroy_char);
 			_addto_id_char_list(job_cond->groupid_list, optarg, 1);
 			break;
-
 		case 'h':
 			params.opt_help = 1;
 			break;
-
 		case 'j':
 			if ((strspn(optarg, "0123456789, ") < strlen(optarg))
 			    && (strspn(optarg, ".0123456789, ") 
@@ -760,23 +716,38 @@ void parse_command_line(int argc, char **argv)
 					destroy_jobacct_selected_step);
 			_addto_step_list(job_cond->step_list, optarg);
 			break;
-
+		case 'L':
+			all_clusters = 1;
+			break;
 		case 'l':
 			long_output = true;
 			break;
-
+		case 'o':
+			xstrfmtcat(params.opt_field_list, "%s,", optarg);
+			break;
 		case 'O':
 			params.opt_fdump = 1;
 			break;
-
-		case 'P':
-			
-			arch_cond->step_purge = 
-				arch_cond->job_purge = atoi(optarg);
-			
+		case 'n':
+			print_fields_have_header = 0;
 			break;
-
+		case 'N':
+			if(job_cond->used_nodes) {
+				error("Aleady asked for nodes '%s'",
+				      job_cond->used_nodes);
+				break;
+			}
+			job_cond->used_nodes = xstrdup(optarg);
+			break;
 		case 'p':
+			print_fields_parsable_print = 
+				PRINT_FIELDS_PARSABLE_ENDING;
+			break;
+		case 'P':
+			print_fields_parsable_print = 
+				PRINT_FIELDS_PARSABLE_NO_ENDING;
+			break;
+		case 'r':
 			if(!job_cond->partition_list)
 				job_cond->partition_list =
 					list_create(slurm_destroy_char);
@@ -792,21 +763,14 @@ void parse_command_line(int argc, char **argv)
 			_addto_state_char_list(job_cond->state_list, optarg);
 			break;
 		case 'S':
-			if(!params.opt_field_list) {
-				xstrfmtcat(params.opt_field_list, "%s,",
-					   STAT_FIELDS);
-			}
-			params.opt_stat = 1;
+			job_cond->usage_start = parse_time(optarg, 1);
 			break;
-
-		case 't':
-			params.opt_total = 1;
+		case 'T':
+			job_cond->without_usage_truncation = 0;
 			break;
-
 		case 'U':
 			params.opt_help = 3;
 			break;
-
 		case 'u':
 			if(!strcmp(optarg, "-1")) {
 				all_users = 1;
@@ -818,17 +782,11 @@ void parse_command_line(int argc, char **argv)
 					list_create(slurm_destroy_char);
 			_addto_id_char_list(job_cond->userid_list, optarg, 0);
 			break;
-
 		case 'v':
 			/* Handle -vvv thusly...
-			 * 0 - report only normal messages and errors
-			 * 1 - report options selected and major operations
-			 * 2 - report data anomalies probably not errors
-			 * 3 - blather on and on
 			 */
-			params.opt_verbose++;
+			verbosity++;
 			break;
-
 		case 'W':
 			if(!job_cond->wckey_list) 
 				job_cond->wckey_list =
@@ -838,12 +796,22 @@ void parse_command_line(int argc, char **argv)
 		case 'V':
 			printf("%s %s\n", PACKAGE, SLURM_VERSION);
 			exit(0);
-
+		case 't':
+		case 'X':
+			params.opt_allocs = 1;
+			break;
 		case ':':
 		case '?':	/* getopt() has explained it */
 			exit(1); 
 		}
 	}
+
+	if (verbosity) {
+		opts.stderr_level += verbosity;
+		opts.prefix_level = 1;
+		log_alter(opts, 0, NULL);
+	}
+
 
 	/* Now set params.opt_dup, unless they've already done so */
 	if (params.opt_dup < 0)	/* not already set explicitly */
@@ -854,62 +822,73 @@ void parse_command_line(int argc, char **argv)
 
 	job_cond->duplicates = params.opt_dup;
 
+	if(!job_cond->usage_start) {
+		job_cond->usage_start = time(NULL);
+		struct tm start_tm;
+
+		if(!localtime_r(&job_cond->usage_start, &start_tm)) {
+			error("Couldn't get localtime from %d", 
+			      job_cond->usage_start);
+			return;
+		}
+		start_tm.tm_sec = 0;
+		start_tm.tm_min = 0;
+		start_tm.tm_hour = 0;
+		start_tm.tm_isdst = -1;
+		job_cond->usage_start = mktime(&start_tm);
+	}
+	
+	if(verbosity > 0) {
+		char *start_char =NULL, *end_char = NULL;
+		
+		start_char = xstrdup(ctime(&job_cond->usage_start));
+		/* remove the new line */
+		start_char[strlen(start_char)-1] = '\0';
+		if(job_cond->usage_end) {
+			end_char = xstrdup(ctime(&job_cond->usage_end));
+			/* remove the new line */
+			end_char[strlen(end_char)-1] = '\0';
+		} else
+			end_char = xstrdup("Now");
+		info("Jobs eligible from %s - %s\n", start_char, end_char);
+		xfree(start_char);
+		xfree(end_char);
+	}
+
 	debug("Options selected:\n"
-	      "\topt_archive_jobs=%d\n"
-	      "\topt_archve_steps=%d\n"
 	      "\topt_completion=%d\n"
 	      "\topt_dump=%d\n"
 	      "\topt_dup=%d\n"
-	      "\topt_expire=%d\n"
 	      "\topt_fdump=%d\n"
-	      "\topt_stat=%d\n"
 	      "\topt_field_list=%s\n"
-	      "\topt_filein=%s\n"
-	      "\topt_noheader=%d\n"
 	      "\topt_help=%d\n"
-	      "\topt_long=%d\n"
-	      "\topt_lowmem=%d\n"
-	      "\topt_job_purge=%d\n"
-	      "\topt_step_purge=%d\n"
-	      "\topt_total=%d\n"
-	      "\topt_verbose=%d\n",
-	      arch_cond->archive_jobs,
-	      arch_cond->archive_steps,
+	      "\topt_allocs=%d\n",
 	      params.opt_completion,
 	      params.opt_dump,
 	      params.opt_dup,
-	      params.opt_expire,
 	      params.opt_fdump,
-	      params.opt_stat,
 	      params.opt_field_list,
-	      arch_cond->archive_dir,
-	      params.opt_noheader,
 	      params.opt_help,
-	      params.opt_long,
-	      params.opt_lowmem,
-	      arch_cond->job_purge,
-	      arch_cond->step_purge,
-	      params.opt_total,
-	      params.opt_verbose);
+	      params.opt_allocs);
 
 
 	if(params.opt_completion) {
-		g_slurm_jobcomp_init(arch_cond->archive_dir);
+		g_slurm_jobcomp_init(params.opt_filein);
 
 		acct_type = slurm_get_jobcomp_type();
 		if ((strcmp(acct_type, "jobcomp/none") == 0)
-		    &&  (stat(arch_cond->archive_dir, &stat_buf) != 0)) {
+		    &&  (stat(params.opt_filein, &stat_buf) != 0)) {
 			fprintf(stderr, "SLURM job completion is disabled\n");
 			exit(1);
 		}
 		xfree(acct_type);
 	} else {
-		slurm_acct_storage_init(arch_cond->archive_dir);
+		slurm_acct_storage_init(params.opt_filein);
 		acct_db_conn = acct_storage_g_get_connection(false, 0, false);
 		
 		acct_type = slurm_get_accounting_storage_type();
 		if ((strcmp(acct_type, "accounting_storage/none") == 0)
-		    &&  (stat(arch_cond->archive_dir, &stat_buf) != 0)) {
+		    &&  (stat(params.opt_filein, &stat_buf) != 0)) {
 			fprintf(stderr,
 				"SLURM accounting storage is disabled\n");
 			exit(1);
@@ -924,116 +903,102 @@ void parse_command_line(int argc, char **argv)
 			list_destroy(job_cond->cluster_list);
 			job_cond->cluster_list = NULL;
 		}
-		if(params.opt_verbose)
-			fprintf(stderr, "Clusters requested:\n\t: all\n");
-	} else if (params.opt_verbose && job_cond->cluster_list 
-	    && list_count(job_cond->cluster_list)) {
-		fprintf(stderr, "Clusters requested:\n");
+		debug2("Clusters requested:\tall\n");
+	} else if (job_cond->cluster_list 
+		   && list_count(job_cond->cluster_list)) {
+		debug2( "Clusters requested:\n");
 		itr = list_iterator_create(job_cond->cluster_list);
 		while((start = list_next(itr))) 
-			fprintf(stderr, "\t: %s\n", start);
+			debug2("\t: %s\n", start);
 		list_iterator_destroy(itr);
 	} else if(!job_cond->cluster_list 
 		  || !list_count(job_cond->cluster_list)) {
 		if(!job_cond->cluster_list)
 			job_cond->cluster_list =
 				list_create(slurm_destroy_char);
-		if((start = slurm_get_cluster_name()))
+		if((start = slurm_get_cluster_name())) {
 			list_append(job_cond->cluster_list, start);
-		if(params.opt_verbose) {
-			fprintf(stderr, "Clusters requested:\n");
-			fprintf(stderr, "\t: %s\n", start);
+			debug2("Clusters requested:\t%s", start);
 		}
 	}
 
-	/* if any jobs are specified set to look for all users if none
+	/* if any jobs or nodes are specified set to look for all users if none
 	   are set */
-	if((job_cond->step_list && list_count(job_cond->step_list))
-	   && (!job_cond->userid_list || !list_count(job_cond->userid_list)))
-		all_users=1;
+	if(!job_cond->userid_list || !list_count(job_cond->userid_list)) 
+		if((job_cond->step_list && list_count(job_cond->step_list)) 
+		   || job_cond->used_nodes)
+			all_users=1;      
 
 	if(all_users) {
-		if(job_cond->userid_list 
-		   && list_count(job_cond->userid_list)) {
+		if(job_cond->userid_list && list_count(job_cond->userid_list)) {
 			list_destroy(job_cond->userid_list);
 			job_cond->userid_list = NULL;
 		}
-		if(params.opt_verbose)
-			fprintf(stderr, "Userids requested:\n\t: all\n");
-	} else if (params.opt_verbose && job_cond->userid_list 
-	    && list_count(job_cond->userid_list)) {
-		fprintf(stderr, "Userids requested:\n");
+		debug2("Userids requested:\tall\n");
+	} else if (job_cond->userid_list && list_count(job_cond->userid_list)) {
+		debug2("Userids requested:");
 		itr = list_iterator_create(job_cond->userid_list);
 		while((start = list_next(itr))) 
-			fprintf(stderr, "\t: %s\n", start);
+			debug2("\t: %s", start);
 		list_iterator_destroy(itr);
 	} else if(!job_cond->userid_list 
-		      || !list_count(job_cond->userid_list)) {
+		  || !list_count(job_cond->userid_list)) {
 		if(!job_cond->userid_list)
-			job_cond->userid_list =
-				list_create(slurm_destroy_char);
+			job_cond->userid_list = list_create(slurm_destroy_char);
 		start = xstrdup_printf("%u", params.opt_uid);
 		list_append(job_cond->userid_list, start);
-		if(params.opt_verbose) {
-			fprintf(stderr, "Userids requested:\n");
-			fprintf(stderr, "\t: %s\n", start);
-		}
+		debug2("Userid requested\t: %s", start);
 	}
 
-	if (params.opt_verbose && job_cond->groupid_list 
-	    && list_count(job_cond->groupid_list)) {
-		fprintf(stderr, "Groupids requested:\n");
+	if (job_cond->groupid_list && list_count(job_cond->groupid_list)) {
+		debug2("Groupids requested:\n");
 		itr = list_iterator_create(job_cond->groupid_list);
 		while((start = list_next(itr))) 
-			fprintf(stderr, "\t: %s\n", start);
+			debug2("\t: %s\n", start);
 		list_iterator_destroy(itr);
 	} 
 
 	/* specific partitions requested? */
-	if (params.opt_verbose && job_cond->partition_list 
-	    && list_count(job_cond->partition_list)) {
-		fprintf(stderr, "Partitions requested:\n");
+	if (job_cond->partition_list && list_count(job_cond->partition_list)) {
+		debug2("Partitions requested:");
 		itr = list_iterator_create(job_cond->partition_list);
 		while((start = list_next(itr))) 
-			fprintf(stderr, "\t: %s\n", start);
+			debug2("\t: %s\n", start);
 		list_iterator_destroy(itr);
 	}
 
 	/* specific jobs requested? */
-	if (params.opt_verbose && job_cond->step_list
-	    && list_count(job_cond->step_list)) { 
-		fprintf(stderr, "Jobs requested:\n");
+	if (job_cond->step_list && list_count(job_cond->step_list)) { 
+		debug2("Jobs requested:");
 		itr = list_iterator_create(job_cond->step_list);
 		while((selected_step = list_next(itr))) {
 			if(selected_step->stepid != NO_VAL) 
-				fprintf(stderr, "\t: %d.%d\n",
+				debug2("\t: %d.%d",
 					selected_step->jobid,
 					selected_step->stepid);
 			else	
-				fprintf(stderr, "\t: %d\n", 
+				debug2("\t: %d", 
 					selected_step->jobid);
 		}
 		list_iterator_destroy(itr);
 	}
 
 	/* specific states (completion state) requested? */
-	if (params.opt_verbose && job_cond->state_list
-	    && list_count(job_cond->state_list)) {
-		fprintf(stderr, "States requested:\n");
+	if (job_cond->state_list && list_count(job_cond->state_list)) {
+		debug2("States requested:");
 		itr = list_iterator_create(job_cond->state_list);
 		while((start = list_next(itr))) {
-			fprintf(stderr, "\t: %s\n", 
+			debug2("\t: %s", 
 				job_state_string(atoi(start)));
 		}
 		list_iterator_destroy(itr);
 	}
 
-	if (params.opt_verbose && job_cond->wckey_list 
-	    && list_count(job_cond->wckey_list)) {
-		fprintf(stderr, "Wckeys requested:\n");
+	if (job_cond->wckey_list && list_count(job_cond->wckey_list)) {
+		debug2("Wckeys requested:");
 		itr = list_iterator_create(job_cond->wckey_list);
 		while((start = list_next(itr))) 
-			fprintf(stderr, "\t: %s\n", start);
+			debug2("\t: %s\n", start);
 		list_iterator_destroy(itr);
 	} 
 
@@ -1057,7 +1022,7 @@ void parse_command_line(int argc, char **argv)
 	} 
 	
 	if (params.opt_field_list==NULL) {
-		if (params.opt_dump || params.opt_expire)
+		if (params.opt_dump)
 			goto endopt;
 		if(params.opt_completion)
 			dot = DEFAULT_COMP_FIELDS;
@@ -1078,29 +1043,19 @@ void parse_command_line(int argc, char **argv)
 			if (!strcasecmp(fields[i].name, start))
 				goto foundfield;
 		}
-		fprintf(stderr,
-			"Invalid field requested: \"%s\"\n",
-			start);
+		error("Invalid field requested: \"%s\"", start);
 		exit(1);
 	foundfield:
-		printfields[nprintfields++] = i;
+		list_append(print_fields_list, &fields[i]);
 		start = end + 1;
 	}
-	if (params.opt_verbose) {
-		fprintf(stderr, "%d field%s selected:\n",
-			nprintfields,
-			(nprintfields==1? "" : "s"));
-		for (i = 0; i < nprintfields; i++)
-			fprintf(stderr,
-				"\t%s\n",
-				fields[printfields[i]].name);
-	} 
+	field_count = list_count(print_fields_list);
 endopt:
 	if (optind < argc) {
-		fprintf(stderr, "Error: Unknown arguments:");
+		debug2("Error: Unknown arguments:");
 		for (i=optind; i<argc; i++)
-			fprintf(stderr, " %s", argv[i]);
-		fprintf(stderr, "\n");
+			debug2(" %s", argv[i]);
+		debug2("\n");
 		exit(1);
 	}
 	return;
@@ -1312,18 +1267,6 @@ void do_dump_completion(void)
 	list_iterator_destroy(itr);
 }
 
-/* do_expire() -- purge expired data from the accounting log file
- */
-
-void do_expire()
-{
-	if(params.opt_completion) 
-		g_slurm_jobcomp_archive(params.arch_cond);
-	else {
-		jobacct_storage_g_archive(acct_db_conn, params.arch_cond);
-	}
-}
-
 void do_help(void)
 {
 	switch (params.opt_help) {
@@ -1337,7 +1280,7 @@ void do_help(void)
 		_usage();
 		break;
 	default:
-		fprintf(stderr, "sacct bug: params.opt_help=%d\n", 
+		debug2("sacct bug: params.opt_help=%d\n", 
 			params.opt_help);
 	}
 }
@@ -1352,8 +1295,6 @@ void do_help(void)
  */
 void do_list(void)
 {
-	int do_jobsteps = 1;
-	
 	ListIterator itr = NULL;
 	ListIterator itr_step = NULL;
 	jobacct_job_rec_t *job = NULL;
@@ -1362,8 +1303,6 @@ void do_list(void)
 	if(!jobs)
 		return;
 
-	if (params.opt_total)
-		do_jobsteps = 0;
 	itr = list_iterator_create(jobs);
 	while((job = list_next(itr))) {
 		if(job->sacct.min_cpu == NO_VAL)
@@ -1376,18 +1315,15 @@ void do_list(void)
 			job->sacct.ave_pages /= list_count(job->steps);
 		}
 
-		if (job->show_full) {
+		if (job->show_full) 
 			print_fields(JOB, job);
-		}
 		
-		if (do_jobsteps && (job->track_steps || !job->show_full)) {
+		if (!params.opt_allocs
+		    && (job->track_steps || !job->show_full)) {
 			itr_step = list_iterator_create(job->steps);
 			while((step = list_next(itr_step))) {
 				if(step->end == 0)
 					step->end = job->end;
-				step->associd = job->associd;
-				step->cluster = job->cluster;
-				step->account = job->account;
 				print_fields(JOBSTEP, step);
 			} 
 			list_iterator_destroy(itr_step);
@@ -1419,44 +1355,31 @@ void do_list_completion(void)
 	list_iterator_destroy(itr);
 }
 
-void do_stat()
-{
-	ListIterator itr = NULL;
-	uint32_t stepid = 0;
-	jobacct_selected_step_t *selected_step = NULL;
-	acct_job_cond_t *job_cond = params.arch_cond->job_cond;
-
-	if(!job_cond->step_list || !list_count(job_cond->step_list)) {
-		fprintf(stderr, "No job list given to stat.\n");
-		return;
-	}
-
-	itr = list_iterator_create(job_cond->step_list);
-	while((selected_step = list_next(itr))) {
-		if(selected_step->stepid != NO_VAL)
-			stepid = selected_step->stepid;
-		else
-			stepid = 0;
-		sacct_stat(selected_step->jobid, stepid);
-	}
-	list_iterator_destroy(itr);
-}
-
 void sacct_init()
 {
 	_init_params();
+	print_fields_list = list_create(NULL);
+	print_fields_itr = list_iterator_create(print_fields_list);
 }
 
 void sacct_fini()
 {
+	if(print_fields_itr)
+		list_iterator_destroy(print_fields_itr);
+	if(print_fields_list)
+		list_destroy(print_fields_list);
 	if(jobs)
 		list_destroy(jobs);
+	if(qos_list)
+		list_destroy(qos_list);
+
 	if(params.opt_completion)
 		g_slurm_jobcomp_fini();
 	else {
 		acct_storage_g_close_connection(&acct_db_conn);
 		slurm_acct_storage_fini();
 	}
-
-	destroy_acct_archive_cond(params.arch_cond);
+	xfree(params.opt_field_list);
+	xfree(params.opt_filein);
+	destroy_acct_job_cond(params.job_cond);
 }
