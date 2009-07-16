@@ -96,7 +96,7 @@
 #include "src/slurmctld/state_save.h"
 #include "src/slurmctld/srun_comm.h"
 
-#define MAX_RETRIES	10
+#define MAX_RETRIES	100
 
 typedef enum {
 	DSH_NEW,        /* Request not yet started */
@@ -223,8 +223,9 @@ void *agent(void *args)
 	     agent_cnt, MAX_AGENT_CNT, agent_arg_ptr->msg_type);
 #endif
 	slurm_mutex_lock(&agent_cnt_mutex);
-	while (slurmctld_config.shutdown_time == 0) {
-		if (agent_cnt < MAX_AGENT_CNT) {
+	while (1) {
+		if (slurmctld_config.shutdown_time ||
+		    (agent_cnt < MAX_AGENT_CNT)) {
 			agent_cnt++;
 			break;
 		} else {	/* wait for state change and retry */
@@ -1413,9 +1414,11 @@ static void _mail_proc(mail_info_t *mi)
 		(void) close(0);
 		(void) close(1);
 		(void) close(2);
-		fd = open("/dev/null", O_RDWR);
-		dup(fd);
-		dup(fd);
+		fd = open("/dev/null", O_RDWR); // 0
+		if(dup(fd) == -1) // 1
+			error("Couldn't do a dup for 1: %m");
+		if(dup(fd) == -1) // 2
+			error("Couldn't do a dup for 2 %m");
 		execle(slurmctld_conf.mail_prog, "mail", 
 			"-s", mi->message, mi->user_name,
 			NULL, NULL);

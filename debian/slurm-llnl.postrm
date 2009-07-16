@@ -22,17 +22,17 @@ case "$1" in
        purge)
          SCONF=/etc/slurm-llnl/slurm.conf
          if [ -e $SCONF ] ; then
-           CRYPTOTYPE=$(grep CryptoType $SCONF | grep -v "^ *#" || /bin/true)
+           CRYPTOTYPE=$(grep CryptoType $SCONF | grep -v "^ *#" || true)
            CRYPTOTYPE=${CRYPTOTYPE##*=}
            CRYPTOTYPE=${CRYPTOTYPE%#*}
            if [ "$CRYPTOTYPE" = "crypto/openssl" ] || \
               [ "$CRYPTOTYPE" = "" ] ; then
               CERTFILE=$(grep JobCredentialPublicCertificate $SCONF \
-                              | grep -v "^ *#" || /bin/true )
+                              | grep -v "^ *#" || true )
               CERTFILE=${CERTFILE##*=}
               CERTFILE=${CERTFILE%#*}
               KEYFILE=$(grep JobCredentialPrivateKey $SCONF \
-		             | grep -v "^ *#" || /bin/true)
+		             | grep -v "^ *#" || true)
               KEYFILE=${KEYFILE##*=}
               KEYFILE=${KEYFILE%#*}
               if [ -n "${KEYFILE}${CERTFILE}" ] ; then

@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  block_sys.c - component used for wiring up the blocks
  *
- *  $Id: block_sys.c 17680 2009-06-02 21:27:50Z da $
+ *  $Id: block_sys.c 18102 2009-07-09 20:45:13Z jette $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -230,13 +230,10 @@ static int _post_allocate(bg_record_t *bg_record)
 		bg_record->user_name = 
 			xstrdup(bg_conf->slurm_user_name);
 		
-
-		my_uid = uid_from_string(bg_record->user_name);
-		if (my_uid == (uid_t) -1) {
+		if (uid_from_string (bg_record->user_name, &my_uid) < 0)
 			error("uid_from_string(%s): %m", bg_record->user_name);
-		} else {
+		else
 			bg_record->user_uid = my_uid;
-		} 
 	}
 	/* We are done with the block */
 	if ((rc = bridge_free_block(bg_record->bg_block)) != STATUS_OK)
@@ -845,7 +842,8 @@ int read_bg_blocks(List curr_block_list)
 				if(!bg_record->boot_state) {
 					
 					bg_record->target_name = 
-						xstrdup(bg_conf->slurm_user_name);
+						xstrdup(bg_conf->
+							slurm_user_name);
 					
 				} else
 					bg_record->target_name = 
@@ -854,8 +852,7 @@ int read_bg_blocks(List curr_block_list)
 				free(user_name);
 					
 			}
-			my_uid = uid_from_string(bg_record->user_name);
-			if (my_uid == (uid_t) -1) {
+			if (uid_from_string (bg_record->user_name, &my_uid)<0){
 				error("uid_from_string(%s): %m", 
 				      bg_record->user_name);
 			} else {
@@ -1176,8 +1173,7 @@ extern int load_state_file(List curr_block_list, char *dir_name)
 		bg_record->target_name = xstrdup(bg_conf->slurm_user_name);
 		bg_record->user_name = xstrdup(bg_conf->slurm_user_name);
 			
-		my_uid = uid_from_string(bg_record->user_name);
-		if (my_uid == (uid_t) -1) {
+		if (uid_from_string (bg_record->user_name, &my_uid) < 0) {
 			error("uid_from_strin(%s): %m", 
 			      bg_record->user_name);
 		} else {

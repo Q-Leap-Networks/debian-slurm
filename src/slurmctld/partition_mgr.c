@@ -2,7 +2,7 @@
  *  partition_mgr.c - manage the partition information of slurm
  *	Note: there is a global partition list (part_list) and
  *	time stamp (last_part_update)
- *  $Id: partition_mgr.c 17701 2009-06-03 21:02:09Z da $
+ *  $Id: partition_mgr.c 18102 2009-07-09 20:45:13Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -354,9 +354,13 @@ int dump_all_part_state(void)
 		(void) unlink(new_file);
 	else {			/* file shuffle */
 		(void) unlink(old_file);
-		(void) link(reg_file, old_file);
+		if(link(reg_file, old_file))
+			debug4("unable to create link for %s -> %s: %m",
+			       reg_file, old_file);
 		(void) unlink(reg_file);
-		(void) link(new_file, reg_file);
+		if(link(new_file, reg_file))
+			debug4("unable to create link for %s -> %s: %m",
+			       new_file, reg_file);
 		(void) unlink(new_file);
 	}
 	xfree(old_file);
@@ -1218,13 +1222,11 @@ uid_t *_get_group_members(char *group_name)
 
 	j = 0;
 	for (i=0; i<uid_cnt; i++) {
-		my_uid = uid_from_string(grp_result->gr_mem[i]);
-		if (my_uid == (uid_t) -1) {
+		if (uid_from_string (grp_result->gr_mem[i], &my_uid) < 0)
 			error("Could not find user %s in configured group %s",
 			      grp_result->gr_mem[i], group_name);
-		} else if (my_uid) {
+		else if (my_uid)
 			group_uids[j++] = my_uid;
-		}
 	}
 
 #ifdef HAVE_AIX

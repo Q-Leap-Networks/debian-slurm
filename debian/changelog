@@ -1,3 +1,12 @@
+slurm-llnl (2.0.4-1) unstable; urgency=low
+
+  * New upstream release
+  * Removed gettext bashism in init.d scripts (Closes: #530993, #530994)
+  * init.d script modified to check that a daemon is not running before
+    a call with the stop argument is completed
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Thu, 16 Jul 2009 11:05:21 +0200
+
 slurm-llnl (2.0.2-1) unstable; urgency=low
 
   * New upstream release 

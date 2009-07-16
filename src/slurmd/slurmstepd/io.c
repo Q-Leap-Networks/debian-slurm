@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/slurmd/slurmstepd/io.c - Standard I/O handling routines for slurmstepd
- * $Id: io.c 17803 2009-06-10 22:06:56Z da $
+ * $Id: io.c 17962 2009-06-24 19:41:49Z da $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -945,7 +945,7 @@ _init_task_stdio_fds(slurmd_task_info_t *task, slurmd_job_t *job)
 		/* open file on task's stdin */
 		debug5("  stdin file name = %s", task->ifname);
 		if ((task->stdin_fd = open(task->ifname, O_RDONLY)) == -1) {
-			error("Could not open stdin file: %m");
+			error("Could not open stdin file %s: %m", task->ifname);
 			return SLURM_ERROR;
 		}
 		fd_set_close_on_exec(task->stdin_fd);
@@ -999,6 +999,8 @@ _init_task_stdio_fds(slurmd_task_info_t *task, slurmd_job_t *job)
 		debug5("  stdout file name = %s", task->ofname);
 		task->stdout_fd = open(task->ofname, file_flags, 0666);
 		if (task->stdout_fd == -1) {
+			error("Could not open stdout file %s: %m",
+			      task->ofname);
 			return SLURM_ERROR;
 		}
 		fd_set_close_on_exec(task->stdout_fd);
@@ -1028,15 +1030,16 @@ _init_task_stdio_fds(slurmd_task_info_t *task, slurmd_job_t *job)
 #ifdef HAVE_PTY_H
 	if (job->pty) {
 		if (task->gtid == 0) {
+			/* Make a file descriptor for the task to write to, but
+			   don't make a separate one read from, because in pty 
+			   mode we can't distinguish between stdout and stderr
+			   coming from the remote shell.  Both streams from the
+			   shell will go to task->stdout_fd, which is okay in 
+			   pty mode because any output routed through the stepd
+			   will be displayed. */
 			task->stderr_fd = dup(task->stdin_fd);
 			fd_set_close_on_exec(task->stderr_fd);
-			task->from_stderr = dup(task->to_stdin);
-			fd_set_close_on_exec(task->from_stderr);
-			fd_set_nonblocking(task->from_stderr);
-			task->err = _create_task_out_eio(task->from_stderr,
-						 SLURM_IO_STDERR, job, task);
-			list_append(job->stderr_eio_objs, (void *)task->err);
-			eio_new_initial_obj(job->eio, (void *)task->err);
+			task->from_stderr = -1;
 		} else {
 			xfree(task->efname);
 			task->efname = xstrdup("/dev/null");
@@ -1054,6 +1057,8 @@ _init_task_stdio_fds(slurmd_task_info_t *task, slurmd_job_t *job)
 		debug5("  stderr file name = %s", task->efname);
 		task->stderr_fd = open(task->efname, file_flags, 0666);
 		if (task->stderr_fd == -1) {
+			error("Could not open stderr file %s: %m",
+			      task->efname);
 			return SLURM_ERROR;
 		}
 		fd_set_close_on_exec(task->stderr_fd);
@@ -1277,7 +1282,7 @@ io_close_all(slurmd_job_t *job)
 	 *  and log facility may still try to write to stderr.
 	 */
 	if ((devnull = open("/dev/null", O_RDWR)) < 0) {
-		error("Unable to open /dev/null: %m");
+		error("Could not open /dev/null: %m");
 	} else {
 		if (dup2(devnull, STDERR_FILENO) < 0)
 			error("Unable to dup /dev/null onto stderr\n");

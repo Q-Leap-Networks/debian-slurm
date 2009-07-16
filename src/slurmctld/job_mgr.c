@@ -87,7 +87,6 @@
 #include "src/slurmctld/trigger_mgr.h"
 
 #define DETAILS_FLAG 0xdddd
-#define MAX_RETRIES  10
 #define SLURM_CREATE_JOB_FLAG_NO_ALLOCATE_0 0
 #define STEP_FLAG 0xbbbb
 #define TOP_PRIORITY 0xffff0000	/* large, but leave headroom for higher */
@@ -383,9 +382,13 @@ int dump_all_job_state(void)
 		(void) unlink(new_file);
 	else {			/* file shuffle */
 		(void) unlink(old_file);
-		(void) link(reg_file, old_file);
+		if(link(reg_file, old_file))
+			debug4("unable to create link for %s -> %s: %m",
+			       reg_file, old_file);
 		(void) unlink(reg_file);
-		(void) link(new_file, reg_file);
+		if(link(new_file, reg_file))
+			debug4("unable to create link for %s -> %s: %m",
+			       new_file, reg_file);
 		(void) unlink(new_file);
 	}
 	xfree(old_file);
@@ -2556,8 +2559,8 @@ static int _job_create(job_desc_msg_t * job_desc, int allocate, int will_run,
 	
 	/* already confirmed submit_uid==0 */
 	/* If the priority isn't given we will figure it out later
-	   after we see if the job is eligible or not. So we want
-	   NO_VAL if not set. */
+	 * after we see if the job is eligible or not. So we want
+	 * NO_VAL if not set. */
 	job_ptr->priority = job_desc->priority;
 
 	if (update_job_dependency(job_ptr, job_desc->dependency)) {
@@ -3432,7 +3435,18 @@ void job_time_limit(void)
 
 		xassert (job_ptr->magic == JOB_MAGIC);
 
+		/* This needs to be near the top of the loop, checks every 
+		 * running, suspended and pending job */
 		resv_status = job_resv_check(job_ptr);
+
+		if ((job_ptr->priority == 1) && (!IS_JOB_FINISHED(job_ptr))) {
+			/* Rather than resetting job priorities whenever a 
+			 * DOWN, DRAINED or non-responsive node is returned to 
+			 * service, we pick them up here. There will be a small
+			 * delay in restting a job's priority, but the code is 
+			 * a lot cleaner this way. */
+			_set_job_prio(job_ptr);
+		}
 		if (job_ptr->job_state != JOB_RUNNING)
 			continue;
 
@@ -5137,6 +5151,9 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 		if (IS_JOB_PENDING(job_ptr) && detail_ptr) {
 			detail_ptr->begin_time = job_specs->begin_time;
 			update_accounting = true;
+			if ((job_ptr->priority == 1) &&
+			    (detail_ptr->begin_time <= now))
+				_set_job_prio(job_ptr);
 		} else
 			error_code = ESLURM_DISABLED;
 	}
@@ -6724,9 +6741,9 @@ extern int update_job_account(char *module, struct job_record *job_ptr,
 		  && !job_ptr->assoc_ptr 
 		  && !(accounting_enforce & ACCOUNTING_ENFORCE_ASSOCS)) {
 		/* if not enforcing associations we want to look for
-		   the default account and use it to avoid getting
-		   trash in the accounting records.
-		*/
+		 * the default account and use it to avoid getting
+		 * trash in the accounting records.
+		 */
 		assoc_rec.acct = NULL;
 		assoc_mgr_fill_in_assoc(acct_db_conn, &assoc_rec,
 					accounting_enforce, 
@@ -7061,9 +7078,13 @@ static int _checkpoint_job_record (struct job_record *job_ptr, char *image_dir)
 		(void) unlink(new_file);
 	else {			/* file shuffle */
 		(void) unlink(old_file);
-		(void) link(ckpt_file, old_file);
+		if(link(ckpt_file, old_file))
+			debug4("unable to create link for %s -> %s: %m",
+			       ckpt_file, old_file);
 		(void) unlink(ckpt_file);
-		(void) link(new_file, ckpt_file);
+		if(link(new_file, ckpt_file))
+			debug4("unable to create link for %s -> %s: %m",
+			       new_file, ckpt_file);
 		(void) unlink(new_file);
 	}
 
@@ -7122,10 +7143,6 @@ _copy_job_record_to_job_desc(struct job_record *job_ptr)
 
 	/* construct a job_desc_msg_t from job */
 	job_desc = xmalloc(sizeof(job_desc_msg_t));
-	if (!job_desc) {
-		error("_pack_job_for_ckpt: memory exhausted");
-		return NULL;
-	}
 
 	job_desc->account           = xstrdup(job_ptr->account);
 	job_desc->acctg_freq        = details->acctg_freq;

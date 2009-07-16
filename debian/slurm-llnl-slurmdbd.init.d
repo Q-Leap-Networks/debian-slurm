@@ -108,18 +108,18 @@ slurmstatus() {
         if [ "$rpid" != "" -a "$pid" != "" ]; then
             for i in $pid ; do
                 if [ "$i" = "$rpid" ]; then 
-                    echo $"slurmdbd (pid $pid) is running..."
+                    echo "slurmdbd (pid $pid) is running..."
                     return 0
                 fi     
             done
         elif [ "$rpid" != "" -a "$pid" = "" ]; then
-            echo $"slurmdbd is stopped"
+            echo "slurmdbd is stopped"
             return 1
         fi 
 
     fi
      
-    echo $"slurmdbd is stopped"
+    echo "slurmdbd is stopped"
     
     return 3
 }

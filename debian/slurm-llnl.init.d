@@ -245,7 +245,7 @@ slurmstatus() {
         if [ "$rpid" != "" -a "$pid" != "" ]; then
             for i in $pid ; do
                 if [ "$i" = "$rpid" ]; then 
-                    echo $"${base} (pid $pid) is running..."
+                    echo "${base} (pid $pid) is running..."
                     return 0
                 fi     
             done
@@ -253,7 +253,7 @@ slurmstatus() {
 #           Due to change in user id, pid file may persist 
 #           after slurmctld terminates
             if [ "$base" != "slurmctld" ] ; then
-               echo $"${base} dead but pid file exists"
+               echo "${base} dead but pid file exists"
             fi
             return 1
         fi 
@@ -261,11 +261,11 @@ slurmstatus() {
     fi
 
     if [ "$base" = "slurmctld" -a "$pid" != "" ] ; then
-        echo $"${base} (pid $pid) is running..."
+        echo "${base} (pid $pid) is running..."
         return 0
     fi
      
-    echo $"${base} is stopped"
+    echo "${base} is stopped"
     
     return 3
 }
@@ -277,14 +277,14 @@ slurmstatus() {
 slurmstop() {
     for prog in $DAEMONLIST ; do
        stop $prog
-#       for i in 1 2 3 4
-#       do
-#          sleep $i
-#          slurmstatus $prog
-#          if [ $? != 0 ]; then
-#             break
-#          fi
-#       done
+       for i in 1 2 3 4
+       do
+          sleep $i
+          slurmstatus $prog
+          if [ $? != 0 ]; then
+             break
+          fi
+       done
     done
 }
 
@@ -314,7 +314,6 @@ case "$1" in
         ;;
     restart)
         $0 stop
-	sleep 1
         $0 start
         ;;
     force-reload)

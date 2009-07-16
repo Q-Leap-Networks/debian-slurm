@@ -1269,15 +1269,13 @@ static void _set_options(int argc, char **argv)
 		case LONG_OPT_UID:
 			if (opt.euid != (uid_t) -1)
 				fatal ("duplicate --uid option");
-			opt.euid = uid_from_string (optarg);
-			if (opt.euid == (uid_t) -1)
+			if (uid_from_string (optarg, &opt.euid) < 0)
 				fatal ("--uid=\"%s\" invalid", optarg);
 			break;
 		case LONG_OPT_GID:
 			if (opt.egid != (gid_t) -1)
 				fatal ("duplicate --gid option");
-			opt.egid = gid_from_string (optarg);
-			if (opt.egid == (gid_t) -1)
+			if (gid_from_string (optarg, &opt.egid) < 0)
 				fatal ("--gid=\"%s\" invalid", optarg);
 			break;
 		case LONG_OPT_CONNTYPE:
@@ -1996,7 +1994,9 @@ static bool _opt_verify(void)
 	}
 
 	/* massage the numbers */
-	if ((opt.nodes_set || opt.extra_set) && !opt.nprocs_set) {
+	if ((opt.nodes_set || opt.extra_set)				&& 
+	    ((opt.min_nodes == opt.max_nodes) || (opt.max_nodes == 0))	&& 
+	    !opt.nprocs_set) {
 		/* 1 proc / node default */
 		opt.nprocs = MAX(opt.min_nodes, 1);
 

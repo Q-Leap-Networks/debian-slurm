@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmd/slurmd.c - main slurm node server daemon
- *  $Id: slurmd.c 17397 2009-05-04 16:07:42Z da $
+ *  $Id: slurmd.c 17951 2009-06-23 22:51:55Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -236,7 +236,8 @@ main (int argc, char *argv[])
 	 * Do not chdir("/") or close all fd's
 	 */
 	if (conf->daemonize) 
-		daemon(1,1);
+		if(daemon(1,1) == -1) 
+			error("Couldn't daemonize slurmd: %m");
 	info("slurmd version %s started", SLURM_VERSION);
 	debug3("finished daemonize");
 
@@ -1146,9 +1147,13 @@ int save_cred_state(slurm_cred_ctx_t ctx)
 		goto cleanup;
 	}
 	(void) unlink(old_file);
-	(void) link(reg_file, old_file);
+	if(link(reg_file, old_file))
+		debug4("unable to create link for %s -> %s: %m",
+		       reg_file, old_file);
 	(void) unlink(reg_file);
-	(void) link(new_file, reg_file);
+	if(link(new_file, reg_file))
+		debug4("unable to create link for %s -> %s: %m",
+		       new_file, reg_file);
 	(void) unlink(new_file);
 
 cleanup:

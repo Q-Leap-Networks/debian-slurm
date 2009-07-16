@@ -1,13 +1,85 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 2.0.4
+========================
+ -- Permit node suspend/resume logic to be enabled through "scontrol reconfig"
+    given appropriate changes to slurm configuration file.
+ -- Check for return codes on functions with warn_unused_result set.
+ -- Fix memory leak in getting step information (as used by squeue -s).
+ -- Better logging for when job's request bad output file locations.
+ -- Fix issue where if user specified non-existant file to write to slurmstepd
+    will regain privileges before sending batch script ended to the controller.
+ -- Fix bug when using the priority_multifactor plugin with no associations yet.
+ -- BLUEGENE - we no longer check for the images to sync state.  This was 
+    needed long ago when rebooting blocks wasn't a possibility and should 
+    had been removed when that functionality was available.
+ -- Added message about no connection with the database for sacctmgr.
+ -- On BlueGene, let srun or salloc exit on SIGINT if slurmctld dies while
+    booting its block.
+ -- In select/cons_res fix bug that could result in invalid memory pointer
+    if node configurations in slurm.conf contains 8 or more distinct 
+    socket/core/thread counts.
+ -- Modify select/cons_res to recognize updated memory size upon node startup
+    if FastSchedule=0.
+ -- Fixed bug if not enforcing associations, but running with them and the 
+    priority/multifactor, the slurmctld will not core dump on processing usage.
+ -- QOS will not be reset to the default when added back a previously deleted
+    association.
+ -- Do not set a job's virtual memory limit based upon the job's specified
+    memory limit (which should be a real memory limit, not virtual).
+ -- In sched/wiki2 - Strip single and double quotes out of a node's reason 
+    string to avoid confusing Moab's parser.
+ -- BLUEGENE - fix for sinfo/sview for displaying proper node count for nodes 
+    in draining state.
+ -- Fix for sview when viewing a certain part of a group (like 1 job) so it 
+    doesn't core when the part is gone.
+ -- BLUEGENE - Changed order of SYNC's to be on the front of the list to
+    avoid having a job terminated with a TERM before the SYNC of the 
+    job happens.
+ -- Validate configured PluginDir value is a valid directory before trying to
+    use it.
+ -- Fix to resolve agent_queue_request symbol from some checkpoint plugins.
+ -- Fix possible execve error for sbatch script read from stdin.
+ -- Modify handling of user ID/name and group ID/name in the slurm.conf file
+    to properly handle user names that contain all digits. Return error code 
+    from uid_from_string() and gid_from_string() functions rather than a uid of
+    -1, which might be a valid uid or gid on some systems.
+ -- Fix in re-calcuation of job priorities do to DOWN or DRAINED nodes.
+
+* Changes in SLURM 2.0.3
+========================
+ -- Add reservation creation/update flag of Ignore_Jobs to enable the creation
+    of a reservation that overlaps jobs expected to still be running when
+    the reservation starts. This would be especially useful to reserve all 
+    nodes for system maintenence without adjusting time limits of running
+    jobs before creating the reservation. Without this flag, nodes allocated
+    jobs expected to running when the reservation begins can not be placed 
+    into a reservation.
+ -- In task/affinity plugin, add layer of abstraction to logic translating
+    block masks to physical machine masks. Patch from Matthieu Hautreux, CEA.
+ -- Fix for setting the node_bitmap in a job to NULL if the job does not 
+    start correctly when expected to start.
+ -- Fixed bug in srun --pty logic. Output from the task was split up 
+    arbitrarily into stdout and stderr streams, and sometimes was printed 
+    out of order.
+ -- If job requests minimum and maximum node count range with select/cons_res,
+    try to satisfy the higher value (formerly only allocated the minimum).
+ -- Fix for checking for a non-existant job when querying steps.
+ -- For job steps with the --exclusive option, base initial wait time in 
+    partly upon the process ID for better performance with many job steps 
+    started at the same time. Maintain exponential back-off as needed.
+ -- Fix for correct step ordering in sview.
+ -- Support optional argument to srun and salloc --immediate option. Specify
+    timeout value in seconds for job or step to be allocated resources.
+
 * Changes in SLURM 2.0.2
 ========================
  -- Fix, don't remove job details when a job is cancelled while pending.
  -- Do correct type for mktime so garbage isn't returned on 64bit systems 
     for accounting archival.
  -- Better checking in sacctmgr to avoid infinite loops.
- -- fix minor memory leak in fake_slurm_step_layout_create()
+ -- Fix minor memory leak in fake_slurm_step_layout_create()
  -- Fix node weight (scheduling priority) calculation for powered down
     nodes. Patch from Hongjia Cao, NUDT.
  -- Fix node suspend/resume rate calculations. Patch from Hongjia Cao, NUDT.
@@ -32,7 +104,8 @@ documents those changes that are of interest to users and admins.
     not set in the slurm.conf.
  -- Added a set of SBATCH_CPU_BIND* and SBATCH_MEM_BIND* env variables to keep
     jobsteps launched from within a batch script from inheriting the CPU and
-    memory affinity that was applied to the batch script.
+    memory affinity that was applied to the batch script. Patch from Matthieu
+    Hautreux, CEA.
  -- Ignore the extra processors on a node above configured size if either 
     sched/gang or select/cons_res is configured.
  -- Fix bug in tracking memory allocated on a node for select/cons_res plugin.
@@ -52,7 +125,7 @@ documents those changes that are of interest to users and admins.
  -- Improve sched/backfill logic with respect to shared nodes (multiple jobs
     per node).
  -- In sched/wiki (Maui interface) add job info fields QOS, RCLASS, DMEM and
-    TASKSPERNODE.
+    TASKSPERNODE. Patch from Bjorn-Helge Mevik, University of Oslo.
 
 * Changes in SLURM 2.0.1
 ========================
@@ -4166,4 +4239,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 17869 2009-06-16 22:36:02Z jette $
+$Id: NEWS 18108 2009-07-10 17:08:17Z jette $

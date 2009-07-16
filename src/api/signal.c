@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  signal.c - Send a signal to a slurm job or job step
- *  $Id: signal.c 16616 2009-02-20 17:00:27Z jette $
+ *  $Id: signal.c 17933 2009-06-22 20:47:02Z jette $
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -149,7 +149,7 @@ slurm_signal_job_step (uint32_t job_id, uint32_t step_id, uint16_t signal)
 		    && step_info->job_steps[i].step_id == step_id) {
  			rc = _signal_job_step(&step_info->job_steps[i],
  					      alloc_info, signal);
- 			save_errno = errno;
+ 			save_errno = rc;
 			break;
 		}
 	}

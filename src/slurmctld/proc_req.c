@@ -1241,11 +1241,13 @@ static void _slurm_rpc_complete_batch_script(slurm_msg_t * msg)
 	       uid, comp_msg->job_id);
 
 	if (!validate_super_user(uid)) {
+		error("A non superuser %u tried to complete batch job %u",
+		      uid, comp_msg->job_id);
 		/* Only the slurmstepd can complete a batch script */
 		END_TIMER2("_slurm_rpc_complete_batch_script");
 		return;
 	}
- 
+
 	lock_slurmctld(job_write_lock);
 
 	/* do RPC call */
@@ -1770,6 +1772,7 @@ static void _slurm_rpc_reconfigure_controller(slurm_msg_t * msg)
 		}
 		in_progress = false;
 		unlock_slurmctld(config_write_lock);
+		start_power_mgr(&slurmctld_config.thread_id_power);
 		trigger_reconfig();
 	}
 	END_TIMER2("_slurm_rpc_reconfigure_controller");

@@ -94,6 +94,7 @@
 #define OPT_NONE        0x00
 #define OPT_INT         0x01
 #define OPT_STRING      0x02
+#define OPT_IMMEDIATE   0x03
 #define OPT_DISTRIB     0x04
 #define OPT_NODES       0x05
 #define OPT_OVERCOMMIT  0x06
@@ -376,7 +377,7 @@ static void _opt_default()
 	opt.no_kill = false;
 	opt.kill_bad_exit = false;
 
-	opt.immediate	= false;
+	opt.immediate	= 0;
 
 	opt.join	= false;
 	opt.max_wait	= slurm_get_wait_time();
@@ -477,9 +478,10 @@ env_vars_t env_vars[] = {
 {"SLURM_DEPENDENCY",    OPT_STRING,     &opt.dependency,    NULL             },
 {"SLURM_DISTRIBUTION",  OPT_DISTRIB,    NULL,               NULL             },
 {"SLURM_GEOMETRY",      OPT_GEOMETRY,   NULL,               NULL             },
-{"SLURM_IMMEDIATE",     OPT_INT,        &opt.immediate,     NULL             },
-{"SLURM_JOB_NAME",      OPT_STRING,     &opt.job_name,      
-					&opt.job_name_set_env},
+{"SLURM_IMMEDIATE",     OPT_IMMEDIATE,  NULL,               NULL             },
+{"SLURM_JOB_NAME",      OPT_STRING,     &opt.job_name,  &opt.job_name_set_env},
+/* SLURM_JOBID was used in slurm version 1.3 and below, it is now vestigial */
+{"SLURM_JOBID",         OPT_INT,        &opt.jobid,         NULL             },
 {"SLURM_JOB_ID",        OPT_INT,        &opt.jobid,         NULL             },
 {"SLURM_KILL_BAD_EXIT", OPT_INT,        &opt.kill_bad_exit, NULL             },
 {"SLURM_LABELIO",       OPT_INT,        &opt.labelio,       NULL             },
@@ -648,6 +650,13 @@ _process_env_var(env_vars_t *e, const char *val)
 		}
 		break;
 
+	case OPT_IMMEDIATE:
+		if (val)
+			opt.immediate = strtol(val, NULL, 10);
+		else
+			opt.immediate = DEFAULT_IMMEDIATE;
+		break;
+
 	case OPT_MPI:
 		if (mpi_hook_client_init((char *)val) == SLURM_ERROR) {
 			fatal("\"%s=%s\" -- invalid MPI type, "
@@ -706,7 +715,7 @@ static void set_options(const int argc, char **argv)
 		{"geometry",      required_argument, 0, 'g'},
 		{"hold",          no_argument,       0, 'H'},
 		{"input",         required_argument, 0, 'i'},
-		{"immediate",     no_argument,       0, 'I'},
+		{"immediate",     optional_argument, 0, 'I'},
 		{"join",          no_argument,       0, 'j'},
 		{"job-name",      required_argument, 0, 'J'},
 		{"no-kill",       no_argument,       0, 'k'},
@@ -872,8 +881,10 @@ static void set_options(const int argc, char **argv)
 			opt.cwd = xstrdup(optarg);
 			break;
 		case (int)'e':
-			if (opt.pty)
-				fatal("--error incompatable with --pty option");
+			if (opt.pty) {
+				fatal("--error incompatable with --pty "
+				      "option");
+			}
 			xfree(opt.efname);
 			if (strncasecmp(optarg, "none", (size_t) 4) == 0)
 				opt.efname = xstrdup("/dev/null");
@@ -891,8 +902,10 @@ static void set_options(const int argc, char **argv)
 			opt.hold = true;
 			break;
 		case (int)'i':
-			if (opt.pty)
-				fatal("--input incompatable with --pty option");
+			if (opt.pty) {
+				fatal("--input incompatable with "
+				      "--pty option");
+			}
 			xfree(opt.ifname);
 			if (strncasecmp(optarg, "none", (size_t) 4) == 0)
 				opt.ifname = xstrdup("/dev/null");
@@ -900,7 +913,10 @@ static void set_options(const int argc, char **argv)
 				opt.ifname = xstrdup(optarg);
 			break;
 		case (int)'I':
-			opt.immediate = true;
+			if (optarg)
+				opt.immediate = strtol(optarg, NULL, 10);
+			else
+				opt.immediate = DEFAULT_IMMEDIATE;
 			break;
 		case (int)'j':
 			opt.join = true;
@@ -1124,15 +1140,13 @@ static void set_options(const int argc, char **argv)
 		case LONG_OPT_UID:
 			if (opt.euid != (uid_t) -1)
 				fatal ("duplicate --uid option");
-			opt.euid = uid_from_string (optarg);
-			if (opt.euid == (uid_t) -1)
+			if (uid_from_string (optarg, &opt.euid) < 0)
 				fatal ("--uid=\"%s\" invalid", optarg);
 			break;
 		case LONG_OPT_GID:
 			if (opt.egid != (gid_t) -1)
 				fatal ("duplicate --gid option");
-			opt.egid = gid_from_string (optarg);
-			if (opt.egid == (gid_t) -1)
+			if (gid_from_string (optarg, &opt.egid) < 0)
 				fatal ("--gid=\"%s\" invalid", optarg);
 			break;
 		case LONG_OPT_DEBUG_TS:
@@ -1693,7 +1707,9 @@ static bool _opt_verify(void)
 			opt.nodes_set = true;
 		}
 	}
-	if ((opt.nodes_set || opt.extra_set) && !opt.nprocs_set) {
+	if ((opt.nodes_set || opt.extra_set)				&& 
+	    ((opt.min_nodes == opt.max_nodes) || (opt.max_nodes == 0))	&& 
+	    !opt.nprocs_set) {
 		/* 1 proc / node default */
 		opt.nprocs = opt.min_nodes;
 
@@ -1808,7 +1824,8 @@ static bool _opt_verify(void)
 
 	if (opt.ckpt_interval_str) {
 		opt.ckpt_interval = time_str2mins(opt.ckpt_interval_str);
-		if ((opt.ckpt_interval < 0) && (opt.ckpt_interval != INFINITE)) {
+		if ((opt.ckpt_interval < 0) && 
+		    (opt.ckpt_interval != INFINITE)) {
 			error("Invalid checkpoint interval specification");
 			exit(1);
 		}
@@ -1822,16 +1839,6 @@ static bool _opt_verify(void)
 
 	if ((opt.egid != (gid_t) -1) && (opt.egid != opt.gid)) 
 		opt.gid = opt.egid;
-
-	if (opt.immediate) {
-		char *sched_name = slurm_get_sched_type();
-		if (strcmp(sched_name, "sched/wiki") == 0) {
-			info("WARNING: Ignoring the -I/--immediate option "
-				"(not supported by Maui)");
-			opt.immediate = false;
-		}
-		xfree(sched_name);
-	}
 
 	 if (slurm_verify_cpu_bind(NULL, &opt.cpu_bind,
 				   &opt.cpu_bind_type))
@@ -1924,7 +1931,10 @@ static void _opt_list()
 	info("core format    : %s", core_format_name (opt.core_type));
 	info("verbose        : %d", _verbose);
 	info("slurmd_debug   : %d", opt.slurmd_debug);
-	info("immediate      : %s", tf_(opt.immediate));
+	if (opt.immediate <= 1)
+		info("immediate      : %s", tf_(opt.immediate));
+	else
+		info("immediate      : %d secs", (opt.immediate - 1));
 	info("label output   : %s", tf_(opt.labelio));
 	info("unbuffered IO  : %s", tf_(opt.unbuffered));
 	info("overcommit     : %s", tf_(opt.overcommit));
@@ -2024,7 +2034,7 @@ static void _usage(void)
  	printf(
 "Usage: srun [-N nnodes] [-n ntasks] [-i in] [-o out] [-e err]\n"
 "            [-c ncpus] [-r n] [-p partition] [--hold] [-t minutes]\n"
-"            [-D path] [--immediate] [--overcommit] [--no-kill]\n"
+"            [-D path] [--immediate[=secs]] [--overcommit] [--no-kill]\n"
 "            [--share] [--label] [--unbuffered] [-m dist] [-J jobname]\n"
 "            [--jobid=id] [--verbose] [--slurmd_debug=#]\n"
 "            [--core=type] [-T threads] [-W sec] [--checkpoint=time]\n"
@@ -2079,7 +2089,7 @@ static void _help(void)
 "      --get-user-env          used by Moab.  See srun man page.\n"
 "  -H, --hold                  submit job in held state\n"
 "  -i, --input=in              location of stdin redirection\n"
-"  -I, --immediate             exit if resources are not immediately available\n"
+"  -I, --immediate[=secs]      exit if resources not available in \"secs\"\n"
 "      --jobid=id              run under already allocated job\n"
 "  -J, --job-name=jobname      name of job\n"
 "  -k, --no-kill               do not kill job on node failure\n"
