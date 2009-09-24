@@ -1,6 +1,83 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 2.0.5
+========================
+ -- BLUEGENE - Added support for emulating systems with a X-dimension of 4.
+ -- BLUEGENE - When a nodecard goes down on a non-Dynamic system SLURM will 
+    now only drain blocks under 1 midplane, if no such block exists then SLURM 
+    will drain the entire midplane and not mark any block in error state.  
+    Previously SLURM would drain every overlapping block of the nodecard 
+    making it possible for a large block to make other blocks not work since 
+    they overlap some other part of the block that really isn't bad.
+ -- BLUEGENE - Handle L3 errors on boot better.
+ -- Don't revoke a pending batch launch request from the slurmctld if the
+    job is immediately suspended (a normal event with gang scheduling).
+ -- BLUEGENE - Fixed issue with restart of slurmctld would allow error block 
+    nodes to be considered for building new blocks when testing if a job would 
+    run.  This is a visual bug only, jobs would never run on new block, but 
+    the block would appear in slurm tools.
+ -- Better responsiveness when starting new allocations when running with the 
+    slurmdbd.
+ -- Fixed race condition when reconfiguring the slurmctld and using the 
+    consumable resources plugin which would cause the controller to core.
+ -- Fixed race condition that sometimes caused jobs to stay in completing
+    state longer than necessary after being terminated.
+ -- Fixed issue where if a parent account has a qos added and then a child
+    account has the qos removed the users still get the qos.
+ -- BLUEGENE - New blocks in dynamic mode will only be made in the system
+    when the block is actually needed for a job, not when testing.
+ -- BLUEGENE - Don't remove larger block used for small block until job starts.
+ -- Add new squeue output format and sort option of "%L" to print a job's time 
+    left (time limit minus time used).
+ -- BLUEGENE - Fixed draining state count for sinfo/sview.
+ -- Fix for sview to not core when viewing nodes allocated to a partition 
+    and the all jobs finish.
+ -- Fix cons_res to not core dump when finishing a job running on a 
+    defunct partition.
+ -- Don't require a node to have --ntasks-per-node CPUs for use when the 
+    --overcommit option is also used.
+ -- Increase the maximum number of tasks which can be launched by a job step
+    per node from 64 to 128. 
+ -- sview - make right click on popup window title show sorted list.
+ -- scontrol now displays correct units for job min memory and min tmp disk.
+ -- better support for salloc/sbatch arbitrary layout for setting correct 
+    SLURM_TASKS_PER_NODE
+ -- Env var SLURM_CPUS_ON_NODE is now set correctly depending on the 
+    FastSchedule configuration parameter.
+ -- Correction to topology/3d_torus plugin calculation when coordinate value 
+    exceeds "9" (i.e. a hex value).
+ -- In sched/wiki2 - Strip single and double quotes out of a node's reason 
+    string to avoid confusing Moab's parser.
+ -- Modified scancel to cancel any pending jobs before cancelling any other
+ -- Updated sview config info
+ -- Fix a couple of bugs with respect to scheduling with overlapping 
+    reservations (one with a flag of "Maintenance").
+ -- Fix bug when updating a pending job's nice value after explicitly setting
+    it's priority.
+ -- We no longer add blank QOS'
+ -- Fix task affinity for systems running fastschedule!=0 and they have less 
+    resources configured than in existence.
+ -- Slurm.pm loads without warning now on AIX systems
+ -- modified pmi code to do strncpy's on the correct len
+ -- Fix for filling in a qos structure to return SLURM_SUCCESS on success.
+ -- BLUEGENE - Added SLURM_BG_NUM_NODES with cnode count of allocation, 
+    SLURM_JOB_NUM_NODES represents midplane counts until 2.1.
+ -- BLUEGENE - Added fix for if a block is in error state and the midplane 
+    containning the block is also set to drain/down.  This previously 
+    prevented dynamic creation of new blocks when this state was present.
+ -- Fixed bug where a users association limits were not enforced, only 
+    parent limits were being enforced.
+ -- For OpenMPI use of SLURM reserved ports, reserve a count of ports equal to 
+    the maximum task count on any node plus one (the plus one is a correction).
+ -- Do not reset SLURM_TASKS_PER_NODE when srun --preserve-env option is used
+    (needed by OpenMPI).
+ -- Fix possible assert failure in task/affinity if a node is configured with
+    more resources than physically exist.
+ -- Sview can now resize columns.
+ -- Avoid clearing a drained node's reason field when state is changed from
+    down (i.e. returned to service). Note the drain state flag stays set.
+
 * Changes in SLURM 2.0.4
 ========================
  -- Permit node suspend/resume logic to be enabled through "scontrol reconfig"
@@ -10,7 +87,8 @@ documents those changes that are of interest to users and admins.
  -- Better logging for when job's request bad output file locations.
  -- Fix issue where if user specified non-existant file to write to slurmstepd
     will regain privileges before sending batch script ended to the controller.
- -- Fix bug when using the priority_multifactor plugin with no associations yet.
+ -- Fix bug when using the priority_multifactor plugin with no associations 
+    yet.
  -- BLUEGENE - we no longer check for the images to sync state.  This was 
     needed long ago when rebooting blocks wasn't a possibility and should 
     had been removed when that functionality was available.
@@ -28,8 +106,6 @@ documents those changes that are of interest to users and admins.
     association.
  -- Do not set a job's virtual memory limit based upon the job's specified
     memory limit (which should be a real memory limit, not virtual).
- -- In sched/wiki2 - Strip single and double quotes out of a node's reason 
-    string to avoid confusing Moab's parser.
  -- BLUEGENE - fix for sinfo/sview for displaying proper node count for nodes 
     in draining state.
  -- Fix for sview when viewing a certain part of a group (like 1 job) so it 
@@ -45,7 +121,7 @@ documents those changes that are of interest to users and admins.
     to properly handle user names that contain all digits. Return error code 
     from uid_from_string() and gid_from_string() functions rather than a uid of
     -1, which might be a valid uid or gid on some systems.
- -- Fix in re-calcuation of job priorities do to DOWN or DRAINED nodes.
+ -- Fix in re-calcuation of job priorities due to DOWN or DRAINED nodes.
 
 * Changes in SLURM 2.0.3
 ========================
@@ -4239,4 +4315,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 18108 2009-07-10 17:08:17Z jette $
+$Id: NEWS 18691 2009-09-11 22:41:00Z jette $

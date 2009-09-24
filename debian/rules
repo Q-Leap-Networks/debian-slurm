@@ -163,6 +163,7 @@ binary-common:
 	dh_installchangelogs
 	dh_installdocs
 	dh_installexamples
+	install -m644 debian/slurm-llnl.lintian debian/slurm-llnl/usr/share/lintian/overrides/slurm-llnl
 #	dh_installexamples debian/slurm-resume.sh
 #	dh_installexamples debian/slurm-suspend.sh
 #	dh_installexamples debian/slurm.conf.simple

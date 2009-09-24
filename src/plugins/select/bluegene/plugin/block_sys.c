@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  block_sys.c - component used for wiring up the blocks
  *
- *  $Id: block_sys.c 18102 2009-07-09 20:45:13Z jette $
+ *  $Id: block_sys.c 18612 2009-09-02 19:00:21Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1080,7 +1080,7 @@ extern int load_state_file(List curr_block_list, char *dir_name)
 #endif
 
 	slurm_mutex_lock(&block_state_mutex);
-	reset_ba_system(false);
+	reset_ba_system(true);
 
 	/* Locks are already in place to protect part_list here */
 	bitmap = bit_alloc(node_record_count);

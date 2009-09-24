@@ -636,6 +636,9 @@ static int _setup_association_limits(acct_association_rec_t *assoc,
 			list_iterator_create(assoc->qos_list);
 		
 		while((tmp_char = list_next(qos_itr))) {
+			/* we don't want to include blank names */
+			if(!tmp_char[0])
+				continue;
 			if(!set) {
 				if(tmp_char[0] == '+' || tmp_char[0] == '-')
 					qos_type = "delta_qos";
@@ -645,11 +648,12 @@ static int _setup_association_limits(acct_association_rec_t *assoc,
 		}
 		
 		list_iterator_destroy(qos_itr);
-		
-		xstrfmtcat(*cols, ", %s", qos_type);		
-		xstrfmtcat(*vals, ", '%s'", qos_val); 		
-		xstrfmtcat(*extra, ", %s=\"%s\"", qos_type, qos_val); 
-		xfree(qos_val);
+		if(qos_val) {
+			xstrfmtcat(*cols, ", %s", qos_type);		
+			xstrfmtcat(*vals, ", '%s'", qos_val); 		
+			xstrfmtcat(*extra, ", %s=\"%s\"", qos_type, qos_val); 
+			xfree(qos_val);
+		}
 	} else if((qos_level == QOS_LEVEL_SET) && default_qos_str) { 
 		/* Add default qos to the account */
 		xstrcat(*cols, ", qos");
@@ -3035,7 +3039,7 @@ static int _mysql_acct_check_tables(MYSQL *db_conn)
 		{ "max_vsize", "bigint unsigned default 0 not null" },
 		{ "max_vsize_task", "smallint unsigned default 0 not null" },
 		{ "max_vsize_node", "int unsigned default 0 not null" },
-		{ "ave_vsize", "double default 0.0 not null" },
+		{ "ave_vsize", "double unsigned default 0.0 not null" },
 		{ "max_rss", "bigint unsigned default 0 not null" },
 		{ "max_rss_task", "smallint unsigned default 0 not null" },
 		{ "max_rss_node", "int unsigned default 0 not null" },
@@ -3153,7 +3157,7 @@ static int _mysql_acct_check_tables(MYSQL *db_conn)
 		"end if; "
 		"if @qos = '' then set @s = CONCAT("
 		"@s, '@qos := qos, "
-		"@delta_qos := CONCAT(@delta_qos, delta_qos), '); "
+		"@delta_qos := CONCAT(delta_qos, @delta_qos), '); "
 		"end if; "
 		"set @s = concat(@s, ' @my_acct := parent_acct from ', "
 		"my_table, ' where acct = \"', @my_acct, '\" && "
@@ -5644,9 +5648,11 @@ extern List acct_storage_p_modify_associations(
 						   ", qos=if(qos='', '', "
 						   "replace(qos, ',%s', ''))"
 						   ", delta_qos=if(qos='', "
-						   "concat(replace(delta_qos, "
-						   "',%s', ''), ',%s'), '')",
-						   new_qos+1, new_qos, new_qos);
+						   "concat(replace(replace("
+						   "delta_qos, ',+%s', ''), "
+						   "',-%s', ''), ',%s'), '')",
+						   new_qos+1, new_qos+1, 
+						   new_qos+1, new_qos);
 				} else if(new_qos[0] == '+') {
 					xstrfmtcat(vals,
 						   ", qos=if(qos='', '', "
@@ -5654,10 +5660,12 @@ extern List acct_storage_p_modify_associations(
 						   "replace(qos, ',%s', ''), "
 						   "\"%s\")), delta_qos=if("
 						   "qos='', concat("
-						   "replace(delta_qos, "
-						   "',%s', ''), ',%s'), '')",
+						   "replace(replace("
+						   "delta_qos, ',+%s', ''), "
+						   "',-%s', ''), ',%s'), '')",
 						   new_qos+1, new_qos+1,
-						   new_qos, new_qos);
+						   new_qos+1, new_qos+1, 
+						   new_qos);
 				} else if(new_qos[0]) 
 					xstrfmtcat(tmp_qos, ",%s", new_qos);
 				else
@@ -8553,9 +8561,10 @@ empty:
 						      parent_qos+1);
 
 			/* then add the parents delta */
-			if(parent_delta_qos)
+			if(parent_delta_qos) 
 				slurm_addto_char_list(delta_qos_list,
 						      parent_delta_qos+1);
+
 			/* now add the associations */
 			if(row[ASSOC_REQ_DELTA_QOS][0]) 
 				slurm_addto_char_list(

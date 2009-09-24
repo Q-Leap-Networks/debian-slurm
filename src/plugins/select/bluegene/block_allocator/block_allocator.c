@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  block_allocator.c - Assorted functions for layout of bluegene blocks, 
  *	 wiring, mapping for smap, etc.
- *  $Id: block_allocator.c 18102 2009-07-09 20:45:13Z jette $
+ *  $Id: block_allocator.c 18612 2009-09-02 19:00:21Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1255,10 +1255,11 @@ extern void ba_update_node_state(ba_node_t *ba_node, uint16_t state)
 
 	/* basically set the node as used */
 	if((node_base_state == NODE_STATE_DOWN)
-	   || (ba_node->state & NODE_STATE_DRAIN)) 
+	   || (state & NODE_STATE_DRAIN)) 
 		ba_node->used = true;
 	else
 		ba_node->used = false;
+
 	ba_node->state = state;
 }
 
@@ -1506,14 +1507,26 @@ extern int check_and_set_node_list(List nodes)
 			grid[ba_node->coord[X]]
 			[ba_node->coord[Y]]
 			[ba_node->coord[Z]];
+		
 		if(ba_node->used && curr_ba_node->used) {
-			debug4("I have already been to "
-			       "this node %c%c%c",
-			       alpha_num[ba_node->coord[X]], 
-			       alpha_num[ba_node->coord[Y]],
-			       alpha_num[ba_node->coord[Z]]);
-			rc = SLURM_ERROR;
-			goto end_it;
+			/* Only error if the midplane isn't already
+			 * marked down or in a error state outside of
+			 * the bluegene block.
+			 */
+			uint16_t base_state, node_flags;
+			base_state = curr_ba_node->state & NODE_STATE_BASE;
+			node_flags = curr_ba_node->state & NODE_STATE_FLAGS;
+			if (!(node_flags & (NODE_STATE_DRAIN | NODE_STATE_FAIL))
+			    && (base_state != NODE_STATE_DOWN)) {
+				debug4("I have already been to "
+				       "this node %c%c%c %s",
+				       alpha_num[ba_node->coord[X]], 
+				       alpha_num[ba_node->coord[Y]],
+				       alpha_num[ba_node->coord[Z]],
+				       node_state_string(curr_ba_node->state));
+				rc = SLURM_ERROR;
+				goto end_it;
+			}
 		}
 		
 		if(ba_node->used) 
@@ -3787,7 +3800,6 @@ requested_end:
 static bool _node_used(ba_node_t* ba_node, int x_size)
 {
 	ba_switch_t* ba_switch = NULL;
-	
 	/* if we've used this node in another block already */
 	if (!ba_node || ba_node->used) {
 		debug4("node %c%c%c used", 
@@ -3819,7 +3831,7 @@ static bool _node_used(ba_node_t* ba_node, int x_size)
 			return true;
 		}
 	}
-		
+	
 	return false;
 
 }
@@ -4026,6 +4038,35 @@ static int _set_external_wires(int dim, int count, ba_node_t* source,
 
 	/* set up split x */
 	if(DIM_SIZE[X] == 1) {
+	} else if(DIM_SIZE[X] == 4) {
+		switch(count) {
+		case 0:
+		case 3:
+			/* 0 and 3rd Node */
+			/* nothing */
+			break;
+		case 1:
+			/* 1st Node */
+			target = &ba_system_ptr->grid[0]
+				[source->coord[Y]]
+				[source->coord[Z]];
+			/* 4->3 of 0th */
+			_switch_config(source, target, dim, 4, 3);
+			break;	
+		case 2:
+			/* 2nd Node */
+			target = &ba_system_ptr->grid[3]
+				[source->coord[Y]]
+				[source->coord[Z]];
+			/* 4->3 of 3rd and back */
+			_switch_config(source, target, dim, 4, 3);
+			_switch_config(source, target, dim, 3, 4);
+			break;
+		default:
+			fatal("got %d for a count on a %d X-dim system",
+			      count, DIM_SIZE[X]);
+			break;
+		}
 	} else if(DIM_SIZE[X] == 5) {
 		/* 4 X dim fixes for wires */
 		switch(count) {

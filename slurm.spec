@@ -1,4 +1,4 @@
-# $Id: slurm.spec 17631 2009-05-28 21:18:15Z jette $
+# $Id: slurm.spec 18573 2009-08-27 18:14:02Z jette $
 #
 # Note that this package is not relocatable
 
@@ -75,14 +75,14 @@
 %endif
 
 Name:    slurm
-Version: 2.0.4
+Version: 2.0.5
 Release: 1%{?dist}
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL 
 Group: System Environment/Base
-Source: slurm-2.0.4.tar.bz2
+Source: slurm-2.0.5.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: https://computing.llnl.gov/linux/slurm/
 
@@ -269,7 +269,7 @@ SLURM process tracking plugin for SGI job containers.
 #############################################################################
 
 %prep
-%setup -n slurm-2.0.4
+%setup -n slurm-2.0.5
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \
@@ -369,6 +369,7 @@ rm -rf $RPM_BUILD_ROOT
 %{_libdir}/slurm/src/*
 %{_mandir}/man1/*
 %{_mandir}/man5/slurm.*
+%{_mandir}/man5/topology.*
 %{_mandir}/man5/wiki.*
 %{_mandir}/man8/slurmctld.*
 %{_mandir}/man8/slurmd.*

@@ -1,3 +1,20 @@
+slurm-llnl (2.0.5-1) unstable; urgency=low
+
+  * New upstream release 
+  * Changed dependecy from lib-mysqlclient15 to lib-mysqlclient 
+  * Added Default-Start for runlevel 2 and 4 and $remote_fs requirement in
+    init.d scripts (Closes: #541252)
+  * Postinst checks for wrong runlevels 2 and 4 links
+  * Upgraded to standard version 3.8.3
+  * Add lintian overrides for missing slurm-llnl-configurator.html in doc
+    base registration
+  * modified postrm scripts to ignore pkill return value in order to avoid
+    postrm failure when no slurm process is running
+  * Checking for slurmctld.pid before cancelling running and pending
+    jobs during package removal 
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Thu, 24 Sep 2009 23:28:15 +0200
+
 slurm-llnl (2.0.4-1) unstable; urgency=low
 
   * New upstream release

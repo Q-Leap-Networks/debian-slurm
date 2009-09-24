@@ -32,6 +32,17 @@ case "$1" in
     ;;
 esac
 
+# Those using dependency based boot sequencing with sysv-rc and
+# installing slurm-llnl-slurmdbd before version 2.0.5-1 would miss the
+# runlevel 4 symlink.
+# Recover from this.
+if [ "$1" = "configure" ] && dpkg --compare-versions "$2" le "2.0.5-1" \
+   && [ -f /etc/rc2.d/K[0-9][0-9]slurm-llnl-slurmdbd ] \
+   && ! [ -f /etc/rc4.d/S[0-9][0-9]slurm-llnl-slurmdbd ] \
+   && ! [ -f /etc/rc2.d/S[0-9][0-9]slurm-llnl-slurmdbd ] ; then
+      update-rc.d -f slurm-llnl-slurmdbd remove
+fi
+
 
 
 # dh_installdeb will replace this with shell code automatically

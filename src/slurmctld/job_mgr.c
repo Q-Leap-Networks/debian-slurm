@@ -2376,7 +2376,7 @@ static int _job_create(job_desc_msg_t * job_desc, int allocate, int will_run,
 	if (job_desc->account == NULL)
 		job_desc->account = xstrdup(assoc_rec.acct);
 	if ((accounting_enforce & ACCOUNTING_ENFORCE_LIMITS) &&
-	    (!_validate_acct_policy(job_desc, part_ptr, &assoc_rec))) {
+	    (!_validate_acct_policy(job_desc, part_ptr, assoc_ptr))) {
 		info("_job_create: exceeded association's node or time limit "
 		     "for user %u", job_desc->user_id);
 		error_code = ESLURM_ACCOUNTING_POLICY;
@@ -3291,11 +3291,16 @@ _copy_job_desc_to_job_record(job_desc_msg_t * job_desc,
 		detail_ptr->cpus_per_task = 1;
 	if (job_desc->job_min_procs != (uint16_t) NO_VAL)
 		detail_ptr->job_min_procs = job_desc->job_min_procs;
+	if (job_desc->overcommit != (uint8_t) NO_VAL)
+		detail_ptr->overcommit = job_desc->overcommit;
 	if (job_desc->ntasks_per_node != (uint16_t) NO_VAL) {
 		detail_ptr->ntasks_per_node = job_desc->ntasks_per_node;
-		detail_ptr->job_min_procs = MAX(detail_ptr->job_min_procs,
-						(detail_ptr->cpus_per_task *
-						 detail_ptr->ntasks_per_node));
+		if (detail_ptr->overcommit == 0) {
+			detail_ptr->job_min_procs = 
+					MAX(detail_ptr->job_min_procs,
+					    (detail_ptr->cpus_per_task *
+					     detail_ptr->ntasks_per_node));
+		}
 	} else {
 		detail_ptr->job_min_procs = MAX(detail_ptr->job_min_procs,
 						detail_ptr->cpus_per_task);
@@ -3318,8 +3323,6 @@ _copy_job_desc_to_job_record(job_desc_msg_t * job_desc,
 		detail_ptr->out = xstrdup(job_desc->out);
 	if (job_desc->work_dir)
 		detail_ptr->work_dir = xstrdup(job_desc->work_dir);
-	if (job_desc->overcommit != (uint8_t) NO_VAL)
-		detail_ptr->overcommit = job_desc->overcommit;
 	if (job_desc->begin_time > time(NULL))
 		detail_ptr->begin_time = job_desc->begin_time;
 	job_ptr->select_jobinfo = 
@@ -3552,7 +3555,7 @@ void job_time_limit(void)
 				info("Job %u timed out, "
 				     "assoc %u is at or exceeds "
 				     "group max cpu minutes limit %llu "
-				     "with %Lf for account %s",
+				     "with %llu for account %s",
 				     job_ptr->job_id, assoc->id,
 				     assoc->grp_cpu_mins, 
 				     usage_mins, assoc->acct);
@@ -3580,7 +3583,7 @@ void job_time_limit(void)
 				info("Job %u timed out, "
 				     "assoc %u is at or exceeds "
 				     "max cpu minutes limit %llu "
-				     "with %Lf for account %s",
+				     "with %llu for account %s",
 				     job_ptr->job_id, assoc->id,
 				     assoc->max_cpu_mins_pj, 
 				     job_cpu_usage_mins, assoc->acct);
@@ -4693,6 +4696,7 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 			error_code = ESLURM_DISABLED;
 		else if (super_user
 			 ||  (job_ptr->priority > job_specs->priority)) {
+			job_ptr->details->nice = NICE_OFFSET;
 			if(job_specs->priority == INFINITE) {
 				job_ptr->direct_set_prio = 0;
 				_set_job_prio(job_ptr);
@@ -4715,8 +4719,11 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 		if (IS_JOB_FINISHED(job_ptr)) 
 			error_code = ESLURM_DISABLED;
 		else if (super_user || (job_specs->nice < NICE_OFFSET)) {
+			int64_t new_prio = job_ptr->priority;
+			new_prio += job_ptr->details->nice;
+			new_prio -= job_specs->nice;
+			job_ptr->priority = MAX(new_prio, 2);
 			job_ptr->details->nice = job_specs->nice;
-			_set_job_prio(job_ptr);
 			
 			info("update_job: setting priority to %u for "
 			     "job_id %u", job_ptr->priority,
@@ -6504,7 +6511,9 @@ static bool _validate_acct_policy(job_desc_msg_t *job_desc,
 	int timelimit_set = 0;
 	int max_nodes_set = 0;
 	char *user_name = assoc_ptr->user;
+	bool rc = true;
 
+	slurm_mutex_lock(&assoc_mgr_association_lock);
 	while(assoc_ptr) {
 		/* for validation we don't need to look at 
 		 * assoc_ptr->grp_cpu_mins.
@@ -6529,7 +6538,8 @@ static bool _validate_acct_policy(job_desc_msg_t *job_desc,
 				     job_desc->min_nodes, 
 				     assoc_ptr->grp_nodes,
 				     assoc_ptr->acct);
-				return false;
+				rc = false;
+				break;
 			} else if (job_desc->max_nodes == 0
 				   || (max_nodes_set 
 				       && (job_desc->max_nodes 
@@ -6560,7 +6570,8 @@ static bool _validate_acct_policy(job_desc_msg_t *job_desc,
 			     job_desc->user_id, 
 			     assoc_ptr->grp_submit_jobs,
 			     assoc_ptr->acct);
-			return false;
+			rc = false;
+			break;
 		}
 
 		
@@ -6599,7 +6610,8 @@ static bool _validate_acct_policy(job_desc_msg_t *job_desc,
 				     job_desc->user_id, 
 				     job_desc->min_nodes, 
 				     assoc_ptr->max_nodes_pj);
-				return false;
+				rc = false;
+				break;
 			} else if (job_desc->max_nodes == 0
 				   || (max_nodes_set 
 				       && (job_desc->max_nodes 
@@ -6618,7 +6630,7 @@ static bool _validate_acct_policy(job_desc_msg_t *job_desc,
 				job_desc->max_nodes = assoc_ptr->max_nodes_pj;
 			}
 		}
-		
+
 		if ((assoc_ptr->max_submit_jobs != NO_VAL) &&
 		    (assoc_ptr->max_submit_jobs != INFINITE) &&
 		    (assoc_ptr->used_submit_jobs 
@@ -6628,7 +6640,8 @@ static bool _validate_acct_policy(job_desc_msg_t *job_desc,
 			     user_name,
 			     job_desc->user_id, 
 			     assoc_ptr->max_submit_jobs);
-			return false;
+			rc = false;
+			break;
 		}
 		
 		if ((assoc_ptr->max_wall_pj != NO_VAL) &&
@@ -6651,14 +6664,17 @@ static bool _validate_acct_policy(job_desc_msg_t *job_desc,
 				     user_name,
 				     job_desc->user_id, 
 				     job_desc->time_limit, time_limit);
-				return false;
+				rc = false;
+				break;
 			}
 		}
 		
 		assoc_ptr = assoc_ptr->parent_assoc_ptr;
 		parent = 1;
 	}
-	return true;
+	slurm_mutex_unlock(&assoc_mgr_association_lock);
+
+	return rc;
 }
 
 /*

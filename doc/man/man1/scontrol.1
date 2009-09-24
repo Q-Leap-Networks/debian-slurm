@@ -64,7 +64,7 @@ are unavailable to user's group.
 Instruct the Slurm controller to terminate immediately and generate a core file.
 
 .TP
-\fBcheckpoint\fP \fICKPT_OP\fP \fIID\fP \fIOPTIONS\fP
+\fBcheckpoint\fP \fICKPT_OP\fP \fIID\fP
 Perform a checkpoint activity on the job step(s) with the specified identification.
 \fIID\fP can be used to identify a specific job (e.g. "<job_id>",
 which applies to all of its existing steps)
@@ -357,8 +357,14 @@ Identify the job to be updated. This specification is required.
 \fIMinCores\fP=<count>
 Set the job's minimum number of cores per socket to the specified value.
 .TP
-\fIMinMemory\fP=<megabytes>
+\fIMinMemoryCPU\fP=<megabytes>
+Set the job's minimum real memory required per allocated CPU to the specified 
+value.
+Either \fIMinMemoryCPU\fP or \fIMinMemoryNode\fP may be set, but not both.
+.TP
+\fIMinMemoryNode\fP=<megabytes>
 Set the job's minimum real memory required per node to the specified value.
+Either \fIMinMemoryCPU\fP or \fIMinMemoryNode\fP may be set, but not both.
 .TP
 \fIMinProcs\fP=<count>
 Set the job's minimum number of processors per node to the specified value.
@@ -377,6 +383,11 @@ Set the job's name to the specified value.
 .TP
 \fINice\fP[=delta]
 Adjust job's priority by the specified value. Default value is 100.
+The adjustment range is from \-10000 (highest priority)
+to 10000 (lowest priority). 
+Nice value changes are not additive, but overwrite any prior nice
+value and are applied to the job's base priority.
+Only privileged users can specify a negative adjustment.
 .TP
 \fIPartition\fP=<name>
 Set the job's partition to the specified value.
@@ -386,6 +397,7 @@ Set the job's priority to the specified value.
 Note that a job priority of zero prevents the job from ever being scheduled.
 By setting a job's priority to zero it is held.
 Set the priority to a non\-zero value to permit it to run.
+Explicitly setting a job's priority clears any previously set nice value.
 .TP
 \fIReqCores\fP=<count>
 Set the job's count of required cores to the specified value.
@@ -725,7 +737,7 @@ JobId=65539 UserId=1500 JobState=PENDING TimeLimit=0:20:00
 .br 
    StartTime=0 EndTime=0 Shared=0 ReqProcs=1000
 .br
-   ReqNodes=400 Contiguous=1 MinProcs=4 MinMemory=1024
+   ReqNodes=400 Contiguous=1 MinProcs=4 MinMemoryNode=1024
 .br 
    MinTmpDisk=2034 ReqNodeList=lx[3000-3003] 
 .br

@@ -52,7 +52,7 @@ case "$1" in
          rm -f /var/log/slurm-llnl/slurmctld*.log*
 	 if [ ! -e /usr/sbin/slurmdbd ] ; then 
 	    # Killing all slurm owned process
-            pkill -9 -u slurm
+            pkill -9 -u slurm || true
 	    deluser --quiet slurm
             rm -rf /var/run/slurm-llnl
 	 fi

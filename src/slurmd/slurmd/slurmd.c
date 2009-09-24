@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmd/slurmd.c - main slurm node server daemon
- *  $Id: slurmd.c 17951 2009-06-23 22:51:55Z da $
+ *  $Id: slurmd.c 18662 2009-09-09 23:09:09Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -78,6 +78,8 @@
 #include "src/common/forward.h"
 #include "src/common/bitstring.h"
 #include "src/common/stepd_api.h"
+#include "src/common/node_select.h"
+#include "src/common/slurm_jobacct_gather.h"
 
 #include "src/slurmd/slurmd/slurmd.h"
 #include "src/slurmd/slurmd/req.h"
@@ -674,11 +676,31 @@ _read_config()
 		    &conf->block_map_size,
 		    &conf->block_map, &conf->block_map_inv);
 
-	conf->cpus    = conf->actual_cpus;
-	conf->sockets = conf->actual_sockets;
-	conf->cores   = conf->actual_cores;
-	conf->threads = conf->actual_threads;
+	if(cf->fast_schedule && 
+	   ((conf->conf_cpus != conf->actual_cpus)    ||
+	    (conf->sockets   != conf->actual_sockets) ||
+	    (conf->cores     != conf->actual_cores)   ||
+	    (conf->threads   != conf->actual_threads))) {
+		info("Node configuration differs from hardware\n"
+		     "   Procs=%u:%u(hw) Sockets=%u:%u(hw)\n"
+		     "   CoresPerSocket%u:%u(hw) ThreadsPerCore:%u:%u(hw)",
+		     conf->conf_cpus,    conf->actual_cpus,
+		     conf->conf_sockets, conf->actual_sockets,
+		     conf->conf_cores,   conf->actual_cores,
+		     conf->conf_threads, conf->actual_threads);
+	}
 
+	if((cf->fast_schedule == 0) || (conf->actual_cpus < conf->conf_cpus)) {
+		conf->cpus    = conf->actual_cpus;
+		conf->sockets = conf->actual_sockets;
+		conf->cores   = conf->actual_cores;
+		conf->threads = conf->actual_threads;
+	} else {
+		conf->cpus    = conf->conf_cpus;
+		conf->sockets = conf->conf_sockets;
+		conf->cores   = conf->conf_cores;
+		conf->threads = conf->conf_threads;
+	}
 	get_memory(&conf->real_memory_size);
 
 	cf = slurm_conf_lock();
@@ -1101,7 +1123,6 @@ static int
 _slurmd_fini()
 {
 	save_cred_state(conf->vctx);
-	int slurm_proctrack_init();
 	switch_fini();
 	slurmd_task_fini(); 
 	slurm_conf_destroy();
@@ -1109,6 +1130,8 @@ _slurmd_fini()
 	slurm_auth_fini();
 	slurmd_req(NULL);	/* purge memory allocated by slurmd_req() */
 	fini_setproctitle();
+	slurm_select_fini();
+	slurm_jobacct_gather_fini();
 	return SLURM_SUCCESS;
 }
 

@@ -1443,7 +1443,7 @@ static List _create_part_info_list(partition_info_msg_t *part_info_ptr,
 			} else
 				block_error = 0;
 			node_ptr->threads = node_scaling;
-			for(j=0; j<3; j++) {
+			for(j=0; j<4; j++) {
 				int norm = 0;
 				switch(j) {
 				case SVIEW_BG_IDLE_STATE:
@@ -1467,7 +1467,10 @@ static List _create_part_info_list(partition_info_msg_t *part_info_ptr,
 					 */
 					node_ptr->threads -=
 						(node_ptr->cores
+						 + node_ptr->sockets
 						 + node_ptr->used_cpus);
+					if((int16_t)node_ptr->threads < 0)
+						node_ptr->threads = 0;
 					if(node_ptr->threads == node_scaling)
 						norm = 1;
 					else {
@@ -1488,6 +1491,16 @@ static List _create_part_info_list(partition_info_msg_t *part_info_ptr,
 					
 					node_ptr->threads =
 						node_ptr->used_cpus;
+					break;
+				case SVIEW_BG_DRAINING_STATE:
+					/* get the draining node count */
+					if(!node_ptr->sockets) 
+						continue;
+					node_ptr->node_state =
+						NODE_STATE_ALLOCATED;
+					node_ptr->node_state |= 
+						NODE_STATE_DRAIN;
+					node_ptr->threads = node_ptr->sockets;
 					break;
 				case SVIEW_BG_ERROR_STATE:
 					/* get the error node count */
@@ -2231,13 +2244,14 @@ extern void set_menus_part(void *arg, GtkTreePath *path,
 
 	switch(type) {
 	case TAB_CLICKED:
-		make_fields_menu(menu, display_data_part, SORTID_CNT);
+		make_fields_menu(NULL, menu, display_data_part, SORTID_CNT);
 		break;
 	case ROW_CLICKED:
 		make_options_menu(tree_view, path, menu, options_data_part);
 		break;
 	case POPUP_CLICKED:
-		make_popup_fields_menu(popup_win, menu);
+		make_fields_menu(popup_win, menu,
+				 popup_win->display_data, SORTID_CNT);
 		break;
 	default:
 		g_error("UNKNOWN type %d given to set_fields\n", type);
@@ -2253,7 +2267,8 @@ extern void popup_all_part(GtkTreeModel *model, GtkTreeIter *iter, int id)
 	ListIterator itr = NULL;
 	popup_info_t *popup_win = NULL;
 	GError *error = NULL;
-				
+	GtkTreeIter par_iter;
+			
 	gtk_tree_model_get(model, iter, SORTID_NAME, &name, -1);
 	
 	switch(id) {
@@ -2341,7 +2356,14 @@ extern void popup_all_part(GtkTreeModel *model, GtkTreeIter *iter, int id)
 	case RESV_PAGE:
 	case NODE_PAGE:
 		g_free(name);
-		gtk_tree_model_get(model, iter, SORTID_NODELIST, &name, -1);
+		/* we want to include the parent's nodes here not just
+		   the subset */
+		if(gtk_tree_model_iter_parent(model, &par_iter, iter)) 
+			gtk_tree_model_get(model, &par_iter,
+					   SORTID_NODELIST, &name, -1);
+		else
+			gtk_tree_model_get(model, iter, 
+					   SORTID_NODELIST, &name, -1);
 		popup_win->spec_info->search_info->gchar_data = name;
 		if(state && strlen(state)) {
 			popup_win->spec_info->search_info->search_type =

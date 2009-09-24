@@ -691,7 +691,7 @@ static void  _init_config(void)
  * _slurm_rpc_reconfigure_controller function inside proc_req.c try
  * to keep these in sync.  
  */
-extern int slurm_reconfigure(void)
+static int _reconfigure_slurm(void)
 {
 	/* Locks: Write configuration, job, node, and partition */
 	slurmctld_lock_t config_write_lock = { 
@@ -711,11 +711,14 @@ extern int slurm_reconfigure(void)
 		_update_cred_key();
 		set_slurmctld_state_loc();
 	}
+	select_g_reconfigure();		/* notify select
+					 * plugin too.  This
+					 * needs to happen
+					 * inside the lock. */
 	unlock_slurmctld(config_write_lock);
 	start_power_mgr(&slurmctld_config.thread_id_power);
 	trigger_reconfig();
 	slurm_sched_partition_change();	/* notify sched plugin */
-	select_g_reconfigure();		/* notify select plugin too */
 	priority_g_reconfig();          /* notify priority plugin too */
 
 	return rc;
@@ -764,7 +767,7 @@ static void *_slurmctld_signal_hand(void *no_data)
 			break;
 		case SIGHUP:	/* kill -1 */
 			info("Reconfigure signal (SIGHUP) received");
-			slurm_reconfigure();
+			_reconfigure_slurm();
 			break;
 		case SIGABRT:	/* abort */
 			info("SIGABRT received");

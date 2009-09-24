@@ -455,12 +455,17 @@ extern void *get_pointer(GtkTreeView *tree_view, GtkTreePath *path, int loc)
 	return ptr;
 }
 
-extern void make_fields_menu(GtkMenu *menu, display_data_t *display_data,
-			     int count)
+extern void make_fields_menu(popup_info_t *popup_win, GtkMenu *menu,
+			     display_data_t *display_data, int count)
 {
 	GtkWidget *menuitem = NULL;
 	display_data_t *first_display_data = display_data;
 	int i = 0;
+
+	/* we don't want to display anything on the full info page */
+	if(popup_win && popup_win->spec_info->type == INFO_PAGE)
+		return;
+
 	for(i=0; i<count; i++) {
 		while(display_data++) {
 			if(display_data->id == -1)
@@ -469,15 +474,25 @@ extern void make_fields_menu(GtkMenu *menu, display_data_t *display_data,
 				continue;
 			if(display_data->id != i)
 				continue;
+		
 			menuitem = gtk_check_menu_item_new_with_label(
 				display_data->name); 
 			
 			gtk_check_menu_item_set_active(
 				GTK_CHECK_MENU_ITEM(menuitem),
 				display_data->show);
-			g_signal_connect(menuitem, "toggled",
-					 G_CALLBACK(_toggle_state_changed), 
-					 display_data);
+			if(popup_win) {
+				display_data->user_data = popup_win;
+				g_signal_connect(
+					menuitem, "toggled",
+					G_CALLBACK(_popup_state_changed), 
+					display_data);
+			} else {
+				g_signal_connect(
+					menuitem, "toggled",
+					G_CALLBACK(_toggle_state_changed), 
+					display_data);
+			}
 			gtk_menu_shell_append(GTK_MENU_SHELL(menu), menuitem);
 			break;
 		}
@@ -512,33 +527,6 @@ extern void make_options_menu(GtkTreeView *tree_view, GtkTreePath *path,
 		gtk_menu_shell_append(GTK_MENU_SHELL(menu), menuitem);
 	}
 }
-
-extern void make_popup_fields_menu(popup_info_t *popup_win, GtkMenu *menu)
-{
-	GtkWidget *menuitem = NULL;
-	display_data_t *display_data = popup_win->display_data;
-
-	/* we don't want to display anything on the full info page */
-	if(popup_win->spec_info->type == INFO_PAGE)
-		return;
-
-	while(display_data++) {
-		if(display_data->id == -1)
-			break;
-		if(!display_data->name)
-			continue;
-		display_data->user_data = popup_win;
-		menuitem = 
-			gtk_check_menu_item_new_with_label(display_data->name);
-		gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(menuitem),
-					       display_data->show);
-		g_signal_connect(menuitem, "toggled",
-				 G_CALLBACK(_popup_state_changed), 
-				 display_data);
-		gtk_menu_shell_append(GTK_MENU_SHELL(menu), menuitem);
-	}
-}
-
 
 extern GtkScrolledWindow *create_scrolled_window()
 {
@@ -615,7 +603,8 @@ extern GtkTreeView *create_treeview_2cols_attach_to_table(GtkTable *table)
 {
 	GtkTreeView *tree_view = GTK_TREE_VIEW(gtk_tree_view_new());
 	GtkTreeStore *treestore = 
-		gtk_tree_store_new(2, GTK_TYPE_STRING, GTK_TYPE_STRING);
+		gtk_tree_store_new(3, GTK_TYPE_STRING, 
+				   GTK_TYPE_STRING, GTK_TYPE_STRING);
 	GtkTreeViewColumn *col = gtk_tree_view_column_new();
 	GtkCellRenderer *renderer = gtk_cell_renderer_text_new();
 
@@ -628,6 +617,8 @@ extern GtkTreeView *create_treeview_2cols_attach_to_table(GtkTable *table)
 	gtk_tree_view_column_pack_start(col, renderer, TRUE);
 	gtk_tree_view_column_add_attribute(col, renderer, 
 					   "text", DISPLAY_NAME);
+	gtk_tree_view_column_add_attribute(col, renderer, 
+					   "font", DISPLAY_FONT);
 	gtk_tree_view_column_set_title(col, "Name");
 	gtk_tree_view_column_set_resizable(col, true);
 	gtk_tree_view_column_set_expand(col, true);
@@ -638,9 +629,19 @@ extern GtkTreeView *create_treeview_2cols_attach_to_table(GtkTable *table)
 	gtk_tree_view_column_pack_start(col, renderer, TRUE);
 	gtk_tree_view_column_add_attribute(col, renderer, 
 					   "text", DISPLAY_VALUE);
+	gtk_tree_view_column_add_attribute(col, renderer, 
+					   "font", DISPLAY_FONT);
 	gtk_tree_view_column_set_title(col, "Value");
 	gtk_tree_view_column_set_resizable(col, true);
 	gtk_tree_view_column_set_expand(col, true);
+	gtk_tree_view_append_column(tree_view, col);
+
+	col = gtk_tree_view_column_new();
+	renderer = gtk_cell_renderer_text_new();
+	gtk_tree_view_column_pack_start(col, renderer, TRUE);
+	gtk_tree_view_column_set_visible(col, false);
+	gtk_tree_view_column_add_attribute(col, renderer, 
+					   "text", DISPLAY_FONT);
 	gtk_tree_view_append_column(tree_view, col);
 
        	g_object_unref(treestore);
@@ -760,7 +761,18 @@ extern gboolean row_clicked(GtkTreeView *tree_view, GdkEventButton *event,
 	gtk_tree_selection_unselect_all(selection);
 	gtk_tree_selection_select_path(selection, path);
 	
-	if(event->x <= 20) {	
+	if(event->x <= 2) {	
+		/* When you try to resize a column this event happens
+		   for some reason.  Resizing always happens in the
+		   first 2 of x so if that happens just return and
+		   continue. */
+		did_something = FALSE;
+	} else if(event->x <= 20) {
+		/* This should also be included with above since there
+		   is no reason for us to handle this here since it is
+		   already handled automatically. Just to make sure
+		   we will keep it this way until 2.1 just so we
+		   don't break anything. */
 		if(!gtk_tree_view_expand_row(tree_view, path, FALSE))
 			gtk_tree_view_collapse_row(tree_view, path);
 		did_something = TRUE;
@@ -1226,6 +1238,55 @@ found:
 			   DISPLAY_NAME, name, 
 			   DISPLAY_VALUE, value,
 			   -1);
+
+	return;
+}
+
+extern void add_display_treestore_line_with_font(
+	int update,
+	GtkTreeStore *treestore,
+	GtkTreeIter *iter,
+	const char *name, char *value,
+	char *font)
+{
+	if(!name) {
+		g_print("error, name = %s and value = %s\n",
+			name, value);
+		return;
+	}
+	if(update) {
+		char *display_name = NULL;
+		GtkTreePath *path = gtk_tree_path_new_first();
+		gtk_tree_model_get_iter(GTK_TREE_MODEL(treestore), iter, path);
 	
+		while(1) {
+			/* search for the jobid and check to see if 
+			   it is in the list */
+			gtk_tree_model_get(GTK_TREE_MODEL(treestore), iter,
+					   DISPLAY_NAME, 
+					   &display_name, -1);
+			if(!strcmp(display_name, name)) {
+				/* update with new info */
+				g_free(display_name);
+				goto found;
+			}
+			g_free(display_name);
+				
+			if(!gtk_tree_model_iter_next(GTK_TREE_MODEL(treestore),
+						     iter)) {
+				return;
+			}
+		}
+		
+	} else {
+		gtk_tree_store_append(treestore, iter, NULL);
+	}
+found:
+	gtk_tree_store_set(treestore, iter,
+			   DISPLAY_NAME, name, 
+			   DISPLAY_VALUE, value,
+			   DISPLAY_FONT, font,
+			   -1);
+
 	return;
 }

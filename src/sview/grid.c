@@ -939,16 +939,18 @@ get_bg:
 	/* Here we need to reset the nodes off of what the blocks say */
 	for (i=0; i<node_info_ptr->record_count; i++) {
 		node_ptr = &(node_info_ptr->node_array[i]);
-		/* in each node_ptr we overload the threads var
-		 * with the number of cnodes in the used_cpus var
-		 * will be used to tell how many cnodes are
-		 * allocated and the cores will represent the cnodes
+		/* In each node_ptr we overload the threads var
+		 * with the number of cnodes in drained state, the
+		 * sockets var with the nodes in draining state, and
+		 * the used_cpus var will be used to tell how many cnodes are
+		 * allocated.  The cores will also represent the cnodes
 		 * in an error state. So we can get an idle count by
-		 * subtracting those 2 numbers from the total possible
+		 * subtracting those 3 numbers from the total possible
 		 * cnodes (which are the idle cnodes).
 		 */
 		node_ptr->threads = node_scaling;
 		node_ptr->cores = 0;
+		node_ptr->sockets = 0;
 		node_ptr->used_cpus = 0;
 		if((node_ptr->node_state & NODE_STATE_BASE) == NODE_STATE_DOWN) 
 			continue;
@@ -1000,9 +1002,16 @@ get_bg:
 				 */
 				if(((node_ptr->node_state & NODE_STATE_BASE) 
 				    == NODE_STATE_DOWN)
-				   || (node_ptr->node_state & NODE_STATE_DRAIN))
+				   || (node_ptr->node_state
+				       & NODE_STATE_DRAIN)) {
+					if(bg_info_record->job_running 
+					   > NO_JOB_RUNNING) {
+						node_ptr->sockets += alter;
+						node_ptr->cores -= alter;
+					}
+
 					continue;
-				
+				}				
 				if(bg_info_record->state
 				   == RM_PARTITION_ERROR) {
 					node_ptr->cores += alter;
@@ -1106,7 +1115,6 @@ extern void sview_reset_grid()
 extern void setup_popup_grid_list(popup_info_t *popup_win)
 {
 	int def_color = MAKE_BLACK;
-	GtkTreeIter iter;
 
 	if(!popup_win->model) 
 		def_color = MAKE_WHITE;
@@ -1125,19 +1133,19 @@ extern void setup_popup_grid_list(popup_info_t *popup_win)
 
 	/* refresh the pointer */
 	if(popup_win->model 
-	   && gtk_tree_model_get_iter_first(popup_win->model, &iter)) {
+	   && gtk_tree_store_iter_is_valid(GTK_TREE_STORE(popup_win->model),
+					   &popup_win->iter)) {
 		gtk_tree_model_get(popup_win->model, &popup_win->iter,
 				   popup_win->node_inx_id,
 				   &popup_win->node_inx, -1);
 	} else {
-		popup_win->model = NULL;
 		popup_win->node_inx = NULL;
 	}
 
 	if(popup_win->node_inx) {
 		int j=0;
 	       
-		while(popup_win->node_inx[j] >= 0) {
+		while(popup_win->node_inx[j] >= 0) {			
 			set_grid_used(popup_win->grid_button_list,
 				      popup_win->node_inx[j],
 				      popup_win->node_inx[j+1], true);

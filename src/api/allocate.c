@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  allocate.c - allocate nodes for a job or step with supplied contraints
- *  $Id: allocate.c 17903 2009-06-19 18:04:48Z jette $
+ *  $Id: allocate.c 18263 2009-07-30 19:09:07Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -317,9 +317,9 @@ int slurm_job_will_run (job_desc_msg_t *req)
 		slurm_make_time_str(&will_run_resp->start_time,
 				    buf, sizeof(buf));
 		info("Job %u to start at %s using %u processors on %s",
-			will_run_resp->job_id, buf,
-			will_run_resp->proc_cnt,
-			will_run_resp->node_list);
+		     will_run_resp->job_id, buf,
+		     will_run_resp->proc_cnt,
+		     will_run_resp->node_list);
 		slurm_free_will_run_response_msg(will_run_resp);
 		break;
 	default:

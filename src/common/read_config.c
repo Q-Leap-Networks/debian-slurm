@@ -1227,8 +1227,8 @@ extern int slurm_conf_get_addr(const char *node_name, slurm_addr *address)
  * Returns SLURM_SUCCESS on success, SLURM_FAILURE on failure.
  */
 extern int slurm_conf_get_cpus_sct(const char *node_name,
-			uint16_t *cpus, uint16_t *sockets,
-			uint16_t *cores, uint16_t *threads)
+				   uint16_t *cpus, uint16_t *sockets,
+				   uint16_t *cores, uint16_t *threads)
 {
 	int idx;
 	names_ll_t *p;
@@ -2467,6 +2467,12 @@ _validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 	if (!s_p_get_uint16(&conf->unkillable_timeout,
 			    "UnkillableStepTimeout", hashtbl))
 		conf->unkillable_timeout = DEFAULT_UNKILLABLE_TIMEOUT;
+
+#ifdef HAVE_BG
+	if (conf->node_prefix == NULL)
+		fatal("No valid node name prefix identified");
+#endif
+
 	xfree(default_storage_type);
 	xfree(default_storage_loc);
 	xfree(default_storage_host);

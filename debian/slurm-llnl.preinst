@@ -64,14 +64,17 @@ case "$1" in
 		echo Couldn\'t stop daemons properly, aborting ... 
 		exit 1
 	fi
-        if [ -x "/etc/init.d/slurm-llnl" ]; then
+        if [ -x "/etc/init.d/slurm-llnl" ] \
+          && [ -e "/etc/slurm-llnl/slurm.conf" ] ; then
           if [ -x "`which invoke-rc.d 2>/dev/null`" ]; then
             invoke-rc.d slurm-llnl start 2>/dev/null 1>&2 || exit $?
           else
             /etc/init.d/slurm-llnl start 2>/dev/null 1>&2 || exit $?
           fi
-          scancel --state=pending
-          scancel --state=running
+          if [ -e /var/run/slurm-llnl/slurmctld.pid ] ; then
+            scancel --state=pending 
+            scancel --state=running
+          fi
           if [ -x "`which invoke-rc.d 2>/dev/null`" ]; then
             invoke-rc.d slurm-llnl stop 2>/dev/null 1>&2 || exit $?
           else
