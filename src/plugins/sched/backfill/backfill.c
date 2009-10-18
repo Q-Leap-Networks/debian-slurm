@@ -386,7 +386,7 @@ static void _attempt_backfill(void)
 		if ((part_ptr->root_only) && filter_root)
 			continue;
 
-		if ((!job_independent(job_ptr)) ||
+		if ((!job_independent(job_ptr, 0)) ||
 		    (license_job_test(job_ptr) != SLURM_SUCCESS))
 			continue;
 
@@ -438,8 +438,8 @@ static void _attempt_backfill(void)
 		bit_and(avail_bitmap, up_node_bitmap);
 		for (j=0; ; ) {
 			if (node_space[j].end_time < start_res)
-				continue;
-			if (node_space[j].begin_time <= end_time) {
+				;
+			else if (node_space[j].begin_time <= end_time) {
 				bit_and(avail_bitmap, 
 					node_space[j].avail_bitmap);
 			} else
@@ -534,7 +534,7 @@ static int _start_job(struct job_record *job_ptr, bitstr_t *resv_bitmap)
 	static uint32_t fail_jobid = 0;
 
 	if (job_ptr->details->exc_node_bitmap) {
-		orig_exc_nodes = job_ptr->details->exc_node_bitmap;
+		orig_exc_nodes = bit_copy(job_ptr->details->exc_node_bitmap);
 		bit_or(job_ptr->details->exc_node_bitmap, resv_bitmap);
 	} else
 		job_ptr->details->exc_node_bitmap = bit_copy(resv_bitmap);

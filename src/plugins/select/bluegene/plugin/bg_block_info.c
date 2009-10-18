@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  bg_block_info.c - bluegene block information from the db2 database.
  *
- *  $Id: bg_block_info.c 18147 2009-07-15 16:25:53Z da $
+ *  $Id: bg_block_info.c 18904 2009-10-15 15:52:20Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -278,6 +278,16 @@ extern int update_block_list()
 					break;
 				}
 			}
+
+			/* If the call was busy, just skip this
+			   iteration.  It usually means something like
+			   rm_get_BG was called which can be a very
+			   long call */
+			if(rc == EBUSY) {
+				debug5("lock was busy, aborting");
+				break;
+			}
+
 			error("bridge_get_block_info(%s): %s", 
 			      name, 
 			      bg_err_str(rc));
@@ -357,6 +367,7 @@ extern int update_block_list()
 			  //plugin set error
 			  && bg_record->state != state) {
 			int skipped_dealloc = 0;
+
 			debug("state of Block %s was %d and now is %d",
 			      bg_record->bg_block_id, 
 			      bg_record->state, 
@@ -382,8 +393,18 @@ extern int update_block_list()
 				xfree(bg_record->target_name);
 				bg_record->target_name =
 					xstrdup(bg_record->user_name);
-			}
-
+			} else if((bg_record->state 
+				   == RM_PARTITION_DEALLOCATING)
+				  && (state == RM_PARTITION_CONFIGURING)) 
+				/* This is a funky state IBM says
+				   isn't a bug, but all their
+				   documentation says this doesn't
+				   happen, but IBM says oh yeah, you
+				   weren't really suppose to notice
+				   that. So we will just skip this
+				   state and act like this didn't happen. */
+				goto nochange_state;
+			
 			bg_record->state = state;
 
 			if(bg_record->state == RM_PARTITION_DEALLOCATING
@@ -402,7 +423,7 @@ extern int update_block_list()
 					xstrdup(bg_record->user_name);
 			}
 #endif
-			else if(bg_record->state == RM_PARTITION_CONFIGURING) 
+			else if(bg_record->state == RM_PARTITION_CONFIGURING)
 				bg_record->boot_state = 1;
 			else if(bg_record->state == RM_PARTITION_FREE) {
 				if(remove_from_bg_list(bg_lists->job_running, 
@@ -425,8 +446,8 @@ extern int update_block_list()
 				trigger_block_error();
 			}
 			updated = 1;
-			
 		}
+	nochange_state:
 
 		/* check the boot state */
 		debug3("boot state for block %s is %d",
@@ -600,6 +621,15 @@ extern int update_freeing_block_list()
 					break;
 				}
 			}
+			/* If the call was busy, just skip this
+			   iteration.  It usually means something like
+			   rm_get_BG was called which can be a very
+			   long call */
+			if(rc == EBUSY) {
+				debug5("lock was busy, aborting");
+				break;
+			}
+
 			error("bridge_get_block_info(%s): %s", 
 			      name, 
 			      bg_err_str(rc));

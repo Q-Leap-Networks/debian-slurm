@@ -10,7 +10,7 @@
 # config: /etc/sysconfig/slurm
 #
 ### BEGIN INIT INFO
-# Provides:          slurmbd
+# Provides:          slurm-llnl-slurmdbd
 # Required-Start:    $remote_fs $syslog $network munge
 # Required-Stop:     $remote_fs $syslog $network munge
 # Should-Start:      $named

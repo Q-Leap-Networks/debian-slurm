@@ -14,7 +14,7 @@
 # config: /etc/default/slurm-llnl
 #
 ### BEGIN INIT INFO
-# Provides:          slurm
+# Provides:          slurm-llnl
 # Required-Start:    $remote_fs $syslog $network munge
 # Required-Stop:     $remote_fs $syslog $network munge
 # Should-Start:      $named
