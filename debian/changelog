@@ -1,3 +1,11 @@
+slurm-llnl (2.0.7-2) unstable; urgency=low
+
+  * Fixed getline definition to build on AMD (Closes: #552836)
+  * Changing dependency from version 8.3 to 8.4 of postgreSQL (Closes: #559605)
+  * Fixing various typos
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Sat, 05 Dec 2009 23:28:51 +0100
+
 slurm-llnl (2.0.7-1) unstable; urgency=low
 
   * New upstream release announced together with 2.0.6
