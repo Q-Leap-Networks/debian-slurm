@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/mgr.c - job manager functions for slurmstepd
- *  $Id: mgr.c 18638 2009-09-08 21:54:27Z jette $
+ *  $Id: mgr.c 19082 2009-12-01 20:15:57Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.

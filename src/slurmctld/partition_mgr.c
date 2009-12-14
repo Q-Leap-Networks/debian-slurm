@@ -2,7 +2,7 @@
  *  partition_mgr.c - manage the partition information of slurm
  *	Note: there is a global partition list (part_list) and
  *	time stamp (last_part_update)
- *  $Id: partition_mgr.c 18102 2009-07-09 20:45:13Z jette $
+ *  $Id: partition_mgr.c 19082 2009-12-01 20:15:57Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

@@ -9,7 +9,7 @@ Homepage: https://computing.llnl.gov/linux/slurm/
 
 Package: slurm-llnl
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, openssl, ucf, munge, slurm-llnl-basic-plugins (= ${binary:Version}), adduser, openssl-blacklist, openssl (>= 0.9.8g-9), lsb-base (>= 3.2-12)
+Depends: ${shlibs:Depends}, ${misc:Depends}, openssl, ucf, munge, slurm-llnl-basic-plugins (= ${binary:Version}), adduser, openssl-blacklist, openssl (>= 0.9.8g-9), lsb-base (>= 3.2-12), blcr-util
 Description: Simple Linux Utility for Resource Management
  SLURM stands for Simple Linux Utility for Resource Management, it
  is an open-source cluster resource management and job scheduling system

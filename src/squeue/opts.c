@@ -1,7 +1,7 @@
 /****************************************************************************\
  *  opts.c - srun command line option parsing
  *
- *  $Id: opts.c 18308 2009-08-04 16:31:06Z jette $
+ *  $Id: opts.c 19082 2009-12-01 20:15:57Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security

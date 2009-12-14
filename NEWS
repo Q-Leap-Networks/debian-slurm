@@ -1,6 +1,57 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 2.0.10
+=========================
+
+* Changes in SLURM 2.0.9
+========================
+ -- When running the mysql plugin natively MUNGE errors are now eliminated 
+    when sending updates to slurmctlds.
+ -- Check to make sure we have a default account before looking to 
+    fill in default association. 
+ -- Fix to make it so sched/wiki2 can modify a job's partition or hostlist of 
+    non-pending jobs.
+ -- Applied slurmctld prolog bug fix from Dennis Leepow to backfill.c
+ -- fixed quite a few typos (needed for debian packages)
+ -- make it so slurmctld will core dump without --enable-debug set
+ -- Fix issue when doing a rollup on reservations before a cluster has been 
+    added. 
+ -- MySQL plugin - When doing archiving end time is now decreased by 1 
+    which should be more correct.
+ -- BLUEGENE - Fixed issue where --no-rotate didn't work correctly on job
+    submissions.
+ -- BLUEGENE - made the buffer longer when submitting jobs to get the entire 
+    line.  Previously the line could be shortened prematurely.
+ -- BLUEGENE - Fix to make sure we don't erroneously set a connection type
+    to SMALL.
+ -- Type cast a negative uint64_t to int64_t to avoid confusion when doing 
+    arithmetic with it in accounting dealing with over commit time.
+
+* Changes in SLURM 2.0.8
+========================
+ -- BLUEGENE - added dub2 of stderr to put error messages sent from underlying 
+    libraries of the bridge api to the bridgeapi.log
+ -- Fixed issue with sacctmgr when modifing a user and specifying 'where'
+    after giving the user name also.
+ -- -L, --allclusters now works with sacct
+ -- Modified job table to use 32bit u/gids for those with ids greater 
+    than 16 bits.
+ -- Made minor changes for slurm to compile cleanly under gcc 4.4.1
+ -- Fixed issue with task/affinity when an allocation would run multiple sruns 
+    with the --exclusive flag in an allocation with more than 1 node.  
+    Previously when the first node was filled up no tasks would ever run 
+    on the other nodes.
+ -- Fixed sview and sacct to display correct run time and suspend time when 
+    job has been suspended.
+ -- Applied patch from Mark Grondona that fixes the validation of the
+    PluginDir to support the colon separated list of directories as documented.
+ -- BLUEGENE - squeue -o %R now prints more readable info for small blocks
+ -- sacct - fixed garbage being printed out on uninitialized variable.
+ -- Fix for mysql plugin when used without slurmdbd to register the 
+    slurmctld properly.
+ -- Fix for mysql plugin putting correct hostnames in for running steps.
+
 * Changes in SLURM 2.0.7
 ========================
  -- Fix bug in select/cons_res when nodes are configured in more than one 
@@ -4356,4 +4407,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 18901 2009-10-14 22:34:30Z da $
+$Id: NEWS 19162 2009-12-11 22:14:21Z da $

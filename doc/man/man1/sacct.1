@@ -163,12 +163,12 @@ The section titled "Job Accounting Fields" describes these fields.
 .TP
 \f3\-E \fP\f2end_time\fP\fP\f3,\fP \f3\-\-endtime\fP\f3=\fP\f2end_time\fP
 .IP
-Select jobs starting before time.
+Select jobs eligible before time.
 Valid time formats are...
 HH:MM[:SS] [AM|PM]
 MMDD[YY] or MM/DD[/YY] or MM.DD[.YY]
 MM/DD[/YY]-HH:MM[:SS]         
-YYYY-MM-DD[THH[:MM[:SS]]]
+YYYY-MM-DD[THH:MM[:SS]]
 .IP
 
 
@@ -235,7 +235,7 @@ Display jobs that ran on any of these nodes.
 
 .TP 
 \f3\-o \fP\f3,\fP \f3\-\-format\fP
-Comma seperated list of fields. (use "\-\-helpformat" for a list of
+Comma separated list of fields. (use "\-\-helpformat" for a list of
 available fields). 
 
 NOTE: When using the format option for listing various fields you can put a
@@ -262,7 +262,7 @@ output will be '|' delimited without a '|' at the end
 .TP
 \f3\-r \fP\f3,\fP \f3\-\-partition\fP
 
-Comma seperated list of partitions to select jobs and job steps
+Comma separated list of partitions to select jobs and job steps
 from. The default is all partitions.
 
 .TP 
@@ -311,7 +311,7 @@ Valid time formats are...
 HH:MM[:SS] [AM|PM]
 MMDD[YY] or MM/DD[/YY] or MM.DD[.YY]
 MM/DD[/YY]-HH:MM[:SS]         
-YYYY-MM-DD[THH[:MM[:SS]]]
+YYYY-MM-DD[THH:MM[:SS]]
 
 .TP 
 \f3\-T \fP\f3,\fP \f3\-\-truncate\fP
@@ -320,7 +320,7 @@ would be truncated to \-\-starttime.  The same for end time and \-\-endtime.
 
 .TP 
 \f3\-u \fP\f2uid_list\fP\f3,\fP  \f3\-\-uid\fP\f3=\fP\f2uid_list\fP \f3\-\-user\fP\f3=\fP\f2user_list\fP
-Use this comma seperated list of uids or user names to select jobs to display.  By default, the running
+Use this comma separated list of uids or user names to select jobs to display.  By default, the running
 user's uid is used.
 
 .TP 

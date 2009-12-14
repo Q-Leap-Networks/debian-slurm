@@ -530,13 +530,17 @@ to Moab (configuration parameter <B>SchedulerPort</B> must specified)<BR>
 <input type="text" name="scheduler_port" value="7321"> <B>SchedulerPort</B>: scheduler 
 communcations port (used by Wiki only)
 <P>
-Define what node configuration should be used. 
+Define what node configuration (sockets, cores, memory, etc.) should be used. 
 Using values defined in the configuration file will provide faster scheduling.<BR>
 Select one value for <B>FastSchedule</B>:<BR>
 <input type="radio" name="fast_schedule" value="1" checked>
 <B>1</B>: Use node configuration values defined in configuration file<BR>
 <input type="radio" name="fast_schedule" value="0">
-<B>0</B>: Use node configuration values actually found on each node
+<B>0</B>: Use node configuration values actually found on each node 
+(if configured with with gang scheduling or allocation of individual 
+processors to jobs rather than only whole node allocations, the processor 
+count on the node should match the configured value to avoid having extra 
+processors left idle)
 <P>
 
 <H2>Interconnect</H2>
@@ -631,7 +635,7 @@ Select one value for <B>SelectType</B>:<BR>
 </DL>
 <input type="radio" name="select_type" value="linear" checked>
 <B>Linear</B>: Node-base 
-resource allocation, does not manage indivual processor allocation<BR>
+resource allocation, does not manage individual processor allocation<BR>
 <input type="radio" name="select_type" value="bluegene">
 <B>BlueGene</B>: For IBM Blue Gene systems only<BR>
 <P>
