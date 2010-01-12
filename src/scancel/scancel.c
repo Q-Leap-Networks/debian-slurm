@@ -6,32 +6,32 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  In addition, as a special exception, the copyright holders give permission
+ *  to link the code of portions of this program with the OpenSSL library under
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -95,7 +95,7 @@ static	pthread_mutex_t  num_active_threads_lock;
 static	pthread_cond_t   num_active_threads_cond;
 
 int
-main (int argc, char *argv[]) 
+main (int argc, char *argv[])
 {
 	log_options_t log_opts = LOG_OPTS_STDERR_ONLY ;
 
@@ -104,17 +104,20 @@ main (int argc, char *argv[])
 	if (opt.verbose) {
 		log_opts.stderr_level += opt.verbose;
 		log_alter (log_opts, SYSLOG_FACILITY_DAEMON, NULL);
-	} 
-	
+	}
+
 	_load_job_records();
 	_verify_job_ids();
 
-	if ((opt.interactive) ||
+	if ((opt.account) ||
+	    (opt.interactive) ||
 	    (opt.job_name) ||
+	    (opt.nodelist) ||
 	    (opt.partition) ||
+	    (opt.qos) ||
 	    (opt.state != JOB_END) ||
 	    (opt.user_name) ||
-	    (opt.nodelist)) {
+	    (opt.wckey)) {
 		_filter_job_records ();
 	}
 	_cancel_jobs ();
@@ -124,13 +127,13 @@ main (int argc, char *argv[])
 
 
 /* _load_job_records - load all job information for filtering and verification */
-static void 
+static void
 _load_job_records (void)
 {
 	int error_code;
 
 	error_code = slurm_load_jobs ((time_t) NULL, &job_buffer_ptr, 1);
-	
+
 	if (error_code) {
 		slurm_perror ("slurm_load_jobs error");
 		exit (1);
@@ -155,8 +158,8 @@ _verify_job_ids (void)
 		     (i >= job_buffer_ptr->record_count)) &&
 		     (opt.verbose >= 0)) {
 			if (opt.step_id[j] == SLURM_BATCH_SCRIPT)
-				error("Kill job error on job id %u: %s", 
-				      opt.job_id[j], 
+				error("Kill job error on job id %u: %s",
+				      opt.job_id[j],
 				      slurm_strerror(ESLURM_INVALID_JOB_ID));
 			else
 				error("Kill job error on job step id %u.%u: %s",
@@ -168,20 +171,28 @@ _verify_job_ids (void)
 
 
 /* _filter_job_records - filtering job information per user specification */
-static void 
+static void
 _filter_job_records (void)
 {
 	int i, j;
 	job_info_t *job_ptr = NULL;
+	uint16_t job_base_state;
 
 	job_ptr = job_buffer_ptr->job_array ;
 	for (i = 0; i < job_buffer_ptr->record_count; i++) {
-		if (job_ptr[i].job_id == 0) 
+		if (job_ptr[i].job_id == 0)
 			continue;
 
-		if ((job_ptr[i].job_state != JOB_PENDING)
-		&&  (job_ptr[i].job_state != JOB_RUNNING)
-		&&  (job_ptr[i].job_state != JOB_SUSPENDED)) {
+		job_base_state = job_ptr[i].job_state & JOB_STATE_BASE;
+		if ((job_base_state != JOB_PENDING) &&
+		    (job_base_state != JOB_RUNNING) &&
+		    (job_base_state != JOB_SUSPENDED)) {
+			job_ptr[i].job_id = 0;
+			continue;
+		}
+
+		if (opt.account != NULL &&
+		    (strcmp(job_ptr[i].account, opt.account) != 0)) {
 			job_ptr[i].job_id = 0;
 			continue;
 		}
@@ -192,14 +203,14 @@ _filter_job_records (void)
 			continue;
 		}
 
-		if (opt.wckey != NULL &&
-		    (strcmp(job_ptr[i].wckey, opt.wckey) != 0)) {
+		if ((opt.partition != NULL) &&
+		    (strcmp(job_ptr[i].partition,opt.partition) != 0)) {
 			job_ptr[i].job_id = 0;
 			continue;
 		}
 
-		if ((opt.partition != NULL) &&
-		    (strcmp(job_ptr[i].partition,opt.partition) != 0)) {
+		if ((opt.qos != NULL) &&
+		    (strcmp(job_ptr[i].qos, opt.qos) != 0)) {
 			job_ptr[i].job_id = 0;
 			continue;
 		}
@@ -235,6 +246,24 @@ _filter_job_records (void)
 				continue;
 			} else {
 				hostset_destroy(hs);
+			}
+		}
+
+		if (opt.wckey != NULL) {
+			char *job_key = job_ptr[i].wckey;
+
+			/*
+			 * A wckey that begins with '*' indicates that the wckey
+			 * was applied by default.  When the --wckey option does
+			 * not begin with a '*', act on all wckeys with the same
+			 * name, default or not.
+			 */
+			if ((opt.wckey[0] != '*') && (job_key[0] == '*'))
+				job_key++;
+
+			if (strcmp(job_key, opt.wckey) != 0) {
+				job_ptr[i].job_id = 0;
+				continue;
 			}
 		}
 
@@ -408,9 +437,10 @@ _cancel_job_id (void *ci)
 						     (uint16_t)opt.batch);
 		} else {
 			if (opt.batch)
-				error_code = slurm_signal_job_step(job_id,
-							   SLURM_BATCH_SCRIPT,
-							   sig);
+				error_code = slurm_signal_job_step(
+					job_id,
+					SLURM_BATCH_SCRIPT,
+					sig);
 			else
 				error_code = slurm_signal_job (job_id, sig);
 		}
@@ -423,16 +453,16 @@ _cancel_job_id (void *ci)
 	}
 	if (error_code) {
 		error_code = slurm_get_errno();
-		if ((opt.verbose > 0) || 
+		if ((opt.verbose > 0) ||
 		    ((error_code != ESLURM_ALREADY_DONE) &&
 		     (error_code != ESLURM_INVALID_JOB_ID)))
-			error("Kill job error on job id %u: %s", 
+			error("Kill job error on job id %u: %s",
 				job_id, slurm_strerror(slurm_get_errno()));
 	}
 
 	/* Purposely free the struct passed in here, so the caller doesn't have
-	 * to keep track of it, but don't destroy the mutex and condition 
-	 * variables contained. */ 
+	 * to keep track of it, but don't destroy the mutex and condition
+	 * variables contained. */
 	pthread_mutex_lock(   cancel_info->num_active_threads_lock );
 	(*(cancel_info->num_active_threads))--;
 	pthread_cond_signal(  cancel_info->num_active_threads_cond );
@@ -450,19 +480,22 @@ _cancel_step_id (void *ci)
 	uint32_t job_id  = cancel_info->job_id;
 	uint32_t step_id = cancel_info->step_id;
 	uint16_t sig     = cancel_info->sig;
+	bool sig_set = true;
 
-	if (sig == (uint16_t)-1)
+	if (sig == (uint16_t)-1) {
 		sig = SIGKILL;
+		sig_set = false;
+	}
 
 	for (i=0; i<MAX_CANCEL_RETRY; i++) {
 		if (sig == SIGKILL)
 			verbose("Terminating step %u.%u", job_id, step_id);
 		else {
-			verbose("Signal %u to step %u.%u", 
+			verbose("Signal %u to step %u.%u",
 				sig, job_id, step_id);
 		}
 
-		if (opt.ctld)
+		if ((!sig_set) || opt.ctld)
 			error_code = slurm_kill_job_step(job_id, step_id, sig);
 		else if (sig == SIGKILL)
 			error_code = slurm_terminate_job_step(job_id, step_id);
@@ -479,14 +512,14 @@ _cancel_step_id (void *ci)
 	if (error_code) {
 		error_code = slurm_get_errno();
 		if ((opt.verbose > 0) || (error_code != ESLURM_ALREADY_DONE ))
-			error("Kill job error on job step id %u.%u: %s", 
-		 		job_id, step_id, 
+			error("Kill job error on job step id %u.%u: %s",
+		 		job_id, step_id,
 				slurm_strerror(slurm_get_errno()));
 	}
 
 	/* Purposely free the struct passed in here, so the caller doesn't have
-	 * to keep track of it, but don't destroy the mutex and condition 
-	 * variables contained. */ 
+	 * to keep track of it, but don't destroy the mutex and condition
+	 * variables contained. */
 	pthread_mutex_lock(   cancel_info->num_active_threads_lock );
 	(*(cancel_info->num_active_threads))--;
 	pthread_cond_signal(  cancel_info->num_active_threads_cond );
@@ -497,7 +530,7 @@ _cancel_step_id (void *ci)
 }
 
 /* _confirmation - Confirm job cancel request interactively */
-static int 
+static int
 _confirmation (int i, uint32_t step_id)
 {
 	char in_line[128];
@@ -507,12 +540,12 @@ _confirmation (int i, uint32_t step_id)
 	job_ptr = job_buffer_ptr->job_array ;
 	while (1) {
 		if (step_id == SLURM_BATCH_SCRIPT) {
-			printf ("Cancel job_id=%u name=%s partition=%s [y/n]? ", 
-			        job_ptr[i].job_id, job_ptr[i].name, 
+			printf ("Cancel job_id=%u name=%s partition=%s [y/n]? ",
+			        job_ptr[i].job_id, job_ptr[i].name,
 				job_ptr[i].partition);
 		} else {
-			printf ("Cancel step_id=%u.%u name=%s partition=%s [y/n]? ", 
-			        job_ptr[i].job_id, step_id, job_ptr[i].name, 
+			printf ("Cancel step_id=%u.%u name=%s partition=%s [y/n]? ",
+			        job_ptr[i].job_id, step_id, job_ptr[i].name,
 				job_ptr[i].partition);
 		}
 

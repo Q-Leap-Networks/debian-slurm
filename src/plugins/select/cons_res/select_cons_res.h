@@ -1,21 +1,21 @@
 /*****************************************************************************\
- *  select_cons_res.h 
+ *  select_cons_res.h
  *
  *  $Id: select_cons_res.h,v 1.3 2006/10/31 20:01:38 palermo Exp $
  *****************************************************************************
  *  Copyright (C) 2006 Hewlett-Packard Development Company, L.P.
  *  Written by Susanne M. Balle, <susanne.balle@hp.com>
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
- *  
+ *
  *  In addition, as a special exception, the copyright holders give permission
  *  to link the code of portions of this program with the OpenSSL library under
  *  certain conditions as described in each individual source file, and
@@ -31,7 +31,7 @@
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -56,6 +56,8 @@
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 #include "src/common/slurm_resource_info.h"
+#include "src/common/slurm_topology.h"
+#include "src/slurmctld/preempt.h"
 #include "src/slurmctld/slurmctld.h"
 
 #include "src/slurmd/slurmd/slurmd.h"
@@ -83,17 +85,16 @@ enum node_cr_state {
 struct part_row_data {
 	bitstr_t *row_bitmap;		/* contains all jobs for this row */
 	uint32_t num_jobs;		/* Number of jobs in this row */
-	struct select_job_res **job_list;/* List of jobs in this row */
+	struct job_resources **job_list;/* List of jobs in this row */
 	uint32_t job_list_size;		/* Size of job_list array */
 };
 
 /* partition CPU allocation data */
 struct part_res_record {
-	char *name;			/* name of the partition */
-	uint16_t priority;		/* Partition priority */
-	uint16_t num_rows;		/* Number of row_bitmaps */
-	struct part_row_data *row;	/* array of rows containing jobs */
 	struct part_res_record *next;	/* Ptr to next part_res_record */
+	uint16_t num_rows;		/* Number of row_bitmaps */
+	struct part_record *part_ptr;   /* controller part record pointer */
+	struct part_row_data *row;	/* array of rows containing jobs */
 };
 
 /* per-node resource data */
@@ -124,6 +125,8 @@ extern struct node_use_record *select_node_usage;
 extern void cr_sort_part_rows(struct part_res_record *p_ptr);
 extern uint32_t cr_get_coremap_offset(uint32_t node_index);
 extern uint32_t cr_get_node_num_cores(uint32_t node_index);
-extern bool cr_priority_selection_enabled();
+
+extern bool cr_preemption_enabled(void);
+extern bool cr_preemption_killing(void);
 
 #endif /* !_CONS_RES_H */

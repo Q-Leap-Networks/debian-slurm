@@ -1,20 +1,20 @@
 /*****************************************************************************\
- *  slurm_resource_info.c - Functions to determine number of available resources 
+ *  slurm_resource_info.c - Functions to determine number of available resources
  *  $Id: slurm_resource_info.c,v 1.12 2006/10/04 21:52:24 palermo Exp $
  *****************************************************************************
  *  Copyright (C) 2006 Hewlett-Packard Development Company, L.P.
  *  Written by Susanne M. Balle, <susanne.balle@hp.com>
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
- *  
+ *
  *  In addition, as a special exception, the copyright holders give permission
  *  to link the code of portions of this program with the OpenSSL library under
  *  certain conditions as described in each individual source file, and
@@ -30,7 +30,7 @@
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -91,9 +91,6 @@ static int _isvalue(char *arg) {
  *	given this number given the number of cpus_per_task and
  *	maximum sockets, cores, threads.  Note that the value of
  *	cpus is the lowest-level logical processor (LLLP).
- * IN max_sockets    - Job requested max sockets
- * IN max_cores      - Job requested max cores
- * IN max_threads    - Job requested max threads
  * IN min_sockets    - Job requested min sockets
  * IN min_cores      - Job requested min cores
  * IN cpus_per_task  - Job requested cpus per task
@@ -109,18 +106,15 @@ static int _isvalue(char *arg) {
  *
  * Note: currently only used in the select/linear plugin.
  */
-int slurm_get_avail_procs(const uint16_t max_sockets,
-			  const uint16_t max_cores,
-			  const uint16_t max_threads,
-			  const uint16_t min_sockets,
+int slurm_get_avail_procs(const uint16_t min_sockets,
 			  const uint16_t min_cores,
 			  uint16_t cpus_per_task,
 			  const uint16_t ntaskspernode,
 			  const uint16_t ntaskspersocket,
 			  const uint16_t ntaskspercore,
-			  uint16_t *cpus, 
-			  uint16_t *sockets, 
-			  uint16_t *cores, 
+			  uint16_t *cpus,
+			  uint16_t *sockets,
+			  uint16_t *cores,
 			  uint16_t *threads,
 			  const uint16_t *alloc_cores,
 			  const select_type_plugin_info_t cr_type,
@@ -147,31 +141,29 @@ int slurm_get_avail_procs(const uint16_t max_sockets,
 			allocated_sockets++;
 	}
 #if(DEBUG)
-	info("get_avail_procs %u %s MAX User_ sockets %u cores %u threads %u",
-			job_id, name, max_sockets, max_cores, max_threads);
 	info("get_avail_procs %u %s MIN User_ sockets %u cores %u",
 			job_id, name, min_sockets, min_cores);
 	info("get_avail_procs %u %s HW_   sockets %u cores %u threads %u",
 			job_id, name, *sockets, *cores, *threads);
 	info("get_avail_procs %u %s Ntask node   %u sockets %u core   %u",
-			job_id, name, ntaskspernode, ntaskspersocket, 
+			job_id, name, ntaskspernode, ntaskspersocket,
 			ntaskspercore);
 	info("get_avail_procs %u %s cr_type %d cpus %u  alloc_ c %u s %u",
 			job_id, name, cr_type, *cpus, allocated_cores,
 			allocated_sockets);
 	for (i = 0; alloc_cores && i < *sockets; i++)
-		info("get_avail_procs %u %s alloc_cores[%d] = %u", 
+		info("get_avail_procs %u %s alloc_cores[%d] = %u",
 		     job_id, name, i, alloc_cores[i]);
 #endif
 	allocated_cpus = allocated_cores * (*threads);
 	switch(cr_type) {
 	/* For the following CR types, nodes have no notion of socket, core,
-	   and thread.  Only one level of logical processors */ 
+	   and thread.  Only one level of logical processors */
 	case SELECT_TYPE_INFO_NONE:
 		/* Default for select/linear */
 	case CR_CPU:
 	case CR_CPU_MEMORY:
-		
+
 		if (*cpus >= allocated_cpus)
 			*cpus -= allocated_cpus;
 		else {
@@ -206,12 +198,7 @@ int slurm_get_avail_procs(const uint16_t max_sockets,
 					max_avail_cpus += tmp_diff;
 				}
 			}
-		} 
-
-		/*** honor socket/core/thread maximums ***/
-		*sockets = MIN(*sockets, max_sockets);
-		*threads = MIN(*threads, max_threads);
-		*cores   = MIN(*cores,   max_cores);
+		}
 
 		if (min_sockets > *sockets) {
 			*cpus = 0;
@@ -261,14 +248,9 @@ int slurm_get_avail_procs(const uint16_t max_sockets,
 			error("cons_res: *cpus underflow");
 		}
 
-		/*** honor socket/core/thread maximums ***/
-		*sockets = MIN(*sockets, max_sockets);
-		*cores   = MIN(*cores,   max_cores);
-		*threads = MIN(*threads, max_threads);
-
 		if (min_sockets > *sockets)
 			*cpus = 0;
-		
+
 		/*** compute an overall maximum cpu count honoring ntasks* ***/
 		max_cpus  = *threads;
 		if (ntaskspercore > 0) {
@@ -287,9 +269,9 @@ int slurm_get_avail_procs(const uint16_t max_sockets,
 		max_cpus = MIN(max_cpus, max_avail_cpus);
 		break;
 	}
-	
+
 	/*** factor cpus_per_task into max_cpus ***/
-	max_cpus *= cpus_per_task; 
+	max_cpus *= cpus_per_task;
 	/*** round down available based on cpus_per_task ***/
 	avail_cpus = (*cpus / cpus_per_task) * cpus_per_task;
 	avail_cpus = MIN(avail_cpus, max_cpus);
@@ -425,7 +407,7 @@ void slurm_print_cpu_bind_help(void)
  *
  * returns -1 on error, 0 otherwise
  */
-int slurm_verify_cpu_bind(const char *arg, char **cpu_bind, 
+int slurm_verify_cpu_bind(const char *arg, char **cpu_bind,
 			  cpu_bind_type_t *flags)
 {
 	char *buf, *p, *tok;
@@ -560,8 +542,8 @@ int slurm_verify_cpu_bind(const char *arg, char **cpu_bind,
 			}
 		} else if ((strcasecmp(tok, "socket") == 0) ||
 		           (strcasecmp(tok, "sockets") == 0)) {
-			if (task_plugin_param & 
-			    (CPU_BIND_NONE | CPU_BIND_TO_CORES | 
+			if (task_plugin_param &
+			    (CPU_BIND_NONE | CPU_BIND_TO_CORES |
 			     CPU_BIND_TO_THREADS | CPU_BIND_TO_LDOMS)) {
 				error("--cpu_bind=sockets incompatible with "
 				      "TaskPluginParam configuration "
@@ -572,8 +554,8 @@ int slurm_verify_cpu_bind(const char *arg, char **cpu_bind,
 				       CPU_BIND_TO_SOCKETS);
 		} else if ((strcasecmp(tok, "core") == 0) ||
 		           (strcasecmp(tok, "cores") == 0)) {
-			if (task_plugin_param & 
-			    (CPU_BIND_NONE | CPU_BIND_TO_SOCKETS | 
+			if (task_plugin_param &
+			    (CPU_BIND_NONE | CPU_BIND_TO_SOCKETS |
 			     CPU_BIND_TO_THREADS | CPU_BIND_TO_LDOMS)) {
 				error("--cpu_bind=cores incompatible with "
 				      "TaskPluginParam configuration "
@@ -584,8 +566,8 @@ int slurm_verify_cpu_bind(const char *arg, char **cpu_bind,
 				       CPU_BIND_TO_CORES);
 		} else if ((strcasecmp(tok, "thread") == 0) ||
 		           (strcasecmp(tok, "threads") == 0)) {
-			if (task_plugin_param & 
-			    (CPU_BIND_NONE | CPU_BIND_TO_SOCKETS | 
+			if (task_plugin_param &
+			    (CPU_BIND_NONE | CPU_BIND_TO_SOCKETS |
 			     CPU_BIND_TO_CORES | CPU_BIND_TO_LDOMS)) {
 				error("--cpu_bind=threads incompatible with "
 				      "TaskPluginParam configuration "
@@ -596,8 +578,8 @@ int slurm_verify_cpu_bind(const char *arg, char **cpu_bind,
 				       CPU_BIND_TO_THREADS);
 		} else if ((strcasecmp(tok, "ldom") == 0) ||
 		           (strcasecmp(tok, "ldoms") == 0)) {
-			if (task_plugin_param & 
-			    (CPU_BIND_NONE | CPU_BIND_TO_SOCKETS | 
+			if (task_plugin_param &
+			    (CPU_BIND_NONE | CPU_BIND_TO_SOCKETS |
 			     CPU_BIND_TO_CORES | CPU_BIND_TO_THREADS)) {
 				error("--cpu_bind=threads incompatible with "
 				      "TaskPluginParam configuration "
@@ -646,7 +628,7 @@ void slurm_print_mem_bind_help(void)
  *
  * returns -1 on error, 0 otherwise
  */
-int slurm_verify_mem_bind(const char *arg, char **mem_bind, 
+int slurm_verify_mem_bind(const char *arg, char **mem_bind,
 			  mem_bind_type_t *flags)
 {
 	char *buf, *p, *tok;
@@ -672,7 +654,7 @@ int slurm_verify_mem_bind(const char *arg, char **mem_bind,
 		if (strcasecmp(tok, "help") == 0) {
 			slurm_print_mem_bind_help();
 			return 1;
-			
+
 		} else if ((strcasecmp(tok, "q") == 0) ||
 			   (strcasecmp(tok, "quiet") == 0)) {
 		        *flags &= ~MEM_BIND_VERBOSE;

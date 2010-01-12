@@ -6,32 +6,32 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  In addition, as a special exception, the copyright holders give permission
+ *  to link the code of portions of this program with the OpenSSL library under
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -40,6 +40,7 @@
 #ifdef HAVE_CONFIG_H
 #  include "config.h"
 #endif
+#include <grp.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
@@ -55,9 +56,12 @@
 #include "src/common/read_config.h"
 #include "src/common/slurm_accounting_storage.h"
 #include "src/common/slurm_auth.h"
+#include "src/common/uid.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
+#include "src/common/proc_args.h"
+
 #include "src/slurmdbd/read_config.h"
 #include "src/slurmdbd/rpc_mgr.h"
 #include "src/slurmdbd/backup.h"
@@ -81,6 +85,7 @@ static pthread_mutex_t rollup_lock = PTHREAD_MUTEX_INITIALIZER;
 static bool running_rollup = 0;
 
 /* Local functions */
+static void  _become_slurm_user(void);
 static void  _daemonize(void);
 static void  _default_sigaction(int sig);
 static void  _init_config(void);
@@ -119,14 +124,21 @@ int main(int argc, char *argv[])
 	_kill_old_slurmdbd();
 	if (foreground == 0)
 		_daemonize();
+
 	_init_pidfile();
+	_become_slurm_user();
 	log_config();
+
+#ifdef PR_SET_DUMPABLE
+	if (prctl(PR_SET_DUMPABLE, 1) < 0)
+		debug ("Unable to set dumpable to 1");
+#endif /* PR_SET_DUMPABLE */
 
 	if (xsignal_block(dbd_sigarray) < 0)
 		error("Unable to block signals");
 
 	db_conn = acct_storage_g_get_connection(false, 0, false);
-	
+
 	/* Create attached thread for signal handling */
 	slurm_attr_init(&thread_attr);
 	if (pthread_create(&signal_handler_thread, &thread_attr,
@@ -136,12 +148,12 @@ int main(int argc, char *argv[])
 
 	memset(&assoc_init_arg, 0, sizeof(assoc_init_args_t));
 
-	/* If we are tacking wckey we need to cache associations and
-	   wckeys if we aren't only cache the users */
-	assoc_init_arg.cache_level = ASSOC_MGR_CACHE_USER;
+	/* If we are tacking wckey we need to cache
+	   wckeys, if we aren't only cache the users and qos */
+	assoc_init_arg.cache_level = ASSOC_MGR_CACHE_USER | ASSOC_MGR_CACHE_QOS;
 	if(slurmdbd_conf->track_wckey)
 		assoc_init_arg.cache_level |= ASSOC_MGR_CACHE_WCKEY;
-	
+
 	if(assoc_mgr_init(db_conn, &assoc_init_arg) == SLURM_ERROR) {
 		error("Problem getting cache of data");
 		acct_storage_g_close_connection(&db_conn);
@@ -160,7 +172,7 @@ int main(int argc, char *argv[])
 			backup = true;
 			run_backup();
 			if(!shutdown_time)
-				assoc_mgr_refresh_lists(db_conn, NULL);		
+				assoc_mgr_refresh_lists(db_conn, NULL);
 		} else if (slurmdbd_conf->dbd_host &&
 			   (!strcmp(slurmdbd_conf->dbd_host, node_name) ||
 			    !strcmp(slurmdbd_conf->dbd_host, "localhost"))) {
@@ -172,11 +184,11 @@ int main(int argc, char *argv[])
 			      node_name, slurmdbd_conf->dbd_host,
 			      slurmdbd_conf->dbd_backup);
 		}
-		
+
 		if(!shutdown_time) {
 			/* Create attached thread to process incoming RPCs */
 			slurm_attr_init(&thread_attr);
-			if (pthread_create(&rpc_handler_thread, &thread_attr, 
+			if (pthread_create(&rpc_handler_thread, &thread_attr,
 					   rpc_mgr, NULL))
 				fatal("pthread_create error %m");
 			slurm_attr_destroy(&thread_attr);
@@ -195,7 +207,7 @@ int main(int argc, char *argv[])
 		/* Daemon is fully operational here */
 		if(!shutdown_time || primary_resumed) {
 			shutdown_time = 0;
-			info("slurmdbd version %s started", SLURM_VERSION);
+			info("slurmdbd version %s started", SLURM_VERSION_STRING);
 			if(backup)
 				run_backup();
 		}
@@ -206,7 +218,7 @@ int main(int argc, char *argv[])
 		if(rpc_handler_thread)
 			pthread_join(rpc_handler_thread, NULL);
 
-		if(backup && primary_resumed) { 
+		if(backup && primary_resumed) {
 			shutdown_time = 0;
 			info("Backup has given up control");
 		}
@@ -215,19 +227,19 @@ int main(int argc, char *argv[])
 			break;
 	}
 	/* Daemon termination handled here */
-	
+
 	if(signal_handler_thread)
 		pthread_join(signal_handler_thread, NULL);
-	
+
 end_it:
 	acct_storage_g_close_connection(&db_conn);
-	
+
 	if (slurmdbd_conf->pid_file &&
 	    (unlink(slurmdbd_conf->pid_file) < 0)) {
 		verbose("Unable to remove pidfile '%s': %m",
 			slurmdbd_conf->pid_file);
 	}
-	
+
 	assoc_mgr_fini(NULL);
 	slurm_acct_storage_fini();
 	slurm_auth_fini();
@@ -257,9 +269,9 @@ static void  _init_config(void)
 		(void) setrlimit(RLIMIT_CORE, &rlim);
 	}
 	if (getrlimit(RLIMIT_STACK, &rlim) == 0) {
-		/* slurmctld can spawn lots of pthreads. 
-		 * Set the (per thread) stack size to a 
-		 * more "reasonable" value to avoid running 
+		/* slurmctld can spawn lots of pthreads.
+		 * Set the (per thread) stack size to a
+		 * more "reasonable" value to avoid running
 		 * out of virtual memory and dying */
 		rlim.rlim_cur = rlim.rlim_max;
 		(void) setrlimit(RLIMIT_STACK, &rlim);
@@ -294,7 +306,7 @@ static void _parse_commandline(int argc, char *argv[])
 			debug_level++;
 			break;
 		case 'V':
-			printf("%s %s\n", PACKAGE, SLURM_VERSION);
+			print_slurm_version();
 			exit(0);
 			break;
 		default:
@@ -303,7 +315,7 @@ static void _parse_commandline(int argc, char *argv[])
 		}
 }
 
-/* _usage - print a message describing the command line arguments of 
+/* _usage - print a message describing the command line arguments of
  *	slurmctld */
 static void _usage(char *prog_name)
 {
@@ -319,12 +331,12 @@ static void _usage(char *prog_name)
 }
 
 /* Reset slurmctld logging based upon configuration parameters */
-static void _update_logging(void) 
+static void _update_logging(void)
 {
 	/* Preserve execute line arguments (if any) */
 	if (debug_level) {
 		slurmdbd_conf->debug_level = MIN(
-			(LOG_LEVEL_INFO + debug_level), 
+			(LOG_LEVEL_INFO + debug_level),
 			(LOG_LEVEL_END - 1));
 	}
 
@@ -359,12 +371,12 @@ static void _kill_old_slurmdbd(void)
 		info("Killing old slurmdbd[%ld]", (long) oldpid);
 		kill(oldpid, SIGTERM);
 
-		/* 
+		/*
 		 * Wait for previous daemon to terminate
 		 */
-		if (fd_get_readw_lock(fd) < 0) 
+		if (fd_get_readw_lock(fd) < 0)
 			fatal("Unable to wait for readw lock: %m");
-		(void) close(fd); /* Ignore errors */ 
+		(void) close(fd); /* Ignore errors */
 	}
 }
 
@@ -382,14 +394,14 @@ static void _init_pidfile(void)
 		return;
 }
 
-/* Become a daemon (child of init) and 
+/* Become a daemon (child of init) and
  * "cd" to the LogFile directory (if one is configured) */
 static void _daemonize(void)
 {
 	if (daemon(1, 1))
 		error("daemon(): %m");
 	log_alter(log_opts, LOG_DAEMON, slurmdbd_conf->log_file);
-		
+
 	if (slurmdbd_conf->log_file &&
 	    (slurmdbd_conf->log_file[0] == '/')) {
 		char *slash_ptr, *work_dir;
@@ -412,7 +424,7 @@ static void _rollup_handler_cancel()
 	slurm_mutex_lock(&rollup_lock);
 	if(rollup_handler_thread)
 		pthread_cancel(rollup_handler_thread);
-	slurm_mutex_unlock(&rollup_lock);	
+	slurm_mutex_unlock(&rollup_lock);
 }
 
 /* _rollup_handler - Process rollup duties */
@@ -441,7 +453,7 @@ static void *_rollup_handler(void *db_conn)
 		debug2("running rollup at %s", ctime(&start_time));
 		acct_storage_g_roll_usage(db_conn, 0, 0, 1);
 		running_rollup = 0;
-		slurm_mutex_unlock(&rollup_lock);	
+		slurm_mutex_unlock(&rollup_lock);
 
 		/* sleep for an hour */
 		tm.tm_sec = 0;
@@ -461,6 +473,9 @@ static void *_rollup_handler(void *db_conn)
 			      start_time);
 			return NULL;
 		}
+		/* Just in case some new uids were added to the system
+		   pick them up here. */
+		assoc_mgr_set_missing_uids();
 		/* repeat ;) */
 
 	}
@@ -493,6 +508,7 @@ static void *_signal_handler(void *no_data)
 		case SIGHUP:	/* kill -1 */
 			info("Reconfigure signal (SIGHUP) received");
 			read_slurmdbd_conf();
+			assoc_mgr_set_missing_uids();
 			_update_logging();
 			break;
 		case SIGINT:	/* kill -2  or <CTRL-C> */
@@ -512,7 +528,7 @@ static void *_signal_handler(void *no_data)
 
 }
 
-/* Reset some signals to their default state to clear any 
+/* Reset some signals to their default state to clear any
  * inherited signal states */
 static void _default_sigaction(int sig)
 {
@@ -528,4 +544,46 @@ static void _default_sigaction(int sig)
 	act.sa_handler = SIG_DFL;
 	if (sigaction(sig, &act, NULL))
 		error("sigaction(%d): %m", sig);
+}
+
+static void _become_slurm_user(void)
+{
+	gid_t slurm_user_gid;
+
+	/* Determine SlurmUser gid */
+	slurm_user_gid = gid_from_uid(slurmdbd_conf->slurm_user_id);
+	if (slurm_user_gid == (gid_t) -1) {
+		fatal("Failed to determine gid of SlurmUser(%u)",
+		      slurmdbd_conf->slurm_user_id);
+	}
+
+	/* Initialize supplementary groups ID list for SlurmUser */
+	if (getuid() == 0) {
+		/* root does not need supplementary groups */
+		if ((slurmdbd_conf->slurm_user_id == 0) &&
+		    (setgroups(0, NULL) != 0)) {
+			fatal("Failed to drop supplementary groups, "
+			      "setgroups: %m");
+		} else if ((slurmdbd_conf->slurm_user_id != getuid()) &&
+			   initgroups(slurmdbd_conf->slurm_user_name,
+				      slurm_user_gid)) {
+			fatal("Failed to set supplementary groups, "
+			      "initgroups: %m");
+		}
+	} else {
+		info("Not running as root. Can't drop supplementary groups");
+	}
+
+	/* Set GID to GID of SlurmUser */
+	if ((slurm_user_gid != getegid()) &&
+	    (setgid(slurm_user_gid))) {
+		fatal("Failed to set GID to %d", slurm_user_gid);
+	}
+
+	/* Set UID to UID of SlurmUser */
+	if ((slurmdbd_conf->slurm_user_id != getuid()) &&
+	    (setuid(slurmdbd_conf->slurm_user_id))) {
+		fatal("Can not set uid to SlurmUser(%u): %m",
+		      slurmdbd_conf->slurm_user_id);
+	}
 }

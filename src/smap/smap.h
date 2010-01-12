@@ -16,15 +16,15 @@
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
+ *  In addition, as a special exception, the copyright holders give permission
  *  to link the code of portions of this program with the OpenSSL library under
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
@@ -81,6 +81,9 @@
 #ifdef lines
 #  undef lines
 #endif
+#ifndef SYSTEM_DIMENSIONS
+#  define SYSTEM_DIMENSIONS 1
+#endif
 
 #include <stdlib.h>
 #include <pwd.h>
@@ -110,25 +113,14 @@ enum { JOBS, RESERVATIONS, SLURMPART, BGPART, COMMANDS };
 /* Input parameters */
 typedef struct {
 	bool all_flag;
-	bool no_header;
-
-	char *format;
-	char *sort;
-	char *states;
-
-	int iterate;
-	int verbose;
-	int display;
-
-	bool long_output;
 	bool commandline;
-	bool parse;
-
-	char *nodes;
-	char *partition;
-	
-	int node_field_size;
-
+	int display;
+	int iterate;
+	bitstr_t *io_bit;
+	bool no_header;
+	hostlist_t hl;
+	char *resolve;
+	int verbose;
 } smap_parameters_t;
 
 extern WINDOW *grid_win;
@@ -151,6 +143,7 @@ extern int set_grid_inx(int start, int end, int count);
 extern int set_grid_name(char *nodes, int count);
 extern int set_grid_bg(int *start, int *end, int count, int set);
 extern void print_grid(int dir);
+bitstr_t *get_requested_node_bitmap();
 
 extern void parse_command_line(int argc, char *argv[]);
 extern void print_date(void);

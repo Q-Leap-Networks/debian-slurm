@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/slurmd/slurmstepd/ulimits.c - set user limits for job
- * $Id: ulimits.c 18017 2009-06-30 23:03:30Z jette $
+ * $Id: ulimits.c 18027 2009-07-01 19:16:44Z da $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

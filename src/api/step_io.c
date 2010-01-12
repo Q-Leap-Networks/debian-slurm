@@ -1,26 +1,26 @@
 /****************************************************************************\
  *  step_io.c - process stdin, stdout, and stderr for parallel jobs.
- *  $Id: step_io.c 17056 2009-03-26 23:35:52Z dbremer $
+ *  $Id: step_io.c 19095 2009-12-01 22:59:18Z da $
  *****************************************************************************
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA.
@@ -61,6 +61,7 @@
 #include "src/common/write_labelled_message.h"
 
 #include "src/api/step_io.h"
+#include "src/api/step_launch.h"
 
 #define MAX_RETRIES 3
 #define STDIO_MAX_FREE_BUF 1024
@@ -112,6 +113,8 @@ struct io_operations server_ops = {
 
 struct server_io_info {
 	client_io_t *cio;
+	int node_id;
+	bool testing_connection;
 
 	/* incoming variables */
 	struct slurm_io_header header;
@@ -120,7 +123,7 @@ struct server_io_info {
 	bool in_eof;
 	int remote_stdout_objs; /* active eio_obj_t's on the remote node */
 	int remote_stderr_objs; /* active eio_obj_t's on the remote node */
-	
+
 	/* outgoing variables */
 	List msg_queue;
 	struct io_buf *out_msg;
@@ -178,7 +181,7 @@ struct file_read_info {
 /**********************************************************************
  * Listening socket functions
  **********************************************************************/
-static bool 
+static bool
 _listening_socket_readable(eio_obj_t *obj)
 {
 	debug3("Called _listening_socket_readable");
@@ -208,7 +211,7 @@ static void
 _set_listensocks_nonblocking(client_io_t *cio)
 {
 	int i;
-	for (i = 0; i < cio->num_listen; i++) 
+	for (i = 0; i < cio->num_listen; i++)
 		fd_set_nonblocking(cio->listensock[i]);
 }
 
@@ -216,7 +219,7 @@ _set_listensocks_nonblocking(client_io_t *cio)
  * IO server socket functions
  **********************************************************************/
 static eio_obj_t *
-_create_server_eio_obj(int fd, client_io_t *cio,
+_create_server_eio_obj(int fd, client_io_t *cio, int nodeid,
 		       int stdout_objs, int stderr_objs)
 {
 	struct server_io_info *info = NULL;
@@ -224,6 +227,8 @@ _create_server_eio_obj(int fd, client_io_t *cio,
 
 	info = (struct server_io_info *)xmalloc(sizeof(struct server_io_info));
 	info->cio = cio;
+	info->node_id = nodeid;
+	info->testing_connection = false;
 	info->in_msg = NULL;
 	info->in_remaining = 0;
 	info->in_eof = false;
@@ -239,7 +244,7 @@ _create_server_eio_obj(int fd, client_io_t *cio,
 	return eio;
 }
 
-static bool 
+static bool
 _server_readable(eio_obj_t *obj)
 {
 	struct server_io_info *s = (struct server_io_info *) obj->arg;
@@ -256,10 +261,11 @@ _server_readable(eio_obj_t *obj)
 		return false;
 	}
 
-	if (s->remote_stdout_objs > 0 || s->remote_stderr_objs > 0) {
+	if (s->remote_stdout_objs > 0 || s->remote_stderr_objs > 0 ||
+	    s->testing_connection) {
 		debug4("remote_stdout_objs = %d", s->remote_stdout_objs);
 		debug4("remote_stderr_objs = %d", s->remote_stderr_objs);
-		return true;	
+		return true;
 	}
 
 	if (obj->shutdown) {
@@ -295,7 +301,11 @@ _server_read(eio_obj_t *obj, List objs)
 
 		n = io_hdr_read_fd(obj->fd, &s->header);
 		if (n <= 0) { /* got eof or error on socket read */
-			debug3(  "got eof or error on _server_read header");
+			if (s->cio->sls)
+				step_launch_notify_io_failure(s->cio->sls,
+							      s->node_id);
+			debug3("got error or unexpected eof "
+			       "on _server_read header");
 			close(obj->fd);
 			obj->fd = -1;
 			s->in_eof = true;
@@ -304,12 +314,25 @@ _server_read(eio_obj_t *obj, List objs)
 			s->in_msg = NULL;
 			return SLURM_SUCCESS;
 		}
-		if (s->header.length == 0) { /* eof message */
-			if (s->header.type == SLURM_IO_STDOUT)
+		if (s->header.type == SLURM_IO_CONNECTION_TEST) {
+			if (s->cio->sls)
+				step_launch_clear_questionable_state(
+					s->cio->sls, s->node_id);
+			list_enqueue(s->cio->free_outgoing, s->in_msg);
+			s->in_msg = NULL;
+			s->testing_connection = false;
+			return SLURM_SUCCESS;
+
+		} else if (s->header.length == 0) { /* eof message */
+			if (s->header.type == SLURM_IO_STDOUT) {
 				s->remote_stdout_objs--;
-			else if (s->header.type == SLURM_IO_STDERR)
+				debug3( "got eof-stdout msg on _server_read "
+					"header");
+			} else if (s->header.type == SLURM_IO_STDERR) {
 				s->remote_stderr_objs--;
-			else
+				debug3( "got eof-stderr msg on _server_read "
+					"header");
+			} else
 				error("Unrecognized output message type");
 			list_enqueue(s->cio->free_outgoing, s->in_msg);
 			s->in_msg = NULL;
@@ -334,7 +357,11 @@ _server_read(eio_obj_t *obj, List objs)
 			debug3("_server_read error: %m");
 		}
 		if (n <= 0) { /* got eof or unhandled error */
-			debug3(  "got eof on _server_read body");
+			if (s->cio->sls)
+				step_launch_notify_io_failure(
+					s->cio->sls, s->node_id);
+			debug3("got error or unexpected eof "
+			       "on _server_read body");
 			close(obj->fd);
 			obj->fd = -1;
 			s->in_eof = true;
@@ -344,8 +371,6 @@ _server_read(eio_obj_t *obj, List objs)
 			return SLURM_SUCCESS;
 		}
 
-/* 		*(char *)(buf + n) = '\0'; */
-/* 		debug3("\"%s\"", buf); */
 		s->in_remaining -= n;
 		if (s->in_remaining > 0)
 			return SLURM_SUCCESS;
@@ -353,7 +378,7 @@ _server_read(eio_obj_t *obj, List objs)
 	else {
 		debug3("***** passing on eof message");
 	}
-	
+
 	/*
 	 * Route the message to the proper output
 	 */
@@ -379,7 +404,7 @@ _server_read(eio_obj_t *obj, List objs)
 	return SLURM_SUCCESS;
 }
 
-static bool 
+static bool
 _server_writable(eio_obj_t *obj)
 {
 	struct server_io_info *s = (struct server_io_info *) obj->arg;
@@ -424,13 +449,13 @@ _server_write(eio_obj_t *obj, List objs)
 			debug3("_server_write: nothing in the queue");
 			return SLURM_SUCCESS;
 		}
-		debug3("  dequeue successful, s->out_msg->length = %d", 
+		debug3("  dequeue successful, s->out_msg->length = %d",
 		       s->out_msg->length);
 		s->out_remaining = s->out_msg->length;
 	}
 
-	debug3("  s->out_remaining = %d", s->out_remaining); 
-	
+	debug3("  s->out_remaining = %d", s->out_remaining);
+
 	/*
 	 * Write message to socket.
 	 */
@@ -444,11 +469,15 @@ again:
 			return SLURM_SUCCESS;
 		} else {
 			error("_server_write write failed: %m");
+			if (s->cio->sls)
+				step_launch_notify_io_failure(s->cio->sls,
+							      s->node_id);
 			s->out_eof = true;
 			/* FIXME - perhaps we should free the message here? */
 			return SLURM_ERROR;
 		}
 	}
+
 	debug3("Wrote %d bytes to socket", n);
 	s->out_remaining -= n;
 	if (s->out_remaining > 0)
@@ -458,9 +487,11 @@ again:
 	 * Free the message and prepare to send the next one.
 	 */
 	s->out_msg->ref_count--;
-	if (s->out_msg->ref_count == 0)
+	if (s->out_msg->ref_count == 0) {
+		pthread_mutex_lock(&s->cio->ioservers_lock);
 		list_enqueue(s->cio->free_incoming, s->out_msg);
-	else
+		pthread_mutex_unlock(&s->cio->ioservers_lock);
+	} else
 		debug3("  Could not free msg!!");
 	s->out_msg = NULL;
 
@@ -526,7 +557,7 @@ static int _file_write(eio_obj_t *obj, List objs)
 		}
 		info->out_remaining = info->out_msg->length;
 	}
-	
+
 	/*
 	 * Write message to file.
 	 */
@@ -615,8 +646,12 @@ static bool _file_readable(eio_obj_t *obj)
 		info->eof = true;
 		return false;
 	}
-	if (_incoming_buf_free(info->cio))
+	pthread_mutex_lock(&info->cio->ioservers_lock);
+	if (_incoming_buf_free(info->cio)) {
+		pthread_mutex_unlock(&info->cio->ioservers_lock);
 		return true;
+	}
+	pthread_mutex_unlock(&info->cio->ioservers_lock);
 
 	debug3("  false");
 	return false;
@@ -632,12 +667,15 @@ static int _file_read(eio_obj_t *obj, List objs)
 	int len;
 
 	debug2("Entering _file_read");
+	pthread_mutex_lock(&info->cio->ioservers_lock);
 	if (_incoming_buf_free(info->cio)) {
 		msg = list_dequeue(info->cio->free_incoming);
 	} else {
 		debug3("  List free_incoming is empty, no file read");
+		pthread_mutex_unlock(&info->cio->ioservers_lock);
 		return SLURM_SUCCESS;
 	}
+	pthread_mutex_unlock(&info->cio->ioservers_lock);
 
 	ptr = msg->data + io_hdr_packed_size();
 
@@ -648,7 +686,9 @@ again:
 			if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
 				debug("_file_read returned %s",
 				      errno==EAGAIN?"EAGAIN":"EWOULDBLOCK");
+				pthread_mutex_lock(&info->cio->ioservers_lock);
 				list_enqueue(info->cio->free_incoming, msg);
+				pthread_mutex_unlock(&info->cio->ioservers_lock);
 				return SLURM_SUCCESS;
 			}
 			/* Any other errors, we pretend we got eof */
@@ -762,7 +802,7 @@ _read_io_init_msg(int fd, client_io_t *cio, char *host)
 		goto fail;
 	}
 	if (io_init_msg_validate(&msg, cio->io_key) < 0) {
-		goto fail; 
+		goto fail;
 	}
 	if (msg.nodeid >= cio->num_nodes) {
 		error ("Invalid nodeid %d from %s", msg.nodeid, host);
@@ -781,7 +821,7 @@ _read_io_init_msg(int fd, client_io_t *cio, char *host)
 		error("IO: Hey, you told me node %d was down!", msg.nodeid);
 	}
 
-	cio->ioserver[msg.nodeid] = _create_server_eio_obj(fd, cio,
+	cio->ioserver[msg.nodeid] = _create_server_eio_obj(fd, cio, msg.nodeid,
 							   msg.stdout_objs,
 							   msg.stderr_objs);
 	pthread_mutex_lock(&cio->ioservers_lock);
@@ -794,6 +834,9 @@ _read_io_init_msg(int fd, client_io_t *cio, char *host)
 	eio_new_initial_obj(cio->eio, cio->ioserver[msg.nodeid]);
 	pthread_mutex_unlock(&cio->ioservers_lock);
 
+	if (cio->sls)
+		step_launch_clear_questionable_state(cio->sls, msg.nodeid);
+
 	return SLURM_SUCCESS;
 
     fail:
@@ -802,7 +845,7 @@ _read_io_init_msg(int fd, client_io_t *cio, char *host)
 }
 
 
-static bool 
+static bool
 _is_fd_ready(int fd)
 {
 	struct pollfd pfd[1];
@@ -829,8 +872,8 @@ _handle_io_init_msg(int fd, client_io_t *cio)
 		struct sockaddr_in *sin;
 		socklen_t size = sizeof(addr);
 		char buf[INET_ADDRSTRLEN];
-		
-		/* 
+
+		/*
 		 * Return early if fd is not now ready
 		 */
 		if (!_is_fd_ready(fd))
@@ -841,7 +884,7 @@ _handle_io_init_msg(int fd, client_io_t *cio)
 				continue;
 			if (errno == EAGAIN)	/* No more connections */
 				return;
-			if ((errno == ECONNABORTED) || 
+			if ((errno == ECONNABORTED) ||
 			    (errno == EWOULDBLOCK)) {
 				return;
 			}
@@ -852,11 +895,11 @@ _handle_io_init_msg(int fd, client_io_t *cio)
 		sin = (struct sockaddr_in *) &addr;
 		inet_ntop(AF_INET, &sin->sin_addr, buf, INET_ADDRSTRLEN);
 
-		debug3("Accepted IO connection: ip=%s sd=%d", buf, sd); 
+		debug3("Accepted IO connection: ip=%s sd=%d", buf, sd);
 
 		/*
 		 * On AIX the new socket [sd] seems to inherit the O_NONBLOCK
-		 * flag from the listening socket [fd], so we need to 
+		 * flag from the listening socket [fd], so we need to
 		 * explicitly set it back to blocking mode.
 		 * (XXX: This should eventually be fixed by making
 		 *  reads of IO headers nonblocking)
@@ -956,6 +999,7 @@ _init_stdio_eio_objs(slurm_step_io_fds_t fds, client_io_t *cio)
 	}
 }
 
+/* Callers of this function should already have locked cio->ioservers_lock */
 static bool
 _incoming_buf_free(client_io_t *cio)
 {
@@ -971,7 +1015,6 @@ _incoming_buf_free(client_io_t *cio)
 			return true;
 		}
 	}
-
 	return false;
 }
 
@@ -1006,13 +1049,13 @@ client_io_t *
 client_io_handler_create(slurm_step_io_fds_t fds,
 			 int num_tasks,
 			 int num_nodes,
-			 slurm_cred_t cred,
+			 slurm_cred_t *cred,
 			 bool label)
 {
 	client_io_t *cio;
 	int len;
 	int i;
-	int siglen;
+	uint32_t siglen;
 	char *sig;
 
 	cio = (client_io_t *)xmalloc(sizeof(client_io_t));
@@ -1079,6 +1122,7 @@ client_io_handler_create(slurm_step_io_fds_t fds,
 	for (i = 0; i < STDIO_MAX_FREE_BUF; i++) {
 		list_enqueue(cio->free_outgoing, _alloc_io_buf());
 	}
+	cio->sls = NULL;
 
 	return cio;
 }
@@ -1143,6 +1187,8 @@ client_io_handler_downnodes(client_io_t *cio,
 {
 	int i;
 	int node_id;
+	struct server_io_info *info;
+	void *tmp;
 
 	if (cio == NULL)
 		return;
@@ -1153,6 +1199,11 @@ client_io_handler_downnodes(client_io_t *cio,
 			continue;
 		if (bit_test(cio->ioservers_ready_bits, node_id)
 		    && cio->ioserver[node_id] != NULL) {
+			tmp = cio->ioserver[node_id]->arg;
+			info = (struct server_io_info *)tmp;
+			info->remote_stdout_objs = 0;
+			info->remote_stderr_objs = 0;
+			info->testing_connection = false;
 			cio->ioserver[node_id]->shutdown = true;
 		} else {
 			bit_set(cio->ioservers_ready_bits, node_id);
@@ -1164,6 +1215,7 @@ client_io_handler_downnodes(client_io_t *cio,
 
 	eio_signal_wakeup(cio->eio);
 }
+
 
 void
 client_io_handler_abort(client_io_t *cio)
@@ -1183,8 +1235,85 @@ client_io_handler_abort(client_io_t *cio)
 			 * connection. */
 			info->remote_stdout_objs = 0;
 			info->remote_stderr_objs = 0;
+			info->testing_connection = false;
 			cio->ioserver[i]->shutdown = true;
 		}
 	}
 	pthread_mutex_unlock(&cio->ioservers_lock);
 }
+
+
+int client_io_handler_send_test_message(client_io_t *cio, int node_id,
+					bool *sent_message)
+{
+	struct io_buf *msg;
+	io_hdr_t header;
+	Buf packbuf;
+	struct server_io_info *server;
+	int rc = SLURM_SUCCESS;
+	pthread_mutex_lock(&cio->ioservers_lock);
+
+	server = (struct server_io_info *)cio->ioserver[node_id]->arg;
+	if (sent_message)
+		*sent_message = false;
+
+	/* In this case, the I/O connection has not yet been established.
+	   A problem might go undetected here, if a task appears to get
+	   launched correctly, but fails before it can make its I/O
+	   connection.  TODO:  Set a timer, see if the task has checked in
+	   within some timeout, and abort the job if not. */
+	if (cio->ioserver[node_id] == NULL) {
+		goto done;
+	}
+
+	/* In this case, the I/O connection has closed so can't send a test
+	   message.  This error case is handled elsewhere. */
+	if (server->out_eof) {
+		goto done;
+	}
+
+	/*
+	 * enqueue a test message, which would be ignored by the slurmstepd
+	 */
+	header.type = SLURM_IO_CONNECTION_TEST;
+	header.gtaskid = 0;  /* Unused */
+	header.ltaskid = 0;  /* Unused */
+	header.length = 0;
+
+	if (_incoming_buf_free(cio)) {
+		msg = list_dequeue(cio->free_incoming);
+
+		msg->length = io_hdr_packed_size();
+		msg->ref_count = 1;
+		msg->header = header;
+
+		packbuf = create_buf(msg->data, io_hdr_packed_size());
+		io_hdr_pack(&header, packbuf);
+		/* free the Buf packbuf, but not the memory to which it points*/
+		packbuf->head = NULL;
+		free_buf(packbuf);
+
+		list_enqueue( server->msg_queue, msg );
+
+		if (eio_signal_wakeup(cio->eio) != SLURM_SUCCESS) {
+			rc = SLURM_ERROR;
+			goto done;
+		}
+		server->testing_connection = true;
+		if (sent_message)
+			*sent_message = true;
+	} else {
+		rc = SLURM_ERROR;
+		goto done;
+	}
+done:
+	pthread_mutex_unlock(&cio->ioservers_lock);
+	return rc;
+}
+
+
+
+
+
+
+

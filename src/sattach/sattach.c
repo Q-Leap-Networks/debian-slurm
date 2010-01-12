@@ -2,25 +2,25 @@
  *  sattach.c - Attach to a running job step.
  *****************************************************************************
  *  Copyright (C) 2006-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA.
@@ -66,20 +66,23 @@ static void _mpir_init(int num_tasks);
 static void _mpir_cleanup(void);
 static void _mpir_dump_proctable(void);
 static void print_layout_info(slurm_step_layout_t *layout);
-static slurm_cred_t _generate_fake_cred(uint32_t jobid, uint32_t stepid,
-					uid_t uid, char *nodelist, 
+static slurm_cred_t *_generate_fake_cred(uint32_t jobid, uint32_t stepid,
+					uid_t uid, char *nodelist,
 					uint32_t node_cnt);
 static uint32_t _nodeid_from_layout(slurm_step_layout_t *layout,
 				    uint32_t taskid);
+static void _set_exit_code(void);
 static int _attach_to_tasks(uint32_t jobid,
 			    uint32_t stepid,
 			    slurm_step_layout_t *layout,
-			    slurm_cred_t fake_cred,
+			    slurm_cred_t *fake_cred,
 			    uint16_t num_resp_ports,
 			    uint16_t *resp_ports,
 			    int num_io_ports,
 			    uint16_t *io_ports,
 			    bitstr_t *tasks_started);
+
+int global_rc = 0;
 
 /**********************************************************************
  * Message handler declarations
@@ -97,12 +100,12 @@ typedef struct message_thread_state {
 static message_thread_state_t *_msg_thr_create(int num_nodes, int num_tasks);
 static void _msg_thr_wait(message_thread_state_t *mts);
 static void _msg_thr_destroy(message_thread_state_t *mts);
-static void _handle_msg(message_thread_state_t *mts, slurm_msg_t *msg);
-static bool _message_socket_readable(eio_obj_t *obj);
-static int _message_socket_accept(eio_obj_t *obj, List objs);
+static void _handle_msg(void *arg, slurm_msg_t *msg);
+
 static struct io_operations message_socket_ops = {
-	readable:	&_message_socket_readable,
-	handle_read:	&_message_socket_accept
+	readable:	&eio_message_socket_readable,
+	handle_read:	&eio_message_socket_accept,
+	handle_msg:     &_handle_msg
 };
 
 /**********************************************************************
@@ -112,13 +115,15 @@ int sattach(int argc, char *argv[])
 {
 	log_options_t logopt = LOG_OPTS_STDERR_ONLY;
 	slurm_step_layout_t *layout;
-	slurm_cred_t fake_cred;
+	slurm_cred_t *fake_cred;
 	message_thread_state_t *mts;
 	client_io_t *io;
 
 	log_init(xbasename(argv[0]), logopt, 0, NULL);
+	_set_exit_code();
 	if (initialize_and_process_args(argc, argv) < 0) {
-		fatal("sattach parameter parsing");
+		error("sattach parameter parsing");
+		exit(error_exit);
 	}
 	/* reinit log with new verbosity (if changed by command line) */
 	if (opt.verbose || opt.quiet) {
@@ -131,7 +136,7 @@ int sattach(int argc, char *argv[])
 	layout = slurm_job_step_layout_get(opt.jobid, opt.stepid);
 	if (layout == NULL) {
 		error("Could not get job step info: %m");
-		return 1;
+		exit(error_exit);
 	}
 	if (opt.layout_only) {
 		print_layout_info(layout);
@@ -149,7 +154,7 @@ int sattach(int argc, char *argv[])
 	fake_cred = _generate_fake_cred(opt.jobid, opt.stepid,
 					opt.uid, layout->node_list,
 					layout->node_cnt);
-	
+
 	mts = _msg_thr_create(layout->node_cnt, layout->task_cnt);
 
 	io = client_io_handler_create(opt.fds, layout->task_cnt,
@@ -161,7 +166,7 @@ int sattach(int argc, char *argv[])
 			 mts->num_resp_port, mts->resp_port,
 			 io->num_listen, io->listenport,
 			 mts->tasks_started);
-	
+
 	MPIR_debug_state = MPIR_DEBUG_SPAWNED;
 	MPIR_Breakpoint();
 	if (opt.debugger_test)
@@ -174,7 +179,21 @@ int sattach(int argc, char *argv[])
 	client_io_handler_destroy(io);
 	_mpir_cleanup();
 
-	return 0;
+	return global_rc;
+}
+
+static void _set_exit_code(void)
+{
+	int i;
+	char *val = getenv("SLURM_EXIT_ERROR");
+
+	if (val) {
+		i = atoi(val);
+		if (i == 0)
+			error("SLURM_EXIT_ERROR has zero value");
+		else
+			error_exit = i;
+	}
 }
 
 static uint32_t
@@ -218,12 +237,12 @@ static void print_layout_info(slurm_step_layout_t *layout)
 
 
 /* return a faked job credential */
-static slurm_cred_t _generate_fake_cred(uint32_t jobid, uint32_t stepid,
+static slurm_cred_t *_generate_fake_cred(uint32_t jobid, uint32_t stepid,
 					uid_t uid, char *nodelist,
 					uint32_t node_cnt)
 {
 	slurm_cred_arg_t arg;
-	slurm_cred_t cred;
+	slurm_cred_t *cred;
 
 	arg.jobid    = jobid;
 	arg.stepid   = stepid;
@@ -299,7 +318,7 @@ void _handle_response_msg_list(List other_nodes_resp, bitstr_t *tasks_started)
 					       ret_data_info->data);
 		debug("Attach returned msg_rc=%d err=%d type=%d",
 		      msg_rc, ret_data_info->err, ret_data_info->type);
-		if (msg_rc != SLURM_SUCCESS) 
+		if (msg_rc != SLURM_SUCCESS)
 			errno = ret_data_info->err;
 		_handle_response_msg(ret_data_info->type,
 				     ret_data_info->data,
@@ -316,7 +335,7 @@ void _handle_response_msg_list(List other_nodes_resp, bitstr_t *tasks_started)
 static int _attach_to_tasks(uint32_t jobid,
 			    uint32_t stepid,
 			    slurm_step_layout_t *layout,
-			    slurm_cred_t fake_cred,
+			    slurm_cred_t *fake_cred,
 			    uint16_t num_resp_ports,
 			    uint16_t *resp_ports,
 			    int num_io_ports,
@@ -329,7 +348,7 @@ static int _attach_to_tasks(uint32_t jobid,
 	reattach_tasks_request_msg_t reattach_msg;
 
 	slurm_msg_t_init(&msg);
-	
+
 	timeout = slurm_get_msg_timeout() * 1000; /* sec to msec */
 
 	reattach_msg.job_id = jobid;
@@ -342,8 +361,8 @@ static int _attach_to_tasks(uint32_t jobid,
 
 	msg.msg_type = REQUEST_REATTACH_TASKS;
 	msg.data = &reattach_msg;
-	
-	nodes_resp = slurm_send_recv_msgs(layout->node_list, &msg, 
+
+	nodes_resp = slurm_send_recv_msgs(layout->node_list, &msg,
 					  timeout, false);
 	if (nodes_resp == NULL) {
 		error("slurm_send_recv_msgs failed: %m");
@@ -352,7 +371,7 @@ static int _attach_to_tasks(uint32_t jobid,
 
 	_handle_response_msg_list(nodes_resp, tasks_started);
 	list_destroy(nodes_resp);
-	
+
 	return SLURM_SUCCESS;
 }
 
@@ -444,85 +463,6 @@ static void _msg_thr_destroy(message_thread_state_t *mts)
 	bit_free(mts->tasks_exited);
 }
 
-static bool _message_socket_readable(eio_obj_t *obj)
-{
-	debug3("Called _message_socket_readable");
-	if (obj->shutdown == true) {
-		if (obj->fd != -1) {
-			debug2("  false, shutdown");
-			close(obj->fd);
-			obj->fd = -1;
-			/*_wait_for_connections();*/
-		} else {
-			debug2("  false");
-		}
-		return false;
-	}
-	return true;
-}
-
-static int _message_socket_accept(eio_obj_t *obj, List objs)
-{
-	message_thread_state_t *mts = (message_thread_state_t *)obj->arg;
-
-	int fd;
-	unsigned char *uc;
-	short        port;
-	struct sockaddr_un addr;
-	slurm_msg_t *msg = NULL;
-	int len = sizeof(addr);
-	int          timeout = 0;	/* slurm default value */
-
-	debug3("Called _msg_socket_accept");
-
-	while ((fd = accept(obj->fd, (struct sockaddr *)&addr,
-			    (socklen_t *)&len)) < 0) {
-		if (errno == EINTR)
-			continue;
-		if (errno == EAGAIN
-		    || errno == ECONNABORTED
-		    || errno == EWOULDBLOCK) {
-			return SLURM_SUCCESS;
-		}
-		error("Error on msg accept socket: %m");
-		obj->shutdown = true;
-		return SLURM_SUCCESS;
-	}
-
-	fd_set_close_on_exec(fd);
-	fd_set_blocking(fd);
-
-	/* Should not call slurm_get_addr() because the IP may not be
-	   in /etc/hosts. */
-	uc = (unsigned char *)&((struct sockaddr_in *)&addr)->sin_addr.s_addr;
-	port = ((struct sockaddr_in *)&addr)->sin_port;
-	debug2("got message connection from %u.%u.%u.%u:%hu",
-	       uc[0], uc[1], uc[2], uc[3], ntohs(port));
-	fflush(stdout);
-
-	msg = xmalloc(sizeof(slurm_msg_t));
-	slurm_msg_t_init(msg);
-
-	timeout = slurm_get_msg_timeout() * 1000;
-again:
-	if(slurm_receive_msg(fd, msg, timeout) != 0) {
-		if (errno == EINTR) {
-			goto again;
-		}
-		error("slurm_receive_msg[%u.%u.%u.%u]: %m",
-		      uc[0],uc[1],uc[2],uc[3]);
-		goto cleanup;
-	}
-
-	_handle_msg(mts, msg); /* handle_msg frees msg->data */
-cleanup:
-	if ((msg->conn_fd >= 0) && slurm_close_accepted_conn(msg->conn_fd) < 0)
-		error ("close(%d): %m", msg->conn_fd);
-	slurm_free_msg(msg);
-
-	return SLURM_SUCCESS;
-}
-
 static void
 _launch_handler(message_thread_state_t *mts, slurm_msg_t *resp)
 {
@@ -540,7 +480,7 @@ _launch_handler(message_thread_state_t *mts, slurm_msg_t *resp)
 
 }
 
-static void 
+static void
 _exit_handler(message_thread_state_t *mts, slurm_msg_t *exit_msg)
 {
 	task_exit_msg_t *msg = (task_exit_msg_t *) exit_msg->data;
@@ -569,6 +509,7 @@ _exit_handler(message_thread_state_t *mts, slurm_msg_t *exit_msg)
 				error("task %u exited with exit code %d",
 				      msg->task_id_list[i], rc);
 			}
+			global_rc = MAX(rc, global_rc);
 		}
 	} else if (WIFSIGNALED(msg->return_code)) {
 		for (i = 0; i < msg->num_tasks; i++) {
@@ -584,20 +525,21 @@ _exit_handler(message_thread_state_t *mts, slurm_msg_t *exit_msg)
 }
 
 static void
-_handle_msg(message_thread_state_t *mts, slurm_msg_t *msg)
+_handle_msg(void *arg, slurm_msg_t *msg)
 {
+	message_thread_state_t *mts = (message_thread_state_t *)arg;
 	uid_t req_uid = g_slurm_auth_get_uid(msg->auth_cred, NULL);
 	static uid_t slurm_uid;
 	static bool slurm_uid_set = false;
 	uid_t uid = getuid();
-	
+
 	if (!slurm_uid_set) {
 		slurm_uid = slurm_get_slurm_user_id();
 		slurm_uid_set = true;
 	}
 
 	if ((req_uid != slurm_uid) && (req_uid != 0) && (req_uid != uid)) {
-		error ("Security violation, slurm message from uid %u", 
+		error ("Security violation, slurm message from uid %u",
 		       (unsigned int) req_uid);
 		return;
 	}
@@ -635,8 +577,10 @@ _mpir_init(int num_tasks)
 {
 	MPIR_proctable_size = num_tasks;
 	MPIR_proctable = xmalloc(sizeof(MPIR_PROCDESC) * num_tasks);
-	if (MPIR_proctable == NULL)
-		fatal("Unable to initialize MPIR_proctable: %m");
+	if (MPIR_proctable == NULL) {
+		error("Unable to initialize MPIR_proctable: %m");
+		exit(error_exit);
+	}
 }
 
 static void
@@ -665,4 +609,4 @@ _mpir_dump_proctable()
 		     i, tv->host_name, tv->pid, tv->executable_name);
 	}
 }
-	
+

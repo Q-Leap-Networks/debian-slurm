@@ -12,7 +12,7 @@
 %%
 %% This program consists of the files listed in manifest.txt
 %%
-%% CVSId : $Id: prosper.cls 2452 2003-04-16 15:03:38Z grondo $
+%% CVSId : $Id: prosper.cls 19097 2009-12-01 23:20:47Z da $
 %%=============================================================================
 
 \def\Prosper@Version{2001/07/17, v. 1.5}
@@ -20,7 +20,7 @@
 \ProvidesClass{prosper}[\Prosper@Version]
 \typeout{(c) 2000-2001 Frederic Goualard, EPFL, Switzerland}
 \typeout{          and Peter Møller Neergaard, Boston Univ., USA}
-\typeout{CVSId: $Id: prosper.cls 2452 2003-04-16 15:03:38Z grondo $}
+\typeout{CVSId: $Id: prosper.cls 19097 2009-12-01 23:20:47Z da $}
 
 \newif\ifDVItoPS
 \DeclareOption{ps}{\global\DVItoPStrue}

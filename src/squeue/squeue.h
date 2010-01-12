@@ -1,7 +1,8 @@
 /****************************************************************************\
  *  squeue.h - definitions used for printing job queue state
  *****************************************************************************
- *  Copyright (C) 2002 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -15,15 +16,15 @@
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  In addition, as a special exception, the copyright holders give permission
+ *  to link the code of portions of this program with the OpenSSL library under
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
@@ -77,6 +78,7 @@ typedef struct job_step squeue_job_step_t;
 struct squeue_parameters {
 	bool all_flag;
 	bool job_flag;
+	bool start_flag;
 	bool step_flag;
 	bool long_list;
 	bool no_header;
@@ -84,23 +86,25 @@ struct squeue_parameters {
 	int  max_procs;
 	int  verbose;
 
+	char* accounts;
+	char* format;
 	char* jobs;
 	hostset_t nodes;
 	char* partitions;
-	char* accounts;
+	char* qoss;
+	char* sort;
 	char* states;
 	char* steps;
 	char* users;
-	char* format;
-	char* sort;
 
+	List  account_list;
+	List  format_list;
 	List  job_list;
 	List  part_list;
-	List  account_list;
+	List  qos_list;
 	List  state_list;
 	List  step_list;
 	List  user_list;
-	List  format_list;
 };
 
 extern struct squeue_parameters params;

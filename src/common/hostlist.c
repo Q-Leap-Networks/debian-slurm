@@ -1,5 +1,5 @@
 /*****************************************************************************\
- *  $Id: hostlist.c 17248 2009-04-14 20:14:06Z da $
+ *  $Id: hostlist.c 19171 2009-12-15 18:56:20Z da $
  *****************************************************************************
  *  $LSDId: hostlist.c,v 1.14 2003/10/14 20:11:54 grondo Exp $
  *****************************************************************************
@@ -7,32 +7,32 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
+ *  In addition, as a special exception, the copyright holders give permission
  *  to link the code of portions of this program with the OpenSSL library under
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -40,6 +40,13 @@
 
 #ifdef HAVE_CONFIG_H
 #  include "config.h"
+#  if HAVE_INTTYPES_H
+#    include <inttypes.h>
+#  else
+#    if HAVE_STDINT_H
+#      include <stdint.h>
+#    endif
+#  endif  /* HAVE_INTTYPES_H */
 #  if HAVE_STRING_H
 #    include <string.h>
 #  endif
@@ -47,6 +54,7 @@
 #    include <pthread.h>
 #  endif
 #else                /* !HAVE_CONFIG_H */
+#  include <inttypes.h>
 #  include <string.h>
 #  include <pthread.h>
 #endif                /* HAVE_CONFIG_H */
@@ -64,10 +72,12 @@
 #include "src/common/log.h"
 #include "src/common/macros.h"
 #include "src/common/xmalloc.h"
+#include "src/common/timers.h"
+#include "src/common/xassert.h"
 
 /*
- * Define slurm-specific aliases for use by plugins, see slurm_xlator.h 
- * for details. 
+ * Define slurm-specific aliases for use by plugins, see slurm_xlator.h
+ * for details.
  */
 strong_alias(hostlist_create,		slurm_hostlist_create);
 strong_alias(hostlist_copy,		slurm_hostlist_copy);
@@ -112,14 +122,14 @@ strong_alias(hostset_nth,		slurm_hostset_nth);
  */
 #ifdef WITH_LSD_FATAL_ERROR_FUNC
 #  undef lsd_fatal_error
-   extern void lsd_fatal_error(char *file, int line, char *mesg);
+extern void lsd_fatal_error(char *file, int line, char *mesg);
 #else /* !WITH_LSD_FATAL_ERROR_FUNC */
 #  ifndef lsd_fatal_error
-#    define lsd_fatal_error(file, line, mesg)                                \
-       do {                                                                  \
-           fprintf(stderr, "ERROR: [%s:%d] %s: %s\n",                        \
-           file, line, mesg, strerror(errno));                               \
-       } while (0)
+#    define lsd_fatal_error(file, line, mesg)			\
+	do {							\
+		fprintf(stderr, "ERROR: [%s:%d] %s: %s\n",	\
+			file, line, mesg, strerror(errno));	\
+	} while (0)
 #  endif /* !lsd_fatal_error */
 #endif /* !WITH_LSD_FATAL_ERROR_FUNC */
 
@@ -128,7 +138,7 @@ strong_alias(hostset_nth,		slurm_hostset_nth);
  */
 #ifdef WITH_LSD_NOMEM_ERROR_FUNC
 #  undef lsd_nomem_error
-   extern void * lsd_nomem_error(char *file, int line, char *mesg);
+extern void * lsd_nomem_error(char *file, int line, char *mesg);
 #else /* !WITH_LSD_NOMEM_ERROR_FUNC */
 #  ifndef lsd_nomem_error
 #    define lsd_nomem_error(file, line, mesg) (NULL)
@@ -140,14 +150,14 @@ strong_alias(hostset_nth,		slurm_hostset_nth);
  *  Automatically call lsd_nomem_error with appropriate args
  *  and set errno to ENOMEM
  */
-#define out_of_memory(mesg)                                                  \
-    do {                                                                     \
-        fatal("malloc failure");                                             \
-        errno = ENOMEM;                                                      \
-        return(lsd_nomem_error(__FILE__, __LINE__, mesg));                   \
-    } while (0)
+#define out_of_memory(mesg)						\
+	do {								\
+		fatal("malloc failure");				\
+		errno = ENOMEM;						\
+		return(lsd_nomem_error(__FILE__, __LINE__, mesg));	\
+	} while (0)
 
-/* 
+/*
  * Some constants and tunables:
  */
 
@@ -168,49 +178,32 @@ strong_alias(hostset_nth,		slurm_hostset_nth);
 
 /* ----[ Internal Data Structures ]---- */
 
-
-char *alpha_num = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-
-#ifdef HAVE_BG		
-/* logic for block node description */
-/* We allocate space for three digits, 
- * each with values 0 to Z even if they are not all used */
-bool axis[HOSTLIST_BASE][HOSTLIST_BASE][HOSTLIST_BASE];
-int axis_min_x, axis_min_y, axis_min_z;
-int axis_max_x, axis_max_y, axis_max_z;
-
-static int _get_boxes(char *buf, int max_len);
-static void _clear_grid(void);
-static void _set_grid(unsigned long start, unsigned long end);
-static bool _test_box(void);
-#endif
-
 /* hostname type: A convenience structure used in parsing single hostnames */
 struct hostname_components {
-    char *hostname;         /* cache of initialized hostname        */
-    char *prefix;           /* hostname prefix                      */
-    unsigned long num;      /* numeric suffix                       */
+	char *hostname;         /* cache of initialized hostname        */
+	char *prefix;           /* hostname prefix                      */
+	unsigned long num;      /* numeric suffix                       */
 
-    /* string representation of numeric suffix
-     * points into `hostname'                                       */
-    char *suffix;
+	/* string representation of numeric suffix
+	 * points into `hostname'                                       */
+	char *suffix;
 };
 
 typedef struct hostname_components *hostname_t;
 
 /* hostrange type: A single prefix with `hi' and `lo' numeric suffix values */
 struct hostrange_components {
-    char *prefix;        /* alphanumeric prefix: */
+	char *prefix;        /* alphanumeric prefix: */
 
-    /* beginning (lo) and end (hi) of suffix range */
-    unsigned long lo, hi;
+	/* beginning (lo) and end (hi) of suffix range */
+	unsigned long lo, hi;
 
-    /* width of numeric output format
-     * (pad with zeros up to this width) */
-    int width;
+	/* width of numeric output format
+	 * (pad with zeros up to this width) */
+	int width;
 
-    /* If singlehost is 1, `lo' and `hi' are invalid */
-    unsigned singlehost:1;
+	/* If singlehost is 1, `lo' and `hi' are invalid */
+	unsigned singlehost:1;
 };
 
 typedef struct hostrange_components *hostrange_t;
@@ -219,57 +212,125 @@ typedef struct hostrange_components *hostrange_t;
 struct hostlist {
 #ifndef NDEBUG
 #define HOSTLIST_MAGIC    57005
-    int magic;
+	int magic;
 #endif
 #if    WITH_PTHREADS
-    pthread_mutex_t mutex;
+	pthread_mutex_t mutex;
 #endif                /* WITH_PTHREADS */
 
-    /* current number of elements available in array */
-    int size;
+	/* current number of elements available in array */
+	int size;
 
-    /* current number of ranges stored in array */
-    int nranges;
+	/* current number of ranges stored in array */
+	int nranges;
 
-    /* current number of hosts stored in hostlist */
-    int nhosts;
+	/* current number of hosts stored in hostlist */
+	int nhosts;
 
-    /* pointer to hostrange array */
-    hostrange_t *hr;
+	/* pointer to hostrange array */
+	hostrange_t *hr;
 
-    /* list of iterators */
-    struct hostlist_iterator *ilist;
+	/* list of iterators */
+	struct hostlist_iterator *ilist;
 
 };
 
 
 /* a hostset is a wrapper around a hostlist */
 struct hostset {
-    hostlist_t hl;
+	hostlist_t hl;
 };
 
 struct hostlist_iterator {
 #ifndef NDEBUG
-    int magic;
+	int magic;
 #endif
-    /* hostlist we are traversing */
-    hostlist_t hl;
+	/* hostlist we are traversing */
+	hostlist_t hl;
 
-    /* current index of iterator in hl->hr[] */
-    int idx;
+	/* current index of iterator in hl->hr[] */
+	int idx;
 
-    /* current hostrange object in list hl, i.e. hl->hr[idx] */
-    hostrange_t hr;
+	/* current hostrange object in list hl, i.e. hl->hr[idx] */
+	hostrange_t hr;
 
-    /* current depth we've traversed into range hr */
-    int depth;
+	/* current depth we've traversed into range hr */
+	int depth;
 
-    /* next ptr for lists of iterators */
-    struct hostlist_iterator *next;
+	/* next ptr for lists of iterators */
+	struct hostlist_iterator *next;
 };
 
+struct _range {
+	unsigned long lo, hi;
+	int width;
+};
 
 /* ---- ---- */
+
+/* Multi-dimension system stuff here */
+char *alpha_num = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+enum {A, B, C, D};
+
+#ifndef SYSTEM_DIMENSIONS
+#  define SYSTEM_DIMENSIONS 1
+#endif
+
+#if (SYSTEM_DIMENSIONS > 1)
+/* logic for block node description */
+
+/* to speed things up we will do some calculations once to avoid
+ * having to do it multiple times.  We need to calculate the size of
+ * the maximum sized array for each dimension.  This way we can be
+ * prepared for any size coming in.
+ */
+#if (SYSTEM_DIMENSIONS == 3)
+static bool grid[HOSTLIST_BASE*HOSTLIST_BASE*HOSTLIST_BASE];
+#endif
+
+#if (SYSTEM_DIMENSIONS == 4)
+static bool grid[HOSTLIST_BASE*HOSTLIST_BASE*HOSTLIST_BASE*HOSTLIST_BASE];
+#endif
+
+static int grid_start[SYSTEM_DIMENSIONS];
+static int grid_end[SYSTEM_DIMENSIONS];
+static int offset[SYSTEM_DIMENSIONS];
+static int dim_grid_size  = -1;
+
+/* used to protect the above grid, grid_start, and grid_end. */
+static pthread_mutex_t multi_dim_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void _parse_int_to_array(int in, int out[SYSTEM_DIMENSIONS]);
+static int _tell_if_used(int dim, int curr,
+			 int start[SYSTEM_DIMENSIONS],
+			 int end[SYSTEM_DIMENSIONS],
+			 int last[SYSTEM_DIMENSIONS],
+			 int *found);
+static int _get_next_box(int start[SYSTEM_DIMENSIONS],
+			 int end[SYSTEM_DIMENSIONS]);
+static int _get_boxes(char *buf, int max_len);
+static void _set_box_in_grid(int dim, int curr,
+			     int start[SYSTEM_DIMENSIONS],
+			     int end[SYSTEM_DIMENSIONS],
+			     bool value);
+static int _add_box_ranges(int dim,  int curr,
+			   int start[SYSTEM_DIMENSIONS],
+			   int end[SYSTEM_DIMENSIONS],
+			   int pos[SYSTEM_DIMENSIONS],
+			   struct _range *ranges,
+			   int len, int *count);
+static void _set_min_max_of_grid(int dim, int curr,
+				 int start[SYSTEM_DIMENSIONS],
+				 int end[SYSTEM_DIMENSIONS],
+				 int min[SYSTEM_DIMENSIONS],
+				 int max[SYSTEM_DIMENSIONS],
+				 int pos[SYSTEM_DIMENSIONS]);
+static void _set_grid(unsigned long start, unsigned long end);
+static bool _test_box_in_grid(int dim, int curr,
+			      int start[SYSTEM_DIMENSIONS],
+			      int end[SYSTEM_DIMENSIONS]);
+static bool _test_box(int start[SYSTEM_DIMENSIONS], int end[SYSTEM_DIMENSIONS]);
+#endif
 
 /* ------[ static function prototypes ]------ */
 
@@ -287,7 +348,7 @@ static int           hostname_suffix_width(hostname_t);
 static hostrange_t   hostrange_new(void);
 static hostrange_t   hostrange_create_single(const char *);
 static hostrange_t   hostrange_create(char *, unsigned long, unsigned long,
-				int);
+				      int);
 static unsigned long hostrange_count(hostrange_t);
 static hostrange_t   hostrange_copy(hostrange_t);
 static void          hostrange_destroy(hostrange_t);
@@ -302,8 +363,8 @@ static char *        hostrange_shift(hostrange_t);
 static int           hostrange_join(hostrange_t, hostrange_t);
 static hostrange_t   hostrange_intersect(hostrange_t, hostrange_t);
 static int           hostrange_hn_within(hostrange_t, hostname_t);
-static size_t        hostrange_to_string(hostrange_t hr, size_t, char *, 
-				char *);
+static size_t        hostrange_to_string(hostrange_t hr, size_t, char *,
+					 char *);
 static size_t        hostrange_numstr(hostrange_t, size_t, char *);
 
 static hostlist_t  hostlist_new(void);
@@ -331,44 +392,44 @@ static int hostset_find_host(hostset_t, const char *);
 /* ------[ macros ]------ */
 
 #ifdef WITH_PTHREADS
-#  define mutex_init(mutex)                                                  \
-	do {                                                                    \
-		int e = pthread_mutex_init(mutex, NULL);                             \
-		if (e) {                                                             \
-			errno = e;                                                       \
-			lsd_fatal_error(__FILE__, __LINE__, "hostlist mutex init:");     \
-			abort();                                                         \
-		}                                                                    \
+#  define mutex_init(mutex)						\
+	do {								\
+		int e = pthread_mutex_init(mutex, NULL);		\
+		if (e) {						\
+			errno = e;					\
+			lsd_fatal_error(__FILE__, __LINE__, "hostlist mutex init:"); \
+			abort();					\
+		}							\
 	} while (0)
 
-#  define mutex_lock(mutex)                                                  \
-	do {                                                                    \
- 		int e = pthread_mutex_lock(mutex);                                   \
-		if (e) {                                                             \
-			errno = e;                                                        \
-			lsd_fatal_error(__FILE__, __LINE__, "hostlist mutex lock:");      \
- 			abort();                                                          \
-		}                                                                    \
+#  define mutex_lock(mutex)						\
+	do {								\
+ 		int e = pthread_mutex_lock(mutex);			\
+		if (e) {						\
+			errno = e;					\
+			lsd_fatal_error(__FILE__, __LINE__, "hostlist mutex lock:"); \
+ 			abort();					\
+		}							\
 	} while (0)
 
-#  define mutex_unlock(mutex)                                                \
-	do {                                                                    \
-		int e = pthread_mutex_unlock(mutex);                                 \
-		if (e) {                                                             \
-			errno = e;                                                       \
-			lsd_fatal_error(__FILE__, __LINE__, "hostlist mutex unlock:");   \
-			abort();                                                         \
-		}                                                                    \
+#  define mutex_unlock(mutex)						\
+	do {								\
+		int e = pthread_mutex_unlock(mutex);			\
+		if (e) {						\
+			errno = e;					\
+			lsd_fatal_error(__FILE__, __LINE__, "hostlist mutex unlock:"); \
+			abort();					\
+		}							\
 	} while (0)
 
-#  define mutex_destroy(mutex)                                               \
-	do {                                                                    \
-		int e = pthread_mutex_destroy(mutex);                                \
-		if (e) {                                                             \
-			errno = e;                                                       \
-			lsd_fatal_error(__FILE__, __LINE__, "hostlist mutex destroy:");  \
-			abort();                                                         \
-		}                                                                    \
+#  define mutex_destroy(mutex)						\
+	do {								\
+		int e = pthread_mutex_destroy(mutex);			\
+		if (e) {						\
+			errno = e;					\
+			lsd_fatal_error(__FILE__, __LINE__, "hostlist mutex destroy:");	\
+			abort();					\
+		}							\
 	} while (0)
 
 #else                /* !WITH_PTHREADS */
@@ -380,22 +441,22 @@ static int hostset_find_host(hostset_t, const char *);
 
 #endif                /* WITH_PTHREADS */
 
-#define LOCK_HOSTLIST(_hl)                                                   \
-	do {                                                                   \
-		assert(_hl != NULL);                                               \
-		mutex_lock(&(_hl)->mutex);                                         \
-		assert((_hl)->magic == HOSTLIST_MAGIC);                            \
+#define LOCK_HOSTLIST(_hl)				\
+	do {						\
+		assert(_hl != NULL);			\
+		mutex_lock(&(_hl)->mutex);		\
+		assert((_hl)->magic == HOSTLIST_MAGIC);	\
 	} while (0)
 
-#define UNLOCK_HOSTLIST(_hl)                                                 \
-	do {                                                                   \
-		mutex_unlock(&(_hl)->mutex);                                       \
-	} while (0)                       
+#define UNLOCK_HOSTLIST(_hl)			\
+	do {					\
+		mutex_unlock(&(_hl)->mutex);	\
+	} while (0)
 
-#define seterrno_ret(_errno, _rc)                                            \
-	do {                                                                   \
-		errno = _errno;                                                    \
-		return _rc;                                                        \
+#define seterrno_ret(_errno, _rc)		\
+	do {					\
+		errno = _errno;			\
+		return _rc;			\
 	} while (0)
 
 /* ------[ Function Definitions ]------ */
@@ -414,7 +475,7 @@ static void _error(char *file, int line, char *msg, ...)
 	va_start(ap, msg);
 
 	len = vsnprintf(buf, 1024, msg, ap);
-	if ((len < 0) || (len > 1024)) 
+	if ((len < 0) || (len > 1024))
 		buf[1023] = '\0';
 
 	lsd_fatal_error(file, line, buf);
@@ -423,8 +484,8 @@ static void _error(char *file, int line, char *msg, ...)
 	return;
 }
 
-/* 
- * Helper function for host list string parsing routines 
+/*
+ * Helper function for host list string parsing routines
  * Returns a pointer to the next token; additionally advance *str
  * to the next separator.
  *
@@ -456,6 +517,7 @@ static char * _next_tok(char *sep, char **str)
 	if ((memchr(tok, '[', *str - tok) != NULL) &&
 	    (memchr(tok, ']', *str - tok) == NULL)) {
 		char *q = strchr(*str, ']');
+
 		if (q && (memchr(*str, '[', q - *str) == NULL))
 			*str = ++q;
 
@@ -465,7 +527,7 @@ static char * _next_tok(char *sep, char **str)
 
 		/* if _second_ opening bracket exists b/w tok and str,
 		 * push str past second closing bracket */
-		if ((**str != '\0') &&
+		if ((**str != '\0') && q &&
 		    (memchr(tok, '[', *str - q) != NULL) &&
 		    (memchr(tok, ']', *str - q) == NULL)) {
 			q = strchr(*str, ']');
@@ -493,12 +555,12 @@ static int _zero_padded(unsigned long num, int width)
 }
 
 /* test whether two format `width' parameters are "equivalent"
- * The width arguments "wn" and "wm" for integers "n" and "m" 
+ * The width arguments "wn" and "wm" for integers "n" and "m"
  * are equivalent if:
- *  
+ *
  *  o  wn == wm  OR
  *
- *  o  applying the same format width (either wn or wm) to both of  
+ *  o  applying the same format width (either wn or wm) to both of
  *     'n' and 'm' will not change the zero padding of *either* 'm' nor 'n'.
  *
  *  If this function returns 1 (or true), the appropriate width value
@@ -540,7 +602,7 @@ static int _width_equiv(unsigned long n, int *wn, unsigned long m, int *wm)
 
 /* ----[ hostname_t functions ]---- */
 
-/* 
+/*
  * return the location of the last char in the hostname prefix
  */
 static int host_prefix_end(const char *hostname)
@@ -550,22 +612,28 @@ static int host_prefix_end(const char *hostname)
 	assert(hostname != NULL);
 
 	len = strlen(hostname);
-#ifdef HAVE_3D
-	if (len < 4)
-		return -1;
-	idx = len - 4;
+#if (SYSTEM_DIMENSIONS > 1)
+	idx = len - 1;
+
+	while (idx >= 0) {
+		if (((hostname[idx] >= '0') && (hostname[idx] <= '9')) ||
+		    ((hostname[idx] >= 'A') && (hostname[idx] <= 'Z')))
+			idx--;
+		else
+			break;
+	}
 #else
 	if (len < 1)
 		return -1;
 	idx = len - 1;
 
-	while (idx >= 0 && isdigit((char) hostname[idx])) 
+	while (idx >= 0 && isdigit((char) hostname[idx]))
 		idx--;
 #endif
 	return idx;
 }
 
-/* 
+/*
  * create a hostname_t object from a string hostname
  */
 static hostname_t hostname_create(const char *hostname)
@@ -573,7 +641,7 @@ static hostname_t hostname_create(const char *hostname)
 	hostname_t hn = NULL;
 	char *p = '\0';
 	int idx = 0;
-
+	int hostlist_base = HOSTLIST_BASE;
 	assert(hostname != NULL);
 
 	if (!(hn = (hostname_t) malloc(sizeof(*hn))))
@@ -589,7 +657,6 @@ static hostname_t hostname_create(const char *hostname)
 	hn->num = 0;
 	hn->prefix = NULL;
 	hn->suffix = NULL;
-
 	if (idx == (strlen(hostname) - 1)) {
 		if ((hn->prefix = strdup(hostname)) == NULL) {
 			hostname_destroy(hn);
@@ -599,8 +666,11 @@ static hostname_t hostname_create(const char *hostname)
 	}
 
 	hn->suffix = hn->hostname + idx + 1;
-
-	hn->num = strtoul(hn->suffix, &p, HOSTLIST_BASE);
+#if (SYSTEM_DIMENSIONS > 1)
+	if(strlen(hn->suffix) != SYSTEM_DIMENSIONS)
+		hostlist_base = 10;
+#endif
+	hn->num = strtoul(hn->suffix, &p, hostlist_base);
 
 	if (*p == '\0') {
 		if (!(hn->prefix = malloc((idx + 2) * sizeof(char)))) {
@@ -634,7 +704,7 @@ static void hostname_destroy(hostname_t hn)
 	free(hn);
 }
 
-/* return true if the hostname has a valid numeric suffix 
+/* return true if the hostname has a valid numeric suffix
  */
 static int hostname_suffix_is_valid(hostname_t hn)
 {
@@ -656,12 +726,12 @@ static int hostname_suffix_width(hostname_t hn)
 
 /* ----[ hostrange_t functions ]---- */
 
-/* allocate a new hostrange object 
+/* allocate a new hostrange object
  */
 static hostrange_t hostrange_new(void)
 {
 	hostrange_t new = (hostrange_t) malloc(sizeof(*new));
-	if (!new) 
+	if (!new)
 		out_of_memory("hostrange create");
 	return new;
 }
@@ -688,9 +758,9 @@ static hostrange_t hostrange_create_single(const char *prefix)
 
 	return new;
 
-  error2:
+error2:
 	free(new);
-  error1:
+error1:
 	out_of_memory("hostrange create single");
 }
 
@@ -718,9 +788,9 @@ hostrange_create(char *prefix, unsigned long lo, unsigned long hi, int width)
 
 	return new;
 
-  error2:
+error2:
 	free(new);
-  error1:
+error1:
 	out_of_memory("hostrange create");
 }
 
@@ -746,7 +816,7 @@ static hostrange_t hostrange_copy(hostrange_t hr)
 		return hostrange_create_single(hr->prefix);
 	else
 		return hostrange_create(hr->prefix, hr->lo, hr->hi,
-			hr->width);
+					hr->width);
 }
 
 
@@ -791,7 +861,7 @@ static hostrange_t hostrange_delete_host(hostrange_t hr, unsigned long n)
 /* hostrange_cmp() is used to sort hostrange objects. It will
  * sort based on the following (in order):
  *  o result of strcmp on prefixes
- *  o if widths are compatible, then: 
+ *  o if widths are compatible, then:
  *       sort based on lowest suffix in range
  *    else
  *       sort based on width                     */
@@ -810,11 +880,11 @@ static int hostrange_cmp(hostrange_t h1, hostrange_t h2)
 }
 
 
-/* compare the prefixes of two hostrange objects. 
+/* compare the prefixes of two hostrange objects.
  * returns:
  *    < 0   if h1 prefix is less than h2 OR h2 == NULL.
  *
- *      0   if h1's prefix and h2's prefix match, 
+ *      0   if h1's prefix and h2's prefix match,
  *          UNLESS, either h1 or h2 (NOT both) do not have a valid suffix.
  *
  *    > 0   if h1's prefix is greater than h2's OR h1 == NULL. */
@@ -848,7 +918,7 @@ static int hostrange_within_range(hostrange_t h1, hostrange_t h2)
 }
 
 
-/* compare two hostrange objects to determine if they are width 
+/* compare two hostrange objects to determine if they are width
  * compatible,  returns:
  *  1 if widths can safely be combined
  *  0 if widths cannot be safely combined
@@ -885,27 +955,30 @@ static char *hostrange_pop(hostrange_t hr)
 		hr->lo++;    /* effectively set count == 0 */
 		host = strdup(hr->prefix);
 	} else if (hostrange_count(hr) > 0) {
-		size = strlen(hr->prefix) + hr->width + 16;    
+		size = strlen(hr->prefix) + hr->width + 16;
 		if (!(host = (char *) malloc(size * sizeof(char))))
 			out_of_memory("hostrange pop");
-#ifdef HAVE_3D
-		if (hr->width == 3) {
-			int coord[3];
-			coord[0] = hr->hi / (HOSTLIST_BASE * HOSTLIST_BASE);
-			coord[1] = (hr->hi % (HOSTLIST_BASE * HOSTLIST_BASE))
-				/ HOSTLIST_BASE;
-			coord[2] = (hr->hi % HOSTLIST_BASE);
-		
-			snprintf(host, size, "%s%c%c%c", hr->prefix, 
-				 alpha_num[coord[0]], alpha_num[coord[1]],
-				 alpha_num[coord[2]]);
+#if (SYSTEM_DIMENSIONS > 1)
+		if (hr->width == SYSTEM_DIMENSIONS) {
+			int len = 0;
+			int i2=0;
+			int coord[SYSTEM_DIMENSIONS];
+
+			_parse_int_to_array(hr->hi, coord);
+
+			len = snprintf(host, size, "%s", hr->prefix);
+			for(i2 = 0; i2<SYSTEM_DIMENSIONS; i2++) {
+				if(len <= size)
+					host[len++] = alpha_num[coord[i2]];
+			}
 			hr->hi--;
+			host[len] = '\0';
 		} else {
-			snprintf(host, size, "%s%0*lu", hr->prefix, 
+			snprintf(host, size, "%s%0*lu", hr->prefix,
 				 hr->width, hr->hi--);
 		}
 #else
-		snprintf(host, size, "%s%0*lu", hr->prefix, 
+		snprintf(host, size, "%s%0*lu", hr->prefix,
 			 hr->width, hr->hi--);
 #endif
 	}
@@ -929,24 +1002,28 @@ static char *hostrange_shift(hostrange_t hr)
 		size = strlen(hr->prefix) + hr->width + 16;
 		if (!(host = (char *) malloc(size * sizeof(char))))
 			out_of_memory("hostrange shift");
-#ifdef HAVE_3D
-		if (hr->width == 3) {
-			int coord[3];
-			coord[0] = hr->lo / (HOSTLIST_BASE * HOSTLIST_BASE);
-			coord[1] = (hr->lo % (HOSTLIST_BASE * HOSTLIST_BASE))
-				/ HOSTLIST_BASE;
-			coord[2] = (hr->lo % HOSTLIST_BASE);
-			snprintf(host, size, "%s%c%c%c", hr->prefix, 
-				 alpha_num[coord[0]], alpha_num[coord[1]],
-				 alpha_num[coord[2]]);
+#if (SYSTEM_DIMENSIONS > 1)
+		if (hr->width == SYSTEM_DIMENSIONS) {
+			int len = 0;
+			int i2=0;
+			int coord[SYSTEM_DIMENSIONS];
+
+			_parse_int_to_array(hr->lo, coord);
+
+			len = snprintf(host, size, "%s", hr->prefix);
+			for(i2 = 0; i2<SYSTEM_DIMENSIONS; i2++) {
+				if(len <= size)
+					host[len++] = alpha_num[coord[i2]];
+			}
 			hr->lo++;
+			host[len] = '\0';
 		} else {
 			snprintf(host, size, "%s%0*lu", hr->prefix,
 				 hr->width, hr->lo++);
 		}
-#else		
+#else
 		snprintf(host, size, "%s%0*lu", hr->prefix,
-			hr->width, hr->lo++);
+			 hr->width, hr->lo++);
 #endif
 	}
 
@@ -960,7 +1037,7 @@ static char *hostrange_shift(hostrange_t hr)
  *
  * -1 if ranges do not overlap (including incompatible zero padding)
  *  0 if ranges join perfectly
- * >0 number of hosts that were duplicated in  h1 and h2 
+ * >0 number of hosts that were duplicated in  h1 and h2
  *
  * h2 will be coalesced into h1 if rc >= 0
  *
@@ -1014,8 +1091,8 @@ static hostrange_t hostrange_intersect(hostrange_t h1, hostrange_t h2)
 	assert(hostrange_cmp(h1, h2) <= 0);
 
 	if ((hostrange_prefix_cmp(h1, h2) == 0)
-	&& (h1->hi > h2->lo) 
-	&& (hostrange_width_combine(h1, h2))) {
+	    && (h1->hi > h2->lo)
+	    && (hostrange_width_combine(h1, h2))) {
 
 		if (!(new = hostrange_copy(h1)))
 			return NULL;
@@ -1032,24 +1109,24 @@ static hostrange_t hostrange_intersect(hostrange_t h1, hostrange_t h2)
 static int hostrange_hn_within(hostrange_t hr, hostname_t hn)
 {
 	if (hr->singlehost) {
-		/*  
-		 *  If the current hostrange [hr] is a `singlehost' (no valid 
+		/*
+		 *  If the current hostrange [hr] is a `singlehost' (no valid
 		 *   numeric suffix (lo and hi)), then the hostrange [hr]
 		 *   stores just one host with name == hr->prefix.
-		 *  
+		 *
 		 *  Thus the full hostname in [hn] must match hr->prefix, in
-		 *   which case we return true. Otherwise, there is no 
+		 *   which case we return true. Otherwise, there is no
 		 *   possibility that [hn] matches [hr].
 		 */
 		if (strcmp (hn->hostname, hr->prefix) == 0)
 			return 1;
-		else 
+		else
 			return 0;
 	}
 
 	/*
 	 *  Now we know [hr] is not a "singlehost", so hostname
-	 *   better have a valid numeric suffix, or there is no 
+	 *   better have a valid numeric suffix, or there is no
 	 *   way we can match
 	 */
 	if (!hostname_suffix_is_valid (hn))
@@ -1059,7 +1136,7 @@ static int hostrange_hn_within(hostrange_t hr, hostname_t hn)
 	 *  If hostrange and hostname prefixes don't match, then
 	 *   there is way the hostname falls within the range [hr].
 	 */
-	if (strcmp(hr->prefix, hn->prefix) != 0) 
+	if (strcmp(hr->prefix, hn->prefix) != 0)
 		return 0;
 
 	/*
@@ -1067,8 +1144,8 @@ static int hostrange_hn_within(hostrange_t hr, hostname_t hn)
 	 *   falls within the range of [hr].
 	 */
 	if (hn->num <= hr->hi && hn->num >= hr->lo) {
-			int width = hostname_suffix_width(hn);
-			int num = hn->num;
+		int width = hostname_suffix_width(hn);
+		int num = hn->num;
 		return (_width_equiv(hr->lo, &hr->width, num, &width));
 	}
 
@@ -1089,7 +1166,7 @@ hostrange_to_string(hostrange_t hr, size_t n, char *buf, char *separator)
 
 	if (n == 0)
 		return 0;
-	
+
 	assert(hr != NULL);
 
 	if (hr->singlehost)
@@ -1098,21 +1175,23 @@ hostrange_to_string(hostrange_t hr, size_t n, char *buf, char *separator)
 	for (i = hr->lo; i <= hr->hi; i++) {
 		size_t m = (n - len) <= n ? n - len : 0; /* check for < 0 */
 		int ret = 0;
-#ifdef HAVE_3D
-		if (hr->width == 3) {
-			int coord[3];
-			coord[0] = i / (HOSTLIST_BASE * HOSTLIST_BASE);
-			coord[1] = (i % (HOSTLIST_BASE * HOSTLIST_BASE))
-				/ HOSTLIST_BASE;
-			coord[2] = (i % HOSTLIST_BASE);
-			ret = snprintf(buf + len, m, "%s%c%c%c", hr->prefix, 
-					alpha_num[coord[0]], alpha_num[coord[1]],
-					alpha_num[coord[2]]);
+#if (SYSTEM_DIMENSIONS > 1)
+		if (hr->width == SYSTEM_DIMENSIONS) {
+			int i2=0;
+			int coord[SYSTEM_DIMENSIONS];
+
+			_parse_int_to_array(i, coord);
+			ret = snprintf(buf+len, m, "%s", hr->prefix);
+			for(i2 = 0; i2<SYSTEM_DIMENSIONS; i2++) {
+				if(len+ret < n)
+					buf[len+ret] = alpha_num[coord[i2]];
+				ret++;
+			}
 		} else {
 			ret = snprintf(buf + len, m, "%s%0*lu",
 				       hr->prefix, hr->width, i);
 		}
-#else		
+#else
 		ret = snprintf(buf + len, m, "%s%0*lu",
 			       hr->prefix, hr->width, i);
 #endif
@@ -1147,42 +1226,48 @@ static size_t hostrange_numstr(hostrange_t hr, size_t n, char *buf)
 	if (hr->singlehost || n == 0)
 		return 0;
 
-#ifdef HAVE_3D
-	if (hr->width == 3) {
-		int coord[3];
-		coord[0] = hr->lo / (HOSTLIST_BASE * HOSTLIST_BASE);
-		coord[1] = (hr->lo % (HOSTLIST_BASE * HOSTLIST_BASE)) / HOSTLIST_BASE;
-		coord[2] = (hr->lo % HOSTLIST_BASE);
-		len = snprintf(buf, n, "%c%c%c",  
-			       alpha_num[coord[0]], alpha_num[coord[1]],
-			       alpha_num[coord[2]]);
+#if (SYSTEM_DIMENSIONS > 1)
+	if (hr->width == SYSTEM_DIMENSIONS) {
+		int i2=0;
+		int coord[SYSTEM_DIMENSIONS];
+
+		_parse_int_to_array(hr->lo, coord);
+
+		for(i2 = 0; i2<SYSTEM_DIMENSIONS; i2++) {
+			if(len <= n)
+				buf[len++] = alpha_num[coord[i2]];
+		}
+		buf[len] = '\0';
 	} else {
 		len = snprintf(buf, n, "%0*lu", hr->width, hr->lo);
 	}
-#else		
+#else
 	len = snprintf(buf, n, "%0*lu", hr->width, hr->lo);
 #endif
 
 	if ((len >= 0) && (len < n) && (hr->lo < hr->hi)) {
 		int len2 = 0;
-#ifdef HAVE_3D
-		if (hr->width == 3) {
-			int coord[3];
-			coord[0] = hr->hi / (HOSTLIST_BASE * HOSTLIST_BASE);
-			coord[1] = (hr->hi % (HOSTLIST_BASE * HOSTLIST_BASE))
-				/ HOSTLIST_BASE;
-			coord[2] = (hr->hi % HOSTLIST_BASE);
-			len2 = snprintf(buf+len, n-len, "-%c%c%c",  
-					alpha_num[coord[0]], alpha_num[coord[1]],
-					alpha_num[coord[2]]);
+#if (SYSTEM_DIMENSIONS > 1)
+		if (hr->width == SYSTEM_DIMENSIONS) {
+			int i2=0;
+			int coord[SYSTEM_DIMENSIONS];
+
+			_parse_int_to_array(hr->hi, coord);
+
+			buf[len++] = '-';
+			for(i2 = 0; i2<SYSTEM_DIMENSIONS; i2++) {
+				if(len <= n)
+					buf[len++] = alpha_num[coord[i2]];
+			}
+			buf[len] = '\0';
 		} else {
-			len2 = snprintf(buf+len, n-len, "-%0*lu", 
+			len2 = snprintf(buf+len, n-len, "-%0*lu",
 					hr->width, hr->hi);
 		}
-#else				
+#else
 		len2 = snprintf(buf+len, n-len, "-%0*lu", hr->width, hr->hi);
 #endif
-		if (len2 < 0) 
+		if (len2 < 0)
 			len = -1;
 		else
 			len += len2;
@@ -1194,7 +1279,7 @@ static size_t hostrange_numstr(hostrange_t hr, size_t n, char *buf)
 
 /* ----[ hostlist functions ]---- */
 
-/* Create a new hostlist object. 
+/* Create a new hostlist object.
  * Returns an empty hostlist, or NULL if memory allocation fails.
  */
 static hostlist_t hostlist_new(void)
@@ -1221,9 +1306,9 @@ static hostlist_t hostlist_new(void)
 	new->ilist = NULL;
 	return new;
 
-  fail2:
+fail2:
 	free(new);
-  fail1:
+fail1:
 	out_of_memory("hostlist_create");
 }
 
@@ -1231,9 +1316,9 @@ static hostlist_t hostlist_new(void)
 /* Resize the internal array used to store the list of hostrange objects.
  *
  * returns 1 for a successful resize,
- *         0 if call to _realloc fails    
+ *         0 if call to _realloc fails
  *
- * It is assumed that the caller has the hostlist hl locked 
+ * It is assumed that the caller has the hostlist hl locked
  */
 static int hostlist_resize(hostlist_t hl, size_t newsize)
 {
@@ -1244,7 +1329,7 @@ static int hostlist_resize(hostlist_t hl, size_t newsize)
 	oldsize = hl->size;
 	hl->size = newsize;
 	hl->hr = realloc((void *) hl->hr, hl->size*sizeof(hostrange_t));
-	if (!(hl->hr)) 
+	if (!(hl->hr))
 		return 0;
 
 	for (i = oldsize; i < newsize; i++)
@@ -1282,9 +1367,9 @@ static int hostlist_push_range(hostlist_t hl, hostrange_t hr)
 		goto error;
 
 	if (hl->nranges > 0
-	&& hostrange_prefix_cmp(tail, hr) == 0
-	&& tail->hi == hr->lo - 1
-	&& hostrange_width_combine(tail, hr)) {
+	    && hostrange_prefix_cmp(tail, hr) == 0
+	    && tail->hi == hr->lo - 1
+	    && hostrange_width_combine(tail, hr)) {
 		tail->hi = hr->hi;
 	} else {
 		hostrange_t new = hostrange_copy(hr);
@@ -1299,7 +1384,7 @@ static int hostlist_push_range(hostlist_t hl, hostrange_t hr)
 
 	return retval;
 
-  error:
+error:
 	UNLOCK_HOSTLIST(hl);
 	return -1;
 }
@@ -1307,11 +1392,11 @@ static int hostlist_push_range(hostlist_t hl, hostrange_t hr)
 
 
 /* Same as hostlist_push_range() above, but prefix, lo, hi, and width
- * are passed as args 
+ * are passed as args
  */
 static int
 hostlist_push_hr(hostlist_t hl, char *prefix, unsigned long lo,
-	unsigned long hi, int width)
+		 unsigned long hi, int width)
 {
 	hostrange_t hr = hostrange_create(prefix, lo, hi, width);
 	int retval = hostlist_push_range(hl, hr);
@@ -1398,18 +1483,19 @@ hostlist_t _hostlist_create(const char *hostlist, char *sep, char *r_op)
 	char prefix[256] = "";
 	int pos = 0;
 	int error = 0;
+	int hostlist_base = HOSTLIST_BASE;
 	char range_op = r_op[0];/* XXX support > 1 char range ops in future? */
 
 	hostlist_t new = hostlist_new();
 
 	if (hostlist == NULL)
 		return new;
-#ifdef HAVE_3D
+#if (SYSTEM_DIMENSIONS > 1)
 	fatal("WANT_RECKLESS_HOSTRANGE_EXPANSION does not work on "
 	      "Bluegene or Sun Constellation systems!!!!");
 #endif
 	orig = str = strdup(hostlist);
-	
+
 	/* return an empty list if an empty string was passed in */
 	if (str == NULL || strlen(str) == 0)
 		goto done;
@@ -1425,23 +1511,23 @@ hostlist_t _hostlist_create(const char *hostlist, char *sep, char *r_op)
 
 		high = low = 0;
 
-		/* find end of alpha part 
+		/* find end of alpha part
 		 *   do this by finding last occurence of range_op in str */
 		pos = strlen(tok) - 1;
 		if (strstr(tok, r_op) != '\0') {
-			while (pos >= 0 && (char) tok[pos] != range_op) 
+			while (pos >= 0 && (char) tok[pos] != range_op)
 				pos--;
 		}
 
 		/* now back up past any digits */
 		while (pos >= 0 && isdigit((char) tok[--pos])) {;}
 
-		/* Check for valid x-y range (x must be a digit) 
+		/* Check for valid x-y range (x must be a digit)
 		 *   Reset pos if the range is not valid         */
 		if (!isdigit((char) tok[++pos]))
 			pos = strlen(tok) - 1;
 
-		/* create prefix string 
+		/* create prefix string
 		 * if prefix will be zero length, but prefix already exists
 		 * use the previous prefix and fmt
 		 */
@@ -1461,8 +1547,14 @@ hostlist_t _hostlist_create(const char *hostlist, char *sep, char *r_op)
 		} else
 			tok += pos;
 
+#if (SYSTEM_DIMENSIONS > 1)
+		if(strlen(tok) != SYSTEM_DIMENSIONS)
+			hostlist_base = 10;
+		else
+			hostlist_base = HOSTLIST_BASE;
+#endif
 		/* get lower bound */
-		low = strtoul(tok, (char **) &tok, HOSTLIST_BASE);
+		low = strtoul(tok, (char **) &tok, hostlist_base);
 
 		if (*tok == range_op) {    /* now get range upper bound */
 			/* push pointer past range op */
@@ -1485,11 +1577,13 @@ hostlist_t _hostlist_create(const char *hostlist, char *sep, char *r_op)
 				tok += pos;
 
 			/* make sure we have digits to the end */
-			for (pos = 0; tok[pos] && isdigit((char) tok[pos]); ++pos) {;}
+			for (pos = 0;
+			     tok[pos] && isdigit((char) tok[pos]);
+			     ++pos) {;}
 
 			if (pos > 0) {    /* we have digits to process */
 				high = strtoul(tok, (char **) &tok,
-					       HOSTLIST_BASE);
+					       hostlist_base);
 			} else {    /* bad boy, no digits */
 				error = 1;
 			}
@@ -1501,7 +1595,7 @@ hostlist_t _hostlist_create(const char *hostlist, char *sep, char *r_op)
 			high = 0;    /* special case, ugh. */
 		}
 
-		/* error if: 
+		/* error if:
 		 * 1. we are not at end of string
 		 * 2. upper bound equals lower bound
 		 */
@@ -1519,7 +1613,7 @@ hostlist_t _hostlist_create(const char *hostlist, char *sep, char *r_op)
 		error = 0;
 	}
 
-  done:
+done:
 	if(orig)
 		free(orig);
 
@@ -1528,19 +1622,64 @@ hostlist_t _hostlist_create(const char *hostlist, char *sep, char *r_op)
 
 #else                /* !WANT_RECKLESS_HOSTRANGE_EXPANSION */
 
-hostlist_t _hostlist_create(const char *hostlist, char *sep, char *r_op) 
+hostlist_t _hostlist_create(const char *hostlist, char *sep, char *r_op)
 {
 	return _hostlist_create_bracketed(hostlist, sep, r_op);
 }
 
 #endif                /* WANT_RECKLESS_HOSTRANGE_EXPANSION */
 
-struct _range {
-	unsigned long lo, hi;
-	int width;
-};
 
-/* Grab a single range from str 
+
+static int _parse_box_range(char *str, struct _range *ranges,
+ 			    int len, int *count)
+{
+
+#if (SYSTEM_DIMENSIONS > 1)
+	int start[SYSTEM_DIMENSIONS], end[SYSTEM_DIMENSIONS],
+		pos[SYSTEM_DIMENSIONS];
+	char coord[SYSTEM_DIMENSIONS+1];
+	char coord2[SYSTEM_DIMENSIONS+1];
+	int i, a;
+
+	if ((str[SYSTEM_DIMENSIONS] != 'x') ||
+	    (str[(SYSTEM_DIMENSIONS * 2) + 1] != '\0'))
+		return 0;
+
+	for(i = 0; i<SYSTEM_DIMENSIONS; i++) {
+		if ((str[i] >= '0') && (str[i] <= '9'))
+			start[i] = str[i] - '0';
+		else if ((str[i] >= 'A') && (str[i] <= 'Z'))
+			start[i] = str[i] - 'A' + 10;
+		else
+			return 0;
+
+		a = i + SYSTEM_DIMENSIONS + 1;
+		if ((str[a] >= '0') && (str[a] <= '9'))
+			end[i] = str[a] - '0';
+		else if ((str[a] >= 'A') && (str[a] <= 'Z'))
+			end[i] = str[a] - 'A' + 10;
+		else
+			return 0;
+	}
+
+	memset(coord, 0, sizeof(coord));
+	memset(coord2, 0, sizeof(coord2));
+
+	for(i = 0; i<SYSTEM_DIMENSIONS; i++) {
+		coord[i] = alpha_num[start[i]];
+		coord2[i] = alpha_num[end[i]];
+	}
+/* 	info("adding ranges in %sx%s", coord, coord2); */
+
+	return _add_box_ranges(A, 0, start, end, pos, ranges, len, count);
+#else
+	fatal("Unsupported dimensions count %d", SYSTEM_DIMENSIONS);
+	return 0;
+#endif
+}
+
+/* Grab a single range from str
  * returns 1 if str contained a valid number or range,
  *         0 if conversion of str to a range failed.
  */
@@ -1548,12 +1687,13 @@ static int _parse_single_range(const char *str, struct _range *range)
 {
 	char *p, *q;
 	char *orig = strdup(str);
-	if (!orig) 
+	int hostlist_base = HOSTLIST_BASE;
+
+	if (!orig)
 		seterrno_ret(ENOMEM, 0);
-	
-	if ((p = strchr(str, 'x'))) {
-		goto error; /* do NOT allow boxes in here */
-	}
+
+	if ((p = strchr(str, 'x')))
+		goto error; /* do NOT allow boxes here */
 
 	if ((p = strchr(str, '-'))) {
 		*p++ = '\0';
@@ -1561,29 +1701,39 @@ static int _parse_single_range(const char *str, struct _range *range)
 			goto error;
 	}
 
-	range->lo = strtoul(str, &q, HOSTLIST_BASE);
+	range->width = strlen(str);
 
-	if (q == str) 
-		goto error;
-	
-	range->hi = (p && *p) ? strtoul(p, &q, HOSTLIST_BASE) : range->lo;
+#if (SYSTEM_DIMENSIONS > 1)
+	/* If we get something here where the width is not
+	   SYSTEM_DIMENSIONS we need to treat it as a regular number
+	   since that is how it will be treated in the future.
+	*/
+	if(range->width != SYSTEM_DIMENSIONS)
+		hostlist_base = 10;
+#endif
+	range->lo = strtoul(str, &q, hostlist_base);
 
-	if (q == p || *q != '\0') 
+	if (q == str)
 		goto error;
-	
-	if (range->lo > range->hi) 
+
+	range->hi = (p && *p) ? strtoul(p, &q, hostlist_base) : range->lo;
+
+	if (q == p || *q != '\0')
 		goto error;
-	
+
+	if (range->lo > range->hi)
+		goto error;
+
 	if (range->hi - range->lo + 1 > MAX_RANGE ) {
-		_error(__FILE__, __LINE__, "Too many hosts in range `%s'\n", orig);
+		_error(__FILE__, __LINE__, "Too many hosts in range `%s'\n",
+		       orig);
 		free(orig);
 		seterrno_ret(ERANGE, 0);
 	}
-	
+
 	free(orig);
-	range->width = strlen(str);
 	return 1;
-	
+
 error:
 	errno = EINVAL;
 	_error(__FILE__, __LINE__, "Invalid range: `%s'", orig);
@@ -1592,60 +1742,8 @@ error:
 }
 
 /*
- * Convert description of a rectangular prism in 3-D node space into a set of 
- * sequential node ranges.
- * str IN - contains "<number>x<number>" in which the two number describe the
- *		XYZ boundaries of the nodes, each must contain three-digits
- * ranges IN/OUT - set of high/low numeric ranges based upon sequential ordering
- * len IN - number of entries in ranges structure
- * count OUT - location in ranges of first unused entry
- * RET 1 if str contained a valid number or range,
- *	0 if conversion of str to a range failed.
- */
-static int _parse_box_range(char *str, struct _range *ranges,
-			    int len, int *count)
-{
-	int a[3], b[3], i1, i2, i;
-	char new_str[8];
-
-	if((str[3] != 'x') || (str[7] != '\0')) 
-		return 0;
-
-	for(i = 0; i<3; i++) {
-		if ((str[i] >= '0') && (str[i] <= '9'))
-			a[i] = str[i] - '0';
-		else if ((str[i] >= 'A') && (str[i] <= 'Z'))
-			a[i] = str[i] - 'A' + 10;
-		else
-			return 0;
-
-		if ((str[i+4] >= '0') && (str[i+4] <= '9'))
-			b[i] = str[i+4] - '0';
-		else if ((str[i+4] >= 'A') && (str[i+4] <= 'Z'))
-			b[i] = str[i+4] - 'A' + 10;
-		else
-			return 0;
-	}
-
-	for (i1=a[0]; i1 <= b[0]; i1++) {
-		for (i2=a[1]; i2 <=b[1]; i2++) {
-			if (*count == len)
-				return -1;
-			snprintf(new_str, 8, "%c%c%c-%c%c%c", 
-				 alpha_num[i1], alpha_num[i2], alpha_num[a[2]],
-				 alpha_num[i1], alpha_num[i2], 
-				 alpha_num[b[2]]);
-			if (!_parse_single_range(new_str,&ranges[*count]))
-				return -1;
-			(*count)++;
-		}
-	}
-	return 1;
-}
-
-/*
  * Convert 'str' containing comma separated digits and ranges into an array
- *  of struct _range types (max 'len' elements).  
+ *  of struct _range types (max 'len' elements).
  *
  * Return number of ranges created, or -1 on error.
  */
@@ -1655,17 +1753,24 @@ static int _parse_range_list(char *str, struct _range *ranges, int len)
 	int count = 0;
 
 	while (str) {
-		if (count == len)
+		if (count == len) {
+			errno = EINVAL;
+			_error(__FILE__, __LINE__,
+			       "Too many ranges, can't process "
+			       "entire list");
 			return -1;
+		}
 		if ((p = strchr(str, ',')))
 			*p++ = '\0';
-
-		if ((str[3] == 'x') && (strlen(str) == 7)) {
-			if (!_parse_box_range(str, ranges, len, &count)) 
-				return -1;  
+/* 		info("looking at %s", str); */
+		if ((SYSTEM_DIMENSIONS > 1) &&
+		    (str[SYSTEM_DIMENSIONS] == 'x') &&
+		    (strlen(str) == (SYSTEM_DIMENSIONS * 2 + 1))) {
+			if (!_parse_box_range(str, ranges, len, &count))
+				return -1;
 		} else {
-			if (!_parse_single_range(str, &ranges[count++])) 
-				return -1;  
+			if (!_parse_single_range(str, &ranges[count++]))
+				return -1;
 		}
 		str = p;
 	}
@@ -1705,7 +1810,7 @@ _push_range_list(hostlist_t hl, char *prefix, struct _range *range,
 			}
 			for (j = pre_range->lo; j <= pre_range->hi; j++) {
 				snprintf(new_prefix, sizeof(new_prefix),
-					 "%s%0*lu%s", tmp_prefix, 
+					 "%s%0*lu%s", tmp_prefix,
 					 pre_range->width, j, q);
 				range = saved_range;
 				for (k = 0; k < n; k++) {
@@ -1721,7 +1826,7 @@ _push_range_list(hostlist_t hl, char *prefix, struct _range *range,
 	}
 
 	for (k = 0; k < n; k++) {
-		hostlist_push_hr(hl, prefix, 
+		hostlist_push_hr(hl, prefix,
 				 range->lo, range->hi, range->width);
 		range++;
 	}
@@ -1729,10 +1834,10 @@ _push_range_list(hostlist_t hl, char *prefix, struct _range *range,
 }
 
 /*
- * Create a hostlist from a string with brackets '[' ']' to aid 
+ * Create a hostlist from a string with brackets '[' ']' to aid
  * detection of ranges and compressed lists
  */
-static hostlist_t 
+static hostlist_t
 _hostlist_create_bracketed(const char *hostlist, char *sep, char *r_op)
 {
 	hostlist_t new = hostlist_new();
@@ -1751,7 +1856,6 @@ _hostlist_create_bracketed(const char *hostlist, char *sep, char *r_op)
 
 	while ((tok = _next_tok(sep, &str)) != NULL) {
 		strncpy(cur_tok, tok, 1024);
-
 		if ((p = strrchr(tok, '[')) != NULL) {
 			char *q, *prefix = tok;
 			*p++ = '\0';
@@ -1761,16 +1865,22 @@ _hostlist_create_bracketed(const char *hostlist, char *sep, char *r_op)
 					goto error;
 				*q = '\0';
 				nr = _parse_range_list(p, ranges, MAX_RANGES);
-				if (nr < 0) 
+				if (nr < 0)
 					goto error;
 				if (_push_range_list(new, prefix, ranges, nr))
 					goto error;
-                
 			} else {
 				/* The hostname itself contains a '['
-				 * (no ']' found). 
-				 * Not likely what the user wanted. */
-				hostlist_push_host(new, cur_tok);
+				 * (no ']' found).
+				 * Not likely what the user
+				 * wanted. We will just tack one on
+				 * the end. */
+				strcat(cur_tok, "]");
+				if(prefix && prefix[0])
+					hostlist_push_host(new, cur_tok);
+				else
+					hostlist_push_host(new, p);
+
 			}
 
 		} else
@@ -1780,7 +1890,7 @@ _hostlist_create_bracketed(const char *hostlist, char *sep, char *r_op)
 	free(orig);
 	return new;
 
-  error:
+error:
 	err = errno = EINVAL;
 	hostlist_destroy(new);
 	free(orig);
@@ -1815,7 +1925,7 @@ hostlist_t hostlist_copy(const hostlist_t hl)
 	for (i = 0; i < hl->nranges; i++)
 		new->hr[i] = hostrange_copy(hl->hr[i]);
 
-  done:
+done:
 	UNLOCK_HOSTLIST(hl);
 	return new;
 }
@@ -1869,12 +1979,12 @@ int hostlist_push_host(hostlist_t hl, const char *str)
 
 	hn = hostname_create(str);
 
-	if (hostname_suffix_is_valid(hn)) 
+	if (hostname_suffix_is_valid(hn))
 		hr = hostrange_create(hn->prefix, hn->num, hn->num,
 				      hostname_suffix_width(hn));
-	else 
+	else
 		hr = hostrange_create_single(str);
-	
+
 	hostlist_push_range(hl, hr);
 
 	hostrange_destroy(hr);
@@ -1908,7 +2018,7 @@ char *hostlist_pop(hostlist_t hl)
 		error("hostlist_pop: no hostlist given");
 		return NULL;
 	}
-	
+
 	LOCK_HOSTLIST(hl);
 	if (hl->nhosts > 0) {
 		hostrange_t hr = hl->hr[hl->nranges - 1];
@@ -1923,7 +2033,7 @@ char *hostlist_pop(hostlist_t hl)
 	return host;
 }
 
-/* find all iterators affected by a shift (or deletion) at 
+/* find all iterators affected by a shift (or deletion) at
  * hl->hr[idx], depth, with the deletion of n ranges */
 static void
 hostlist_shift_iterators(hostlist_t hl, int idx, int depth, int n)
@@ -2032,8 +2142,8 @@ char *hostlist_shift_range(hostlist_t hl)
 	do {
 		hostlist_push_range(hltmp, hl->hr[i]);
 		hostrange_destroy(hl->hr[i]);
-	} while ( (++i < hl->nranges) 
-		&& hostrange_within_range(hltmp->hr[0], hl->hr[i]) );
+	} while ( (++i < hl->nranges)
+		  && hostrange_within_range(hltmp->hr[0], hl->hr[i]) );
 
 	hostlist_shift_iterators(hl, i, 0, hltmp->nranges);
 
@@ -2061,7 +2171,7 @@ int hostlist_delete(hostlist_t hl, const char *hosts)
 	hostlist_t hltmp;
 	if(!hl)
 		return -1;
-	
+
 	if (!(hltmp = hostlist_create(hosts)))
 		seterrno_ret(EINVAL, 0);
 
@@ -2097,23 +2207,24 @@ _hostrange_string(hostrange_t hr, int depth)
 	int  len = snprintf(buf, MAXHOSTNAMELEN + 15, "%s", hr->prefix);
 
 	if (!hr->singlehost) {
-#ifdef HAVE_3D
-		if (hr->width == 3) {
-			int coord[3];
-			int temp = hr->lo+depth;
-			coord[0] = temp / (HOSTLIST_BASE * HOSTLIST_BASE);
-			coord[1] = (temp % (HOSTLIST_BASE * HOSTLIST_BASE))
-				/ HOSTLIST_BASE;
-			coord[2] = (temp % HOSTLIST_BASE);
-			snprintf(buf+len, MAXHOSTNAMELEN+15 - len, "%c%c%c",
-				 alpha_num[coord[0]], alpha_num[coord[1]],
-				 alpha_num[coord[2]]);
+#if (SYSTEM_DIMENSIONS > 1)
+		if (hr->width == SYSTEM_DIMENSIONS) {
+			int i2=0;
+			int coord[SYSTEM_DIMENSIONS];
+
+			_parse_int_to_array((hr->lo+depth), coord);
+
+			for(i2 = 0; i2<SYSTEM_DIMENSIONS; i2++) {
+				if(len <= (MAXHOSTNAMELEN + 15))
+					buf[len++] = alpha_num[coord[i2]];
+			}
+			buf[len] = '\0';
 		} else {
-			snprintf(buf+len, MAXHOSTNAMELEN+15 - len, "%0*lu", 
+			snprintf(buf+len, MAXHOSTNAMELEN+15 - len, "%0*lu",
 				 hr->width, hr->lo + depth);
 		}
 #else
-		snprintf(buf+len, MAXHOSTNAMELEN+15 - len, "%0*lu", 
+		snprintf(buf+len, MAXHOSTNAMELEN+15 - len, "%0*lu",
 			 hr->width, hr->lo + depth);
 #endif
 	}
@@ -2178,7 +2289,7 @@ int hostlist_delete_nth(hostlist_t hl, int n)
 
 	}
 
-  done:
+done:
 	UNLOCK_HOSTLIST(hl);
 	hl->nhosts--;
 	return 1;
@@ -2219,13 +2330,13 @@ int hostlist_find(hostlist_t hl, const char *hostname)
 			count += hostrange_count(hl->hr[i]);
 	}
 
-  done:
+done:
 	UNLOCK_HOSTLIST(hl);
 	hostname_destroy(hn);
 	return ret;
 }
 
-/* hostrange compare with void * arguments to allow use with 
+/* hostrange compare with void * arguments to allow use with
  * libc qsort()
  */
 int _cmp(const void *hr1, const void *hr2)
@@ -2259,7 +2370,7 @@ void hostlist_sort(hostlist_t hl)
 }
 
 
-/* search through hostlist for ranges that can be collapsed 
+/* search through hostlist for ranges that can be collapsed
  * does =not= delete any hosts
  */
 static void hostlist_collapse(hostlist_t hl)
@@ -2281,7 +2392,7 @@ static void hostlist_collapse(hostlist_t hl)
 	UNLOCK_HOSTLIST(hl);
 }
 
-/* search through hostlist (hl) for intersecting ranges 
+/* search through hostlist (hl) for intersecting ranges
  * split up duplicates and coalesce ranges where possible
  */
 static void hostlist_coalesce(hostlist_t hl)
@@ -2311,8 +2422,8 @@ static void hostlist_coalesce(hostlist_t hl)
 
 			while (new->lo <= new->hi) {
 				hostrange_t hr = hostrange_create( new->prefix,
-					new->lo, new->lo,
-					new->width );
+								   new->lo, new->lo,
+								   new->width );
 
 				if (new->lo > hprev->hi)
 					hostlist_insert_range(hl, hr, j++);
@@ -2444,7 +2555,6 @@ _get_bracketed_list(hostlist_t hl, int *start, const size_t n, char *buf)
 		if (bracket_needed) /* Only need commas inside brackets */
 			buf[len++] = ',';
 	} while (++i < hl->nranges && hostrange_within_range(hr[i], hr[i-1]));
-
 	if (bracket_needed && len < n && len > 0) {
 
 		/* Add trailing bracket (change trailing "," from above to "]" */
@@ -2452,7 +2562,6 @@ _get_bracketed_list(hostlist_t hl, int *start, const size_t n, char *buf)
 
 		/* NUL terminate for safety, but do not add terminator to len */
 		buf[len]   = '\0';
-
 	} else if (len >= n) {
 		if (n > 0)
 			buf[n-1] = '\0';
@@ -2466,7 +2575,199 @@ _get_bracketed_list(hostlist_t hl, int *start, const size_t n, char *buf)
 	return len;
 }
 
-#ifdef HAVE_BG
+#if (SYSTEM_DIMENSIONS > 1)
+static void _parse_int_to_array(int in, int out[SYSTEM_DIMENSIONS])
+{
+	int a;
+
+	static int my_start_pow_minus = 0;
+	static int my_start_pow = 0;
+        int my_pow_minus = my_start_pow_minus;
+	int my_pow = my_start_pow;
+
+	if(!my_start_pow) {
+		/* this will never change so just calculate it once */
+		my_start_pow = 1;
+
+		/* To avoid having to use the pow function and include
+		   the math lib everywhere just do this. */
+		for(a = 0; a<SYSTEM_DIMENSIONS; a++)
+			my_start_pow *= HOSTLIST_BASE;
+
+		my_pow = my_start_pow;
+		my_pow_minus = my_start_pow_minus =
+			my_start_pow / HOSTLIST_BASE;
+	}
+
+	for(a = 0; a<SYSTEM_DIMENSIONS; a++) {
+		out[a] = (int)in % my_pow;
+		/* This only needs to be done until we get a 0 here
+		   meaning we are on the last dimension. This avoids
+		   dividing by 0. */
+		if(SYSTEM_DIMENSIONS - a) {
+			out[a] /= my_pow_minus;
+
+			/* set this up for the next dimension */
+			my_pow = my_pow_minus;
+			my_pow_minus /= HOSTLIST_BASE;
+		}
+	}
+}
+
+static int _tell_if_used(int dim, int curr,
+			 int start[SYSTEM_DIMENSIONS],
+			 int end[SYSTEM_DIMENSIONS],
+			 int last[SYSTEM_DIMENSIONS], int *found)
+{
+	int rc = 1;
+	int start_curr = curr;
+/* 	int i; */
+/* 	char coord[SYSTEM_DIMENSIONS+1]; */
+/* 	memset(coord, 0, sizeof(coord)); */
+
+	for (last[dim]=start[dim]; last[dim]<=grid_end[dim]; last[dim]++) {
+		curr = start_curr + (last[dim] * offset[dim]);
+		if(dim == (SYSTEM_DIMENSIONS-1)) {
+			if (!grid[curr]) {
+/* 				for(i = 0; i<SYSTEM_DIMENSIONS; i++) { */
+/* 					coord[i] = alpha_num[last[i]]; */
+/* 				} */
+/* 				info("%s not used", coord); */
+				if((*found) == -1)
+					continue;
+				else if(end[dim] < grid_end[dim]) {
+					/* try to get a box out of
+					   this slice. */
+					grid_end[dim] = end[dim];
+					goto end_it;
+				} else
+					return 0;
+			}
+/* 			for(i = 0; i<SYSTEM_DIMENSIONS; i++) { */
+/* 				coord[i] = alpha_num[last[i]]; */
+/* 			} */
+/* 			info("%s used", coord); */
+			if((*found) == -1) {
+/* 				for(i = 0; i<SYSTEM_DIMENSIONS; i++) { */
+/* 					coord[i] = alpha_num[last[i]]; */
+/* 				} */
+/* 				info("box starts at %s", coord); */
+				memcpy(start, last, dim_grid_size);
+				memcpy(end, last, dim_grid_size);
+				(*found) = SYSTEM_DIMENSIONS;
+			} else if((*found) >= dim) {
+/* 				for(i = 0; i<SYSTEM_DIMENSIONS; i++) { */
+/* 					coord[i] = alpha_num[last[i]]; */
+/* 				} */
+/* 				info("first end %d here %s", dim, coord); */
+				memcpy(end, last, dim_grid_size);
+				(*found) = dim;
+			}
+		} else {
+			if((rc = _tell_if_used(dim+1, curr,
+					       start, end,
+					       last, found)) != 1) {
+				return rc;
+			}
+			if((*found) >= dim) {
+/* 				for(i = 0; i<SYSTEM_DIMENSIONS; i++) { */
+/* 					coord[i] = alpha_num[last[i]]; */
+/* 				} */
+/* 				info("%d here %s", dim, coord); */
+				memcpy(end, last, dim_grid_size);
+				(*found) = dim;
+			} else if((*found) == -1)
+				start[dim] = grid_start[dim];
+		}
+	}
+end_it:
+	last[dim]--;
+
+	return rc;
+}
+
+static int _get_next_box(int start[SYSTEM_DIMENSIONS],
+			 int end[SYSTEM_DIMENSIONS])
+{
+	static int orig_grid_end[SYSTEM_DIMENSIONS];
+	static int last[SYSTEM_DIMENSIONS];
+	int pos[SYSTEM_DIMENSIONS];
+/* 	int i; */
+/* 	char coord[SYSTEM_DIMENSIONS+1]; */
+/* 	char coord2[SYSTEM_DIMENSIONS+1]; */
+	int found = -1;
+	int rc = 0;
+	int new_min[SYSTEM_DIMENSIONS];
+	int new_max[SYSTEM_DIMENSIONS];
+
+/* 	memset(coord, 0, sizeof(coord)); */
+/* 	memset(coord2, 0, sizeof(coord2)); */
+
+again:
+	if(start[A] == -1) {
+		memcpy(start, grid_start, dim_grid_size);
+		/* We need to keep track of this to make sure we get
+		   all the nodes marked since this could change based
+		   on the boxes we are able to make.
+		*/
+		memcpy(orig_grid_end, grid_end, dim_grid_size);
+	} else
+		memcpy(start, last, dim_grid_size);
+
+	memcpy(end, start, dim_grid_size);
+
+
+/* 	for(i = 0; i<SYSTEM_DIMENSIONS; i++) { */
+/* 		coord[i] = alpha_num[start[i]]; */
+/* 	}	 */
+/* 	info("beginning with %s", coord); */
+
+	_tell_if_used(A, 0, start, end, last, &found);
+
+/* 	for(i = 0; i<SYSTEM_DIMENSIONS; i++) { */
+/* 		coord[i] = alpha_num[grid_start[i]]; */
+/* 		coord2[i] = alpha_num[grid_end[i]]; */
+/* 	}	 */
+/* 	info("current grid is %sx%s", coord, coord2); */
+
+	/* remove what we just did */
+	_set_box_in_grid(A, 0, start, end, false);
+
+	/* set the new min max of the grid */
+	memset(new_min, HOSTLIST_BASE, dim_grid_size);
+	memset(new_max, -1, dim_grid_size);
+
+	/* send the orid_grid_end so we don't miss anything that was set. */
+	_set_min_max_of_grid(A, 0, grid_start, orig_grid_end,
+			     new_min, new_max, pos);
+
+	if(new_max[A] != -1) {
+/* 		for(i = 0; i<SYSTEM_DIMENSIONS; i++) { */
+/* 			coord[i] = alpha_num[new_min[i]]; */
+/* 			coord2[i] = alpha_num[new_max[i]]; */
+/* 		}	 */
+/* 		info("here with %sx%s", coord, coord2); */
+		memcpy(grid_start, new_min, dim_grid_size);
+		memcpy(grid_end, new_max, dim_grid_size);
+		memcpy(last, grid_start, dim_grid_size);
+
+/* 		for(i = 0; i<SYSTEM_DIMENSIONS; i++)  */
+/* 			coord[i] = alpha_num[last[i]]; */
+/* 		info("next start %s", coord); */
+		if(found == -1) {
+			/* There are still nodes set in the grid, so we need
+			   to go through them again to make sure we got all
+			   the nodes that weren't included in the boxes of
+			   previous runs. */
+			goto again;
+		}
+	}
+
+	if(found != -1)
+		rc = 1;
+
+	return rc;
+}
 
 /* logic for block node description */
 /* write the next bracketed hostlist, i.e. prefix[n-m,k,...]
@@ -2480,68 +2781,59 @@ _get_bracketed_list(hostlist_t hl, int *start, const size_t n, char *buf)
 static int
 _get_boxes(char *buf, int max_len)
 {
-	int i, j, k, len = 0;
-	int is_box, start_box=-1, end_box=-1;
+	int len=0, i;
+	int curr_min[SYSTEM_DIMENSIONS], curr_max[SYSTEM_DIMENSIONS];
+/* 	char coord[SYSTEM_DIMENSIONS+1]; */
+/* 	char coord2[SYSTEM_DIMENSIONS+1]; */
+/* 	memset(coord, 0, sizeof(coord)); */
+/* 	memset(coord2, 0, sizeof(coord2)); */
 
-	/* scan each X-plane for a box then match across X values */
-	for (i=axis_min_x; i<=axis_max_x; i++) {
-		is_box = 1;
-		for (j=axis_min_y; j<=axis_max_y; j++) {
-			for (k=axis_min_z; k<=axis_max_z; k++) {
-				if (!axis[i][j][k]) {
-					is_box = 0;
-					break;
-				}
-			}
-		}
-		if (is_box) {
-			if (start_box == -1)
-				start_box = i;
-			end_box = i;
-		}
+	/* this means we are at the beginning */
+	curr_min[A] = -1;
 
+/* 	for(i=0; i<HOSTLIST_BASE*HOSTLIST_BASE*HOSTLIST_BASE*HOSTLIST_BASE; i++) { */
+/* 		if(grid[i]) */
+/* 			info("got one at %d", i); */
+/* 	} */
 
-		if (((len+8) < max_len) && (start_box != -1)
-		    && ((is_box == 0) || (i == axis_max_x))) {
-			if(start_box == end_box
-			   && axis_min_y == axis_max_y
-			   && axis_min_z == axis_max_z) {
-				sprintf(buf+len,"%c%c%c,",
-					alpha_num[start_box],
-					alpha_num[axis_min_y],
-					alpha_num[axis_min_z]);
-				len += 4;
-			} else {
-				sprintf(buf+len,"%c%c%cx%c%c%c,",
-					alpha_num[start_box],
-					alpha_num[axis_min_y],
-					alpha_num[axis_min_z],
-					alpha_num[end_box], 
-					alpha_num[axis_max_y],
-					alpha_num[axis_max_z]);
-				len += 8;
+	while(_get_next_box(curr_min, curr_max)) {
+/* 		for(i = 0; i<SYSTEM_DIMENSIONS; i++) { */
+/* 			coord[i] = alpha_num[curr_min[i]]; */
+/* 			coord2[i] = alpha_num[curr_max[i]]; */
+/* 		} */
+/* 		info("%sx%s is a box", coord, coord2); */
+		if(!memcmp(curr_min, curr_max, dim_grid_size)) {
+			for(i = 0; i<SYSTEM_DIMENSIONS; i++) {
+				if(len >= max_len)
+					goto end_it;
+				buf[len++] = alpha_num[curr_min[i]];
 			}
-			start_box = -1;
-			end_box = -1;
-		}
-		if (is_box == 0) {
-			for (j=axis_min_y; j<=axis_max_y; j++) {
-				for (k=axis_min_z; k<=axis_max_z; k++) {
-					if (!axis[i][j][k])
-						continue;
-					if ((len+4) >= max_len)
-						break;
-					sprintf(buf+len,"%c%c%c,",
-						alpha_num[i], alpha_num[j],
-						alpha_num[k]);
-					len += 4;
-				}
+			if(len >= max_len)
+				goto end_it;
+			buf[len++] = ',';
+		} else {
+			for(i = 0; i<SYSTEM_DIMENSIONS; i++) {
+				if(len >= max_len)
+					goto end_it;
+				buf[len++] = alpha_num[curr_min[i]];
 			}
+			if(len >= max_len)
+				goto end_it;
+			buf[len++] = 'x';
+			for(i = 0; i<SYSTEM_DIMENSIONS; i++) {
+				if(len >= max_len)
+					goto end_it;
+				buf[len++] = alpha_num[curr_max[i]];
+			}
+			if(len >= max_len)
+				goto end_it;
+			buf[len++] = ',';
 		}
 	}
-	
+
 	buf[len - 1] = ']';
-	
+
+end_it:
 	/* NUL terminate for safety, but do not add terminator to len */
 	buf[len]   = '\0';
 
@@ -2549,85 +2841,150 @@ _get_boxes(char *buf, int max_len)
 }
 
 static void
-_clear_grid(void)
+_set_box_in_grid(int dim, int curr, int start[SYSTEM_DIMENSIONS],
+		 int end[SYSTEM_DIMENSIONS], bool value)
 {
-	memset(axis, 0, sizeof(axis));
+	int i;
+	int start_curr = curr;
 
-	axis_min_x = HOSTLIST_BASE;
-	axis_min_y = HOSTLIST_BASE;
-	axis_min_z = HOSTLIST_BASE;
+	for (i=start[dim]; i<=end[dim]; i++) {
+		curr = start_curr + (i * offset[dim]);
+		if(dim == (SYSTEM_DIMENSIONS-1))
+			grid[curr] = value;
+		else
+			_set_box_in_grid(dim+1, curr, start, end, value);
 
-	axis_max_x = -1;
-	axis_max_y = -1;
-	axis_max_z = -1;
+	}
+}
+
+static int _add_box_ranges(int dim,  int curr,
+			   int start[SYSTEM_DIMENSIONS],
+			   int end[SYSTEM_DIMENSIONS],
+			   int pos[SYSTEM_DIMENSIONS],
+			   struct _range *ranges,
+			   int len, int *count)
+{
+	int i;
+	int start_curr = curr;
+
+	for (pos[dim]=start[dim]; pos[dim]<=end[dim]; pos[dim]++) {
+		curr = start_curr + (pos[dim] * offset[dim]);
+		if(dim == (SYSTEM_DIMENSIONS-2)) {
+			char new_str[(SYSTEM_DIMENSIONS*2)+2];
+			memset(new_str, 0, sizeof(new_str));
+
+			if (*count == len) {
+				errno = EINVAL;
+				_error(__FILE__, __LINE__,
+				       "Too many ranges, can't process "
+				       "entire list");
+				return 0;
+			}
+			new_str[SYSTEM_DIMENSIONS] = '-';
+			for(i = 0; i<(SYSTEM_DIMENSIONS-1); i++) {
+				new_str[i] = alpha_num[pos[i]];
+				new_str[SYSTEM_DIMENSIONS+i+1] =
+					alpha_num[pos[i]];
+			}
+			new_str[i] = alpha_num[start[i]];
+			new_str[SYSTEM_DIMENSIONS+i+1] = alpha_num[end[i]];
+
+/* 			info("got %s", new_str); */
+			if (!_parse_single_range(new_str,
+						 &ranges[*count]))
+				return 0;
+			(*count)++;
+		} else
+			if(!_add_box_ranges(dim+1, curr, start, end, pos,
+					    ranges, len, count))
+				return 0;
+	}
+	return 1;
+}
+
+static void _set_min_max_of_grid(int dim, int curr,
+				 int start[SYSTEM_DIMENSIONS],
+				 int end[SYSTEM_DIMENSIONS],
+				 int min[SYSTEM_DIMENSIONS],
+				 int max[SYSTEM_DIMENSIONS],
+				 int pos[SYSTEM_DIMENSIONS])
+{
+	int i;
+	int start_curr = curr;
+
+	for (pos[dim]=start[dim]; pos[dim]<=end[dim]; pos[dim]++) {
+		curr = start_curr + (pos[dim] * offset[dim]);
+		if(dim == (SYSTEM_DIMENSIONS-1)) {
+			if(!grid[curr])
+				continue;
+			for(i = 0; i<SYSTEM_DIMENSIONS; i++) {
+				min[i] = MIN(min[i], pos[i]);
+				max[i] = MAX(max[i], pos[i]);
+			}
+		} else
+			_set_min_max_of_grid(dim+1, curr, start, end,
+					     min, max, pos);
+	}
 }
 
 static void
 _set_grid(unsigned long start, unsigned long end)
 {
-	int pt1 = (int) start;
-	int pt2 = (int) end;
-	int x1, y1, z1, x2, y2, z2;
-	int temp, temp1, temp2;
-  
-	x1 = pt1 / (HOSTLIST_BASE * HOSTLIST_BASE);
-	y1 = (pt1 % (HOSTLIST_BASE * HOSTLIST_BASE)) / HOSTLIST_BASE;
-	z1 = pt1 % HOSTLIST_BASE;
+	int sent_start[SYSTEM_DIMENSIONS], sent_end[SYSTEM_DIMENSIONS];
+	int i;
+/* 	char coord[SYSTEM_DIMENSIONS+1]; */
+/* 	char coord2[SYSTEM_DIMENSIONS+1]; */
+/* 	memset(coord, 0, sizeof(coord)); */
+/* 	memset(coord2, 0, sizeof(coord2)); */
 
-	x2 = pt2 / (HOSTLIST_BASE * HOSTLIST_BASE);
-	y2 = (pt2 % (HOSTLIST_BASE * HOSTLIST_BASE)) / HOSTLIST_BASE;
-	z2 = pt2 % HOSTLIST_BASE;
-/* 	printf("new %c%c%c %c%c%c\n", */
-/* 	       alpha_num[x1],alpha_num[y1],alpha_num[z1], */
-/* 	       alpha_num[x2],alpha_num[y2],alpha_num[z2]); */
-			
-	axis_min_x = MIN(axis_min_x, x1);
-	axis_min_y = MIN(axis_min_y, y1);
-	axis_min_z = MIN(axis_min_z, z1);
+	_parse_int_to_array(start, sent_start);
+	_parse_int_to_array(end, sent_end);
 
-	axis_max_x = MAX(axis_max_x, x2);
-	axis_max_y = MAX(axis_max_y, y2);
-	axis_max_z = MAX(axis_max_z, z2);
-/* 	printf("max %c%c%c %c%c%c\n", */
-/* 	       alpha_num[axis_min_x],alpha_num[axis_min_y], */
-/* 	       alpha_num[axis_min_z], */
-/* 	       alpha_num[axis_max_x],alpha_num[axis_max_y], */
-/* 	       alpha_num[axis_max_z]); */
-	
-	for (temp=x1; temp<=x2; temp++) {
-		for (temp1=y1; temp1<=y2; temp1++) {
-			for (temp2=z1; temp2<=z2; temp2++) {
-				axis[temp][temp1][temp2] = true;
-			}
-		}
+	for(i = 0; i<SYSTEM_DIMENSIONS; i++) {
+		grid_start[i] = MIN(grid_start[i], sent_start[i]);
+		grid_end[i] = MAX(grid_end[i], sent_end[i]);
+/* 		coord[i] = alpha_num[sent_start[i]]; */
+/* 		coord2[i] = alpha_num[sent_end[i]]; */
 	}
-}  
+/* 	info("going to set %sx%s", coord, coord2); */
+
+	_set_box_in_grid(A, 0, sent_start, sent_end, true);
+}
 
 static bool
-_test_box(void)
+_test_box_in_grid(int dim, int curr,
+		  int start[SYSTEM_DIMENSIONS], int end[SYSTEM_DIMENSIONS])
 {
-	int temp, temp1, temp2;
+	int i;
+	int start_curr = curr;
 
-	if ((axis_min_x > axis_max_x) 
-	||  (axis_min_y > axis_max_y)
-	||  (axis_min_z > axis_max_z))
-		return false;
-
-	if ((axis_min_x == axis_max_x) 
-	&&  (axis_min_y == axis_max_y)
-	&&  (axis_min_z == axis_max_z))
-		return false;	/* single node */
-
-	for (temp = axis_min_x; temp<=axis_max_x; temp++) {
-		for (temp1 = axis_min_y; temp1<=axis_max_y; temp1++) {
-			for (temp2 = axis_min_z; temp2<=axis_max_z; temp2++) {
-				if (!axis[temp][temp1][temp2])
-					return false;	/* gap in box */
-			}
+	for (i=start[dim]; i<=end[dim]; i++) {
+		curr = start_curr + (i * offset[dim]);
+		if(dim == (SYSTEM_DIMENSIONS-1)) {
+			if(!grid[curr])
+				return false;
+		} else {
+			if(!_test_box_in_grid(dim+1, curr, start, end))
+				return false;
 		}
 	}
 
 	return true;
+}
+
+static bool
+_test_box(int start[SYSTEM_DIMENSIONS], int end[SYSTEM_DIMENSIONS])
+{
+	int i;
+
+	if(!memcmp(start, end, dim_grid_size)) /* single node */
+		return false;
+
+	for(i = 0; i<SYSTEM_DIMENSIONS; i++)
+		if (start[i] > end[i])
+			return false;
+
+	return _test_box_in_grid(A, 0, start, end);
 }
 #endif
 
@@ -2637,51 +2994,89 @@ ssize_t hostlist_ranged_string(hostlist_t hl, size_t n, char *buf)
 	int len = 0;
 	int truncated = 0;
 	bool box = false;
-  
+	DEF_TIMERS;
+
+	START_TIMER;
 	LOCK_HOSTLIST(hl);
 
-#ifdef HAVE_BG		/* logic for block node description */
+#if (SYSTEM_DIMENSIONS > 1)	/* logic for block node description */
+	slurm_mutex_lock(&multi_dim_lock);
+
+	/* compute things that only need to be calculated once */
+	if(dim_grid_size == -1) {
+		int i;
+		dim_grid_size = sizeof(grid_start);
+		/* the last one is always 1 */
+		offset[SYSTEM_DIMENSIONS-1] = 1;
+		for(i=(SYSTEM_DIMENSIONS-2); i>=0; i--)
+			offset[i] = offset[i+1] * HOSTLIST_BASE;
+	}
+
 	if (hl->nranges < 1)
 		goto notbox;	/* no data */
-	if (hl->hr[0]->width != 3) {
-		/* We use this logic to build task list ranges, so
-		 * this does not necessarily contain a BlueGene
-		 * host list. It could just be numeric values */
-		if (hl->hr[0]->prefix[0]) {
-			debug("This node is not in bluegene format.  "
-		 	      "Prefix is %s and suffix is %d chars long",
-		  	      hl->hr[0]->prefix, hl->hr[0]->width);
+
+	memset(grid, 0, sizeof(grid));
+	memset(grid_start, HOSTLIST_BASE, dim_grid_size);
+	memset(grid_end, -1, dim_grid_size);
+
+	for (i=0;i<hl->nranges;i++) {
+/* 		info("got %s %d %d-%d", hl->hr[i]->prefix, hl->hr[i]->width, */
+/* 		     hl->hr[i]->lo, hl->hr[i]->hi); */
+		if (hl->hr[i]->width != SYSTEM_DIMENSIONS) {
+			/* We use this logic to build task list ranges, so
+			 * this does not necessarily contain a
+			 * SYSTEM_DIMENSION dimensional
+			 * host list. It could just be numeric values */
+			if (hl->hr[i]->prefix[0]) {
+				debug4("This node is not in %dD format.  "
+				       "Prefix of range %d is %s and suffix is "
+				       "%d chars long",
+				       SYSTEM_DIMENSIONS, i,
+				       hl->hr[i]->prefix, hl->hr[i]->width);
+			} else {
+				debug3("This node is not in %dD format.  "
+				       "No prefix for range %d but suffix is "
+				       "%d chars long",
+				       SYSTEM_DIMENSIONS, i, hl->hr[i]->width);
+			}
+			goto notbox;
 		}
-		goto notbox; 
-	}
-	_clear_grid();
-	for (i=0;i<hl->nranges;i++)
 		_set_grid(hl->hr[i]->lo, hl->hr[i]->hi);
-	if ((axis_min_x == axis_max_x) 
-	    && (axis_min_y == axis_max_y)
-	    &&  (axis_min_z == axis_max_z)) {
-		len += snprintf(buf, n, "%s%c%c%c",
-				hl->hr[0]->prefix,
-				alpha_num[axis_min_x], alpha_num[axis_min_y],
-				alpha_num[axis_min_z]);
-		if ((len < 0) || (len > n))
-			len = n;    /* truncated */
-	} else if (!_test_box()) {
+	}
+	if (!memcmp(grid_start, grid_end, dim_grid_size)) {
+		len += snprintf(buf, n, "%s", hl->hr[0]->prefix);
+		for(i = 0; i<SYSTEM_DIMENSIONS; i++) {
+			if(len > n)
+				goto too_long;
+			buf[len++] = alpha_num[grid_start[i]];
+		}
+	} else if (!_test_box(grid_start, grid_end)) {
 		sprintf(buf, "%s[", hl->hr[0]->prefix);
 		len = strlen(hl->hr[0]->prefix) + 1;
 		len += _get_boxes(buf + len, (n-len));
 	} else {
-		len += snprintf(buf, n, "%s[%c%c%cx%c%c%c]", 
-				hl->hr[0]->prefix,
-				alpha_num[axis_min_x], alpha_num[axis_min_y],
-				alpha_num[axis_min_z],
-				alpha_num[axis_max_x], alpha_num[axis_max_y],
-				alpha_num[axis_max_z]);
-		if ((len < 0) || (len > n))
-			len = n;	/* truncated */
+		len += snprintf(buf, n, "%s[", hl->hr[0]->prefix);
+		for(i = 0; i<SYSTEM_DIMENSIONS; i++) {
+			if(len > n)
+				goto too_long;
+			buf[len++] = alpha_num[grid_start[i]];
+		}
+		if(len <= n)
+			buf[len++] = 'x';
+
+		for(i = 0; i<SYSTEM_DIMENSIONS; i++) {
+			if(len > n)
+				goto too_long;
+			buf[len++] = alpha_num[grid_end[i]];
+		}
+		if(len <= n)
+			buf[len++] = ']';
 	}
+	if ((len < 0) || (len > n))
+	too_long:
+		len = n;	/* truncated */
 	box = true;
-	
+
 notbox:
 #endif
 	if (!box) {
@@ -2694,7 +3089,7 @@ notbox:
 	}
 
 	UNLOCK_HOSTLIST(hl);
-	
+
 	/* NUL terminate */
 	if (len >= n) {
 		truncated = 1;
@@ -2703,6 +3098,11 @@ notbox:
 	} else
 		buf[len > 0 ? len : 0] = '\0';
 
+	END_TIMER;
+#if (SYSTEM_DIMENSIONS > 1)	/* logic for block node description */
+	slurm_mutex_unlock(&multi_dim_lock);
+#endif
+//	info("time was %s", TIME_STR);
 	return truncated ? -1 : len;
 }
 /* ----[ hostlist iterator functions ]---- */
@@ -2710,7 +3110,7 @@ notbox:
 static hostlist_iterator_t hostlist_iterator_new(void)
 {
 	hostlist_iterator_t i = (hostlist_iterator_t) malloc(sizeof(*i));
-	if (!i) 
+	if (!i)
 		return NULL;
 	i->hl = NULL;
 	i->hr = NULL;
@@ -2824,24 +3224,23 @@ char *hostlist_next(hostlist_iterator_t i)
 
 	len = snprintf(buf, MAXHOSTNAMELEN + 15, "%s", i->hr->prefix);
 	if (!i->hr->singlehost) {
-#ifdef HAVE_3D
-		if (i->hr->width == 3) {
-			int coord[3];
-			int temp = i->hr->lo + i->depth;
-			coord[0] = temp / (HOSTLIST_BASE * HOSTLIST_BASE);
-			coord[1] = (temp % (HOSTLIST_BASE * HOSTLIST_BASE))
-				/ HOSTLIST_BASE;
-			coord[2] = (temp % HOSTLIST_BASE);
-			snprintf(buf + len, MAXHOSTNAMELEN + 15 - len, "%c%c%c",
-				 alpha_num[coord[0]], alpha_num[coord[1]],
-				 alpha_num[coord[2]]);
+#if (SYSTEM_DIMENSIONS > 1)
+		if (i->hr->width == SYSTEM_DIMENSIONS) {
+			int i2=0;
+			int coord[SYSTEM_DIMENSIONS];
+			_parse_int_to_array((i->hr->lo + i->depth), coord);
+			for(i2 = 0; i2<SYSTEM_DIMENSIONS; i2++) {
+				if(len <= (MAXHOSTNAMELEN + 15))
+					buf[len++] = alpha_num[coord[i2]];
+			}
+			buf[len] = '\0';
 		} else {
 			snprintf(buf + len, MAXHOSTNAMELEN + 15 - len, "%0*lu",
 				 i->hr->width, i->hr->lo + i->depth);
 		}
 #else
 		snprintf(buf + len, MAXHOSTNAMELEN + 15 - len, "%0*lu",
-			i->hr->width, i->hr->lo + i->depth);
+			 i->hr->width, i->hr->lo + i->depth);
 #endif
 	}
 	UNLOCK_HOSTLIST(i->hl);
@@ -2887,7 +3286,7 @@ int hostlist_remove(hostlist_iterator_t i)
 	} else if (hostrange_empty(i->hr)) {
 		hostlist_delete_range(i->hl, i->idx);
 		/* i->hr = i->hl->hr[i->idx];
-		i->depth = -1; */
+		   i->depth = -1; */
 	} else
 		i->depth--;
 
@@ -2912,9 +3311,9 @@ hostset_t hostset_create(const char *hostlist)
 	hostlist_uniq(new->hl);
 	return new;
 
-  error2:
+error2:
 	free(new);
-  error1:
+error1:
 	return NULL;
 }
 
@@ -2928,9 +3327,9 @@ hostset_t hostset_copy(const hostset_t set)
 		goto error2;
 
 	return new;
-  error2:
+error2:
 	free(new);
-  error1:
+error1:
 	return NULL;
 }
 
@@ -2942,7 +3341,7 @@ void hostset_destroy(hostset_t set)
 	free(set);
 }
 
-/* inserts a single range object into a hostset 
+/* inserts a single range object into a hostset
  * Assumes that the set->hl lock is already held
  * Updates hl->nhosts
  */
@@ -2964,7 +3363,7 @@ static int hostset_insert_range(hostset_t set, hostrange_t hr)
 	for (i = 0; i < hl->nranges; i++) {
 		if (hostrange_cmp(hr, hl->hr[i]) <= 0) {
 
-			if ((ndups = hostrange_join(hr, hl->hr[i])) >= 0) 
+			if ((ndups = hostrange_join(hr, hl->hr[i])) >= 0)
 				hostlist_delete_range(hl, i);
 			else if (ndups < 0)
 				ndups = 0;
@@ -3007,7 +3406,7 @@ int hostset_insert(hostset_t set, const char *hosts)
 
 	hostlist_uniq(hl);
 	LOCK_HOSTLIST(set->hl);
-	for (i = 0; i < hl->nranges; i++) 
+	for (i = 0; i < hl->nranges; i++)
 		n += hostset_insert_range(set, hl->hr[i]);
 	UNLOCK_HOSTLIST(set->hl);
 	hostlist_destroy(hl);
@@ -3030,7 +3429,7 @@ static int hostset_find_host(hostset_t set, const char *host)
 			goto done;
 		}
 	}
-  done:
+done:
 	UNLOCK_HOSTLIST(set->hl);
 	hostname_destroy(hn);
 	return retval;
@@ -3069,7 +3468,7 @@ int hostset_within(hostset_t set, const char *hosts)
 	assert(set->hl->magic == HOSTLIST_MAGIC);
 
 	if (!(hl = hostlist_create(hosts)))
-        return (0);
+		return (0);
 	nhosts = hostlist_count(hl);
 	nfound = 0;
 
@@ -3138,7 +3537,7 @@ int hostset_find(hostset_t set, const char *hostname)
 	return hostlist_find(set->hl, hostname);
 }
 
-#if TEST_MAIN 
+#if TEST_MAIN
 
 int hostlist_nranges(hostlist_t hl)
 {
@@ -3204,27 +3603,27 @@ int main(int ac, char **av)
 	hostset_t set, set1;
 	hostlist_iterator_t iter, iter2;
 
-    if (ac < 2)
-        printf("Recommended usage: %s [hostlist]\n\n", av[0]);
+	if (ac < 2)
+		printf("Recommended usage: %s [hostlist]\n\n", av[0]);
 
 	if (!(hl1 = hostlist_create(ac > 1 ? av[1] : NULL))) {
 		perror("hostlist_create");
-        exit(1);
-    }
+		exit(1);
+	}
 
-    /* build a temporary hostlist, remove duplicates, 
-     * use it to make the hostset */
-    if (!(hl2 = hostlist_create(ac > 1 ? av[1] : NULL))) {
-        perror("hostlist_create");
-        exit(1);
-    }
-    hostlist_uniq(hl2);
-    hostlist_ranged_string(hl2, 102400, buf);
+	/* build a temporary hostlist, remove duplicates,
+	 * use it to make the hostset */
+	if (!(hl2 = hostlist_create(ac > 1 ? av[1] : NULL))) {
+		perror("hostlist_create");
+		exit(1);
+	}
+	hostlist_uniq(hl2);
+	hostlist_ranged_string(hl2, 102400, buf);
 	if (!(set = hostset_create(buf))) {
 		perror("hostset_create");
-        exit(1);
-    }
-    hostlist_destroy(hl2);
+		exit(1);
+	}
+	hostlist_destroy(hl2);
 
 	hl3 = hostlist_create("f[0-5]");
 	hostlist_delete(hl3, "f[1-3]");
@@ -3312,7 +3711,3 @@ int main(int ac, char **av)
 }
 
 #endif		/* TEST_MAIN */
-
-/* 
- * vi: tabstop=4 shiftwidth=4 expandtab 
- */

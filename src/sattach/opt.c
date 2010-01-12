@@ -1,26 +1,26 @@
 /*****************************************************************************\
  *  opt.c - options processing for sattach
- *  $Id: opt.c 16616 2009-02-20 17:00:27Z jette $
+ *  $Id: opt.c 19190 2009-12-30 00:20:27Z lipari $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona1@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA.
@@ -46,11 +46,14 @@
 #  include "src/common/getopt.h"
 #endif
 
+#ifdef HAVE_LIMITS_H
+#  include <limits.h>
+#endif
+
 #include <fcntl.h>
 #include <stdarg.h>		/* va_start   */
 #include <stdio.h>
 #include <stdlib.h>		/* getenv     */
-#include <pwd.h>		/* getpwuid   */
 #include <ctype.h>		/* isdigit    */
 #include <sys/param.h>		/* MAXPATHLEN */
 #include <sys/stat.h>
@@ -68,6 +71,7 @@
 #include "src/common/xstring.h"
 #include "src/common/slurm_rlimits_info.h"
 #include "src/common/read_config.h" /* contains getnodename() */
+#include "src/common/proc_args.h"
 
 #include "src/sattach/opt.h"
 
@@ -82,6 +86,7 @@
 
 /*---- global variables, defined in opt.h ----*/
 opt_t opt;
+int error_exit = 1;
 
 /*---- forward declarations of static functions  ----*/
 
@@ -102,8 +107,6 @@ static void  _opt_list(void);
 
 /* verify options sanity  */
 static bool _opt_verify(void);
-
-static void  _print_version(void);
 
 static void _process_env_var(env_vars_t *e, const char *val);
 
@@ -132,11 +135,6 @@ int initialize_and_process_args(int argc, char *argv[])
 
 }
 
-static void _print_version(void)
-{
-	printf("%s %s\n", PACKAGE, SLURM_VERSION);
-}
-
 /*
  * print error message to stderr with opt.progname prepended
  */
@@ -162,7 +160,7 @@ static void argerror(const char *msg, ...)
  *  Get a POSITIVE decimal integer from arg.
  *
  *  Returns the integer on success, exits program on failure.
- * 
+ *
  */
 static int
 _get_pos_int(const char *arg, const char *what)
@@ -172,12 +170,12 @@ _get_pos_int(const char *arg, const char *what)
 
 	if (p == arg || !xstring_is_whitespace(p) || (result < 0L)) {
 		error ("Invalid numeric value \"%s\" for %s.", arg, what);
-		exit(1);
+		exit(error_exit);
 	}
 
 	if (result > INT_MAX) {
 		error ("Numeric argument %ld to big for %s.", result, what);
-		exit(1);
+		exit(error_exit);
 	}
 
 	return (int) result;
@@ -188,15 +186,14 @@ _get_pos_int(const char *arg, const char *what)
  */
 static void _opt_default()
 {
-	struct passwd *pw;
 	static slurm_step_io_fds_t fds = SLURM_STEP_IO_FDS_INITIALIZER;
+	uid_t uid = getuid();
 
-	if ((pw = getpwuid(getuid())) != NULL) {
-		strncpy(opt.user, pw->pw_name, MAX_USERNAME);
-		opt.uid = pw->pw_uid;
-	} else
-		error("who are you?");
+	opt.user = uid_to_string(uid);
+	if (strcmp(opt.user, "nobody") == 0)
+		fatal("Invalid user id: %u", uid);
 
+	opt.uid = uid;
 	opt.gid = getgid();
 
 	opt.progname = NULL;
@@ -209,7 +206,7 @@ static void _opt_default()
 
 	opt.euid = (uid_t) -1;
 	opt.egid = (gid_t) -1;
-	
+
 	opt.labelio = false;
 	opt.ctrl_comm_ifhn  = xshort_hostname();
 	memcpy(&opt.fds, &fds, sizeof(fds));
@@ -226,8 +223,8 @@ static void _opt_default()
 /*---[ env var processing ]-----------------------------------------------*/
 
 /*
- * try to use a similar scheme as popt. 
- * 
+ * try to use a similar scheme as popt.
+ *
  * in order to add a new env var (to be processed like an option):
  *
  * define a new entry into env_vars[], if the option is a simple int
@@ -251,13 +248,13 @@ env_vars_t env_vars[] = {
  *            environment variables. See comments above for how to
  *            extend sattach to process different vars
  */
-static void _opt_env()
+static void _opt_env(void)
 {
 	char       *val = NULL;
 	env_vars_t *e   = env_vars;
 
 	while (e->var) {
-		if ((val = getenv(e->var)) != NULL) 
+		if ((val = getenv(e->var)) != NULL)
 			_process_env_var(e, val);
 		e++;
 	}
@@ -286,7 +283,7 @@ void set_options(const int argc, char **argv)
 	static struct option long_options[] = {
 		{"help", 	no_argument,       0, 'h'},
 		{"label",       no_argument,       0, 'l'},
-		{"quiet",       no_argument,       0, 'q'},
+		{"quiet",       no_argument,       0, 'Q'},
 		{"usage",       no_argument,       0, 'u'},
 		{"verbose",     no_argument,       0, 'v'},
 		{"version",     no_argument,       0, 'V'},
@@ -297,18 +294,18 @@ void set_options(const int argc, char **argv)
 		{"error-filter", required_argument,0, LONG_OPT_ERR_FILTER},
 		{NULL}
 	};
-	char *opt_string = "+hlquvV";
+	char *opt_string = "+hlQuvV";
 
 	opt.progname = xbasename(argv[0]);
-	optind = 0;		
+	optind = 0;
 	while((opt_char = getopt_long(argc, argv, opt_string,
 				      long_options, &option_index)) != -1) {
 		switch (opt_char) {
-			
+
 		case '?':
 			fprintf(stderr, "Try \"sattach --help\" for more "
 				"information\n");
-			exit(1);
+			exit(error_exit);
 			break;
 		case 'h':
 			_help();
@@ -316,7 +313,7 @@ void set_options(const int argc, char **argv)
 		case 'l':
 			opt.labelio = true;
 			break;
-		case 'q':
+		case 'Q':
 			opt.quiet++;
 			break;
 		case 'u':
@@ -326,7 +323,7 @@ void set_options(const int argc, char **argv)
 			opt.verbose++;
 			break;
 		case 'V':
-			_print_version();
+			print_slurm_version();
 			exit(0);
 			break;
 		case LONG_OPT_IN_FILTER:
@@ -357,8 +354,9 @@ void set_options(const int argc, char **argv)
 			opt.debugger_test = true;
 			break;
 		default:
-			fatal("Unrecognized command line parameter %c",
+			error("Unrecognized command line parameter %c",
 			      opt_char);
+			exit(error_exit);
 		}
 	}
 }
@@ -375,7 +373,7 @@ static void _parse_jobid_stepid(char *jobid_str)
 		error("Did not find a period in the step ID string");
 		_usage();
 		xfree(job);
-		exit(1);
+		exit(error_exit);
 	} else {
 		*ptr = '\0';
 		step = ptr + 1;
@@ -386,7 +384,7 @@ static void _parse_jobid_stepid(char *jobid_str)
 		error("\"%s\" does not look like a jobid", job);
 		_usage();
 		xfree(job);
-		exit(1);
+		exit(error_exit);
 	}
 
 	stepid = strtol(step, &ptr, 10);
@@ -394,7 +392,7 @@ static void _parse_jobid_stepid(char *jobid_str)
 		error("\"%s\" does not look like a stepid", step);
 		_usage();
 		xfree(job);
-		exit(1);
+		exit(error_exit);
 	}
 
 	opt.jobid = (uint32_t) jobid;
@@ -422,16 +420,16 @@ static void _opt_args(int argc, char **argv)
 	if (leftover != 1) {
 		error("too many parameters");
 		_usage();
-		exit(1);
+		exit(error_exit);
 	}
 
 	_parse_jobid_stepid(*(argv + optind));
 
 	if (!_opt_verify())
-		exit(1);
+		exit(error_exit);
 }
 
-/* 
+/*
  * _opt_verify : perform some post option processing verification
  *
  */
@@ -489,7 +487,7 @@ static void _help(void)
 "      --error-filter=taskid  only print stderr from the specified task\n"
 "  -l, --label        prepend task number to lines of stdout & stderr\n"
 "      --layout       print task layout info and exit (does not attach to tasks)\n"
-"  -q, --quiet        quiet mode (suppress informational messages)\n"
+"  -Q, --quiet        quiet mode (suppress informational messages)\n"
 "  -v, --verbose      verbose mode (multiple -v's increase verbosity)\n"
 "  -V, --version      print the SLURM version and exit\n\n"
 "Help options:\n"

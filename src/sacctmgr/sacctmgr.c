@@ -1,5 +1,5 @@
 /*****************************************************************************\
- *  sacctmgr.c - administration tool for slurm's accounting. 
+ *  sacctmgr.c - administration tool for slurm's accounting.
  *	         provides interface to read, write, update, and configure
  *               accounting.
  *****************************************************************************
@@ -8,32 +8,32 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
+ *  In addition, as a special exception, the copyright holders give permission
  *  to link the code of portions of this program with the OpenSSL library under
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -41,6 +41,7 @@
 
 #include "src/sacctmgr/sacctmgr.h"
 #include "src/common/xsignal.h"
+#include "src/common/proc_args.h"
 
 #define BUFFER_SIZE 4096
 
@@ -56,6 +57,7 @@ int rollback_flag;       /* immediate execute=1, else = 0 */
 int with_assoc_flag = 0;
 void *db_conn = NULL;
 uint32_t my_uid = 0;
+List g_qos_list = NULL;
 
 static void	_add_it (int argc, char *argv[]);
 static void	_archive_it (int argc, char *argv[]);
@@ -67,8 +69,8 @@ static void     _print_version( void );
 static int	_process_command (int argc, char *argv[]);
 static void	_usage ();
 
-int 
-main (int argc, char *argv[]) 
+int
+main (int argc, char *argv[])
 {
 	int error_code = SLURM_SUCCESS, i, opt_char, input_field_count;
 	char **input_fields;
@@ -84,7 +86,7 @@ main (int argc, char *argv[])
 		{"oneliner", 0, 0, 'o'},
 		{"parsable", 0, 0, 'p'},
 		{"parsable2", 0, 0, 'P'},
-		{"quiet",    0, 0, 'q'},
+		{"quiet",    0, 0, 'Q'},
 		{"readonly", 0, 0, 'r'},
 		{"associations", 0, 0, 's'},
 		{"verbose",  0, 0, 'v'},
@@ -102,7 +104,7 @@ main (int argc, char *argv[])
 	verbosity         = 0;
 	log_init("sacctmgr", opts, SYSLOG_FACILITY_DAEMON, NULL);
 
-	while((opt_char = getopt_long(argc, argv, "hionpPqrsvV",
+	while((opt_char = getopt_long(argc, argv, "hionpPQrsvV",
 			long_options, &option_index)) != -1) {
 		switch (opt_char) {
 		case (int)'?':
@@ -124,14 +126,14 @@ main (int argc, char *argv[])
 			print_fields_have_header = 0;
 			break;
 		case (int)'p':
-			print_fields_parsable_print = 
+			print_fields_parsable_print =
 			PRINT_FIELDS_PARSABLE_ENDING;
 			break;
 		case (int)'P':
 			print_fields_parsable_print =
 			PRINT_FIELDS_PARSABLE_NO_ENDING;
 			break;
-		case (int)'q':
+		case (int)'Q':
 			quiet_flag = 1;
 			break;
 		case (int)'r':
@@ -150,7 +152,7 @@ main (int argc, char *argv[])
 			break;
 		default:
 			exit_code = 1;
-			fprintf(stderr, "getopt error, returned %c\n", 
+			fprintf(stderr, "getopt error, returned %c\n",
 				opt_char);
 			exit(exit_code);
 		}
@@ -164,7 +166,7 @@ main (int argc, char *argv[])
 	if (optind < argc) {
 		for (i = optind; i < argc; i++) {
 			input_fields[input_field_count++] = argv[i];
-		}	
+		}
 	}
 
 	if (verbosity) {
@@ -196,11 +198,17 @@ main (int argc, char *argv[])
 		int tmp_errno = errno;
 		if((input_field_count == 2) &&
 		   (!strncasecmp(argv[2], "Configuration", strlen(argv[1]))) &&
-		   ((!strncasecmp(argv[1], "list", strlen(argv[0]))) || 
-		    (!strncasecmp(argv[1], "show", strlen(argv[0])))))
-			sacctmgr_list_config(false);
+		   ((!strncasecmp(argv[1], "list", strlen(argv[0]))) ||
+		    (!strncasecmp(argv[1], "show", strlen(argv[0]))))) {
+			if(tmp_errno == ESLURM_DB_CONNECTION) {
+				tmp_errno = 0;
+				sacctmgr_list_config(true);
+			} else
+				sacctmgr_list_config(false);
+		}
 		errno = tmp_errno;
-		fprintf(stderr, "Problem talking to the database: %m\n");
+		if(errno)
+			error("Problem talking to the database: %m");
 		exit(1);
 	}
 	my_uid = getuid();
@@ -210,7 +218,7 @@ main (int argc, char *argv[])
 	else
 		error_code = _get_command (&input_field_count, input_fields);
 	while (error_code == SLURM_SUCCESS) {
-		error_code = _process_command (input_field_count, 
+		error_code = _process_command (input_field_count,
 					       input_fields);
 		if (error_code || exit_flag)
 			break;
@@ -224,10 +232,12 @@ main (int argc, char *argv[])
 			exit_code = 0;
 		}
 	}
-	if(local_exit_code) 
+	if(local_exit_code)
 		exit_code = local_exit_code;
 	acct_storage_g_close_connection(&db_conn);
 	slurm_acct_storage_fini();
+	if(g_qos_list)
+		list_destroy(g_qos_list);
 	exit(exit_code);
 }
 
@@ -260,8 +270,8 @@ static char *_getline(const char *prompt)
  * OUT argc - location to store count of arguments
  * OUT argv - location to store the argument list
  */
-static int 
-_get_command (int *argc, char **argv) 
+static int
+_get_command (int *argc, char **argv)
 {
 	char *in_line;
 	static char *last_in_line = NULL;
@@ -304,11 +314,11 @@ _get_command (int *argc, char **argv)
 			continue;
 		if (((*argc) + 1) > MAX_INPUT_FIELDS) {	/* bogus input line */
 			exit_code = 1;
-			fprintf (stderr, 
+			fprintf (stderr,
 				 "%s: can not process over %d words\n",
 				 command_name, input_words);
 			return E2BIG;
-		}		
+		}
 		argv[(*argc)++] = &in_line[i];
 		for (i++; i < in_line_size; i++) {
 			if (in_line[i] == '\042') {
@@ -327,19 +337,19 @@ _get_command (int *argc, char **argv)
 				in_line[i] = '\0';
 				break;
 			}
-		}		
+		}
 	}
-	return 0;		
+	return 0;
 }
 
 
 static void _print_version(void)
 {
-	printf("%s %s\n", PACKAGE, SLURM_VERSION);
+	print_slurm_version();
 	if (quiet_flag == -1) {
 		long version = slurm_api_version();
 		printf("slurm_api_version: %ld, %ld.%ld.%ld\n", version,
-			SLURM_VERSION_MAJOR(version), 
+			SLURM_VERSION_MAJOR(version),
 			SLURM_VERSION_MINOR(version),
 			SLURM_VERSION_MICRO(version));
 	}
@@ -352,7 +362,7 @@ static void _print_version(void)
  * RET 0 or errno (only for errors fatal to sacctmgr)
  */
 static int
-_process_command (int argc, char *argv[]) 
+_process_command (int argc, char *argv[])
 {
 	int command_len = 0;
 	if (argc < 1) {
@@ -360,11 +370,11 @@ _process_command (int argc, char *argv[])
 		if (quiet_flag == -1)
 			fprintf(stderr, "no input");
 		return 0;
-	} 
+	}
 
 	command_len = strlen(argv[0]);
-	
-	if (strncasecmp (argv[0], "associations", 
+
+	if (strncasecmp (argv[0], "associations",
 			 MAX(command_len, 3)) == 0) {
 		with_assoc_flag = 1;
 	} else if (strncasecmp (argv[0], "dump", MAX(command_len, 3)) == 0) {
@@ -372,18 +382,18 @@ _process_command (int argc, char *argv[])
 	} else if (strncasecmp (argv[0], "help", MAX(command_len, 2)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
-			fprintf (stderr, 
+			fprintf (stderr,
 				 "too many arguments for keyword:%s\n",
 				 argv[0]);
 		}
 		_usage ();
 	} else if (strncasecmp (argv[0], "load", MAX(command_len, 2)) == 0) {
 		load_sacctmgr_cfg_file((argc - 1), &argv[1]);
-	} else if (strncasecmp (argv[0], "oneliner", 
+	} else if (strncasecmp (argv[0], "oneliner",
 				MAX(command_len, 1)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
-			fprintf (stderr, 
+			fprintf (stderr,
 				 "too many arguments for keyword:%s\n",
 				 argv[0]);
 		}
@@ -400,8 +410,8 @@ _process_command (int argc, char *argv[])
 		   (strncasecmp (argv[0], "quit", MAX(command_len, 4)) == 0)) {
 		if (argc > 1) {
 			exit_code = 1;
-			fprintf (stderr, 
-				 "too many arguments for keyword:%s\n", 
+			fprintf (stderr,
+				 "too many arguments for keyword:%s\n",
 				 argv[0]);
 		}
 		exit_flag = 1;
@@ -429,7 +439,7 @@ _process_command (int argc, char *argv[])
 			fprintf (stderr,
 				 "too many arguments for %s keyword\n",
 				 argv[0]);
-		}		
+		}
 		quiet_flag = -1;
 	} else if (strncasecmp (argv[0], "readonly",
 				MAX(command_len, 4)) == 0) {
@@ -438,7 +448,7 @@ _process_command (int argc, char *argv[])
 			fprintf (stderr,
 				 "too many arguments for %s keyword\n",
 				 argv[0]);
-		}		
+		}
 		readonly_flag = 1;
 	} else if (strncasecmp (argv[0], "rollup", MAX(command_len, 2)) == 0) {
 		time_t my_start = 0;
@@ -457,7 +467,7 @@ _process_command (int argc, char *argv[])
 			my_end = parse_time(argv[2], 1);
 		if(argc > 3)
 			archive_data = atoi(argv[3]);
-		if(acct_storage_g_roll_usage(db_conn, my_start, 
+		if(acct_storage_g_roll_usage(db_conn, my_start,
 					     my_end, archive_data)
 		   == SLURM_SUCCESS) {
 			if(commit_check("Would you like to commit rollup?")) {
@@ -473,22 +483,22 @@ _process_command (int argc, char *argv[])
 			fprintf (stderr,
 				 "too many arguments for %s keyword\n",
 				 argv[0]);
-		}		
+		}
 		_print_version();
 	} else {
 		exit_code = 1;
 		fprintf (stderr, "invalid keyword: %s\n", argv[0]);
 	}
-		
+
 	return 0;
 }
 
-/* 
- * _add_it - add the entity per the supplied arguments 
+/*
+ * _add_it - add the entity per the supplied arguments
  * IN argc - count of arguments
  * IN argv - list of arguments
  */
-static void _add_it (int argc, char *argv[]) 
+static void _add_it (int argc, char *argv[])
 {
 	int error_code = SLURM_SUCCESS;
 	int command_len = 0;
@@ -496,7 +506,7 @@ static void _add_it (int argc, char *argv[])
 	if(readonly_flag) {
 		exit_code = 1;
 		fprintf(stderr, "Can't run this command in readonly mode.\n");
-		return;		
+		return;
 	}
 
 	if(!argv[0])
@@ -505,7 +515,7 @@ static void _add_it (int argc, char *argv[])
 	command_len = strlen(argv[0]);
 	/* reset the connection to get the most recent stuff */
 	acct_storage_g_commit(db_conn, 0);
-	
+
 	/* First identify the entity to add */
 	if (strncasecmp (argv[0], "Account", MAX(command_len, 1)) == 0
 	    || !strncasecmp (argv[0], "Acct", MAX(command_len, 4))) {
@@ -527,18 +537,18 @@ static void _add_it (int argc, char *argv[])
 		fprintf(stderr, "\"Account\", \"Cluster\", \"Coordinator\", ");
 		fprintf(stderr, "\"QOS\", or \"User\"\n");
 	}
-	
+
 	if (error_code == SLURM_ERROR) {
 		exit_code = 1;
 	}
 }
 
-/* 
- * _archive_it - archive the entity per the supplied arguments 
+/*
+ * _archive_it - archive the entity per the supplied arguments
  * IN argc - count of arguments
  * IN argv - list of arguments
  */
-static void _archive_it (int argc, char *argv[]) 
+static void _archive_it (int argc, char *argv[])
 {
 	int error_code = SLURM_SUCCESS;
 	int command_len = 0;
@@ -546,7 +556,7 @@ static void _archive_it (int argc, char *argv[])
 	if(readonly_flag) {
 		exit_code = 1;
 		fprintf(stderr, "Can't run this command in readonly mode.\n");
-		return;		
+		return;
 	}
 
 	if(!argv[0])
@@ -555,7 +565,7 @@ static void _archive_it (int argc, char *argv[])
 	command_len = strlen(argv[0]);
 	/* reset the connection to get the most recent stuff */
 	acct_storage_g_commit(db_conn, 0);
-	
+
 	/* First identify the entity to add */
 	if (strncasecmp (argv[0], "dump", MAX(command_len, 1)) == 0) {
 		error_code = sacctmgr_archive_dump((argc - 1), &argv[1]);
@@ -568,20 +578,20 @@ static void _archive_it (int argc, char *argv[])
 		fprintf(stderr, "Input line must include, ");
 		fprintf(stderr, "\"Dump\", or \"load\"\n");
 	}
-	
+
 	if (error_code == SLURM_ERROR) {
 		exit_code = 1;
 	}
 }
 
-/* 
- * _show_it - list the slurm configuration per the supplied arguments 
+/*
+ * _show_it - list the slurm configuration per the supplied arguments
  * IN argc - count of arguments
  * IN argv - list of arguments
  * undocumented association options wopi and wopl
  * without parent info and without parent limits
  */
-static void _show_it (int argc, char *argv[]) 
+static void _show_it (int argc, char *argv[])
 {
 	int error_code = SLURM_SUCCESS;
 	int command_len = 0;
@@ -601,15 +611,18 @@ static void _show_it (int argc, char *argv[])
 	} else if (strncasecmp (argv[0], "Associations",
 				MAX(command_len, 2)) == 0) {
 		error_code = sacctmgr_list_association((argc - 1), &argv[1]);
-	} else if (strncasecmp (argv[0], "Clusters", 
+	} else if (strncasecmp (argv[0], "Clusters",
 				MAX(command_len, 1)) == 0) {
 		error_code = sacctmgr_list_cluster((argc - 1), &argv[1]);
-	} else if (strncasecmp (argv[0], "Configuration", 
+	} else if (strncasecmp (argv[0], "Configuration",
 				MAX(command_len, 1)) == 0) {
 		error_code = sacctmgr_list_config(true);
+	} else if (strncasecmp (argv[0], "Problems",
+				MAX(command_len, 1)) == 0) {
+		error_code = sacctmgr_list_problem((argc - 1), &argv[1]);
 	} else if (strncasecmp (argv[0], "QOS", MAX(command_len, 1)) == 0) {
 		error_code = sacctmgr_list_qos((argc - 1), &argv[1]);
-	} else if (strncasecmp (argv[0], "Transactions", 
+	} else if (strncasecmp (argv[0], "Transactions",
 				MAX(command_len, 1)) == 0) {
 		error_code = sacctmgr_list_txn((argc - 1), &argv[1]);
 	} else if (strncasecmp (argv[0], "Users", MAX(command_len, 1)) == 0) {
@@ -621,23 +634,24 @@ static void _show_it (int argc, char *argv[])
 		exit_code = 1;
 		fprintf(stderr, "No valid entity in list command\n");
 		fprintf(stderr, "Input line must include ");
-		fprintf(stderr, "\"Account\", \"Association\", ");
-		fprintf(stderr, "\"Cluster\", \"QOS\", \"Transaction\", ");
-		fprintf(stderr, "\"User\", or \"WCKey\"\n");
-	} 
-	
+		fprintf(stderr, "\"Account\", \"Association\", "
+			"\"Configuration\"\n\"Cluster\", \"Problem\", "
+			"\"QOS\", \"Transaction\", \"User\", "
+			"or \"WCKey\"\n");
+	}
+
 	if (error_code == SLURM_ERROR) {
 		exit_code = 1;
 	}
 }
 
 
-/* 
- * _modify_it - modify the slurm configuration per the supplied arguments 
+/*
+ * _modify_it - modify the slurm configuration per the supplied arguments
  * IN argc - count of arguments
  * IN argv - list of arguments
  */
-static void _modify_it (int argc, char *argv[]) 
+static void _modify_it (int argc, char *argv[])
 {
 	int error_code = SLURM_SUCCESS;
 	int command_len = 0;
@@ -645,7 +659,7 @@ static void _modify_it (int argc, char *argv[])
 	if(readonly_flag) {
 		exit_code = 1;
 		fprintf(stderr, "Can't run this command in readonly mode.\n");
-		return;		
+		return;
 	}
 
 	if(!argv[0])
@@ -659,9 +673,11 @@ static void _modify_it (int argc, char *argv[])
 	if (strncasecmp (argv[0], "Accounts", MAX(command_len, 1)) == 0
 	    || !strncasecmp (argv[0], "Acct", MAX(command_len, 4))) {
 		error_code = sacctmgr_modify_account((argc - 1), &argv[1]);
-	} else if (strncasecmp (argv[0], "Clusters", 
+	} else if (strncasecmp (argv[0], "Clusters",
 				MAX(command_len, 1)) == 0) {
 		error_code = sacctmgr_modify_cluster((argc - 1), &argv[1]);
+	} else if (strncasecmp (argv[0], "QOSs", MAX(command_len, 1)) == 0) {
+		error_code = sacctmgr_modify_qos((argc - 1), &argv[1]);
 	} else if (strncasecmp (argv[0], "Users", MAX(command_len, 1)) == 0) {
 		error_code = sacctmgr_modify_user((argc - 1), &argv[1]);
 	} else {
@@ -669,7 +685,8 @@ static void _modify_it (int argc, char *argv[])
 		exit_code = 1;
 		fprintf(stderr, "No valid entity in modify command\n");
 		fprintf(stderr, "Input line must include ");
-		fprintf(stderr, "\"Account\", \"Cluster\", or \"User\"\n");
+		fprintf(stderr, "\"Account\", \"Cluster\", \"QOS\", "
+			"or \"User\"\n");
 	}
 
 	if (error_code == SLURM_ERROR) {
@@ -677,12 +694,12 @@ static void _modify_it (int argc, char *argv[])
 	}
 }
 
-/* 
- * _delete_it - delete the slurm configuration per the supplied arguments 
+/*
+ * _delete_it - delete the slurm configuration per the supplied arguments
  * IN argc - count of arguments
  * IN argv - list of arguments
  */
-static void _delete_it (int argc, char *argv[]) 
+static void _delete_it (int argc, char *argv[])
 {
 	int error_code = SLURM_SUCCESS;
 	int command_len = 0;
@@ -690,7 +707,7 @@ static void _delete_it (int argc, char *argv[])
 	if(readonly_flag) {
 		exit_code = 1;
 		fprintf(stderr, "Can't run this command in readonly mode.\n");
-		return;		
+		return;
 	}
 
 	if(!argv[0])
@@ -707,7 +724,7 @@ static void _delete_it (int argc, char *argv[])
 	} else if (strncasecmp (argv[0], "Clusters",
 				MAX(command_len, 2)) == 0) {
 		error_code = sacctmgr_delete_cluster((argc - 1), &argv[1]);
-	} else if (strncasecmp (argv[0], "Coordinators", 
+	} else if (strncasecmp (argv[0], "Coordinators",
 				MAX(command_len, 2)) == 0) {
 		error_code = sacctmgr_delete_coord((argc - 1), &argv[1]);
 	} else if (strncasecmp (argv[0], "QOS", MAX(command_len, 2)) == 0) {
@@ -722,7 +739,7 @@ static void _delete_it (int argc, char *argv[])
 		fprintf(stderr, "\"Account\", \"Cluster\", \"Coordinator\", ");
 		fprintf(stderr, "\"QOS\", or \"User\"\n");
 	}
-	
+
 	if (error_code == SLURM_ERROR) {
 		exit_code = 1;
 	}
@@ -739,7 +756,7 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
      -o or --oneliner: equivalent to \"oneliner\" command                  \n\
      -p or --parsable: output will be '|' delimited with a '|' at the end  \n\
      -P or --parsable2: output will be '|' delimited without a '|' at the end\n\
-     -q or --quiet: equivalent to \"quiet\" command                        \n\
+     -Q or --quiet: equivalent to \"quiet\" command                        \n\
      -r or --readonly: equivalent to \"readonly\" command                  \n\
      -s or --associations: equivalent to \"associations\" command          \n\
      -v or --verbose: equivalent to \"verbose\" command                    \n\
@@ -798,13 +815,13 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
        add account        - Clusters=, Description=, Fairshare=,           \n\
                             GrpCPUMins=, GrpCPUs=, GrpJobs=, GrpNodes=,    \n\
                             GrpSubmitJob=, GrpWall=, MaxCPUMins=, MaxJobs=,\n\
-                            MaxNodes=, MaxWall=, Names=, Organization=,    \n\
-                            Parent=, and QosLevel                          \n\
+                            MaxNodes=, MaxSubmitJobs=, MaxWall=, Names=,   \n\
+                            Organization=, Parent=, and QosLevel           \n\
        modify account     - (set options) Description=, Fairshare=,        \n\
                             GrpCPUMins=, GrpCPUs=, GrpJobs=, GrpNodes=,    \n\
                             GrpSubmitJob=, GrpWall=, MaxCPUMins=, MaxJobs=,\n\
-                            MaxNodes=, MaxWall=, Names=, Organization=,    \n\
-                            Parent=, and QosLevel=                         \n\
+                            MaxNodes=, MaxSubmitJobs=, MaxWall=, Names=,   \n\
+                            Organization=, Parent=, and QosLevel=          \n\
                             (where options) Clusters=, Descriptions=,      \n\
                             Names=, Organizations=, Parent=, and QosLevel= \n\
        delete account     - Clusters=, Descriptions=, Names=,              \n\
@@ -812,18 +829,18 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
                                                                            \n\
        list associations  - Accounts=, Clusters=, Format=, IDs=,           \n\
                             Partitions=, Parent=, Tree, Users=,            \n\
-                            WithSubAccounts, WithDeleted, WOPInfo,         \n\
-                            and WOPLimits                                  \n\
+                            WithSubAccounts, WithDeleted, WOLimits,        \n\
+                            WOPInfo, and WOPLimits                         \n\
                                                                            \n\
-       list cluster       - Format=, Names=                                \n\
+       list cluster       - Format=, Names=, WOLimits                      \n\
        add cluster        - Fairshare=, GrpCPUs=, GrpJobs=,                \n\
                             GrpNodes=, GrpSubmitJob=, MaxCPUMins=          \n\
-                            MaxJobs=, MaxNodes=, MaxWall=, Name=,          \n\
-                            and QosLevel=                                  \n\
+                            MaxJobs=, MaxNodes=, MaxSubmitJobs=, MaxWall=, \n\
+                            Name=, and QosLevel=                           \n\
        modify cluster     - (set options) Fairshare=,                      \n\
                             GrpCPUs=, GrpJobs=, GrpNodes=, GrpSubmitJob=,  \n\
-                            MaxCPUMins=, MaxJobs=, MaxNodes=, MaxWall=,    \n\
-                            and QosLevel=                                  \n\
+                            MaxCPUMins=, MaxJobs=, MaxNodes=, MaxSubmitJobs=,\n\
+                            MaxWall=, and QosLevel=                        \n\
                             (where options) Names=                         \n\
        delete cluster     - Names=                                         \n\
                                                                            \n\
@@ -833,9 +850,9 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
        list qos           - Descriptions=, Format=, Ids=, Names=,          \n\
                             and WithDeleted                                \n\
        add qos            - Description=, GrpCPUMins=, GrpCPUs=, GrpJobs=, \n\
-                            GrpNodes=, GrpSubmitJob=, GrpWall=, JobFlags=, \n\
-                            MaxCPUMins=, MaxJobs=, MaxNodes=, MaxWall=,    \n\
-                            Preemptee=, Preemptor=, Priority=, and Names=  \n\
+                            GrpNodes=, GrpSubmitJob=, GrpWall=,            \n\
+                            MaxCPUMins=, MaxJobs=, MaxNodes=, MaxSubmitJobs=,\n\
+                            MaxWall=, Preempt=, Priority=, and Names=      \n\
        delete qos         - Descriptions=, IDs=, and Names=                \n\
                                                                            \n\
        list transactions  - Accounts=, Action=, Actor=, Clusters=, End=,   \n\
@@ -847,13 +864,13 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
                             WithRawQOS, and WOPLimits                      \n\
        add user           - Accounts=, AdminLevel=, Clusters=,             \n\
                             DefaultAccount=, DefaultWCKey=,                \n\
-                            Fairshare=, MaxCPUMins=                        \n\
-                            MaxCPUs=, MaxJobs=, MaxNodes=, MaxWall=,       \n\
+                            Fairshare=, MaxCPUMins=, MaxCPUs=,             \n\
+                            MaxJobs=, MaxNodes=, MaxSubmitJobs=, MaxWall=, \n\
                             Names=, Partitions=, and QosLevel=             \n\
        modify user        - (set options) AdminLevel=, DefaultAccount=,    \n\
                             DefaultWCKey=, Fairshare=, MaxCPUMins=,        \n\
-                            MaxCPUs= MaxJobs=,                             \n\
-                            MaxNodes=, MaxWall=, and QosLevel=             \n\
+                            MaxCPUs=, MaxJobs=, MaxNodes=,                 \n\
+                            MaxSubmitJobs=, MaxWall=, and QosLevel=        \n\
                             (where options) Accounts=, AdminLevel=,        \n\
                             Clusters=, DefaultAccounts=, Names=,           \n\
                             Partitions=, and QosLevel=                     \n\
@@ -879,18 +896,22 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
                                                                            \n\
        Association        - Account, Cluster, Fairshare, GrpCPUMins,       \n\
                             GrpCPUs, GrpJobs, GrpNodes, GrpSubmitJob,      \n\
-                            GrpWall, ID, LFT, MaxCPUs, MaxCPUMins,         \n\
-                            MaxJobs, MaxNodes, MaxSubmitJobs, MaxWall, QOS,\n\
-                            ParentID, ParentName, Partition, RawQOS, RGT,  \n\
-                            User                                           \n\
+                            GrpWall, ID, LFT, MaxCPUMins, MaxCPUs,         \n\
+                            MaxJobs, MaxNodes, MaxSubmitJobs,              \n\
+                            MaxWall, QOS, ParentID, ParentName,            \n\
+                            Partition, RawQOS, RGT, User                   \n\
                                                                            \n\
        Cluster            - Cluster, ControlHost, ControlPort, CpuCount,   \n\
-                            Fairshare, GrpCPUs, GrpJobs,                   \n\
-                            GrpNodes, GrpSubmitJob, MaxCPUs,               \n\
-                            MaxCPUMins, MaxJobs, MaxNodes, MaxSubmitJobs,  \n\
+                            Fairshare, GrpCPUMins, GrpCPUs, GrpJobs,       \n\
+                            GrpNodes, GrpSubmitJob, MaxCPUMins,            \n\
+                            MaxCPUs, MaxJobs, MaxNodes, MaxSubmitJobs,     \n\
                             MaxWall, NodeCount, NodeNames                  \n\
                                                                            \n\
-       QOS                - Description, ID, Name                          \n\
+       QOS                - Description, GrpCPUMins, GrpCPUs, GrpJobs,     \n\
+                            GrpNodes, GrpSubmitJob, GrpWall, ID,           \n\
+                            MaxCPUMins, MaxCPUs, MaxJobs, MaxNodes,        \n\
+                            MaxSubmitJobs, MaxWall, Name,                  \n\
+                            Preempt, Priority, UsageFactor                 \n\
                                                                            \n\
        Transactions       - Action, Actor, Info, TimeStamp, Where          \n\
                                                                            \n\
@@ -904,6 +925,6 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
                                                                            \n\
                                                                            \n\
   All commands entitys, and options are case-insensitive.               \n\n");
-	
+
 }
 

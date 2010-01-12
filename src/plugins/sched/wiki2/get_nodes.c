@@ -6,32 +6,32 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
+ *  In addition, as a special exception, the copyright holders give permission
  *  to link the code of portions of this program with the OpenSSL library under
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -43,10 +43,10 @@
 #include "src/slurmctld/slurmctld.h"
 
 static char *	_dump_all_nodes(int *node_cnt, time_t update_time);
-static char *	_dump_node(struct node_record *node_ptr, hostlist_t hl, 
+static char *	_dump_node(struct node_record *node_ptr, hostlist_t hl,
 			   time_t update_time);
 static char *	_get_node_state(struct node_record *node_ptr);
-static int	_same_info(struct node_record *node1_ptr, 
+static int	_same_info(struct node_record *node1_ptr,
 			   struct node_record *node2_ptr, time_t update_time);
 static int	_str_cmp(char *s1, char *s2);
 
@@ -113,11 +113,11 @@ extern int	get_nodes(char *cmd_ptr, int *err_code, char **err_msg)
 			while ((node_name = hostset_shift(slurm_hostset))) {
 				node_ptr = find_node_record(node_name);
 				if (node_ptr == NULL) {
-					error("sched/wiki2: bad hostname %s", 
+					error("sched/wiki2: bad hostname %s",
 					      node_name);
 					continue;
 				}
-				tmp_buf = _dump_node(node_ptr, NULL, 
+				tmp_buf = _dump_node(node_ptr, NULL,
 						     update_time);
 				if (node_rec_cnt > 0)
 					xstrcat(buf, "#");
@@ -154,13 +154,11 @@ static char *	_dump_all_nodes(int *node_cnt, time_t update_time)
 	char *tmp_buf = NULL, *buf = NULL;
 	struct node_record *uniq_node_ptr = NULL;
 	hostlist_t hl = NULL;
-	uint16_t base_state;
 
 	for (i=0; i<node_record_count; i++, node_ptr++) {
 		if (node_ptr->name == NULL)
 			continue;
-		base_state = node_ptr->node_state & NODE_STATE_BASE;
-		if (base_state == NODE_STATE_FUTURE)
+		if (IS_NODE_FUTURE(node_ptr))
 			continue;
 		if (use_host_exp == 2) {
 			rc = _same_info(uniq_node_ptr, node_ptr, update_time);
@@ -175,7 +173,7 @@ static char *	_dump_all_nodes(int *node_cnt, time_t update_time)
 				}
 				continue;
 			} else {
-				tmp_buf = _dump_node(uniq_node_ptr, hl, 
+				tmp_buf = _dump_node(uniq_node_ptr, hl,
 						     update_time);
 				hostlist_destroy(hl);
 				hl = hostlist_create(node_ptr->name);
@@ -211,7 +209,7 @@ static char *	_dump_all_nodes(int *node_cnt, time_t update_time)
  * RET 0 of node1 is NULL or their parameters are the same
  *     >0 otherwise
  */
-static int	_same_info(struct node_record *node1_ptr, 
+static int	_same_info(struct node_record *node1_ptr,
 			   struct node_record *node2_ptr, time_t update_time)
 {
 	int i;
@@ -250,11 +248,11 @@ static int	_same_info(struct node_record *node1_ptr,
 
 	if (slurmctld_conf.fast_schedule) {
 		/* config from slurm.conf */
-		if ((node1_ptr->config_ptr->real_memory != 
+		if ((node1_ptr->config_ptr->real_memory !=
 		     node2_ptr->config_ptr->real_memory) ||
-		    (node1_ptr->config_ptr->tmp_disk != 
+		    (node1_ptr->config_ptr->tmp_disk !=
 		     node2_ptr->config_ptr->tmp_disk) ||
-		    (node1_ptr->config_ptr->cpus != 
+		    (node1_ptr->config_ptr->cpus !=
 		     node2_ptr->config_ptr->cpus))
 			return 9;
 	} else {
@@ -263,13 +261,13 @@ static int	_same_info(struct node_record *node1_ptr,
 		    (node1_ptr->cpus        != node2_ptr->cpus))
 			return 10;
 	}
-	if (_str_cmp(node1_ptr->config_ptr->feature, 
+	if (_str_cmp(node1_ptr->config_ptr->feature,
 		     node2_ptr->config_ptr->feature))
 		return 11;
 	return 0;
 }
 
-static char *	_dump_node(struct node_record *node_ptr, hostlist_t hl, 
+static char *	_dump_node(struct node_record *node_ptr, hostlist_t hl,
 			   time_t update_time)
 {
 	char tmp[16*1024], *buf = NULL;
@@ -303,7 +301,7 @@ static char *	_dump_node(struct node_record *node_ptr, hostlist_t hl,
 		xstrcat(buf, tmp);
 		xfree(reason);
 	}
-	
+
 	if (update_time > last_node_update)
 		return buf;
 
@@ -317,7 +315,7 @@ static char *	_dump_node(struct node_record *node_ptr, hostlist_t hl,
 	for (i=0; i<node_ptr->part_cnt; i++) {
 		if (i == 0)
 			xstrcat(buf, "CCLASS=");
-		snprintf(tmp, sizeof(tmp), "[%s:%u]", 
+		snprintf(tmp, sizeof(tmp), "[%s:%u]",
 			node_ptr->part_pptr[i]->name,
 			cpu_cnt);
 		xstrcat(buf, tmp);
@@ -335,8 +333,7 @@ static char *	_dump_node(struct node_record *node_ptr, hostlist_t hl,
 		xstrcat(buf, tmp);
 	}
 
-	if (node_ptr->config_ptr
-	&&  node_ptr->config_ptr->feature) {
+	if (node_ptr->config_ptr && node_ptr->config_ptr->feature) {
 		snprintf(tmp, sizeof(tmp), "FEATURE=%s;",
 			node_ptr->config_ptr->feature);
 		/* comma separator to colon */
@@ -374,12 +371,10 @@ static char *	_get_node_state(struct node_record *node_ptr)
 {
 	static bool got_select_type = false;
 	static bool node_allocations;
-	uint16_t state = node_ptr->node_state;
-	uint16_t base_state = state & NODE_STATE_BASE;
 
 	if (!got_select_type) {
 		char * select_type = slurm_get_select_type();
-		if (select_type && 
+		if (select_type &&
 		    (strcasecmp(select_type, "select/linear") == 0))
 			node_allocations = true;
 		else
@@ -388,26 +383,24 @@ static char *	_get_node_state(struct node_record *node_ptr)
 		got_select_type = true;
 	}
 
-	if ((state & NODE_STATE_DRAIN)
-	||  (state & NODE_STATE_FAIL)) {
-		if (base_state == NODE_STATE_IDLE)
+	if (IS_NODE_DRAIN(node_ptr) || IS_NODE_FAIL(node_ptr)) {
 			return "Drained";
 		return "Draining";
 	}
-	if (state & NODE_STATE_COMPLETING)
+	if (IS_NODE_COMPLETING(node_ptr))
 		return "Busy";
 
-	if (base_state == NODE_STATE_DOWN)
+	if (IS_NODE_DOWN(node_ptr))
 		return "Down";
-	if (base_state == NODE_STATE_ALLOCATED) {
+	if (IS_NODE_ALLOCATED(node_ptr)) {
 		if (node_allocations)
 			return "Busy";
 		else
 			return "Running";
 	}
-	if (base_state == NODE_STATE_IDLE)
+	if (IS_NODE_IDLE(node_ptr))
 		return "Idle";
-	
+
 	return "Unknown";
 }
 

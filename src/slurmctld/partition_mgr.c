@@ -2,38 +2,39 @@
  *  partition_mgr.c - manage the partition information of slurm
  *	Note: there is a global partition list (part_list) and
  *	time stamp (last_part_update)
- *  $Id: partition_mgr.c 19082 2009-12-01 20:15:57Z da $
+ *  $Id: partition_mgr.c 19095 2009-12-01 22:59:18Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
+ *  In addition, as a special exception, the copyright holders give permission
  *  to link the code of portions of this program with the OpenSSL library under
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -45,7 +46,6 @@
 
 #include <ctype.h>
 #include <errno.h>
-#include <grp.h>
 #include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -66,6 +66,18 @@
 #include "src/slurmctld/proc_req.h"
 #include "src/slurmctld/sched_plugin.h"
 #include "src/slurmctld/slurmctld.h"
+#include "src/slurmctld/state_save.h"
+
+/* needed for getgrent_r */
+#ifndef   _GNU_SOURCE
+#  define _GNU_SOURCE
+#endif
+#ifndef   __USE_GNU
+#define   __USE_GNU
+#endif
+
+#include <grp.h>
+
 
 /* Change PART_STATE_VERSION value when changing the state save format */
 #define PART_STATE_VERSION      "VER002"
@@ -86,18 +98,19 @@ static uid_t *_get_groups_members(char *group_names);
 static uid_t *_get_group_members(char *group_name);
 static time_t _get_group_tlm(void);
 static void   _list_delete_part(void *part_entry);
+static int    _open_part_state_file(char **state_file);
 static int    _uid_list_size(uid_t * uid_list_ptr);
-static void   _unlink_free_nodes(bitstr_t *old_bitmap, 
+static void   _unlink_free_nodes(bitstr_t *old_bitmap,
 			struct part_record *part_ptr);
 
 /*
- * _build_part_bitmap - update the total_cpus, total_nodes, and node_bitmap 
- *	for the specified partition, also reset the partition pointers in 
+ * _build_part_bitmap - update the total_cpus, total_nodes, and node_bitmap
+ *	for the specified partition, also reset the partition pointers in
  *	the node back to this partition.
  * IN part_ptr - pointer to the partition
  * RET 0 if no error, errno otherwise
  * global: node_record_table_ptr - pointer to global node table
- * NOTE: this does not report nodes defined in more than one partition. this   
+ * NOTE: this does not report nodes defined in more than one partition. this
  *	is checked only upon reading the configuration file, not on an update
  */
 static int _build_part_bitmap(struct part_record *part_ptr)
@@ -172,7 +185,7 @@ static int _build_part_bitmap(struct part_record *part_ptr)
 }
 
 /* unlink nodes removed from a partition */
-static void _unlink_free_nodes(bitstr_t *old_bitmap, 
+static void _unlink_free_nodes(bitstr_t *old_bitmap,
 		struct part_record *part_ptr)
 {
 	int i, j, k, update_nodes = 0;
@@ -190,7 +203,7 @@ static void _unlink_free_nodes(bitstr_t *old_bitmap,
 				continue;
 			node_ptr->part_cnt--;
 			for (k=j; k<node_ptr->part_cnt; k++) {
-				node_ptr->part_pptr[k] = 
+				node_ptr->part_pptr[k] =
 					node_ptr->part_pptr[k+1];
 			}
 			break;
@@ -203,7 +216,7 @@ static void _unlink_free_nodes(bitstr_t *old_bitmap,
 }
 
 
-/* 
+/*
  * create_part_record - create a partition record
  * RET a pointer to the record or NULL if error
  * global: part_list - global partition list
@@ -233,7 +246,7 @@ struct part_record *create_part_record(void)
 	part_ptr->max_share         = default_part.max_share;
 	part_ptr->priority          = default_part.priority;
 	if(part_max_priority)
-		part_ptr->norm_priority = (double)default_part.priority 
+		part_ptr->norm_priority = (double)default_part.priority
 			/ (double)part_max_priority;
 	part_ptr->node_bitmap       = NULL;
 
@@ -260,9 +273,9 @@ struct part_record *create_part_record(void)
 }
 
 
-/* 
+/*
  * _delete_part_record - delete record for partition with specified name
- * IN name - name of the desired node, delete all partitions if NULL 
+ * IN name - name of the desired node, delete all partitions if NULL
  * RET 0 on success, errno otherwise
  * global: part_list - global partition list
  */
@@ -329,12 +342,12 @@ int dump_all_part_state(void)
 	unlock_slurmctld(part_read_lock);
 	lock_state_files();
 	log_fd = creat(new_file, 0600);
-	if (log_fd == 0) {
+	if (log_fd < 0) {
 		error("Can't save state, error creating file %s, %m",
 		      new_file);
 		error_code = errno;
 	} else {
-		int pos = 0, nwrite = get_buf_offset(buffer), amount;
+		int pos = 0, nwrite = get_buf_offset(buffer), amount, rc;
 		char *data = (char *)get_buf_data(buffer);
 		high_buffer_size = MAX(nwrite, high_buffer_size);
 		while (nwrite > 0) {
@@ -347,8 +360,10 @@ int dump_all_part_state(void)
 			nwrite -= amount;
 			pos    += amount;
 		}
-		fsync(log_fd);
-		close(log_fd);
+
+		rc = fsync_and_close(log_fd, "partition");
+		if (rc && !error_code)
+			error_code = rc;
 	}
 	if (error_code)
 		(void) unlink(new_file);
@@ -375,7 +390,7 @@ int dump_all_part_state(void)
 
 /*
  * _dump_part_state - dump the state of a specific partition to a buffer
- * IN part_ptr - pointer to partition for which information 
+ * IN part_ptr - pointer to partition for which information
  *	is requested
  * IN/OUT buffer - location to store data, pointers automatically advanced
  */
@@ -407,9 +422,40 @@ static void _dump_part_state(struct part_record *part_ptr, Buf buffer)
 	packstr(part_ptr->nodes,         buffer);
 }
 
+/* Open the partition state save file, or backup if necessary.
+ * state_file IN - the name of the state save file used
+ * RET the file description to read from or error code
+ */
+static int _open_part_state_file(char **state_file)
+{
+	int state_fd;
+	struct stat stat_buf;
+
+	*state_file = xstrdup(slurmctld_conf.state_save_location);
+	xstrcat(*state_file, "/part_state");
+	state_fd = open(*state_file, O_RDONLY);
+	if (state_fd < 0) {
+		error("Could not open partition state file %s: %m",
+		      *state_file);
+	} else if (fstat(state_fd, &stat_buf) < 0) {
+		error("Could not stat partition state file %s: %m",
+		      *state_file);
+		(void) close(state_fd);
+	} else if (stat_buf.st_size < 10) {
+		error("Partition state file %s too small", *state_file);
+		(void) close(state_fd);
+	} else 	/* Success */
+		return state_fd;
+
+	error("NOTE: Trying backup state save file. Information may be lost!");
+	xstrcat(*state_file, ".old");
+	state_fd = open(*state_file, O_RDONLY);
+	return state_fd;
+}
+
 /*
- * load_all_part_state - load the partition state from file, recover on 
- *	slurmctld restart. execute this after loading the configuration 
+ * load_all_part_state - load the partition state from file, recover on
+ *	slurmctld restart. execute this after loading the configuration
  *	file data.
  * NOTE: READ lock_slurmctld config before entry
  */
@@ -429,10 +475,8 @@ int load_all_part_state(void)
 	char* allow_alloc_nodes = NULL;
 
 	/* read the file */
-	state_file = xstrdup(slurmctld_conf.state_save_location);
-	xstrcat(state_file, "/part_state");
 	lock_state_files();
-	state_fd = open(state_file, O_RDONLY);
+	state_fd = _open_part_state_file(&state_file);
 	if (state_fd < 0) {
 		info("No partition state file (%s) to recover",
 		     state_file);
@@ -441,13 +485,13 @@ int load_all_part_state(void)
 		data_allocated = BUF_SIZE;
 		data = xmalloc(data_allocated);
 		while (1) {
-			data_read = read(state_fd, &data[data_size], 
+			data_read = read(state_fd, &data[data_size],
 					BUF_SIZE);
 			if (data_read < 0) {
 				if  (errno == EINTR)
 					continue;
 				else {
-					error("Read error on %s: %m", 
+					error("Read error on %s: %m",
 						state_file);
 					break;
 				}
@@ -490,7 +534,7 @@ int load_all_part_state(void)
 		safe_unpack16(&max_share, buffer);
 		safe_unpack16(&priority,  buffer);
 
-		if(priority > part_max_priority) 
+		if(priority > part_max_priority)
 			part_max_priority = priority;
 
 		safe_unpack16(&state_up, buffer);
@@ -514,7 +558,7 @@ int load_all_part_state(void)
 		}
 
 		/* find record and perform update */
-		part_ptr = list_find_first(part_list, &list_find_part, 
+		part_ptr = list_find_first(part_list, &list_find_part,
 					   part_name);
 
 		if (part_ptr) {
@@ -535,9 +579,9 @@ int load_all_part_state(void)
 			part_ptr->max_share      = max_share;
 			part_ptr->priority       = priority;
 
-			if(part_max_priority) 
-				part_ptr->norm_priority = 
-					(double)part_ptr->priority 
+			if(part_max_priority)
+				part_ptr->norm_priority =
+					(double)part_ptr->priority
 					/ (double)part_max_priority;
 
 			part_ptr->state_up       = state_up;
@@ -566,9 +610,9 @@ int load_all_part_state(void)
 	return EFAULT;
 }
 
-/* 
+/*
  * find_part_record - find a record for partition with specified name
- * IN name - name of the desired partition 
+ * IN name - name of the desired partition
  * RET pointer to node partition or NULL if not found
  * global: part_list - global partition list
  */
@@ -578,9 +622,9 @@ struct part_record *find_part_record(char *name)
 }
 
 
-/* 
- * init_part_conf - initialize the default partition configuration values 
- *	and create a (global) partition list. 
+/*
+ * init_part_conf - initialize the default partition configuration values
+ *	and create a (global) partition list.
  * this should be called before creating any partition entries.
  * RET 0 if no error, otherwise an error code
  * global: default_part - default partition values
@@ -628,7 +672,7 @@ int init_part_conf(void)
 }
 
 /*
- * _list_delete_part - delete an entry from the global partition list, 
+ * _list_delete_part - delete an entry from the global partition list,
  *	see common/list.h for documentation
  * global: node_record_count - count of nodes in the system
  *         node_record_table_ptr - pointer to global node table
@@ -647,7 +691,7 @@ static void _list_delete_part(void *part_entry)
 				continue;
 			node_ptr->part_cnt--;
 			for (k=j; k<node_ptr->part_cnt; k++) {
-				node_ptr->part_pptr[k] = 
+				node_ptr->part_pptr[k] =
 					node_ptr->part_pptr[k+1];
 			}
 			break;
@@ -664,10 +708,10 @@ static void _list_delete_part(void *part_entry)
 
 
 /*
- * list_find_part - find an entry in the partition list, see common/list.h 
+ * list_find_part - find an entry in the partition list, see common/list.h
  *	for documentation
- * IN key - partition name or "universal_key" for all partitions 
- * RET 1 if matches key, 0 otherwise 
+ * IN key - partition name or "universal_key" for all partitions
+ * RET 1 if matches key, 0 otherwise
  * global- part_list - the global partition list
  */
 int list_find_part(void *part_entry, void *key)
@@ -684,7 +728,7 @@ int list_find_part(void *part_entry, void *key)
 	return 0;
 }
 
-/* part_filter_set - Set the partition's hidden flag based upon a user's 
+/* part_filter_set - Set the partition's hidden flag based upon a user's
  * group access. This must be followed by a call to part_filter_clear() */
 extern void part_filter_set(uid_t uid)
 {
@@ -715,8 +759,8 @@ extern void part_filter_clear(void)
 	list_iterator_destroy(part_iterator);
 }
 
-/* 
- * pack_all_part - dump all partition information for all partitions in 
+/*
+ * pack_all_part - dump all partition information for all partitions in
  *	machine independent form (for network transmission)
  * OUT buffer_ptr - the pointer is set to the allocated buffer.
  * OUT buffer_size - set to size of the buffer in bytes
@@ -726,8 +770,8 @@ extern void part_filter_clear(void)
  * NOTE: the buffer at *buffer_ptr must be xfreed by the caller
  * NOTE: change slurm_load_part() in api/part_info.c if data format changes
  */
-extern void pack_all_part(char **buffer_ptr, int *buffer_size, 
-		uint16_t show_flags, uid_t uid)
+extern void pack_all_part(char **buffer_ptr, int *buffer_size,
+			  uint16_t show_flags, uid_t uid)
 {
 	ListIterator part_iterator;
 	struct part_record *part_ptr;
@@ -751,7 +795,7 @@ extern void pack_all_part(char **buffer_ptr, int *buffer_size,
 	while ((part_ptr = (struct part_record *) list_next(part_iterator))) {
 		xassert (part_ptr->magic == PART_MAGIC);
 		if (((show_flags & SHOW_ALL) == 0) && (uid != 0) &&
-		    ((part_ptr->hidden) 
+		    ((part_ptr->hidden)
 		     || (validate_group (part_ptr, uid) == 0)))
 			continue;
 		pack_part(part_ptr, buffer);
@@ -770,11 +814,11 @@ extern void pack_all_part(char **buffer_ptr, int *buffer_size,
 }
 
 
-/* 
- * pack_part - dump all configuration information about a specific partition 
+/*
+ * pack_part - dump all configuration information about a specific partition
  *	in machine independent form (for network transmission)
  * IN part_ptr - pointer to partition for which information is requested
- * IN/OUT buffer - buffer in which data is placed, pointers automatically 
+ * IN/OUT buffer - buffer in which data is placed, pointers automatically
  *	updated
  * global: default_part_loc - pointer to the default partition
  * NOTE: if you make any changes here be sure to make the corresponding changes
@@ -783,8 +827,7 @@ extern void pack_all_part(char **buffer_ptr, int *buffer_size,
 void pack_part(struct part_record *part_ptr, Buf buffer)
 {
 	uint16_t default_part_flag;
-	char node_inx_ptr[BUF_SIZE];
-	uint32_t altered, node_scaling;
+	uint32_t altered;
 
 	if (default_part_loc == part_ptr)
 		default_part_flag = 1;
@@ -797,12 +840,9 @@ void pack_part(struct part_record *part_ptr, Buf buffer)
 	pack32(part_ptr->max_nodes_orig, buffer);
 	pack32(part_ptr->min_nodes_orig, buffer);
 	altered = part_ptr->total_nodes;
-	select_g_alter_node_cnt(SELECT_APPLY_NODE_MAX_OFFSET, 
+	select_g_alter_node_cnt(SELECT_APPLY_NODE_MAX_OFFSET,
 				&altered);
 	pack32(altered, buffer);
-	select_g_alter_node_cnt(SELECT_GET_NODE_SCALING, 
-				&node_scaling);
-	pack16(node_scaling, buffer);
 	pack32(part_ptr->total_cpus, buffer);
 	pack16(default_part_flag,    buffer);
 	pack16(part_ptr->disable_root_jobs, buffer);
@@ -815,16 +855,11 @@ void pack_part(struct part_record *part_ptr, Buf buffer)
 	packstr(part_ptr->allow_groups, buffer);
 	packstr(part_ptr->allow_alloc_nodes, buffer);
 	packstr(part_ptr->nodes, buffer);
-	if (part_ptr->node_bitmap) {
-		bit_fmt(node_inx_ptr, BUF_SIZE,
-			part_ptr->node_bitmap);
-		packstr((char *)node_inx_ptr, buffer);
-	} else
-		packstr("", buffer);
+	pack_bit_fmt(part_ptr->node_bitmap, buffer);
 }
 
 
-/* 
+/*
  * update_part - create or update a partition's configuration data
  * IN part_desc - description of partition changes
  * IN create_flag - create a new partition
@@ -843,7 +878,7 @@ extern int update_part (update_part_msg_t * part_desc, bool create_flag)
 	}
 
 	error_code = SLURM_SUCCESS;
-	part_ptr = list_find_first(part_list, &list_find_part, 
+	part_ptr = list_find_first(part_list, &list_find_part,
 				   part_desc->name);
 
 	if (create_flag) {
@@ -874,24 +909,24 @@ extern int update_part (update_part_msg_t * part_desc, bool create_flag)
 	}
 
 	if (part_desc->max_time != NO_VAL) {
-		info("update_part: setting max_time to %u for partition %s", 
+		info("update_part: setting max_time to %u for partition %s",
 		     part_desc->max_time, part_desc->name);
 		part_ptr->max_time = part_desc->max_time;
 	}
 
-	if ((part_desc->default_time != NO_VAL) && 
+	if ((part_desc->default_time != NO_VAL) &&
 	    (part_desc->default_time > part_ptr->max_time)) {
 		info("update_part: DefaultTime would exceed MaxTime for "
 		     "partition %s", part_desc->name);
 	} else if (part_desc->default_time != NO_VAL) {
 		info("update_part: setting default_time to %u "
-		     "for partition %s", 
+		     "for partition %s",
 		     part_desc->default_time, part_desc->name);
 		part_ptr->default_time = part_desc->default_time;
 	}
 
 	if (part_desc->max_nodes != NO_VAL) {
-		info("update_part: setting max_nodes to %u for partition %s", 
+		info("update_part: setting max_nodes to %u for partition %s",
 		     part_desc->max_nodes, part_desc->name);
 		part_ptr->max_nodes      = part_desc->max_nodes;
 		part_ptr->max_nodes_orig = part_desc->max_nodes;
@@ -900,7 +935,7 @@ extern int update_part (update_part_msg_t * part_desc, bool create_flag)
 	}
 
 	if (part_desc->min_nodes != NO_VAL) {
-		info("update_part: setting min_nodes to %u for partition %s", 
+		info("update_part: setting min_nodes to %u for partition %s",
 		     part_desc->min_nodes, part_desc->name);
 		part_ptr->min_nodes      = part_desc->min_nodes;
 		part_ptr->min_nodes_orig = part_desc->min_nodes;
@@ -909,13 +944,13 @@ extern int update_part (update_part_msg_t * part_desc, bool create_flag)
 	}
 
 	if (part_desc->root_only != (uint16_t) NO_VAL) {
-		info("update_part: setting root_only to %u for partition %s", 
+		info("update_part: setting root_only to %u for partition %s",
 		     part_desc->root_only, part_desc->name);
 		part_ptr->root_only = part_desc->root_only;
 	}
 
 	if (part_desc->state_up != (uint16_t) NO_VAL) {
-		info("update_part: setting state_up to %u for partition %s", 
+		info("update_part: setting state_up to %u for partition %s",
 		     part_desc->state_up, part_desc->name);
 		part_ptr->state_up = part_desc->state_up;
 	}
@@ -941,7 +976,7 @@ extern int update_part (update_part_msg_t * part_desc, bool create_flag)
 		info("update_part: setting priority to %u for partition %s",
 		     part_desc->priority, part_desc->name);
 		part_ptr->priority = part_desc->priority;
-		
+
 		/* If the max_priority changes we need to change all
 		   the normalized priorities of all the other
 		   partitions.  If not then just set this partitions.
@@ -953,23 +988,23 @@ extern int update_part (update_part_msg_t * part_desc, bool create_flag)
 			part_max_priority = part_ptr->priority;
 
 			while((part2 = list_next(itr))) {
-				part2->norm_priority = (double)part2->priority 
+				part2->norm_priority = (double)part2->priority
 					/ (double)part_max_priority;
 			}
 			list_iterator_destroy(itr);
 		} else {
-			part_ptr->norm_priority = (double)part_ptr->priority 
+			part_ptr->norm_priority = (double)part_ptr->priority
 				/ (double)part_max_priority;
 		}
 	}
 
 	if (part_desc->default_part == 1) {
 		if (default_part_name == NULL) {
-			info("update_part: setting default partition to %s", 
+			info("update_part: setting default partition to %s",
 			     part_desc->name);
 		} else if (strcmp(default_part_name, part_desc->name) != 0) {
 			info("update_part: changing default "
-			     "partition from %s to %s", 
+			     "partition from %s to %s",
 			     default_part_name, part_desc->name);
 		}
 		xfree(default_part_name);
@@ -983,13 +1018,13 @@ extern int update_part (update_part_msg_t * part_desc, bool create_flag)
 		if ((strcasecmp(part_desc->allow_groups, "ALL") == 0) ||
 		    (part_desc->allow_groups[0] == '\0')) {
 			info("update_part: setting allow_groups to ALL for "
-				"partition %s", 
+				"partition %s",
 				part_desc->name);
 		} else {
 			part_ptr->allow_groups = part_desc->allow_groups;
 			part_desc->allow_groups = NULL;
 			info("update_part: setting allow_groups to %s for "
-				"partition %s", 
+				"partition %s",
 				part_ptr->allow_groups, part_desc->name);
 			part_ptr->allow_uids =
 				_get_groups_members(part_ptr->allow_groups);
@@ -1009,7 +1044,7 @@ extern int update_part (update_part_msg_t * part_desc, bool create_flag)
 						      allow_alloc_nodes;
 			part_desc->allow_alloc_nodes = NULL;
 			info("update_part: setting allow_alloc_nodes to %s for "
-			     "partition %s", 
+			     "partition %s",
 			     part_ptr->allow_alloc_nodes, part_desc->name);
 		}
 	}
@@ -1034,7 +1069,7 @@ extern int update_part (update_part_msg_t * part_desc, bool create_flag)
 			part_ptr->nodes = backup_node_list;
 		} else {
 			info("update_part: setting nodes to %s "
-			     "for partition %s", 
+			     "for partition %s",
 			     part_ptr->nodes, part_desc->name);
 			xfree(backup_node_list);
 		}
@@ -1047,7 +1082,7 @@ extern int update_part (update_part_msg_t * part_desc, bool create_flag)
 		slurm_sched_partition_change();	/* notify sched plugin */
 		select_g_reconfigure();		/* notify select plugin too */
 		reset_job_priority();		/* free jobs */
-		
+
 		/* I am not sure why this was ever there (da) */
 /* 		if (select_g_block_init(part_list) != SLURM_SUCCESS ) */
 /* 			error("failed to update node selection plugin state"); */
@@ -1058,7 +1093,7 @@ extern int update_part (update_part_msg_t * part_desc, bool create_flag)
 
 
 /*
- * validate_group - validate that the submit uid is authorized to run in 
+ * validate_group - validate that the submit uid is authorized to run in
  *	this partition
  * IN part_ptr - pointer to a partition
  * IN run_uid - user to run the job as
@@ -1074,7 +1109,7 @@ extern int validate_group(struct part_record *part_ptr, uid_t run_uid)
 		return 1;	/* super-user can run anywhere */
 	if (part_ptr->allow_uids == NULL)
 		return 0;	/* no non-super-users in the list */
-	
+
 	for (i = 0; part_ptr->allow_uids[i]; i++) {
 		if (part_ptr->allow_uids[i] == run_uid)
 			return 1;
@@ -1093,22 +1128,22 @@ extern int validate_group(struct part_record *part_ptr, uid_t run_uid)
 extern int validate_alloc_node(struct part_record *part_ptr, char* alloc_node)
 {
 	int status;
-	
+
  	if (part_ptr->allow_alloc_nodes == NULL)
  		return 1;	/* all allocating nodes allowed */
  	if (alloc_node == NULL)
  		return 1;	/* if no allocating node defined
 				 * let it go */
- 
+
  	hostlist_t hl = hostlist_create(part_ptr->allow_alloc_nodes);
  	status=hostlist_find(hl,alloc_node);
  	hostlist_destroy(hl);
-	
+
  	if(status==-1)
 		status=0;
  	else
 		status=1;
-	
+
  	return status;
 }
 
@@ -1141,10 +1176,10 @@ void load_part_uid_allow_list(int force)
 }
 
 
-/* 
+/*
  * _get_groups_members - indentify the users in a list of group names
  * IN group_names - a comma delimited list of group names
- * RET a zero terminated list of its UIDs or NULL on error 
+ * RET a zero terminated list of its UIDs or NULL on error
  * NOTE: User root has implicitly access to every group
  * NOTE: The caller must xfree non-NULL return values
  */
@@ -1182,10 +1217,10 @@ uid_t *_get_groups_members(char *group_names)
 	return group_uids;
 }
 
-/* 
+/*
  * _get_group_members - indentify the users in a given group name
  * IN group_name - a single group name
- * RET a zero terminated list of its UIDs or NULL on error 
+ * RET a zero terminated list of its UIDs or NULL on error
  * NOTE: User root has implicitly access to every group
  * NOTE: The caller must xfree non-NULL return values
  */
@@ -1202,10 +1237,10 @@ uid_t *_get_group_members(char *group_name)
 	FILE *fp = NULL;
 #endif
 
-	/* We need to check for !grp_result, since it appears some 
+	/* We need to check for !grp_result, since it appears some
 	 * versions of this function do not return an error on failure.
 	 */
-	if (getgrnam_r(group_name, &grp, grp_buffer, PW_BUF_SIZE, 
+	if (getgrnam_r(group_name, &grp, grp_buffer, PW_BUF_SIZE,
 		       &grp_result) || (grp_result == NULL)) {
 		error("Could not find configured group %s", group_name);
 		return NULL;
@@ -1213,29 +1248,71 @@ uid_t *_get_group_members(char *group_name)
 
 	my_gid = grp_result->gr_gid;
 
-	for (uid_cnt=0; ; uid_cnt++) {
-		if (grp_result->gr_mem[uid_cnt] == NULL)
-			break;
+	/* MH-CEA workaround to handle different group entries with
+	 * the same gid */
+	uid_cnt=0;
+#ifdef HAVE_AIX
+	setgrent_r(&fp);
+	while (!getgrent_r(&grp, grp_buffer, PW_BUF_SIZE, &fp)) {
+		grp_result = &grp;
+#else
+	setgrent();
+	while (getgrent_r(&grp, grp_buffer, PW_BUF_SIZE,
+			  &grp_result) == 0 && grp_result != NULL) {
+#endif
+	        if (grp_result->gr_gid == my_gid) {
+		        for (i=0 ; grp_result->gr_mem[i] != NULL ; i++) {
+				uid_cnt++;
+			}
+		}
 	}
 
 	group_uids = (uid_t *) xmalloc(sizeof(uid_t) * (uid_cnt + 1));
 
-	j = 0;
-	for (i=0; i<uid_cnt; i++) {
-		if (uid_from_string (grp_result->gr_mem[i], &my_uid) < 0)
-			error("Could not find user %s in configured group %s",
-			      grp_result->gr_mem[i], group_name);
-		else if (my_uid)
-			group_uids[j++] = my_uid;
-	}
-
+	j=0;
 #ifdef HAVE_AIX
+	setgrent_r(&fp);
+	while (!getgrent_r(&grp, grp_buffer, PW_BUF_SIZE, &fp)) {
+		grp_result = &grp;
+#else
+	setgrent();
+	while (getgrent_r(&grp, grp_buffer, PW_BUF_SIZE,
+			  &grp_result) == 0 && grp_result != NULL) {
+#endif
+	        if (grp_result->gr_gid == my_gid) {
+			if (strcmp(grp_result->gr_name, group_name))
+				debug("including members of group '%s' as it "
+				      "corresponds to the same gid as group"
+				      " '%s'",grp_result->gr_name,group_name);
+
+		        for (i=0; j < uid_cnt; i++) {
+			        if (grp_result->gr_mem[i] == NULL)
+			                break;
+				if (uid_from_string(grp_result->gr_mem[i],
+						    &my_uid) < 0)
+				        error("Could not find user %s in "
+					      "configured group %s",
+					      grp_result->gr_mem[i],
+					      group_name);
+				else if (my_uid)
+				        group_uids[j++] = my_uid;
+			}
+		}
+	}
+#ifdef HAVE_AIX
+	endgrent_r(&fp);
 	setpwent_r(&fp);
 	while (!getpwent_r(&pw, pw_buffer, PW_BUF_SIZE, &fp)) {
 		pwd_result = &pw;
 #else
+	endgrent();
 	setpwent();
+#if defined (__sun)
+	while ((pwd_result = getpwent_r(&pw, pw_buffer, PW_BUF_SIZE)) != NULL) {
+#else
+
 	while (!getpwent_r(&pw, pw_buffer, PW_BUF_SIZE, &pwd_result)) {
+#endif
 #endif
  		if (pwd_result->pw_gid != my_gid)
 			continue;
@@ -1296,7 +1373,7 @@ static int _uid_list_size(uid_t * uid_list_ptr)
 }
 
 /* part_fini - free all memory associated with partition records */
-void part_fini (void) 
+void part_fini (void)
 {
 	if (part_list) {
 		list_destroy(part_list);
@@ -1308,7 +1385,7 @@ void part_fini (void)
 }
 
 /*
- * delete_partition - delete the specified partition (actually leave 
+ * delete_partition - delete the specified partition (actually leave
  *	the entry, just flag it as defunct)
  * IN job_specs - job specification from RPC
  */

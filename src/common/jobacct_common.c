@@ -5,32 +5,32 @@
  *  Copyright (C) 2005 Hewlett-Packard Development Company, L.P.
  *  Written by Danny Auble, <da@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
+ *  In addition, as a special exception, the copyright holders give permission
  *  to link the code of portions of this program with the OpenSSL library under
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -41,15 +41,9 @@
 
 #include "jobacct_common.h"
 
-bool jobacct_shutdown = false;
-bool jobacct_suspended = false;
-List task_list = NULL;
 pthread_mutex_t jobacct_lock = PTHREAD_MUTEX_INITIALIZER;
-uint32_t cont_id = (uint32_t)NO_VAL;
-uint32_t acct_job_id = 0;
-uint32_t job_mem_limit = 0;
-bool pgid_plugin = false;
-uint32_t mult = 1000;
+uint32_t jobacct_job_id = 0;
+uint32_t jobacct_mem_limit = 0;
 
 static void _pack_jobacct_id(jobacct_id_t *jobacct_id, Buf buffer)
 {
@@ -69,32 +63,30 @@ unpack_error:
 static void _pack_sacct(sacct_t *sacct, Buf buffer)
 {
 	int i=0;
-	uint32_t temp;
 
 	if(!sacct) {
-		for(i=0; i<8; i++)
+		for(i=0; i<4; i++)
 			pack32((uint32_t) 0, buffer);
+
+		for(i=0; i<4; i++)
+			packdouble(0, buffer);
 
 		for(i=0; i<4; i++) {	/* _pack_jobacct_id() */
 			pack32((uint32_t) 0, buffer);
 			pack16((uint16_t) 0, buffer);
 		}
 		return;
-	} 
+	}
 
 	pack32(sacct->max_vsize, buffer);
-	temp = sacct->ave_vsize * mult;
-	pack32(temp, buffer);
 	pack32(sacct->max_rss, buffer);
-	temp = (uint32_t)sacct->ave_rss * mult;
-	pack32(temp, buffer);
 	pack32(sacct->max_pages, buffer);
-	temp = (uint32_t)sacct->ave_pages * mult;
-	pack32(temp, buffer);
-	temp = (uint32_t)sacct->min_cpu * mult;
-	pack32(temp, buffer);
-	temp = (uint32_t)sacct->ave_cpu * mult;
-	pack32(temp, buffer);
+	pack32(sacct->min_cpu, buffer);
+
+	packdouble(sacct->ave_vsize, buffer);
+	packdouble(sacct->ave_rss, buffer);
+	packdouble(sacct->ave_pages, buffer);
+	packdouble(sacct->ave_cpu, buffer);
 
 	_pack_jobacct_id(&sacct->max_vsize_id, buffer);
 	_pack_jobacct_id(&sacct->max_rss_id, buffer);
@@ -105,24 +97,16 @@ static void _pack_sacct(sacct_t *sacct, Buf buffer)
 /* you need to xfree this */
 static int _unpack_sacct(sacct_t *sacct, Buf buffer)
 {
-	/* this is here to handle the floats since it appears sending
-	 * in a float with a typecast returns incorrect information
-	 */
-	uint32_t temp;
-
 	safe_unpack32(&sacct->max_vsize, buffer);
-	safe_unpack32(&temp, buffer);
-	sacct->ave_vsize = temp / mult;
 	safe_unpack32(&sacct->max_rss, buffer);
-	safe_unpack32(&temp, buffer);
-	sacct->ave_rss = temp / mult;
 	safe_unpack32(&sacct->max_pages, buffer);
-	safe_unpack32(&temp, buffer);
-	sacct->ave_pages = temp / mult;
-	safe_unpack32(&temp, buffer);
-	sacct->min_cpu = temp / mult;
-	safe_unpack32(&temp, buffer);
-	sacct->ave_cpu = temp / mult;
+	safe_unpack32(&sacct->min_cpu, buffer);
+
+	safe_unpackdouble(&sacct->ave_vsize, buffer);
+	safe_unpackdouble(&sacct->ave_rss, buffer);
+	safe_unpackdouble(&sacct->ave_pages, buffer);
+	safe_unpackdouble(&sacct->ave_cpu, buffer);
+
 	if(_unpack_jobacct_id(&sacct->max_vsize_id, buffer) != SLURM_SUCCESS)
 		goto unpack_error;
 	if(_unpack_jobacct_id(&sacct->max_rss_id, buffer) != SLURM_SUCCESS)
@@ -142,7 +126,7 @@ extern jobacct_job_rec_t *create_jobacct_job_rec()
 {
 	jobacct_job_rec_t *job = xmalloc(sizeof(jobacct_job_rec_t));
 	memset(&job->sacct, 0, sizeof(sacct_t));
-	job->sacct.min_cpu = (float)NO_VAL;
+	job->sacct.min_cpu = NO_VAL;
 	job->state = JOB_PENDING;
 	job->steps = list_create(destroy_jobacct_step_rec);
 	job->requid = -1;
@@ -206,7 +190,7 @@ extern void destroy_jobacct_selected_step(void *object)
 	}
 }
 
- 
+
 extern void pack_jobacct_job_rec(void *object, uint16_t rpc_version, Buf buffer)
 {
 	jobacct_job_rec_t *job = (jobacct_job_rec_t *)object;
@@ -542,8 +526,8 @@ unpack_error:
 	*job = NULL;
 	return SLURM_ERROR;
 }
- 
-extern void pack_jobacct_step_rec(jobacct_step_rec_t *step, 
+
+extern void pack_jobacct_step_rec(jobacct_step_rec_t *step,
 				  uint16_t rpc_version, Buf buffer)
 {
 	uint32_t uint32_tmp = NO_VAL;
@@ -593,7 +577,7 @@ extern void pack_jobacct_step_rec(jobacct_step_rec_t *step,
 	}
 }
 
-extern int unpack_jobacct_step_rec(jobacct_step_rec_t **step, 
+extern int unpack_jobacct_step_rec(jobacct_step_rec_t **step,
 				   uint16_t rpc_version, Buf buffer)
 {
 	uint32_t uint32_tmp;
@@ -656,7 +640,7 @@ unpack_error:
 	destroy_jobacct_step_rec(step_ptr);
 	*step = NULL;
 	return SLURM_ERROR;
-} 
+}
 
 extern void pack_jobacct_selected_step(jobacct_selected_step_t *step,
 				       uint16_t rpc_version, Buf buffer)
@@ -670,7 +654,7 @@ extern int unpack_jobacct_selected_step(jobacct_selected_step_t **step,
 {
 	jobacct_selected_step_t *step_ptr =
 		xmalloc(sizeof(jobacct_selected_step_t));
-	
+
 	*step = step_ptr;
 
 	safe_unpack32(&step_ptr->jobid, buffer);
@@ -684,7 +668,7 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
-extern int jobacct_common_init_struct(struct jobacctinfo *jobacct, 
+extern int jobacct_common_init_struct(struct jobacctinfo *jobacct,
 				      jobacct_id_t *jobacct_id)
 {
 	if(!jobacct_id) {
@@ -711,7 +695,7 @@ extern int jobacct_common_init_struct(struct jobacctinfo *jobacct,
 	jobacct->min_cpu = (uint32_t)NO_VAL;
 	memcpy(&jobacct->min_cpu_id, jobacct_id, sizeof(jobacct_id_t));
 	jobacct->tot_cpu = 0;
-	
+
 	return SLURM_SUCCESS;
 }
 
@@ -729,7 +713,7 @@ extern void jobacct_common_free_jobacct(void *object)
 	xfree(jobacct);
 }
 
-extern int jobacct_common_setinfo(struct jobacctinfo *jobacct, 
+extern int jobacct_common_setinfo(struct jobacctinfo *jobacct,
 				  enum jobacct_data_type type, void *data)
 {
 	int rc = SLURM_SUCCESS;
@@ -790,7 +774,7 @@ extern int jobacct_common_setinfo(struct jobacctinfo *jobacct,
 		jobacct->tot_cpu = *uint32;
 		break;
 	default:
-		debug("jobacct_g_set_setinfo data_type %d invalid", 
+		debug("jobacct_g_set_setinfo data_type %d invalid",
 		      type);
 	}
 	slurm_mutex_unlock(&jobacct_lock);
@@ -798,10 +782,10 @@ extern int jobacct_common_setinfo(struct jobacctinfo *jobacct,
 rwfail:
 	slurm_mutex_unlock(&jobacct_lock);
 	return SLURM_ERROR;
-	
+
 }
 
-extern int jobacct_common_getinfo(struct jobacctinfo *jobacct, 
+extern int jobacct_common_getinfo(struct jobacctinfo *jobacct,
 				  enum jobacct_data_type type, void *data)
 {
 	int rc = SLURM_SUCCESS;
@@ -863,7 +847,7 @@ extern int jobacct_common_getinfo(struct jobacctinfo *jobacct,
 		*uint32 = jobacct->tot_cpu;
 		break;
 	default:
-		debug("jobacct_g_set_setinfo data_type %d invalid", 
+		debug("jobacct_g_set_setinfo data_type %d invalid",
 		      type);
 	}
 	slurm_mutex_unlock(&jobacct_lock);
@@ -874,7 +858,7 @@ rwfail:
 
 }
 
-extern void jobacct_common_aggregate(struct jobacctinfo *dest, 
+extern void jobacct_common_aggregate(struct jobacctinfo *dest,
 			     struct jobacctinfo *from)
 {
 	xassert(dest);
@@ -886,19 +870,19 @@ extern void jobacct_common_aggregate(struct jobacctinfo *dest,
 		dest->max_vsize_id = from->max_vsize_id;
 	}
 	dest->tot_vsize += from->tot_vsize;
-	
+
 	if(dest->max_rss < from->max_rss) {
 		dest->max_rss = from->max_rss;
 		dest->max_rss_id = from->max_rss_id;
 	}
 	dest->tot_rss += from->tot_rss;
-	
+
 	if(dest->max_pages < from->max_pages) {
 		dest->max_pages = from->max_pages;
 		dest->max_pages_id = from->max_pages_id;
 	}
 	dest->tot_pages += from->tot_pages;
-	if((dest->min_cpu > from->min_cpu) 
+	if((dest->min_cpu > from->min_cpu)
 	   || (dest->min_cpu == (uint32_t)NO_VAL)) {
 		if(from->min_cpu == (uint32_t)NO_VAL)
 			from->min_cpu = 0;
@@ -906,7 +890,7 @@ extern void jobacct_common_aggregate(struct jobacctinfo *dest,
 		dest->min_cpu_id = from->min_cpu_id;
 	}
 	dest->tot_cpu += from->tot_cpu;
-		
+
 	if(dest->max_vsize_id.taskid == (uint16_t)NO_VAL)
 		dest->max_vsize_id = from->max_vsize_id;
 
@@ -932,7 +916,7 @@ extern void jobacct_common_aggregate(struct jobacctinfo *dest,
 		dest->sys_cpu_usec -= 1E6;
 	}
 
-	slurm_mutex_unlock(&jobacct_lock);	
+	slurm_mutex_unlock(&jobacct_lock);
 }
 
 extern void jobacct_common_2_sacct(sacct_t *sacct, struct jobacctinfo *jobacct)
@@ -942,16 +926,16 @@ extern void jobacct_common_2_sacct(sacct_t *sacct, struct jobacctinfo *jobacct)
 	slurm_mutex_lock(&jobacct_lock);
 	sacct->max_vsize = jobacct->max_vsize;
 	sacct->max_vsize_id = jobacct->max_vsize_id;
-	sacct->ave_vsize = jobacct->tot_vsize;
+	sacct->ave_vsize = (double)jobacct->tot_vsize;
 	sacct->max_rss = jobacct->max_rss;
 	sacct->max_rss_id = jobacct->max_rss_id;
-	sacct->ave_rss = jobacct->tot_rss;
+	sacct->ave_rss = (double)jobacct->tot_rss;
 	sacct->max_pages = jobacct->max_pages;
 	sacct->max_pages_id = jobacct->max_pages_id;
-	sacct->ave_pages = jobacct->tot_pages;
+	sacct->ave_pages = (double)jobacct->tot_pages;
 	sacct->min_cpu = jobacct->min_cpu;
 	sacct->min_cpu_id = jobacct->min_cpu_id;
-	sacct->ave_cpu = jobacct->tot_cpu;
+	sacct->ave_cpu = (double)jobacct->tot_cpu;
 	slurm_mutex_unlock(&jobacct_lock);
 }
 
@@ -965,7 +949,7 @@ extern void jobacct_common_pack(struct jobacctinfo *jobacct, Buf buffer)
 		for(i=0; i<4; i++)
 			pack16((uint16_t) 0, buffer);
 		return;
-	} 
+	}
 	slurm_mutex_lock(&jobacct_lock);
 	pack32((uint32_t)jobacct->user_cpu_sec, buffer);
 	pack32((uint32_t)jobacct->user_cpu_usec, buffer);
@@ -1007,7 +991,7 @@ extern int jobacct_common_unpack(struct jobacctinfo **jobacct, Buf buffer)
 	safe_unpack32(&(*jobacct)->tot_pages, buffer);
 	safe_unpack32(&(*jobacct)->min_cpu, buffer);
 	safe_unpack32(&(*jobacct)->tot_cpu, buffer);
-	if(_unpack_jobacct_id(&(*jobacct)->max_vsize_id, buffer) 
+	if(_unpack_jobacct_id(&(*jobacct)->max_vsize_id, buffer)
 	   != SLURM_SUCCESS)
 		goto unpack_error;
 	if(_unpack_jobacct_id(&(*jobacct)->max_rss_id, buffer)
@@ -1027,26 +1011,6 @@ unpack_error:
        	return SLURM_ERROR;
 }
 
-extern int jobacct_common_set_proctrack_container_id(uint32_t id)
-{
-	if(pgid_plugin)
-		return SLURM_SUCCESS;
-
-	if(cont_id != (uint32_t)NO_VAL) 
-		info("Warning: jobacct: set_proctrack_container_id: "
-		     "cont_id is already set to %d you are setting it to %d",
-		     cont_id, id);
-	if(id <= 0) {
-		error("jobacct: set_proctrack_container_id: "
-		      "I was given most likely an unset cont_id %d",
-		      id);
-		return SLURM_ERROR;
-	}
-	cont_id = id;
-
-	return SLURM_SUCCESS;
-}
-
 extern int jobacct_common_set_mem_limit(uint32_t job_id, uint32_t mem_limit)
 {
 	if ((job_id == 0) || (mem_limit == 0)) {
@@ -1055,15 +1019,16 @@ extern int jobacct_common_set_mem_limit(uint32_t job_id, uint32_t mem_limit)
 		return SLURM_ERROR;
 	}
 
-	acct_job_id   = job_id;
-	job_mem_limit = mem_limit * 1024;	/* MB to KB */
+	jobacct_job_id   = job_id;
+	jobacct_mem_limit = mem_limit * 1024;	/* MB to KB */
 	return SLURM_SUCCESS;
 }
 
-extern int jobacct_common_add_task(pid_t pid, jobacct_id_t *jobacct_id)
+extern int jobacct_common_add_task(pid_t pid, jobacct_id_t *jobacct_id,
+				   List task_list)
 {
 	struct jobacctinfo *jobacct = jobacct_common_alloc_jobacct(jobacct_id);
-	
+
 	slurm_mutex_lock(&jobacct_lock);
 	if(pid <= 0) {
 		error("invalid pid given (%d) for task acct", pid);
@@ -1075,7 +1040,7 @@ extern int jobacct_common_add_task(pid_t pid, jobacct_id_t *jobacct_id)
 
 	jobacct->pid = pid;
 	jobacct->min_cpu = 0;
-	debug2("adding task %u pid %d on node %u to jobacct", 
+	debug2("adding task %u pid %d on node %u to jobacct",
 	       jobacct_id->taskid, pid, jobacct_id->nodeid);
 	list_push(task_list, jobacct);
 	slurm_mutex_unlock(&jobacct_lock);
@@ -1087,12 +1052,12 @@ error:
 	return SLURM_ERROR;
 }
 
-extern struct jobacctinfo *jobacct_common_stat_task(pid_t pid)
+extern struct jobacctinfo *jobacct_common_stat_task(pid_t pid, List task_list)
 {
 	struct jobacctinfo *jobacct = NULL;
 	struct jobacctinfo *ret_jobacct = NULL;
 	ListIterator itr = NULL;
-	
+
 	slurm_mutex_lock(&jobacct_lock);
 	if (!task_list) {
 		error("no task list created!");
@@ -1100,7 +1065,7 @@ extern struct jobacctinfo *jobacct_common_stat_task(pid_t pid)
 	}
 
 	itr = list_iterator_create(task_list);
-	while((jobacct = list_next(itr))) { 
+	while((jobacct = list_next(itr))) {
 		if(jobacct->pid == pid)
 			break;
 	}
@@ -1114,7 +1079,7 @@ error:
 	return ret_jobacct;
 }
 
-extern struct jobacctinfo *jobacct_common_remove_task(pid_t pid)
+extern struct jobacctinfo *jobacct_common_remove_task(pid_t pid, List task_list)
 {
 	struct jobacctinfo *jobacct = NULL;
 
@@ -1127,7 +1092,7 @@ extern struct jobacctinfo *jobacct_common_remove_task(pid_t pid)
 	}
 
 	itr = list_iterator_create(task_list);
-	while((jobacct = list_next(itr))) { 
+	while((jobacct = list_next(itr))) {
 		if(jobacct->pid == pid) {
 			list_remove(itr);
 			break;
@@ -1135,30 +1100,13 @@ extern struct jobacctinfo *jobacct_common_remove_task(pid_t pid)
 	}
 	list_iterator_destroy(itr);
 	if(jobacct) {
-		debug2("removing task %u pid %d from jobacct", 
+		debug2("removing task %u pid %d from jobacct",
 		       jobacct->max_vsize_id.taskid, jobacct->pid);
 	} else {
-		error("pid(%d) not being watched in jobacct!", pid);
+		debug2("pid(%d) not being watched in jobacct!", pid);
 	}
 error:
 	slurm_mutex_unlock(&jobacct_lock);
 	return jobacct;
-}
-
-extern int jobacct_common_endpoll()
-{
-	jobacct_shutdown = true;
-
-	return SLURM_SUCCESS;
-}
-
-extern void jobacct_common_suspend_poll()
-{
-	jobacct_suspended = true;
-}
-
-extern void jobacct_common_resume_poll()
-{
-	jobacct_suspended = false;
 }
 

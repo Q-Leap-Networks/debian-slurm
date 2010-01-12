@@ -15,15 +15,15 @@
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  In addition, as a special exception, the copyright holders give permission
+ *  to link the code of portions of this program with the OpenSSL library under
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
@@ -56,6 +56,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "src/common/proc_args.h"
 #include "src/common/read_config.h"
 #include "src/common/uid.h"
 #include "src/common/xstring.h"
@@ -70,10 +71,9 @@ static List  _build_job_list( char* str );
 static List  _build_user_list( char* str );
 static char *_get_prefix(char *token);
 static void  _help( void );
-static void  _parse_token( char *token, char *field, int *field_size, 
+static void  _parse_token( char *token, char *field, int *field_size,
                            bool *right_justify, char **suffix);
 static void  _print_options( void );
-static void  _print_version( void );
 static void  _usage( void );
 
 /*
@@ -136,7 +136,7 @@ parse_command_line( int argc, char* argv[] )
 			params.verbose++;
 			break;
 		case (int) 'V':
-			_print_version();
+			print_slurm_version ();
 			exit(0);
 		case (int) 'w':
 			params.weights = true;
@@ -320,7 +320,7 @@ _get_prefix( char *token )
  * OUT suffix - string containing everthing after the field specification
  */
 static void
-_parse_token( char *token, char *field, int *field_size, bool *right_justify, 
+_parse_token( char *token, char *field, int *field_size, bool *right_justify,
 	      char **suffix)
 {
 	int i = 0;
@@ -443,11 +443,6 @@ _build_user_list( char* str )
 		user = strtok_r (NULL, ",", &tmp_char);
 	}
 	return my_list;
-}
-
-static void _print_version(void)
-{
-	printf("%s %s\n", PACKAGE, SLURM_VERSION);
 }
 
 static void _usage(void)

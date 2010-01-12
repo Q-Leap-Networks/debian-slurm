@@ -6,32 +6,32 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
+ *  In addition, as a special exception, the copyright holders give permission
  *  to link the code of portions of this program with the OpenSSL library under
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -44,6 +44,7 @@
 #include "src/sreport/resv_reports.h"
 #include "src/sreport/user_reports.h"
 #include "src/common/xsignal.h"
+#include "src/common/proc_args.h"
 
 #define OPT_LONG_HIDE   0x102
 #define BUFFER_SIZE 4096
@@ -72,8 +73,8 @@ static int      _set_time_format(char *format);
 static int      _set_sort(char *format);
 static void	_usage ();
 
-int 
-main (int argc, char *argv[]) 
+int
+main (int argc, char *argv[])
 {
 	int error_code = SLURM_SUCCESS, i, opt_char, input_field_count;
 	char **input_fields;
@@ -87,7 +88,7 @@ main (int argc, char *argv[])
 		{"noheader", 0, 0, 'n'},
 		{"parsable", 0, 0, 'p'},
 		{"parsable2",0, 0, 'P'},
-		{"quiet",    0, 0, 'q'},
+		{"quiet",    0, 0, 'Q'},
 		{"sort",     0, 0, 's'},
 		{"usage",    0, 0, 'h'},
 		{"verbose",  0, 0, 'v'},
@@ -116,7 +117,7 @@ main (int argc, char *argv[])
 	}
 	xfree(temp);
 
-	while((opt_char = getopt_long(argc, argv, "ahnpPqs:t:vV",
+	while((opt_char = getopt_long(argc, argv, "ahnpPQs:t:vV",
 			long_options, &option_index)) != -1) {
 		switch (opt_char) {
 		case (int)'?':
@@ -135,14 +136,14 @@ main (int argc, char *argv[])
 			print_fields_have_header = 0;
 			break;
 		case (int)'p':
-			print_fields_parsable_print = 
+			print_fields_parsable_print =
 			PRINT_FIELDS_PARSABLE_ENDING;
 			break;
 		case (int)'P':
 			print_fields_parsable_print =
 			PRINT_FIELDS_PARSABLE_NO_ENDING;
 			break;
-		case (int)'q':
+		case (int)'Q':
 			quiet_flag = 1;
 			break;
 		case (int)'s':
@@ -160,7 +161,7 @@ main (int argc, char *argv[])
 			break;
 		default:
 			exit_code = 1;
-			fprintf(stderr, "getopt error, returned %c\n", 
+			fprintf(stderr, "getopt error, returned %c\n",
 				opt_char);
 			exit(exit_code);
 		}
@@ -174,10 +175,14 @@ main (int argc, char *argv[])
 	if (optind < argc) {
 		for (i = optind; i < argc; i++) {
 			input_fields[input_field_count++] = argv[i];
-		}	
+		}
 	}
 
 	db_conn = acct_storage_g_get_connection(false, 0, false);
+	if(errno) {
+		error("Problem talking to the database: %m");
+		exit(1);
+	}
 	my_uid = getuid();
 
 	if (input_field_count)
@@ -185,7 +190,7 @@ main (int argc, char *argv[])
 	else
 		error_code = _get_command (&input_field_count, input_fields);
 	while (error_code == SLURM_SUCCESS) {
-		error_code = _process_command (input_field_count, 
+		error_code = _process_command (input_field_count,
 					       input_fields);
 		if (error_code || exit_flag)
 			break;
@@ -221,12 +226,12 @@ static char *_getline(const char *prompt)
 }
 #endif
 
-/* 
- * _job_rep - Reports having to do with jobs 
+/*
+ * _job_rep - Reports having to do with jobs
  * IN argc - count of arguments
  * IN argv - list of arguments
  */
-static void _job_rep (int argc, char *argv[]) 
+static void _job_rep (int argc, char *argv[])
 {
 	int error_code = SLURM_SUCCESS;
 	int command_len = strlen(argv[0]);
@@ -236,7 +241,7 @@ static void _job_rep (int argc, char *argv[])
 	if (!strncasecmp (argv[0], "SizesByAccount", MAX(command_len, 1))) {
 		error_code = job_sizes_grouped_by_top_acct(
 			(argc - 1), &argv[1]);
-	} else if (!strncasecmp (argv[0], 
+	} else if (!strncasecmp (argv[0],
 				 "SizesByWcKey", MAX(command_len, 8))) {
 		error_code = job_sizes_grouped_by_wckey(
 			(argc - 1), &argv[1]);
@@ -246,18 +251,18 @@ static void _job_rep (int argc, char *argv[])
 		fprintf(stderr, "Valid job reports are, ");
 		fprintf(stderr, "\"SizesByAccount, and SizesByWckey\"\n");
 	}
-	
+
 	if (error_code) {
 		exit_code = 1;
 	}
 }
 
-/* 
- * _user_rep - Reports having to do with users 
+/*
+ * _user_rep - Reports having to do with users
  * IN argc - count of arguments
  * IN argv - list of arguments
  */
-static void _user_rep (int argc, char *argv[]) 
+static void _user_rep (int argc, char *argv[])
 {
 	int error_code = SLURM_SUCCESS;
 
@@ -268,19 +273,19 @@ static void _user_rep (int argc, char *argv[])
 		fprintf(stderr, "Not valid report %s\n", argv[0]);
 		fprintf(stderr, "Valid user reports are, ");
 		fprintf(stderr, "\"Top\"\n");
-	}	
-	
+	}
+
 	if (error_code) {
 		exit_code = 1;
 	}
 }
 
-/* 
- * _resv_rep - Reports having to do with reservations 
+/*
+ * _resv_rep - Reports having to do with reservations
  * IN argc - count of arguments
  * IN argv - list of arguments
  */
-static void _resv_rep (int argc, char *argv[]) 
+static void _resv_rep (int argc, char *argv[])
 {
 	int error_code = SLURM_SUCCESS;
 
@@ -291,19 +296,19 @@ static void _resv_rep (int argc, char *argv[])
 		fprintf(stderr, "Not valid report %s\n", argv[0]);
 		fprintf(stderr, "Valid reservation reports are, ");
 		fprintf(stderr, "\"Utilization\"\n");
-	}	
-	
+	}
+
 	if (error_code) {
 		exit_code = 1;
 	}
 }
 
-/* 
- * _cluster_rep - Reports having to do with clusters 
+/*
+ * _cluster_rep - Reports having to do with clusters
  * IN argc - count of arguments
  * IN argv - list of arguments
  */
-static void _cluster_rep (int argc, char *argv[]) 
+static void _cluster_rep (int argc, char *argv[])
 {
 	int error_code = SLURM_SUCCESS;
 
@@ -328,18 +333,18 @@ static void _cluster_rep (int argc, char *argv[])
 			"\"UserUtilizationByWckey\", \"Utilization\", "
 			"and \"WCKeyUtilizationByUser\"\n");
 	}
-	
+
 	if (error_code) {
 		exit_code = 1;
 	}
 }
 
-/* 
- * _assoc_rep - Reports having to do with jobs 
+/*
+ * _assoc_rep - Reports having to do with jobs
  * IN argc - count of arguments
  * IN argv - list of arguments
  */
-static void _assoc_rep (int argc, char *argv[]) 
+static void _assoc_rep (int argc, char *argv[])
 {
 	int error_code = SLURM_SUCCESS;
 
@@ -353,8 +358,8 @@ static void _assoc_rep (int argc, char *argv[])
  * OUT argc - location to store count of arguments
  * OUT argv - location to store the argument list
  */
-static int 
-_get_command (int *argc, char **argv) 
+static int
+_get_command (int *argc, char **argv)
 {
 	char *in_line;
 	static char *last_in_line = NULL;
@@ -397,11 +402,11 @@ _get_command (int *argc, char **argv)
 			continue;
 		if (((*argc) + 1) > MAX_INPUT_FIELDS) {	/* bogus input line */
 			exit_code = 1;
-			fprintf (stderr, 
+			fprintf (stderr,
 				 "%s: can not process over %d words\n",
 				 command_name, input_words);
 			return E2BIG;
-		}		
+		}
 		argv[(*argc)++] = &in_line[i];
 		for (i++; i < in_line_size; i++) {
 			if (in_line[i] == '\042') {
@@ -420,19 +425,19 @@ _get_command (int *argc, char **argv)
 				in_line[i] = '\0';
 				break;
 			}
-		}		
+		}
 	}
-	return 0;		
+	return 0;
 }
 
 
 static void _print_version(void)
 {
-	printf("%s %s\n", PACKAGE, SLURM_VERSION);
+	print_slurm_version ();
 	if (quiet_flag == -1) {
 		long version = slurm_api_version();
 		printf("slurm_api_version: %ld, %ld.%ld.%ld\n", version,
-			SLURM_VERSION_MAJOR(version), 
+			SLURM_VERSION_MAJOR(version),
 			SLURM_VERSION_MINOR(version),
 			SLURM_VERSION_MICRO(version));
 	}
@@ -445,7 +450,7 @@ static void _print_version(void)
  * RET 0 or errno (only for errors fatal to sreport)
  */
 static int
-_process_command (int argc, char *argv[]) 
+_process_command (int argc, char *argv[])
 {
 	int command_len = 0;
 
@@ -455,32 +460,32 @@ _process_command (int argc, char *argv[])
 			fprintf(stderr, "no input");
 		return 0;
 	}
-	
+
 	command_len = strlen(argv[0]);
 
 	if ((strncasecmp (argv[0], "association", MAX(command_len, 1)) == 0)) {
 		if (argc < 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
-				fprintf(stderr, 
-				        "too few arguments for keyword:%s\n", 
+				fprintf(stderr,
+				        "too few arguments for keyword:%s\n",
 				        argv[0]);
-		} else 
+		} else
 			_assoc_rep((argc - 1), &argv[1]);
 	} else if ((strncasecmp (argv[0], "cluster",
 				 MAX(command_len, 2)) == 0)) {
 		if (argc < 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
-				fprintf(stderr, 
-				        "too few arguments for keyword:%s\n", 
+				fprintf(stderr,
+				        "too few arguments for keyword:%s\n",
 				        argv[0]);
-		} else 
+		} else
 			_cluster_rep((argc - 1), &argv[1]);
 	} else if (strncasecmp (argv[0], "help", MAX(command_len, 2)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
-			fprintf (stderr, 
+			fprintf (stderr,
 				 "too many arguments for keyword:%s\n",
 				 argv[0]);
 		}
@@ -489,10 +494,10 @@ _process_command (int argc, char *argv[])
 		if (argc < 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
-				fprintf(stderr, 
-				        "too few arguments for keyword:%s\n", 
+				fprintf(stderr,
+				        "too few arguments for keyword:%s\n",
 				        argv[0]);
-		} else 
+		} else
 			_job_rep((argc - 1), &argv[1]);
 	} else if (strncasecmp (argv[0], "quiet", MAX(command_len, 4)) == 0) {
 		if (argc > 1) {
@@ -506,8 +511,8 @@ _process_command (int argc, char *argv[])
 		   (strncasecmp (argv[0], "quit", MAX(command_len, 4)) == 0)) {
 		if (argc > 1) {
 			exit_code = 1;
-			fprintf (stderr, 
-				 "too many arguments for keyword:%s\n", 
+			fprintf (stderr,
+				 "too many arguments for keyword:%s\n",
 				 argv[0]);
 		}
 		exit_flag = 1;
@@ -518,10 +523,10 @@ _process_command (int argc, char *argv[])
 		if (argc < 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
-				fprintf(stderr, 
-				        "too few arguments for keyword:%s\n", 
+				fprintf(stderr,
+				        "too few arguments for keyword:%s\n",
 				        argv[0]);
-		} else 
+		} else
 			_resv_rep((argc - 1), &argv[1]);
 	} else if (strncasecmp (argv[0], "sort", MAX(command_len, 1)) == 0) {
 		if (argc < 2) {
@@ -529,7 +534,7 @@ _process_command (int argc, char *argv[])
 			fprintf (stderr,
 				 "too few arguments for keyword:%s\n",
 				 argv[0]);
-		} else		
+		} else
 			_set_sort(argv[1]);
 	} else if (strncasecmp (argv[0], "time", MAX(command_len, 1)) == 0) {
 		if (argc < 2) {
@@ -537,7 +542,7 @@ _process_command (int argc, char *argv[])
 			fprintf (stderr,
 				 "too few arguments for keyword:%s\n",
 				 argv[0]);
-		} else		
+		} else
 			_set_time_format(argv[1]);
 	} else if (strncasecmp (argv[0], "verbose", MAX(command_len, 4)) == 0) {
 		if (argc > 1) {
@@ -545,7 +550,7 @@ _process_command (int argc, char *argv[])
 			fprintf (stderr,
 				 "too many arguments for %s keyword\n",
 				 argv[0]);
-		}		
+		}
 		quiet_flag = -1;
 	} else if (strncasecmp (argv[0], "version", MAX(command_len, 4)) == 0) {
 		if (argc > 1) {
@@ -553,22 +558,22 @@ _process_command (int argc, char *argv[])
 			fprintf (stderr,
 				 "too many arguments for %s keyword\n",
 				 argv[0]);
-		}		
+		}
 		_print_version();
 	} else if ((strncasecmp (argv[0], "user", MAX(command_len, 1)) == 0)) {
 		if (argc < 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
-				fprintf(stderr, 
-				        "too few arguments for keyword:%s\n", 
+				fprintf(stderr,
+				        "too few arguments for keyword:%s\n",
 				        argv[0]);
-		} else 
+		} else
 			_user_rep((argc - 1), &argv[1]);
 	} else {
 		exit_code = 1;
 		fprintf (stderr, "invalid keyword: %s\n", argv[0]);
 	}
-		
+
 	return 0;
 }
 
@@ -598,7 +603,7 @@ static int _set_time_format(char *format)
 		time_format = SREPORT_TIME_PERCENT;
 		time_format_string = "Percentage of Total";
 	} else {
-		fprintf (stderr, "unknown time format %s", format);	
+		fprintf (stderr, "unknown time format %s", format);
 		return SLURM_ERROR;
 	}
 
@@ -614,7 +619,7 @@ static int _set_sort(char *format)
 	} else if (strncasecmp (format, "Time", MAX(command_len, 6)) == 0) {
 		sort_flag = SREPORT_SORT_TIME;
 	} else {
-		fprintf (stderr, "unknown timesort format %s", format);	
+		fprintf (stderr, "unknown timesort format %s", format);
 		return SLURM_ERROR;
 	}
 
@@ -632,7 +637,7 @@ sreport [<OPTION>] [<COMMAND>]                                             \n\
      -n or --noheader: equivalent to \"noheader\" command                \n\
      -p or --parsable: output will be '|' delimited with a '|' at the end  \n\
      -P or --parsable2: output will be '|' delimited without a '|' at the end\n\
-     -q or --quiet: equivalent to \"quiet\" command                        \n\
+     -Q or --quiet: equivalent to \"quiet\" command                        \n\
      -t <time_format>: Second, Minute, Hour, Percent, SecPer, MinPer, HourPer\n\
      -v or --verbose: equivalent to \"verbose\" command                    \n\
      -V or --version: equivalent to \"version\" command                    \n\
@@ -784,6 +789,6 @@ sreport [<OPTION>] [<COMMAND>]                                             \n\
                                                                            \n\
                                                                            \n\
   All commands and options are case-insensitive.                         \n\n");
-	
+
 }
 

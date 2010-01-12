@@ -1,19 +1,18 @@
 <!--#include virtual="header.txt"-->
 
 <h1>SLURM Team</h1>
-<p>SLURM development has been a joint effort of 
+<p>SLURM development has been a joint effort of
 <a href="https://www.llnl.gov/">Lawrence Livermore National Laboratory</a> (LLNL),
 <a href="http://www.hp.com/">HP</a>,
 <a href="http://www.bull.com/">Bull</a>,
-Linux NetworX and many other contributorss.
+Linux NetworX and many other contributors.
 
 <p>The current SLURM development staff includes: </p>
 <ul>
 <li>Morris Jette (LLNL, Project leader)</li>
 <li>Danny Auble (LLNL)</li>
-<li>Susanne Balle (HP)</li>
-<li>David Bremer (LLNL)</li>
 <li>Chris Holmes (HP)</li>
+<li>Don Lipari (LLNL)</li>
 </ul>
 
 <p> SLURM contributers include: </p>
@@ -22,7 +21,9 @@ Linux NetworX and many other contributorss.
 <li>P&auml;r Andersson (National Supercomputer Centre, Sweden)</li>
 <li>Don Albert (Bull)</li>
 <li>Ernest Artiaga (Barcelona Supercomputer Center, Spain)</li>
+<li>Susanne Balle (HP)</li>
 <li>Anton Blanchard (Samba)</li>
+<li>David Bremer (LLNL)</li>
 <li>Hongjia Cao (National University of Defense Techonogy, China)</li>
 <li>Daniel Christians (HP)</li>
 <li>Gilles Civario (Bull)</li>
@@ -37,6 +38,7 @@ Linux NetworX and many other contributorss.
 <li>Mark Grondona (LLNL)</li>
 <li>Takao Hatazaki (HP, Japan)</li>
 <li>Matthieu Hautreux (CEA, France)</li>
+<li>David H&ouml;ppner</li>
 <li>Nathan Huff (North Dakota State University)</li>
 <li>David Jackson (Cluster Resources)</li>
 <li>Klaus Joas (University Karlsruhe, Germany)</li>
@@ -52,15 +54,16 @@ Linux NetworX and many other contributorss.
 <li>Bj&oslash;rn-Helge Mevik (University of Oslo, Norway)</li>
 <li>Chris Morrone (LLNL)</li>
 <li>Pere Munt (Barcelona Supercomputer Center, Spain)</li>
-<li>Michal Novotny (Masaryk University, Czech Republic)</li> 
+<li>Michal Novotny (Masaryk University, Czech Republic)</li>
 <li>Bryan O'Sullivan (Pathscale)</li>
-<li>Gennaro Oliva (Institute of High Performance Computing and 
-Networking, Italy)</li>
+<li>Gennaro Oliva (Institute of High Performance Computing and
+    Networking, Italy)</li>
 <li>Daniel Palermo (HP)</li>
 <li>Dan Phung (LLNL/Columbia University)</li>
-<li>Ashley Pittman (Quadrics)</li>
+<li>Ashley Pittman (Quadrics, UK)</li>
 <li>Vijay Ramasubramanian (University of Maryland)</li>
 <li>Krishnakumar Ravi[KK] (HP)</li>
+<li>Petter Reinholdtsen (University of Oslo, Norway)</li>
 <li>Andy Riebs (HP)</li>
 <li>Asier Roa (Barcelona Supercomputer Center, Spain)<li>
 <li>Miguel Ros (Barcelona Supercomputer Center, Spain)<li>
@@ -76,6 +79,6 @@ Networking, Italy)</li>
 <li>Anne-Marie Wunderlin (Bull)</li>
 </ul>
 
-<p style="text-align:center;">Last modified 16 June 2009</p>
+<p style="text-align:center;">Last modified 21 September 2009</p>
 
 <!--#include virtual="footer.txt"-->

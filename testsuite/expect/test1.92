@@ -13,21 +13,21 @@
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
 # CODE-OCEC-09-009. All rights reserved.
-# 
+#
 # This file is part of SLURM, a resource management program.
 # For details, see <https://computing.llnl.gov/linux/slurm/>.
 # Please also read the included file: DISCLAIMER.
-#  
+#
 # SLURM is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
-# 
+#
 # SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
-# 
+#
 # You should have received a copy of the GNU General Public License along
 # with SLURM; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -61,16 +61,12 @@ expect {
 		set job_id $expect_out(1,string)
 		exp_continue
 	}
-	-re "More processors requested than permitted" {
-		send_user "\nWARNING: can't test srun task distribution\n"
-		exit 0
-	}
-	-re "Node count specification invalid" {
+	-re "(configuration is not available|Unable to submit batch job|Node count specification invalid)" {
 		send_user "\nWARNING: can't test srun task distribution\n"
 		exit 0
 	}
 	-re $prompt {
-		send "$srun -l -c1 $file_bash | sort -n\n"
+		send "$srun -l -c1 $file_bash | sort -n\r"
 	}
 	timeout {
 		send_user "\nFAILURE: salloc not responding\n"
@@ -133,7 +129,7 @@ if {$task_cnt < (2 * $node_cnt)} {
 set this_cnt  0
 set prev_node -1
 set this_node -1
-send "$srun -l -n $task_cnt -m block $file_bash | sort -n\n"
+send "$srun -l -n $task_cnt -m block $file_bash | sort -n\r"
 expect {
 	-re "nodeid:($number) taskid:($number) localid:($number)" {
 		set this_node $expect_out(1,string)
@@ -183,7 +179,7 @@ set this_cnt  0
 set prev_node -1
 set this_node -1
 set prev_cnt  $block_size
-send "$srun -l -n $task_cnt -m cyclic $file_bash | sort -n\n"
+send "$srun -l -n $task_cnt -m cyclic $file_bash | sort -n\r"
 expect {
 	-re "nodeid:($number) taskid:($number) localid:($number)" {
 		set this_node $expect_out(1,string)
@@ -233,7 +229,7 @@ set this_cnt  0
 set prev_node -1
 set this_node -1
 set prev_cnt  $block_size
-send "$srun -l -n $task_cnt -m plane=$block_size $file_bash | sort -n\n"
+send "$srun -l -n $task_cnt -m plane=$block_size $file_bash | sort -n\r"
 expect {
 	-re "nodeid:($number) taskid:($number) localid:($number)" {
 		set this_node $expect_out(1,string)
@@ -278,7 +274,7 @@ if {$this_cnt != $task_cnt} {
 #
 # Terminate the job, free the allocation
 #
-send "exit\n"
+send "exit\r"
 expect {
 	-re "error" {
 		send_user "\nFAILURE: some error occurred\n"
@@ -294,7 +290,7 @@ expect {
 		wait
 	}
 }
-	
+
 if {$exit_code == 0} {
 	send_user "\nSUCCESS\n"
 } else {

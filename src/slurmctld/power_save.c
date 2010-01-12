@@ -1,9 +1,9 @@
 /*****************************************************************************\
- *  power_save.c - support node power saving mode. Nodes which have been 
- *  idle for an extended period of time will be placed into a power saving 
+ *  power_save.c - support node power saving mode. Nodes which have been
+ *  idle for an extended period of time will be placed into a power saving
  *  mode by running an arbitrary script. This script can lower the voltage
  *  or frequency of the nodes or can completely power the nodes off.
- *  When the node is restored to normal operation, another script will be 
+ *  When the node is restored to normal operation, another script will be
  *  executed. Many parameters are available to control this mode of operation.
  *****************************************************************************
  *  Copyright (C) 2007 The Regents of the University of California.
@@ -11,32 +11,32 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
+ *  In addition, as a special exception, the copyright holders give permission
  *  to link the code of portions of this program with the OpenSSL library under
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -70,7 +70,7 @@
 #define _DEBUG			0
 #define PID_CNT			10
 #define MAX_SHUTDOWN_DELAY	120	/* seconds to wait for child procs
-					 * to exit after daemon shutdown 
+					 * to exit after daemon shutdown
 					 * request, then orphan or kill proc */
 
 /* Records for tracking processes forked to suspend/resume nodes */
@@ -109,7 +109,7 @@ static void _do_power_work(void)
 	static time_t last_log = 0, last_work_scan = 0;
 	int i, wake_cnt = 0, sleep_cnt = 0, susp_total = 0;
 	time_t now = time(NULL), delta_t;
-	uint16_t base_state, comp_state, susp_state;
+	uint16_t susp_state;
 	bitstr_t *wake_node_bitmap = NULL, *sleep_node_bitmap = NULL;
 	struct node_record *node_ptr;
 	bool run_suspend = false;
@@ -131,7 +131,7 @@ static void _do_power_work(void)
 		/* ready to start another round of node suspends */
 		run_suspend = true;
 		if (last_suspend) {
-			bit_nclear(suspend_node_bitmap, 0, 
+			bit_nclear(suspend_node_bitmap, 0,
 				   (node_record_count - 1));
 			last_suspend = (time_t) 0;
 		}
@@ -140,11 +140,9 @@ static void _do_power_work(void)
 	last_work_scan = now;
 
 	/* Build bitmaps identifying each node which should change state */
-	for (i=0; i<node_record_count; i++) {
-		node_ptr = &node_record_table_ptr[i];
-		base_state = node_ptr->node_state & NODE_STATE_BASE;
-		susp_state = node_ptr->node_state & NODE_STATE_POWER_SAVE;
-		comp_state = node_ptr->node_state & NODE_STATE_COMPLETING;
+	for (i=0, node_ptr=node_record_table_ptr;
+	     i<node_record_count; i++, node_ptr++) {
+		susp_state = IS_NODE_POWER_SAVE(node_ptr);
 
 		if (susp_state)
 			susp_total++;
@@ -153,33 +151,36 @@ static void _do_power_work(void)
 		if (susp_state &&
 		    ((resume_rate == 0) || (resume_cnt < resume_rate))	&&
 		    (bit_test(suspend_node_bitmap, i) == 0)		&&
-		    ((base_state == NODE_STATE_ALLOCATED) ||
+		    (IS_NODE_ALLOCATED(node_ptr) ||
 		     (node_ptr->last_idle > (now - idle_time)))) {
 			if (wake_node_bitmap == NULL) {
-				wake_node_bitmap = 
+				wake_node_bitmap =
 					bit_alloc(node_record_count);
 			}
 			wake_cnt++;
 			resume_cnt++;
 			resume_cnt_f++;
 			node_ptr->node_state &= (~NODE_STATE_POWER_SAVE);
+			node_ptr->node_state |=   NODE_STATE_POWER_UP;
+			node_ptr->node_state |=   NODE_STATE_NO_RESPOND;
 			bit_clear(power_node_bitmap, i);
-			node_ptr->node_state   |= NODE_STATE_NO_RESPOND;
+			bit_clear(avail_node_bitmap, i);
 			node_ptr->last_response = now + resume_timeout;
 			bit_set(wake_node_bitmap, i);
 		}
 
 		/* Suspend nodes as appropriate */
-		if (run_suspend 					&& 
+		if (run_suspend 					&&
 		    (susp_state == 0)					&&
 		    ((suspend_rate == 0) || (suspend_cnt < suspend_rate)) &&
-		    (base_state == NODE_STATE_IDLE)			&&
-		    (comp_state == 0)					&&
+		    IS_NODE_IDLE(node_ptr)				&&
+		    (!IS_NODE_COMPLETING(node_ptr))			&&
+		    (!IS_NODE_POWER_UP(node_ptr))			&&
 		    (node_ptr->last_idle < (now - idle_time))		&&
-		    ((exc_node_bitmap == NULL) || 
+		    ((exc_node_bitmap == NULL) ||
 		     (bit_test(exc_node_bitmap, i) == 0))) {
 			if (sleep_node_bitmap == NULL) {
-				sleep_node_bitmap = 
+				sleep_node_bitmap =
 					bit_alloc(node_record_count);
 			}
 			sleep_cnt++;
@@ -224,24 +225,22 @@ static void _do_power_work(void)
 
 /* If slurmctld crashes, the node state that it recovers could differ
  * from the actual hardware state (e.g. ResumeProgram failed to complete).
- * To address that, when a node that should be powered up for a running 
+ * To address that, when a node that should be powered up for a running
  * job is not responding, they try running ResumeProgram again. */
 static void _re_wake(void)
 {
-	uint16_t base_state;
 	struct node_record *node_ptr;
 	bitstr_t *wake_node_bitmap = NULL;
 	int i;
 
 	node_ptr = node_record_table_ptr;
 	for (i=0; i<node_record_count; i++, node_ptr++) {
-		base_state = node_ptr->node_state & NODE_STATE_BASE;
-		if ((base_state == NODE_STATE_ALLOCATED)		  &&
-		    (node_ptr->node_state & NODE_STATE_NO_RESPOND)	  &&
-		    ((node_ptr->node_state & NODE_STATE_POWER_SAVE) == 0) &&
+		if (IS_NODE_ALLOCATED(node_ptr)   &&
+		    IS_NODE_NO_RESPOND(node_ptr)  &&
+		    !IS_NODE_POWER_SAVE(node_ptr) &&
 		    (bit_test(suspend_node_bitmap, i) == 0)) {
 			if (wake_node_bitmap == NULL) {
-				wake_node_bitmap = 
+				wake_node_bitmap =
 					bit_alloc(node_record_count);
 			}
 			bit_set(wake_node_bitmap, i);
@@ -253,12 +252,12 @@ static void _re_wake(void)
 		nodes = bitmap2node_name(wake_node_bitmap);
 		if (nodes) {
 			info("power_save: rewaking nodes %s", nodes);
-			_run_prog(resume_prog, nodes);	
+			_run_prog(resume_prog, nodes);
 		} else
 			error("power_save: bitmap2nodename");
 		xfree(nodes);
 		bit_free(wake_node_bitmap);
-	}		
+	}
 }
 
 static void _do_resume(char *host)
@@ -268,7 +267,7 @@ static void _do_resume(char *host)
 #else
 	verbose("power_save: waking nodes %s", host);
 #endif
-	_run_prog(resume_prog, host);	
+	_run_prog(resume_prog, host);
 }
 
 static void _do_suspend(char *host)
@@ -278,7 +277,7 @@ static void _do_suspend(char *host)
 #else
 	verbose("power_save: suspending nodes %s", host);
 #endif
-	_run_prog(suspend_prog, host);	
+	_run_prog(suspend_prog, host);
 }
 
 /* run a suspend or resume program
@@ -345,14 +344,14 @@ static int  _reap_procs(void)
 
 		delay = difftime(time(NULL), child_time[i]);
 		if (delay > max_timeout) {
-			info("power_save: program %d ran for %d sec", 
+			info("power_save: program %d ran for %d sec",
 			     (int) child_pid[i], delay);
 		}
 
 		if (WIFEXITED(status)) {
 			rc = WEXITSTATUS(status);
 			if (rc != 0) {
-				error("power_save: program exit status of %d", 
+				error("power_save: program exit status of %d",
 				      rc);
 			}
 		} else if (WIFSIGNALED(status)) {
@@ -409,7 +408,7 @@ static void _shutdown_power(void)
 			break;
 		if (i >= max_timeout) {
 			error("power_save: orphaning %d processes which are "
-			      "not terminating so slurmctld can exit", 
+			      "not terminating so slurmctld can exit",
 			      proc_cnt);
 			_kill_procs();
 			break;
@@ -537,7 +536,7 @@ static bool _valid_prog(char *file_name)
 	struct stat buf;
 
 	if (file_name[0] != '/') {
-		debug("power_save program %s not absolute pathname", 
+		debug("power_save program %s not absolute pathname",
 		     file_name);
 		return false;
 	}
@@ -561,9 +560,9 @@ static bool _valid_prog(char *file_name)
 	return true;
 }
 
-/* start_power_mgr - Start power management thread as needed. The thread 
+/* start_power_mgr - Start power management thread as needed. The thread
  *	terminates automatically at slurmctld shutdown time.
- * IN thread_id - pointer to thread ID of the started pthread. 
+ * IN thread_id - pointer to thread ID of the started pthread.
  */
 extern void start_power_mgr(pthread_t *thread_id)
 {
@@ -578,7 +577,7 @@ extern void start_power_mgr(pthread_t *thread_id)
 	slurm_mutex_unlock(&power_mutex);
 
 	slurm_attr_init(&thread_attr);
-	while (pthread_create(thread_id, &thread_attr, _init_power_save, 
+	while (pthread_create(thread_id, &thread_attr, _init_power_save,
 			      NULL)) {
 		error("pthread_create %m");
 		sleep(1);

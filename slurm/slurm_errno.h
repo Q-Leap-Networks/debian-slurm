@@ -4,7 +4,7 @@
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  Written by Kevin Tew <tew1@llnl.gov>, 
+ *  Written by Kevin Tew <tew1@llnl.gov>,
  *	Jim Garlick <garlick@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
@@ -17,15 +17,15 @@
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
+ *  In addition, as a special exception, the copyright holders give permission
  *  to link the code of portions of this program with the OpenSSL library under
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
@@ -69,15 +69,15 @@ BEGIN_C_DECLS
 
 #include <errno.h>
 
-/* set errno to the specified value - then return -1 */ 
+/* set errno to the specified value - then return -1 */
 #define slurm_seterrno_ret(errnum) do { \
 	slurm_seterrno(errnum);         \
 	return (errnum ? -1 : 0);       \
-        } while (0)
+	} while (0)
 
 /* general return codes */
 #define SLURM_SUCCESS   0
-#define SLURM_ERROR    -1 
+#define SLURM_ERROR    -1
 #define SLURM_FAILURE  -1
 
 /* general communication layer return codes */
@@ -99,6 +99,7 @@ enum {
 	SLURM_MPI_PLUGIN_NAME_INVALID,
 	SLURM_MPI_PLUGIN_PRELAUNCH_SETUP_FAILED,
 	SLURM_PLUGIN_NAME_INVALID,
+	SLURM_UNKNOWN_FORWARD_ADDR,
 
 	/* communication failures to/from slurmctld */
 	SLURMCTLD_COMMUNICATIONS_CONNECTION_ERROR =     1800,
@@ -116,7 +117,7 @@ enum {
 	ESLURM_JOB_MISSING_REQUIRED_PARTITION_GROUP,
 	ESLURM_REQUESTED_NODES_NOT_IN_PARTITION,
 	ESLURM_TOO_MANY_REQUESTED_CPUS,
-	ESLURM_TOO_MANY_REQUESTED_NODES,
+	ESLURM_INVALID_NODE_COUNT,
 	ESLURM_ERROR_ON_DESC_TO_RECORD_COPY,
 	ESLURM_JOB_MISSING_SIZE_SPECIFICATION,
 	ESLURM_JOB_SCRIPT_MISSING,
@@ -154,9 +155,10 @@ enum {
 	ESLURM_TASKDIST_REQUIRES_OVERCOMMIT,
 	ESLURM_JOB_HELD,
 	ESLURM_INVALID_CRYPTO_TYPE_CHANGE,
-	ESLURM_INVALID_BANK_ACCOUNT,
 	ESLURM_INVALID_TASK_MEMORY,
 	ESLURM_INVALID_ACCOUNT,
+	ESLURM_INVALID_PARENT_ACCOUNT,
+	ESLURM_SAME_PARENT_ACCOUNT,
 	ESLURM_INVALID_LICENSES,
 	ESLURM_NEED_RESTART,
 	ESLURM_ACCOUNTING_POLICY,
@@ -171,6 +173,13 @@ enum {
 	ESLURM_PORTS_BUSY,
 	ESLURM_PORTS_INVALID,
 	ESLURM_PROLOG_RUNNING,
+	ESLURM_NO_STEPS,
+	ESLURM_INVALID_BLOCK_STATE,
+	ESLURM_INVALID_BLOCK_LAYOUT,
+	ESLURM_INVALID_BLOCK_NAME,
+	ESLURM_INVALID_QOS,
+	ESLURM_QOS_PREEMPTION_LOOP,
+	ESLURM_NODE_NOT_AVAIL,
 
 	/* switch specific error codes, specific values defined in plugin module */
 	ESLURM_SWITCH_MIN = 3000,
@@ -185,6 +194,7 @@ enum {
 	ESLRUMD_PIPE_ERROR_ON_TASK_SPAWN =		4000,
 	ESLURMD_KILL_TASK_FAILED,
 	ESLURMD_KILL_JOB_ALREADY_COMPLETE,
+	ESLURMD_INVALID_ACCT_FREQ,
 	ESLURMD_INVALID_JOB_CREDENTIAL,
 	ESLURMD_UID_NOT_FOUND,
 	ESLURMD_GID_NOT_FOUND,
@@ -225,11 +235,14 @@ enum {
 	SLURM_PROTOCOL_SOCKET_IMPL_TIMEOUT ,
 	SLURM_PROTOCOL_SOCKET_ZERO_BYTES_SENT,
 
-        /* slurm_auth errors */
-        ESLURM_AUTH_CRED_INVALID	= 6000,
+	/* slurm_auth errors */
+	ESLURM_AUTH_CRED_INVALID	= 6000,
 	ESLURM_AUTH_FOPEN_ERROR,
 	ESLURM_AUTH_NET_ERROR,
-        ESLURM_AUTH_UNABLE_TO_SIGN
+	ESLURM_AUTH_UNABLE_TO_SIGN,
+
+	/* accounting errors */
+	ESLURM_DB_CONNECTION            = 7000
 };
 
 /* look up an errno value */

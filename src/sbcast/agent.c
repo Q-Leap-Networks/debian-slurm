@@ -2,36 +2,36 @@
  *  agent.c - File transfer agent (handles message traffic)
  *****************************************************************************
  *  Copyright (C) 2006-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  In addition, as a special exception, the copyright holders give permission
+ *  to link the code of portions of this program with the OpenSSL library under
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -92,14 +92,14 @@ static void *_agent_thread(void *args)
 		error("slurm_send_recv_msgs: %m");
 		exit(1);
 	}
-	
+
 	itr = list_iterator_create(ret_list);
 	while ((ret_data_info = list_next(itr))) {
-		msg_rc = slurm_get_return_code(ret_data_info->type, 
+		msg_rc = slurm_get_return_code(ret_data_info->type,
 					       ret_data_info->data);
 		if (msg_rc == SLURM_SUCCESS)
 			continue;
-		
+
 		error("REQUEST_FILE_BCAST(%s): %s",
 		      ret_data_info->node_name,
 		      slurm_strerror(msg_rc));
@@ -112,14 +112,14 @@ static void *_agent_thread(void *args)
 		list_destroy(ret_list);
 	slurm_mutex_lock(&agent_cnt_mutex);
 	agent_cnt--;
-	slurm_mutex_unlock(&agent_cnt_mutex);
 	pthread_cond_broadcast(&agent_cnt_cond);
+	slurm_mutex_unlock(&agent_cnt_mutex);
 	return NULL;
 }
 
 /* Issue the RPC to transfer the file's data */
 extern void send_rpc(file_bcast_msg_t *bcast_msg,
-		     job_alloc_info_response_msg_t *alloc_resp)
+		     job_sbcast_cred_msg_t *sbcast_cred)
 {
 	/* Preserve some data structures across calls for better performance */
 	static int threads_used = 0;
@@ -141,12 +141,12 @@ extern void send_rpc(file_bcast_msg_t *bcast_msg,
 		else
 			fanout = MAX_THREADS;
 
-		span = set_span(alloc_resp->node_cnt, fanout);
-		
-		hl = hostlist_create(alloc_resp->node_list);
-		
+		span = set_span(sbcast_cred->node_cnt, fanout);
+
+		hl = hostlist_create(sbcast_cred->node_list);
+
 		i = 0;
-		while (i < alloc_resp->node_cnt) {
+		while (i < sbcast_cred->node_cnt) {
 			int j = 0;
 			name = hostlist_shift(hl);
 			if(!name) {

@@ -11,21 +11,21 @@
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
 # CODE-OCEC-09-009. All rights reserved.
-# 
+#
 # This file is part of SLURM, a resource management program.
 # For details, see <https://computing.llnl.gov/linux/slurm/>.
 # Please also read the included file: DISCLAIMER.
-#  
+#
 # SLURM is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
-# 
+#
 # SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
-# 
+#
 # You should have received a copy of the GNU General Public License along
 # with SLURM; if not, write to the Free Software Foundation, Inc.,
 # 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA.
@@ -41,9 +41,12 @@ set got_login_grps       0
 
 print_header $test_id
 
-if {[test_front_end] != 0 && [test_super_user] == 0} {
+if {[test_front_end] != 0} {
 	send_user "\nWARNING: This test is incompatible with front-end systems\n"
 	exit $exit_code
+} elseif {[test_super_user] == 0} {
+	send_user "\nWARNING: This test must be done from a super-user\n"
+	exit 1
 }
 
 #
@@ -78,7 +81,7 @@ expect {
 		set job_id $expect_out(1,string)
 		exp_continue
 	}
-	-re "(uid=.*\n)" {
+	-re "(uid=.*\\)\r\n)" {
 		set job_grp_info $expect_out(1,string)
 		set got_job_grps 1
 		exp_continue
@@ -100,12 +103,12 @@ if {$got_job_grps == 0} {
 	send_user "\nFAILURE: Did not get user info from slurm job\n"
 	exit 1
 }
-  
+
 #
-# Confirm the user id and group id in the slurm job matches that  
+# Confirm the user id and group id in the slurm job matches that
 # of the local 'id' execution.
 #
- 
+
 if {[string compare $login_grp_info $job_grp_info] != 0} {
 	send_user "\nFAILURE: Login and slurm user info mismatch\n"
 	set exit_code 1

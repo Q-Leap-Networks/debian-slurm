@@ -12,21 +12,21 @@
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Dave Bremer <dbremer@llnl.gov>
 # CODE-OCEC-09-009. All rights reserved.
-# 
+#
 # This file is part of SLURM, a resource management program.
 # For details, see <https://computing.llnl.gov/linux/slurm/>.
 # Please also read the included file: DISCLAIMER.
-#  
+#
 # SLURM is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
-# 
+#
 # SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
-# 
+#
 # You should have received a copy of the GNU General Public License along
 # with SLURM; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -83,14 +83,18 @@ if {$job_id == 0} {
 }
 
 set node_count 0
-spawn $squeue -tall -j $job_id -o "%i %D"
-expect {
-	-re "$job_id ($number)" {
-		set node_count $expect_out(1,string)
-		exp_continue
-	}
-	eof {
-		wait
+if { [test_bluegene] } {
+	set node_count 1
+} else {
+	spawn $squeue -tall -j $job_id -o "%i %D"
+	expect {
+		-re "$job_id ($number)" {
+			set node_count $expect_out(1,string)
+			exp_continue
+		}
+		eof {
+			wait
+		}
 	}
 }
 if {$node_count == 0} {
@@ -104,6 +108,7 @@ for {set task_id 0} {$task_id < $node_count} {incr task_id} {
 	set file_out_t_glob  "test$test_id.t.$task_id.output"
 	if {[wait_for_file $file_out_t_glob] != 0} {
 		set exit_code 1
+		break
 	} else {
 		set test_task_id -1
 		spawn $bin_cat $file_out_t_glob
@@ -163,12 +168,19 @@ if {$job_id == 0} {
 	send_user "\nFAILURE: job initiation failed\n"
 	exit 1
 }
-
+if {[test_front_end] != 0} {
+	send_user "\nWARNING: Additional tests are incompatible with front-end systems\n"
+	exit $exit_code
+}
 
 for {set node_id 0} {$node_id < $node_count} {incr node_id} {
 	set file_out_n_glob  "test$test_id.n.$node_id.output"
 	if {[wait_for_file $file_out_n_glob] != 0} {
+		if {$node_id == 1} {
+			send_user "\nNOTE: This failure is expected on front-end configurations\n"
+		}
 		set exit_code 1
+		break
 	} else {
 		set t0found false
 		set t1found false

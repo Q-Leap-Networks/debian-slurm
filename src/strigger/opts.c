@@ -16,15 +16,15 @@
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  In addition, as a special exception, the copyright holders give permission
+ *  to link the code of portions of this program with the OpenSSL library under
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
  *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
@@ -60,6 +60,8 @@
 
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
+#include "src/common/proc_args.h"
+
 #include "src/strigger/strigger.h"
 
 #define OPT_LONG_HELP      0x100
@@ -76,7 +78,6 @@
 static void     _help( void );
 static void     _init_options( void );
 static void     _print_options( void );
-static void     _print_version( void );
 static void     _usage( void );
 static void     _validate_options( void );
 
@@ -103,7 +104,7 @@ extern void parse_command_line(int argc, char *argv[])
 		{"node",      optional_argument, 0, 'n'},
 		{"offset",    required_argument, 0, 'o'},
 		{"program",   required_argument, 0, 'p'},
-		{"quiet",     no_argument,       0, 'q'},
+		{"quiet",     no_argument,       0, 'Q'},
 		{"reconfig",  no_argument,       0, 'r'},
 		{"time",      no_argument,       0, 't'},
 		{"up",        no_argument,       0, 'u'},
@@ -121,7 +122,7 @@ extern void parse_command_line(int argc, char *argv[])
 	_init_options();
 
 	optind = 0;
-	while((opt_char = getopt_long(argc, argv, "dDFfi:Ij:no:p:qrtuvV",
+	while((opt_char = getopt_long(argc, argv, "dDFfi:Ij:no:p:QrtuvV",
 			long_options, &option_index)) != -1) {
 		switch (opt_char) {
 		case (int)'?':
@@ -172,7 +173,7 @@ extern void parse_command_line(int argc, char *argv[])
 			xfree(params.program);
 			params.program = xstrdup(optarg);
 			break;
-		case (int)'q':
+		case (int)'Q':
 			params.quiet = true;
 		case (int)'r':
 			params.reconfig = true;
@@ -200,7 +201,7 @@ extern void parse_command_line(int argc, char *argv[])
 			params.verbose++;
 			break;
 		case (int) 'V':
-			_print_version();
+			print_slurm_version();
 			exit(0);
 		case (int) OPT_LONG_HELP:
 			_help();
@@ -288,7 +289,7 @@ static void _validate_options( void )
 			"--set, --get or --clear");
 		exit(1);
 	}
-	
+
 	if (params.mode_clear
 	&&  ((params.trigger_id + params.job_id + params.user_id) == 0)) {
 		error("You must specify a --id, --jobid, or --user to clear");
@@ -296,7 +297,7 @@ static void _validate_options( void )
 	}
 
 	if (params.mode_set
-	&&  ((params.node_down + params.node_drained + params.node_fail + 
+	&&  ((params.node_down + params.node_drained + params.node_fail +
 	      params.node_idle + params.node_up + params.reconfig +
 	      params.job_fini  + params.time_limit + params.block_err) == 0)) {
 		error("You must specify a trigger (--block_err, --down, --up, "
@@ -338,11 +339,6 @@ static void _validate_options( void )
 	}
 }
 
-static void _print_version(void)
-{
-	printf("%s %s\n", PACKAGE, SLURM_VERSION);
-}
-
 static void _usage( void )
 {
 	printf("Usage: strigger [--set | --get | --clear | --version] [-dDfiIjnoptuv]\n");
@@ -366,6 +362,7 @@ Usage: strigger [--set | --get | --clear] [OPTIONS]\n\
   -n, --node[=host]   trigger related to specific node, all nodes by default\n\
   -o, --offset=#      trigger's offset time from event, negative to preceed\n\
   -p, --program=path  pathname of program to execute when triggered\n\
+  -Q, --quiet         quiet mode (suppress informational messages)\n\
   -r, --reconfig      trigger event on configuration changes\n\
   -t, --time          trigger event on job's time limit\n\
   -u, --up            trigger event when node returned to service from DOWN \n\

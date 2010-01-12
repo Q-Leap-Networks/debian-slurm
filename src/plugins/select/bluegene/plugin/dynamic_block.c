@@ -6,32 +6,32 @@
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
+ *  In addition, as a special exception, the copyright holders give permission
  *  to link the code of portions of this program with the OpenSSL library under
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -43,19 +43,20 @@ static int _split_block(List block_list, List new_blocks,
 			bg_record_t *bg_record, int cnodes);
 
 static int _breakup_blocks(List block_list, List new_blocks,
-			   ba_request_t *request, List my_block_list);
+			   ba_request_t *request, List my_block_list,
+			   bool only_free, bool only_small);
 
 /*
  * create_dynamic_block - create new block(s) to be used for a new
  * job allocation.
  * RET - a list of created block(s) or NULL on failure errno is set.
  */
-extern List create_dynamic_block(List block_list, 
+extern List create_dynamic_block(List block_list,
 				 ba_request_t *request, List my_block_list,
 				 bool track_down_nodes)
 {
 	int rc = SLURM_SUCCESS;
-	
+
 	ListIterator itr;
 	bg_record_t *bg_record = NULL;
 	List results = NULL;
@@ -64,7 +65,8 @@ extern List create_dynamic_block(List block_list,
 	int geo[BA_SYSTEM_DIMENSIONS];
 	int i;
 	blockreq_t blockreq;
-	int cnodes = request->procs / bg_conf->proc_ratio;
+	int cnodes = request->procs / bg_conf->cpu_ratio;
+	char *unusable_nodes = NULL;
 
 	if(cnodes < bg_conf->smallest_block) {
 		error("Can't create this size %d "
@@ -81,13 +83,13 @@ extern List create_dynamic_block(List block_list,
 		itr = list_iterator_create(my_block_list);
 		while ((bg_record = list_next(itr))) {
 			if(!my_bitmap) {
-				my_bitmap = 
+				my_bitmap =
 					bit_alloc(bit_size(bg_record->bitmap));
 			}
-				
+
 			if(!bit_super_set(bg_record->bitmap, my_bitmap)) {
 				bit_or(my_bitmap, bg_record->bitmap);
-				for(i=0; i<BA_SYSTEM_DIMENSIONS; i++) 
+				for(i=0; i<BA_SYSTEM_DIMENSIONS; i++)
 					geo[i] = bg_record->geo[i];
 				debug2("adding %s %c%c%c %c%c%c",
 				       bg_record->nodes,
@@ -119,20 +121,18 @@ extern List create_dynamic_block(List block_list,
 	}
 
 	if(request->avail_node_bitmap) {
- 		char *nodes = NULL;
 		bitstr_t *bitmap = bit_alloc(node_record_count);
-		
+
 		/* we want the bps that aren't in this partition to
 		 * mark them as used
 		 */
 		bit_or(bitmap, request->avail_node_bitmap);
 		bit_not(bitmap);
-		nodes = bitmap2node_name(bitmap);
-		
-		//info("not using %s", nodes);
-		removable_set_bps(nodes);
+		unusable_nodes = bitmap2node_name(bitmap);
 
-		xfree(nodes);
+		//info("not using %s", nodes);
+		removable_set_bps(unusable_nodes);
+
 		FREE_NULL_BITMAP(bitmap);
 	}
 
@@ -178,132 +178,140 @@ extern List create_dynamic_block(List block_list,
 			goto finished;
 			break;
 		}
-	
+
 		request->conn_type = SELECT_SMALL;
 		new_blocks = list_create(destroy_bg_record);
-		if(_breakup_blocks(block_list, new_blocks, 
-				   request, my_block_list)
-		   != SLURM_SUCCESS) {
-			list_destroy(new_blocks);
-			new_blocks = NULL;
-			debug2("small block not able to be placed");
-			//rc = SLURM_ERROR;
-		} else 
+		/* check only blocks that are free and small */
+		if(_breakup_blocks(block_list, new_blocks,
+				   request, my_block_list,
+				   true, true)
+		   == SLURM_SUCCESS)
 			goto finished;
+
+		/* check only blocks that are free and any size */
+		if(_breakup_blocks(block_list, new_blocks,
+				   request, my_block_list,
+				   true, false)
+		   == SLURM_SUCCESS)
+			goto finished;
+
+		/* check usable blocks that are small with any state */
+		if(_breakup_blocks(block_list, new_blocks,
+				   request, my_block_list,
+				   false, true)
+		   == SLURM_SUCCESS)
+			goto finished;
+
+		/* check all usable blocks */
+		if(_breakup_blocks(block_list, new_blocks,
+				   request, my_block_list,
+				   false, false)
+		   == SLURM_SUCCESS)
+			goto finished;
+
+		list_destroy(new_blocks);
+		new_blocks = NULL;
+		debug2("small block not able to be placed inside others");
 	}
 
 	if(request->conn_type == SELECT_NAV)
 		request->conn_type = SELECT_TORUS;
-	
+
 	//debug("going to create %d", request->size);
 	if(!new_ba_request(request)) {
 		if(geo[X] == (uint16_t)NO_VAL) {
-			error("Problems with request for size %d geo %dx%dx%d", 
+			error("Problems with request for size %d geo %dx%dx%d",
 			      request->size,
-			      request->geometry[X], 
-			      request->geometry[Y], 
+			      request->geometry[X],
+			      request->geometry[Y],
 			      request->geometry[Z]);
 		} else {
 			error("Problems with request for size %d.  "
-			      "No geo given.", 
+			      "No geo given.",
 			      request->size);
 		}
 		rc = ESLURM_INTERCONNECT_FAILURE;
 		goto finished;
-	} 
-	
-	if(!list_count(block_list) || !my_block_list) {
-		bg_record = NULL;
-		goto no_list;
 	}
+
+	/* try on free midplanes */
+	rc = SLURM_SUCCESS;
+	if(results)
+		list_flush(results);
+	else
+		results = list_create(NULL);
+
+	if (allocate_block(request, results))
+		goto setup_records;
+
+	debug2("allocate failure for size %d base "
+	       "partitions of free midplanes",
+	       request->size);
+	rc = SLURM_ERROR;
+
+	if(!list_count(block_list) || !my_block_list)
+		goto finished;
 
 	/*Try to put block starting in the smallest of the exisiting blocks*/
-	if(!request->start_req) {
-		itr = list_iterator_create(block_list);
-		while ((bg_record = (bg_record_t *) list_next(itr)) != NULL) {
-			request->rotate_count = 0;
-			request->elongate_count = 1;
-		
-			/* Here we are only looking for the first
-			   block on the midplane.  So either the count
-			   is greater or equal than
-			   bg_conf->bp_node_cnt or the first bit is
-			   set in the ionode_bitmap.
-			*/
-			if(bg_record->job_running == NO_JOB_RUNNING 
-			   && ((bg_record->node_cnt >= bg_conf->bp_node_cnt)
-			       || (bit_ffs(bg_record->ionode_bitmap) == 0))) {
-				
-				for(i=0; i<BA_SYSTEM_DIMENSIONS; i++) 
-					request->start[i] = 
-						bg_record->start[i];
-				debug2("allocating %s %c%c%c %d",
-				       bg_record->nodes,
-				       alpha_num[request->start[X]],
-				       alpha_num[request->start[Y]],
-				       alpha_num[request->start[Z]],
-				       request->size);
-				request->start_req = 1;
-				rc = SLURM_SUCCESS;
-				if(results)
-					list_delete_all(
-						results,
-						&empty_null_destroy_list, "");
-				else
-					results = list_create(NULL);
-				if (!allocate_block(request, results)){
-					debug2("1 allocate failure for size %d "
-					       "base partitions", 
-					       request->size);
-					rc = SLURM_ERROR;
-				} else 
-					break;
-			}
-		}
-		list_iterator_destroy(itr);
-		
-		request->start_req = 0;
-		for(i=0; i<BA_SYSTEM_DIMENSIONS; i++) 
-			request->start[i] = (uint16_t) NO_VAL;
-	}
+	itr = list_iterator_create(block_list);
+	while ((bg_record = (bg_record_t *) list_next(itr)) != NULL) {
+		/* never check a block with a job running */
+		if(bg_record->job_running != NO_JOB_RUNNING)
+			continue;
 
-no_list:
-	if(!bg_record) {		
+		/* Here we are only looking for the first
+		   block on the midplane.  So either the count
+		   is greater or equal than
+		   bg_conf->bp_node_cnt or the first bit is
+		   set in the ionode_bitmap.
+		*/
+		if((bg_record->node_cnt < bg_conf->bp_node_cnt)
+		   && (bit_ffs(bg_record->ionode_bitmap) != 0))
+			continue;
+
+		debug3("removing %s for request %d",
+		       bg_record->nodes, request->size);
+		remove_block(bg_record->bg_block_list, (int)NO_VAL);
+		/* need to set any unusable nodes that this last block
+		   used */
+		removable_set_bps(unusable_nodes);
 		rc = SLURM_SUCCESS;
 		if(results)
-			list_delete_all(results, 
-					&empty_null_destroy_list, "");
+			list_flush(results);
 		else
 			results = list_create(NULL);
-		if (!allocate_block(request, results)) {
-			debug2("allocate failure for size %d base partitions", 
-			       request->size);
-			rc = SLURM_ERROR;
-		}
+		if (allocate_block(request, results))
+			break;
+
+		debug2("allocate failure for size %d base partitions",
+		       request->size);
+		rc = SLURM_ERROR;
 	}
+	list_iterator_destroy(itr);
 
-	if(rc != SLURM_SUCCESS) 
-		goto finished;
-	
-	/*set up bg_record(s) here */
-	new_blocks = list_create(destroy_bg_record);
+setup_records:
+	if(rc == SLURM_SUCCESS) {
+		/*set up bg_record(s) here */
+		new_blocks = list_create(destroy_bg_record);
 
-	blockreq.block = request->save_name;
+		blockreq.block = request->save_name;
 #ifdef HAVE_BGL
-	blockreq.blrtsimage = request->blrtsimage;
+		blockreq.blrtsimage = request->blrtsimage;
 #endif
-	blockreq.linuximage = request->linuximage;
-	blockreq.mloaderimage = request->mloaderimage;
-	blockreq.ramdiskimage = request->ramdiskimage;
-	blockreq.conn_type = request->conn_type;
+		blockreq.linuximage = request->linuximage;
+		blockreq.mloaderimage = request->mloaderimage;
+		blockreq.ramdiskimage = request->ramdiskimage;
+		blockreq.conn_type = request->conn_type;
 
-	add_bg_record(new_blocks, results, &blockreq, 0, 0);
+		add_bg_record(new_blocks, results, &blockreq, 0, 0);
+	}
 
 finished:
 	reset_all_removed_bps();
-	
+
+	xfree(unusable_nodes);
 	xfree(request->save_name);
-	
+
 	if(request->elongate_geos) {
 		list_destroy(request->elongate_geos);
 		request->elongate_geos = NULL;
@@ -316,7 +324,7 @@ finished:
 	return new_blocks;
 }
 
-extern bg_record_t *create_small_record(bg_record_t *bg_record, 
+extern bg_record_t *create_small_record(bg_record_t *bg_record,
 					bitstr_t *ionodes, int size)
 {
 	bg_record_t *found_record = NULL;
@@ -325,7 +333,7 @@ extern bg_record_t *create_small_record(bg_record_t *bg_record,
 	char bitstring[BITSIZE];
 
 	found_record = (bg_record_t*) xmalloc(sizeof(bg_record_t));
-				
+
 	found_record->job_running = NO_JOB_RUNNING;
 	found_record->user_name = xstrdup(bg_record->user_name);
 	found_record->user_uid = bg_record->user_uid;
@@ -339,17 +347,17 @@ extern bg_record_t *create_small_record(bg_record_t *bg_record,
 			hostlist_destroy(hl);
 			found_record->nodes = xstrdup(host);
 			free(host);
-			error("you gave me a list with no ba_nodes using %s", 
+			error("you gave me a list with no ba_nodes using %s",
 			      found_record->nodes);
 		} else {
 			found_record->nodes = xstrdup_printf(
 				"%s%c%c%c",
-				bg_conf->slurm_node_prefix, 
+				bg_conf->slurm_node_prefix,
 				alpha_num[found_record->start[X]],
 				alpha_num[found_record->start[Y]],
 				alpha_num[found_record->start[Z]]);
 			error("you gave me a record with no ba_nodes "
-			      "and no nodes either using %s", 
+			      "and no nodes either using %s",
 			      found_record->nodes);
 		}
 	} else {
@@ -359,10 +367,10 @@ extern bg_record_t *create_small_record(bg_record_t *bg_record,
 			for(j=0;j<NUM_PORTS_PER_NODE;j++) {
 				ba_node->axis_switch[i].int_wire[j].used = 0;
 				if(i!=X) {
-					if(j==3 || j==4) 
+					if(j==3 || j==4)
 						ba_node->axis_switch[i].
 							int_wire[j].
-							used = 1;	
+							used = 1;
 				}
 				ba_node->axis_switch[i].int_wire[j].
 					port_tar = j;
@@ -371,8 +379,8 @@ extern bg_record_t *create_small_record(bg_record_t *bg_record,
 		list_append(found_record->bg_block_list, new_ba_node);
 		found_record->bp_count = 1;
 		found_record->nodes = xstrdup_printf(
-			"%s%c%c%c", 
-			bg_conf->slurm_node_prefix, 
+			"%s%c%c%c",
+			bg_conf->slurm_node_prefix,
 			alpha_num[ba_node->coord[X]],
 			alpha_num[ba_node->coord[Y]],
 			alpha_num[ba_node->coord[Z]]);
@@ -386,11 +394,11 @@ extern bg_record_t *create_small_record(bg_record_t *bg_record,
 	found_record->ramdiskimage = xstrdup(bg_record->ramdiskimage);
 
 	process_nodes(found_record, false);
-				
+
 	found_record->conn_type = SELECT_SMALL;
-				
-	xassert(bg_conf->proc_ratio);
-	found_record->cpu_cnt = bg_conf->proc_ratio * size;
+
+	xassert(bg_conf->cpu_ratio);
+	found_record->cpu_cnt = bg_conf->cpu_ratio * size;
 	found_record->node_cnt = size;
 
 	found_record->ionode_bitmap = bit_copy(ionodes);
@@ -403,12 +411,12 @@ extern bg_record_t *create_small_record(bg_record_t *bg_record,
 /*********************** Local Functions *************************/
 
 static int _split_block(List block_list, List new_blocks,
-			bg_record_t *bg_record, int cnodes) 
+			bg_record_t *bg_record, int cnodes)
 {
-	bool full_bp = false; 
+	bool full_bp = false;
 	bitoff_t start = 0;
 	blockreq_t blockreq;
-	
+
 	memset(&blockreq, 0, sizeof(blockreq_t));
 
 	switch(bg_record->node_cnt) {
@@ -419,11 +427,11 @@ static int _split_block(List block_list, List new_blocks,
 		break;
 	case 128:
 		switch(cnodes) {
-		case 32:			
+		case 32:
 			blockreq.small32 = 4;
 			break;
 		default:
-			error("We don't make a %d from size %d", 
+			error("We don't make a %d from size %d",
 			      cnodes, bg_record->node_cnt);
 			goto finished;
 			break;
@@ -431,15 +439,15 @@ static int _split_block(List block_list, List new_blocks,
 		break;
 	default:
 		switch(cnodes) {
-		case 32:			
+		case 32:
 			blockreq.small32 = 4;
 			blockreq.small128 = 3;
 			break;
-		case 128:				
+		case 128:
 			blockreq.small128 = 4;
 			break;
 		default:
-			error("We don't make a %d from size %d", 
+			error("We don't make a %d from size %d",
 			      cnodes, bg_record->node_cnt);
 			goto finished;
 			break;
@@ -457,7 +465,7 @@ static int _split_block(List block_list, List new_blocks,
 			blockreq.small16 = 2;
 			break;
 		default:
-			error("We don't make a %d from size %d", 
+			error("We don't make a %d from size %d",
 			      cnodes, bg_record->node_cnt);
 			goto finished;
 			break;
@@ -465,7 +473,7 @@ static int _split_block(List block_list, List new_blocks,
 		break;
 	case 64:
 		switch(cnodes) {
-		case 16:			
+		case 16:
 			blockreq.small16 = 2;
 			blockreq.small32 = 1;
 			break;
@@ -473,7 +481,7 @@ static int _split_block(List block_list, List new_blocks,
 			blockreq.small32 = 2;
 			break;
 		default:
-			error("We don't make a %d from size %d", 
+			error("We don't make a %d from size %d",
 			      cnodes, bg_record->node_cnt);
 			goto finished;
 			break;
@@ -481,12 +489,12 @@ static int _split_block(List block_list, List new_blocks,
 		break;
 	case 128:
 		switch(cnodes) {
-		case 16:			
+		case 16:
 			blockreq.small16 = 2;
 			blockreq.small32 = 1;
 			blockreq.small64 = 1;
 			break;
-		case 32:			
+		case 32:
 			blockreq.small32 = 2;
 			blockreq.small64 = 1;
 			break;
@@ -494,7 +502,7 @@ static int _split_block(List block_list, List new_blocks,
 			blockreq.small64 = 2;
 			break;
 		default:
-			error("We don't make a %d from size %d", 
+			error("We don't make a %d from size %d",
 			      cnodes, bg_record->node_cnt);
 			goto finished;
 			break;
@@ -502,13 +510,13 @@ static int _split_block(List block_list, List new_blocks,
 		break;
 	case 256:
 		switch(cnodes) {
-		case 16:			
+		case 16:
 			blockreq.small16 = 2;
 			blockreq.small32 = 1;
 			blockreq.small64 = 1;
 			blockreq.small128 = 1;
 			break;
-		case 32:			
+		case 32:
 			blockreq.small32 = 2;
 			blockreq.small64 = 1;
 			blockreq.small128 = 1;
@@ -521,7 +529,7 @@ static int _split_block(List block_list, List new_blocks,
 			blockreq.small128 = 2;
 			break;
 		default:
-			error("We don't make a %d from size %d", 
+			error("We don't make a %d from size %d",
 			      cnodes, bg_record->node_cnt);
 			goto finished;
 			break;
@@ -529,14 +537,14 @@ static int _split_block(List block_list, List new_blocks,
 		break;
 	default:
 		switch(cnodes) {
-		case 16:			
+		case 16:
 			blockreq.small16 = 2;
 			blockreq.small32 = 1;
 			blockreq.small64 = 1;
 			blockreq.small128 = 1;
 			blockreq.small256 = 1;
 			break;
-		case 32:			
+		case 32:
 			blockreq.small32 = 2;
 			blockreq.small64 = 1;
 			blockreq.small128 = 1;
@@ -547,15 +555,15 @@ static int _split_block(List block_list, List new_blocks,
 			blockreq.small128 = 1;
 			blockreq.small256 = 1;
 			break;
-		case 128:				
+		case 128:
 			blockreq.small128 = 2;
 			blockreq.small256 = 1;
 			break;
-		case 256:			
+		case 256:
 			blockreq.small256 = 2;
 			break;
 		default:
-			error("We don't make a %d from size %d", 
+			error("We don't make a %d from size %d",
 			      cnodes, bg_record->node_cnt);
 			goto finished;
 			break;
@@ -567,20 +575,20 @@ static int _split_block(List block_list, List new_blocks,
 
 	if(!full_bp && bg_record->ionode_bitmap) {
 		if((start = bit_ffs(bg_record->ionode_bitmap)) == -1)
-			start = 0;		
+			start = 0;
 	}
 
 #ifdef HAVE_BGL
 	debug2("Asking for %u 32CNBlocks, and %u 128CNBlocks "
-	       "from a %u block, starting at ionode %d.", 
-	       blockreq.small32, blockreq.small128, 
+	       "from a %u block, starting at ionode %d.",
+	       blockreq.small32, blockreq.small128,
 	       bg_record->node_cnt, start);
 #else
 	debug2("Asking for %u 16CNBlocks, %u 32CNBlocks, "
 	       "%u 64CNBlocks, %u 128CNBlocks, and %u 256CNBlocks"
-	       "from a %u block, starting at ionode %d.", 
-	       blockreq.small16, blockreq.small32, 
-	       blockreq.small64, blockreq.small128, 
+	       "from a %u block, starting at ionode %d.",
+	       blockreq.small16, blockreq.small32,
+	       blockreq.small64, blockreq.small128,
 	       blockreq.small256, bg_record->node_cnt, start);
 #endif
 	handle_small_record_request(new_blocks, &blockreq, bg_record, start);
@@ -590,20 +598,20 @@ finished:
 }
 
 static int _breakup_blocks(List block_list, List new_blocks,
-			   ba_request_t *request, List my_block_list)
+			   ba_request_t *request, List my_block_list,
+			   bool only_free, bool only_small)
 {
 	int rc = SLURM_ERROR;
 	bg_record_t *bg_record = NULL;
 	ListIterator itr = NULL, bit_itr = NULL;
-	int search_cnt = 0;
 	int total_cnode_cnt=0;
 	char tmp_char[256];
 	bitstr_t *ionodes = bit_alloc(bg_conf->numpsets);
-	int cnodes = request->procs / bg_conf->proc_ratio;
-	
+	int cnodes = request->procs / bg_conf->cpu_ratio;
+
 	debug2("proc count = %d cnodes = %d size = %d",
 	       request->procs, cnodes, request->size);
-	
+
 	switch(cnodes) {
 	case 16:
 		/* a 16 can go anywhere */
@@ -623,57 +631,33 @@ static int _breakup_blocks(List block_list, List new_blocks,
 	default:
 		error("We shouldn't be here with this size %d", cnodes);
 		goto finished;
-		break;				
+		break;
 	}
 
-	itr = list_iterator_create(block_list);	
 	/* First try with free blocks a midplane or less.  Then try with the
 	 * smallest blocks.
 	 */
-again:		
+	itr = list_iterator_create(block_list);
 	while ((bg_record = list_next(itr))) {
+		/* never look at a block if a job is running */
 		if(bg_record->job_running != NO_JOB_RUNNING)
 			continue;
 		/* on the third time through look for just a block
 		 * that isn't used */
-		
+
 		/* check for free blocks on the first and second time */
-		if((search_cnt < 2)
-		   && (bg_record->state != RM_PARTITION_FREE))
-				continue;
+		if(only_free && (bg_record->state != RM_PARTITION_FREE))
+			continue;
 		/* check small blocks first */
-		if((search_cnt == 0)
-		   && (bg_record->node_cnt > bg_conf->bp_node_cnt))
-				continue;
-		
+		if(only_small && (bg_record->node_cnt > bg_conf->bp_node_cnt))
+			continue;
+
 		if (request->avail_node_bitmap &&
 		    !bit_super_set(bg_record->bitmap,
 				   request->avail_node_bitmap)) {
 			debug2("bg block %s has nodes not usable by this job",
 			       bg_record->bg_block_id);
 			continue;
-		}
-
-		if(request->start_req) {
-			if ((request->start[X] != bg_record->start[X])
-			    || (request->start[Y] != bg_record->start[Y])
-			    || (request->start[Z] != bg_record->start[Z])) {
-				debug4("small got %c%c%c looking for %c%c%c",
-				       alpha_num[bg_record->start[X]],
-				       alpha_num[bg_record->start[Y]],
-				       alpha_num[bg_record->start[Z]],
-				       alpha_num[request->start[X]],
-				       alpha_num[request->start[Y]],
-				       alpha_num[request->start[Z]]);
-				continue;
-			}
-			debug3("small found %c%c%c looking for %c%c%c",
-			       alpha_num[bg_record->start[X]],
-			       alpha_num[bg_record->start[Y]],
-			       alpha_num[bg_record->start[Z]],
-			       alpha_num[request->start[X]],
-			       alpha_num[request->start[Y]],
-			       alpha_num[request->start[Z]]);
 		}
 
 		if(bg_record->node_cnt == cnodes) {
@@ -698,7 +682,7 @@ again:
 			   combo */
 			if(bit_itr) {
 				while((bitstr = list_next(bit_itr))) {
-					if(bit_super_set(ionodes, bitstr)) 
+					if(bit_super_set(ionodes, bitstr))
 						break;
 				}
 				list_iterator_reset(bit_itr);
@@ -713,7 +697,7 @@ again:
 			bit_fmt(bitstring, BITSIZE, ionodes);
 			debug2("1 adding %s %d got %d set "
 			       "ionodes %s total is %s",
-			       bg_record->bg_block_id, 
+			       bg_record->bg_block_id,
 			       bg_record->node_cnt, total_cnode_cnt,
 			       bg_record->ionodes, bitstring);
 			if(total_cnode_cnt == cnodes) {
@@ -724,29 +708,21 @@ again:
 					alpha_num[bg_record->start[Z]]);
 				if(!my_block_list) {
 					rc = SLURM_SUCCESS;
-					goto finished;	
+					goto finished;
 				}
-						
+
 				bg_record = create_small_record(bg_record,
 								ionodes,
 								cnodes);
 				list_append(new_blocks, bg_record);
-							
+
 				rc = SLURM_SUCCESS;
-				goto finished;	
+				goto finished;
 			}
 			continue;
 		}
 		/* we found a block that is bigger than requested */
 		break;
-	}
-	
-	if(!bg_record && (search_cnt < 2)) {
-		search_cnt++;
-		list_iterator_reset(itr);
-		bit_nclear(ionodes, 0, (bg_conf->numpsets-1));
-		total_cnode_cnt = 0;		
-		goto again;
 	}
 
 	if(bg_record) {
@@ -765,9 +741,9 @@ again:
 			rc = SLURM_ERROR;
 			goto finished;
 		}
-		
+
 		format_node_name(found_record, tmp_char, sizeof(tmp_char));
-			
+
 		debug2("going to split %s, %s",
 		       found_record->bg_block_id,
 		       tmp_char);
@@ -778,20 +754,20 @@ again:
 			alpha_num[found_record->start[Z]]);
 		if(!my_block_list) {
 			rc = SLURM_SUCCESS;
-			goto finished;	
+			goto finished;
 		}
 		_split_block(block_list, new_blocks, found_record, cnodes);
 		rc = SLURM_SUCCESS;
 		goto finished;
 	}
-	
+
 finished:
 	if(bit_itr)
 		list_iterator_destroy(bit_itr);
 
-	FREE_NULL_BITMAP(ionodes);	
+	FREE_NULL_BITMAP(ionodes);
 	if(itr)
 		list_iterator_destroy(itr);
-		
+
 	return rc;
 }

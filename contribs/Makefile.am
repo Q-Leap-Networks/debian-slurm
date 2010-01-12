@@ -1,4 +1,4 @@
-SUBDIRS = perlapi python torque slurmdb-direct
+SUBDIRS = pam perlapi torque slurmdb-direct
 
 EXTRA_DIST = \
 	env_cache_builder.c	\
@@ -6,5 +6,6 @@ EXTRA_DIST = \
 	mpich1.slurm.patch	\
 	ptrace.patch		\
 	skilling.c		\
+	sjstat			\
 	time_login.c		\
 	README

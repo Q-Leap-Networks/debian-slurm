@@ -2,36 +2,36 @@
  *  get_nodes.c - Process Wiki get node info request
  *****************************************************************************
  *  Copyright (C) 2006-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  In addition, as a special exception, the copyright holders give permission
+ *  to link the code of portions of this program with the OpenSSL library under
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -133,13 +133,11 @@ static char *	_dump_all_nodes(int *node_cnt, time_t update_time)
 	int i, cnt = 0;
 	struct node_record *node_ptr = node_record_table_ptr;
 	char *tmp_buf, *buf = NULL;
-	uint16_t base_state;
 
 	for (i=0; i<node_record_count; i++, node_ptr++) {
 		if (node_ptr->name == NULL)
 			continue;
-		base_state = node_ptr->node_state & NODE_STATE_BASE;
-		if (base_state == NODE_STATE_FUTURE)
+		if (IS_NODE_FUTURE(node_ptr))
 			continue;
 		tmp_buf = _dump_node(node_ptr, update_time);
 		if (cnt > 0)
@@ -154,14 +152,14 @@ static char *	_dump_all_nodes(int *node_cnt, time_t update_time)
 
 static char *	_dump_node(struct node_record *node_ptr, time_t update_time)
 {
-	char tmp[512], *buf = NULL;
+	char tmp[1024], *buf = NULL;
 	int i;
 
 	if (!node_ptr)
 		return NULL;
 
 	snprintf(tmp, sizeof(tmp), "%s:STATE=%s;",
-		node_ptr->name, 
+		node_ptr->name,
 		_get_node_state(node_ptr));
 	xstrcat(buf, tmp);
 
@@ -175,14 +173,12 @@ static char *	_dump_node(struct node_record *node_ptr, time_t update_time)
 		xstrcat(buf, tmp);
 	}
 
-	if (node_ptr->config_ptr
-	&&  node_ptr->config_ptr->feature) {
+	if (node_ptr->config_ptr && node_ptr->config_ptr->feature) {
 		snprintf(tmp, sizeof(tmp), "FEATURES=%s;",
 			node_ptr->config_ptr->feature);
 		/* comma separated to colon */
 		for (i=0; (tmp[i] != '\0'); i++) {
-			if ((tmp[i] == ',')
-			||  (tmp[i] == '|'))
+			if ((tmp[i] == ',') || (tmp[i] == '|'))
 				tmp[i] = ':';
 		}
 		xstrcat(buf, tmp);
@@ -215,12 +211,10 @@ static char *	_get_node_state(struct node_record *node_ptr)
 {
 	static bool got_select_type = false;
 	static bool node_allocations;
-	uint16_t state = node_ptr->node_state;
-	uint16_t base_state = state & NODE_STATE_BASE;
 
 	if (!got_select_type) {
 		char * select_type = slurm_get_select_type();
-		if (select_type && 
+		if (select_type &&
 		    (strcasecmp(select_type, "select/linear") == 0))
 			node_allocations = true;
 		else
@@ -229,22 +223,21 @@ static char *	_get_node_state(struct node_record *node_ptr)
 		got_select_type = true;
 	}
 
-	if ((state & NODE_STATE_DRAIN)
-	||  (state & NODE_STATE_FAIL))
+	if (IS_NODE_DRAIN(node_ptr) || IS_NODE_FAIL(node_ptr))
 		return "Draining";
-	if (state & NODE_STATE_COMPLETING)
+	if (IS_NODE_COMPLETING(node_ptr))
 		return "Busy";
 
-	if (base_state == NODE_STATE_DOWN)
+	if (IS_NODE_DOWN(node_ptr))
 		return "Down";
-	if (base_state == NODE_STATE_ALLOCATED) {
+	if (IS_NODE_ALLOCATED(node_ptr)) {
 		if (node_allocations)
 			return "Busy";
 		else
 			return "Running";
 	}
-	if (base_state == NODE_STATE_IDLE)
+	if (IS_NODE_IDLE(node_ptr))
 		return "Idle";
-	
+
 	return "Unknown";
 }

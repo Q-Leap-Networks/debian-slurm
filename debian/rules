@@ -33,7 +33,8 @@ endif
 config.status: configure
 	dh_testdir
 	# Add here commands to configure the package.
-	CFLAGS="$(CFLAGS)" ./configure --host=$(DEB_HOST_GNU_TYPE) --build=$(DEB_BUILD_GNU_TYPE) --prefix=/usr --mandir=\$${prefix}/share/man --infodir=\$${prefix}/share/info --sysconfdir=/etc/slurm-llnl --with-munge --localstatedir=/var/run/slurm-llnl --with-blcr --libexecdir=/usr/share
+	CFLAGS="$(CFLAGS)" ./configure --host=$(DEB_HOST_GNU_TYPE) --build=$(DEB_BUILD_GNU_TYPE) --prefix=/usr --mandir=\$${prefix}/share/man --infodir=\$${prefix}/share/info --sysconfdir=/etc/slurm-llnl --with-munge --localstatedir=/var/run/slurm-llnl --without-blcr --libexecdir=/usr/share
+
 
 
 #Architecture 
@@ -95,26 +96,27 @@ ifneq "$(wildcard /usr/share/misc/config.sub)" ""
 	rm -fr debian/slurm-llnl/usr/lib/slurm/src
 	rm -f  debian/slurm-llnl/usr/sbin/slurm_epilog
 	rm -f  debian/slurm-llnl/usr/sbin/slurm_prolog
+	rmdir  debian/slurm-llnl/usr/share/slurm
 	dh_install debian/slurm-llnl-configurator.html usr/share/doc/slurm-llnl
 	rm -rf debian/slurm-llnl/usr/share/doc/slurm-[0-9]*
 
 	# pmi packages
-	dh_install -plibpmi0 debian/slurm-llnl/usr/lib/libpmi.so.* usr/lib
-	dh_install -plibpmi0-dev debian/slurm-llnl/usr/lib/libpmi.a usr/lib
-	dh_install -plibpmi0-dev debian/slurm-llnl/usr/lib/libpmi.la usr/lib
-	dh_install -plibpmi0-dev debian/slurm-llnl/usr/lib/libpmi*.so usr/lib
-	dh_install -plibpmi0-dev debian/slurm-llnl/usr/include/slurm/pmi.h usr/include/slurm
+	dh_install -plibpmi21 debian/slurm-llnl/usr/lib/libpmi.so.* usr/lib
+	dh_install -plibpmi21-dev debian/slurm-llnl/usr/lib/libpmi.a usr/lib
+	dh_install -plibpmi21-dev debian/slurm-llnl/usr/lib/libpmi.la usr/lib
+	dh_install -plibpmi21-dev debian/slurm-llnl/usr/lib/libpmi*.so usr/lib
+	dh_install -plibpmi21-dev debian/slurm-llnl/usr/include/slurm/pmi.h usr/include/slurm
 	rm -f debian/slurm-llnl/usr/include/slurm/pmi.h
 	rm -f debian/slurm-llnl/usr/lib/libpmi*
 
 	# libslurm packages
-	dh_install -plibslurm20-dev debian/slurm-llnl/usr/include/slurm/* usr/include/slurm
-	dh_install -plibslurm20-dev debian/slurm-llnl/usr/lib/*.a usr/lib
-	dh_install -plibslurm20-dev debian/slurm-llnl/usr/lib/lib*.la usr/lib
-	dh_install -plibslurm20-dev debian/slurm-llnl/usr/lib/lib*.so usr/lib
+	dh_install -plibslurm21-dev debian/slurm-llnl/usr/include/slurm/* usr/include/slurm
+	dh_install -plibslurm21-dev debian/slurm-llnl/usr/lib/*.a usr/lib
+	dh_install -plibslurm21-dev debian/slurm-llnl/usr/lib/lib*.la usr/lib
+	dh_install -plibslurm21-dev debian/slurm-llnl/usr/lib/lib*.so usr/lib
 	rm -rf debian/slurm-llnl/usr/share/man/man3/*trigger*
-	dh_installman -plibslurm20-dev debian/slurm-llnl/usr/share/man/man3/*
-	dh_install -plibslurm20 debian/slurm-llnl/usr/lib/libslurm.so.* usr/lib
+	dh_installman -plibslurm21-dev debian/slurm-llnl/usr/share/man/man3/*
+	dh_install -plibslurm21 debian/slurm-llnl/usr/lib/libslurm.so.* usr/lib
 	rm -rf debian/slurm-llnl/usr/include
 	rm -f debian/slurm-llnl/usr/lib/*.a
 	rm -f debian/slurm-llnl/usr/lib/lib*.la

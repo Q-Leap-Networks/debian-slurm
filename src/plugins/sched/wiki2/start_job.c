@@ -5,32 +5,32 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  In addition, as a special exception, the copyright holders give permission
+ *  to link the code of portions of this program with the OpenSSL library under
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -45,8 +45,8 @@
 #include "src/slurmctld/slurmctld.h"
 #include "src/slurmctld/state_save.h"
 
-static int	_start_job(uint32_t jobid, int task_cnt, char *hostlist, 
-			char *tasklist, char *comment_ptr, 
+static int	_start_job(uint32_t jobid, int task_cnt, char *hostlist,
+			char *tasklist, char *comment_ptr,
 			int *err_code, char **err_msg);
 
 /* Start a job:
@@ -153,7 +153,7 @@ extern int	start_job(char *cmd_ptr, int *err_code, char **err_msg)
 			err_code, err_msg);
 	xfree(tasklist);
 	if (rc == 0) {
-		snprintf(reply_msg, sizeof(reply_msg), 
+		snprintf(reply_msg, sizeof(reply_msg),
 			"job %u started successfully", jobid);
 		*err_msg = reply_msg;
 	}
@@ -171,8 +171,8 @@ extern int	start_job(char *cmd_ptr, int *err_code, char **err_msg)
  * err_code (OUT) - Moab error code
  * err_msg  (OUT) - Moab error message
  */
-static int	_start_job(uint32_t jobid, int task_cnt, char *hostlist, 
-			char *tasklist, char *comment_ptr, 
+static int	_start_job(uint32_t jobid, int task_cnt, char *hostlist,
+			char *tasklist, char *comment_ptr,
 			int *err_code, char **err_msg)
 {
 	int rc = 0, old_task_cnt = 1;
@@ -206,8 +206,7 @@ static int	_start_job(uint32_t jobid, int task_cnt, char *hostlist,
 		goto fini;
 	}
 
-	if ((job_ptr->details == NULL)
-	||  (job_ptr->job_state != JOB_PENDING)) {
+	if ((job_ptr->details == NULL) || (!IS_JOB_PENDING(job_ptr))) {
 		*err_code = -700;
 		*err_msg = "Job not pending, can't start";
 		error("wiki: Attempt to start job %u in state %s",
@@ -304,7 +303,7 @@ static int	_start_job(uint32_t jobid, int task_cnt, char *hostlist,
 	save_req_bitmap = job_ptr->details->req_node_bitmap;
 	job_ptr->details->req_node_bitmap = new_bitmap;
 	old_task_cnt = job_ptr->num_procs;
-	job_ptr->num_procs = MAX(task_cnt, old_task_cnt); 
+	job_ptr->num_procs = MAX(task_cnt, old_task_cnt);
 	job_ptr->priority = 100000000;
 
  fini:	unlock_slurmctld(job_write_lock);
@@ -319,12 +318,12 @@ static int	_start_job(uint32_t jobid, int task_cnt, char *hostlist,
 	if (job_ptr->job_id != jobid)
 		job_ptr = find_job_record(jobid);
 
-	if (job_ptr && (job_ptr->job_id == jobid) 
-	&&  (job_ptr->job_state != JOB_RUNNING)) {
+	if (job_ptr && (job_ptr->job_id == jobid) &&
+	    (!IS_JOB_RUNNING(job_ptr))) {
 		uint16_t wait_reason = 0;
 		char *wait_string;
 
-		if (job_ptr->job_state == JOB_FAILED)
+		if (IS_JOB_FAILED(job_ptr))
 			wait_string = "Invalid request, job aborted";
 		else {
 			wait_reason = job_ptr->state_reason;

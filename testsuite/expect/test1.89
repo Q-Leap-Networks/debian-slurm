@@ -12,21 +12,21 @@
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
 # CODE-OCEC-09-009. All rights reserved.
-# 
+#
 # This file is part of SLURM, a resource management program.
 # For details, see <https://computing.llnl.gov/linux/slurm/>.
 # Please also read the included file: DISCLAIMER.
-#  
+#
 # SLURM is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your option)
 # any later version.
-# 
+#
 # SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
-# 
+#
 # You should have received a copy of the GNU General Public License along
 # with SLURM; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -61,6 +61,24 @@ if {$affinity == 0} {
 }
 send_user "\ntask affinity plugin installed\n"
 
+set force 0
+log_user 0
+spawn $scontrol show partition [default_partition]
+expect {
+	-re "Shared=FORCE" {
+		set force 1
+		exp_continue
+	}
+	eof {
+		wait
+	}
+}
+log_user 1
+if {$force == 1} {
+	send_user "\nWARNING: This test is not compatible with Shared=FORCE\n"
+	exit 0
+}
+
 #
 # Build a test program to report affinity by task
 #
@@ -79,7 +97,7 @@ set salloc_pid [spawn $salloc -N1 --exclusive --verbose -t2 $bin_bash]
 expect -re $prompt
 set mask 0
 set task_cnt 0
-send "$srun -c1 $file_prog\n"
+send "$srun -c1 $file_prog\r"
 expect {
 	-re "TASK_ID:($number),MASK:($number)" {
 		incr task_cnt
@@ -105,7 +123,7 @@ expect {
 #
 set expected_mask [ expr ((1 << $task_cnt) - 1) ]
 set task_mask 0
-send "$srun -c1 --cpu_bind=rank $file_prog\n"
+send "$srun -c1 --cpu_bind=rank $file_prog\r"
 expect {
 	-re "TASK_ID:($number),MASK:($number)" {
 		incr task_mask $expect_out(2,string)
@@ -132,7 +150,7 @@ if {$task_mask != $expected_mask} {
 # Run a job step with verbosity and all tasks on CPU 0
 #
 set task_mask 0
-send "$srun -c1 --cpu_bind=verbose,map_cpu:0 $file_prog\n"
+send "$srun -c1 --cpu_bind=verbose,map_cpu:0 $file_prog\r"
 expect {
 	-re "TASK_ID:($number),MASK:($number)" {
 		incr task_mask $expect_out(2,string)
@@ -155,7 +173,7 @@ if {$task_mask != $task_cnt} {
 	set exit_code 1
 }
 set verbose_cnt 0
-send "$srun -c1 --cpu_bind=verbose,map_cpu:0 $file_prog\n"
+send "$srun -c1 --cpu_bind=verbose,map_cpu:0 $file_prog\r"
 expect {
 	-re "cpu_bind=MAP|cpu_bind_cores=MAP|cpu_bind_sockets=MAP|cpu_bind_threads=MAP" {
 		incr verbose_cnt
@@ -185,7 +203,7 @@ set cpu_cnt 0
 while {$cpu_cnt < $task_cnt} {
 	set mask_sum 0
 	set mask [ expr 1 << $cpu_cnt ]
-	send "$srun -c1 --cpu_bind=map_cpu:$cpu_cnt $file_prog\n"
+	send "$srun -c1 --cpu_bind=map_cpu:$cpu_cnt $file_prog\r"
 	expect {
 		-re "TASK_ID:($number),MASK:($number)" {
 			incr mask_sum $expect_out(2,string)
@@ -219,7 +237,7 @@ while {$cpu_cnt < $task_cnt} {
 	set mask_sum 0
 	set mask [ expr 1 << $cpu_cnt ]
 	set mstr [ dec2hex $mask]
-	send "$srun -c1 --cpu_bind=mask_cpu:$mstr $file_prog\n"
+	send "$srun -c1 --cpu_bind=mask_cpu:$mstr $file_prog\r"
 	expect {
 		-re "TASK_ID:($number),MASK:($number)" {
 			incr mask_sum $expect_out(2,string)
@@ -295,7 +313,7 @@ send_user "alt_mask: $alt_mask\n"
 # Run all tasks bound to a different CPU by specifying a forward map
 #
 set task_mask 0
-send "$srun -c1 --cpu_bind=map_cpu:$fwd_map $file_prog\n"
+send "$srun -c1 --cpu_bind=map_cpu:$fwd_map $file_prog\r"
 expect {
 	-re "TASK_ID:($number),MASK:($number)" {
 		incr task_mask $expect_out(2,string)
@@ -323,7 +341,7 @@ if {$task_mask != $full_mask} {
 # Run all tasks bound to a different CPU by specifying a reverse map
 #
 set task_mask 0
-send "$srun -c1 --cpu_bind=map_cpu:$rev_map $file_prog\n"
+send "$srun -c1 --cpu_bind=map_cpu:$rev_map $file_prog\r"
 expect {
 	-re "TASK_ID:($number),MASK:($number)" {
 		incr task_mask $expect_out(2,string)
@@ -351,7 +369,7 @@ if {$task_mask != $full_mask} {
 # Run all tasks bound to a different CPU by specifying an alternating map
 #
 set task_mask 0
-send "$srun -c1 --cpu_bind=map_cpu:$alt_map $file_prog\n"
+send "$srun -c1 --cpu_bind=map_cpu:$alt_map $file_prog\r"
 expect {
 	-re "TASK_ID:($number),MASK:($number)" {
 		incr task_mask $expect_out(2,string)
@@ -379,7 +397,7 @@ if {$task_mask != $full_mask} {
 # Run all tasks bound to a different CPU by specifying a forward mask
 #
 set task_mask 0
-send "$srun -c1 --cpu_bind=mask_cpu:$fwd_mask $file_prog\n"
+send "$srun -c1 --cpu_bind=mask_cpu:$fwd_mask $file_prog\r"
 expect {
 	-re "TASK_ID:($number),MASK:($number)" {
 		incr task_mask $expect_out(2,string)
@@ -407,7 +425,7 @@ if {$task_mask != $full_mask} {
 # Run all tasks bound to a different CPU by specifying a reverse mask
 #
 set task_mask 0
-send "$srun -c1 --cpu_bind=mask_cpu:$rev_mask $file_prog\n"
+send "$srun -c1 --cpu_bind=mask_cpu:$rev_mask $file_prog\r"
 expect {
 	-re "TASK_ID:($number),MASK:($number)" {
 		incr task_mask $expect_out(2,string)
@@ -435,7 +453,7 @@ if {$task_mask != $full_mask} {
 # Run all tasks bound to a different CPU by specifying an alternating mask
 #
 set task_mask 0
-send "$srun -c1 --cpu_bind=mask_cpu:$alt_mask $file_prog\n"
+send "$srun -c1 --cpu_bind=mask_cpu:$alt_mask $file_prog\r"
 expect {
 	-re "TASK_ID:($number),MASK:($number)" {
 		incr task_mask $expect_out(2,string)
@@ -462,7 +480,7 @@ if {$task_mask != $full_mask} {
 #
 # Terminate the job, free the allocation
 #
-send "exit\n"
+send "exit\r"
 expect {
 	-re "error" {
 		send_user "\nFAILURE: some error occurred\n"
@@ -478,7 +496,7 @@ expect {
 		wait
 	}
 }
-	
+
 if {$exit_code == 0} {
 	exec $bin_rm -f $file_prog
 	send_user "\nSUCCESS\n"

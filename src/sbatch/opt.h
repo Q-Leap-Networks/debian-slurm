@@ -7,24 +7,35 @@
  *  Written by Mark Grondona <grondona1@llnl.gov>,
  *    Christopher J. Morrone <morrone2@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
- *  
+ *
+ *  In addition, as a special exception, the copyright holders give permission
+ *  to link the code of portions of this program with the OpenSSL library under
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
+ *  so. If you do not wish to do so, delete this exception statement from your
+ *  version.  If you delete this exception statement from all source files in
+ *  the program, then also delete it here.
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
- *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA.
+ *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
 #ifndef _HAVE_OPT_H
@@ -41,7 +52,9 @@
 #include "src/common/macros.h" /* true and false */
 #include "src/common/env.h"
 
-#define MAX_USERNAME	9
+#ifndef SYSTEM_DIMENSIONS
+#  define SYSTEM_DIMENSIONS 1
+#endif
 
 
 typedef struct sbatch_options {
@@ -51,7 +64,7 @@ typedef struct sbatch_options {
 	int script_argc;
 	char **script_argv;
 
-	char user[MAX_USERNAME];/* local username		*/
+	char *user;		/* local username		*/
 	uid_t uid;		/* local uid			*/
 	gid_t gid;		/* local gid			*/
 	uid_t euid;		/* effective user --uid=user	*/
@@ -62,15 +75,12 @@ typedef struct sbatch_options {
 	bool nprocs_set;	/* true if nprocs explicitly set */
 	int  cpus_per_task;	/* --cpus-per-task=n, -c n	*/
 	bool cpus_set;		/* true if cpus_per_task explicitly set */
-	int  min_nodes;		/* --nodes=n,       -N n	*/ 
-	int  max_nodes;		/* --nodes=x-n,       -N x-n	*/ 
+	int  min_nodes;		/* --nodes=n,       -N n	*/
+	int  max_nodes;		/* --nodes=x-n,       -N x-n	*/
 	bool nodes_set;		/* true if nodes explicitly set */
 	int min_sockets_per_node; /* --sockets-per-node=n      */
-	int max_sockets_per_node; /* --sockets-per-node=x-n    */
 	int min_cores_per_socket; /* --cores-per-socket=n      */
-	int max_cores_per_socket; /* --cores-per-socket=x-n    */
 	int min_threads_per_core; /* --threads-per-core=n      */
-	int max_threads_per_core; /* --threads-per-core=x-n    */
 	int ntasks_per_node;   /* --ntasks-per-node=n	    */
 	int ntasks_per_socket; /* --ntasks-per-socket=n     */
 	int ntasks_per_core;   /* --ntasks-per-core=n	    */
@@ -86,7 +96,7 @@ typedef struct sbatch_options {
 	        distribution;	/* --distribution=, -m dist	*/
         uint32_t plane_size;    /* lllp distribution -> plane_size for
 				 * when -m plane=<# of lllp per
-				 * plane> */      
+				 * plane> */
 	char *job_name;		/* --job-name=,     -J name	*/
 	unsigned int jobid;     /* --jobid=jobid                */
 	bool jobid_set;		/* true of jobid explicitly set */
@@ -96,8 +106,10 @@ typedef struct sbatch_options {
 	char *account;		/* --account, -U acct_name	*/
 	char *comment;		/* --comment			*/
 	char *propagate;	/* --propagate[=RLIMIT_CORE,...]*/
-
+	char *qos;		/* --qos			*/
 	int immediate;		/* -i, --immediate      	*/
+	uint16_t warn_signal;	/* --signal=<int>@<time>	*/
+	uint16_t warn_time;	/* --signal=<int>@<time>	*/
 
 	bool hold;		/* --hold, -H			*/
 	bool no_kill;		/* --no-kill, -k		*/
@@ -149,9 +161,13 @@ typedef struct sbatch_options {
  	int ckpt_interval;	/* --checkpoint (int minutes)   */
  	char *ckpt_interval_str;/* --checkpoint (string)        */
  	char *ckpt_dir;		/* --checkpoint-dir (string)    */
+	char **spank_job_env;	/* SPANK controlled environment for job
+				 * Prolog and Epilog		*/
+	int spank_job_env_size;	/* size of spank_job_env	*/
 } opt_t;
 
 extern opt_t opt;
+extern int error_exit;
 
 /*
  * process_options_first_pass()
@@ -176,7 +192,14 @@ char *process_options_first_pass(int argc, char **argv);
  * 3. update options with commandline args
  * 4. perform some verification that options are reasonable
  */
-int process_options_second_pass(int argc, char *argv[],
+int process_options_second_pass(int argc, char *argv[], const char *file,
 				const void *script_body, int script_size);
+
+/* external functions available for SPANK plugins to modify the environment
+ * exported to the SLURM Prolog and Epilog programs */
+extern char *spank_get_job_env(const char *name);
+extern int   spank_set_job_env(const char *name, const char *value,
+			       int overwrite);
+extern int   spank_unset_job_env(const char *name);
 
 #endif	/* _HAVE_OPT_H */

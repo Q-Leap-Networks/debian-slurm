@@ -1,37 +1,37 @@
 /*****************************************************************************\
  *  src/common/stepd_api.h - slurmstepd message API
- *  $Id: stepd_api.h 16867 2009-03-12 16:35:42Z jette $
+ *  $Id: stepd_api.h 19192 2009-12-30 18:51:37Z da $
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher Morrone <morrone2@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  In addition, as a special exception, the copyright holders give permission
+ *  to link the code of portions of this program with the OpenSSL library under
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -70,7 +70,8 @@ typedef enum {
 	REQUEST_STEP_TERMINATE,
 	REQUEST_STEP_COMPLETION,
 	REQUEST_STEP_TASK_INFO,
-	REQUEST_STEP_LIST_PIDS
+	REQUEST_STEP_LIST_PIDS,
+	REQUEST_STEP_RECONFIGURE
 } step_msg_t;
 
 typedef enum {
@@ -111,7 +112,7 @@ int stepd_terminate(int fd);
  * slurmd on one node (unusual outside of development environments), you
  * will get one of the local NodeNames more-or-less at random.
  *
- * Returns a socket descriptor for the opened socket on success, 
+ * Returns a socket descriptor for the opened socket on success,
  * and -1 on error.
  */
 int stepd_connect(const char *directory, const char *nodename,
@@ -142,7 +143,7 @@ int stepd_checkpoint(int fd, time_t timestamp, char *image_dir);
 /*
  * Send a signal to a single task in a job step.
  */
-int stepd_signal_task_local(int fd, int signal, int ltaskid); 
+int stepd_signal_task_local(int fd, int signal, int ltaskid);
 
 /*
  * Send a signal to a single task in a job step.
@@ -211,6 +212,15 @@ int stepd_suspend(int *fd, int size, uint32_t jobid);
 int stepd_resume(int fd);
 
 /*
+ * Reconfigure the job step (Primarily to allow the stepd to refresh
+ * it's log file pointer.
+ *
+ * Returns SLURM_SUCCESS is successful.  On error returns SLURM_ERROR
+ * and sets errno.
+ */
+int stepd_reconfig(int fd);
+
+/*
  *
  * Returns SLURM_SUCCESS is successful.  On error returns SLURM_ERROR
  * and sets errno.
@@ -219,10 +229,10 @@ int stepd_completion(int fd, step_complete_msg_t *sent);
 
 /*
  *
- * Returns SLURM_SUCCESS on success or SLURM_ERROR on error.  
+ * Returns SLURM_SUCCESS on success or SLURM_ERROR on error.
  * resp receives a jobacctinfo_t which must be freed if SUCCESS.
  */
-int stepd_stat_jobacct(int fd, stat_jobacct_msg_t *sent, 
+int stepd_stat_jobacct(int fd, stat_jobacct_msg_t *sent,
 		       stat_jobacct_msg_t *resp);
 
 

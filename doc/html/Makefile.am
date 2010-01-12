@@ -20,8 +20,6 @@ generated_html = \
 	gang_scheduling.html \
 	help.html \
 	ibm.html \
-	priority_multifactor.html \
-	priority_plugins.html \
 	jobacct_gatherplugins.html \
 	accounting_storageplugins.html \
 	jobcompplugins.html \
@@ -37,11 +35,13 @@ generated_html = \
 	plugins.html \
 	power_save.html \
 	preempt.html \
+	preemption_plugins.html \
 	proctrack_plugins.html \
 	priority_multifactor.html \
 	priority_plugins.html \
 	programmer_guide.html \
 	publications.html \
+	qos.html \
 	quickstart_admin.html \
 	quickstart.html \
 	reservations.html \
