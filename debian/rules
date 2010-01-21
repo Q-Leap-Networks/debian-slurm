@@ -114,7 +114,6 @@ ifneq "$(wildcard /usr/share/misc/config.sub)" ""
 	dh_install -plibslurm21-dev debian/slurm-llnl/usr/lib/*.a usr/lib
 	dh_install -plibslurm21-dev debian/slurm-llnl/usr/lib/lib*.la usr/lib
 	dh_install -plibslurm21-dev debian/slurm-llnl/usr/lib/lib*.so usr/lib
-	rm -rf debian/slurm-llnl/usr/share/man/man3/*trigger*
 	dh_installman -plibslurm21-dev debian/slurm-llnl/usr/share/man/man3/*
 	dh_install -plibslurm21 debian/slurm-llnl/usr/lib/libslurm.so.* usr/lib
 	rm -rf debian/slurm-llnl/usr/include

@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  bg_block_info.c - bluegene block information from the db2 database.
  *
- *  $Id: bg_block_info.c 19095 2009-12-01 22:59:18Z da $
+ *  $Id: bg_block_info.c 19270 2010-01-19 19:46:45Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
