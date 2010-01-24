@@ -1,3 +1,10 @@
+slurm-llnl (2.1.1-2) unstable; urgency=low
+
+  * slurm-llnl-slurmdbd postinst script doesn't change /var/run/slurm-llnl
+    owner anymore (Closes: #566572)
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Mon, 25 Jan 2010 00:14:06 +0100
+
 slurm-llnl (2.1.1-1) unstable; urgency=low
 
   * New upstream release (Closes: #565454)
