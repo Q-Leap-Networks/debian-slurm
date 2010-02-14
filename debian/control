@@ -4,7 +4,7 @@ Priority: extra
 Maintainer: Gennaro Oliva <oliva.g@na.icar.cnr.it>
 Uploaders: Dirk Eddelbuettel <edd@debian.org>
 Build-Depends: debhelper (>= 7.0.0), autotools-dev, libmunge-dev, libncurses5-dev, libssl-dev, po-debconf, python, libglade2-dev, libgtk2.0-dev, libmysqlclient-dev, postgresql-server-dev-8.4
-Standards-Version: 3.8.3
+Standards-Version: 3.8.4
 Homepage: https://computing.llnl.gov/linux/slurm/
 
 Package: slurm-llnl
@@ -25,7 +25,7 @@ Description: Runtime library files for SLURM
  is an open-source cluster resource management and job scheduling.
  This package contains the SLURM runtime library.
 
-Package: libpmi21
+Package: libpmi0
 Section: libs
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
@@ -43,10 +43,10 @@ Description: SLURM development files
  is an open-source cluster resource management and job scheduling.
  This package contains SLURM static library and header files.
 
-Package: libpmi21-dev
+Package: libpmi0-dev
 Section: libdevel
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, libpmi21 (= ${binary:Version}), libslurm21 (= ${binary:Version})
+Depends: ${shlibs:Depends}, ${misc:Depends}, libpmi0 (= ${binary:Version}), libslurm21 (= ${binary:Version})
 Description: SLURM PMI library implementation development files
  SLURM, the Simple Linux Utility for Resource Management,
  is an open-source cluster resource management and job scheduling.
@@ -91,7 +91,7 @@ Description: GUI to view and modify SLURM state
 
 Package: slurm-llnl-slurmdbd
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, slurm-llnl-basic-plugins (= ${binary:Version}), adduser
+Depends: ${shlibs:Depends}, ${misc:Depends}, slurm-llnl-basic-plugins (= ${binary:Version}), adduser, munge
 Description: Secure enterprise-wide interface to a database for SLURM
  SLURM, the Simple Linux Utility for Resource Management,
  is an open-source cluster resource management and job scheduling.

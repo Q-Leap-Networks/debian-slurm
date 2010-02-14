@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  auth_munge.c - SLURM auth implementation via Chris Dunlap's Munge
- *  $Id: auth_munge.c 19095 2009-12-01 22:59:18Z da $
+ *  $Id: auth_munge.c 19303 2010-01-21 22:42:24Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.

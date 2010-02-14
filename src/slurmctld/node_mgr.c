@@ -863,41 +863,34 @@ int update_node ( update_node_msg_t * update_node_msg )
  */
 extern void restore_node_features(void)
 {
-	int i, j, update_cnt = 0;
+	int i, j;
 	char *node_list;
+	struct node_record *node_ptr1, *node_ptr2;
 
-	/* Identify all nodes that have features field
-	 * preserved and not explicitly set in slurm.conf
-	 * to a different value */
-	for (i=0; i<node_record_count; i++) {
-		if (!node_record_table_ptr[i].features)
-			continue;
-		if (node_record_table_ptr[i].config_ptr->feature) {
-			/* use Features explicitly set in slurm.conf */
-			continue;
+	for (i=0, node_ptr1=node_record_table_ptr; i<node_record_count; 
+	     i++, node_ptr1++) {
+
+		if (!node_ptr1->features)
+			continue;	/* No feature to preserve */
+		if (node_ptr1->config_ptr->feature &&
+		    !strcmp(node_ptr1->config_ptr->feature,
+			    node_ptr1->features)) {
+			continue;	/* Identical feature value */
 		}
-		update_cnt++;
-	}
-	if (update_cnt == 0)
-		return;
 
-	for (i=0; i<node_record_count; i++) {
-		if (!node_record_table_ptr[i].features)
-			continue;
-		node_list = xstrdup(node_record_table_ptr[i].name);
-
-		for (j=(i+1); j<node_record_count; j++) {
-			if (!node_record_table_ptr[j].features ||
-			    strcmp(node_record_table_ptr[i].features,
-			    node_record_table_ptr[j].features))
+		node_list = xstrdup(node_ptr1->name);
+		for (j=(i+1), node_ptr2=(node_ptr1+1); j<node_record_count; 
+		     j++, node_ptr2++) {
+			if (!node_ptr2->features ||
+			    strcmp(node_ptr1->features, node_ptr2->features))
 				continue;
 			xstrcat(node_list, ",");
-			xstrcat(node_list, node_record_table_ptr[j].name);
-			xfree(node_record_table_ptr[j].features);
+			xstrcat(node_list, node_ptr2->name);
 		}
-		_update_node_features(node_list,
-			node_record_table_ptr[i].features);
-		xfree(node_record_table_ptr[i].features);
+		error("Node %s Features(%s) differ from slurm.conf",
+		      node_list, node_ptr1->features);
+		_update_node_features(node_list, node_ptr1->features);
+		xfree(node_ptr1->features);
 		xfree(node_list);
 	}
 }
@@ -1063,7 +1056,7 @@ static int _update_node_features(char *node_names, char *features)
 	list_iterator_destroy(config_iterator);
 	bit_free(node_bitmap);
 
-	info("_update_node_features: nodes %s reason set to: %s",
+	info("_update_node_features: nodes %s features set to: %s",
 		node_names, features);
 	return SLURM_SUCCESS;
 }
@@ -1403,10 +1396,11 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg)
 			char time_str[32];
 			last_node_update = now;
 			slurm_make_time_str(&now, time_str, sizeof(time_str));
-			xfree(node_ptr->reason);
-			node_ptr->reason = xstrdup_printf(
-				"Node silently failed and came back [slurm@%s]",
-				time_str);
+			if(!node_ptr->reason)
+				node_ptr->reason = xstrdup_printf(
+					"Node silently failed and "
+					"came back [slurm@%s]",
+					time_str);
 			info("Node %s silently failed and came back",
 			     reg_msg->node_name);
 			_make_node_down(node_ptr, last_node_update);

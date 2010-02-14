@@ -1,3 +1,10 @@
+slurm-llnl (2.1.2-1) unstable; urgency=low
+
+  * New upstream release 
+  * Added munge dependence for slurm-llnl-slurmdbd (Closes: #567013)
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Sun, 14 Feb 2010 20:21:29 +0100
+
 slurm-llnl (2.1.1-2) unstable; urgency=low
 
   * slurm-llnl-slurmdbd postinst script doesn't change /var/run/slurm-llnl

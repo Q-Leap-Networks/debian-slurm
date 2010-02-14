@@ -101,11 +101,11 @@ ifneq "$(wildcard /usr/share/misc/config.sub)" ""
 	rm -rf debian/slurm-llnl/usr/share/doc/slurm-[0-9]*
 
 	# pmi packages
-	dh_install -plibpmi21 debian/slurm-llnl/usr/lib/libpmi.so.* usr/lib
-	dh_install -plibpmi21-dev debian/slurm-llnl/usr/lib/libpmi.a usr/lib
-	dh_install -plibpmi21-dev debian/slurm-llnl/usr/lib/libpmi.la usr/lib
-	dh_install -plibpmi21-dev debian/slurm-llnl/usr/lib/libpmi*.so usr/lib
-	dh_install -plibpmi21-dev debian/slurm-llnl/usr/include/slurm/pmi.h usr/include/slurm
+	dh_install -plibpmi0 debian/slurm-llnl/usr/lib/libpmi.so.* usr/lib
+	dh_install -plibpmi0-dev debian/slurm-llnl/usr/lib/libpmi.a usr/lib
+	dh_install -plibpmi0-dev debian/slurm-llnl/usr/lib/libpmi.la usr/lib
+	dh_install -plibpmi0-dev debian/slurm-llnl/usr/lib/libpmi*.so usr/lib
+	dh_install -plibpmi0-dev debian/slurm-llnl/usr/include/slurm/pmi.h usr/include/slurm
 	rm -f debian/slurm-llnl/usr/include/slurm/pmi.h
 	rm -f debian/slurm-llnl/usr/lib/libpmi*
 

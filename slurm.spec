@@ -1,4 +1,4 @@
-# $Id: slurm.spec 19205 2010-01-05 01:58:11Z da $
+# $Id: slurm.spec 19380 2010-02-02 18:31:55Z da $
 #
 # Note that this package is not relocatable
 
@@ -83,14 +83,14 @@
 %endif
 
 Name:    slurm
-Version: 2.1.1
+Version: 2.1.2
 Release: 1%{?dist}
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL
 Group: System Environment/Base
-Source: slurm-2.1.1.tar.bz2
+Source: slurm-2.1.2.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: https://computing.llnl.gov/linux/slurm/
 
@@ -350,7 +350,7 @@ Gives the ability for SLURM to use Berkeley Lab Checkpoint/Restart
 #############################################################################
 
 %prep
-%setup -n slurm-2.1.1
+%setup -n slurm-2.1.2
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \
@@ -423,6 +423,9 @@ install -D -m644 etc/federation.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/fed
 %if %{slurm_with bluegene}
 rm -f ${RPM_BUILD_ROOT}%{_bindir}/srun
 install -D -m644 etc/bluegene.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/bluegene.conf.example
+mkdir -p ${RPM_BUILD_ROOT}/etc/ld.so.conf.d
+echo "%{_libdir}/slurm" > ${RPM_BUILD_ROOT}/etc/ld.so.conf.d/slurm.conf
+chmod 644 ${RPM_BUILD_ROOT}/etc/ld.so.conf.d/slurm.conf
 %endif
 
 LIST=./aix.files
@@ -443,8 +446,6 @@ test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/accounting_storage_mysql.so &&
    echo %{_libdir}/slurm/accounting_storage_mysql.so >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/accounting_storage_pgsql.so &&
    echo %{_libdir}/slurm/accounting_storage_pgsql.so >> $LIST
-test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/checkpoint_blcr.so          &&
-   echo %{_libdir}/slurm/checkpoint_blcr.so          >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/crypto_openssl.so           &&
    echo %{_libdir}/slurm/crypto_openssl.so           >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/jobcomp_mysql.so            &&
@@ -534,6 +535,8 @@ rm -rf $RPM_BUILD_ROOT
 %defattr(-,root,root)
 %{_libdir}/slurm/select_bluegene.so
 %{_libdir}/slurm/libsched_if64.so
+%dir /etc/ld.so.conf.d
+/etc/ld.so.conf.d/slurm.conf
 %{_mandir}/man5/bluegene.*
 %{_sbindir}/slurm_epilog
 %{_sbindir}/slurm_prolog
