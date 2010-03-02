@@ -1,4 +1,4 @@
-# $Id: slurm.spec 19380 2010-02-02 18:31:55Z da $
+# $Id: slurm.spec 19555 2010-02-19 22:35:07Z da $
 #
 # Note that this package is not relocatable
 
@@ -83,14 +83,14 @@
 %endif
 
 Name:    slurm
-Version: 2.1.2
+Version: 2.1.4
 Release: 1%{?dist}
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL
 Group: System Environment/Base
-Source: slurm-2.1.2.tar.bz2
+Source: slurm-2.1.4.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: https://computing.llnl.gov/linux/slurm/
 
@@ -292,6 +292,7 @@ Summary: SLURM interfaces to IBM AIX and Federation switch.
 Group: System Environment/Base
 Requires: slurm
 BuildRequires: proctrack >= 3
+Obsoletes: slurm-aix-federation
 %description aix
 SLURM plugins for IBM AIX and Federation switch.
 %endif
@@ -331,6 +332,7 @@ Summary: PAM module for restricting access to compute nodes via SLURM.
 Group: System Environment/Base
 Requires: slurm slurm-devel
 BuildRequires: pam-devel
+Obsoletes: pam_slurm
 %description pam_slurm
 This module restricts access to compute nodes in a cluster where the Simple
 Linux Utility for Resource Managment (SLURM) is in use.  Access is granted
@@ -350,7 +352,7 @@ Gives the ability for SLURM to use Berkeley Lab Checkpoint/Restart
 #############################################################################
 
 %prep
-%setup -n slurm-2.1.2
+%setup -n slurm-2.1.4
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \
@@ -358,6 +360,7 @@ Gives the ability for SLURM to use Berkeley Lab Checkpoint/Restart
 	%{?slurm_with_debug:--enable-debug} \
 	%{?slurm_with_sun_const:--enable-sun-const} \
 	%{?with_db2_dir} \
+	%{?with_pam_dir}	\
 	%{?with_proctrack}	\
 	%{?with_cpusetdir} \
 	%{?with_apbasildir} \
@@ -394,6 +397,12 @@ install -D -m755 contribs/sjstat ${RPM_BUILD_ROOT}%{_bindir}/sjstat
 # Delete unpackaged files:
 rm -f $RPM_BUILD_ROOT/%{_libdir}/slurm/*.{a,la}
 rm -f $RPM_BUILD_ROOT/%{_libdir}/security/*.{a,la}
+%if %{?with_pam_dir}0
+rm -f $RPM_BUILD_ROOT/%{with_pam_dir}/pam_slurm.{a,la}
+%endif
+rm -f $RPM_BUILD_ROOT/lib/security/pam_slurm.{a,la}
+rm -f $RPM_BUILD_ROOT/lib32/security/pam_slurm.{a,la}
+rm -f $RPM_BUILD_ROOT/lib64/security/pam_slurm.{a,la}
 %if ! %{slurm_with auth_none}
 rm -f $RPM_BUILD_ROOT/%{_libdir}/slurm/auth_none.so
 %endif
@@ -442,6 +451,7 @@ if [ -d /etc/init.d ]; then
 fi
 
 LIST=./plugins.files
+touch $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/accounting_storage_mysql.so &&
    echo %{_libdir}/slurm/accounting_storage_mysql.so >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/accounting_storage_pgsql.so &&
@@ -455,6 +465,19 @@ test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/jobcomp_pgsql.so            &&
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/task_affinity.so            &&
    echo %{_libdir}/slurm/task_affinity.so            >> $LIST
 
+LIST=./pam.files
+touch $LIST
+%if %{?with_pam_dir}0
+    test -f $RPM_BUILD_ROOT/%{with_pam_dir}/pam_slurm.so	&&
+	echo %{with_pam_dir}/pam_slurm.so	>>$LIST
+%else
+    test -f $RPM_BUILD_ROOT/lib/security/pam_slurm.so		&&
+	echo /lib/security/pam_slurm.so		>>$LIST
+    test -f $RPM_BUILD_ROOT/lib32/security/pam_slurm.so		&&
+	echo /lib32/security/pam_slurm.so	>>$LIST
+    test -f $RPM_BUILD_ROOT/lib64/security/pam_slurm.so		&&
+	echo /lib64/security/pam_slurm.so	>>$LIST
+%endif
 #############################################################################
 
 %clean
@@ -661,9 +684,8 @@ rm -rf $RPM_BUILD_ROOT
 #############################################################################
 
 %if %{slurm_with pam}
-%files pam_slurm
+%files -f pam.files pam_slurm
 %defattr(-,root,root)
-%{_libdir}/security/pam_slurm.so
 %endif
 #############################################################################
 
