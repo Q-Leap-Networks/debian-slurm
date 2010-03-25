@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/mgr.c - job manager functions for slurmstepd
- *  $Id: mgr.c 19152 2009-12-10 22:29:52Z da $
+ *  $Id: mgr.c 19712 2010-03-09 16:45:32Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -1009,7 +1009,8 @@ _fork_all_tasks(slurmd_job_t *job)
 
 	xassert(job != NULL);
 
-	if (slurm_container_create(job) == SLURM_ERROR) {
+	if ((job->cont_id == 0) &&
+	    (slurm_container_create(job) != SLURM_SUCCESS)) {
 		error("slurm_container_create: %m");
 		return SLURM_ERROR;
 	}
@@ -1553,6 +1554,7 @@ _make_batch_script(batch_job_launch_msg_t *msg, char *path)
 	}
 
 	if (fputs(msg->script, fp) < 0) {
+		(void) fclose(fp);
 		error("fputs: %m");
 		goto error;
 	}
@@ -1573,6 +1575,7 @@ _make_batch_script(batch_job_launch_msg_t *msg, char *path)
 	return xstrdup(script);
 
   error:
+	(void) unlink(script);
 	return NULL;
 
 }
@@ -1967,7 +1970,8 @@ _run_script_as_user(const char *name, const char *path, slurmd_job_t *job,
 		return -1;
 	}
 
-	if (slurm_container_create(job) != SLURM_SUCCESS)
+	if ((job->cont_id == 0) &&
+	    (slurm_container_create(job) != SLURM_SUCCESS))
 		error("slurm_container_create: %m");
 
 	if ((cpid = fork()) < 0) {
@@ -2034,7 +2038,6 @@ _run_script_as_user(const char *name, const char *path, slurmd_job_t *job,
 	}
 	/* Insure that all child processes get killed, one last time */
 	killpg(cpid, SIGKILL);
-	slurm_container_signal(job->cont_id, SIGKILL);
 
 	return status;
 }

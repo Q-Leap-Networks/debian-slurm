@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/slurmd/slurmstepd/ulimits.c - set user limits for job
- * $Id: ulimits.c 18027 2009-07-01 19:16:44Z da $
+ * $Id: ulimits.c 19673 2010-03-04 18:40:34Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -129,6 +129,7 @@ set_umask(slurmd_job_t *job)
 		return SLURM_ERROR;
 	}
 
+	unsetenvp(job->env, "SLURM_UMASK");
 	mask = strtol(val, (char **)NULL, 8);
 	umask(mask);
 	return SLURM_SUCCESS;

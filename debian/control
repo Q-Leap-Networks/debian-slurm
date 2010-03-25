@@ -3,7 +3,7 @@ Section: admin
 Priority: extra
 Maintainer: Gennaro Oliva <oliva.g@na.icar.cnr.it>
 Uploaders: Dirk Eddelbuettel <edd@debian.org>
-Build-Depends: debhelper (>= 7.0.0), autotools-dev, libmunge-dev, libncurses5-dev, libssl-dev, po-debconf, python, libglade2-dev, libgtk2.0-dev, libmysqlclient-dev, postgresql-server-dev-8.4
+Build-Depends: debhelper (>= 7.0.0), autotools-dev, libmunge-dev, libncurses5-dev, libssl-dev, po-debconf, python, libglade2-dev, libgtk2.0-dev, libmysqlclient-dev, postgresql-server-dev-8.4, libpam0g-dev
 Standards-Version: 3.8.4
 Homepage: https://computing.llnl.gov/linux/slurm/
 

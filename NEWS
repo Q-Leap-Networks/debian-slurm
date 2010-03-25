@@ -1,6 +1,51 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 2.1.5
+========================
+ -- BLUEGENE - Fixed display of draining nodes for sinfo -R.
+ -- Fixes to scontrol and sview when setting a job to an impossible start time.
+ -- Added -h to srun for help.
+ -- Fix for sacctmgr man page to remove erroneous 'with' statements.
+ -- Fix for unpacking jobs with accounting statistics, previously it appears
+    only steps were unpacked correctly, for the most case sacct would only
+    display this information making this fix a very minor one.
+ -- Changed scontrol and sview output for jobs with unknown end times from
+    'NONE' to 'Unknown'.
+ -- Fixed mysql plugin to reset classification when adding a
+    previously deleted cluster.
+ -- Permit a batch script to reset umask and have that propagate to tasks
+    spawed by subsequent srun. Previously the umask in effect when sbatch was
+    executed was propagated to tasks spawed by srun.
+ -- Modify slurm_job_cpus_allocated_on_node_id() and 
+    slurm_job_cpus_allocated_on_node() functions to not write explanation of 
+    failures to stderr. Only return -1 and set errno.
+ -- Correction in configurator.html script. Prolog and Epilog were reversed.
+ -- BLUEGENE - Fixed race condition where if a nodecard has an error on an
+    un-booted block when a job comes to use it before the state checking
+    thread notices it which could cause the slurmctld to lock up on a
+    non-dynamic system.
+ -- Correct TaskEpilog logic. Previously could kill other user tasks on that
+    node which remained running.
+ -- Fix accounting Purge to remove correct period of time.  Previously would
+    remove n+1 leaving an extra time period around.
+ -- In select/cons_res with FastSchedule=0 and Procs=# defined for the node, 
+    but no specific socket/core/thread count configured, avoid fatal error if 
+    the number of cores on a node is less than the number of Procs configured.
+ -- Added ability for the perlapi to utilize opaque data types returned from
+    the C api.
+ -- BLUEGENE - made the perlapi get correct values for cpus per node,
+    Previously it would give the number of cpus per cnode instead of midplane.
+ -- BLEUGENE - Fixed issue where if a block being selected for a job to use
+    and during the process a hardware failure happens, previously the block
+    would still be allowed to be used which would fail or requeue the job
+    depending on the configuration.
+ -- For SPANK job environment, avoid duplicate "SPANK_" prefix for environment
+    set by sbatch jobs.
+ -- Make squeue select jobs on hidden partitions when requesting more than one.
+ -- Avoid automatically cancelling job steps when all of the tasks on some node
+    have gracefully terminated.
+
 * Changes in SLURM 2.1.4
 ========================
  -- Fix for purge script in accounting to use correct options.
@@ -4890,4 +4935,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 19625 2010-02-27 00:23:00Z jette $
+$Id: NEWS 19780 2010-03-17 23:56:43Z jette $

@@ -443,10 +443,9 @@ void slurm_step_launch_wait_finish(slurm_step_ctx_t *ctx)
 				 *   be made smart enough to really ensure
 				 *   that a killed step never starts.
 				 */
-				slurm_kill_job_step(
-					ctx->job_id,
-					ctx->step_resp->job_step_id,
-					SIGKILL);
+				slurm_kill_job_step(ctx->job_id,
+						    ctx->step_resp->job_step_id,
+						    SIGKILL);
 				if (!sls->user_managed_io) {
 					client_io_handler_abort(sls->
 								io.normal);
@@ -471,12 +470,12 @@ void slurm_step_launch_wait_finish(slurm_step_ctx_t *ctx)
 		     ctx->job_id, ctx->step_resp->job_step_id);
 
 	/* task_exit_signal != 0 when srun receives a message that a task
-	   exited with a SIGTERM or SIGKILL.  Without this test, a hang in srun
-	   might occur when a node gets a hard power failure, and TCP does not
-	   indicate that the I/O connection closed.  The I/O thread could
-	   block waiting for an EOF message, even though the remote process
-	   has died.  In this case, use client_io_handler_abort to force the
-	   I/O thread to stop listening for stdout or stderr and shutdown.*/
+	 * exited with a SIGTERM or SIGKILL.  Without this test, a hang in srun
+	 * might occur when a node gets a hard power failure, and TCP does not
+	 * indicate that the I/O connection closed.  The I/O thread could
+	 * block waiting for an EOF message, even though the remote process
+	 * has died.  In this case, use client_io_handler_abort to force the
+	 * I/O thread to stop listening for stdout or stderr and shutdown. */
 	if (task_exit_signal && !sls->user_managed_io) {
 		client_io_handler_abort(sls->io.normal);
 	}
@@ -1052,31 +1051,12 @@ _step_missing_handler(struct step_launch_state *sls, slurm_msg_t *missing_msg)
 		node = hostlist_next(fail_itr);
 		node_id = hostset_find(all_nodes, node);
 		if (node_id < 0) {
-			error(  "Internal error: bad SRUN_STEP_MISSING message. "
-				"Node %s not part of this job step", node);
+			error("Internal error: bad SRUN_STEP_MISSING message. "
+			      "Node %s not part of this job step", node);
 			free(node);
 			continue;
 		}
 		free(node);
-
-		/* If this is true, an I/O error has already occurred on the
-		   stepd for the current node, and the job should abort */
-		if (bit_test(sls->node_io_error, node_id)) {
-			error("Aborting, step missing and io error on node %d",
-			      node_id);
-			sls->abort = true;
-			pthread_cond_broadcast(&sls->cond);
-			break;
-		}
-
-		/*
-		 * A test is already is progress. Ignore message for this node.
-		 */
-		if (sls->io_deadline[node_id] != NO_VAL) {
-			debug("Test in progress for node %d, ignoring message",
-			      node_id);
-			continue;
-		}
 
 		/*
 		 * If all tasks for this node have either not started or already
@@ -1096,6 +1076,24 @@ _step_missing_handler(struct step_launch_state *sls, slurm_msg_t *missing_msg)
 		if (!active)
 			continue;
 
+		/* If this is true, an I/O error has already occurred on the
+		 * stepd for the current node, and the job should abort */
+		if (bit_test(sls->node_io_error, node_id)) {
+			error("Aborting, step missing and io error on node %d",
+			      node_id);
+			sls->abort = true;
+			pthread_cond_broadcast(&sls->cond);
+			break;
+		}
+
+		/*
+		 * A test is already is progress. Ignore message for this node.
+		 */
+		if (sls->io_deadline[node_id] != NO_VAL) {
+			debug("Test in progress for node %d, ignoring message",
+			      node_id);
+			continue;
+		}
 
 		sls->io_deadline[node_id] = time(NULL) + sls->io_timeout;
 

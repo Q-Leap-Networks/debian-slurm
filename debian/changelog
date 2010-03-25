@@ -1,3 +1,10 @@
+slurm-llnl (2.1.5-1) unstable; urgency=low
+
+  * New upstream release
+  * Added support for pam (Closes: #573461) 
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Thu, 25 Mar 2010 16:34:15 +0100
+
 slurm-llnl (2.1.4-1) unstable; urgency=low
 
   * New upstream release 
