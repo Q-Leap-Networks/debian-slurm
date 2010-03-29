@@ -890,7 +890,9 @@ The maximum stack size
 Execute task zero in pseudo terminal.
 Implicitly sets \fB\-\-unbuffered\fR.
 Implicitly sets \fB\-\-error\fR and \fB\-\-output\fR to /dev/null
-for all tasks except task zero.
+for all tasks except task zero, which may cause those tasks to 
+exit immediately (e.g. shells will typically exit immediately
+in that situation).
 Not currently supported on AIX platforms.
 
 .TP
@@ -1208,6 +1210,9 @@ will consider this an error, as 15 processes cannot run across 16 nodes.
 By default, stdout and stderr will be redirected from all tasks to the
 stdout and stderr of \fBsrun\fR, and stdin will be redirected from the
 standard input of \fBsrun\fR to all remote tasks.
+If stdin is only to be read by a subset of the spawned tasks, specifying a
+file to read from rather than forwarding stdin from the \fBsrun\fR command may
+be preferable as it avoids moving and storing data that will never be read.
 For OS X, the poll() function does not support stdin, so input from
 a terminal is not possible.
 This behavior may be changed with the
