@@ -135,7 +135,7 @@ For example: \fB\-\-constraint="opteron&video"\fR or
 In the first example, only nodes having both the feature "opteron" AND
 the feature "video" will be used.
 There is no mechanism to specify that you want one node with feature
-"opteron" and another node with feature "video" in that case that no
+"opteron" and another node with feature "video" in case no
 node has both features.
 If only one of a set of possible options should be used for all allocated
 nodes, then use the OR operator and enclose the options within square brackets.
@@ -757,8 +757,8 @@ When a job is within \fIsig_time\fR seconds of its end time,
 send it the signal \fIsig_num\fR.
 Due to the resolution of event handling by SLURM, the signal may
 be sent up to 60 seconds earlier than specified.
-Both \fIsig_time\fR and \fIsig_num\fR must have integer values
-between zero and 65535.
+\fIsig_num\fR may either be a signal number or name (e.g. "10" or "USR1").
+\fIsig_time\fR must have integer value between zero and 65535.
 By default, no signal is sent before the job's end time.
 If a \fIsig_num\fR is specified without any \fIsig_time\fR,
 the default time will be 60 seconds.

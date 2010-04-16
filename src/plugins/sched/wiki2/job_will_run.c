@@ -48,7 +48,6 @@
 
 #define MAX_JOB_QUEUE 20
 
-static void	_preempt_list_del(void *x);
 static char *	_will_run_test(uint32_t jobid, time_t start_time,
 			       char *node_list, int *err_code, char **err_msg);
 static char *	_will_run_test2(uint32_t jobid, time_t start_time,
@@ -410,7 +409,7 @@ static char *	_will_run_test2(uint32_t jobid, time_t start_time,
 				uint32_t *preemptee, int preemptee_cnt,
 				int *err_code, char **err_msg)
 {
-	struct job_record *job_ptr = NULL, *pre_ptr, **pre_pptr;
+	struct job_record *job_ptr = NULL, *pre_ptr;
 	struct part_record *part_ptr;
 	bitstr_t *avail_bitmap = NULL, *resv_bitmap = NULL;
 	time_t start_res;
@@ -531,15 +530,10 @@ static char *	_will_run_test2(uint32_t jobid, time_t start_time,
 	}
 
 	if (preemptee_cnt) {
-		preemptee_candidates = list_create(_preempt_list_del);
+		preemptee_candidates = list_create(NULL);
 		for (i=0; i<preemptee_cnt; i++) {
-			pre_ptr = find_job_record(preemptee[i]);
-			if (pre_ptr) {
-				pre_pptr = xmalloc(sizeof(struct
-							  job_record *));
-				pre_pptr[0] = pre_ptr;
-				list_append(preemptee_candidates, pre_pptr);
-			}
+			if ((pre_ptr = find_job_record(preemptee[i])))
+				list_append(preemptee_candidates, pre_ptr);
 		}
 	}
 
@@ -570,15 +564,14 @@ static char *	_will_run_test2(uint32_t jobid, time_t start_time,
 		xfree(hostlist);
 
 		if (preempted_jobs) {
-			while ((pre_pptr = list_pop(preempted_jobs))) {
+			while ((pre_ptr = list_pop(preempted_jobs))) {
 				if (pre_cnt++)
 					sep = ",";
 				else
 					sep = " PREEMPT=";
 				snprintf(tmp_str, sizeof(tmp_str), "%s%u",
-					 sep, pre_pptr[0]->job_id);
+					 sep, pre_ptr->job_id);
 				xstrcat(reply_msg, tmp_str);
-				xfree(pre_pptr);
 			}
 			list_destroy(preempted_jobs);
 		}
@@ -592,11 +585,6 @@ static char *	_will_run_test2(uint32_t jobid, time_t start_time,
 
 	FREE_NULL_BITMAP(avail_bitmap);
 	return reply_msg;
-}
-
-static void _preempt_list_del(void *x)
-{
-	xfree(x);
 }
 
 /*

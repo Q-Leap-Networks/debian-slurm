@@ -1,4 +1,4 @@
-# $Id: slurm.spec 19555 2010-02-19 22:35:07Z da $
+# $Id: slurm.spec 19976 2010-04-07 15:55:58Z jette $
 #
 # Note that this package is not relocatable
 
@@ -83,14 +83,14 @@
 %endif
 
 Name:    slurm
-Version: 2.1.6
+Version: 2.1.7
 Release: 1%{?dist}
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL
 Group: System Environment/Base
-Source: slurm-2.1.6.tar.bz2
+Source: slurm-2.1.7.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: https://computing.llnl.gov/linux/slurm/
 
@@ -352,7 +352,7 @@ Gives the ability for SLURM to use Berkeley Lab Checkpoint/Restart
 #############################################################################
 
 %prep
-%setup -n slurm-2.1.6
+%setup -n slurm-2.1.7
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \
@@ -382,13 +382,13 @@ DESTDIR="$RPM_BUILD_ROOT" make install
 DESTDIR="$RPM_BUILD_ROOT" make install-contrib
 
 %ifos aix5.3
-mv ${RPM_BUILD_ROOT}%{_bindir}/srun ${RPM_BUILD_ROOT}%{_sbindir}
+   mv ${RPM_BUILD_ROOT}%{_bindir}/srun ${RPM_BUILD_ROOT}%{_sbindir}
+%else
+   if [ -d /etc/init.d ]; then
+      install -D -m755 etc/init.d.slurm    $RPM_BUILD_ROOT/etc/init.d/slurm
+      install -D -m755 etc/init.d.slurmdbd $RPM_BUILD_ROOT/etc/init.d/slurmdbd
+   fi
 %endif
-
-if [ -d /etc/init.d ]; then
-   install -D -m755 etc/init.d.slurm    $RPM_BUILD_ROOT/etc/init.d/slurm
-   install -D -m755 etc/init.d.slurmdbd $RPM_BUILD_ROOT/etc/init.d/slurmdbd
-fi
 install -D -m644 etc/slurm.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/slurm.conf.example
 install -D -m644 etc/slurmdbd.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/slurmdbd.conf.example
 install -D -m755 etc/slurm.epilog.clean ${RPM_BUILD_ROOT}%{_sysconfdir}/slurm.epilog.clean
@@ -421,9 +421,8 @@ rm -f ${RPM_BUILD_ROOT}%{_mandir}/man1/srun_cr* ${RPM_BUILD_ROOT}%{_bindir}/srun
 # Build conditional file list for main package
 LIST=./slurm.files
 touch $LIST
-if [ -d /etc/init.d ]; then
-   echo "/etc/init.d/slurm"    >> $LIST
-fi
+test -f $RPM_BUILD_ROOT/etc/init.d/slurm                       &&
+  echo /etc/init.d/slurm                               >> $LIST
 
 %if %{slurm_with aix}
 install -D -m644 etc/federation.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/federation.conf.example
@@ -446,9 +445,8 @@ test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/switch_federation.so  &&
 
 LIST=./slurmdbd.files
 touch $LIST
-if [ -d /etc/init.d ]; then
-   echo "/etc/init.d/slurmdbd" >> $LIST
-fi
+test -f $RPM_BUILD_ROOT/etc/init.d/slurm                       &&
+  echo /etc/init.d/slurmdbd                            >> $LIST
 
 LIST=./plugins.files
 touch $LIST

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmd/slurmd.c - main slurm node server daemon
- *  $Id: slurmd.c 19759 2010-03-16 20:32:26Z jette $
+ *  $Id: slurmd.c 20026 2010-04-14 20:31:58Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -724,9 +724,11 @@ _read_config(void)
 	_massage_pathname(&conf->logfile);
 
 	/* set node_addr if relevant */
-	if((conf->node_addr = slurm_conf_get_nodeaddr(conf->hostname)))
-		if (strcmp(conf->node_addr, conf->hostname) == 0)
-			xfree(conf->node_addr);	/* Sets to NULL */
+	if ((conf->node_addr == NULL) &&
+	    (conf->node_addr = slurm_conf_get_nodeaddr(conf->hostname)) &&
+	    (strcmp(conf->node_addr, conf->hostname) == 0)) {
+		xfree(conf->node_addr);	/* Sets to NULL */
+	}
 
 	conf->port = slurm_conf_get_port(conf->node_name);
 	slurm_conf_get_cpus_sct(conf->node_name,

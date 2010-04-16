@@ -1,6 +1,49 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 2.1.8
+========================
+
+* Changes in SLURM 2.1.7
+========================
+ -- Modify srun, salloc and sbatch parsing for the --signal option to accept
+    either a signal name in addition to the previously supported signal
+    numbers (e.g. "--signal=USR2@200").
+ -- BLUEGENE - Fixed sinfo --long --Node output for cpus on a single cnode.
+ -- In sched/wiki2 - Fix another logic bug in support of Moab being able to
+    identify preemptable jobs.
+ -- In sched/wiki2 - For BlueGene systems only: Fix bug preventing Moab from
+    being able to correctly change the node count of pending jobs.
+ -- In select/cons_res - Fix bug preventing job preemption with a configuration
+    of Shared=FORCE:1 and PreemptMode=GANG,SUSPEND.
+ -- In the TaskProlog, add support for an "unset" option to clear environment
+    variables for the user application. Also add support for embedded white-
+    space in the environment variables exported to the user application
+    (everything after the equal sign to the end of the line is included without
+    alteration).
+ -- Do not install /etc/init.d/slurm or /etc/init.d/slurmdbd on AIX systems.
+ -- BLUEGENE - fixed check for small blocks if a node card of a midplane is
+    in an error state other jobs can still run on the midplane on other
+    nodecards.
+ -- BLUEGENE - Check to make sure job killing is in the active job table in
+    DB2 when killing the job.
+ -- Correct logic to support ResvOverRun configuration parameter.
+ -- Get --acctg-freq option working for srun and salloc commands.
+ -- Fix sinfo display of drained nodes correctly with the summarize flag.
+ -- Fix minor memory leaks in slurmd and slurmstepd.
+ -- Better error messages for failed step launch.
+ -- Modify srun to insure compatability of the --relative option with the node
+    count requested.
+
+* Changes in SLURM 2.1.6-2
+==========================
+ -- In sched/wiki2 - Fix logic in support of Moab being able to identify
+    preemptable jobs.
+ -- Applied fixes to a debug4 message in priority_multifactor.c sent in by
+    Per Lundqvist
+ -- BLUEGENE - Fixed issue where incorrect nodecards could be picked when
+    looking at combining small blocks to make a larger small block.
+
 * Changes in SLURM 2.1.6
 ========================
  -- For newly submitted jobs, report expected start time in squeue --start as
@@ -4957,4 +5000,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 19896 2010-03-26 21:49:42Z jette $
+$Id: NEWS 20049 2010-04-16 00:34:17Z da $
