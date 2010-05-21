@@ -69,6 +69,7 @@ static char *script_wrap(char *command_string);
 static void  _set_exit_code(void);
 static void  _set_prio_process_env(void);
 static int   _set_rlimit_env(void);
+static void  _set_spank_env(void);
 static void  _set_submit_dir_env(void);
 static int   _set_umask_env(void);
 
@@ -134,6 +135,7 @@ int main(int argc, char *argv[])
 	}
 
 	_set_prio_process_env();
+	_set_spank_env();
 	_set_submit_dir_env();
 	_set_umask_env();
 	slurm_init_job_desc_msg(&desc);
@@ -283,11 +285,11 @@ static int fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->ntasks_per_core = opt.ntasks_per_core;
 
 	/* node constraints */
-	if (opt.min_sockets_per_node > -1)
+	if (opt.min_sockets_per_node != NO_VAL)
 		desc->min_sockets = opt.min_sockets_per_node;
-	if (opt.min_cores_per_socket > -1)
+	if (opt.min_cores_per_socket != NO_VAL)
 		desc->min_cores = opt.min_cores_per_socket;
-	if (opt.min_threads_per_core > -1)
+	if (opt.min_threads_per_core != NO_VAL)
 		desc->min_threads = opt.min_threads_per_core;
 
 	if (opt.no_kill)
@@ -350,6 +352,19 @@ static void _set_exit_code(void)
 			error("SLURM_EXIT_ERROR has zero value");
 		else
 			error_exit = i;
+	}
+}
+
+/* Propagate SPANK environment via SLURM_SPANK_ environment variables */
+static void _set_spank_env(void)
+{
+	int i;
+
+	for (i=0; i<opt.spank_job_env_size; i++) {
+		if (setenvfs("SLURM_SPANK_%s", opt.spank_job_env[i]) < 0) {
+			error("unable to set %s in environment",
+			      opt.spank_job_env[i]);
+		}
 	}
 }
 

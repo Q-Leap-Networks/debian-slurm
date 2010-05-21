@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  opt.h - definitions for srun option processing
- *  $Id: opt.h 19316 2010-01-26 00:12:13Z jette $
+ *  $Id: opt.h 20173 2010-04-29 16:14:33Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -256,5 +256,9 @@ extern char *spank_get_job_env(const char *name);
 extern int   spank_set_job_env(const char *name, const char *value,
 			       int overwrite);
 extern int   spank_unset_job_env(const char *name);
+
+/* Initialize the the spank_job_env based upon environment variables set
+ *	via salloc or sbatch commands */
+extern void init_spank_env(void);
 
 #endif	/* _HAVE_OPT_H */
