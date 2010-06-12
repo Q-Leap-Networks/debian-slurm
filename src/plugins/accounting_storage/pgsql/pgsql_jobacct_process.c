@@ -593,6 +593,8 @@ no_cond:
 		xfree(query);
 		for(j = 0; j < PQntuples(step_result); j++) {
 			step = create_jobacct_step_rec();
+			step->tot_cpu_sec = 0;
+			step->tot_cpu_usec = 0;
 			step->job_ptr = job;
 			if(!job->first_step_ptr)
 				job->first_step_ptr = step;
@@ -654,11 +656,9 @@ no_cond:
 				PQgetvalue(step_result, j, STEP_REQ_SYS_SEC));
 			step->sys_cpu_usec = atoi(
 				PQgetvalue(step_result, j, STEP_REQ_SYS_USEC));
-			job->tot_cpu_sec +=
-				step->tot_cpu_sec +=
+			step->tot_cpu_sec +=
 				step->user_cpu_sec + step->sys_cpu_sec;
-			job->tot_cpu_usec +=
-				step->tot_cpu_usec +=
+			step->tot_cpu_usec +=
 				step->user_cpu_usec + step->sys_cpu_usec;
 			step->sacct.max_vsize = atoi(
 				PQgetvalue(step_result, j,

@@ -898,6 +898,7 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn, uid_t uid,
 		"t1.nodelist",
 		"t1.node_inx",
 		"t1.kill_requid",
+		"t1.timelimit",
 		"t1.qos",
 		"t2.user",
 		"t2.cluster",
@@ -934,6 +935,7 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn, uid_t uid,
 		JOB_REQ_NODELIST,
 		JOB_REQ_NODE_INX,
 		JOB_REQ_KILL_REQUID,
+		JOB_REQ_TIMELIMIT,
 		JOB_REQ_QOS,
 		JOB_REQ_USER_NAME,
 		JOB_REQ_CLUSTER,
@@ -1326,6 +1328,7 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn, uid_t uid,
 		job->priority = atoi(row[JOB_REQ_PRIORITY]);
 		job->req_cpus = atoi(row[JOB_REQ_REQ_CPUS]);
 		job->requid = atoi(row[JOB_REQ_KILL_REQUID]);
+		job->timelimit = atoi(row[JOB_REQ_TIMELIMIT]);
 		job->qos = atoi(row[JOB_REQ_QOS]);
 		job->show_full = 1;
 
@@ -1398,6 +1401,8 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn, uid_t uid,
 				continue;
 
 			step = create_jobacct_step_rec();
+			step->tot_cpu_sec = 0;
+			step->tot_cpu_usec = 0;
 			step->job_ptr = job;
 			if(!job->first_step_ptr)
 				job->first_step_ptr = step;
@@ -1455,11 +1460,9 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn, uid_t uid,
 				atoi(step_row[STEP_REQ_USER_USEC]);
 			step->sys_cpu_sec = atoi(step_row[STEP_REQ_SYS_SEC]);
 			step->sys_cpu_usec = atoi(step_row[STEP_REQ_SYS_USEC]);
-			job->tot_cpu_sec +=
-				step->tot_cpu_sec +=
+			step->tot_cpu_sec +=
 				step->user_cpu_sec + step->sys_cpu_sec;
-			job->tot_cpu_usec +=
-				step->tot_cpu_usec +=
+			step->tot_cpu_usec +=
 				step->user_cpu_usec + step->sys_cpu_usec;
 			step->sacct.max_vsize =
 				atoi(step_row[STEP_REQ_MAX_VSIZE]);
@@ -1582,6 +1585,7 @@ extern int mysql_jobacct_process_archive(mysql_conn_t *mysql_conn,
 		"nodelist",
 		"node_inx",
 		"kill_requid",
+		"timelimit",
 		"qos"
 	};
 
@@ -1676,6 +1680,7 @@ extern int mysql_jobacct_process_archive(mysql_conn_t *mysql_conn,
 		JOB_REQ_NODELIST,
 		JOB_REQ_NODE_INX,
 		JOB_REQ_KILL_REQUID,
+		JOB_REQ_TIMELIMIT,
 		JOB_REQ_QOS,
 		JOB_REQ_COUNT
 	};

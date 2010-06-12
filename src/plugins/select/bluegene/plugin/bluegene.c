@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  bluegene.c - blue gene node configuration processing module.
  *
- *  $Id: bluegene.c 19755 2010-03-16 19:15:43Z da $
+ *  $Id: bluegene.c 20411 2010-06-03 23:44:06Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -163,7 +163,6 @@ extern bool blocks_overlap(bg_record_t *rec_a, bg_record_t *rec_b)
 		   == SLURM_ERROR)
 			return true;
 	}
-
 
 	if (!bit_overlap(rec_a->bitmap, rec_b->bitmap))
 		return false;

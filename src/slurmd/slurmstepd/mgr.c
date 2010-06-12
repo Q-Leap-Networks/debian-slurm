@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/mgr.c - job manager functions for slurmstepd
- *  $Id: mgr.c 20036 2010-04-15 18:52:13Z da $
+ *  $Id: mgr.c 20276 2010-05-18 16:51:08Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -910,6 +910,7 @@ job_manager(slurmd_job_t *job)
 	 */
 	if(!conf->job_acct_gather_freq)
 		jobacct_gather_g_stat_task(0);
+
 	/* Send job launch response with list of pids */
 	_send_launch_resp(job, 0);
 

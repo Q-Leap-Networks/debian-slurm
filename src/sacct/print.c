@@ -1126,7 +1126,6 @@ void print_fields(type_t type, void *object)
 			case JOBSTEP:
 				tmp_int = step->sys_cpu_sec;
 				tmp_int2 = step->sys_cpu_usec;
-
 				break;
 			case JOBCOMP:
 
@@ -1145,10 +1144,18 @@ void print_fields(type_t type, void *object)
 		case PRINT_TIMELIMIT:
 			switch(type) {
 			case JOB:
-
+				if (job->timelimit == INFINITE)
+					tmp_char = "UNLIMITED";
+				else if (job->timelimit == NO_VAL)
+					tmp_char = "Partition_Limit";
+				else if(job->timelimit) {
+					char tmp1[128];
+					mins2time_str(job->timelimit,
+						      tmp1, sizeof(tmp1));
+					tmp_char = tmp1;
+				}
 				break;
 			case JOBSTEP:
-
 				break;
 			case JOBCOMP:
 				tmp_char = job_comp->timelimit;
@@ -1237,12 +1244,11 @@ void print_fields(type_t type, void *object)
 			switch(type) {
 			case JOB:
 				tmp_int = job->user_cpu_sec;
-				tmp_int2 = job->tot_cpu_usec;
+				tmp_int2 = job->user_cpu_usec;
 				break;
 			case JOBSTEP:
 				tmp_int = step->user_cpu_sec;
 				tmp_int2 = step->user_cpu_usec;
-
 				break;
 			case JOBCOMP:
 

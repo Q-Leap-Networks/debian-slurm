@@ -1196,6 +1196,11 @@ static bool _opt_verify(void)
 		verified = false;
 	}
 
+	if ((opt.ntasks_per_node > -1) && (!opt.nprocs_set)) {
+		opt.nprocs = opt.min_nodes * opt.ntasks_per_node;
+		opt.nprocs_set = 1;
+	}
+
 	if (opt.mincpus < opt.cpus_per_task)
 		opt.mincpus = opt.cpus_per_task;
 

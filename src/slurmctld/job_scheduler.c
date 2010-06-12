@@ -509,7 +509,8 @@ extern void sort_job_queue(struct job_queue *job_queue, int job_queue_size)
 		job_queue[i].job_ptr       = job_queue[top_prio_inx].job_ptr;
 		job_queue[i].job_priority  = job_queue[top_prio_inx].
 					     job_priority;
-
+		job_queue[i].part_priority = job_queue[top_prio_inx].
+					     part_priority;
 
 		job_queue[top_prio_inx].job_ptr       = tmp_job_ptr;
 		job_queue[top_prio_inx].job_priority  = tmp_job_prio;
@@ -1130,14 +1131,15 @@ static char **_build_env(struct job_record *job_ptr)
 
 #ifdef HAVE_CRAY_XT
 	select_g_select_jobinfo_get(job_ptr->select_jobinfo,
-			     SELECT_JOBDATA_RESV_ID, &name);
+				    SELECT_JOBDATA_RESV_ID, &name);
 	setenvf(&env, "BASIL_RESERVATION_ID", "%s", name);
 	xfree(name);
 #endif
 #ifdef HAVE_BG
 	select_g_select_jobinfo_get(job_ptr->select_jobinfo,
-			     SELECT_JOBDATA_BLOCK_ID, &name);
+				    SELECT_JOBDATA_BLOCK_ID, &name);
 	setenvf(&my_env, "MPIRUN_PARTITION", "%s", name);
+	xfree(name);
 #endif
 	setenvf(&my_env, "SLURM_JOB_ACCOUNT", "%s", job_ptr->account);
 	if (job_ptr->details) {

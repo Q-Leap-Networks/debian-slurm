@@ -1981,6 +1981,11 @@ static bool _opt_verify(void)
 	_fullpath(&opt.ifname, opt.cwd);
 	_fullpath(&opt.ofname, opt.cwd);
 
+	if ((opt.ntasks_per_node > 0) && (!opt.nprocs_set)) {
+		opt.nprocs = opt.min_nodes * opt.ntasks_per_node;
+		opt.nprocs_set = 1;
+	}
+
 	if (opt.mincpus < opt.cpus_per_task)
 		opt.mincpus = opt.cpus_per_task;
 
