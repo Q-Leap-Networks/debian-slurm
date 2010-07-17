@@ -283,7 +283,7 @@ static void _opt_default()
 	opt.nprocs_set = false;
 	opt.cpus_per_task = 1;
 	opt.cpus_set = false;
-	opt.min_nodes = 0;
+	opt.min_nodes = 1;
 	opt.max_nodes = 0;
 	opt.nodes_set = false;
 	opt.min_sockets_per_node = NO_VAL; /* requested min sockets */
@@ -1421,6 +1421,7 @@ static void _set_options(int argc, char **argv)
 			opt.qos = xstrdup(optarg);
 			break;
 		case LONG_OPT_SOCKETSPERNODE:
+			max_val = 0;
 			get_resource_arg_range( optarg, "sockets-per-node",
 						&opt.min_sockets_per_node,
 						&max_val, true );
@@ -1429,6 +1430,7 @@ static void _set_options(int argc, char **argv)
 				opt.min_sockets_per_node = NO_VAL;
 			break;
 		case LONG_OPT_CORESPERSOCKET:
+			max_val = 0;
 			get_resource_arg_range( optarg, "cores-per-socket",
 						&opt.min_cores_per_socket,
 						&max_val, true );
@@ -1437,6 +1439,7 @@ static void _set_options(int argc, char **argv)
 				opt.min_cores_per_socket = NO_VAL;
 			break;
 		case LONG_OPT_THREADSPERCORE:
+			max_val = 0;
 			get_resource_arg_range( optarg, "threads-per-core",
 						&opt.min_threads_per_core,
 						&max_val, true );
@@ -1996,7 +1999,7 @@ static bool _opt_verify(void)
 
 	/* check for realistic arguments */
 	if (opt.nprocs <= 0) {
-		error("invalid number of processes (-n %d)", opt.nprocs);
+		error("invalid number of tasks (-n %d)", opt.nprocs);
 		verified = false;
 	}
 

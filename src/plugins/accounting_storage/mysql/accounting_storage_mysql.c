@@ -3919,14 +3919,17 @@ extern int acct_storage_p_add_users(mysql_conn_t *mysql_conn, uint32_t uid,
 			xstrfmtcat(vals, ", %u", object->admin_level);
 			xstrfmtcat(extra, ", admin_level=%u",
 				   object->admin_level);
-		}
+		} else
+			xstrfmtcat(extra, ", admin_level=%u",
+				   ACCT_ADMIN_NONE);
 
 		if(object->default_wckey) {
 			xstrcat(cols, ", default_wckey");
 			xstrfmtcat(vals, ", \"%s\"", object->default_wckey);
 			xstrfmtcat(extra, ", default_wckey=\"%s\"",
 				   object->default_wckey);
-		}
+		} else
+			xstrcat(extra, ", default_wckey=\"\"");
 
 		query = xstrdup_printf(
 			"insert into %s (%s) values (%s) "
@@ -5540,8 +5543,8 @@ extern List acct_storage_p_modify_associations(
 	time_t now = time(NULL);
 	char *user_name = NULL;
 	int set = 0, i = 0, is_admin=0;
-	MYSQL_RES *result = NULL;
-	MYSQL_ROW row;
+	MYSQL_RES *result = NULL, *result2 = NULL;
+	MYSQL_ROW row, row2;
 	acct_user_rec_t user;
 	char *tmp_char1=NULL, *tmp_char2=NULL;
 	int set_qos_vals = 0;
@@ -5570,6 +5573,18 @@ extern List acct_storage_p_modify_associations(
 		MASSOC_RGT,
 		MASSOC_QOS,
 		MASSOC_COUNT
+	};
+
+	enum {
+		ASSOC2_REQ_PARENT_ID,
+		ASSOC2_REQ_MJ,
+		ASSOC2_REQ_MSJ,
+		ASSOC2_REQ_MCPJ,
+		ASSOC2_REQ_MNPJ,
+		ASSOC2_REQ_MWPJ,
+		ASSOC2_REQ_MCMPJ,
+		ASSOC2_REQ_QOS,
+		ASSOC2_REQ_DELTA_QOS,
 	};
 
 	if(!assoc_cond || !assoc) {
@@ -5677,24 +5692,26 @@ extern List acct_storage_p_modify_associations(
 		*/
 		uint32_t lft = atoi(row[MASSOC_LFT]);
 		uint32_t rgt = atoi(row[MASSOC_RGT]);
+		char *account;
+
+		/* Here we want to see if the person
+		 * is a coord of the parent account
+		 * since we don't want him to be able
+		 * to alter the limits of the account
+		 * he is directly coord of.  They
+		 * should be able to alter the
+		 * sub-accounts though. If no parent account
+		 * that means we are talking about a user
+		 * association so account is really the parent
+		 * of the user a coord can change that all day long.
+		 */
+		if(row[MASSOC_PACCT][0])
+			account = row[MASSOC_PACCT];
+		else
+			account = row[MASSOC_ACCT];
 
 		if(!is_admin) {
 			acct_coord_rec_t *coord = NULL;
-			char *account = row[MASSOC_ACCT];
-
-			/* Here we want to see if the person
-			 * is a coord of the parent account
-			 * since we don't want him to be able
-			 * to alter the limits of the account
-			 * he is directly coord of.  They
-			 * should be able to alter the
-			 * sub-accounts though. If no parent account
-			 * that means we are talking about a user
-			 * association so account is really the parent
-			 * of the user a coord can change that all day long.
-			 */
-			if(row[MASSOC_PACCT][0])
-				account = row[MASSOC_PACCT];
 
 			if(!user.coord_accts) { // This should never
 						// happen
@@ -5799,6 +5816,50 @@ extern List acct_storage_p_modify_associations(
 		} else {
 			xstrfmtcat(name_char, " || id=%s", row[MASSOC_ID]);
 		}
+
+		/* If there is a variable cleared here we need to make
+		   sure we get the parent's information, if any. */
+		query = xstrdup_printf(
+			"call get_parent_limits('%s', "
+			"'%s', '%s', %u);"
+			"select @par_id, @mj, @msj, @mcpj, "
+			"@mnpj, @mwpj, @mcmpj, @qos, @delta_qos;",
+			assoc_table, account,
+			row[MASSOC_CLUSTER], 0);
+		debug4("%d(%d) query\n%s",
+		       mysql_conn->conn, __LINE__, query);
+		if(!(result2 = mysql_db_query_ret(
+			     mysql_conn->db_conn, query, 1))) {
+			xfree(query);
+			break;
+		}
+		xfree(query);
+
+		if((row2 = mysql_fetch_row(result2))) {
+			if((assoc->max_jobs == INFINITE) && row2[ASSOC2_REQ_MJ])
+				assoc->max_jobs = atoi(row2[ASSOC2_REQ_MJ]);
+			if((assoc->max_submit_jobs == INFINITE)
+			   && row2[ASSOC2_REQ_MSJ])
+				assoc->max_submit_jobs =
+					atoi(row2[ASSOC2_REQ_MSJ]);
+			if((assoc->max_cpus_pj == INFINITE)
+			   && row2[ASSOC2_REQ_MCPJ])
+				assoc->max_cpus_pj =
+					atoi(row2[ASSOC2_REQ_MCPJ]);
+			if((assoc->max_nodes_pj == INFINITE)
+			   && row2[ASSOC2_REQ_MNPJ])
+				assoc->max_nodes_pj =
+					atoi(row2[ASSOC2_REQ_MNPJ]);
+			if((assoc->max_wall_pj == INFINITE)
+			   && row2[ASSOC2_REQ_MWPJ])
+				assoc->max_wall_pj =
+					atoi(row2[ASSOC2_REQ_MWPJ]);
+			if((assoc->max_cpu_mins_pj == INFINITE)
+			   && row2[ASSOC2_REQ_MCMPJ])
+				assoc->max_cpu_mins_pj =
+					atoi(row2[ASSOC2_REQ_MCMPJ]);
+		}
+		mysql_free_result(result2);
 
 		mod_assoc = xmalloc(sizeof(acct_association_rec_t));
 		init_acct_association_rec(mod_assoc);
@@ -8587,22 +8648,21 @@ empty:
 
 			parent_id = atoi(row2[ASSOC2_REQ_PARENT_ID]);
 			if(!without_parent_limits) {
-				if(row2[ASSOC2_REQ_MCMPJ])
-					parent_mcmpj =
-						atoi(row2[ASSOC2_REQ_MCMPJ]);
+				if(row2[ASSOC2_REQ_MJ])
+					parent_mj = atoi(row2[ASSOC2_REQ_MJ]);
 				else
-					parent_mcmpj = INFINITE;
+					parent_mj = INFINITE;
+
+				if(row2[ASSOC2_REQ_MSJ])
+					parent_msj = atoi(row2[ASSOC2_REQ_MSJ]);
+				else
+					parent_msj = INFINITE;
 
 				if(row2[ASSOC2_REQ_MCPJ])
 					parent_mcpj =
 						atoi(row2[ASSOC2_REQ_MCPJ]);
 				else
 					parent_mcpj = INFINITE;
-
-				if(row2[ASSOC2_REQ_MJ])
-					parent_mj = atoi(row2[ASSOC2_REQ_MJ]);
-				else
-					parent_mj = INFINITE;
 
 				if(row2[ASSOC2_REQ_MNPJ])
 					parent_mnpj =
@@ -8631,15 +8691,10 @@ empty:
 
 				xfree(parent_delta_qos);
 				if(row2[ASSOC2_REQ_DELTA_QOS][0])
-					xstrcat(parent_delta_qos,
+					parent_delta_qos = xstrdup(
 						row2[ASSOC2_REQ_DELTA_QOS]);
 				else
 					parent_delta_qos = NULL;
-
-				if(row2[ASSOC2_REQ_MSJ])
-					parent_msj = atoi(row2[ASSOC2_REQ_MSJ]);
-				else
-					parent_msj = INFINITE;
 			}
 			last_acct = parent_acct;
 			last_cluster = row[ASSOC_REQ_CLUSTER];

@@ -639,3 +639,4 @@ libslurm.so.21 libslurm21 #MINVER#
  slurm_xstrndup@Base 1.3.8
  slurm_xstrstrip@Base 1.3.9
  slurm_xstrsubstitute@Base 1.3.8
+ slurm_xstrtolower@Base 2.1.10

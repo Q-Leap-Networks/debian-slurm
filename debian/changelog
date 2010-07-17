@@ -1,3 +1,10 @@
+slurm-llnl (2.1.10-1) unstable; urgency=low
+
+  * New upstream release
+  * Setting /usr/bin/mail as default mailer (Closes: #588862) 
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Sat, 17 Jul 2010 10:02:48 +0200
+
 slurm-llnl (2.1.9-1) unstable; urgency=low
 
   * New upstream release 

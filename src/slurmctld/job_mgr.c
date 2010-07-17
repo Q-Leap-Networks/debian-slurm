@@ -934,6 +934,7 @@ static int _load_job_state(Buf buffer)
 
 	xfree(job_ptr->account);
 	job_ptr->account = account;
+	xstrtolower(job_ptr->account);
 	account          = NULL;  /* reused, nothing left to free */
 	xfree(job_ptr->alloc_node);
 	job_ptr->alloc_node   = alloc_node;
@@ -965,6 +966,7 @@ static int _load_job_state(Buf buffer)
 	name                  = NULL;	/* reused, nothing left to free */
 	xfree(job_ptr->wckey);		/* in case duplicate record */
 	job_ptr->wckey        = wckey;
+	xstrtolower(job_ptr->wckey);
 	wckey                 = NULL;	/* reused, nothing left to free */
 	xfree(job_ptr->network);
 	job_ptr->network      = network;
@@ -2461,6 +2463,11 @@ static int _job_create(job_desc_msg_t * job_desc, int allocate, int will_run,
 		return error_code;
 	}
 
+	/* Make sure anything that may be put in the database will be
+	   lower case */
+	xstrtolower(job_desc->account);
+	xstrtolower(job_desc->wckey);
+
 	if ((error_code = _validate_job_desc(job_desc, allocate, submit_uid)))
 		return error_code;
 
@@ -3358,7 +3365,6 @@ _copy_job_desc_to_job_record(job_desc_msg_t * job_desc,
 					return ESLURM_INVALID_WCKEY;
 				}
 			}
-			job_desc->wckey = xstrdup(job_desc->wckey);
 		} else if (accounting_enforce & ACCOUNTING_ENFORCE_WCKEYS) {
 			/* This should never happen */
 			info("_job_create: no wckey was given for "
@@ -3645,9 +3651,6 @@ void job_time_limit(void)
 		if (!IS_JOB_RUNNING(job_ptr))
 			continue;
 
-		qos = (acct_qos_rec_t *)job_ptr->qos_ptr;
-		assoc =	(acct_association_rec_t *)job_ptr->assoc_ptr;
-
 		/* find out how many cpu minutes this job has been
 		 * running for. */
 		job_cpu_usage_mins = (uint64_t)
@@ -3709,6 +3712,14 @@ void job_time_limit(void)
 		    (list_count(job_ptr->step_list) > 0))
 			check_job_step_time_limit(job_ptr, now);
 
+		slurm_mutex_lock(&assoc_mgr_qos_lock);
+		/* Handle both locks here to avoid deadlock. Always do
+		 * QOS first.
+		*/
+		slurm_mutex_lock(&assoc_mgr_association_lock);
+		qos = (acct_qos_rec_t *)job_ptr->qos_ptr;
+		assoc =	(acct_association_rec_t *)job_ptr->assoc_ptr;
+
 		/* The idea here is for qos to trump what an association
 		 * has set for a limit, so if an association set of
 		 * wall 10 mins and the qos has 20 mins set and the
@@ -3716,7 +3727,6 @@ void job_time_limit(void)
 		 * until 20.
 		 */
 		if(qos) {
-			slurm_mutex_lock(&assoc_mgr_qos_lock);
 			usage_mins = (uint64_t)(qos->usage_raw / 60.0);
 			wall_mins = qos->grp_used_wall / 60;
 
@@ -3730,7 +3740,6 @@ void job_time_limit(void)
 				     qos->name, qos->grp_cpu_mins,
 				     usage_mins);
 				job_ptr->state_reason = FAIL_TIMEOUT;
-				slurm_mutex_unlock(&assoc_mgr_qos_lock);
 				goto job_failed;
 			}
 
@@ -3744,7 +3753,6 @@ void job_time_limit(void)
 				     qos->name, qos->grp_wall,
 				     wall_mins);
 				job_ptr->state_reason = FAIL_TIMEOUT;
-				slurm_mutex_unlock(&assoc_mgr_qos_lock);
 				goto job_failed;
 			}
 
@@ -3758,14 +3766,11 @@ void job_time_limit(void)
 				     qos->name, qos->max_cpu_mins_pj,
 				     job_cpu_usage_mins);
 				job_ptr->state_reason = FAIL_TIMEOUT;
-				slurm_mutex_unlock(&assoc_mgr_qos_lock);
 				goto job_failed;
 			}
-			slurm_mutex_unlock(&assoc_mgr_qos_lock);
 		}
 
 		/* handle any association stuff here */
-		slurm_mutex_lock(&assoc_mgr_association_lock);
 		while(assoc) {
 			usage_mins = (uint64_t)(assoc->usage_raw / 60.0);
 			wall_mins = assoc->grp_used_wall / 60;
@@ -3817,8 +3822,10 @@ void job_time_limit(void)
 			if(assoc == assoc_mgr_root_assoc)
 				break;
 		}
-		slurm_mutex_unlock(&assoc_mgr_association_lock);
 	job_failed:
+		slurm_mutex_unlock(&assoc_mgr_association_lock);
+		slurm_mutex_unlock(&assoc_mgr_qos_lock);
+
 		if(job_ptr->state_reason == FAIL_TIMEOUT) {
 			last_job_update = now;
 			_job_timed_out(job_ptr);
@@ -4843,6 +4850,11 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 					&cpus_per_node);
 #endif
 
+	/* Make sure anything that may be put in the database will be
+	   lower case */
+	xstrtolower(job_specs->account);
+	xstrtolower(job_specs->wckey);
+
 	job_ptr = find_job_record(job_specs->job_id);
 	if (job_ptr == NULL) {
 		error("update_job: job_id %u does not exist.",
@@ -4940,32 +4952,41 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 
 		if (wiki_sched && strstr(job_ptr->comment, "QOS:")) {
 			acct_qos_rec_t qos_rec;
+			if (!IS_JOB_PENDING(job_ptr))
+				error_code = ESLURM_DISABLED;
+			else {
+				memset(&qos_rec, 0, sizeof(acct_qos_rec_t));
+
+				if (strstr(job_ptr->comment,
+					   "FLAGS:PREEMPTOR"))
+					qos_rec.name = "expedite";
+				else if (strstr(job_ptr->comment,
+						"FLAGS:PREEMPTEE"))
+					qos_rec.name = "standby";
+
+				job_ptr->qos_ptr = _determine_and_validate_qos(
+					job_ptr->assoc_ptr, &qos_rec,
+					&error_code);
+				job_ptr->qos = qos_rec.id;
+				update_accounting = true;
+			}
+		}
+	} else if(job_specs->qos) {
+		acct_qos_rec_t qos_rec;
+		if (!IS_JOB_PENDING(job_ptr))
+			error_code = ESLURM_DISABLED;
+		else {
+			info("update_job: setting qos to %s for job_id %u",
+			     job_specs->qos, job_specs->job_id);
 
 			memset(&qos_rec, 0, sizeof(acct_qos_rec_t));
-
-			if (strstr(job_ptr->comment, "FLAGS:PREEMPTOR"))
-				qos_rec.name = "expedite";
-			else if (strstr(job_ptr->comment, "FLAGS:PREEMPTEE"))
-				qos_rec.name = "standby";
+			qos_rec.name = job_specs->qos;
 
 			job_ptr->qos_ptr = _determine_and_validate_qos(
 				job_ptr->assoc_ptr, &qos_rec, &error_code);
 			job_ptr->qos = qos_rec.id;
 			update_accounting = true;
 		}
-	} else if(job_specs->qos) {
-		acct_qos_rec_t qos_rec;
-
-		info("update_job: setting qos to %s for job_id %u",
-		     job_specs->qos, job_specs->job_id);
-
-		memset(&qos_rec, 0, sizeof(acct_qos_rec_t));
-		qos_rec.name = job_specs->qos;
-
-		job_ptr->qos_ptr = _determine_and_validate_qos(
-			job_ptr->assoc_ptr, &qos_rec, &error_code);
-		job_ptr->qos = qos_rec.id;
-		update_accounting = true;
 	}
 
 	if (!super_user && (accounting_enforce & ACCOUNTING_ENFORCE_LIMITS) &&
@@ -6965,7 +6986,9 @@ static bool _validate_acct_policy(job_desc_msg_t *job_desc,
 	xassert(limit_set_max_nodes);
 	//(*limit_set_max_nodes) = 0;
 
+	/* Handle both locks here to avoid deadlock. Always do QOS first. */
 	slurm_mutex_lock(&assoc_mgr_qos_lock);
+	slurm_mutex_lock(&assoc_mgr_association_lock);
 	if(qos_ptr) {
 		/* for validation we don't need to look at
 		 * qos_ptr->grp_cpu_mins.
@@ -6990,7 +7013,7 @@ static bool _validate_acct_policy(job_desc_msg_t *job_desc,
 				     qos_ptr->grp_nodes,
 				     qos_ptr->name);
 				rc = false;
-				goto end_qos;
+				goto end_it;
 			} else if (job_desc->max_nodes == 0
 				   || (*limit_set_max_nodes
 				       && (job_desc->max_nodes
@@ -7023,7 +7046,7 @@ static bool _validate_acct_policy(job_desc_msg_t *job_desc,
 			     qos_ptr->grp_submit_jobs,
 			     qos_ptr->name);
 			rc = false;
-			goto end_qos;
+			goto end_it;
 		}
 
 
@@ -7054,7 +7077,7 @@ static bool _validate_acct_policy(job_desc_msg_t *job_desc,
 				     job_desc->min_nodes,
 				     qos_ptr->max_nodes_pj);
 				rc = false;
-				goto end_qos;
+				goto end_it;
 			} else if (job_desc->max_nodes == 0
 				   || (*limit_set_max_nodes
 				       && (job_desc->max_nodes
@@ -7096,7 +7119,7 @@ static bool _validate_acct_policy(job_desc_msg_t *job_desc,
 				     job_desc->user_id,
 				     qos_ptr->max_submit_jobs_pu);
 				rc = false;
-				goto end_qos;
+				goto end_it;
 			}
 		}
 
@@ -7120,13 +7143,12 @@ static bool _validate_acct_policy(job_desc_msg_t *job_desc,
 				     job_desc->user_id,
 				     job_desc->time_limit, time_limit);
 				rc = false;
-				goto end_qos;
+				goto end_it;
 			}
 		}
 
 	}
 
-	slurm_mutex_lock(&assoc_mgr_association_lock);
 	while(assoc_ptr) {
 		/* for validation we don't need to look at
 		 * assoc_ptr->grp_cpu_mins.
@@ -7294,8 +7316,8 @@ static bool _validate_acct_policy(job_desc_msg_t *job_desc,
 		assoc_ptr = assoc_ptr->parent_assoc_ptr;
 		parent = 1;
 	}
+end_it:
 	slurm_mutex_unlock(&assoc_mgr_association_lock);
-end_qos:
 	slurm_mutex_unlock(&assoc_mgr_qos_lock);
 
 	return rc;
@@ -7344,6 +7366,50 @@ extern int job_cancel_by_assoc_id(uint32_t assoc_id)
 		cnt++;
 	}
 	list_iterator_destroy(job_iterator);
+	return cnt;
+}
+
+/*
+ * job_cancel_by_qos_id - Cancel all pending and running jobs with a given
+ *	QOS ID. This happens when a QOS is deleted (e.g. when
+ *	a QOS is removed from the association database).
+ * RET count of cancelled jobs
+ */
+extern int job_cancel_by_qos_id(uint16_t qos_id)
+{
+	int cnt = 0;
+	ListIterator job_iterator;
+	struct job_record *job_ptr;
+	/* Write lock on jobs */
+	slurmctld_lock_t job_write_lock =
+		{ NO_LOCK, WRITE_LOCK, NO_LOCK, NO_LOCK };
+
+	if (!job_list)
+		return cnt;
+
+	lock_slurmctld(job_write_lock);
+	job_iterator = list_iterator_create(job_list);
+	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
+		if (job_ptr->qos != qos_id)
+			continue;
+
+		/* move up to the parent that should still exist */
+		if(job_ptr->qos_ptr)
+			job_ptr->qos_ptr = NULL;
+
+		if(IS_JOB_FINISHED(job_ptr))
+			continue;
+
+		info("QOS deleted, cancelling job %u",
+		     job_ptr->job_id);
+		/* make sure the assoc_mgr_qos_lock isn't locked before this. */
+		job_signal(job_ptr->job_id, SIGKILL, 0, 0);
+		job_ptr->state_reason = FAIL_BANK_ACCOUNT;
+		xfree(job_ptr->state_desc);
+		cnt++;
+	}
+	list_iterator_destroy(job_iterator);
+	unlock_slurmctld(job_write_lock);
 	return cnt;
 }
 
