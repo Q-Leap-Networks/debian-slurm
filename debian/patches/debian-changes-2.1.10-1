@@ -36,17 +36,6 @@ Last-Update: <YYYY-MM-DD>
  #define DEFAULT_MAX_JOB_COUNT       5000
  #define DEFAULT_MEM_PER_CPU         0
  #define DEFAULT_MAX_MEM_PER_CPU     0
---- slurm-llnl-2.1.10.orig/doc/man/man5/slurm.conf.5
-+++ slurm-llnl-2.1.10/doc/man/man5/slurm.conf.5
-@@ -652,7 +652,7 @@ not explicitly listed in the job submiss
- .TP
- \fBMailProg\fR
- Fully qualified pathname to the program used to send email per user request.
--The default value on Debian systems is "/usr/bin/mail".
-+The default value is "/bin/mail".
- 
- .TP
- \fBMaxJobCount\fR
 --- slurm-llnl-2.1.10.orig/doc/man/man1/strigger.1
 +++ slurm-llnl-2.1.10/doc/man/man1/strigger.1
 @@ -211,7 +211,7 @@ argument to the script by SLURM).
@@ -58,6 +47,17 @@ Last-Update: <YYYY-MM-DD>
  
  	> strigger \-\-set \-\-node \-\-down \\
  	           \-\-program=/usr/sbin/slurm_admin_notify
+--- slurm-llnl-2.1.10.orig/doc/man/man5/slurm.conf.5
++++ slurm-llnl-2.1.10/doc/man/man5/slurm.conf.5
+@@ -652,7 +652,7 @@ not explicitly listed in the job submiss
+ .TP
+ \fBMailProg\fR
+ Fully qualified pathname to the program used to send email per user request.
+-The default value on Debian systems is "/usr/bin/mail".
++The default value is "/bin/mail".
+ 
+ .TP
+ \fBMaxJobCount\fR
 --- slurm-llnl-2.1.10.orig/doc/html/configurator.html.in
 +++ slurm-llnl-2.1.10/doc/html/configurator.html.in
 @@ -159,7 +159,7 @@ function displayfile()

@@ -1,3 +1,9 @@
+slurm-llnl (2.1.11-1) unstable; urgency=low
+
+  * New upstream release 
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Wed, 04 Aug 2010 16:10:05 +0200
+
 slurm-llnl (2.1.10-1) unstable; urgency=low
 
   * New upstream release

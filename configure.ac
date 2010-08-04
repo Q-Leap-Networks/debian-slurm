@@ -1,4 +1,4 @@
-# $Id: configure.ac 19204 2010-01-05 00:30:14Z da $
+# $Id: configure.ac 20828 2010-07-28 20:38:55Z da $
 # This file is to be processed with autoconf to generate a configure script
 
 dnl Prologue
@@ -177,6 +177,16 @@ AC_SUBST(HAVE_SOME_CURSES)
 #
 #  Tests for GTK+
 #
+
+# use the correct libs if running on 64bit
+if test -d "/usr/lib64/pkgconfig"; then
+    PKG_CONFIG_PATH="/usr/lib64/pkgconfig/:$PKG_CONFIG_PATH"
+fi
+
+if test -d "/opt/gnome/lib64/pkgconfig"; then
+    PKG_CONFIG_PATH="/opt/gnome/lib64/pkgconfig/:$PKG_CONFIG_PATH"
+fi
+
 AM_PATH_GTK_2_0([2.7.1], [ac_have_gtk="yes"], [ac_have_gtk="no"], [gthread])
 AM_CONDITIONAL(HAVE_GTK, test "x$ac_have_gtk" = "xyes")
 
