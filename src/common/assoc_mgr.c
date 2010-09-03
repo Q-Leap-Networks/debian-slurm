@@ -772,7 +772,7 @@ static int _refresh_assoc_wckey_list(void *db_conn, int enforce)
 		return SLURM_ERROR;
 	}
 
-	_post_user_list(current_wckeys);
+	_post_wckey_list(current_wckeys);
 
 	slurm_mutex_lock(&assoc_mgr_wckey_lock);
 	if(assoc_mgr_wckey_list)
@@ -884,7 +884,7 @@ extern int assoc_mgr_get_user_assocs(void *db_conn,
 {
 	ListIterator itr = NULL;
 	acct_association_rec_t *found_assoc = NULL;
-	int set = 1;
+	int set = 0;
 
 	xassert(assoc);
 	xassert(assoc->uid != (uint32_t)NO_VAL);

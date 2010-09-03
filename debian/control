@@ -4,7 +4,7 @@ Priority: extra
 Maintainer: Gennaro Oliva <oliva.g@na.icar.cnr.it>
 Uploaders: Dirk Eddelbuettel <edd@debian.org>
 Build-Depends: debhelper (>= 7.0.0), autotools-dev, libmunge-dev, libncurses5-dev, libssl-dev, po-debconf, python, libglade2-dev, libgtk2.0-dev, libmysqlclient-dev, postgresql-server-dev-8.4, libpam0g-dev
-Standards-Version: 3.9.0
+Standards-Version: 3.9.1
 Homepage: https://computing.llnl.gov/linux/slurm/
 
 Package: slurm-llnl
@@ -91,7 +91,7 @@ Description: GUI to view and modify SLURM state
 
 Package: slurm-llnl-slurmdbd
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, slurm-llnl-basic-plugins (= ${binary:Version}), adduser, munge, ucf
+Depends: ${shlibs:Depends}, ${misc:Depends}, slurm-llnl-basic-plugins (= ${binary:Version}), adduser, munge
 Description: Secure enterprise-wide interface to a database for SLURM
  SLURM, the Simple Linux Utility for Resource Management,
  is an open-source cluster resource management and job scheduling.

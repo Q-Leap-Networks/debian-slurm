@@ -1,21 +1,8 @@
-slurm-llnl (2.1.11-1squeeze3) testing; urgency=high
+slurm-llnl (2.1.14-1) unstable; urgency=low
 
-  * Making slurm-llnl{,-slurmdbd} postrm scripts independent by ucf
+  * New upstream release 
 
- -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Sun, 05 Dec 2010 16:42:38 +0100
-
-slurm-llnl (2.1.11-1squeeze2) testing; urgency=high
-
-  * Make slurm-llnl-slurmdbd package depend on ucf
-
- -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Mon, 22 Nov 2010 17:18:16 +0100
-
-slurm-llnl (2.1.11-1squeeze1) testing; urgency=high
-
-  * Properly set LD_LIBRARY_PATH in slurm and slurmdbd init scripts
-    FIX CVE-2010-3380
-
- -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Sat, 06 Nov 2010 20:11:06 +0100
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Fri, 03 Sep 2010 18:03:29 +0200
 
 slurm-llnl (2.1.11-1) unstable; urgency=low
 

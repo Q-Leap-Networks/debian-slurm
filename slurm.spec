@@ -1,4 +1,4 @@
-# $Id: slurm.spec 19976 2010-04-07 15:55:58Z jette $
+# $Id: slurm.spec 20919 2010-08-06 21:13:59Z da $
 #
 # Note that this package is not relocatable
 
@@ -83,14 +83,14 @@
 %endif
 
 Name:    slurm
-Version: 2.1.11
+Version: 2.1.14
 Release: 1%{?dist}
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL
 Group: System Environment/Base
-Source: slurm-2.1.11.tar.bz2
+Source: slurm-2.1.14.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: https://computing.llnl.gov/linux/slurm/
 
@@ -352,7 +352,7 @@ Gives the ability for SLURM to use Berkeley Lab Checkpoint/Restart
 #############################################################################
 
 %prep
-%setup -n slurm-2.1.11
+%setup -n slurm-2.1.14
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \
@@ -434,6 +434,14 @@ install -D -m644 etc/bluegene.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/blueg
 mkdir -p ${RPM_BUILD_ROOT}/etc/ld.so.conf.d
 echo "%{_libdir}/slurm" > ${RPM_BUILD_ROOT}/etc/ld.so.conf.d/slurm.conf
 chmod 644 ${RPM_BUILD_ROOT}/etc/ld.so.conf.d/slurm.conf
+
+LIST=./bluegene.files
+touch $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/libsched_if.so &&
+   echo %{_libdir}/slurm/libsched_if.so >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/libsched_if64.so &&
+   echo %{_libdir}/slurm/libsched_if64.so >> $LIST
+
 %endif
 
 LIST=./aix.files
@@ -552,10 +560,9 @@ rm -rf $RPM_BUILD_ROOT
 #############################################################################
 
 %if %{slurm_with bluegene}
-%files bluegene
+%files -f bluegene.files bluegene
 %defattr(-,root,root)
 %{_libdir}/slurm/select_bluegene.so
-%{_libdir}/slurm/libsched_if64.so
 %dir /etc/ld.so.conf.d
 /etc/ld.so.conf.d/slurm.conf
 %{_mandir}/man5/bluegene.*
@@ -723,6 +730,16 @@ if [ ! -f %{_sysconfdir}/slurm.conf ]; then
     echo "Build a new one using http://www.llnl.gov/linux/slurm/configurator.html"
 fi
 
+%if %{slurm_with bluegene}
+%post bluegene
+if [ -x /sbin/ldconfig ]; then
+    /sbin/ldconfig %{_libdir}/slurm
+fi
+if [ ! -f %{_sysconfdir}/bluegene.conf ]; then
+    echo "You need to build and install a bluegene.conf file"
+    echo "Edit %{_sysconfdir}/bluegene.conf.example and copy it to bluegene.conf"
+fi
+%endif
 
 %preun
 if [ "$1" = 0 ]; then

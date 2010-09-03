@@ -22,7 +22,6 @@
 ### END INIT INFO
 
 SBINDIR=/usr/sbin
-LIBDIR=/usr/lib
 CONFFILE="/etc/slurm-llnl/slurmdbd.conf"
 DESCRIPTION="slurm-llnl database server interface"
 NAME="slurmdbd"
@@ -62,9 +61,6 @@ getpidfile() {
 
     echo $dpidfile
 }
-
-# setup library paths for slurm and munge support
-export LD_LIBRARY_PATH=$LIBDIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
 
 start() {
 

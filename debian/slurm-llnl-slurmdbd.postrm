@@ -20,9 +20,7 @@ set -e
 
 case "$1" in
        purge)
-         if which ucf >/dev/null; then
-           ucf --purge /etc/slurm-llnl/slurmdbd.conf
-         fi
+	 ucf --purge /etc/slurm-llnl/slurmdbd.conf
          rm -rf /etc/slurm-llnl/slurmdbd.conf
          rm -rf /var/log/slurm-llnl/slurmdbd*log*
 	 if [ ! -e /usr/sbin/slurmctld ] ; then 

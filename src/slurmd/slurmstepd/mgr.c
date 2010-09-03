@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/mgr.c - job manager functions for slurmstepd
- *  $Id: mgr.c 20276 2010-05-18 16:51:08Z da $
+ *  $Id: mgr.c 20933 2010-08-12 16:18:35Z lipari $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -232,31 +232,32 @@ mgr_launch_tasks_setup(launch_tasks_request_msg_t *msg, slurm_addr *cli,
 }
 
 /*
+ * Find the maximum task return code
+ */
+static uint32_t _get_exit_code(slurmd_job_t *job)
+{
+	int i;
+	uint32_t step_rc = NO_VAL;
+
+	for (i = 0; i < job->ntasks; i++) {
+		/* If signalled we only need to check one and then
+		 * break out of the loop */
+		if(WIFSIGNALED(job->task[i]->estatus)) {
+			step_rc = job->task[i]->estatus;
+			break;
+		}
+		step_rc = MAX(step_complete.step_rc, job->task[i]->estatus);
+	}
+	return step_rc;
+}
+
+/*
  * Send batch exit code to slurmctld. Non-zero rc will DRAIN the node.
  */
 extern void
 batch_finish(slurmd_job_t *job, int rc)
 {
-	int i;
-	for (i = 0; i < job->ntasks; i++) {
-		/* If signalled we only need to check one and then
-		 * break out of the loop */
-		if(WIFSIGNALED(job->task[i]->estatus)) {
-			switch(WTERMSIG(job->task[i]->estatus)) {
-			case SIGTERM:
-			case SIGKILL:
-			case SIGINT:
-				step_complete.step_rc = NO_VAL;
-				break;
-			default:
-				step_complete.step_rc = job->task[i]->estatus;
-				break;
-			}
-			break;
-		}
-		step_complete.step_rc = MAX(step_complete.step_rc,
-					    WEXITSTATUS(job->task[i]->estatus));
-	}
+	step_complete.step_rc = _get_exit_code(job);
 
 	if (job->argv[0] && (unlink(job->argv[0]) < 0))
 		error("unlink(%s): %m", job->argv[0]);
@@ -586,7 +587,6 @@ _wait_for_children_slurmstepd(slurmd_job_t *job)
 {
 	int left = 0;
 	int rc;
-	int i;
 	struct timespec ts = {0, 0};
 
 	pthread_mutex_lock(&step_complete.lock);
@@ -617,26 +617,7 @@ _wait_for_children_slurmstepd(slurmd_job_t *job)
 		       step_complete.rank);
 	}
 
-	/* Find the maximum task return code */
-	for (i = 0; i < job->ntasks; i++) {
-		/* If signalled we only need to check one and then
-		   break out of the loop */
-		if(WIFSIGNALED(job->task[i]->estatus)) {
-			switch(WTERMSIG(job->task[i]->estatus)) {
-			case SIGTERM:
-			case SIGKILL:
-			case SIGINT:
-				step_complete.step_rc = NO_VAL;
-				break;
-			default:
-				step_complete.step_rc = job->task[i]->estatus;
-				break;
-			}
-			break;
-		}
-		step_complete.step_rc = MAX(step_complete.step_rc,
-					    WEXITSTATUS(job->task[i]->estatus));
-	}
+	step_complete.step_rc = _get_exit_code(job);
 	step_complete.wait_children = false;
 
 	pthread_mutex_unlock(&step_complete.lock);
