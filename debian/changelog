@@ -1,3 +1,10 @@
+slurm-llnl (2.1.15-2) unstable; urgency=low
+
+  * Properly set LD_LIBRARY_PATH in slurm and slurmdbd init scripts
+    FIX CVE-2010-3380 (Closes: #602340)
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Thu, 04 Nov 2010 12:36:33 +0100
+
 slurm-llnl (2.1.15-1) unstable; urgency=low
 
   * New upstream release 
