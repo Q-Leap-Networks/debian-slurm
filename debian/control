@@ -91,7 +91,7 @@ Description: GUI to view and modify SLURM state
 
 Package: slurm-llnl-slurmdbd
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, slurm-llnl-basic-plugins (= ${binary:Version}), adduser, munge
+Depends: ${shlibs:Depends}, ${misc:Depends}, slurm-llnl-basic-plugins (= ${binary:Version}), adduser, munge, ucf
 Description: Secure enterprise-wide interface to a database for SLURM
  SLURM, the Simple Linux Utility for Resource Management,
  is an open-source cluster resource management and job scheduling.
