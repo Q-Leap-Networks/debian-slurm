@@ -1,3 +1,9 @@
+slurm-llnl (2.1.11-1squeeze2) testing; urgency=high
+
+  * Make slurm-llnl-slurmdbd package depend on ucf
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Mon, 22 Nov 2010 17:18:16 +0100
+
 slurm-llnl (2.1.11-1squeeze1) testing; urgency=high
 
   * Properly set LD_LIBRARY_PATH in slurm and slurmdbd init scripts
