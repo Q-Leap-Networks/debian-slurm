@@ -1,6 +1,23 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 2.1.16
+=========================
+ -- Fixed minor warnings from gcc-4.5
+ -- Fixed initialization of accounting_stroage_enforce in the slurmctld.
+ -- Fixed bug where if GrpNodes was lowered while pending jobs existed and where
+    above the limit the slurmctld would seg fault.
+ -- Fixed minor memory leak when unpack error happens on an
+    association_shares_object_t.
+ -- Set Lft and Rgt correctly when adding association.  Fix for regression
+    caused in 2.1.15, cosmetic fix only.
+ -- Replaced optarg which was undefined in some spots to make sure ENV vars are
+    set up correctly.
+ -- When removing an account from a cluster with sacctmgr you no longer get
+    a list of previously deleted associations.
+ -- Fix to make jobcomp/(pg/my)sql correctly work when the database name is
+    different than the default.
+
 * Changes in SLURM 2.1.15
 =========================
  -- Fix bug in which backup slurmctld can purge job scripts (and kill batch
@@ -5242,4 +5259,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 21334 2010-10-13 18:35:57Z jette $
+$Id: NEWS 21587 2010-11-23 17:01:27Z da $

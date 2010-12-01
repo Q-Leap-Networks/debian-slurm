@@ -1,3 +1,9 @@
+slurm-llnl (2.1.16-1) unstable; urgency=low
+
+  * New upstream release 
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Wed, 01 Dec 2010 17:25:51 +0100
+
 slurm-llnl (2.1.15-3) unstable; urgency=low
 
   * Make slurm-llnl-slurmdbd package depend on ucf (Closes: #604207) 

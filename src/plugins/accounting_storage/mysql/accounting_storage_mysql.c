@@ -4839,7 +4839,7 @@ extern int acct_storage_p_add_associations(mysql_conn_t *mysql_conn,
 
 		if(!moved_parent) {
 			_set_assoc_limits_for_add(mysql_conn, object);
-			if(!object->lft)
+			if (object->lft == NO_VAL)
 				_set_assoc_lft_rgt(mysql_conn, object);
 		}
 
@@ -7380,8 +7380,8 @@ extern List acct_storage_p_remove_associations(
 	}
 
 	xfree(query);
-	query = xstrdup_printf("select distinct %s "
-			       "from %s where (%s) order by lft;",
+	query = xstrdup_printf("select distinct %s from %s where (%s) "
+			       "and deleted = 0 order by lft;",
 			       object,
 			       assoc_table, name_char);
 	xfree(extra);
