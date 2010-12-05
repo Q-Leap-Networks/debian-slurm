@@ -1,3 +1,10 @@
+slurm-llnl (2.1.16-2) unstable; urgency=low
+
+  * Making slurm-llnl{,-slurmdbd} postrm scripts independent by ucf
+    (Closes: #604207)
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Sun, 05 Dec 2010 16:04:09 +0100
+
 slurm-llnl (2.1.16-1) unstable; urgency=low
 
   * New upstream release 
