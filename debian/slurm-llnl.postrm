@@ -42,7 +42,9 @@ case "$1" in
              rm -f /etc/slurm-llnl/slurm.cert
            fi
 	 fi
-	 ucf --purge /etc/slurm-llnl/slurm.conf
+         if which ucf >/dev/null; then
+           ucf --purge /etc/slurm-llnl/slurm.conf
+         fi
          rm -f /etc/slurm-llnl/slurm.conf
          rm -rf /var/run/slurm-llnl/slurmctld
          rm -rf /var/run/slurm-llnl/slurmd

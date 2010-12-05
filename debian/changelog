@@ -1,3 +1,9 @@
+slurm-llnl (2.1.11-1squeeze3) testing; urgency=high
+
+  * Making slurm-llnl{,-slurmdbd} postrm scripts independent by ucf
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Sun, 05 Dec 2010 16:42:38 +0100
+
 slurm-llnl (2.1.11-1squeeze2) testing; urgency=high
 
   * Make slurm-llnl-slurmdbd package depend on ucf
