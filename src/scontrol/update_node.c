@@ -2,6 +2,7 @@
  *  update_node.c - node update function for scontrol.
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -37,6 +38,7 @@
 \*****************************************************************************/
 
 #include "scontrol.h"
+#include "src/common/uid.h"
 
 /*
  * scontrol_update_node - update the slurm node configuration per the supplied
@@ -54,7 +56,6 @@ scontrol_update_node (int argc, char *argv[])
 	uint16_t state_val;
 	update_node_msg_t node_msg;
 	char *reason_str = NULL;
-	char *user_name;
 	char *tag, *val;
 	int taglen, vallen;
 
@@ -75,6 +76,9 @@ scontrol_update_node (int argc, char *argv[])
 			node_msg.node_names = val;
 		else if (strncasecmp(tag, "Features", MAX(taglen, 1)) == 0) {
 			node_msg.features = val;
+			update_cnt++;
+		} else if (strncasecmp(tag, "Gres", MAX(taglen, 1)) == 0) {
+			node_msg.gres = val;
 			update_cnt++;
 		} else if (strncasecmp(tag, "Weight", MAX(taglen,1)) == 0) {
 			/* Logic borrowed from function _handle_uint32 */
@@ -112,8 +116,6 @@ scontrol_update_node (int argc, char *argv[])
 			node_msg.weight = num;
 			update_cnt++;
 		} else if (strncasecmp(tag, "Reason", MAX(taglen, 1)) == 0) {
-			char time_buf[64], time_str[32];
-			time_t now;
 			int len = strlen(val);
 			reason_str = xmalloc(len+1);
 			if (*val == '"')
@@ -125,21 +127,12 @@ scontrol_update_node (int argc, char *argv[])
 			if ((len >= 0) && (reason_str[len] == '"'))
 				reason_str[len] = '\0';
 
-			/* Append user, date and time */
-			xstrcat(reason_str, " [");
-			user_name = getlogin();
-			if (user_name)
-				xstrcat(reason_str, user_name);
-			else {
-				sprintf(time_buf, "%d", getuid());
-				xstrcat(reason_str, time_buf);
-			}
-			now = time(NULL);
-			slurm_make_time_str(&now, time_str, sizeof(time_str));
-			snprintf(time_buf, sizeof(time_buf), "@%s]", time_str);
-			xstrcat(reason_str, time_buf);
-
 			node_msg.reason = reason_str;
+			if (getlogin() == NULL ||
+			    uid_from_string(getlogin(),
+					    &node_msg.reason_uid) < 0) {
+				node_msg.reason_uid = getuid();
+			}
 			update_cnt++;
 		}
 		else if (strncasecmp(tag, "State", MAX(taglen, 1)) == 0) {
@@ -209,9 +202,9 @@ scontrol_update_node (int argc, char *argv[])
 		}
 	}
 
-	if (((node_msg.node_state == NODE_STATE_DRAIN)
-	||   (node_msg.node_state == NODE_STATE_FAIL))
-	&&  (node_msg.reason == NULL)) {
+	if (((node_msg.node_state == NODE_STATE_DRAIN) ||
+	     (node_msg.node_state == NODE_STATE_FAIL)) &&
+	    ((node_msg.reason == NULL) || (strlen(node_msg.reason) == 0))) {
 		fprintf (stderr, "You must specify a reason when DRAINING a "
 			"node\nRequest aborted\n");
 		goto done;

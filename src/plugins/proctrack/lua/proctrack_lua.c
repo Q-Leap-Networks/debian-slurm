@@ -159,11 +159,13 @@ static int lua_register_slurm_output_functions ()
 	lua_setfield (L, -2, "log_debug2");
 
 	/*
-	 * slurm.SUCCESS and slurm.FAILURE
+	 * slurm.SUCCESS, slurm.FAILURE and slurm.ERROR
 	 */
-	lua_pushnumber (L, -1);
+	lua_pushnumber (L, SLURM_FAILURE);
 	lua_setfield (L, -2, "FAILURE");
-	lua_pushnumber (L, 0);
+	lua_pushnumber (L, SLURM_ERROR);
+	lua_setfield (L, -2, "ERROR");
+	lua_pushnumber (L, SLURM_SUCCESS);
 	lua_setfield (L, -2, "SUCCESS");
 
 	lua_setglobal (L, "slurm");
@@ -229,7 +231,9 @@ int init (void)
 	 *   by any lua scripts.
 	 */
 	if (!dlopen ("liblua.so", RTLD_NOW | RTLD_GLOBAL)) {
-		return (error ("Failed to open liblua.so: %s", dlerror()));
+		if (!dlopen ("liblua5.1.so", RTLD_NOW | RTLD_GLOBAL))
+			return (error("Failed to open liblua.so: %s",
+				      dlerror()));
 	}
 
 	/*
@@ -238,7 +242,8 @@ int init (void)
 	L = luaL_newstate ();
 	luaL_openlibs (L);
 	if (luaL_loadfile (L, lua_script_path))
-		return error ("lua: %s: %s", lua_script_path, lua_tostring (L, -1));
+		return error ("lua: %s: %s", lua_script_path,
+			      lua_tostring (L, -1));
 
 	/*
 	 *  Register slurm.log and slurm.error functions in lua state:
@@ -257,6 +262,8 @@ int init (void)
 	 */
 	rc = (int) lua_tonumber (L, -1);
 	lua_pop (L, 1);
+	if(rc != SLURM_SUCCESS)
+		return rc;
 
 	/*
 	 *  Check for required lua script functions:
@@ -284,10 +291,10 @@ static int lua_job_table_create (slurmd_job_t *job)
 	lua_setfield (L, -2, "stepid");
 	lua_pushnumber (L, job->nodeid);
 	lua_setfield (L, -2, "nodeid");
+	lua_pushnumber (L, job->node_tasks);
+	lua_setfield (L, -2, "node_tasks");
 	lua_pushnumber (L, job->ntasks);
 	lua_setfield (L, -2, "ntasks");
-	lua_pushnumber (L, job->nprocs);
-	lua_setfield (L, -2, "nprocs");
 	lua_pushnumber (L, job->cpus_per_task);
 	lua_setfield (L, -2, "cpus_per_task");
 	lua_pushnumber (L, job->nnodes);
@@ -303,8 +310,10 @@ static int lua_job_table_create (slurmd_job_t *job)
 	lua_pushnumber (L, job->job_mem);
 	lua_setfield (L, -2, "mem");
 
-	lua_pushstring (L, job->alloc_cores ? job->alloc_cores : "");
-	lua_setfield (L, -2, "CPUs");
+	lua_pushstring (L, job->job_alloc_cores ? job->job_alloc_cores : "");
+	lua_setfield (L, -2, "JobCPUs");
+	lua_pushstring (L, job->step_alloc_cores ? job->step_alloc_cores : "");
+	lua_setfield (L, -2, "StepCPUs");
 	lua_pushstring (L, job->cwd ? job->cwd : "");
 	lua_setfield (L, -2, "cwd");
 
@@ -337,13 +346,15 @@ int slurm_container_create (slurmd_job_t *job)
 	 *  Get the container id off the stack:
 	 */
 	if (lua_isnil (L, -1)) {
-		error ("proctrack/lua: slurm_container_create did not return id");
+		error ("proctrack/lua: "
+		       "slurm_container_create did not return id");
 		lua_pop (L, -1);
 		goto out;
 	}
+
 	id = lua_tonumber (L, -1);
 	job->cont_id = id;
-	info ("job->cont_id = %u (%.0f) \n", job->cont_id, id);
+	info ("job->cont_id = %u (%.0f)", job->cont_id, id);
 	lua_pop (L, -1);
 
 	rc = SLURM_SUCCESS;

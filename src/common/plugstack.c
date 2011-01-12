@@ -2,7 +2,7 @@
  *  plugstack.c -- stackable plugin architecture for node job kontrol (SPANK)
  *****************************************************************************
  *  Copyright (C) 2005-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  CODE-OCEC-09-009. All rights reserved.
  *
@@ -265,12 +265,12 @@ static struct spank_plugin *_spank_plugin_create(char *path, int ac,
 	struct spank_plugin_operations ops;
 
 	if ((e = plugin_load_from_file(&p, path)) != EPLUGIN_SUCCESS) {
-		error ("spank: %s: %s\n", path, plugin_strerror(e));
+		error ("spank: %s: %s", path, plugin_strerror(e));
 		return NULL;
 	}
 
 	if (plugin_get_syms(p, n_spank_syms, spank_syms, (void **)&ops) == 0) {
-		error("spank: \"%s\" exports 0 symbols\n", path);
+		error("spank: \"%s\" exports 0 symbols", path);
 		return NULL;
 	}
 
@@ -420,13 +420,13 @@ static int _spank_stack_create(const char *path, List * listp)
 	char buf[4096];
 	FILE *fp;
 
-	verbose("spank: opening plugin stack %s\n", path);
+	verbose("spank: opening plugin stack %s", path);
 
 	if (!(fp = safeopen(path, "r", SAFEOPEN_NOCREATE))) {
 		if (errno == ENOENT)
-			debug("spank: Failed to open %s: %m\n", path);
+			debug("spank: Failed to open %s: %m", path);
 		else
-			error("spank: Failed to open %s: %m\n", path);
+			error("spank: Failed to open %s: %m", path);
 		return -1;
 	}
 
@@ -578,7 +578,7 @@ static int _do_call_stack(step_fn_t type, void * job, int taskid)
 			if (sp->ops.init) {
 				rc = (*sp->ops.init) (spank, sp->ac,
 						      sp->argv);
-				debug2("spank: %s: %s = %d\n", name,
+				debug2("spank: %s: %s = %d", name,
 				       fn_name, rc);
 			}
 			break;
@@ -586,7 +586,7 @@ static int _do_call_stack(step_fn_t type, void * job, int taskid)
 			if (sp->ops.init_post_opt) {
 				rc = (*sp->ops.init_post_opt) (spank, sp->ac,
 						      sp->argv);
-				debug2("spank: %s: %s = %d\n", name,
+				debug2("spank: %s: %s = %d", name,
 				       fn_name, rc);
 			}
 			break;
@@ -594,15 +594,14 @@ static int _do_call_stack(step_fn_t type, void * job, int taskid)
 			if (sp->ops.local_user_init) {
 				rc = (*sp->ops.local_user_init) (spank, sp->ac,
 			 				         sp->argv);
-				debug2("spank: %s: %s = %d\n", name,
-						fn_name, rc);
+				debug2("spank: %s: %s = %d", name, fn_name, rc);
 			}
 			break;
 		case STEP_USER_INIT:
 			if (sp->ops.user_init) {
 				rc = (*sp->ops.user_init) (spank, sp->ac,
 							   sp->argv);
-				debug2("spank: %s: %s = %d\n", name,
+				debug2("spank: %s: %s = %d", name,
 				       fn_name, rc);
 			}
 			break;
@@ -610,7 +609,7 @@ static int _do_call_stack(step_fn_t type, void * job, int taskid)
 			if (sp->ops.task_init_privileged) {
 				rc = (*sp->ops.task_init_privileged)
 					(spank, sp->ac, sp->argv);
-				debug2("spank: %s: %s = %d\n", name,
+				debug2("spank: %s: %s = %d", name,
 				       fn_name, rc);
 			}
 			break;
@@ -619,7 +618,7 @@ static int _do_call_stack(step_fn_t type, void * job, int taskid)
 				rc = (*sp->ops.user_task_init) (spank,
 								sp->ac,
 								sp->argv);
-				debug2("spank: %s: %s = %d\n", name,
+				debug2("spank: %s: %s = %d", name,
 				       fn_name, rc);
 			}
 			break;
@@ -628,7 +627,7 @@ static int _do_call_stack(step_fn_t type, void * job, int taskid)
 				rc = (*sp->ops.task_post_fork) (spank,
 								sp->ac,
 								sp->argv);
-				debug2("spank: %s: %s = %d\n", name,
+				debug2("spank: %s: %s = %d", name,
 				       fn_name, rc);
 			}
 			break;
@@ -644,7 +643,7 @@ static int _do_call_stack(step_fn_t type, void * job, int taskid)
 			if (sp->ops.exit) {
 				rc = (*sp->ops.exit) (spank, sp->ac,
 						      sp->argv);
-				debug2("spank: %s: %s = %d\n", name,
+				debug2("spank: %s: %s = %d", name,
 				       fn_name, rc);
 			}
 			break;
@@ -896,12 +895,12 @@ _spank_option_register(struct spank_plugin *p, struct spank_option *opt)
 	}
 
 	if ((strlen(opt->name) > SPANK_OPTION_MAXLEN)) {
-		error("spank: option \"%s\" provided by %s too long. Ignoring.",
-			       	opt->name, p->name);
+		error("spank: option \"%s\" provided by %s too long. "
+		      "Ignoring.", opt->name, p->name);
 		return (ESPANK_NOSPACE);
 	}
 
-	verbose("SPANK: appending plugin option \"%s\"\n", opt->name);
+	verbose("SPANK: appending plugin option \"%s\"", opt->name);
 	list_append(option_cache, _spank_plugin_opt_create(p, opt, disabled));
 
 	return (ESPANK_SUCCESS);
@@ -934,7 +933,8 @@ static int _spank_plugin_options_cache(struct spank_plugin *p)
 	return (0);
 }
 
-static int _add_one_option(struct option **optz, struct spank_plugin_opt *spopt)
+static int _add_one_option(struct option **optz, 
+			   struct spank_plugin_opt *spopt)
 {
 	struct option opt;
 
@@ -1004,9 +1004,7 @@ int spank_process_option(int optval, const char *arg)
 	if (option_cache == NULL || (list_count(option_cache) == 0))
 		return (-1);
 
-	opt =
-	    list_find_first(option_cache, (ListFindF) _opt_by_val,
-			    &optval);
+	opt = list_find_first(option_cache, (ListFindF) _opt_by_val, &optval);
 
 	if (!opt)
 		return (-1);
@@ -1294,8 +1292,7 @@ static int _opt_find(struct spank_plugin_opt *p,
 	return (1);
 }
 
-static struct spank_plugin_opt *_find_remote_option_by_name(const char
-							    *str)
+static struct spank_plugin_opt *_find_remote_option_by_name(const char *str)
 {
 	struct spank_plugin_opt *opt = NULL;
 	struct opt_find_args args;
@@ -1321,10 +1318,14 @@ static struct spank_plugin_opt *_find_remote_option_by_name(const char
 	if (option_cache) {
 		opt = list_find_first(option_cache, (ListFindF) _opt_find,
 				      &args);
-	}
-	if (opt == NULL) {
-		error("warning: plugin \"%s\" option \"%s\" not found.",
-		      name, buf);
+		if (opt == NULL) {
+			error("Warning: SPANK plugin \"%s\" option \"%s\" not "
+			      "found", name, buf);
+			return (NULL);
+		}
+	} else {
+		error("Warning: no SPANK plugin found to process option \"%s\"",
+		      name);
 		return (NULL);
 	}
 
@@ -1348,8 +1349,10 @@ int spank_get_remote_options_env (char **env)
 		if (!(arg = getenvp (env, _opt_env_name (option, var, sizeof(var)))))
 			continue;
 
-		if (p->cb && (((*p->cb) (p->val, arg, 1)) < 0))
-			error ("spank: failed to process option %s=%s", p->name, arg);
+		if (p->cb && (((*p->cb) (p->val, arg, 1)) < 0)) {
+			error ("spank: failed to process option %s=%s", 
+			       p->name, arg);
+		}
 
 		/*
 		 *  Now remove the environment variable.
@@ -1401,9 +1404,9 @@ global_to_local_id (slurmd_job_t *job, uint32_t gid, uint32_t *p2uint32)
 {
 	int i;
 	*p2uint32 = (uint32_t) -1;
-	if (gid >= job->nprocs)
+	if (gid >= job->ntasks)
 		return (ESPANK_BAD_ARG);
-	for (i = 0; i < job->ntasks; i++) {
+	for (i = 0; i < job->node_tasks; i++) {
 		if (job->task[i]->gtid == gid) {
 			*p2uint32 = job->task[i]->id;
 			return (ESPANK_SUCCESS);
@@ -1656,7 +1659,7 @@ spank_err_t spank_get_item(spank_t spank, spank_item_t item, ...)
 		break;
 	case S_JOB_LOCAL_TASK_COUNT:
 		p2uint32 = va_arg(vargs, uint32_t *);
-		*p2uint32 = slurmd_job->ntasks;
+		*p2uint32 = slurmd_job->node_tasks;
 		break;
 	case S_JOB_TOTAL_TASK_COUNT:
 		p2uint32 = va_arg(vargs, uint32_t *);
@@ -1669,7 +1672,7 @@ spank_err_t spank_get_item(spank_t spank, spank_item_t item, ...)
 				rc = ESPANK_ENV_NOEXIST;
 			}
 		} else
-			*p2uint32 = slurmd_job->nprocs;
+			*p2uint32 = slurmd_job->ntasks;
 		break;
 	case S_JOB_NCPUS:
 		p2uint16 = va_arg(vargs, uint16_t *);
@@ -1757,7 +1760,7 @@ spank_err_t spank_get_item(spank_t spank, spank_item_t item, ...)
 		p2uint32 = va_arg(vargs, uint32_t *);
 		*p2uint32 = (uint32_t) -1;
 
-		if ((uint32 <= slurmd_job->ntasks) &&
+		if ((uint32 <= slurmd_job->node_tasks) &&
 		    slurmd_job->task && slurmd_job->task[uint32]) {
 			*p2uint32 = slurmd_job->task[uint32]->gtid;
 		} else
@@ -1770,11 +1773,19 @@ spank_err_t spank_get_item(spank_t spank, spank_item_t item, ...)
 		break;
 	case S_JOB_ALLOC_CORES:
 		p2str = va_arg(vargs, char **);
-		*p2str = slurmd_job->alloc_cores;
+		*p2str = slurmd_job->job_alloc_cores;
 		break;
 	case S_JOB_ALLOC_MEM:
 		p2uint32 = va_arg(vargs, uint32_t *);
 		*p2uint32 = slurmd_job->job_mem;
+		break;
+	case S_STEP_ALLOC_CORES:
+		p2str = va_arg(vargs, char **);
+		*p2str = slurmd_job->step_alloc_cores;
+		break;
+	case S_STEP_ALLOC_MEM:
+		p2uint32 = va_arg(vargs, uint32_t *);
+		*p2uint32 = slurmd_job->step_mem;
 		break;
 	case S_SLURM_VERSION:
 		p2vers = va_arg(vargs, char  **);

@@ -1,4 +1,4 @@
-.TH SQUEUE "1" "September 2009" "squeue 2.1" "Slurm components"
+.TH SQUEUE "1" "September 2010" "squeue 2.2" "Slurm components"
 
 .SH "NAME"
 squeue \- view information about jobs located in the SLURM scheduling queue.
@@ -57,6 +57,11 @@ Report more of the available information for the selected jobs or job steps,
 subject to any constraints specified.
 
 .TP
+\fB\-M\fR, \fB\-\-clusters\fR=<\fIstring\fR>
+Clusters to issue commands to.  Multiple cluster names may be comma separated.
+A value of of '\fIall\fR' will query to run on all clusters.
+
+.TP
 \fB\-n <hostlist>\fR, \fB\-\-nodes=<hostlist>\fR
 Report only on jobs allocated to the specified node or list of nodes.
 This may either be the \fBNodeName\fR or \fBNodeHostname\fR
@@ -110,6 +115,10 @@ Number of tasks created by a job step.
 This reports the value of the \fBsrun \-\-ntasks\fR option.
 (Valid for job steps only)
 .TP
+\fB%b\fR
+Generic resources (gres) required by the job or step.
+(Valid for jobs and job steps)
+.TP
 \fB%c\fR
 Minimum number of CPUs (processors) per node requested by the job.
 This reports the value of the \fBsrun \-\-mincpus\fR option with a
@@ -162,7 +171,7 @@ Can the nodes allocated to the job be shared with other jobs.
 (Valid for jobs only)
 .TP
 \fB%H\fR
-Minimum number of sockets per node requested by the job.
+Number of sockets per node requested by the job.
 This reports the value of the \fBsrun \-\-sockets\-per\-node\fR option.
 (Valid for jobs only)
 .TP
@@ -171,7 +180,7 @@ Job or job step id.
 (Valid for jobs and job steps)
 .TP
 \fB%I\fR
-Minimum number of cores per socket requested by the job.
+Number of cores per socket requested by the job.
 This reports the value of the \fBsrun \-\-cores\-per\-socket\fR option.
 (Valid for jobs only)
 .TP
@@ -180,7 +189,7 @@ Job or job step name.
 (Valid for jobs and job steps)
 .TP
 \fB%J\fR
-Minimum number of threads per core requested by the job.
+Number of threads per core requested by the job.
 This reports the value of the \fBsrun \-\-threads\-per\-core\fR option.
 (Valid for jobs only)
 .TP
@@ -475,6 +484,9 @@ Some \fBsqueue\fR options may be set via environment variables. These
 environment variables, along with their corresponding options, are listed
 below. (Note: Commandline options will always override these settings.)
 .TP 20
+\fBSLURM_CLUSTERS\fR
+Same as \fB\-\-clusters\fR
+.TP
 \fBSLURM_CONF\fR
 The location of the SLURM configuration file.
 .TP
@@ -559,7 +571,7 @@ Print information only about job step 65552.1:
 
 .SH "COPYING"
 Copyright (C) 2002\-2007 The Regents of the University of California.
-Copyright (C) 2008\-2009 Lawrence Livermore National Security.
+Copyright (C) 2008\-2010 Lawrence Livermore National Security.
 Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 CODE\-OCEC\-09\-009. All rights reserved.
 .LP

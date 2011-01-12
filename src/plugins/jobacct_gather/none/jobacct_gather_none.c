@@ -68,7 +68,7 @@
  * of the plugin.  If major and minor revisions are desired, the major
  * version number may be multiplied by a suitable magnitude constant such
  * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum versions for their plugins as the job accounting API
+ * minimum version for their plugins as the job accounting API
  * matures.
  */
 const char plugin_name[] = "Job accounting gather NOT_INVOKED plugin";
@@ -176,7 +176,7 @@ extern jobacctinfo_t *jobacct_gather_p_remove_task(pid_t pid)
 	return NULL;
 }
 
-extern void jobacct_gather_p_2_sacct(sacct_t *sacct,
+extern void jobacct_gather_p_2_stats(slurmdb_stats_t *stats,
 				     struct jobacctinfo *jobacct)
 {
 	return;

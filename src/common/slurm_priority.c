@@ -44,12 +44,12 @@
 typedef struct slurm_priority_ops {
 	uint32_t (*set)            (uint32_t last_prio,
 				    struct job_record *job_ptr);
-	void     (*reconfig)       ();
-	int      (*set_max_usage)  (uint32_t procs, uint32_t half_life);
-	void     (*set_assoc_usage)(acct_association_rec_t *assoc);
+	void     (*reconfig)       (void);
+	void     (*set_assoc_usage)(slurmdb_association_rec_t *assoc);
+	double   (*calc_fs_factor) (long double usage_efctv,
+				    long double shares_norm);
 	List	 (*get_priority_factors)
 	(priority_factors_request_msg_t *req_msg);
-
 } slurm_priority_ops_t;
 
 typedef struct slurm_priority_context {
@@ -86,8 +86,8 @@ static slurm_priority_ops_t * _priority_get_ops(
 	static const char *syms[] = {
 		"priority_p_set",
 		"priority_p_reconfig",
-		"priority_p_set_max_cluster_usage",
 		"priority_p_set_assoc_usage",
+		"priority_p_calc_fs_factor",
 		"priority_p_get_priority_factors_list",
 	};
 	int n_syms = sizeof( syms ) / sizeof( char * );
@@ -97,6 +97,12 @@ static slurm_priority_ops_t * _priority_get_ops(
 					     (void **) &c->ops);
         if ( c->cur_plugin != PLUGIN_INVALID_HANDLE )
         	return &c->ops;
+
+	if(errno != EPLUGIN_NOTFOUND) {
+		error("Couldn't load specified plugin name for %s: %s",
+		      c->priority_type, plugin_strerror(errno));
+		return NULL;
+	}
 
 	error("Couldn't find the specified plugin name for %s "
 	      "looking at all files",
@@ -240,7 +246,7 @@ extern uint32_t priority_g_set(uint32_t last_prio, struct job_record *job_ptr)
 	return (*(g_priority_context->ops.set))(last_prio, job_ptr);
 }
 
-extern void priority_g_reconfig()
+extern void priority_g_reconfig(void)
 {
 	if (slurm_priority_init() < 0)
 		return;
@@ -250,21 +256,23 @@ extern void priority_g_reconfig()
 	return;
 }
 
-extern int priority_g_set_max_cluster_usage(uint32_t procs, uint32_t half_life)
-{
-	if (slurm_priority_init() < 0)
-		return SLURM_ERROR;
-
-	return (*(g_priority_context->ops.set_max_usage))(procs, half_life);
-}
-
-extern void priority_g_set_assoc_usage(acct_association_rec_t *assoc)
+extern void priority_g_set_assoc_usage(slurmdb_association_rec_t *assoc)
 {
 	if (slurm_priority_init() < 0)
 		return;
 
 	(*(g_priority_context->ops.set_assoc_usage))(assoc);
 	return;
+}
+
+extern double priority_g_calc_fs_factor(long double usage_efctv,
+					long double shares_norm)
+{
+	if (slurm_priority_init() < 0)
+		return 0.0;
+
+	return (*(g_priority_context->ops.calc_fs_factor))
+		(usage_efctv, shares_norm);
 }
 
 extern List priority_g_get_priority_factors_list(

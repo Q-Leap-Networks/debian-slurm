@@ -2,7 +2,8 @@
  *  partition_info.c - get/print the partition state information of slurm
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
+ *  Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
@@ -107,7 +108,8 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 	char tmp1[16], tmp2[16];
 	char tmp_line[MAXHOSTRANGELEN];
 	char *out = NULL;
-	uint16_t force, val;
+	uint16_t force, preempt_mode, val;
+	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
 
 	/****** Line 1 ******/
 
@@ -136,7 +138,13 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 			" AllowGroups=%s", part_ptr->allow_groups);
 	}
 	xstrcat(out, tmp_line);
-	if (part_ptr->default_part)
+	if (part_ptr->alternate != NULL) {
+		snprintf(tmp_line, sizeof(tmp_line), " Alternate=%s",
+			 part_ptr->alternate);
+		xstrcat(out, tmp_line);
+	}
+
+	if (part_ptr->flags & PART_FLAG_DEFAULT)
 		sprintf(tmp_line, " Default=YES");
 	else
 		sprintf(tmp_line, " Default=NO");
@@ -149,16 +157,15 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 	/****** Line added here for BG partitions
 	 to keep with alphabetized output******/
 
-#ifdef HAVE_BG
-	snprintf(tmp_line, sizeof(tmp_line), "BasePartitions=%s",
-		part_ptr->nodes);
-	xstrcat(out, tmp_line);
-	if (one_liner)
-		xstrcat(out, " ");
-	else
-		xstrcat(out, "\n   ");
-#else
-#endif
+	if(cluster_flags & CLUSTER_FLAG_BG) {
+		snprintf(tmp_line, sizeof(tmp_line), "BasePartitions=%s",
+			 part_ptr->nodes);
+		xstrcat(out, tmp_line);
+		if (one_liner)
+			xstrcat(out, " ");
+		else
+			xstrcat(out, "\n   ");
+	}
 
 	/****** Line 3 ******/
 
@@ -173,13 +180,13 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 		sprintf(tmp_line, "DefaultTime=%s", time_line);
 	}
 	xstrcat(out, tmp_line);
-	if (part_ptr->disable_root_jobs)
+	if (part_ptr->flags & PART_FLAG_NO_ROOT)
 		sprintf(tmp_line, " DisableRootJobs=YES");
 	else
 		sprintf(tmp_line, " DisableRootJobs=NO");
 	xstrcat(out, tmp_line);
 
-	if (part_ptr->hidden)
+	if (part_ptr->flags & PART_FLAG_HIDDEN)
 		sprintf(tmp_line, " Hidden=YES");
 	else
 		sprintf(tmp_line, " Hidden=NO");
@@ -194,12 +201,12 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 	if (part_ptr->max_nodes == INFINITE)
 		sprintf(tmp_line, "MaxNodes=UNLIMITED");
 	else {
-#ifdef HAVE_BG
-		convert_num_unit((float)part_ptr->max_nodes, tmp1, sizeof(tmp1),
-				 UNIT_NONE);
-#else
-		snprintf(tmp1, sizeof(tmp1),"%u", part_ptr->max_nodes);
-#endif
+		if(cluster_flags & CLUSTER_FLAG_BG)
+			convert_num_unit((float)part_ptr->max_nodes,
+					 tmp1, sizeof(tmp1), UNIT_NONE);
+		else
+			snprintf(tmp1, sizeof(tmp1),"%u", part_ptr->max_nodes);
+
 		sprintf(tmp_line, "MaxNodes=%s", tmp1);
 	}
 	xstrcat(out, tmp_line);
@@ -212,12 +219,12 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 		sprintf(tmp_line, " MaxTime=%s", time_line);
 	}
 	xstrcat(out, tmp_line);
-#ifdef HAVE_BG
-	convert_num_unit((float)part_ptr->min_nodes, tmp1, sizeof(tmp1),
-			 UNIT_NONE);
-#else
-	snprintf(tmp1, sizeof(tmp1), "%u", part_ptr->min_nodes);
-#endif
+	if(cluster_flags & CLUSTER_FLAG_BG)
+		convert_num_unit((float)part_ptr->min_nodes, tmp1, sizeof(tmp1),
+				 UNIT_NONE);
+	else
+		snprintf(tmp1, sizeof(tmp1), "%u", part_ptr->min_nodes);
+
 	sprintf(tmp_line, " MinNodes=%s", tmp1);
 	xstrcat(out, tmp_line);
 
@@ -229,22 +236,21 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 	/****** Line added here for non BG nodes
 	 to keep with alphabetized output******/
 
-#ifdef HAVE_BG
-	/***Proceed to non BG option***/
-#else
-	snprintf(tmp_line, sizeof(tmp_line), "Nodes=%s", part_ptr->nodes);
-	xstrcat(out, tmp_line);
-	if (one_liner)
-		xstrcat(out, " ");
-	else
-		xstrcat(out, "\n   ");
-#endif
+	if(!(cluster_flags & CLUSTER_FLAG_BG)) {
+		snprintf(tmp_line, sizeof(tmp_line), "Nodes=%s",
+			 part_ptr->nodes);
+		xstrcat(out, tmp_line);
+		if (one_liner)
+			xstrcat(out, " ");
+		else
+			xstrcat(out, "\n   ");
+	}
 
 	/****** Line 6 ******/
 
 	sprintf(tmp_line, "Priority=%u", part_ptr->priority);
 	xstrcat(out, tmp_line);
-	if (part_ptr->root_only)
+	if (part_ptr->flags & PART_FLAG_ROOT_ONLY)
 		sprintf(tmp_line, " RootOnly=YES");
 	else
 		sprintf(tmp_line, " RootOnly=NO");
@@ -263,6 +269,12 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 		sprintf(tmp_line, " Shared=YES:%u", val);
 		xstrcat(out, tmp_line);
 	}
+	preempt_mode = part_ptr->preempt_mode;
+	if (preempt_mode == (uint16_t) NO_VAL)
+		preempt_mode = slurm_get_preempt_mode(); /* use cluster param */
+	snprintf(tmp_line, sizeof(tmp_line), " PreemptMode=%s",
+		 preempt_mode_string(preempt_mode));
+	xstrcat(out, tmp_line);
 	if (one_liner)
 		xstrcat(out, " ");
 	else
@@ -270,27 +282,34 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 
 	/****** Line 7 ******/
 
-	if (part_ptr->state_up)
+	if (part_ptr->state_up == PARTITION_UP)
 		sprintf(tmp_line, "State=UP");
-	else
+	else if (part_ptr->state_up == PARTITION_DOWN)
 		sprintf(tmp_line, "State=DOWN");
+	else if (part_ptr->state_up == PARTITION_INACTIVE)
+		sprintf(tmp_line, "State=INACTIVE");
+	else if (part_ptr->state_up == PARTITION_DRAIN)
+		sprintf(tmp_line, "State=DRAIN");
+	else
+		sprintf(tmp_line, "State=UNKNOWN");
+
 	xstrcat(out, tmp_line);
 
-#ifdef HAVE_BG
-	convert_num_unit((float)part_ptr->total_cpus, tmp1, sizeof(tmp1),
-			 UNIT_NONE);
-#else
-	snprintf(tmp1, sizeof(tmp1), "%u", part_ptr->total_cpus);
-#endif
+	if(cluster_flags & CLUSTER_FLAG_BG)
+		convert_num_unit((float)part_ptr->total_cpus, tmp1,
+				 sizeof(tmp1), UNIT_NONE);
+	else
+		snprintf(tmp1, sizeof(tmp1), "%u", part_ptr->total_cpus);
+
 	sprintf(tmp_line, " TotalCPUs=%s", tmp1);
 	xstrcat(out, tmp_line);
-#ifdef HAVE_BG
-	convert_num_unit((float)part_ptr->total_nodes, tmp2, sizeof(tmp2),
-			 UNIT_NONE);
-#else
-	snprintf(tmp2, sizeof(tmp2), "%u", part_ptr->total_nodes);
-#endif
-		sprintf(tmp_line, " TotalNodes=%s", tmp2);
+	if(cluster_flags & CLUSTER_FLAG_BG)
+		convert_num_unit((float)part_ptr->total_nodes, tmp2,
+				 sizeof(tmp2), UNIT_NONE);
+	else
+		snprintf(tmp2, sizeof(tmp2), "%u", part_ptr->total_nodes);
+
+	sprintf(tmp_line, " TotalNodes=%s", tmp2);
 	xstrcat(out, tmp_line);
 	if (one_liner)
 		xstrcat(out, "\n");
@@ -312,7 +331,8 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
  * NOTE: free the response using slurm_free_partition_info_msg
  */
 extern int slurm_load_partitions (time_t update_time,
-		partition_info_msg_t **resp, uint16_t show_flags)
+				  partition_info_msg_t **resp,
+				  uint16_t show_flags)
 {
         int rc;
         slurm_msg_t req_msg;

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  cancel.c - cancel a slurm job or job step
- *  $Id: cancel.c 19095 2009-12-01 22:59:18Z da $
+ *  $Id: cancel.c 20255 2010-05-12 22:43:51Z da $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -58,7 +58,7 @@
  * RET 0 on success, otherwise return -1 and set errno to indicate the error
  */
 int
-slurm_kill_job ( uint32_t job_id, uint16_t signal, uint16_t batch_flag )
+slurm_kill_job (uint32_t job_id, uint16_t signal, uint16_t batch_flag)
 {
 	int rc;
 	slurm_msg_t msg;

@@ -1,6 +1,6 @@
 /****************************************************************************\
  *  step_io.c - process stdin, stdout, and stderr for parallel jobs.
- *  $Id: step_io.c 19745 2010-03-12 20:52:45Z jette $
+ *  $Id: step_io.c 21726 2010-12-08 19:39:15Z da $
  *****************************************************************************
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -737,9 +737,14 @@ again:
 		for (i = 0; i < info->cio->num_nodes; i++) {
 			msg->ref_count++;
 			if (info->cio->ioserver[i] == NULL)
-				fatal("ioserver stream not yet initialized");
-			server = info->cio->ioserver[i]->arg;
-			list_enqueue(server->msg_queue, msg);
+				/* client_io_handler_abort() or 
+				 * client_io_handler_downnodes() called */
+				verbose("ioserver stream of node %d not yet "
+					"initialized", i);
+			else {
+				server = info->cio->ioserver[i]->arg;
+				list_enqueue(server->msg_queue, msg);
+			}
 		}
 	} else if (header.type == SLURM_IO_STDIN) {
 		uint32_t nodeid;
@@ -1005,7 +1010,8 @@ _init_stdio_eio_objs(slurm_step_io_fds_t fds, client_io_t *cio)
 	} else {
 		if (fds.err.fd > -1) {
 			cio->stderr_obj = create_file_write_eio_obj(
-				fds.err.fd, fds.err.taskid, fds.err.nodeid, cio);
+				fds.err.fd, fds.err.taskid,
+				fds.err.nodeid, cio);
 			eio_new_initial_obj(cio->eio, cio->stderr_obj);
 		}
 	}
@@ -1117,7 +1123,7 @@ client_io_handler_create(slurm_step_io_fds_t fds,
 				      (short *)&cio->listenport[i]) < 0) {
 			fatal("unable to initialize stdio listen socket: %m");
 		}
-		debug("initialized stdio listening socket, port %d\n",
+		debug("initialized stdio listening socket, port %d",
 		      cio->listenport[i]);
 		/*net_set_low_water(cio->listensock[i], 140);*/
 		obj = _create_listensock_eio(cio->listensock[i], cio);
@@ -1152,6 +1158,7 @@ client_io_handler_start(client_io_t *cio)
 				      &_io_thr_internal, (void *) cio))) {
 		if (++retries > MAX_RETRIES) {
 			error ("pthread_create error %m");
+			cio->ioid = 0;
 			slurm_attr_destroy(&attr);
 			return SLURM_ERROR;
 		}
@@ -1184,7 +1191,7 @@ client_io_handler_destroy(client_io_t *cio)
 	   (by calling client_io_handler_finish()) before freeing anything */
 
 	pthread_mutex_destroy(&cio->ioservers_lock);
-	bit_free(cio->ioservers_ready_bits);
+	FREE_NULL_BITMAP(cio->ioservers_ready_bits);
 	xfree(cio->ioserver); /* need to destroy the obj first? */
 	xfree(cio->listenport);
 	xfree(cio->listensock);

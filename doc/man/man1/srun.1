@@ -1,4 +1,4 @@
-.TH "srun" "1" "SLURM 2.1" "October 2009" "SLURM Commands"
+.TH "srun" "1" "SLURM 2.2" "November 2010" "SLURM Commands"
 
 .SH "NAME"
 srun \- Run parallel jobs
@@ -55,6 +55,7 @@ CR_Core, CR_Core_Memory, CR_Socket, or CR_Socket_Memory for this option
 to be honored.
 This option is not supported on BlueGene systems (select/bluegene plugin
 is configured).
+If not specified, the scontrol show job will display 'ReqS:C:T=*:*:*'.
 
 .TP
 \fB\-\-begin\fR=<\fItime\fR>
@@ -145,7 +146,8 @@ indicates that the job requires 16 nodes at that at least four of those
 nodes must have the feature "graphics."
 Constraints with node counts may only be combined with AND operators.
 If no nodes have the requested features, then the job will be rejected
-by the slurm job manager.
+by the slurm job manager. This option is used for job allocations, but ignored
+for job step allocations.
 
 .TP
 \fB\-\-contiguous\fR
@@ -155,11 +157,10 @@ plugins, both of which can modify the node ordering.
 Not honored for a job step's allocation.
 
 .TP
-\fB\-\-core\fR=<\fItype\fR>
-Adjust corefile format for parallel job. If possible, srun will set
-up the environment for the job such that a corefile format other than
-full core dumps is enabled. If run with type = "list", srun will
-print a list of supported corefile format types to stdout and exit.
+\fB\-\-cores\-per\-socket\fR=<\fIcores\fR>
+Allocate the specified number of cores per socket. This may be used to avoid
+allocating more than one core per socket on multi\-core sockets. This option
+is used for job allocations, but ignored for job step allocations.
 
 .TP
 \fB\-\-cpu_bind\fR=[{\fIquiet,verbose\fR},]\fItype\fR
@@ -249,7 +250,7 @@ Bind to a NUMA locality domain by rank
 Bind by mapping NUMA locality domain IDs to tasks as specified where
 <list> is <ldom1>,<ldom2>,...<ldomN>.
 The locality domain IDs are interpreted as decimal values unless they are
-preceded with '0x' in which case they areinterpreted as hexadecimal values.
+preceded with '0x' in which case they are interpreted as hexadecimal values.
 Not supported unless the entire node is allocated to the job.
 .TP
 .B mask_ldom:<list>
@@ -298,6 +299,12 @@ unable to execute more than a total of 4 tasks.
 This option may also be useful to spawn tasks without allocating
 resources to the job step from the job's allocation when running
 multiple job steps with the \fB\-\-exclusive\fR option.
+\fBWARNING\fR: There are configurations and options interpreted differently by
+job and job step requests which can result in inconsistent for this option.
+For example \fIsrun \-c2 \-\-threads\-per\-core=1 prog\fR may allocate two
+cores for the job, but if each of those cores contains two threads, the job
+allocation will include four CPUs. The job step allocation will then launch two
+threads per CPU for a total of two tasks.
 
 .TP
 \fB\-d\fR, \fB\-\-dependency\fR=<\fIdependency_list\fR>
@@ -350,7 +357,7 @@ If the specified file already exists, it will be overwritten.
 .TP
 \fB\-E\fR, \fB\-\-preserve-env\fR
 Pass the current values of environment variables SLURM_NNODES and
-SLURM_NPROCS through to the \fIexecutable\fR, rather than computing them
+SLURM_NTASKS through to the \fIexecutable\fR, rather than computing them
 from commandline parameters.
 
 .TP
@@ -366,7 +373,7 @@ parameter in slurm.conf.
 When used to initiate a job, the job allocation cannot share nodes with
 other running jobs.  This is the oposite of \-\-share, whichever option
 is seen last on the command line will win.  (The default shared/exclusive
-behaviour depends on system configuration.)
+behavior depends on system configuration.)
 
 This option can also be used when initiating more than job step within
 an existing resource allocation and you want separate processors to
@@ -377,7 +384,7 @@ it's allocation. Note that all CPUs allocated to a job are available
 to each job step unless the \fB\-\-exclusive\fR option is used plus
 task affinity is configured. Since resource management is provided by
 processor, the \fB\-\-ntasks\fR option must be specified, but the
-following options should NOT be specified \fB\-\-nodes\fR,
+following options should NOT be specified
 \fB\-\-relative\fR, \fB\-\-distribution\fR=\fIarbitrary\fR.
 See \fBEXAMPLE\fR below.
 
@@ -387,11 +394,26 @@ If \fBsrun\fR is run as root, and the \fB\-\-gid\fR option is used,
 submit the job with \fIgroup\fR's group access permissions.  \fIgroup\fR
 may be the group name or the numerical group ID.
 
-.\".TP
-.\"NOTE: Do not document feature until user release mechanism is available.
-.\"\-H, \-\-hold
-.\"Specify the job is to be submitted in a held state (priority of zero).
-.\"A held job can now be released using scontrol to reset its priority.
+.TP
+\fB\-\-gres\fR=<\fIlist\fR>
+Specifies a comma delimited list of generic consumable resources.
+The format of each entry on the list is "name[:count[*cpu]]".
+The name is that of the consumable resource.
+The count is the number of those resources with a default value of 1.
+The specified resources will be allocated to the job on each node
+allocated unless "*cpu" is appended, in which case the resources
+will be allocated on a per cpu basis.
+The available generic consumable resources is configurable by the system
+administrator.
+A list of available generic consumable resources will be printed and the
+command will exit if the option argument is "help".
+Examples of use include "\-\-gres=gpus:2*cpu,disk=40G" and "\-\-gres=help".
+
+.TP
+\fB\-H, \-\-hold\fR
+Specify the job is to be submitted in a held state (priority of zero).
+A held job can now be released using scontrol to reset its priority
+(e.g. "\fIscontrol update jobid=<id> priority=1\fR".
 
 .TP
 \fB\-h\fR, \fB\-\-help\fR
@@ -541,8 +563,8 @@ will be laid out on the nodes in the order of the file.
 .TP
 \fB\-\-mail\-type\fR=<\fItype\fR>
 Notify user by email when certain event types occur.
-Valid \fItype\fR values are BEGIN, END, FAIL, ALL (any state change).
-The user to be notified is indicated with \fB\-\-mail\-user\fR.
+Valid \fItype\fR values are BEGIN, END, FAIL, REQUEUE, and ALL (any state
+change). The user to be notified is indicated with \fB\-\-mail\-user\fR.
 
 .TP
 \fB\-\-mail\-user\fR=<\fIuser\fR>
@@ -564,9 +586,16 @@ Also see \fB\-\-mem\-per\-cpu\fR.
 .TP
 \fB\-\-mem\-per\-cpu\fR=<\fIMB\fR>
 Mimimum memory required per allocated CPU in MegaBytes.
-Default value is \fBDefMemPerCPU\fR and the maximum value is
-\fBMaxMemPerCPU\fR. If configured, both of parameters can be
+Default value is \fBDefMemPerCPU\fR and the maximum value is \fBMaxMemPerCPU\fR
+(see exception below). If configured, both of parameters can be
 seen using the \fBscontrol show config\fR command.
+Note that if the job's \fB\-\-mem\-per\-cpu\fR value exceeds the configured
+\fBMaxMemPerCPU\fR, then the user's limit will be treated as a memory limit
+per task; \fB\-\-mem\-per\-cpu\fR will be reduced to a value no larger than
+\fBMaxMemPerCPU\fR; \fB\-\-cpus\-per\-task\fR will be set and value of 
+\fB\-\-cpus\-per\-task\fR multiplied by the new \fB\-\-mem\-per\-cpu\fR
+value will equal the original \fB\-\-mem\-per\-cpu\fR value specified by
+the user.
 This parameter would generally be used if individual processors
 are allocated to jobs (\fBSelectType=select/cons_res\fR).
 Also see \fB\-\-mem\fR.
@@ -639,20 +668,8 @@ show this help message
 .RE
 
 .TP
-\fB\-\-mincores\fR=<\fIn\fR>
-Specify a minimum number of cores per socket.
-
-.TP
 \fB\-\-mincpus\fR=<\fIn\fR>
 Specify a minimum number of logical cpus/processors per node.
-
-.TP
-\fB\-\-minsockets\fR=<\fIn\fR>
-Specify a minimum number of sockets (physical processors) per node.
-
-.TP
-\fB\-\-minthreads\fR=<\fIn\fR>
-Specify a minimum number of threads per core.
 
 .TP
 \fB\-\-msg\-timeout\fR=<\fIseconds\fR>
@@ -827,10 +844,12 @@ The default value is specified by the system configuration parameter
 \fIJobFileAppend\fR.
 
 .TP
-\fB\-p\fR, \fB\-\-partition\fR=<\fIpartition name\fR>
+\fB\-p\fR, \fB\-\-partition\fR=<\fIpartition_names\fR>
 Request a specific partition for the resource allocation.  If not specified,
 the default behaviour is to allow the slurm controller to select the default
-partition as designated by the system administrator.
+partition as designated by the system administrator. If the job can use more
+than one partition, specify their names in a comma separate list and the one
+offering earliest initiation will be used.
 
 .TP
 \fB\-\-prolog\fR=<\fIexecutable\fR>
@@ -920,8 +939,8 @@ This option may be used to spread several job steps out among the
 nodes of the current job. If \fB\-r\fR is used, the current job
 step will begin at node \fIn\fR of the allocated nodelist, where
 the first node is considered node 0.  The \fB\-r\fR option is not
-permitted along with \fB\-w\fR or \fB\-x\fR, and will be
-ignored when not running within a prior allocation (i.e. when
+permitted with \fB\-w\fR or \fB\-x\fR option and will result in a 
+fatal error when not running within a prior allocation (i.e. when
 SLURM_JOB_ID is not set). The default for \fIn\fR is 0. If the
 value of \fB\-\-nodes\fR exceeds the number of nodes identified
 with the \fB\-\-relative\fR option, a warning message will be
@@ -964,6 +983,12 @@ Specify a debug level for slurmd(8). \fIlevel\fR may be an integer
 value between 0 [quiet, only errors are displayed] and 4 [verbose
 operation].  The slurmd debug information is copied onto the stderr of
 the job. By default only errors are displayed.
+
+.TP
+\fB\-\-sockets\-per\-node\fR=<\fIsockets\fR>
+Allocate the specified number of sockets per node. This may be used to avoid
+allocating more than one task per node on multi\-socket nodes. This option
+is used for job allocations, but ignored for job step allocations.
 
 .TP
 \fB\-T\fR, \fB\-\-threads\fR=<\fInthreads\fR>
@@ -1012,6 +1037,25 @@ available to identify the process ID of the task being started.
 Standard output from this program of the form
 "export NAME=value" will be used to set environment variables
 for the task being spawned.
+
+.TP
+\fB\-\-time\-min\fR=<\fItime\fR>
+Set a minimum time limit on the job allocation.
+If specified, the job may have it's \fB\-\-time\fR limit lowered to a value
+no lower than \fB\-\-time\-min\fR if doing so permits the job to begin
+execution earlier than otherwise possible. 
+The job's time limit will not be changed after the job is allocated resources.
+This is performed by a backfill scheduling algorithm to allocate resources 
+otherwise reserved for higher priority jobs.
+Acceptable time formats include "minutes", "minutes:seconds", 
+"hours:minutes:seconds", "days\-hours", "days\-hours:minutes" and 
+"days\-hours:minutes:seconds".
+
+.TP
+\fB\-\-threads\-per\-core\fR=<\fIthreads\fR>
+Allocate the specified number of threads per core. This may be used to avoid
+allocating more than one task per core on hyper\-threaded nodes. This option
+is used for job allocations, but ignored for job step allocations.
 
 .TP
 \fB\-\-tmp\fR=<\fIMB\fR>
@@ -1354,14 +1398,11 @@ Same as \fB\-\-checkpoint\-dir\fR
 \fBSLURM_CONN_TYPE\fR
 Same as \fB\-\-conn\-type\fR
 .TP
-\fBSLURM_CORE_FORMAT\fR
-Same as \fB\-\-core\fR
-.TP
 \fBSLURM_CPU_BIND\fR
 Same as \fB\-\-cpu_bind\fR
 .TP
 \fBSLURM_CPUS_PER_TASK\fR
-Same as \fB\-c, \-\-ncpus\-per\-task\fR
+Same as \fB\-c, \-\-cpus\-per\-task\fR
 .TP
 \fBSLURM_DEBUG\fR
 Same as \fB\-v, \-\-verbose\fR
@@ -1436,7 +1477,7 @@ Same as \fB\-\-ntasks\-per\-socket\fR
 \fBSLURM_NO_ROTATE\fR
 Same as \fB\-R, \-\-no\-rotate\fR
 .TP
-\fBSLURM_NPROCS\fR
+\fBSLURM_NTASKS\fR
 Same as \fB\-n, \-\-ntasks\fR
 .TP
 \fBSLURM_OPEN_MODE\fR
@@ -1447,6 +1488,11 @@ Same as \fB\-O, \-\-overcommit\fR
 .TP
 \fBSLURM_PARTITION\fR
 Same as \fB\-p, \-\-partition\fR
+.TP
+\fBSLURM_PMI_KVS_NO_DUP_KEYS\fR
+If set, then PMI key\-pairs will contain no duplicate keys.
+This is the case for MPICH2 and reduces overhead in testing for duplicates
+for improved performance
 .TP
 \fBSLURM_PROLOG\fR
 Same as \fB\-\-prolog\fR
@@ -1529,8 +1575,7 @@ if specified on the execute line.
 Count of processors available to the job on this node.
 Note the select/linear plugin allocates entire nodes to
 jobs, so the value indicates the total count of CPUs on the node.
-The select/cons_res plugin allocates individual processors
-to jobs, so this number indicates the number of processors
+For the select/cons_res plugin, this number indicates the number of cores
 on this node allocated to the job.
 
 .TP
@@ -1572,7 +1617,7 @@ The relative node ID of the current node
 \fBSLURM_NODELIST\fR
 List of nodes allocated to the job
 .TP
-\fBSLURM_NPROCS\fR
+\fBSLURM_NTASKS\fR
 Total number of processes in the current job
 .TP
 \fBSLURM_PRIO_PROCESS\fR
@@ -1748,7 +1793,7 @@ dev[7\-10]
 
 .fi
 .PP
-The follwing script runs two job steps in parallel
+The following script runs two job steps in parallel
 within an allocated set of nodes.
 
 .nf
@@ -1789,7 +1834,7 @@ MACHINEFILE="nodes.$SLURM_JOB_ID"
 srun \-l /bin/hostname | sort \-n | awk '{print $2}' > $MACHINEFILE
 
 # Run using generated Machine file:
-mpirun \-np $SLURM_NPROCS \-machinefile $MACHINEFILE mpi\-app
+mpirun \-np $SLURM_NTASKS \-machinefile $MACHINEFILE mpi\-app
 
 rm $MACHINEFILE
 
@@ -1849,7 +1894,7 @@ wait
 
 .SH "COPYING"
 Copyright (C) 2006\-2007 The Regents of the University of California.
-Copyright (C) 2008\-2009 Lawrence Livermore National Security.
+Copyright (C) 2008\-2010 Lawrence Livermore National Security.
 Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 CODE\-OCEC\-09\-009. All rights reserved.
 .LP

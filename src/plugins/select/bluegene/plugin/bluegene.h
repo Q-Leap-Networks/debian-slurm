@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  bluegene.h - header for blue gene configuration processing module.
  *
- *  $Id: bluegene.h 19995 2010-04-09 20:55:46Z da $
+ *  $Id: bluegene.h 21571 2010-11-17 15:32:36Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -58,6 +58,7 @@ typedef struct {
 	uint16_t bp_nodecard_cnt;
 	char *bridge_api_file;
 	uint16_t bridge_api_verb;
+	uint32_t slurm_debug_flags;
 #ifdef HAVE_BGL
 	char *default_blrtsimage;
 #endif
@@ -86,7 +87,6 @@ typedef struct {
 typedef struct {
 	List booted;         /* blocks that are booted */
 	List job_running;    /* jobs running in these blocks */
-	List freeing;        /* blocks that being freed */
 	List main;	    /* List of configured BG blocks */
 	List valid_small32;
 	List valid_small64;
@@ -102,8 +102,6 @@ extern time_t last_bg_update;
 extern bool agent_fini;
 extern pthread_mutex_t block_state_mutex;
 extern pthread_mutex_t request_list_mutex;
-extern int num_block_to_free;
-extern int num_block_freed;
 extern int blocks_are_created;
 extern int num_unused_cpus;
 
@@ -111,17 +109,19 @@ extern int num_unused_cpus;
 #define BLOCK_ERROR_STATE    -3
 #define ADMIN_ERROR_STATE    -4
 #define NO_JOB_RUNNING       -1
-#define MAX_AGENT_COUNT      30
 #define BUFSIZE 4096
 #define BITSIZE 128
 /* Change BLOCK_STATE_VERSION value when changing the state save
  * format i.e. pack_block() */
-#define BLOCK_STATE_VERSION      "VER003"
+#define BLOCK_STATE_VERSION      "VER004"
+#define BLOCK_2_1_STATE_VERSION  "VER003" /*Slurm 2.1's version*/
 
 #include "bg_block_info.h"
 #include "bg_job_place.h"
 #include "bg_job_run.h"
 #include "state_test.h"
+#include "jobinfo.h"
+#include "nodeinfo.h"
 
 /* bluegene.c */
 /**********************************************/
@@ -134,6 +134,7 @@ extern void fini_bg(void);
 
 extern bool blocks_overlap(bg_record_t *rec_a, bg_record_t *rec_b);
 
+extern void bg_requeue_job(uint32_t job_id, bool wait_for_start);
 
 /* remove all users from a block but what is in user_name */
 /* Note return codes */
@@ -162,7 +163,8 @@ extern bg_record_t *find_and_remove_org_from_bg_list(List my_list,
 extern bg_record_t *find_org_in_bg_list(List my_list, bg_record_t *bg_record);
 extern void *mult_free_block(void *args);
 extern void *mult_destroy_block(void *args);
-extern int free_block_list(List delete_list);
+extern int free_block_list(uint32_t job_id, List track_list,
+			   bool destroy, bool wait);
 extern int read_bg_conf();
 extern int validate_current_blocks(char *dir);
 
@@ -182,6 +184,12 @@ extern int load_state_file(List curr_block_list, char *dir_name);
 /*****************************************************/
 extern int configure_small_block(bg_record_t *bg_record);
 extern int configure_block_switches(bg_record_t * bg_conf_record);
+
+
+/* select_bluegene.c */
+/*****************************************************/
+extern int select_p_update_block(update_block_msg_t *block_desc_ptr);
+
 
 #endif /* _BLUEGENE_H_ */
 

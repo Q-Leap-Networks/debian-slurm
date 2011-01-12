@@ -2,7 +2,7 @@
  *  job_info.c - get/print the job state information of slurm
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
@@ -90,19 +90,21 @@ static void _sprint_range(char *str, uint32_t str_size,
 			  uint32_t lower, uint32_t upper)
 {
 	char tmp[128];
-	/* Note: We don't have the size of str here */
-#ifdef HAVE_BG
-	convert_num_unit((float)lower, tmp, sizeof(tmp), UNIT_NONE);
-#else
-	snprintf(tmp, sizeof(tmp), "%u", lower);
-#endif
+	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
+
+	if(cluster_flags & CLUSTER_FLAG_BG) {
+		convert_num_unit((float)lower, tmp, sizeof(tmp), UNIT_NONE);
+	} else {
+		snprintf(tmp, sizeof(tmp), "%u", lower);
+	}
 	if (upper > 0) {
     		char tmp2[128];
-#ifdef HAVE_BG
-		convert_num_unit((float)upper, tmp2, sizeof(tmp2), UNIT_NONE);
-#else
-		snprintf(tmp2, sizeof(tmp2), "%u", upper);
-#endif
+		if(cluster_flags & CLUSTER_FLAG_BG) {
+			convert_num_unit((float)upper, tmp2,
+					 sizeof(tmp2), UNIT_NONE);
+		} else {
+			snprintf(tmp2, sizeof(tmp2), "%u", upper);
+		}
 		snprintf(str, str_size, "%s-%s", tmp, tmp2);
 	} else
 		snprintf(str, str_size, "%s", tmp);
@@ -120,7 +122,7 @@ extern void
 slurm_print_job_info ( FILE* out, job_info_t * job_ptr, int one_liner )
 {
 	char *print_this = slurm_sprint_job_info(job_ptr, one_liner);
-	fprintf ( out, "%s", print_this);
+	fprintf(out, "%s", print_this);
 	xfree(print_this);
 }
 
@@ -137,21 +139,15 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 {
 	int i, j;
 	char time_str[32], *group_name, *user_name;
-	char tmp1[128], tmp2[128], *tmp3_ptr;
+	char tmp1[128], tmp2[128], tmp3[128], tmp4[128], tmp5[128], *tmp6_ptr;
 	char tmp_line[512];
 	char *ionodes = NULL;
 	uint16_t exit_status = 0, term_sig = 0;
 	job_resources_t *job_resrcs = job_ptr->job_resrcs;
 	char *out = NULL;
+	time_t run_time;
 	uint32_t min_nodes, max_nodes = 0;
-
-#ifdef HAVE_BG
-	char select_buf[122];
-	char *nodelist = "BP_List";
-	select_g_select_jobinfo_get(job_ptr->select_jobinfo,
-				    SELECT_JOBDATA_IONODES,
-				    &ionodes);
-#else
+	char *nodelist = "NodeList";
 	bitstr_t *core_bitmap;
 	char *host;
 	int sock_inx, sock_reps, last;
@@ -159,10 +155,17 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	int bit_inx, bit_reps;
 	uint32_t *last_mem_alloc_ptr = NULL;
 	uint32_t last_mem_alloc = NO_VAL;
-	char last_hosts[128];
+	char *last_hosts;
 	hostlist_t hl, hl_last;
-	char *nodelist = "NodeList";
-#endif
+	char select_buf[122];
+	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
+
+	if(cluster_flags & CLUSTER_FLAG_BG) {
+		nodelist = "BP_List";
+		select_g_select_jobinfo_get(job_ptr->select_jobinfo,
+					    SELECT_JOBDATA_IONODES,
+					    &ionodes);
+	}
 
 	/****** Line 1 ******/
 	snprintf(tmp_line, sizeof(tmp_line),
@@ -209,12 +212,12 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 			if (isspace(job_ptr->state_desc[j]))
 				job_ptr->state_desc[j] = '_';
 		}
-		tmp3_ptr = job_ptr->state_desc;
+		tmp6_ptr = job_ptr->state_desc;
 	} else
-		tmp3_ptr = job_reason_string(job_ptr->state_reason);
+		tmp6_ptr = job_reason_string(job_ptr->state_reason);
 	snprintf(tmp_line, sizeof(tmp_line),
 		 "JobState=%s Reason=%s Dependency=%s",
-		 job_state_string(job_ptr->job_state), tmp3_ptr,
+		 job_state_string(job_ptr->job_state), tmp6_ptr,
 		 job_ptr->dependency);
 	xstrcat(out, tmp_line);
 	if (one_liner)
@@ -223,26 +226,13 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 		xstrcat(out, "\n   ");
 
 	/****** Line 5 ******/
-	snprintf(tmp_line, sizeof(tmp_line), "TimeLimit=");
-	xstrcat(out, tmp_line);
-	if (job_ptr->time_limit == INFINITE)
-		sprintf(tmp_line, "UNLIMITED ");
-	else if (job_ptr->time_limit == NO_VAL)
-		sprintf(tmp_line, "Partition_Limit ");
-	else {
-		secs2time_str(job_ptr->time_limit * 60, tmp1, sizeof(tmp1));
-		sprintf(tmp_line, "%s ", tmp1);
-	}
-	xstrcat(out, tmp_line);
-
 	snprintf(tmp_line, sizeof(tmp_line),
 		 "Requeue=%u Restarts=%u BatchFlag=%u ",
 		 job_ptr->requeue, job_ptr->restart_cnt, job_ptr->batch_flag);
+	xstrcat(out, tmp_line);
 	if (WIFSIGNALED(job_ptr->exit_code))
 		term_sig = WTERMSIG(job_ptr->exit_code);
-	else
-		exit_status = WEXITSTATUS(job_ptr->exit_code);
-	xstrcat(out, tmp_line);
+	exit_status = WEXITSTATUS(job_ptr->exit_code);
 	snprintf(tmp_line, sizeof(tmp_line),
 		 "ExitCode=%u:%u", exit_status, term_sig);
 	xstrcat(out, tmp_line);
@@ -251,7 +241,69 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	else
 		xstrcat(out, "\n   ");
 
+	/****** Line 5a (optional) ******/
+	if (!(job_ptr->show_flags & SHOW_DETAIL))
+		goto line6;
+	if (WIFSIGNALED(job_ptr->derived_ec))
+		term_sig = WTERMSIG(job_ptr->derived_ec);
+	else
+		term_sig = 0;
+	exit_status = WEXITSTATUS(job_ptr->derived_ec);
+	snprintf(tmp_line, sizeof(tmp_line),
+		 "DerivedExitCode=%u:%u", exit_status, term_sig);
+	xstrcat(out, tmp_line);
+	if (one_liner)
+		xstrcat(out, " ");
+	else
+		xstrcat(out, "\n   ");
+
 	/****** Line 6 ******/
+line6:
+	snprintf(tmp_line, sizeof(tmp_line), "RunTime=");
+	xstrcat(out, tmp_line);
+
+	run_time = time(NULL);
+	if (IS_JOB_SUSPENDED(job_ptr))
+		run_time = job_ptr->pre_sus_time;
+	else {
+		if (!IS_JOB_RUNNING(job_ptr) && (job_ptr->end_time != 0))
+			run_time = job_ptr->end_time;
+		if (job_ptr->suspend_time) {
+			run_time = (time_t)
+				(difftime(run_time, job_ptr->suspend_time)
+				 + job_ptr->pre_sus_time);
+		} else
+			run_time = (time_t)
+				difftime(run_time, job_ptr->start_time);
+	}
+	secs2time_str(run_time, tmp1, sizeof(tmp1));
+	sprintf(tmp_line, "%s ", tmp1);
+	xstrcat(out, tmp_line);
+
+	snprintf(tmp_line, sizeof(tmp_line), "TimeLimit=");
+	xstrcat(out, tmp_line);
+	if (job_ptr->time_limit == NO_VAL)
+		sprintf(tmp_line, "Partition_Limit");
+	else {
+		mins2time_str(job_ptr->time_limit, tmp_line,
+			      sizeof(tmp_line));
+	}
+	xstrcat(out, tmp_line);
+	snprintf(tmp_line, sizeof(tmp_line), " TimeMin=");
+	xstrcat(out, tmp_line);
+	if (job_ptr->time_min == 0)
+		sprintf(tmp_line, "N/A");
+	else {
+		mins2time_str(job_ptr->time_min, tmp_line,
+			      sizeof(tmp_line));
+	}
+	xstrcat(out, tmp_line);
+	if (one_liner)
+		xstrcat(out, " ");
+	else
+		xstrcat(out, "\n   ");
+
+	/****** Line 7 ******/
 	slurm_make_time_str((time_t *)&job_ptr->submit_time, time_str,
 			    sizeof(time_str));
 	snprintf(tmp_line, sizeof(tmp_line), "SubmitTime=%s ", time_str);
@@ -266,7 +318,19 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	else
 		xstrcat(out, "\n   ");
 
-	/****** Line 7 ******/
+	/****** Line 8 (optional) ******/
+	if (job_ptr->resize_time) {
+		slurm_make_time_str((time_t *)&job_ptr->resize_time, time_str,
+				    sizeof(time_str));
+		snprintf(tmp_line, sizeof(tmp_line), "ResizeTime=%s", time_str);
+		xstrcat(out, tmp_line);
+		if (one_liner)
+			xstrcat(out, " ");
+		else
+			xstrcat(out, "\n   ");
+	}
+
+	/****** Line 9 ******/
 	slurm_make_time_str((time_t *)&job_ptr->start_time, time_str,
 			    sizeof(time_str));
 	snprintf(tmp_line, sizeof(tmp_line), "StartTime=%s ", time_str);
@@ -288,7 +352,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	else
 		xstrcat(out, "\n   ");
 
-	/****** Line 8 ******/
+	/****** Line 10 ******/
 	if (job_ptr->suspend_time) {
 		slurm_make_time_str ((time_t *)&job_ptr->suspend_time,
 				     time_str, sizeof(time_str));
@@ -304,7 +368,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	else
 		xstrcat(out, "\n   ");
 
-	/****** Line 9 ******/
+	/****** Line 11 ******/
 	snprintf(tmp_line, sizeof(tmp_line),
 		 "Partition=%s AllocNode:Sid=%s:%u",
 		 job_ptr->partition, job_ptr->alloc_node, job_ptr->alloc_sid);
@@ -314,7 +378,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	else
 		xstrcat(out, "\n   ");
 
-	/****** Line 10 ******/
+	/****** Line 12 ******/
 	snprintf(tmp_line, sizeof(tmp_line), "Req%s=%s Exc%s=%s",
 		 nodelist, job_ptr->req_nodes, nodelist, job_ptr->exc_nodes);
 	xstrcat(out, tmp_line);
@@ -323,7 +387,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	else
 		xstrcat(out, "\n   ");
 
-	/****** Line 11 ******/
+	/****** Line 13 ******/
 	xstrfmtcat(out, "%s=", nodelist);
 	xstrcat(out, job_ptr->nodes);
 	if(job_ptr->nodes && ionodes) {
@@ -336,30 +400,38 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	else
 		xstrcat(out, "\n   ");
 
-	/****** Line 12 ******/
-#ifdef HAVE_BG
-	convert_num_unit((float)job_ptr->num_procs, tmp1, sizeof(tmp1),
-			 UNIT_NONE);
-	select_g_select_jobinfo_get(job_ptr->select_jobinfo,
-				    SELECT_JOBDATA_NODE_CNT,
-				    &min_nodes);
-	if ((min_nodes == 0) || (min_nodes == NO_VAL)) {
+	/****** Line 14 ******/
+	if(cluster_flags & CLUSTER_FLAG_BG) {
+		select_g_select_jobinfo_get(job_ptr->select_jobinfo,
+					    SELECT_JOBDATA_NODE_CNT,
+					    &min_nodes);
+		if ((min_nodes == 0) || (min_nodes == NO_VAL)) {
+			min_nodes = job_ptr->num_nodes;
+			max_nodes = job_ptr->max_nodes;
+		} else if(job_ptr->max_nodes)
+			max_nodes = min_nodes;
+	} else {
 		min_nodes = job_ptr->num_nodes;
 		max_nodes = job_ptr->max_nodes;
-	} else if(job_ptr->max_nodes)
-		max_nodes = min_nodes;
-#else
-	snprintf(tmp1, sizeof(tmp1), "%u", job_ptr->num_procs);
-	min_nodes = job_ptr->num_nodes;
-	max_nodes = job_ptr->max_nodes;
-#endif
+	}
+
+	_sprint_range(tmp1, sizeof(tmp1), job_ptr->num_cpus, job_ptr->max_cpus);
 	_sprint_range(tmp2, sizeof(tmp2), min_nodes, max_nodes);
+	if (job_ptr->sockets_per_node == (uint16_t) NO_VAL)
+		strcpy(tmp3, "*");
+	else
+		snprintf(tmp3, sizeof(tmp3), "%u", job_ptr->sockets_per_node);
+	if (job_ptr->cores_per_socket == (uint16_t) NO_VAL)
+		strcpy(tmp4, "*");
+	else
+		snprintf(tmp4, sizeof(tmp4), "%u", job_ptr->cores_per_socket);
+	if (job_ptr->threads_per_core == (uint16_t) NO_VAL)
+		strcpy(tmp5, "*");
+	else
+		snprintf(tmp5, sizeof(tmp5), "%u", job_ptr->threads_per_core);
 	snprintf(tmp_line, sizeof(tmp_line),
-		 "NumNodes=%s NumCPUs=%s CPUs/Task=%u ReqS:C:T=%u:%u:%u",
-		 tmp2, tmp1, job_ptr->cpus_per_task,
-		 job_ptr->min_sockets,
-		 job_ptr->min_cores,
-		 job_ptr->min_threads);
+		 "NumNodes=%s NumCPUs=%s CPUs/Task=%u ReqS:C:T=%s:%s:%s",
+		 tmp2, tmp1, job_ptr->cpus_per_task, tmp3, tmp4, tmp5);
 	xstrcat(out, tmp_line);
 	if (one_liner)
 		xstrcat(out, " ");
@@ -367,327 +439,332 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 		xstrcat(out, "\n   ");
 
 	if (!job_resrcs)
-		goto line13;
+		goto line15;
 
-#ifndef HAVE_BG
-	if (!job_resrcs->core_bitmap)
-		goto line13;
+	if(cluster_flags & CLUSTER_FLAG_BG) {
+		if ((job_resrcs->cpu_array_cnt > 0) &&
+		    (job_resrcs->cpu_array_value) &&
+		    (job_resrcs->cpu_array_reps)) {
+			int length = 0;
+			xstrcat(out, "CPUs=");
+			length += 10;
+			for (i = 0; i < job_resrcs->cpu_array_cnt; i++) {
+				if (length > 70) {
+					/* skip to last CPU group entry */
+					if (i < job_resrcs->cpu_array_cnt - 1) {
+						continue;
+					}
+					/* add elipsis before last entry */
+					xstrcat(out, "...,");
+					length += 4;
+				}
 
-	last  = bit_fls(job_resrcs->core_bitmap);
-	if (last == -1)
-		goto line13;
-
-	hl = hostlist_create(job_ptr->nodes);
-	if (!hl) {
-		error("slurm_sprint_job_info: hostlist_create: %s",
-		      job_ptr->nodes);
-		return NULL;
-	}
-	hl_last = hostlist_create(NULL);
-	if (!hl_last) {
-		error("slurm_sprint_job_info: hostlist_create: NULL");
-		hostlist_destroy(hl);
-		return NULL;
-	}
-
-	bit_inx = 0;
-	i = sock_inx = sock_reps = 0;
-	abs_node_inx = job_ptr->node_inx[i];
-
-/*	tmp1[] stores the current cpu(s) allocated	*/
-	tmp2[0] = '\0';	/* stores last cpu(s) allocated */
-	for (rel_node_inx=0; rel_node_inx < job_resrcs->nhosts;
-	     rel_node_inx++) {
-
-		if (sock_reps >=
-		    job_resrcs->sock_core_rep_count[sock_inx]) {
-			sock_inx++;
-			sock_reps = 0;
+				snprintf(tmp_line, sizeof(tmp_line), "%d",
+					 job_resrcs->cpus[i]);
+				xstrcat(out, tmp_line);
+				length += strlen(tmp_line);
+				if (job_resrcs->cpu_array_reps[i] > 1) {
+					snprintf(tmp_line, sizeof(tmp_line),
+						 "*%d",
+						 job_resrcs->cpu_array_reps[i]);
+					xstrcat(out, tmp_line);
+					length += strlen(tmp_line);
+				}
+				if (i < job_resrcs->cpu_array_cnt - 1) {
+					xstrcat(out, ",");
+					length++;
+				}
+			}
+			if (one_liner)
+				xstrcat(out, " ");
+			else
+				xstrcat(out, "\n   ");
 		}
-		sock_reps++;
+	} else {
+		if (!job_resrcs->core_bitmap)
+			goto line15;
 
-		bit_reps = job_resrcs->sockets_per_node[sock_inx] *
-			job_resrcs->cores_per_socket[sock_inx];
+		last  = bit_fls(job_resrcs->core_bitmap);
+		if (last == -1)
+			goto line15;
 
-		core_bitmap = bit_alloc(bit_reps);
-		if (core_bitmap == NULL) {
-			error("bit_alloc malloc failure");
-			hostlist_destroy(hl_last);
+		hl = hostlist_create(job_ptr->nodes);
+		if (!hl) {
+			error("slurm_sprint_job_info: hostlist_create: %s",
+			      job_ptr->nodes);
+			return NULL;
+		}
+		hl_last = hostlist_create(NULL);
+		if (!hl_last) {
+			error("slurm_sprint_job_info: hostlist_create: NULL");
 			hostlist_destroy(hl);
 			return NULL;
 		}
 
-		for (j=0; j < bit_reps; j++) {
-			if (bit_test(job_resrcs->core_bitmap, bit_inx))
-				bit_set(core_bitmap, j);
-			bit_inx++;
-		}
+		bit_inx = 0;
+		i = sock_inx = sock_reps = 0;
+		abs_node_inx = job_ptr->node_inx[i];
 
-		bit_fmt(tmp1, sizeof(tmp1), core_bitmap);
-		bit_free(core_bitmap);
-		host = hostlist_shift(hl);
+/*	tmp1[] stores the current cpu(s) allocated	*/
+		tmp2[0] = '\0';	/* stores last cpu(s) allocated */
+		for (rel_node_inx=0; rel_node_inx < job_resrcs->nhosts;
+		     rel_node_inx++) {
+
+			if (sock_reps >=
+			    job_resrcs->sock_core_rep_count[sock_inx]) {
+				sock_inx++;
+				sock_reps = 0;
+			}
+			sock_reps++;
+
+			bit_reps = job_resrcs->sockets_per_node[sock_inx] *
+				job_resrcs->cores_per_socket[sock_inx];
+
+			core_bitmap = bit_alloc(bit_reps);
+			if (core_bitmap == NULL) {
+				error("bit_alloc malloc failure");
+				hostlist_destroy(hl_last);
+				hostlist_destroy(hl);
+				return NULL;
+			}
+
+			for (j=0; j < bit_reps; j++) {
+				if (bit_test(job_resrcs->core_bitmap, bit_inx))
+					bit_set(core_bitmap, j);
+				bit_inx++;
+			}
+
+			bit_fmt(tmp1, sizeof(tmp1), core_bitmap);
+			FREE_NULL_BITMAP(core_bitmap);
+			host = hostlist_shift(hl);
 /*
  *		If the allocation values for this host are not the same as the
  *		last host, print the report of the last group of hosts that had
  *		identical allocation values.
  */
-		if (strcmp(tmp1, tmp2) ||
-		    (last_mem_alloc_ptr != job_resrcs->memory_allocated) ||
-		    (job_resrcs->memory_allocated &&
-		     (last_mem_alloc !=
-		      job_resrcs->memory_allocated[rel_node_inx]))) {
-			if (hostlist_count(hl_last)) {
-				hostlist_ranged_string(hl_last,
-						       sizeof(last_hosts),
-						       last_hosts);
-				snprintf(tmp_line, sizeof(tmp_line),
-					 "  Nodes=%s CPU_IDs=%s Mem=%u",
-					 last_hosts, tmp2, last_mem_alloc_ptr ?
-					 last_mem_alloc : 0);
-				xstrcat(out, tmp_line);
-				if (one_liner)
-					xstrcat(out, " ");
-				else
-					xstrcat(out, "\n   ");
+			if (strcmp(tmp1, tmp2) ||
+			    (last_mem_alloc_ptr != job_resrcs->memory_allocated) ||
+			    (job_resrcs->memory_allocated &&
+			     (last_mem_alloc !=
+			      job_resrcs->memory_allocated[rel_node_inx]))) {
+				if (hostlist_count(hl_last)) {
+					last_hosts = 
+						hostlist_ranged_string_xmalloc(
+						hl_last);
+					snprintf(tmp_line, sizeof(tmp_line),
+						 "  Nodes=%s CPU_IDs=%s Mem=%u",
+						 last_hosts, tmp2,
+						 last_mem_alloc_ptr ?
+						 last_mem_alloc : 0);
+					xfree(last_hosts);
+					xstrcat(out, tmp_line);
+					if (one_liner)
+						xstrcat(out, " ");
+					else
+						xstrcat(out, "\n   ");
 
-				hostlist_destroy(hl_last);
-				hl_last = hostlist_create(NULL);
-			}
-			strcpy(tmp2, tmp1);
-			last_mem_alloc_ptr = job_resrcs->memory_allocated;
-			if (last_mem_alloc_ptr)
-				last_mem_alloc = job_resrcs->
-					memory_allocated[rel_node_inx];
-			else
-				last_mem_alloc = NO_VAL;
-		}
-		hostlist_push_host(hl_last, host);
-		free(host);
-
-		if (bit_inx > last)
-			break;
-
-		if (abs_node_inx > job_ptr->node_inx[i+1]) {
-			i += 2;
-			abs_node_inx = job_ptr->node_inx[i];
-		} else {
-			abs_node_inx++;
-		}
-	}
-
-	if (hostlist_count(hl_last)) {
-		hostlist_ranged_string(hl_last, sizeof(last_hosts), last_hosts);
-		snprintf(tmp_line, sizeof(tmp_line),
-			 "  Nodes=%s CPU_IDs=%s Mem=%u", last_hosts, tmp2,
-			 last_mem_alloc_ptr ? last_mem_alloc : 0);
-		xstrcat(out, tmp_line);
-		if (one_liner)
-			xstrcat(out, " ");
-		else
-			xstrcat(out, "\n   ");
-	}
-	hostlist_destroy(hl);
-	hostlist_destroy(hl_last);
-#else
-	if ((job_resrcs->cpu_array_cnt > 0) &&
-	    (job_resrcs->cpu_array_value) &&
-	    (job_resrcs->cpu_array_reps)) {
-		int length = 0;
-		xstrcat(out, "CPUs=");
-		length += 10;
-		for (i = 0; i < job_resrcs->cpu_array_cnt; i++) {
-			if (length > 70) {
-				/* skip to last CPU group entry */
-			    	if (i < job_resrcs->cpu_array_cnt - 1) {
-			    		continue;
+					hostlist_destroy(hl_last);
+					hl_last = hostlist_create(NULL);
 				}
-				/* add elipsis before last entry */
-			    	xstrcat(out, "...,");
-				length += 4;
+				strcpy(tmp2, tmp1);
+				last_mem_alloc_ptr = job_resrcs->memory_allocated;
+				if (last_mem_alloc_ptr)
+					last_mem_alloc = job_resrcs->
+						memory_allocated[rel_node_inx];
+				else
+					last_mem_alloc = NO_VAL;
 			}
+			hostlist_push_host(hl_last, host);
+			free(host);
 
-			snprintf(tmp_line, sizeof(tmp_line), "%d",
-				 job_resrcs->cpus[i]);
-			xstrcat(out, tmp_line);
-			length += strlen(tmp_line);
-		    	if (job_resrcs->cpu_array_reps[i] > 1) {
-				snprintf(tmp_line, sizeof(tmp_line), "*%d",
-					 job_resrcs->cpu_array_reps[i]);
-				xstrcat(out, tmp_line);
-				length += strlen(tmp_line);
-			}
-			if (i < job_resrcs->cpu_array_cnt - 1) {
-				xstrcat(out, ",");
-				length++;
+			if (bit_inx > last)
+				break;
+
+			if (abs_node_inx > job_ptr->node_inx[i+1]) {
+				i += 2;
+				abs_node_inx = job_ptr->node_inx[i];
+			} else {
+				abs_node_inx++;
 			}
 		}
-		if (one_liner)
-			xstrcat(out, " ");
-		else
-			xstrcat(out, "\n   ");
-	}
-#endif
 
-	/****** Line 13 ******/
-line13:
-	if (job_ptr->job_min_memory & MEM_PER_CPU) {
-		job_ptr->job_min_memory &= (~MEM_PER_CPU);
-		tmp3_ptr = "CPU";
+		if (hostlist_count(hl_last)) {
+			last_hosts = hostlist_ranged_string_xmalloc(hl_last);
+			snprintf(tmp_line, sizeof(tmp_line),
+				 "  Nodes=%s CPU_IDs=%s Mem=%u",
+				 last_hosts, tmp2,
+				 last_mem_alloc_ptr ? last_mem_alloc : 0);
+			xfree(last_hosts);
+			xstrcat(out, tmp_line);
+			if (one_liner)
+				xstrcat(out, " ");
+			else
+				xstrcat(out, "\n   ");
+		}
+		hostlist_destroy(hl);
+		hostlist_destroy(hl_last);
+	}
+	/****** Line 15 ******/
+line15:
+	if (job_ptr->pn_min_memory & MEM_PER_CPU) {
+		job_ptr->pn_min_memory &= (~MEM_PER_CPU);
+		tmp6_ptr = "CPU";
 	} else
-		tmp3_ptr = "Node";
-#ifdef HAVE_BG
-	convert_num_unit((float)job_ptr->job_min_cpus, tmp1, sizeof(tmp1),
-			 UNIT_NONE);
-	snprintf(tmp_line, sizeof(tmp_line), "MinCPUsNode=%s",	tmp1);
-#else
-	snprintf(tmp_line, sizeof(tmp_line), "MinCPUsNode=%u",
-		 job_ptr->job_min_cpus);
-#endif
+		tmp6_ptr = "Node";
+
+	if(cluster_flags & CLUSTER_FLAG_BG) {
+		convert_num_unit((float)job_ptr->pn_min_cpus,
+				 tmp1, sizeof(tmp1), UNIT_NONE);
+		snprintf(tmp_line, sizeof(tmp_line), "MinCPUsNode=%s",	tmp1);
+	} else {
+		snprintf(tmp_line, sizeof(tmp_line), "MinCPUsNode=%u",
+			 job_ptr->pn_min_cpus);
+	}
+
 	xstrcat(out, tmp_line);
-	convert_num_unit((float)job_ptr->job_min_memory, tmp1, sizeof(tmp1),
+	convert_num_unit((float)job_ptr->pn_min_memory, tmp1, sizeof(tmp1),
 			 UNIT_MEGA);
-	convert_num_unit((float)job_ptr->job_min_tmp_disk, tmp2, sizeof(tmp2),
+	convert_num_unit((float)job_ptr->pn_min_tmp_disk, tmp2, sizeof(tmp2),
 			 UNIT_MEGA);
 	snprintf(tmp_line, sizeof(tmp_line),
 		 " MinMemory%s=%s MinTmpDiskNode=%s",
-		 tmp3_ptr, tmp1, tmp2);
+		 tmp6_ptr, tmp1, tmp2);
 	xstrcat(out, tmp_line);
 	if (one_liner)
 		xstrcat(out, " ");
 	else
 		xstrcat(out, "\n   ");
 
-	/****** Line 14 ******/
+	/****** Line 16 ******/
 	snprintf(tmp_line, sizeof(tmp_line),
-		 "Features=%s Reservation=%s",
-		 job_ptr->features, job_ptr->resv_name);
+		 "Features=%s Gres=%s Reservation=%s",
+		 job_ptr->features, job_ptr->gres, job_ptr->resv_name);
 	xstrcat(out, tmp_line);
-	if (one_liner)
-		xstrcat(out, " ");
-	else
-		xstrcat(out, "\n   ");
-
-	/****** Line 15 ******/
-	snprintf(tmp_line, sizeof(tmp_line),
-		 "Shared=%s Contiguous=%d Licenses=%s Network=%s",
-		 (job_ptr->shared == 0 ? "0" :
-		  job_ptr->shared == 1 ? "1" : "OK"),
-		 job_ptr->contiguous, job_ptr->licenses, job_ptr->network);
-	xstrcat(out, tmp_line);
-
-	/****** Line 16 (optional, batch only) ******/
-	if (job_ptr->batch_flag) {
-		if (one_liner)
-			xstrcat(out, " ");
-		else
-			xstrcat(out, "\n   ");
-		snprintf(tmp_line, sizeof(tmp_line), "Command=%s",
-			 job_ptr->command);
-		xstrcat(out, tmp_line);
-	}
 	if (one_liner)
 		xstrcat(out, " ");
 	else
 		xstrcat(out, "\n   ");
 
 	/****** Line 17 ******/
-	snprintf(tmp_line, sizeof(tmp_line), "WorkDir=%s", job_ptr->work_dir);
+	snprintf(tmp_line, sizeof(tmp_line),
+		 "Shared=%s Contiguous=%d Licenses=%s Network=%s",
+		 (job_ptr->shared == 0 ? "0" :
+		  job_ptr->shared == 1 ? "1" : "OK"),
+		 job_ptr->contiguous, job_ptr->licenses, job_ptr->network);
+	xstrcat(out, tmp_line);
+	if (one_liner)
+		xstrcat(out, " ");
+	else
+		xstrcat(out, "\n   ");
+
+	/****** Line 18 ******/
+	snprintf(tmp_line, sizeof(tmp_line), "Command=%s",
+		 job_ptr->command);
+	xstrcat(out, tmp_line);
+	if (one_liner)
+		xstrcat(out, " ");
+	else
+		xstrcat(out, "\n   ");
+
+	/****** Line 19 ******/
+	snprintf(tmp_line, sizeof(tmp_line), "WorkDir=%s",
+		 job_ptr->work_dir);
 	xstrcat(out, tmp_line);
 
-#ifdef HAVE_BG
-	/****** Line 18 (optional) ******/
-	select_g_select_jobinfo_sprint(job_ptr->select_jobinfo,
-				       select_buf, sizeof(select_buf),
-				       SELECT_PRINT_BG_ID);
-	if (select_buf[0] != '\0') {
-		if (one_liner)
-			xstrcat(out, " ");
-		else
-			xstrcat(out, "\n   ");
-		snprintf(tmp_line, sizeof(tmp_line),
-			 "Block_ID=%s", select_buf);
-		xstrcat(out, tmp_line);
+	if(cluster_flags & CLUSTER_FLAG_BG) {
+		/****** Line 20 (optional) ******/
+		select_g_select_jobinfo_sprint(job_ptr->select_jobinfo,
+					       select_buf, sizeof(select_buf),
+					       SELECT_PRINT_BG_ID);
+		if (select_buf[0] != '\0') {
+			if (one_liner)
+				xstrcat(out, " ");
+			else
+				xstrcat(out, "\n   ");
+			snprintf(tmp_line, sizeof(tmp_line),
+				 "Block_ID=%s", select_buf);
+			xstrcat(out, tmp_line);
+		}
+
+		/****** Line 21 (optional) ******/
+		select_g_select_jobinfo_sprint(job_ptr->select_jobinfo,
+					       select_buf, sizeof(select_buf),
+					       SELECT_PRINT_MIXED_SHORT);
+		if (select_buf[0] != '\0') {
+			if (one_liner)
+				xstrcat(out, " ");
+			else
+				xstrcat(out, "\n   ");
+			xstrcat(out, select_buf);
+		}
+
+		if(cluster_flags & CLUSTER_FLAG_BGL) {
+			/****** Line 22 (optional) ******/
+			select_g_select_jobinfo_sprint(
+				job_ptr->select_jobinfo,
+				select_buf, sizeof(select_buf),
+				SELECT_PRINT_BLRTS_IMAGE);
+			if (select_buf[0] != '\0') {
+				if (one_liner)
+					xstrcat(out, " ");
+				else
+					xstrcat(out, "\n   ");
+				snprintf(tmp_line, sizeof(tmp_line),
+					 "BlrtsImage=%s", select_buf);
+				xstrcat(out, tmp_line);
+			}
+		}
+		/****** Line 23 (optional) ******/
+		select_g_select_jobinfo_sprint(job_ptr->select_jobinfo,
+					       select_buf, sizeof(select_buf),
+					       SELECT_PRINT_LINUX_IMAGE);
+		if (select_buf[0] != '\0') {
+			if (one_liner)
+				xstrcat(out, " ");
+			else
+				xstrcat(out, "\n   ");
+			if(cluster_flags & CLUSTER_FLAG_BGL)
+				snprintf(tmp_line, sizeof(tmp_line),
+					 "LinuxImage=%s", select_buf);
+			else
+				snprintf(tmp_line, sizeof(tmp_line),
+					 "CnloadImage=%s", select_buf);
+
+			xstrcat(out, tmp_line);
+		}
+		/****** Line 24 (optional) ******/
+		select_g_select_jobinfo_sprint(job_ptr->select_jobinfo,
+					       select_buf, sizeof(select_buf),
+					       SELECT_PRINT_MLOADER_IMAGE);
+		if (select_buf[0] != '\0') {
+			if (one_liner)
+				xstrcat(out, " ");
+			else
+				xstrcat(out, "\n   ");
+			snprintf(tmp_line, sizeof(tmp_line),
+				 "MloaderImage=%s", select_buf);
+			xstrcat(out, tmp_line);
+		}
+		/****** Line 25 (optional) ******/
+		select_g_select_jobinfo_sprint(job_ptr->select_jobinfo,
+					       select_buf, sizeof(select_buf),
+					       SELECT_PRINT_RAMDISK_IMAGE);
+		if (select_buf[0] != '\0') {
+			if (one_liner)
+				xstrcat(out, " ");
+			else
+				xstrcat(out, "\n   ");
+			if(cluster_flags & CLUSTER_FLAG_BGL)
+				snprintf(tmp_line, sizeof(tmp_line),
+					 "RamDiskImage=%s", select_buf);
+			else
+				snprintf(tmp_line, sizeof(tmp_line),
+					 "IoloadImage=%s", select_buf);
+			xstrcat(out, tmp_line);
+		}
 	}
 
-	/****** Line 19 (optional) ******/
-	select_g_select_jobinfo_sprint(job_ptr->select_jobinfo,
-				       select_buf, sizeof(select_buf),
-				       SELECT_PRINT_MIXED_SHORT);
-	if (select_buf[0] != '\0') {
-		if (one_liner)
-			xstrcat(out, " ");
-		else
-			xstrcat(out, "\n   ");
-		xstrcat(out, select_buf);
-	}
-
-#ifdef HAVE_BGL
-	/****** Line 20 (optional) ******/
-	select_g_select_jobinfo_sprint(job_ptr->select_jobinfo,
-				       select_buf, sizeof(select_buf),
-				       SELECT_PRINT_BLRTS_IMAGE);
-	if (select_buf[0] != '\0') {
-		if (one_liner)
-			xstrcat(out, " ");
-		else
-			xstrcat(out, "\n   ");
-		snprintf(tmp_line, sizeof(tmp_line),
-			 "BlrtsImage=%s", select_buf);
-		xstrcat(out, tmp_line);
-	}
-#endif
-	/****** Line 21 (optional) ******/
-	select_g_select_jobinfo_sprint(job_ptr->select_jobinfo,
-				select_buf, sizeof(select_buf),
-				SELECT_PRINT_LINUX_IMAGE);
-	if (select_buf[0] != '\0') {
-		if (one_liner)
-			xstrcat(out, " ");
-		else
-			xstrcat(out, "\n   ");
-#ifdef HAVE_BGL
-		snprintf(tmp_line, sizeof(tmp_line),
-			 "LinuxImage=%s", select_buf);
-#else
-		snprintf(tmp_line, sizeof(tmp_line),
-			 "CnloadImage=%s", select_buf);
-#endif
-		xstrcat(out, tmp_line);
-	}
-	/****** Line 22 (optional) ******/
-	select_g_select_jobinfo_sprint(job_ptr->select_jobinfo,
-				select_buf, sizeof(select_buf),
-				SELECT_PRINT_MLOADER_IMAGE);
-	if (select_buf[0] != '\0') {
-		if (one_liner)
-			xstrcat(out, " ");
-		else
-			xstrcat(out, "\n   ");
-		snprintf(tmp_line, sizeof(tmp_line),
-			 "MloaderImage=%s", select_buf);
-		xstrcat(out, tmp_line);
-	}
-	/****** Line 23 (optional) ******/
-	select_g_select_jobinfo_sprint(job_ptr->select_jobinfo,
-				select_buf, sizeof(select_buf),
-				SELECT_PRINT_RAMDISK_IMAGE);
-	if (select_buf[0] != '\0') {
-		if (one_liner)
-			xstrcat(out, " ");
-		else
-			xstrcat(out, "\n   ");
-#ifdef HAVE_BGL
-		snprintf(tmp_line, sizeof(tmp_line),
-			 "RamDiskImage=%s", select_buf);
-#else
-		snprintf(tmp_line, sizeof(tmp_line),
-			 "IoloadImage=%s", select_buf);
-#endif
-		xstrcat(out, tmp_line);
-	}
-#endif
-
-	/****** Line 24 (optional) ******/
+	/****** Line 26 (optional) ******/
 	if (job_ptr->comment) {
 		if (one_liner)
 			xstrcat(out, " ");
@@ -718,7 +795,7 @@ line13:
  */
 extern int
 slurm_load_jobs (time_t update_time, job_info_msg_t **resp,
-		uint16_t show_flags)
+		 uint16_t show_flags)
 {
 	int rc;
 	slurm_msg_t resp_msg;
@@ -813,21 +890,35 @@ slurm_pid2jobid (pid_t job_pid, uint32_t *jobid)
 	slurm_msg_t req_msg;
 	slurm_msg_t resp_msg;
 	job_id_request_msg_t req;
-	char this_host[256], *this_addr;
+	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
+	char *this_addr;
 
 	slurm_msg_t_init(&req_msg);
 	slurm_msg_t_init(&resp_msg);
 
-	/*
-	 *  Set request message address to slurmd on localhost
-	 */
-	gethostname_short(this_host, sizeof(this_host));
-	this_addr = slurm_conf_get_nodeaddr(this_host);
-	if (this_addr == NULL)
-		this_addr = xstrdup("localhost");
-	slurm_set_addr(&req_msg.address, (uint16_t)slurm_get_slurmd_port(),
-		       this_addr);
-	xfree(this_addr);
+	if(cluster_flags & CLUSTER_FLAG_MULTSD) {
+		if((this_addr = getenv("SLURMD_NODENAME"))) {
+			slurm_conf_get_addr(this_addr, &req_msg.address);
+		} else {
+			this_addr = "localhost";
+			slurm_set_addr(&req_msg.address,
+				       (uint16_t)slurm_get_slurmd_port(),
+				       this_addr);
+		}
+	} else {
+		char this_host[256];
+		/*
+		 *  Set request message address to slurmd on localhost
+		 */
+		gethostname_short(this_host, sizeof(this_host));
+		this_addr = slurm_conf_get_nodeaddr(this_host);
+		if (this_addr == NULL)
+			this_addr = xstrdup("localhost");
+		slurm_set_addr(&req_msg.address,
+			       (uint16_t)slurm_get_slurmd_port(),
+			       this_addr);
+		xfree(this_addr);
+	}
 
 	req.job_pid      = job_pid;
 	req_msg.msg_type = REQUEST_JOB_ID;
@@ -890,7 +981,8 @@ extern int32_t islurm_get_rem_time__(uint32_t *jobid)
 	int32_t rc;
 
 	if ((jobid == NULL)
-	||  (slurm_get_end_time(*jobid, &end_time) != SLURM_SUCCESS))
+	    ||  (slurm_get_end_time(*jobid, &end_time)
+		 != SLURM_SUCCESS))
 		return 0;
 
 	rc = difftime(end_time, now);
@@ -963,7 +1055,8 @@ slurm_get_end_time(uint32_t jobid, time_t *end_time_ptr)
 	req_msg.msg_type   = REQUEST_JOB_END_TIME;
 	req_msg.data       = &job_msg;
 
-	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg) < 0)
+	if (slurm_send_recv_controller_msg(
+		    &req_msg, &resp_msg) < 0)
 		return SLURM_ERROR;
 
 	switch (resp_msg.msg_type) {
@@ -1013,7 +1106,7 @@ extern int slurm_job_node_ready(uint32_t job_id)
 	msg.job_id   = job_id;
 
 	if (slurm_send_recv_controller_msg(&req, &resp) < 0)
-		return -1;
+		return READY_JOB_ERROR;
 
 	if (resp.msg_type == RESPONSE_JOB_READY) {
 		rc = ((return_code_msg_t *) resp.data)->return_code;
@@ -1021,8 +1114,8 @@ extern int slurm_job_node_ready(uint32_t job_id)
 	} else if (resp.msg_type == RESPONSE_SLURM_RC) {
 		int job_rc = ((return_code_msg_t *) resp.data) ->
 				return_code;
-		if ((job_rc == ESLURM_INVALID_PARTITION_NAME)
-		||  (job_rc == ESLURM_INVALID_JOB_ID))
+		if ((job_rc == ESLURM_INVALID_PARTITION_NAME) ||
+		    (job_rc == ESLURM_INVALID_JOB_ID))
 			rc = READY_JOB_FATAL;
 		else	/* EAGAIN */
 			rc = READY_JOB_ERROR;
@@ -1055,15 +1148,19 @@ extern int slurm_job_cpus_allocated_on_node_id(
 	return job_resrcs_ptr->cpu_array_value[i];
 }
 
-extern int slurm_job_cpus_allocated_on_node(
-	job_resources_t *job_resrcs_ptr, const char *node)
+extern int slurm_job_cpus_allocated_on_node(job_resources_t *job_resrcs_ptr,
+					    const char *node)
 {
+	hostlist_t node_hl;
 	int node_id;
 
-	if (!job_resrcs_ptr || !node || !job_resrcs_ptr->node_hl)
+	if (!job_resrcs_ptr || !node || !job_resrcs_ptr->nodes)
 		slurm_seterrno_ret(EINVAL);
 
-	if ((node_id = hostlist_find(job_resrcs_ptr->node_hl, node)) == -1)
+	node_hl = hostlist_create(job_resrcs_ptr->nodes);
+	node_id = hostlist_find(node_hl, node);
+	hostlist_destroy(node_hl);
+	if (node_id == -1)
 		return (0); /* No cpus allocated on this node */
 
 	return slurm_job_cpus_allocated_on_node_id(job_resrcs_ptr, node_id);

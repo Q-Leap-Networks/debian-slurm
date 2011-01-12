@@ -2,7 +2,7 @@
  *  srun_comm.c - srun communications
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -57,7 +57,7 @@
  * we don't want to clog the system up with messages destined for
  * defunct srun processes
  */
-static void _srun_agent_launch(slurm_addr *addr, char *host,
+static void _srun_agent_launch(slurm_addr_t *addr, char *host,
 		slurm_msg_type_t type, void *msg_args)
 {
 	agent_arg_t *agent_args = xmalloc(sizeof(agent_arg_t));
@@ -83,7 +83,7 @@ extern void srun_allocate (uint32_t job_id)
 	if (job_ptr && job_ptr->alloc_resp_port && job_ptr->alloc_node &&
 	    job_ptr->resp_host && job_ptr->job_resrcs &&
 	    job_ptr->job_resrcs->cpu_array_cnt) {
-		slurm_addr * addr;
+		slurm_addr_t * addr;
 		resource_allocation_response_msg_t *msg_arg;
 		job_resources_t *job_resrcs_ptr = job_ptr->job_resrcs;
 
@@ -121,7 +121,7 @@ extern void srun_allocate_abort(struct job_record *job_ptr)
 {
 	if (job_ptr && job_ptr->alloc_resp_port && job_ptr->alloc_node
 	&&  job_ptr->resp_host) {
-		slurm_addr * addr;
+		slurm_addr_t * addr;
 		srun_job_complete_msg_t *msg_arg;
 		addr = xmalloc(sizeof(struct sockaddr_in));
 		slurm_set_addr(addr, job_ptr->alloc_resp_port,
@@ -145,7 +145,7 @@ extern void srun_node_fail (uint32_t job_id, char *node_name)
 	struct node_record *node_ptr;
 	struct job_record *job_ptr = find_job_record (job_id);
 	int bit_position;
-	slurm_addr * addr;
+	slurm_addr_t * addr;
 	srun_node_fail_msg_t *msg_arg;
 	ListIterator step_iterator;
 	struct step_record *step_ptr;
@@ -196,9 +196,10 @@ extern void srun_ping (void)
 {
 	ListIterator job_iterator;
 	struct job_record *job_ptr;
-	slurm_addr * addr;
+	slurm_addr_t * addr;
 	time_t now = time(NULL);
-	time_t old = now - (slurmctld_conf.inactive_limit / 2);
+	time_t old = now - (slurmctld_conf.inactive_limit / 3) +
+			   slurmctld_conf.msg_timeout + 1;
 	srun_ping_msg_t *msg_arg;
 
 	if (slurmctld_conf.inactive_limit == 0)
@@ -233,7 +234,7 @@ extern void srun_ping (void)
  */
 extern void srun_timeout (struct job_record *job_ptr)
 {
-	slurm_addr * addr;
+	slurm_addr_t * addr;
 	srun_timeout_msg_t *msg_arg;
 	ListIterator step_iterator;
 	struct step_record *step_ptr;
@@ -277,17 +278,17 @@ extern void srun_timeout (struct job_record *job_ptr)
 /*
  * srun_user_message - Send arbitrary message to an srun job (no job steps)
  */
-extern void srun_user_message(struct job_record *job_ptr, char *msg)
+extern int srun_user_message(struct job_record *job_ptr, char *msg)
 {
-	slurm_addr * addr;
+	slurm_addr_t * addr;
 	srun_user_msg_t *msg_arg;
 
 	xassert(job_ptr);
 	if (!IS_JOB_PENDING(job_ptr) && !IS_JOB_RUNNING(job_ptr))
-		return;
+		return ESLURM_ALREADY_DONE;
 
-	if (job_ptr->other_port
-	&&  job_ptr->resp_host && job_ptr->resp_host[0]) {
+	if (job_ptr->other_port &&
+	    job_ptr->resp_host && job_ptr->resp_host[0]) {
 		addr = xmalloc(sizeof(struct sockaddr_in));
 		slurm_set_addr(addr, job_ptr->other_port, job_ptr->resp_host);
 		msg_arg = xmalloc(sizeof(srun_user_msg_t));
@@ -295,7 +296,30 @@ extern void srun_user_message(struct job_record *job_ptr, char *msg)
 		msg_arg->msg    = xstrdup(msg);
 		_srun_agent_launch(addr, job_ptr->resp_host, SRUN_USER_MSG,
 				   msg_arg);
+		return SLURM_SUCCESS;
+	} else if (job_ptr->batch_flag && IS_JOB_RUNNING(job_ptr)) {
+		struct node_record *node_ptr;
+		job_notify_msg_t *notify_msg_ptr;
+		agent_arg_t *agent_arg_ptr;
+
+		node_ptr = find_first_node_record(job_ptr->node_bitmap);
+		if (node_ptr == NULL)
+			return ESLURM_DISABLED;	/* no allocated nodes */
+		notify_msg_ptr = (job_notify_msg_t *) 
+				 xmalloc(sizeof(job_notify_msg_t));
+		notify_msg_ptr->job_id = job_ptr->job_id;
+		notify_msg_ptr->message = xstrdup(msg);
+		agent_arg_ptr = (agent_arg_t *) xmalloc(sizeof(agent_arg_t));
+		agent_arg_ptr->node_count = 1;
+		agent_arg_ptr->retry = 0;
+		agent_arg_ptr->hostlist = hostlist_create(node_ptr->name);
+		agent_arg_ptr->msg_type = REQUEST_JOB_NOTIFY;
+		agent_arg_ptr->msg_args = (void *) notify_msg_ptr;
+		/* Launch the RPC via agent */
+		agent_queue_request(agent_arg_ptr);
+		return SLURM_SUCCESS;
 	}
+	return ESLURM_DISABLED;
 }
 
 /*
@@ -304,7 +328,7 @@ extern void srun_user_message(struct job_record *job_ptr, char *msg)
  */
 extern void srun_job_complete (struct job_record *job_ptr)
 {
-	slurm_addr * addr;
+	slurm_addr_t * addr;
 	srun_job_complete_msg_t *msg_arg;
 	ListIterator step_iterator;
 	struct step_record *step_ptr;
@@ -336,7 +360,7 @@ extern void srun_job_complete (struct job_record *job_ptr)
  */
 extern void srun_step_complete (struct step_record *step_ptr)
 {
-	slurm_addr * addr;
+	slurm_addr_t * addr;
 	srun_job_complete_msg_t *msg_arg;
 
 	xassert(step_ptr);
@@ -360,7 +384,7 @@ extern void srun_step_complete (struct step_record *step_ptr)
 extern void srun_step_missing (struct step_record *step_ptr,
 			       char *node_list)
 {
-	slurm_addr * addr;
+	slurm_addr_t * addr;
 	srun_step_missing_msg_t *msg_arg;
 
 	xassert(step_ptr);
@@ -384,7 +408,7 @@ extern void srun_step_missing (struct step_record *step_ptr,
  */
 extern void srun_exec(struct step_record *step_ptr, char **argv)
 {
-	slurm_addr * addr;
+	slurm_addr_t * addr;
 	srun_exec_msg_t *msg_arg;
 	int cnt = 1, i;
 

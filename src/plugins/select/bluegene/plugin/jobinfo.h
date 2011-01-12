@@ -58,10 +58,7 @@ struct select_jobinfo {
 	uint32_t node_cnt;      /* how many cnodes in block running job */
 	uint16_t altered;       /* see if we have altered this job
 				 * or not yet */
-	uint32_t max_cpus;	/* maximum processors to use */
-#ifdef HAVE_BGL
 	char *blrtsimage;       /* BlrtsImage for this block */
-#endif
 	char *linuximage;       /* LinuxImage for this block */
 	char *mloaderimage;     /* mloaderImage for this block */
 	char *ramdiskimage;     /* RamDiskImage for this block */
@@ -91,7 +88,7 @@ extern int set_select_jobinfo(select_jobinfo_t *jobinfo,
  * IN jobinfo  - updated select job credential
  * IN data_type - type of data to enter into job credential
  * OUT data - the data to get from job credential, caller must xfree
- *	data for data_tyep == SELECT_JOBDATA_BLOCK_ID
+ *	data for data_type == SELECT_JOBDATA_BLOCK_ID
  */
 extern int get_select_jobinfo(select_jobinfo_t *jobinfo,
 			      enum select_jobdata_type data_type, void *data);
@@ -106,17 +103,21 @@ extern select_jobinfo_t *copy_select_jobinfo(select_jobinfo_t *jobinfo);
 /* pack a select job credential into a buffer in machine independent form
  * IN jobinfo  - the select job credential to be saved
  * OUT buffer  - buffer with select credential appended
+ * IN protocol_version - slurm protocol version of client
  * RET         - slurm error code
  */
-extern int  pack_select_jobinfo(select_jobinfo_t *jobinfo, Buf buffer);
+extern int  pack_select_jobinfo(select_jobinfo_t *jobinfo, Buf buffer,
+				uint16_t protocol_version);
 
 /* unpack a select job credential from a buffer
  * OUT jobinfo - the select job credential read
  * IN  buffer  - buffer with select credential read from current pointer loc
+ * IN protocol_version - slurm protocol version of client
  * RET         - slurm error code
  * NOTE: returned value must be freed using free_jobinfo
  */
-extern int unpack_select_jobinfo(select_jobinfo_t **jobinfo_pptr, Buf buffer);
+extern int unpack_select_jobinfo(select_jobinfo_t **jobinfo_pptr, Buf buffer,
+				 uint16_t protocol_version);
 
 /* write select job credential to a string
  * IN jobinfo - a select job credential

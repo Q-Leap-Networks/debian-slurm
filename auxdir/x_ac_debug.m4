@@ -1,5 +1,5 @@
 ##*****************************************************************************
-#  $Id: x_ac_debug.m4 15340 2008-10-07 21:21:53Z da $
+#  $Id: x_ac_debug.m4 21164 2010-09-15 22:47:29Z jette $
 ##*****************************************************************************
 #  AUTHOR:
 #    Chris Dunlap <cdunlap@llnl.gov>
@@ -9,7 +9,8 @@
 #
 #  DESCRIPTION:
 #    Add support for the "--enable-debug", "--enable-memory-leak-debug",
-#    and "--enable-front-end" configure script options.
+#    "--disable-partial-attach" and "--enable-front-end" configure script 
+#    options.
 #    If debugging is enabled, CFLAGS will be prepended with the debug flags.
 #    The NDEBUG macro (used by assert) will also be set accordingly.
 #
@@ -72,6 +73,23 @@ AC_DEFUN([X_AC_DEBUG], [
     AC_DEFINE(HAVE_FRONT_END, 1, [Define to 1 if running slurmd on front-end only])
   fi
   AC_MSG_RESULT([${x_ac_front_end=no}])
+
+  AC_MSG_CHECKING([whether debugger partial attach enabled])
+  AC_ARG_ENABLE(
+    [partial-attach],
+    AS_HELP_STRING(--disable-partial-attach,disable debugger partial task attach support),
+    [ case "$enableval" in
+        yes) x_ac_partial_attach=yes ;;
+         no) x_ac_partial_attach=no ;;
+          *) AC_MSG_RESULT([doh!])
+             AC_MSG_ERROR([bad value "$enableval" for --enable-partial-leak-attach]) ;;
+      esac
+    ]
+  )
+  if test "$x_ac_partial_attach" != "no"; then
+    AC_DEFINE(DEBUGGER_PARTIAL_ATTACH, 1, [Define to 1 for debugger partial task attach support.])
+  fi
+  AC_MSG_RESULT([${x_ac_partial_attach=no}])
 
   ]
 )

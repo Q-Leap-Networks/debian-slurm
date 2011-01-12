@@ -1,9 +1,9 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/slurmstepd_job.h  slurmd_job_t definition
- *  $Id: slurmstepd_job.h 19917 2010-03-30 16:41:15Z da $
+ *  $Id: slurmstepd_job.h 21024 2010-08-26 21:54:00Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
@@ -68,8 +68,8 @@ typedef struct srun_key {
 
 typedef struct srun_info {
 	srun_key_t *key;	   /* srun key for IO verification         */
-	slurm_addr resp_addr;	   /* response addr for task exit msg      */
-	slurm_addr ioaddr;         /* Address to connect on for normal I/O.
+	slurm_addr_t resp_addr;	   /* response addr for task exit msg      */
+	slurm_addr_t ioaddr;       /* Address to connect on for normal I/O.
 				      Spawn IO uses messages to the normal
 				      resp_addr. */
 } srun_info_t;
@@ -115,12 +115,13 @@ typedef struct slurmd_job {
 	uint32_t       jobid;  /* Current SLURM job id                      */
 	uint32_t       stepid; /* Current step id (or NO_VAL)               */
 	uint32_t       nnodes; /* number of nodes in current job            */
-	uint32_t       nprocs; /* total number of processes in current job  */
+	uint32_t       ntasks; /* total number of tasks in current job  */
 	uint32_t       nodeid; /* relative position of this node in job     */
-	uint32_t       ntasks; /* number of tasks on *this* node            */
+	uint32_t       node_tasks; /* number of tasks on *this* node        */
 	uint32_t       cpus_per_task;	/* number of cpus desired per task  */
 	uint32_t       debug;  /* debug level for job slurmd                */
 	uint32_t       job_mem;  /* MB of memory reserved for the job       */
+	uint32_t       step_mem; /* MB of memory reserved for the step      */
 	uint16_t       cpus;   /* number of cpus to use for this job        */
 	uint16_t       argc;   /* number of commandline arguments           */
 	char         **env;    /* job environment                           */
@@ -199,9 +200,12 @@ typedef struct slurmd_job {
 	char          *ckpt_dir;
 	time_t         ckpt_timestamp;
 	char          *restart_dir;	/* restart from context */
-	char          *resv_id;		/* Cray/BASIL reservation ID	*/
+	uint32_t       resv_id;		/* Cray/BASIL reservation ID	*/
 	uint16_t       restart_cnt;	/* batch job restart count	*/
-	char	      *alloc_cores;	/* needed by the SPANK cpuset plugin */
+	char	      *job_alloc_cores;	/* needed by the SPANK cpuset plugin */
+	char	      *step_alloc_cores;/* needed by the SPANK cpuset plugin */
+	List           job_gres_list;	/* Needed by GRES plugin */
+	List           step_gres_list;	/* Needed by GRES plugin */
 } slurmd_job_t;
 
 
@@ -212,8 +216,8 @@ void job_kill(slurmd_job_t *job, int signal);
 
 void job_destroy(slurmd_job_t *job);
 
-struct srun_info * srun_info_create(slurm_cred_t *cred, slurm_addr *respaddr,
-				    slurm_addr *ioaddr);
+struct srun_info * srun_info_create(slurm_cred_t *cred, slurm_addr_t *respaddr,
+				    slurm_addr_t *ioaddr);
 
 void  srun_info_destroy(struct srun_info *srun);
 
@@ -229,7 +233,7 @@ static inline slurmd_task_info_t *
 job_task_info_by_pid (slurmd_job_t *job, pid_t pid)
 {
 	int i;
-	for (i = 0; i < job->ntasks; i++) {
+	for (i = 0; i < job->node_tasks; i++) {
 		if (job->task[i]->pid == pid)
 			return (job->task[i]);
 	}

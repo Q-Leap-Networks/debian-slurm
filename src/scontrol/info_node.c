@@ -44,7 +44,6 @@ extern int
 scontrol_load_nodes (node_info_msg_t ** node_buffer_pptr, uint16_t show_flags)
 {
 	int error_code;
-	static node_info_msg_t *old_node_info_ptr = NULL;
 	static int last_show_flags = 0xffff;
 	node_info_msg_t *node_info_ptr = NULL;
 
@@ -52,7 +51,7 @@ scontrol_load_nodes (node_info_msg_t ** node_buffer_pptr, uint16_t show_flags)
 		if (last_show_flags != show_flags)
 			old_node_info_ptr->last_update = (time_t) 0;
 		error_code = slurm_load_node (old_node_info_ptr->last_update,
-			&node_info_ptr, show_flags);
+					      &node_info_ptr, show_flags);
 		if (error_code == SLURM_SUCCESS)
 			slurm_free_node_info_msg (old_node_info_ptr);
 		else if (slurm_get_errno () == SLURM_NO_CHANGE_IN_DATA) {
@@ -64,7 +63,7 @@ scontrol_load_nodes (node_info_msg_t ** node_buffer_pptr, uint16_t show_flags)
 	}
 	else
 		error_code = slurm_load_node ((time_t) NULL, &node_info_ptr,
-				show_flags);
+					      show_flags);
 
 	if (error_code == SLURM_SUCCESS) {
 		old_node_info_ptr = node_info_ptr;
@@ -94,8 +93,8 @@ scontrol_print_node (char *node_name, node_info_msg_t  * node_buffer_ptr)
 		if (node_name) {
 			i = (j + last_inx) % node_buffer_ptr->record_count;
 			if ((node_buffer_ptr->node_array[i].name == NULL) ||
-			    strcmp(node_name,
-				   node_buffer_ptr->node_array[i].name))
+			    strcmp (node_name,
+				    node_buffer_ptr->node_array[i].name))
 				continue;
 		} else if (node_buffer_ptr->node_array[j].name == NULL)
 			continue;

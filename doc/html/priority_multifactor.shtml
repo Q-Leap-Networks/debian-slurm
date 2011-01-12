@@ -142,7 +142,7 @@ computing resources described below.
 <P> The fair-share hierarchy represents the portions of the computing resource that have been allocated to multiple projects.  These allocations are assigned to an account.  There can be multiple levels of allocations made as allocations of a given account are further divided to sub-accounts:</P>
 
 <div class="figure">
-  <img src=AllocationPies.gif width=400 ><BR>
+  <img src=allocation_pies.gif width=400 ><BR>
   Figure 1. Machine Allocation
 </div>
 
@@ -265,7 +265,7 @@ Where:
 <P> The simplified formula for calculating the fair-share factor for usage that spans multiple time periods and subject to a half-life decay is:</P>
 
 <PRE>
-	F = (S - U + 1) / 2
+	F = 2**(-U/S)
 </PRE>
 
 Where:
@@ -292,7 +292,7 @@ Where:
 <P> In the example below, when user 3 submits their first job using account C, they will want their job's priority to reflect all the resources delivered to account B.  They do not care that user 1 has been using up a significant portion of the cycles allocated to account B and user 2 has yet to run a job out of account B.  If user 2 submits a job using account B and user 3 submits a job using account C, user 3 expects their job to be scheduled before the job from user 2.</P>
 
 <div class="figure">
-  <img src=UsagePies.gif width=400 ><BR>
+  <img src=usage_pies.gif width=400 ><BR>
   Figure 2. Usage Example
 </div>
 
@@ -303,7 +303,7 @@ Where:
 <P> The actual formula used is a refinement of the formula presented above:</P>
 
 <PRE>
-	F = (S - U<sub>E</sub> + 1) / 2
+	F = 2**(-U<sub>E</sub>/S)
 </PRE>
 
 <P> The difference is that the usage term is effective usage, which is defined as:</P>
@@ -334,6 +334,19 @@ Where:
 
 <P> Plugging in the effective usage into the fair-share formula above yields a fair-share factor that reflects the aggregated usage charged to each of the accounts in the fair-share hierarchy.</P>
 
+<h3>FairShare=parent</h3>
+
+<P>It is possible to disable the fairshare at certain levels of the fair share
+hierarchy by using the <code>FairShare=parent</code> option of sacctmgr.
+For users and accounts with <code>FairShare=parent</code> the normalized shares
+and effective usage values from the parent in the hierarchy will be used when
+calculating fairshare priories.</P>
+
+<P>If all users in an account is configured with <code>FairShare=parent</code>
+the result is that all the jobs drawing from that account will get the same
+fairshare priority, based on the accounts total usage. No additional fairness
+is added based on users individual usage.</P>
+
 <h3>Example</h3>
 
 <P> The following example demonstrates the effective usage calculations and resultant fair-share factors. (See Figure 3 below.)</P>
@@ -353,7 +366,7 @@ Where:
 <P> The actual usage charged to each account is represented by the solid arrows.  The actual usage charged to each account is summed as one goes up the tree.  Account C's usage is the sum of the usage of Users 2 and 3; account A's actual usage is the sum of its children, accounts B and C.</P>
 
 <div class="figure">
-  <img src=ExampleUsage.gif width=400 ><BR>
+  <img src=example_usage.gif width=400 ><BR>
   Figure 3. Fair-share Example
 </div>
 
@@ -396,17 +409,17 @@ Account A's effective usage is therefore equal to .45.  Account D's effective us
 <P> Using the SLURM fair-share formula,</P>
 
 <PRE>
-	F = (S - U<sub>E</sub> + 1) / 2
+	F = 2**(-U<sub>E</sub>/S)
 </PRE>
 
 <P> the fair-share factor for each user is:</P>
 
 <UL>
-<LI> User 1 fair-share factor: (.3 - .3875 + 1) / 2 =  0.45625
-<LI> User 2 fair-share factor: (.05 - .275 + 1) / 2 =  0.3875
-<LI> User 3 fair-share factor: (.05 - .15 + 1) / 2 =  0.45
-<LI> User 4 fair-share factor: (.25 - .25 + 1) / 2 =  0.5
-<LI> User 5 fair-share factor: (.35 - .1458 + 1) / 2 =  0.6021
+<LI> User 1 fair-share factor: 2**(-.3875 / .3) =  0.408479
+<LI> User 2 fair-share factor: 2**(-.275 / .05) =  0.022097
+<LI> User 3 fair-share factor: 2**(-.15 / .05) =   0.125000
+<LI> User 4 fair-share factor: 2**(-.25 / .25) =   0.500000
+<LI> User 5 fair-share factor: 2**(-.1458 / .35) = 0.749154
 </UL>
 
 <P> From this example, once can see that users 1,2, and 3 are over-serviced while user 5 is under-serviced.  Even though user 3 has yet to submit a job, his/her fair-share factor is negatively influenced by the jobs users 1 and 2 have run.</P>
@@ -545,7 +558,7 @@ PriorityWeightQOS=0 # don't use the qos factor
 </PRE>
 
 <!-------------------------------------------------------------------------->
-<p style="text-align:center;">Last modified 9 Dec 2009</p>
+<p style="text-align:center;">Last modified 2 November 2010</p>
 
 <!--#include virtual="footer.txt"-->
 

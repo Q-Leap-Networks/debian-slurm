@@ -1,5 +1,5 @@
 /*
- * $Id: runqsw.c 3645 2004-05-13 17:08:35Z jette $
+ * $Id: runqsw.c 21149 2010-09-14 22:04:42Z da $
  * $Source$
  *
  * Demo the routines in common/qsw.c
@@ -29,6 +29,8 @@ bool pack_jobinfo = false;
  * XXX Space is allocated on the heap and will never be reclaimed.
  * Example: setenvf("RMS_RANK=%d", rank);
  */
+static int
+setenvf(const char *fmt, ...) __attribute__ ((format (printf, 1, 2)));
 static int
 setenvf(const char *fmt, ...) 
 {

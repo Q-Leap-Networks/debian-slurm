@@ -80,7 +80,7 @@ typedef struct allocation_info {
 	uint32_t                num_cpu_groups;
 	uint16_t               *cpus_per_node;
 	uint32_t               *cpu_count_reps;
-	select_jobinfo_t       *select_jobinfo;
+	dynamic_plugin_data_t  *select_jobinfo;
 } allocation_info_t;
 
 /*
@@ -88,7 +88,7 @@ typedef struct allocation_info {
  */
 static inline int _estimate_nports(int nclients, int cli_per_port);
 static int        _compute_task_count(allocation_info_t *info);
-static void       _set_nprocs(allocation_info_t *info);
+static void       _set_ntasks(allocation_info_t *info);
 static srun_job_t *_job_create_structure(allocation_info_t *info);
 static char *     _normalize_hostlist(const char *hostlist);
 
@@ -119,7 +119,7 @@ job_create_noalloc(void)
 
 	hostlist_destroy(hl);
 
-	cpn = (opt.nprocs + ai->nnodes - 1) / ai->nnodes;
+	cpn = (opt.ntasks + ai->nnodes - 1) / ai->nnodes;
 	ai->cpus_per_node  = &cpn;
 	ai->cpu_count_reps = &ai->nnodes;
 
@@ -147,7 +147,7 @@ job_step_create_allocation(resource_allocation_response_msg_t *resp)
 	srun_job_t *job = NULL;
 	allocation_info_t *ai = xmalloc(sizeof(*ai));
 	hostlist_t hl = NULL;
-	char buf[8192];
+	char *buf = NULL;
 	int count = 0;
 	uint32_t alloc_count = 0;
 
@@ -205,8 +205,8 @@ job_step_create_allocation(resource_allocation_response_msg_t *resp)
 			 * know it is less than the number of nodes
 			 * in the allocation
 			 */
-			if(opt.nprocs_set && (opt.nprocs < ai->nnodes))
-				opt.min_nodes = opt.nprocs;
+			if(opt.ntasks_set && (opt.ntasks < ai->nnodes))
+				opt.min_nodes = opt.ntasks;
 			else
 				opt.min_nodes = ai->nnodes;
 			opt.nodes_set = true;
@@ -230,31 +230,30 @@ job_step_create_allocation(resource_allocation_response_msg_t *resp)
 				hostlist_t tmp_hl = hostlist_copy(hl);
 				int i=0;
 				int diff = ai->nnodes - count;
-				hostlist_ranged_string(inc_hl,
-						       sizeof(buf), buf);
+				buf = hostlist_ranged_string_xmalloc(inc_hl);
 				hostlist_delete(tmp_hl, buf);
-				while((node_name = hostlist_shift(tmp_hl))
-				      && (i < diff)) {
+				xfree(buf);
+				while ((node_name = hostlist_shift(tmp_hl)) &&
+				       (i < diff)) {
 					hostlist_push(inc_hl, node_name);
 					i++;
 				}
 				hostlist_destroy(tmp_hl);
 			}
-			hostlist_ranged_string(inc_hl, sizeof(buf), buf);
+			buf = hostlist_ranged_string_xmalloc(inc_hl);
 			hostlist_destroy(inc_hl);
 			xfree(opt.nodelist);
-			opt.nodelist = xstrdup(buf);
+			opt.nodelist = buf;
 		} else {
-			if(count > ai->nnodes) {
+			if (count > ai->nnodes) {
 				/* remove more nodes than needed for
 				   allocation */
 				int i=0;
-				for(i=count; i>ai->nnodes; i--)
+				for (i=count; i>ai->nnodes; i--)
 					hostlist_delete_nth(hl, i);
 			}
-			hostlist_ranged_string(hl, sizeof(buf), buf);
 			xfree(opt.nodelist);
-			opt.nodelist = xstrdup(buf);
+			opt.nodelist = hostlist_ranged_string_xmalloc(hl);
 		}
 
 		hostlist_destroy(hl);
@@ -265,8 +264,8 @@ job_step_create_allocation(resource_allocation_response_msg_t *resp)
 			 * know it is less than the number of nodes
 			 * in the allocation
 			 */
-			if(opt.nprocs_set && (opt.nprocs < ai->nnodes))
-				opt.min_nodes = opt.nprocs;
+			if(opt.ntasks_set && (opt.ntasks < ai->nnodes))
+				opt.min_nodes = opt.ntasks;
 			else
 				opt.min_nodes = ai->nnodes;
 			opt.nodes_set = true;
@@ -280,21 +279,21 @@ job_step_create_allocation(resource_allocation_response_msg_t *resp)
 		 * opt.nodelist is what is used for the allocation.
 		 */
 		/* xfree(ai->nodelist); */
-/* 		ai->nodelist = xstrdup(buf); */
+		/* ai->nodelist = xstrdup(buf); */
 	}
 
 	/* get the correct number of hosts to run tasks on */
-	if(opt.nodelist) {
+	if (opt.nodelist) {
 		hl = hostlist_create(opt.nodelist);
-		if(opt.distribution != SLURM_DIST_ARBITRARY)
+		if (opt.distribution != SLURM_DIST_ARBITRARY)
 			hostlist_uniq(hl);
-		if(!hostlist_count(hl)) {
+		if (!hostlist_count(hl)) {
 			error("Hostlist is now nothing!  Can not run job.");
 			hostlist_destroy(hl);
 			goto error;
 		}
 
-		hostlist_ranged_string(hl, sizeof(buf), buf);
+		buf = hostlist_ranged_string_xmalloc(hl);
 		count = hostlist_count(hl);
 		hostlist_destroy(hl);
 		/* Don't reset the ai->nodelist because that is the
@@ -302,15 +301,15 @@ job_step_create_allocation(resource_allocation_response_msg_t *resp)
 		 * opt.nodelist is what is used for the allocation.
 		 */
 		/* xfree(ai->nodelist); */
-/* 		ai->nodelist = xstrdup(buf); */
+		/* ai->nodelist = xstrdup(buf); */
 		xfree(opt.nodelist);
-		opt.nodelist = xstrdup(buf);
+		opt.nodelist = buf;
 	}
 
-	if(opt.distribution == SLURM_DIST_ARBITRARY) {
-		if(count != opt.nprocs) {
+	if (opt.distribution == SLURM_DIST_ARBITRARY) {
+		if (count != opt.ntasks) {
 			error("You asked for %d tasks but specified %d nodes",
-			      opt.nprocs, count);
+			      opt.ntasks, count);
 			goto error;
 		}
 	}
@@ -433,12 +432,12 @@ _compute_task_count(allocation_info_t *ainfo)
 }
 
 static void
-_set_nprocs(allocation_info_t *info)
+_set_ntasks(allocation_info_t *info)
 {
-	if (!opt.nprocs_set) {
-		opt.nprocs = _compute_task_count(info);
+	if (!opt.ntasks_set) {
+		opt.ntasks = _compute_task_count(info);
 		if (opt.cpus_set)
-			opt.nprocs_set = true;	/* implicit */
+			opt.ntasks_set = true;	/* implicit */
 	}
 }
 
@@ -451,8 +450,8 @@ _job_create_structure(allocation_info_t *ainfo)
 	srun_job_t *job = xmalloc(sizeof(srun_job_t));
 	int i;
 
-	_set_nprocs(ainfo);
-	debug2("creating job with %d tasks", opt.nprocs);
+	_set_ntasks(ainfo);
+	debug2("creating job with %d tasks", opt.ntasks);
 
 	slurm_mutex_init(&job->state_mutex);
 	pthread_cond_init(&job->state_cond, NULL);
@@ -488,7 +487,7 @@ _job_create_structure(allocation_info_t *ainfo)
 	job->select_jobinfo = ainfo->select_jobinfo;
 	job->jobid   = ainfo->jobid;
 
-	job->ntasks  = opt.nprocs;
+	job->ntasks  = opt.ntasks;
 	for (i=0; i<ainfo->num_cpu_groups; i++) {
 		job->cpu_count += ainfo->cpus_per_node[i] *
 				  ainfo->cpu_count_reps[i];
@@ -512,12 +511,14 @@ job_update_io_fnames(srun_job_t *job)
 static char *
 _normalize_hostlist(const char *hostlist)
 {
+	char *buf = NULL; 
 	hostlist_t hl = hostlist_create(hostlist);
-	char buf[4096];
 
-	if (!hl ||  (hostlist_ranged_string(hl, 4096, buf) < 0))
+	if (hl)	
+		buf = hostlist_ranged_string_xmalloc(hl);
+	if (!hl || !buf)
 		return xstrdup(hostlist);
 
-	return xstrdup(buf);
+	return buf;
 }
 

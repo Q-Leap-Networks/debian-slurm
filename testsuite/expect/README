@@ -1,6 +1,6 @@
 ############################################################################
 # Copyright (C) 2002-2007 The Regents of the University of California.
-# Copyright (C) 2008-2009 Lawrence Livermore National Security.
+# Copyright (C) 2008-2010 Lawrence Livermore National Security.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
 # Additionals by Joseph Donaghy <donaghy1@llnl.gov>
@@ -47,6 +47,11 @@ with an exit code of zero. In the event of a configuration problem or other
 catastrophic test failure other messages could be printed and their cause
 should be investigated. In either case, failing tests will terminate with a
 non-zero exit code and successful tests will terminate with a zero exit code.
+
+The test is designed to be executed from a cluster-wide file system.
+File created on one node in the cluster should be visible to all other
+nodes in the cluster. If not executed in such an environment, many tests
+will fail.
 
 The script "regression" will execute all of the tests and summarize the
 results. Standard output contains detailed logging of all events, which is
@@ -159,6 +164,9 @@ test1.58   Test of srun --jobid for an existing job allocation
 test1.59   Test of hostfile logic for job steps
 test1.60   Test of labelling output when writing a file per task or per node
 test1.61   Test of srun job step time limit
+test1.62   Test of gres/gpu plugin (if configured).
+test1.63   Test of srun --disbale-status/-X option, SIGINT to be sent to tasks.
+test1.64   Test interuption of srun while waiting for resource allocation.
 
 **NOTE**   The following tests attempt to utilize multiple CPUs or partitions,
            The test will print "WARNING" and terminate with an exit code of
@@ -201,6 +209,8 @@ test2.9    Validate scontrol completing command.
 test2.10   Validate scontrol oneliner mode (--oneliner option).
 test2.11   Validate scontrol listpids command.
 test2.12   Validate scontrol show topology option.
+test2.13   Validate scontrol update command for job steps.
+test2.14   Validate scontrol update size of running job.
 
 
 test3.#    Testing of scontrol options (best run as SlurmUser or root).
@@ -298,6 +308,8 @@ test7.9    Test that no files are open in spawned tasks (except stdin,
 test7.10   Test if we can trick SLURM into using the wrong user ID
            through an LD_PRELOAD option.
 test7.11   Test of SPANK plugin.
+test7.12   Test of slurm_job_step_stat() API call.
+test7.13   Verify the correct setting of a job's ExitCode
 
 
 test8.#    Test of Blue Gene specific functionality.
@@ -420,6 +432,7 @@ test15.23  Test of environment variables that control salloc actions:
            SALLOC_DEBUG and SALLOC_TIMELIMIT
 test15.24  Test of --overcommit option.
 test15.25  Test of job account(--account option).
+test15.26  Test interuption of salloc while waiting for resource allocation.
 
 test16.#   Testing of sattach options.
 ======================================
@@ -463,7 +476,7 @@ test17.17  Confirm that node sharing flags are respected  (--nodelist and
            --share options)
 test17.18  Test of job dependencies and deferred begin time (--depedency
            and --begin options).
-test17.19  REMOVED
+test17.19  Test of job submit to multiple partitions (--partition).
 test17.20  Test of mail options (--mail-type and --mail-user options)
 test17.21  Tests #SLURM entry functionality in a batch script
 test17.22  Test of running non-existant job, confirm timely termination.
@@ -531,7 +544,8 @@ test21.24  sacctmgr dump file
 test21.25  sacctmgr show config
 test21.26  sacctmgr +=, -= modify QoS test
 test21.27  sacctmgr problems test
-test21.25  sacctmgr abort delete
+test21.28  sacctmgr abort delete
+test21.29  sacctmgr clear (modify) QoS values
 
 test22.#   Testing of sreport commands and options.
            These also test the sacctmgr archive dump/load functions.

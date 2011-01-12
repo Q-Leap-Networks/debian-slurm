@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  slurm_topology.c - Topology plugin function setup.
  *****************************************************************************
- *  Copyright (C) 2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2009-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -42,6 +42,7 @@
 #include "src/common/plugrack.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_topology.h"
+#include "src/common/timers.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 
@@ -95,6 +96,12 @@ slurm_topo_get_ops( slurm_topo_context_t *c )
 					     (void **) &c->ops);
         if ( c->cur_plugin != PLUGIN_INVALID_HANDLE )
         	return &c->ops;
+
+	if(errno != EPLUGIN_NOTFOUND) {
+		error("Couldn't load specified plugin name for %s: %s",
+		      c->topo_type, plugin_strerror(errno));
+		return NULL;
+	}
 
 	error("Couldn't find the specified plugin name for %s "
 	      "looking at all files",
@@ -248,10 +255,17 @@ slurm_topo_fini( void )
 extern int
 slurm_topo_build_config( void )
 {
+	int rc;
+	DEF_TIMERS;
+
 	if ( slurm_topo_init() < 0 )
 		return SLURM_ERROR;
 
-	return (*(g_topo_context->ops.build_config))();
+	START_TIMER;
+	rc = (*(g_topo_context->ops.build_config))();
+	END_TIMER3("slurm_topo_build_config", 20000);
+
+	return rc;
 }
 
 

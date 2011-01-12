@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  complete.c - note the completion a slurm job or job step
- *  $Id: complete.c 19095 2009-12-01 22:59:18Z da $
+ *  $Id: complete.c 20255 2010-05-12 22:43:51Z da $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -57,7 +57,7 @@
  * RET 0 on success, otherwise return -1 and set errno to indicate the error
  */
 int
-slurm_complete_job ( uint32_t job_id, uint32_t job_return_code )
+slurm_complete_job (uint32_t job_id, uint32_t job_return_code)
 {
 	int rc;
 	slurm_msg_t req_msg;

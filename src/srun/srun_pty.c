@@ -1,7 +1,8 @@
 /*****************************************************************************\
  *  src/srun/srun_pty.c - pty handling for srun
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette  <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -78,18 +79,21 @@ static int winch;
 static void   _handle_sigwinch(int sig);
 static void * _pty_thread(void *arg);
 
-void set_winsize(srun_job_t *job)
+/* Set pty window size in job structure
+ * RET 0 on success, -1 on error */
+int set_winsize(srun_job_t *job)
 {
 	struct winsize ws;
 
-	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws))
+	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws)) {
 		error("ioctl(TIOCGWINSZ): %m");
-	else {
-		job->ws_row = ws.ws_row;
-		job->ws_col = ws.ws_col;
-		debug2("winsize %u:%u", job->ws_row, job->ws_col);
+		return -1;
 	}
-	return;
+
+	job->ws_row = ws.ws_row;
+	job->ws_col = ws.ws_col;
+	debug2("winsize %u:%u", job->ws_row, job->ws_col);
+	return 0;
 }
 
 /* SIGWINCH should already be blocked by srun/signal.c */
@@ -100,7 +104,7 @@ void block_sigwinch(void)
 
 void pty_thread_create(srun_job_t *job)
 {
-	slurm_addr pty_addr;
+	slurm_addr_t pty_addr;
 	pthread_attr_t attr;
 
 	if ((job->pty_fd = slurm_init_msg_engine_port(0)) < 0) {
@@ -112,12 +116,14 @@ void pty_thread_create(srun_job_t *job)
 		return;
 	}
 	job->pty_port = ntohs(((struct sockaddr_in) pty_addr).sin_port);
-	debug2("initialized job control port %hu\n", job->pty_port);
+	debug2("initialized job control port %hu", job->pty_port);
 
 	slurm_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	if ((pthread_create(&job->pty_id, &attr, &_pty_thread, (void *) job)))
+	if ((pthread_create(&job->pty_id, &attr, &_pty_thread, (void *) job))) {
+		job->pty_id = 0;
 		error("pthread_create(pty_thread): %m");
+	}
 	slurm_attr_destroy(&attr);
 }
 
@@ -151,7 +157,7 @@ static void *_pty_thread(void *arg)
 {
 	int fd = -1;
 	srun_job_t *job = (srun_job_t *) arg;
-	slurm_addr client_addr;
+	slurm_addr_t client_addr;
 
 	xsignal_unblock(pty_sigarray);
 	xsignal(SIGWINCH, _handle_sigwinch);

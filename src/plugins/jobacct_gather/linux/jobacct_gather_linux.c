@@ -49,6 +49,24 @@
 
 #define _DEBUG 0
 
+/* These are defined here so when we link with something other than
+ * the slurmd we will have these symbols defined.  They will get
+ * overwritten when linking with the slurmd.
+ */
+#if defined (__APPLE__)
+uint32_t jobacct_job_id __attribute__((weak_import));
+pthread_mutex_t jobacct_lock __attribute__((weak_import));
+uint32_t jobacct_mem_limit __attribute__((weak_import));
+uint32_t jobacct_step_id __attribute__((weak_import));
+uint32_t jobacct_vmem_limit __attribute__((weak_import));
+#else
+uint32_t jobacct_job_id;
+pthread_mutex_t jobacct_lock;
+uint32_t jobacct_mem_limit;
+uint32_t jobacct_step_id;
+uint32_t jobacct_vmem_limit;
+#endif
+
 /*
  * These variables are required by the generic plugin interface.  If they
  * are not found in the plugin, the plugin loader will ignore it.
@@ -75,7 +93,7 @@
  * of the plugin.  If major and minor revisions are desired, the major
  * version number may be multiplied by a suitable magnitude constant such
  * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum versions for their plugins as the job accounting API
+ * minimum version for their plugins as the job accounting API
  * matures.
  */
 const char plugin_name[] = "Job accounting gather LINUX plugin";
@@ -105,12 +123,13 @@ static bool pgid_plugin = false;
 
 /* Finally, pre-define all local routines. */
 
-static void _acct_kill_job(void);
-static void _get_offspring_data(List prec_list, prec_t *ancestor, pid_t pid);
-static void _get_process_data();
-static int _get_process_data_line(int in, prec_t *prec);
-static void *_watch_tasks(void *arg);
+static void _acct_kill_step(void);
 static void _destroy_prec(void *object);
+static int  _is_a_lwp(uint32_t pid);
+static void _get_offspring_data(List prec_list, prec_t *ancestor, pid_t pid);
+static void _get_process_data(void);
+static int  _get_process_data_line(int in, prec_t *prec);
+static void *_watch_tasks(void *arg);
 
 /*
  * _get_offspring_data() -- collect memory usage data for the offspring
@@ -172,7 +191,8 @@ _get_offspring_data(List prec_list, prec_t *ancestor, pid_t pid) {
  *    is a Linux-style stat entry. We disregard the data if they look
  *    wrong.
  */
-static void _get_process_data() {
+static void _get_process_data(void)
+{
 	static	int	slash_proc_open = 0;
 
 	struct	dirent *slash_proc_entry;
@@ -182,13 +202,14 @@ static void _get_process_data() {
 	List prec_list = NULL;
 	pid_t *pids = NULL;
 	int npids = 0;
-	uint32_t total_job_mem = 0;
+	uint32_t total_job_mem = 0, total_job_vsize = 0;
 	int		i, fd;
 	ListIterator itr;
 	ListIterator itr2;
 	prec_t *prec = NULL;
 	struct jobacctinfo *jobacct = NULL;
 	static int processing = 0;
+	long		hertz;
 
 	if(!pgid_plugin && cont_id == (uint32_t)NO_VAL) {
 		debug("cont_id hasn't been set yet not running poll");
@@ -201,6 +222,12 @@ static void _get_process_data() {
 	}
 	processing = 1;
 	prec_list = list_create(_destroy_prec);
+
+	hertz = sysconf(_SC_CLK_TCK);
+	if (hertz < 1) {
+		error ("_get_process_data: unable to get clock rate");
+		hertz = 100;	/* default on many systems */
+	}
 
 	if(!pgid_plugin) {
 		/* get only the processes in the proctrack container */
@@ -332,11 +359,13 @@ static void _get_process_data() {
 				total_job_mem += prec->rss;
 				jobacct->max_vsize = jobacct->tot_vsize =
 					MAX(jobacct->max_vsize, prec->vsize);
+				total_job_vsize += prec->vsize;
 				jobacct->max_pages = jobacct->tot_pages =
 					MAX(jobacct->max_pages, prec->pages);
 				jobacct->min_cpu = jobacct->tot_cpu =
 					MAX(jobacct->min_cpu,
-					    (prec->usec + prec->ssec));
+					    (prec->ssec / hertz +
+					     prec->usec / hertz));
 				debug2("%d mem size %u %u time %u(%u+%u)",
 				       jobacct->pid, jobacct->max_rss,
 				       jobacct->max_vsize, jobacct->tot_cpu,
@@ -350,14 +379,38 @@ static void _get_process_data() {
 	slurm_mutex_unlock(&jobacct_lock);
 
 	if (jobacct_mem_limit) {
-		debug("Job %u memory used:%u limit:%u KB",
-		      jobacct_job_id, total_job_mem, jobacct_mem_limit);
+		if (jobacct_step_id == NO_VAL) {
+			debug("Job %u memory used:%u limit:%u KB",
+			      jobacct_job_id, total_job_mem, jobacct_mem_limit);
+		} else {
+			debug("Step %u.%u memory used:%u limit:%u KB",
+			      jobacct_job_id, jobacct_step_id,
+			      total_job_mem, jobacct_mem_limit);
+		}
 	}
 	if (jobacct_job_id && jobacct_mem_limit &&
 	    (total_job_mem > jobacct_mem_limit)) {
-		error("Job %u exceeded %u KB memory limit, being killed",
-		       jobacct_job_id, jobacct_mem_limit);
-		_acct_kill_job();
+		if (jobacct_step_id == NO_VAL) {
+			error("Job %u exceeded %u KB memory limit, being "
+			      "killed", jobacct_job_id, jobacct_mem_limit);
+		} else {
+			error("Step %u.%u exceeded %u KB memory limit, being "
+			      "killed", jobacct_job_id, jobacct_step_id,
+			      jobacct_mem_limit);
+		}
+		_acct_kill_step();
+	} else if (jobacct_job_id && jobacct_vmem_limit &&
+	           (total_job_vsize > jobacct_vmem_limit)) {
+		if (jobacct_step_id == NO_VAL) {
+			error("Job %u exceeded %u KB virtual memory limit, "
+			      "being killed", jobacct_job_id,
+			      jobacct_vmem_limit);
+		} else {
+			error("Step %u.%u exceeded %u KB virtual memory "
+			      "limit, being killed", jobacct_job_id,
+			      jobacct_step_id, jobacct_vmem_limit);
+		}
+		_acct_kill_step();
 	}
 
 finished:
@@ -366,24 +419,76 @@ finished:
 	return;
 }
 
-/* _acct_kill_job() issue RPC to kill a slurm job */
-static void _acct_kill_job(void)
+/* _acct_kill_step() issue RPC to kill a slurm job step */
+static void _acct_kill_step(void)
 {
 	slurm_msg_t msg;
 	job_step_kill_msg_t req;
+	job_notify_msg_t notify_req;
 
 	slurm_msg_t_init(&msg);
+	notify_req.job_id      = jobacct_job_id;
+	notify_req.job_step_id = jobacct_step_id;
+	notify_req.message     = "Exceeded job memory limit";
+	msg.msg_type    = REQUEST_JOB_NOTIFY;
+	msg.data        = &notify_req;
+	slurm_send_only_controller_msg(&msg);
+
 	/*
 	 * Request message:
 	 */
 	req.job_id      = jobacct_job_id;
-	req.job_step_id = NO_VAL;
+	req.job_step_id = jobacct_step_id;
 	req.signal      = SIGKILL;
 	req.batch_flag  = 0;
 	msg.msg_type    = REQUEST_CANCEL_JOB_STEP;
 	msg.data        = &req;
 
 	slurm_send_only_controller_msg(&msg);
+}
+
+static int _is_a_lwp(uint32_t pid) {
+
+	FILE		*status_fp = NULL;
+	char		proc_status_file[256];
+	uint32_t        tgid;
+	int             rc;
+
+	if ( snprintf(proc_status_file, 256,
+		      "/proc/%d/status",pid) > 256 ) {
+ 		debug("jobacct_gather_linux: unable to build proc_status "
+		      "fpath");
+		return -1;
+	}
+	if ((status_fp = fopen(proc_status_file, "r"))==NULL) {
+		debug3("jobacct_gather_linux: unable to open %s",
+		       proc_status_file);
+		return -1;
+	}
+
+
+	do {
+		rc = fscanf(status_fp,
+			    "Name:\t%*s\n%*[ \ta-zA-Z0-9:()]\nTgid:\t%d\n",
+			    &tgid);
+	} while ( rc < 0 && errno == EINTR );
+	fclose(status_fp);
+
+	/* unable to read /proc/[pid]/status content */
+	if ( rc != 1 ) {
+		debug3("jobacct_gather_linux: unable to read requested "
+		       "pattern in %s",proc_status_file);
+		return -1;
+	}
+
+	/* if tgid differs from pid, this is a LWP (Thread POSIX) */
+	if ( (uint32_t) tgid != (uint32_t) pid ) {
+		debug3("jobacct_gather_linux: pid=%d is a lightweight process",
+		       tgid);
+		return 1;
+	} else
+		return 0;
+
 }
 
 /* _get_process_data_line() - get line of data from /proc/<pid>/stat
@@ -432,6 +537,11 @@ static int _get_process_data_line(int in, prec_t *prec) {
 	/* There are some additional fields, which we do not scan or use */
 	if ((nvals < 22) || (rss < 0))
 		return 0;
+
+	/* If current pid corresponds to a Light Weight Process (Thread POSIX) */
+	/* skip it, we will only account the original process (pid==tgid) */
+	if (_is_a_lwp(prec->pid) > 0)
+  		return 0;
 
 	/* Copy the values that slurm records into our data structure */
 	prec->ppid  = ppid;
@@ -526,7 +636,6 @@ extern int jobacct_gather_p_setinfo(struct jobacctinfo *jobacct,
 				    enum jobacct_data_type type, void *data)
 {
 	return jobacct_common_setinfo(jobacct, type, data);
-
 }
 
 extern int jobacct_gather_p_getinfo(struct jobacctinfo *jobacct,
@@ -600,6 +709,7 @@ extern int jobacct_gather_p_startpoll(uint16_t frequency)
 
 extern int jobacct_gather_p_endpoll()
 {
+	jobacct_shutdown = true;
 	slurm_mutex_lock(&jobacct_lock);
 	if(task_list)
 		list_destroy(task_list);
@@ -612,7 +722,6 @@ extern int jobacct_gather_p_endpoll()
 		slurm_mutex_unlock(&reading_mutex);
 	}
 
-	jobacct_shutdown = true;
 
 	return SLURM_SUCCESS;
 }
@@ -679,13 +788,17 @@ extern int jobacct_gather_p_set_proctrack_container_id(uint32_t id)
 
 extern int jobacct_gather_p_add_task(pid_t pid, jobacct_id_t *jobacct_id)
 {
+	if (jobacct_shutdown)
+		return SLURM_ERROR;
 	return jobacct_common_add_task(pid, jobacct_id, task_list);
 }
 
 
 extern struct jobacctinfo *jobacct_gather_p_stat_task(pid_t pid)
 {
-	if(pid) {
+	if (jobacct_shutdown)
+		return NULL;
+	else if(pid) {
 		_get_process_data();
 		return jobacct_common_stat_task(pid, task_list);
 	} else {
@@ -704,13 +817,13 @@ extern struct jobacctinfo *jobacct_gather_p_stat_task(pid_t pid)
 
 extern struct jobacctinfo *jobacct_gather_p_remove_task(pid_t pid)
 {
+	if (jobacct_shutdown)
+		return NULL;
 	return jobacct_common_remove_task(pid, task_list);
 }
 
-extern void jobacct_gather_p_2_sacct(sacct_t *sacct,
+extern void jobacct_gather_p_2_stats(slurmdb_stats_t *stats,
 				     struct jobacctinfo *jobacct)
 {
-	jobacct_common_2_sacct(sacct, jobacct);
+	jobacct_common_2_stats(stats, jobacct);
 }
-
-

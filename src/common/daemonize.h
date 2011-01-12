@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/slurmd/daemonize.h - function definition for making a daemon
- * $Id: daemonize.h 19095 2009-12-01 22:59:18Z da $
+ * $Id: daemonize.h 21754 2010-12-10 17:44:30Z da $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -49,9 +49,10 @@
  */
 extern int daemon(int nochdir, int noclose);
 
-/* Write pid into file pidfile
+/* Write pid into file pidfile if uid is not 0 change the owner of the
+ * pidfile to that user.
  */
-extern int create_pidfile(const char *pidfilename);
+extern int create_pidfile(const char *pidfilename, uid_t uid);
 
 /*
  * Attempt to read an old pid from the configured pidfile

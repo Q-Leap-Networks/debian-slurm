@@ -1,5 +1,5 @@
 /*****************************************************************************\
- *  $Id: hostlist.h 19095 2009-12-01 22:59:18Z da $
+ *  $Id: hostlist.h 21289 2010-10-08 13:14:23Z jette $
  *****************************************************************************
  *  $LSDId: hostlist.h,v 1.4 2003/09/19 21:37:34 grondo Exp $
  *****************************************************************************
@@ -57,6 +57,10 @@
 #else
 #define HOSTLIST_BASE 10
 #endif
+
+/* largest configured system dimensions */
+#define HIGHEST_DIMENSIONS 4
+#define HIGHEST_BASE 36
 
 extern char *alpha_num;
 
@@ -144,7 +148,7 @@ int set_grid(int start, int end, int count);
  *  o tux0-tux5,tux12,tux20-tux25
  *  o tux0-5,12,20-25
  *
- * If str is NULL, and empty hostlist is created and returned.
+ * If str is NULL, an empty hostlist is created and returned.
  *
  * If the create fails, hostlist_create() returns NULL.
  *
@@ -314,6 +318,10 @@ void hostlist_sort(hostlist_t hl);
  */
 void hostlist_uniq(hostlist_t hl);
 
+int hostlist_get_base();
+
+/* given a int will parse it into sizes in each dimension */
+void hostlist_parse_int_to_array(int in, int *out, int dims, int hostlist_base);
 
 /* ----[ hostlist print functions ]---- */
 
@@ -336,6 +344,16 @@ void hostlist_uniq(hostlist_t hl);
  */
 ssize_t hostlist_ranged_string(hostlist_t hl, size_t n, char *buf);
 
+/* Variant of hostlist_ranged_string().
+ * Returns the buffer which must be released using free() or NULL on failure.
+ */
+char *hostlist_ranged_string_malloc(hostlist_t hl);
+
+/* Variant of hostlist_ranged_string().
+ * Returns the buffer which must be released using xfree().
+ */
+char *hostlist_ranged_string_xmalloc(hostlist_t hl);
+
 /* hostlist_deranged_string():
  *
  * Writes the string representation of the hostlist hl into buf,
@@ -347,9 +365,17 @@ ssize_t hostlist_ranged_string(hostlist_t hl, size_t n, char *buf);
  */
 ssize_t hostlist_deranged_string(hostlist_t hl, size_t n, char *buf);
 
+/* Variant of hostlist_deranged_string().
+ * Returns the buffer which must be released using free() or NULL on failure.
+ */
+char *hostlist_deranged_string_malloc(hostlist_t hl);
+
+/* Variant of hostlist_deranged_string().
+ * Returns the buffer which must be released using xfree().
+ */
+char *hostlist_deranged_string_xmalloc(hostlist_t hl);
 
 /* ----[ hostlist utility functions ]---- */
-
 
 /* hostlist_nranges():
  *
@@ -492,7 +518,7 @@ int hostset_find(hostset_t set, const char *hostname);
 char * hostset_nth(hostset_t set, int n);
 
 /* hostset_ranged_string():
- * hostset equivelent to hostlist_ranged_string();
+ * hostset equivalent to hostlist_ranged_string();
  */
 ssize_t hostset_ranged_string(hostset_t set, size_t n, char *buf);
 

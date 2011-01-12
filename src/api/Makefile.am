@@ -50,7 +50,7 @@ rev     = $(SLURM_API_REVISION)
 # libpmi only the library REVISION and AGE should change (and it is debatable
 # whether these parts of the .so version should change).
 #
-# REVISION is changed if the source of the library has changed so linkers 
+# REVISION is changed if the source of the library has changed so linkers
 # prefer the new version.
 # AGE is changed if interfaces are added but compatibility is not broken.
 libpmi_current = 0
@@ -139,7 +139,7 @@ libpmi_la_LDFLAGS = $(LIB_LDFLAGS) \
         -version-info $(libpmi_current):$(libpmi_rev):$(libpmi_age) \
         $(PMI_OTHER_FLAGS)
 
-# This was made so we chould export all symbols from libcommon
+# This was made so we could export all symbols from libcommon
 # on multiple platforms
 libslurm_o_SOURCES =
 
@@ -155,14 +155,10 @@ force:
 $(libslurm_o_LDADD) $(convenience_libs) $(slurmapi_add) : force
 	@cd `dirname $@` && $(MAKE) `basename $@`
 
-
-# FIXME - don't export the client_io_handler_ symbols once srun is no longer
-#         calling them directly
 $(VERSION_SCRIPT) :
 	(echo "{ global:";   \
 	 echo "   islurm_*;"; \
 	 echo "   slurm_*;"; \
-	 echo "   client_io_handler_*;"; \
 	 echo "  local: *;"; \
 	 echo "};") > $(VERSION_SCRIPT)
 

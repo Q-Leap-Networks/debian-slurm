@@ -2,7 +2,8 @@
  *  preempt_partition_prio.c - job preemption plugin that selects preemptable
  *  jobs based upon their partition's priority.
  *****************************************************************************
- *  Copyright (C) 2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2009-2010 Lawrence Livermore National Security.
+ *  Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -45,6 +46,7 @@
 #include "src/common/log.h"
 #include "src/common/plugin.h"
 #include "src/slurmctld/slurmctld.h"
+#include "src/slurmctld/job_scheduler.h"
 
 const char	plugin_name[]	= "Preempt by partition priority plugin";
 const char	plugin_type[]	= "preempt/partition_prio";
@@ -161,4 +163,39 @@ static int _sort_by_prio (void *x, void *y)
 		rc = 0;
 
 	return rc;
+}
+
+/**************************************************************************/
+/* TAG(                 job_preempt_mode                                ) */
+/**************************************************************************/
+extern uint16_t job_preempt_mode(struct job_record *job_ptr)
+{
+	if (job_ptr->part_ptr &&
+	    (job_ptr->part_ptr->preempt_mode != (uint16_t) NO_VAL))
+		return job_ptr->part_ptr->preempt_mode;
+
+	return (slurm_get_preempt_mode() & (~PREEMPT_MODE_GANG));
+}
+
+/**************************************************************************/
+/* TAG(                 preemption_enabled                              ) */
+/**************************************************************************/
+extern bool preemption_enabled(void)
+{
+	return (slurm_get_preempt_mode() != PREEMPT_MODE_OFF);
+}
+
+/***************************************************************************/
+/* Return true if the preemptor can preempt the preemptee, otherwise false */
+/***************************************************************************/
+extern bool job_preempt_check(job_queue_rec_t *preemptor,
+			      job_queue_rec_t *preemptee)
+{
+	if (preemptor->part_ptr && preemptee->part_ptr) {
+		if (preemptor->part_ptr->priority >
+		    preemptee->part_ptr->priority)
+			return true;
+	}
+
+	return false;
 }

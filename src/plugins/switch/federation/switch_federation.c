@@ -124,7 +124,7 @@ static slurm_errtab_t slurm_errtab[] = {
  * of the plugin.  If major and minor revisions are desired, the major
  * version number may be multiplied by a suitable magnitude constant such
  * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum versions for their plugins as this API matures.
+ * minimum version for their plugins as this API matures.
  */
 const char plugin_name[]        = "switch FEDERATION plugin";
 const char plugin_type[]        = "switch/federation";
@@ -376,7 +376,7 @@ static char *adapter_name_check(char *network)
         char *name;
 
 	if (regcomp(&re, pattern, REG_EXTENDED) != 0) {
-                error("sockname regex compilation failed\n");
+                error("sockname regex compilation failed");
                 return NULL;
         }
 	memset(pmatch, 0, sizeof(regmatch_t)*nmatch);

@@ -108,7 +108,7 @@ static int	_job_modify(uint32_t jobid, char *bank_ptr,
 	}
 
 	if (new_hostlist) {
-		int i, rc = 0, task_cnt;
+		int rc = 0, task_cnt;
 		hostlist_t hl;
 		char *tasklist;
 
@@ -138,11 +138,10 @@ static int	_job_modify(uint32_t jobid, char *bank_ptr,
 		}
 		hostlist_uniq(hl);
 		hostlist_sort(hl);
-		i = strlen(new_hostlist) + 16;
-		job_ptr->details->req_nodes = xmalloc(i);
-		i = hostlist_ranged_string(hl, i, job_ptr->details->req_nodes);
+		job_ptr->details->req_nodes =
+			hostlist_ranged_string_xmalloc(hl);
 		hostlist_destroy(hl);
-		if (i < 0) {
+		if (job_ptr->details->req_nodes == NULL) {
 			rc = 1;
 			goto host_fini;
 		}
@@ -206,8 +205,7 @@ host_fini:	if (rc) {
 	if(update_accounting) {
 		if (job_ptr->details && job_ptr->details->begin_time) {
 			/* Update job record in accounting to reflect changes */
-			jobacct_storage_g_job_start(
-				acct_db_conn, slurmctld_cluster_name, job_ptr);
+			jobacct_storage_g_job_start(acct_db_conn, job_ptr);
 		}
 	}
 

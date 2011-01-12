@@ -4,7 +4,7 @@
 AUTOMAKE_OPTIONS = foreign
 CLEANFILES = core.*
 
-INCLUDES = -I$(top_srcdir)
+INCLUDES = -I$(top_srcdir) $(BG_INCLUDES)
 
 sbin_PROGRAMS = slurmctld
 
@@ -24,9 +24,13 @@ slurmctld_SOURCES = 	\
 	controller.c 	\
 	gang.c		\
 	gang.h		\
+	groups.c	\
+	groups.h	\
 	job_mgr.c 	\
-	job_scheduler.c \
-	job_scheduler.h \
+	job_scheduler.c	\
+	job_scheduler.h	\
+	job_submit.c	\
+	job_submit.h	\
 	licenses.c	\
 	licenses.h	\
 	locks.c   	\

@@ -64,12 +64,20 @@
 #include "src/slurmctld/locks.h"
 
 #define SECS_PER_DAY	(24 * 60 * 60)
-#define SECS_PER_WEEK	(7 * 24 * 60 * 60)
+#define SECS_PER_WEEK	(7 * SECS_PER_DAY)
 /* These are defined here so when we link with something other than
  * the slurmctld we will have these symbols defined.  They will get
  * overwritten when linking with the slurmctld.
  */
+#if defined (__APPLE__)
+uint32_t cluster_cpus __attribute__((weak_import)) = NO_VAL;
+List job_list  __attribute__((weak_import)) = NULL;
+time_t last_job_update __attribute__((weak_import));
+#else
+uint32_t cluster_cpus = NO_VAL;
+List job_list = NULL;
 time_t last_job_update;
+#endif
 
 /*
  * These variables are required by the generic plugin interface.  If they
@@ -97,7 +105,7 @@ time_t last_job_update;
  * of the plugin.  If major and minor revisions are desired, the major
  * version number may be multiplied by a suitable magnitude constant such
  * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum versions for their plugins as the job completion logging API
+ * minimum version for their plugins as the job completion logging API
  * matures.
  */
 const char plugin_name[]       	= "Priority MULTIFACTOR plugin";
@@ -107,7 +115,8 @@ const uint32_t plugin_version	= 100;
 static pthread_t decay_handler_thread;
 static pthread_t cleanup_handler_thread;
 static pthread_mutex_t decay_lock = PTHREAD_MUTEX_INITIALIZER;
-static bool running_decay = 0, reconfig = 0, calc_fairshare = 1;
+static bool running_decay = 0, reconfig = 0,
+	calc_fairshare = 1, priority_debug = 0;
 static bool favor_small; /* favor small jobs over large */
 static uint32_t max_age; /* time when not to add any more
 			  * priority to a job if reached */
@@ -117,8 +126,9 @@ static uint32_t weight_js; /* weight for Job Size factor */
 static uint32_t weight_part; /* weight for Partition factor */
 static uint32_t weight_qos; /* weight for QOS factor */
 
-extern int priority_p_set_max_cluster_usage(uint32_t procs, uint32_t half_life);
-extern void priority_p_set_assoc_usage(acct_association_rec_t *assoc);
+extern void priority_p_set_assoc_usage(slurmdb_association_rec_t *assoc);
+extern double priority_p_calc_fs_factor(long double usage_efctv,
+					long double shares_norm);
 
 /*
  * apply decay factor to all associations usage_raw
@@ -130,40 +140,40 @@ extern void priority_p_set_assoc_usage(acct_association_rec_t *assoc);
 static int _apply_decay(double decay_factor)
 {
 	ListIterator itr = NULL;
-	acct_association_rec_t *assoc = NULL;
-	acct_qos_rec_t *qos = NULL;
+	slurmdb_association_rec_t *assoc = NULL;
+	slurmdb_qos_rec_t *qos = NULL;
+	assoc_mgr_lock_t locks = { WRITE_LOCK, NO_LOCK,
+				   WRITE_LOCK, NO_LOCK, NO_LOCK };
 
 	/* continue if decay_factor is 0 or 1 since that doesn't help
 	   us at all. 1 means no decay and 0 will just zero
 	   everything out so don't waste time doing it */
-	if(!decay_factor)
+	if (!decay_factor)
 		return SLURM_ERROR;
-	else if(!calc_fairshare)
+	else if (!calc_fairshare)
 		return SLURM_SUCCESS;
 
 	xassert(assoc_mgr_association_list);
 	xassert(assoc_mgr_qos_list);
 
-	slurm_mutex_lock(&assoc_mgr_association_lock);
+	assoc_mgr_lock(&locks);
 	itr = list_iterator_create(assoc_mgr_association_list);
 	/* We want to do this to all associations including
 	   root.  All usage_raws are calculated from the bottom up.
 	*/
-	while((assoc = list_next(itr))) {
-		assoc->usage_raw *= decay_factor;
-		assoc->grp_used_wall *= decay_factor;
+	while ((assoc = list_next(itr))) {
+		assoc->usage->usage_raw *= decay_factor;
+		assoc->usage->grp_used_wall *= decay_factor;
 	}
 	list_iterator_destroy(itr);
-	slurm_mutex_unlock(&assoc_mgr_association_lock);
 
-	slurm_mutex_lock(&assoc_mgr_qos_lock);
 	itr = list_iterator_create(assoc_mgr_qos_list);
-	while((qos = list_next(itr))) {
-		qos->usage_raw *= decay_factor;
-		qos->grp_used_wall *= decay_factor;
+	while ((qos = list_next(itr))) {
+		qos->usage->usage_raw *= decay_factor;
+		qos->usage->grp_used_wall *= decay_factor;
 	}
 	list_iterator_destroy(itr);
-	slurm_mutex_unlock(&assoc_mgr_qos_lock);
+	assoc_mgr_unlock(&locks);
 
 	return SLURM_SUCCESS;
 }
@@ -176,34 +186,34 @@ static int _apply_decay(double decay_factor)
 static int _reset_usage()
 {
 	ListIterator itr = NULL;
-	acct_association_rec_t *assoc = NULL;
-	acct_qos_rec_t *qos = NULL;
+	slurmdb_association_rec_t *assoc = NULL;
+	slurmdb_qos_rec_t *qos = NULL;
+	assoc_mgr_lock_t locks = { WRITE_LOCK, NO_LOCK,
+				   WRITE_LOCK, NO_LOCK, NO_LOCK };
 
-	if(!calc_fairshare)
+	if (!calc_fairshare)
 		return SLURM_SUCCESS;
 
 	xassert(assoc_mgr_association_list);
 
-	slurm_mutex_lock(&assoc_mgr_association_lock);
+	assoc_mgr_lock(&locks);
 	itr = list_iterator_create(assoc_mgr_association_list);
 	/* We want to do this to all associations including
 	   root.  All usage_raws are calculated from the bottom up.
 	*/
-	while((assoc = list_next(itr))) {
-		assoc->usage_raw = 0;
-		assoc->grp_used_wall = 0;
+	while ((assoc = list_next(itr))) {
+		assoc->usage->usage_raw = 0;
+		assoc->usage->grp_used_wall = 0;
 	}
 	list_iterator_destroy(itr);
-	slurm_mutex_unlock(&assoc_mgr_association_lock);
 
-	slurm_mutex_lock(&assoc_mgr_qos_lock);
 	itr = list_iterator_create(assoc_mgr_qos_list);
-	while((qos = list_next(itr))) {
-		qos->usage_raw = 0;
-		qos->grp_used_wall = 0;
+	while ((qos = list_next(itr))) {
+		qos->usage->usage_raw = 0;
+		qos->usage->grp_used_wall = 0;
 	}
 	list_iterator_destroy(itr);
-	slurm_mutex_unlock(&assoc_mgr_qos_lock);
+	assoc_mgr_unlock(&locks);
 
 	return SLURM_SUCCESS;
 }
@@ -260,7 +270,8 @@ static void _read_last_decay_ran(time_t *last_ran, time_t *last_reset)
 	safe_unpack_time(last_ran, buffer);
 	safe_unpack_time(last_reset, buffer);
 	free_buf(buffer);
-	debug5("Last ran decay on jobs at %d", last_ran);
+	if (priority_debug)
+		info("Last ran decay on jobs at %ld", (long)*last_ran);
 
 	return;
 
@@ -278,8 +289,15 @@ static int _write_last_decay_ran(time_t last_ran, time_t last_reset)
 	int error_code = SLURM_SUCCESS;
 	int state_fd;
 	char *old_file, *new_file, *state_file;
-	Buf buffer = init_buf(high_buffer_size);
+	Buf buffer;
 
+	if (!strcmp(slurmctld_conf.state_save_location, "/dev/null")) {
+		error("Can not save priority state information, "
+		      "StateSaveLocation is /dev/null");
+		return error_code;
+	}
+
+	buffer = init_buf(high_buffer_size);
 	pack_time(last_ran, buffer);
 	pack_time(last_reset, buffer);
 
@@ -319,12 +337,12 @@ static int _write_last_decay_ran(time_t last_ran, time_t last_reset)
 		(void) unlink(new_file);
 	else {			/* file shuffle */
 		(void) unlink(old_file);
-		if(link(state_file, old_file))
-			debug4("unable to create link for %s -> %s: %m",
+		if (link(state_file, old_file))
+			debug3("unable to create link for %s -> %s: %m",
 			       state_file, old_file);
 		(void) unlink(state_file);
-		if(link(new_file, state_file))
-			debug4("unable to create link for %s -> %s: %m",
+		if (link(new_file, state_file))
+			debug3("unable to create link for %s -> %s: %m",
 			       new_file, state_file);
 		(void) unlink(new_file);
 	}
@@ -333,7 +351,7 @@ static int _write_last_decay_ran(time_t last_ran, time_t last_reset)
 	xfree(new_file);
 
 	unlock_state_files();
-	debug5("done writing time %d", last_ran);
+	debug4("done writing time %ld", (long)last_ran);
 	free_buf(buffer);
 
 	return error_code;
@@ -350,20 +368,20 @@ static int _write_last_decay_ran(time_t last_ran, time_t last_reset)
  */
 static int _set_children_usage_efctv(List childern_list)
 {
-	acct_association_rec_t *assoc = NULL;
+	slurmdb_association_rec_t *assoc = NULL;
 	ListIterator itr = NULL;
 
-	if(!childern_list || !list_count(childern_list))
+	if (!childern_list || !list_count(childern_list))
 		return SLURM_SUCCESS;
 
 	itr = list_iterator_create(childern_list);
-	while((assoc = list_next(itr))) {
-		if(assoc->user) {
-			assoc->usage_efctv = (long double)NO_VAL;
+	while ((assoc = list_next(itr))) {
+		if (assoc->user) {
+			assoc->usage->usage_efctv = (long double)NO_VAL;
 			continue;
 		}
 		priority_p_set_assoc_usage(assoc);
-		_set_children_usage_efctv(assoc->childern_list);
+		_set_children_usage_efctv(assoc->usage->childern_list);
 	}
 	list_iterator_destroy(itr);
 	return SLURM_SUCCESS;
@@ -374,35 +392,49 @@ static int _set_children_usage_efctv(List childern_list)
  */
 static double _get_fairshare_priority( struct job_record *job_ptr)
 {
-	acct_association_rec_t *assoc =
-		(acct_association_rec_t *)job_ptr->assoc_ptr;
+	slurmdb_association_rec_t *job_assoc =
+		(slurmdb_association_rec_t *)job_ptr->assoc_ptr;
+	slurmdb_association_rec_t *fs_assoc = NULL;
 	double priority_fs = 0.0;
+	assoc_mgr_lock_t locks = { READ_LOCK, NO_LOCK,
+				   NO_LOCK, NO_LOCK, NO_LOCK };
 
-	if(!calc_fairshare)
+	if (!calc_fairshare)
 		return 0;
 
-	if(!assoc) {
+	if (!job_assoc) {
 		error("Job %u has no association.  Unable to "
-		      "compute fairshare.");
+		      "compute fairshare.", job_ptr->job_id);
 		return 0;
 	}
 
-	slurm_mutex_lock(&assoc_mgr_association_lock);
-	if(assoc->usage_efctv == (long double)NO_VAL)
-		priority_p_set_assoc_usage(assoc);
+	fs_assoc = job_assoc;
 
-	// Priority is 0 -> 1
-	priority_fs =
-		(assoc->shares_norm - (double)assoc->usage_efctv + 1.0) / 2.0;
-	debug4("Fairshare priority for user %s in acct %s"
-	       "((%f - %Lf) + 1) / 2 = %f",
-	       assoc->user, assoc->acct, assoc->shares_norm,
-	       assoc->usage_efctv, priority_fs);
+	assoc_mgr_lock(&locks);
 
-	slurm_mutex_unlock(&assoc_mgr_association_lock);
+	/* Use values from parent when FairShare=SLURMDB_FS_USE_PARENT */
+	while ((fs_assoc->shares_raw == SLURMDB_FS_USE_PARENT)
+	       && fs_assoc->usage->parent_assoc_ptr
+	       && (fs_assoc != assoc_mgr_root_assoc)) {
+		fs_assoc = fs_assoc->usage->parent_assoc_ptr;
+	}
 
-	debug3("job %u has a fairshare priority of %f",
-	      job_ptr->job_id, priority_fs);
+	if (fs_assoc->usage->usage_efctv == (long double) NO_VAL)
+		priority_p_set_assoc_usage(fs_assoc);
+
+	/* Priority is 0 -> 1 */
+	priority_fs = priority_p_calc_fs_factor(
+		fs_assoc->usage->usage_efctv,
+		(long double)fs_assoc->usage->shares_norm);
+	if (priority_debug) {
+		info("Fairshare priority of job %u for user %s in acct"
+		     " %s is 2**(-%Lf/%f) = %f",
+		     job_ptr->job_id, job_assoc->user, job_assoc->acct,
+		     fs_assoc->usage->usage_efctv,
+		     fs_assoc->usage->shares_norm, priority_fs);
+	}
+
+	assoc_mgr_unlock(&locks);
 
 	return priority_fs;
 }
@@ -411,19 +443,19 @@ static void _get_priority_factors(time_t start_time, struct job_record *job_ptr,
 				  priority_factors_object_t* factors,
 				  bool status_only)
 {
-	acct_qos_rec_t *qos_ptr = NULL;
+	slurmdb_qos_rec_t *qos_ptr = NULL;
 
 	xassert(factors);
 	xassert(job_ptr);
 
-	qos_ptr = (acct_qos_rec_t *)job_ptr->qos_ptr;
+	qos_ptr = (slurmdb_qos_rec_t *)job_ptr->qos_ptr;
 
 	memset(factors, 0, sizeof(priority_factors_object_t));
 
-	if(weight_age) {
+	if (weight_age) {
 		uint32_t diff = start_time - job_ptr->details->begin_time;
-		if(job_ptr->details->begin_time) {
-			if(diff < max_age)
+		if (job_ptr->details->begin_time) {
+			if (diff < max_age)
 				factors->priority_age =
 					(double)diff / (double)max_age;
 			else
@@ -431,7 +463,7 @@ static void _get_priority_factors(time_t start_time, struct job_record *job_ptr,
 		}
 	}
 
-	if(job_ptr->assoc_ptr && weight_fs) {
+	if (job_ptr->assoc_ptr && weight_fs) {
 		if (status_only)
 			factors->priority_fs = job_ptr->priority_fs;
 		else {
@@ -440,41 +472,40 @@ static void _get_priority_factors(time_t start_time, struct job_record *job_ptr,
 		}
 	}
 
-	if(weight_js) {
-		/* FIXME: This will not work correctly when
-		 * the job is requesting smaller than 1 node.
-		 * We need a way to figure out how to look at
-		 * cpus requested here for those situations.  This can
-		 * probably be done with the num_procs, but
-		 * that isn't always used.  This is usually
-		 * set on bluegene systems, which is where
-		 * this problem arose.  The code below was
-		 * tested on a bluegene system, seemed to
-		 * work, but isn't probably that generic.
-		 * Also the variable total_cpus doesn't exist
-		 * yet so that would need to be defined.
-		 */
+	if (weight_js) {
+		uint32_t cpu_cnt = 0;
+		/* On the initial run of this we don't have total_cpus
+		   so go off the requesting.  After the first shot
+		   total_cpus should be filled in.
+		*/
+		if (job_ptr->total_cpus)
+			cpu_cnt = job_ptr->total_cpus;
+		else if (job_ptr->details
+			 && (job_ptr->details->max_cpus != NO_VAL))
+			cpu_cnt = job_ptr->details->max_cpus;
+		else if (job_ptr->details && job_ptr->details->min_cpus)
+			cpu_cnt = job_ptr->details->min_cpus;
 
-		if(favor_small) {
-			factors->priority_js = (double)(node_record_count
-					   - job_ptr->details->min_nodes)
+		if (favor_small) {
+			factors->priority_js =
+				(double)(node_record_count
+					 - job_ptr->details->min_nodes)
 				/ (double)node_record_count;
-/* 			if(job_ptr->num_procs && job_ptr->num_procs != NO_VAL) { */
-/* 				factors->priority_js +=  */
-/* 					(double)(total_cpus - job_ptr->num_procs) */
-/* 					/ (double)total_cpus; */
-/* 				factors->priority_js /= 2;			 */
-/* 			} */
+			if (cpu_cnt) {
+				factors->priority_js +=
+					(double)(cluster_cpus - cpu_cnt)
+					/ (double)cluster_cpus;
+				factors->priority_js /= 2;
+			}
 		} else {
 			factors->priority_js =
 				(double)job_ptr->details->min_nodes
 				/ (double)node_record_count;
-/* 			if(job_ptr->num_procs && job_ptr->num_procs != NO_VAL) { */
-/* 				factors->priority_js +=  */
-/* 					(double)job_ptr->num_procs */
-/* 					/ (double)total_cpus; */
-/* 				factors->priority_js /= 2;			 */
-/* 			} */
+			if (cpu_cnt) {
+				factors->priority_js +=
+					(double)cpu_cnt / (double)cluster_cpus;
+				factors->priority_js /= 2;
+			}
 		}
 		if (factors->priority_js < .0)
 			factors->priority_js = 0.0;
@@ -482,12 +513,12 @@ static void _get_priority_factors(time_t start_time, struct job_record *job_ptr,
 			factors->priority_js = 1.0;
 	}
 
-	if(job_ptr->part_ptr && job_ptr->part_ptr->priority && weight_part) {
+	if (job_ptr->part_ptr && job_ptr->part_ptr->priority && weight_part) {
 		factors->priority_part = job_ptr->part_ptr->norm_priority;
 	}
 
-	if(qos_ptr && qos_ptr->priority && weight_qos) {
-		factors->priority_qos = qos_ptr->norm_priority;
+	if (qos_ptr && qos_ptr->priority && weight_qos) {
+		factors->priority_qos = qos_ptr->usage->norm_priority;
 	}
 
 	factors->nice = job_ptr->details->nice;
@@ -504,43 +535,30 @@ static uint32_t _get_priority_internal(time_t start_time,
 	double priority_qos	= 0.0;
 	priority_factors_object_t	factors;
 
-	if(job_ptr->direct_set_prio)
+	if (job_ptr->direct_set_prio)
 		return job_ptr->priority;
 
-	if(!job_ptr->details) {
+	if (!job_ptr->details) {
 		error("_get_priority_internal: job %u does not have a "
-		      "details symbol set, can't set priority");
+		      "details symbol set, can't set priority",
+		      job_ptr->job_id);
 		return 0;
 	}
 	/*
 	 * This means the job is not eligible yet
 	 */
-	if(!job_ptr->details->begin_time
-	   || (job_ptr->details->begin_time > start_time))
+	if (!job_ptr->details->begin_time
+	    || (job_ptr->details->begin_time > start_time))
 		return 1;
 
 	/* figure out the priority */
 	_get_priority_factors(start_time, job_ptr, &factors, false);
 
 	priority_age = factors.priority_age * (double)weight_age;
-	debug3("Weighted Age priority is %f * %u = %.2f",
-	       factors.priority_age, weight_age, priority_age);
-
 	priority_fs = factors.priority_fs * (double)weight_fs;
-	debug3("Weighted Fairshare priority is %f * %u = %.2f",
-	       factors.priority_fs, weight_fs, priority_fs);
-
 	priority_js = factors.priority_js * (double)weight_js;
-	debug3("Weighted JobSize priority is %f * %u = %.2f",
-	       factors.priority_js, weight_js, priority_js);
-
 	priority_part = factors.priority_part * (double)weight_part;
-	debug3("Weighted Partition priority is %f * %u = %.2f",
-	       factors.priority_part, weight_part, priority_part);
-
 	priority_qos = factors.priority_qos * (double)weight_qos;
-	debug3("Weighted QOS priority is %f * %u = %.2f",
-	       factors.priority_qos, weight_qos, priority_qos);
 
 	priority = priority_age + priority_fs + priority_js + priority_part +
 		priority_qos - (double)(factors.nice - NICE_OFFSET);
@@ -549,14 +567,26 @@ static uint32_t _get_priority_internal(time_t start_time,
 	 * 0 means the job is held; 1 means system hold
 	 * so 2 is the lowest non-held priority
 	 */
-	if(priority < 2)
+	if (priority < 2)
 		priority = 2;
 
-	debug3("Job %u priority: %.2f + %.2f + %.2f + %.2f + %.2f - %d = %.2f",
-	       job_ptr->job_id, priority_age, priority_fs, priority_js,
-	       priority_part, priority_qos, (factors.nice - NICE_OFFSET),
-	       priority);
-
+	if (priority_debug) {
+		info("Weighted Age priority is %f * %u = %.2f",
+		     factors.priority_age, weight_age, priority_age);
+		info("Weighted Fairshare priority is %f * %u = %.2f",
+		     factors.priority_fs, weight_fs, priority_fs);
+		info("Weighted JobSize priority is %f * %u = %.2f",
+		     factors.priority_js, weight_js, priority_js);
+		info("Weighted Partition priority is %f * %u = %.2f",
+		     factors.priority_part, weight_part, priority_part);
+		info("Weighted QOS priority is %f * %u = %.2f",
+		     factors.priority_qos, weight_qos, priority_qos);
+		info("Job %u priority: %.2f + %.2f + %.2f + %.2f + %.2f - %d "
+		     "= %.2f",
+		     job_ptr->job_id, priority_age, priority_fs, priority_js,
+		     priority_part, priority_qos, (factors.nice - NICE_OFFSET),
+		     priority);
+	}
 	return (uint32_t)priority;
 }
 
@@ -566,7 +596,7 @@ static time_t _next_reset(uint16_t reset_period, time_t last_reset)
 	struct tm last_tm;
 	time_t tmp_time, now = time(NULL);
 
-	if(localtime_r(&last_reset, &last_tm) == NULL)
+	if (localtime_r(&last_reset, &last_tm) == NULL)
 		return (time_t) 0;
 
 	last_tm.tm_sec   = 0;
@@ -576,47 +606,47 @@ static time_t _next_reset(uint16_t reset_period, time_t last_reset)
 /*	last_tm.tm_yday = 0;	ignored */
 	last_tm.tm_isdst = -1;
 	switch (reset_period) {
-		case PRIORITY_RESET_DAILY:
-			tmp_time = mktime(&last_tm);
+	case PRIORITY_RESET_DAILY:
+		tmp_time = mktime(&last_tm);
+		tmp_time += SECS_PER_DAY;
+		while ((tmp_time + SECS_PER_DAY) < now)
 			tmp_time += SECS_PER_DAY;
-			while ((tmp_time + SECS_PER_DAY) < now)
-				tmp_time += SECS_PER_DAY;
-			return tmp_time;
-		case PRIORITY_RESET_WEEKLY:
-			tmp_time = mktime(&last_tm);
-			tmp_time += (SECS_PER_DAY * (7 - last_tm.tm_wday));
-			while ((tmp_time + SECS_PER_WEEK) < now)
-				tmp_time += SECS_PER_WEEK;
-			return tmp_time;
-		case PRIORITY_RESET_MONTHLY:
-			last_tm.tm_mday = 1;
-			if(last_tm.tm_mon < 11)
-				last_tm.tm_mon++;
-			else {
-				last_tm.tm_mon  = 0;
-				last_tm.tm_year++;
-			}
-			break;
-		case PRIORITY_RESET_QUARTERLY:
-			last_tm.tm_mday = 1;
-			if(last_tm.tm_mon < 3)
-				last_tm.tm_mon = 3;
-			else if(last_tm.tm_mon < 6)
-				last_tm.tm_mon = 6;
-			else if(last_tm.tm_mon < 9)
-				last_tm.tm_mon = 9;
-			else {
-				last_tm.tm_mon  = 0;
-				last_tm.tm_year++;
-			}
-			break;
-		case PRIORITY_RESET_YEARLY:
-			last_tm.tm_mday = 1;
+		return tmp_time;
+	case PRIORITY_RESET_WEEKLY:
+		tmp_time = mktime(&last_tm);
+		tmp_time += (SECS_PER_DAY * (7 - last_tm.tm_wday));
+		while ((tmp_time + SECS_PER_WEEK) < now)
+			tmp_time += SECS_PER_WEEK;
+		return tmp_time;
+	case PRIORITY_RESET_MONTHLY:
+		last_tm.tm_mday = 1;
+		if (last_tm.tm_mon < 11)
+			last_tm.tm_mon++;
+		else {
 			last_tm.tm_mon  = 0;
 			last_tm.tm_year++;
-			break;
-		default:
-			return (time_t) 0;
+		}
+		break;
+	case PRIORITY_RESET_QUARTERLY:
+		last_tm.tm_mday = 1;
+		if (last_tm.tm_mon < 3)
+			last_tm.tm_mon = 3;
+		else if (last_tm.tm_mon < 6)
+			last_tm.tm_mon = 6;
+		else if (last_tm.tm_mon < 9)
+			last_tm.tm_mon = 9;
+		else {
+			last_tm.tm_mon  = 0;
+			last_tm.tm_year++;
+		}
+		break;
+	case PRIORITY_RESET_YEARLY:
+		last_tm.tm_mday = 1;
+		last_tm.tm_mon  = 0;
+		last_tm.tm_year++;
+		break;
+	default:
+		return (time_t) 0;
 	}
 	return mktime(&last_tm);
 }
@@ -636,20 +666,22 @@ static void *_decay_thread(void *no_data)
 	double decay_factor = 1;
 	uint16_t reset_period = slurm_get_priority_reset_period();
 
-	if(decay_hl > 0)
-		decay_factor = 1 - (0.693 / decay_hl);
-
 	/* Write lock on jobs, read lock on nodes and partitions */
 	slurmctld_lock_t job_write_lock =
 		{ NO_LOCK, WRITE_LOCK, READ_LOCK, READ_LOCK };
+	assoc_mgr_lock_t locks = { WRITE_LOCK, NO_LOCK,
+				   WRITE_LOCK, NO_LOCK, NO_LOCK };
+
+	if (decay_hl > 0)
+		decay_factor = 1 - (0.693 / decay_hl);
 
 	(void) pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 	(void) pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 
-	if(!localtime_r(&start_time, &tm)) {
+	if (!localtime_r(&start_time, &tm)) {
 		fatal("_decay_thread: "
-		      "Couldn't get localtime for rollup handler %d",
-		      start_time);
+		      "Couldn't get localtime for rollup handler %ld",
+		      (long)start_time);
 		return NULL;
 	}
 
@@ -657,7 +689,7 @@ static void *_decay_thread(void *no_data)
 	if (last_reset == 0)
 		last_reset = start_time;
 
-	while(1) {
+	while (1) {
 		time_t now = time(NULL);
 		int run_delta = 0;
 		double real_decay = 0.0;
@@ -667,7 +699,7 @@ static void *_decay_thread(void *no_data)
 
 		/* If reconfig is called handle all that happens
 		   outside of the loop here */
-		if(reconfig) {
+		if (reconfig) {
 			/* if decay_hl is 0 or less that means no
 			   decay is to be had.  This also means we
 			   flush the used time at a certain time
@@ -677,7 +709,7 @@ static void *_decay_thread(void *no_data)
 			reset_period = slurm_get_priority_reset_period();
 			next_reset = 0;
 			decay_hl = (double)slurm_get_priority_decay_hl();
-			if(decay_hl > 0)
+			if (decay_hl > 0)
 				decay_factor = 1 - (0.693 / decay_hl);
 			else
 				decay_factor = 1;
@@ -689,126 +721,131 @@ static void *_decay_thread(void *no_data)
 		 * incorporate it into the decay loop.
 		 */
 		switch(reset_period) {
-			case PRIORITY_RESET_NONE:
-				break;
-			case PRIORITY_RESET_NOW:	/* do once */
+		case PRIORITY_RESET_NONE:
+			break;
+		case PRIORITY_RESET_NOW:	/* do once */
+			_reset_usage();
+			reset_period = PRIORITY_RESET_NONE;
+			last_reset = now;
+			break;
+		case PRIORITY_RESET_DAILY:
+		case PRIORITY_RESET_WEEKLY:
+		case PRIORITY_RESET_MONTHLY:
+		case PRIORITY_RESET_QUARTERLY:
+		case PRIORITY_RESET_YEARLY:
+			if (next_reset == 0) {
+				next_reset = _next_reset(reset_period,
+							 last_reset);
+			}
+			if (now >= next_reset) {
 				_reset_usage();
-				reset_period = PRIORITY_RESET_NONE;
-				last_reset = now;
-				break;
-			case PRIORITY_RESET_DAILY:
-			case PRIORITY_RESET_WEEKLY:
-			case PRIORITY_RESET_MONTHLY:
-			case PRIORITY_RESET_QUARTERLY:
-			case PRIORITY_RESET_YEARLY:
-				if(next_reset == 0) {
-					next_reset = _next_reset(reset_period,
-								 last_reset);
-				}
-				if(now >= next_reset) {
-					_reset_usage();
-					last_reset = next_reset;
-					next_reset = _next_reset(reset_period,
-								 last_reset);
-				}
+				last_reset = next_reset;
+				next_reset = _next_reset(reset_period,
+							 last_reset);
+			}
 		}
 
-		if(!last_ran)
+		if (!last_ran)
 			goto get_usage;
 		else
 			run_delta = (start_time - last_ran);
 
-		if(run_delta <= 0)
+		if (run_delta <= 0)
 			goto get_usage;
 
 		real_decay = pow(decay_factor, (double)run_delta);
 
-		debug3("Decay factor over %d seconds goes from %.15f -> %.15f",
-		       run_delta, decay_factor, real_decay);
+		if (priority_debug)
+			info("Decay factor over %d seconds goes "
+			     "from %.15f -> %.15f",
+			     run_delta, decay_factor, real_decay);
 
 		/* first apply decay to used time */
-		if(_apply_decay(real_decay) != SLURM_SUCCESS) {
+		if (_apply_decay(real_decay) != SLURM_SUCCESS) {
 			error("problem applying decay");
 			running_decay = 0;
 			slurm_mutex_unlock(&decay_lock);
 			break;
 		}
-
 		lock_slurmctld(job_write_lock);
 		itr = list_iterator_create(job_list);
 		while ((job_ptr = list_next(itr))) {
 			/* apply new usage */
-			if(!IS_JOB_PENDING(job_ptr) &&
-			   job_ptr->start_time && job_ptr->assoc_ptr) {
-				acct_qos_rec_t *qos =
-					(acct_qos_rec_t *)job_ptr->qos_ptr;
-				acct_association_rec_t *assoc =
-					(acct_association_rec_t *)
-					job_ptr->assoc_ptr;
+			if (!IS_JOB_PENDING(job_ptr) &&
+			    job_ptr->start_time && job_ptr->assoc_ptr) {
+				slurmdb_qos_rec_t *qos;
+				slurmdb_association_rec_t *assoc;
 				time_t start_period = last_ran;
 				time_t end_period = start_time;
 				double run_decay = 0;
 
-				if(job_ptr->start_time > start_period)
+				if (job_ptr->start_time > start_period)
 					start_period = job_ptr->start_time;
 
-				if(job_ptr->end_time
-				   && (end_period > job_ptr->end_time))
+				if (job_ptr->end_time
+				    && (end_period > job_ptr->end_time))
 					end_period = job_ptr->end_time;
 
 				run_delta = (int)end_period - (int)start_period;
 
 				/* job already has been accounted for
 				   go to next */
-				if(run_delta < 1)
+				if (run_delta < 1)
 					continue;
 
-				debug4("job %u ran for %d seconds",
-				       job_ptr->job_id, run_delta);
+				if (priority_debug)
+					info("job %u ran for %d seconds",
+					     job_ptr->job_id, run_delta);
 
 				/* get the time in decayed fashion */
 				run_decay = run_delta
 					* pow(decay_factor, (double)run_delta);
 
 				real_decay = run_decay
-					* (double)job_ptr->total_procs;
+					* (double)job_ptr->total_cpus;
 
+				assoc_mgr_lock(&locks);
+				qos = (slurmdb_qos_rec_t *)job_ptr->qos_ptr;
+				assoc = (slurmdb_association_rec_t *)
+					job_ptr->assoc_ptr;
 				/* now apply the usage factor for this
 				   qos */
-				if(qos) {
-					slurm_mutex_lock(&assoc_mgr_qos_lock);
-					if(qos->usage_factor > 0) {
+				if (qos) {
+					if (qos->usage_factor > 0) {
 						real_decay *= qos->usage_factor;
 						run_decay *= qos->usage_factor;
 					}
-					qos->grp_used_wall += run_decay;
-					qos->usage_raw +=
+					qos->usage->grp_used_wall += run_decay;
+					qos->usage->usage_raw +=
 						(long double)real_decay;
-					slurm_mutex_unlock(&assoc_mgr_qos_lock);
 				}
 
-				slurm_mutex_lock(&assoc_mgr_association_lock);
 				/* We want to do this all the way up
 				   to and including root.  This way we
 				   can keep track of how much usage
 				   has occured on the entire system
 				   and use that to normalize against.
 				*/
-				while(assoc) {
-					assoc->grp_used_wall += run_decay;
-					assoc->usage_raw +=
+				while (assoc) {
+					assoc->usage->grp_used_wall +=
+						run_decay;
+					assoc->usage->usage_raw +=
 						(long double)real_decay;
-					debug4("adding %f new usage to "
-					       "assoc %u (user='%s' acct='%s') "
-					       "raw usage is now %Lf.  Group "
-					       "wall added %f making it %f.",
-					       real_decay, assoc->id,
-					       assoc->user, assoc->acct,
-					       assoc->usage_raw, run_decay,
-					       assoc->grp_used_wall);
-					assoc = assoc->parent_assoc_ptr;
+					if (priority_debug)
+						info("adding %f new usage to "
+						     "assoc %u (user='%s' "
+						     "acct='%s') raw usage "
+						     "is now %Lf.  Group wall "
+						     "added %f making it %f.",
+						     real_decay, assoc->id,
+						     assoc->user, assoc->acct,
+						     assoc->usage->usage_raw,
+						     run_decay,
+						     assoc->usage->
+						     grp_used_wall);
+					assoc = assoc->usage->parent_assoc_ptr;
 				}
-				slurm_mutex_unlock(&assoc_mgr_association_lock);
+				assoc_mgr_unlock(&locks);
 			}
 
 			/*
@@ -817,7 +854,8 @@ static void *_decay_thread(void *no_data)
 			 * pending.  There is no reason to set the
 			 * priority if the job isn't pending.
 			 */
-			if((job_ptr->priority <= 1) || !IS_JOB_PENDING(job_ptr))
+			if ((job_ptr->priority <= 1)
+			    || !IS_JOB_PENDING(job_ptr))
 				continue;
 
 			job_ptr->priority =
@@ -831,9 +869,12 @@ static void *_decay_thread(void *no_data)
 
 	get_usage:
 		/* now calculate all the normalized usage here */
-		slurm_mutex_lock(&assoc_mgr_association_lock);
-		_set_children_usage_efctv(assoc_mgr_root_assoc->childern_list);
-		slurm_mutex_unlock(&assoc_mgr_association_lock);
+		locks.qos = NO_LOCK;
+		assoc_mgr_lock(&locks);
+		_set_children_usage_efctv(
+			assoc_mgr_root_assoc->usage->childern_list);
+		assoc_mgr_unlock(&locks);
+		locks.qos = WRITE_LOCK;
 
 		last_ran = start_time;
 
@@ -904,6 +945,13 @@ static void *_cleanup_thread(void *no_data)
 
 static void _internal_setup()
 {
+	uint32_t debug_flags = slurm_get_debug_flags();
+
+	if (debug_flags & DEBUG_FLAG_PRIO)
+		priority_debug = 1;
+	else
+		priority_debug = 0;
+
 	favor_small = slurm_get_priority_favor_small();
 
 	max_age = slurm_get_priority_max_age();
@@ -913,12 +961,14 @@ static void _internal_setup()
 	weight_part = slurm_get_priority_weight_partition();
 	weight_qos = slurm_get_priority_weight_qos();
 
-	debug3("priority: Max Age is %u", max_age);
-	debug3("priority: Weight Age is %u", weight_age);
-	debug3("priority: Weight Fairshare is %u", weight_fs);
-	debug3("priority: Weight JobSize is %u", weight_js);
-	debug3("priority: Weight Part is %u", weight_part);
-	debug3("priority: Weight QOS is %u", weight_qos);
+	if (priority_debug) {
+		info("priority: Max Age is %u", max_age);
+		info("priority: Weight Age is %u", weight_age);
+		info("priority: Weight Fairshare is %u", weight_fs);
+		info("priority: Weight JobSize is %u", weight_js);
+		info("priority: Weight Part is %u", weight_part);
+		info("priority: Weight QOS is %u", weight_qos);
+	}
 }
 
 /*
@@ -930,29 +980,32 @@ int init ( void )
 	pthread_attr_t thread_attr;
 	char *temp = NULL;
 
+	/* This means we aren't running from the controller so skip setup. */
+	if (cluster_cpus == NO_VAL)
+		return SLURM_SUCCESS;
+
 	_internal_setup();
 
 	/* Check to see if we are running a supported accounting plugin */
 	temp = slurm_get_accounting_storage_type();
-	if(strcasecmp(temp, "accounting_storage/slurmdbd")
-	   && strcasecmp(temp, "accounting_storage/mysql")) {
+	if (strcasecmp(temp, "accounting_storage/slurmdbd")
+	    && strcasecmp(temp, "accounting_storage/mysql")) {
 		error("You are not running a supported "
 		      "accounting_storage plugin\n(%s).\n"
 		      "Fairshare can only be calculated with either "
 		      "'accounting_storage/slurmdbd' "
 		      "or 'accounting_storage/mysql' enabled.  "
 		      "If you want multifactor priority without fairshare "
-		      "ignore this message.\n",
+		      "ignore this message.",
 		      temp);
 		calc_fairshare = 0;
 		weight_fs = 0;
-	} else if(assoc_mgr_root_assoc) {
-		if(!cluster_procs)
+	} else if (assoc_mgr_root_assoc) {
+		if (!cluster_cpus)
 			fatal("We need to have a cluster cpu count "
 			      "before we can init the priority/multifactor "
 			      "plugin");
-		priority_p_set_max_cluster_usage(cluster_procs,
-						 slurm_get_priority_decay_hl());
+		assoc_mgr_root_assoc->usage->usage_efctv = 1.0;
 		slurm_attr_init(&thread_attr);
 		if (pthread_create(&decay_handler_thread, &thread_attr,
 				   _decay_thread, NULL))
@@ -969,7 +1022,7 @@ int init ( void )
 
 		slurm_attr_destroy(&thread_attr);
 	} else {
-		if(weight_fs)
+		if (weight_fs)
 			fatal("It appears you don't have any association "
 			      "data from your database.  "
 			      "The priority/multifactor plugin requires "
@@ -981,22 +1034,22 @@ int init ( void )
 
 	xfree(temp);
 
-	verbose("%s loaded", plugin_name);
+	debug("%s loaded", plugin_name);
 	return SLURM_SUCCESS;
 }
 
 int fini ( void )
 {
 	/* Daemon termination handled here */
-	if(running_decay)
+	if (running_decay)
 		debug("Waiting for decay thread to finish.");
 
 	slurm_mutex_lock(&decay_lock);
 
 	/* cancel the decay thread and then join the cleanup thread */
-	if(decay_handler_thread)
+	if (decay_handler_thread)
 		pthread_cancel(decay_handler_thread);
-	if(cleanup_handler_thread)
+	if (cleanup_handler_thread)
 		pthread_join(cleanup_handler_thread, NULL);
 
 	slurm_mutex_unlock(&decay_lock);
@@ -1013,7 +1066,7 @@ extern uint32_t priority_p_set(uint32_t last_prio, struct job_record *job_ptr)
 	return priority;
 }
 
-extern void priority_p_reconfig()
+extern void priority_p_reconfig(void)
 {
 	reconfig = 1;
 	_internal_setup();
@@ -1022,88 +1075,90 @@ extern void priority_p_reconfig()
 	return;
 }
 
-extern int priority_p_set_max_cluster_usage(uint32_t procs, uint32_t half_life)
+extern void priority_p_set_assoc_usage(slurmdb_association_rec_t *assoc)
 {
-	static uint32_t last_procs = 0;
-	static uint32_t last_half_life = 0;
-
-	if(!calc_fairshare)
-		return SLURM_SUCCESS;
-
-	/* No need to do this if nothing has changed so just return */
-	if((procs == last_procs) && (half_life == last_half_life))
-		return SLURM_SUCCESS;
+	char *child;
+	char *child_str;
 
 	xassert(assoc_mgr_root_assoc);
-
-	last_procs = procs;
-	last_half_life = half_life;
-
-	/* This should always be 1 and it doesn't get calculated later
-	   so set it now. usage_raw and usage_norm get calculated the
-	   same way the other associations do. */
-	assoc_mgr_root_assoc->usage_efctv = 1.0;
-	debug3("Total possible cpu usage for half_life of %d secs "
-	       "on the system is %.0Lf",
-	       half_life, assoc_mgr_root_assoc->usage_raw);
-
-	return SLURM_SUCCESS;
-}
-
-extern void priority_p_set_assoc_usage(acct_association_rec_t *assoc)
-{
-	char *child = "account";
-	char *child_str = assoc->acct;
-
 	xassert(assoc);
+	xassert(assoc->usage);
+	xassert(assoc->usage->parent_assoc_ptr);
 
-	if(assoc->user) {
+	if (assoc->user) {
 		child = "user";
 		child_str = assoc->user;
+	} else {
+		child = "account";
+		child_str = assoc->acct;
 	}
 
-	xassert(assoc_mgr_root_assoc);
-	xassert(assoc->parent_assoc_ptr);
-
-	if(assoc_mgr_root_assoc->usage_raw)
-		assoc->usage_norm =
-			assoc->usage_raw / assoc_mgr_root_assoc->usage_raw;
+	if (assoc_mgr_root_assoc->usage->usage_raw)
+		assoc->usage->usage_norm = assoc->usage->usage_raw
+			/ assoc_mgr_root_assoc->usage->usage_raw;
 	else
 		/* This should only happen when no usage has occured
 		   at all so no big deal, the other usage should be 0
 		   as well here.
 		*/
-		assoc->usage_norm = 0;
+		assoc->usage->usage_norm = 0;
 
-	debug4("Normalized usage for %s %s off %s %Lf / %Lf = %Lf",
-	       child, child_str, assoc->parent_assoc_ptr->acct,
-	       assoc->usage_raw, assoc_mgr_root_assoc->usage_raw,
-	       assoc->usage_norm);
+	if (priority_debug)
+		info("Normalized usage for %s %s off %s %Lf / %Lf = %Lf",
+		     child, child_str, assoc->usage->parent_assoc_ptr->acct,
+		     assoc->usage->usage_raw,
+		     assoc_mgr_root_assoc->usage->usage_raw,
+		     assoc->usage->usage_norm);
 	/* This is needed in case someone changes the half-life on the
 	   fly and now we have used more time than is available under
 	   the new config */
-	if (assoc->usage_norm > 1.0)
-		assoc->usage_norm = 1.0;
+	if (assoc->usage->usage_norm > 1.0)
+		assoc->usage->usage_norm = 1.0;
 
-	if (assoc->parent_assoc_ptr == assoc_mgr_root_assoc) {
-		assoc->usage_efctv = assoc->usage_norm;
-		debug4("Effective usage for %s %s off %s %Lf %Lf",
-		       child, child_str, assoc->parent_assoc_ptr->acct,
-		       assoc->usage_efctv, assoc->usage_norm);
+	if (assoc->usage->parent_assoc_ptr == assoc_mgr_root_assoc) {
+		assoc->usage->usage_efctv = assoc->usage->usage_norm;
+		if (priority_debug)
+			info("Effective usage for %s %s off %s %Lf %Lf",
+			     child, child_str,
+			     assoc->usage->parent_assoc_ptr->acct,
+			     assoc->usage->usage_efctv,
+			     assoc->usage->usage_norm);
 	} else {
-		assoc->usage_efctv = assoc->usage_norm +
-			((assoc->parent_assoc_ptr->usage_efctv -
-			  assoc->usage_norm) *
-			 assoc->shares_raw /
-			 (long double)assoc->level_shares);
-		debug4("Effective usage for %s %s off %s "
-		       "%Lf + ((%Lf - %Lf) * %d / %d) = %Lf",
-		       child, child_str, assoc->parent_assoc_ptr->acct,
-		       assoc->usage_norm,
-		       assoc->parent_assoc_ptr->usage_efctv,
-		       assoc->usage_norm, assoc->shares_raw,
-		       assoc->level_shares, assoc->usage_efctv);
+		assoc->usage->usage_efctv = assoc->usage->usage_norm +
+			((assoc->usage->parent_assoc_ptr->usage->usage_efctv -
+			  assoc->usage->usage_norm) *
+			 (assoc->shares_raw == SLURMDB_FS_USE_PARENT ?
+			  0 : (assoc->shares_raw /
+			       (long double)assoc->usage->level_shares)));
+		if (priority_debug) {
+			info("Effective usage for %s %s off %s "
+			     "%Lf + ((%Lf - %Lf) * %d / %d) = %Lf",
+			     child, child_str,
+			     assoc->usage->parent_assoc_ptr->acct,
+			     assoc->usage->usage_norm,
+			     assoc->usage->parent_assoc_ptr->usage->usage_efctv,
+			     assoc->usage->usage_norm,
+			     (assoc->shares_raw == SLURMDB_FS_USE_PARENT ?
+			      0 : assoc->shares_raw),
+			     assoc->usage->level_shares,
+			     assoc->usage->usage_efctv);
+		}
 	}
+}
+
+extern double priority_p_calc_fs_factor(long double usage_efctv,
+					long double shares_norm)
+{
+	double priority_fs;
+
+	xassert(usage_efctv != (long double)NO_VAL);
+
+	if (shares_norm > 0.0)
+		priority_fs = pow(2.0, -(usage_efctv / shares_norm));
+	else
+		priority_fs = 0.0;
+
+	return priority_fs;
 }
 
 extern List priority_p_get_priority_factors_list(
@@ -1129,23 +1184,25 @@ extern List priority_p_get_priority_factors_list(
 		ret_list = list_create(slurm_destroy_priority_factors_object);
 		lock_slurmctld(job_read_lock);
 		itr = list_iterator_create(job_list);
+		if (itr == NULL)
+			fatal("list_iterator_create: malloc failure");
 		while ((job_ptr = list_next(itr))) {
 			/*
 			 * We are only looking for pending jobs
 			 */
-			if(!IS_JOB_PENDING(job_ptr))
+			if (!IS_JOB_PENDING(job_ptr))
 				continue;
 			/*
 			 * This means the job is not eligible yet
 			 */
-			if(!job_ptr->details->begin_time
-			   || (job_ptr->details->begin_time > start_time))
+			if (!job_ptr->details->begin_time
+			    || (job_ptr->details->begin_time > start_time))
 				continue;
 
 			/*
 			 * 0 means the job is held; 1 means system hold
 			 */
-			if(job_ptr->priority <= 1)
+			if (job_ptr->priority <= 1)
 				continue;
 
 			if (_filter_job(job_ptr, req_job_list, req_user_list))

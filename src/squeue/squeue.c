@@ -61,10 +61,12 @@ int max_line_size;
 /************
  * Funtions *
  ************/
+static int  _get_info(bool clear_old);
 static int  _get_window_width( void );
 static void _print_date( void );
-static int _print_job (void);
-static int _print_job_steps( void );
+static int  _multi_cluster(List clusters);
+static int  _print_job ( bool clear_old );
+static int  _print_job_steps( bool clear_old );
 
 int
 main (int argc, char *argv[])
@@ -80,16 +82,19 @@ main (int argc, char *argv[])
 	}
 	max_line_size = _get_window_width( );
 
-	while (1)
-	{
+	if (params.clusters)
+		working_cluster_rec = list_peek(params.clusters);
+
+	while (1) {
 		if ((!params.no_header) &&
 		    (params.iterate || params.verbose || params.long_list))
 			_print_date ();
 
-		if ( params.step_flag )
-			error_code = _print_job_steps( );
-		else
-			error_code = _print_job( );
+		if (!params.clusters) {
+			if (_get_info(false))
+				error_code = 1;
+		} else if (_multi_cluster(params.clusters) != 0)
+			error_code = 1;
 
 		if ( params.iterate ) {
 			printf( "\n");
@@ -103,6 +108,35 @@ main (int argc, char *argv[])
 		exit (error_code);
 	else
 		exit (0);
+}
+
+static int _multi_cluster(List clusters)
+{
+	ListIterator itr;
+	bool first = true;
+	int rc = 0, rc2;
+
+	itr = list_iterator_create(clusters);
+	while ((working_cluster_rec = list_next(itr))) {
+		if (first)
+			first = false;
+		else
+			printf("\n");
+		printf("CLUSTER: %s\n", working_cluster_rec->name);
+		rc2 = _get_info(true);
+		rc = MAX(rc, rc2);
+	}
+	list_iterator_destroy(itr);
+
+	return rc;
+}
+
+static int _get_info(bool clear_old)
+{
+	if ( params.step_flag )
+		return _print_job_steps( clear_old );
+	else
+		return _print_job( clear_old );
 }
 
 /* get_window_width - return the size of the window STDOUT goes to */
@@ -131,7 +165,7 @@ _get_window_width( void )
 
 /* _print_job - print the specified job's information */
 static int
-_print_job ( void )
+_print_job ( bool clear_old )
 {
 	static job_info_msg_t * old_job_ptr = NULL, * new_job_ptr;
 	int error_code;
@@ -155,12 +189,16 @@ _print_job ( void )
 	}
 
 	if (old_job_ptr) {
+		if (clear_old)
+			old_job_ptr->last_update = 0;
 		if (job_id) {
-			error_code = slurm_load_job(&new_job_ptr, job_id,
-						    show_flags);
+			error_code = slurm_load_job(
+				&new_job_ptr, job_id,
+				show_flags);
 		} else {
-			error_code = slurm_load_jobs(old_job_ptr->last_update,
-						     &new_job_ptr, show_flags);
+			error_code = slurm_load_jobs(
+				old_job_ptr->last_update,
+				&new_job_ptr, show_flags);
 		}
 		if (error_code ==  SLURM_SUCCESS)
 			slurm_free_job_info_msg( old_job_ptr );
@@ -172,7 +210,7 @@ _print_job ( void )
 		error_code = slurm_load_job(&new_job_ptr, job_id, show_flags);
 	} else {
 		error_code = slurm_load_jobs((time_t) NULL, &new_job_ptr,
-				show_flags);
+					     show_flags);
 	}
 
 	if (error_code) {
@@ -191,7 +229,7 @@ _print_job ( void )
 	if (params.format == NULL) {
 		if (params.long_list)
 			params.format = "%.7i %.9P %.8j %.8u %.8T %.10M %.9l "
-			                "%.6D %R";
+				"%.6D %R";
 		else
 			params.format = "%.7i %.9P %.8j %.8u  %.2t %.10M %.6D %R";
 	}
@@ -199,14 +237,14 @@ _print_job ( void )
 		parse_format(params.format);
 
 	print_jobs_array( new_job_ptr->job_array, new_job_ptr->record_count ,
-			params.format_list ) ;
+			  params.format_list ) ;
 	return SLURM_SUCCESS;
 }
 
 
 /* _print_job_step - print the specified job step's information */
 static int
-_print_job_steps( void )
+_print_job_steps( bool clear_old )
 {
 	int error_code;
 	static job_step_info_response_msg_t * old_step_ptr = NULL;
@@ -217,10 +255,12 @@ _print_job_steps( void )
 		show_flags |= SHOW_ALL;
 
 	if (old_step_ptr) {
+		if (clear_old)
+			old_step_ptr->last_update = 0;
 		/* Use a last_update time of 0 so that we can get an updated
 		 * run_time for jobs rather than just its start_time */
-		error_code = slurm_get_job_steps ((time_t) 0, NO_VAL, NO_VAL,
-						  &new_step_ptr, show_flags);
+		error_code = slurm_get_job_steps((time_t) 0, NO_VAL, NO_VAL,
+						 &new_step_ptr, show_flags);
 		if (error_code ==  SLURM_SUCCESS)
 			slurm_free_job_step_info_response_msg( old_step_ptr );
 		else if (slurm_get_errno () == SLURM_NO_CHANGE_IN_DATA) {
@@ -229,8 +269,8 @@ _print_job_steps( void )
 		}
 	}
 	else
-		error_code = slurm_get_job_steps ((time_t) 0, NO_VAL, NO_VAL,
-						  &new_step_ptr, show_flags);
+		error_code = slurm_get_job_steps((time_t) 0, NO_VAL, NO_VAL,
+						 &new_step_ptr, show_flags);
 	if (error_code) {
 		slurm_perror ("slurm_get_job_steps error");
 		return SLURM_ERROR;

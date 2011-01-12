@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/slurmstepd.c - SLURM job-step manager.
- *  $Id: slurmstepd.c 19187 2009-12-23 20:11:00Z da $
+ *  $Id: slurmstepd.c 21033 2010-08-27 16:55:02Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -47,30 +47,31 @@
 #include <stdlib.h>
 #include <signal.h>
 
-#include "src/common/xmalloc.h"
-#include "src/common/xsignal.h"
+#include "src/common/gres.h"
 #include "src/common/slurm_jobacct_gather.h"
 #include "src/common/slurm_rlimits_info.h"
-#include "src/common/switch.h"
 #include "src/common/stepd_api.h"
+#include "src/common/switch.h"
+#include "src/common/xmalloc.h"
+#include "src/common/xsignal.h"
 
-#include "src/slurmd/slurmd/slurmd.h"
 #include "src/slurmd/common/slurmstepd_init.h"
 #include "src/slurmd/common/setproctitle.h"
 #include "src/slurmd/common/proctrack.h"
-#include "src/slurmd/slurmstepd/slurmstepd.h"
+#include "src/slurmd/slurmd/slurmd.h"
 #include "src/slurmd/slurmstepd/mgr.h"
 #include "src/slurmd/slurmstepd/req.h"
+#include "src/slurmd/slurmstepd/slurmstepd.h"
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 
-static int _init_from_slurmd(int sock, char **argv, slurm_addr **_cli,
-			     slurm_addr **_self, slurm_msg_t **_msg,
+static int _init_from_slurmd(int sock, char **argv, slurm_addr_t **_cli,
+			     slurm_addr_t **_self, slurm_msg_t **_msg,
 			     int *_ngids, gid_t **_gids);
 
 static void _dump_user_env(void);
 static void _send_ok_to_slurmd(int sock);
 static void _send_fail_to_slurmd(int sock);
-static slurmd_job_t *_step_setup(slurm_addr *cli, slurm_addr *self,
+static slurmd_job_t *_step_setup(slurm_addr_t *cli, slurm_addr_t *self,
 				 slurm_msg_t *msg);
 #ifdef MEMORY_LEAK_DEBUG
 static void _step_cleanup(slurmd_job_t *job, slurm_msg_t *msg, int rc);
@@ -87,8 +88,8 @@ extern char  ** environ;
 int
 main (int argc, char *argv[])
 {
-	slurm_addr *cli;
-	slurm_addr *self;
+	slurm_addr_t *cli;
+	slurm_addr_t *self;
 	slurm_msg_t *msg;
 	slurmd_job_t *job;
 	int ngids;
@@ -105,6 +106,8 @@ main (int argc, char *argv[])
 	conf->argv = &argv;
 	conf->argc = &argc;
 	init_setproctitle(argc, argv);
+	if (slurm_select_init(1) != SLURM_SUCCESS )
+		fatal( "failed to initialize node selection plugin" );
 
 	/* Receive job parameters from the slurmd */
 	_init_from_slurmd(STDIN_FILENO, argv, &cli, &self, &msg,
@@ -117,7 +120,11 @@ main (int argc, char *argv[])
 
 	/* Create the slurmd_job_t, mostly from info in a
 	   launch_tasks_request_msg_t or a batch_job_launch_msg_t */
-	job = _step_setup(cli, self, msg);
+	if(!(job = _step_setup(cli, self, msg))) {
+		_send_fail_to_slurmd(STDOUT_FILENO);
+		rc = SLURM_FAILURE;
+		goto ending;
+	}
 	job->ngids = ngids;
 	job->gids = gids;
 
@@ -186,6 +193,7 @@ _send_fail_to_slurmd(int sock)
 
 	if (errno)
 		fail = errno;
+
 	safe_write(sock, &fail, sizeof(int));
 	return;
 rwfail:
@@ -198,15 +206,15 @@ rwfail:
  */
 static int
 _init_from_slurmd(int sock, char **argv,
-		  slurm_addr **_cli, slurm_addr **_self, slurm_msg_t **_msg,
+		  slurm_addr_t **_cli, slurm_addr_t **_self, slurm_msg_t **_msg,
 		  int *_ngids, gid_t **_gids)
 {
 	char *incoming_buffer = NULL;
 	Buf buffer;
 	int step_type;
 	int len;
-	slurm_addr *cli = NULL;
-	slurm_addr *self = NULL;
+	slurm_addr_t *cli = NULL;
+	slurm_addr_t *self = NULL;
 	slurm_msg_t *msg = NULL;
 	int ngids = 0;
 	gid_t *gids = NULL;
@@ -224,7 +232,7 @@ _init_from_slurmd(int sock, char **argv,
 	safe_read(sock, &step_complete.children, sizeof(int));
 	safe_read(sock, &step_complete.depth, sizeof(int));
 	safe_read(sock, &step_complete.max_depth, sizeof(int));
-	safe_read(sock, &step_complete.parent_addr, sizeof(slurm_addr));
+	safe_read(sock, &step_complete.parent_addr, sizeof(slurm_addr_t));
 	step_complete.bits = bit_alloc(step_complete.children);
 	step_complete.jobacct = jobacct_gather_g_create(NULL);
 	pthread_mutex_unlock(&step_complete.lock);
@@ -273,7 +281,7 @@ _init_from_slurmd(int sock, char **argv,
 	incoming_buffer = xmalloc(sizeof(char) * len);
 	safe_read(sock, incoming_buffer, len);
 	buffer = create_buf(incoming_buffer,len);
-	cli = xmalloc(sizeof(slurm_addr));
+	cli = xmalloc(sizeof(slurm_addr_t));
 	if(slurm_unpack_slurm_addr_no_alloc(cli, buffer) == SLURM_ERROR) {
 		fatal("slurmstepd: problem with unpack of slurmd_conf");
 	}
@@ -286,7 +294,7 @@ _init_from_slurmd(int sock, char **argv,
 		incoming_buffer = xmalloc(sizeof(char) * len);
 		safe_read(sock, incoming_buffer, len);
 		buffer = create_buf(incoming_buffer,len);
-		self = xmalloc(sizeof(slurm_addr));
+		self = xmalloc(sizeof(slurm_addr_t));
 		if(slurm_unpack_slurm_addr_no_alloc(self, buffer)
 		   == SLURM_ERROR) {
 			fatal("slurmstepd: problem with unpack of "
@@ -347,7 +355,7 @@ rwfail:
 }
 
 static slurmd_job_t *
-_step_setup(slurm_addr *cli, slurm_addr *self, slurm_msg_t *msg)
+_step_setup(slurm_addr_t *cli, slurm_addr_t *self, slurm_msg_t *msg)
 {
 	slurmd_job_t *job = NULL;
 
@@ -364,11 +372,25 @@ _step_setup(slurm_addr *cli, slurm_addr *self, slurm_msg_t *msg)
 		fatal("handle_launch_message: Unrecognized launch RPC");
 		break;
 	}
-	if(!job) {
-		fatal("_step_setup: no job returned");
+
+	if (!job) {
+		error("_step_setup: no job returned");
+		return NULL;
 	}
+
 	job->jmgr_pid = getpid();
 	job->jobacct = jobacct_gather_g_create(NULL);
+
+	/* Establish GRES environment variables */
+	if (conf->debug_flags & DEBUG_FLAG_GRES) {
+		gres_plugin_job_state_log(job->job_gres_list, job->jobid);
+		gres_plugin_step_state_log(job->step_gres_list, job->jobid,
+					   job->stepid);
+	}
+	if (msg->msg_type == REQUEST_BATCH_JOB_LAUNCH)
+		gres_plugin_job_set_env(&job->env, job->job_gres_list);
+	else if (msg->msg_type == REQUEST_LAUNCH_TASKS)
+		gres_plugin_step_set_env(&job->env, job->step_gres_list);
 
 	/*
 	 * Add slurmd node topology informations to job env array

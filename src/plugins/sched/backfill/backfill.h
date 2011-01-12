@@ -2,7 +2,7 @@
  *  backfill.h - header for simple backfill scheduler plugin.
  *****************************************************************************
  *  Copyright (C) 2003-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -37,8 +37,9 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#define STOP_CHECK_USEC     200000	/* check for shutdown every 0.2 secs */
-#define BACKFILL_CHECK_SEC  5		/* try to backfill every 5.0 seconds */
+
+#ifndef _SLURM_BACKFILL_H
+#define _SLURM_BACKFILL_H
 
 /* backfill_agent - detached thread periodically attempts to backfill jobs */
 extern void *backfill_agent(void *args);
@@ -46,6 +47,7 @@ extern void *backfill_agent(void *args);
 /* Terminate backfill_agent */
 extern void stop_backfill_agent(void);
 
-/* trigger the attempt of a backfill */
-extern void run_backfill (void);
+/* Note that slurm.conf has changed */
+extern void backfill_reconfig(void);
 
+#endif	/* _SLURM_BACKFILL_H */

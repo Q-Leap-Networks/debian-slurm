@@ -29,7 +29,8 @@
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  Written by Mark Grondona <grondona1@llnl.gov>, Morris Jette <jette1@llnl.gov>
+ *  Written by Mark Grondona <grondona1@llnl.gov>,
+ *             Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
@@ -128,6 +129,10 @@
 #define	hostlist_delete_host	slurm_hostlist_delete_host
 #define	hostlist_delete_nth	slurm_hostlist_delete_nth
 #define	hostlist_deranged_string slurm_hostlist_deranged_string
+#define	hostlist_deranged_string_malloc \
+				slurm_hostlist_deranged_string_malloc
+#define	hostlist_deranged_string_xmalloc \
+				slurm_hostlist_deranged_string_xmalloc
 #define	hostlist_destroy	slurm_hostlist_destroy
 #define	hostlist_find		slurm_hostlist_find
 #define	hostlist_iterator_create  slurm_hostlist_iterator_create
@@ -142,6 +147,10 @@
 #define	hostlist_push_host	slurm_hostlist_push_host
 #define	hostlist_push_list	slurm_hostlist_push_list
 #define	hostlist_ranged_string	slurm_hostlist_ranged_string
+#define	hostlist_ranged_string_malloc \
+				slurm_hostlist_ranged_string_malloc
+#define	hostlist_ranged_string_xmalloc \
+				slurm_hostlist_ranged_string_xmalloc
 #define	hostlist_remove		slurm_hostlist_remove
 #define	hostlist_shift		slurm_hostlist_shift
 #define	hostlist_shift_range	slurm_hostlist_shift_range
@@ -205,6 +214,8 @@
 #define	debug			slurm_debug
 #define	debug2			slurm_debug2
 #define	debug3			slurm_debug3
+#define	debug4			slurm_debug4
+#define	debug5			slurm_debug5
 
 /* macros.h functions
  * None exported today.
@@ -290,12 +301,54 @@
 #define	xstrdup			slurm_xstrdup
 #define	xbasename		slurm_xbasename
 
+/* slurm_protocol_defs.[ch] functions */
+#define preempt_mode_string	slurm_preempt_mode_string
+#define preempt_mode_num	slurm_preempt_mode_num
+#define job_reason_string	slurm_job_reason_string
+#define job_state_string	slurm_job_state_string
+#define job_state_string_compact slurm_job_state_string_compact
+#define job_state_num		slurm_job_state_num
+#define node_state_string	slurm_node_state_string
+#define node_state_string_compact slurm_node_state_string_compact
+#define private_data_string	slurm_private_data_string
+#define accounting_enforce_string slurm_accounting_enforce_string
+#define conn_type_string	slurm_conn_type_string
+#define node_use_string		slurm_node_use_string
+#define bg_block_state_string	slurm_bg_block_state_string
+#define reservation_flags_string slurm_reservation_flags_string
+
+/* slurmdbd_defs.[ch] functions */
+#define slurmdbd_free_list_msg	slurmdb_slurmdbd_free_list_msg
+#define slurmdbd_free_rc_msg    slurmdb_slurmdbd_free_rc_msg
+#define slurmdbd_free_usage_msg slurmdb_slurmdbd_free_usage_msg
+#define slurmdbd_free_id_rc_msg slurmdb_slurmdbd_free_id_rc_msg
+
+/* plugin.[ch] functions */
+#define plugin_get_syms         slurm_plugin_get_syms
+#define plugin_load_and_link    slurm_plugin_load_and_link
+#define plugin_strerror         slurm_plugin_strerror
+#define plugin_unload           slurm_plugin_unload
+
+/* plugrack.[ch] functions */
+#define plugrack_create         slurm_plugrack_create
+#define plugrack_destroy        slurm_plugrack_destroy
+#define plugrack_read_dir       slurm_plugrack_read_dir
+#define plugrack_set_major_type slurm_plugrack_set_major_type
+#define plugrack_set_paranoia   slurm_plugrack_set_paranoia
+#define plugrack_use_by_type    slurm_plugrack_use_by_type
+
+#define jobacct_common_pack	slurm_jobacct_common_pack
+#define jobacct_common_unpack	slurm_jobacct_common_unpack
+#define jobacct_common_alloc_jobacct slurm_jobacct_common_alloc_jobacct
+#define jobacct_common_free_jobacct slurm_jobacct_common_free_jobacct
+
 #endif /* USE_ALIAS */
 
 /* Include the function definitions after redefining their names. */
 #include "src/common/arg_desc.h"
 #include "src/common/bitstring.h"
 #include "src/common/hostlist.h"
+#include "src/common/jobacct_common.h"
 #include "src/common/list.h"
 #include "src/common/log.h"
 #include "src/common/macros.h"

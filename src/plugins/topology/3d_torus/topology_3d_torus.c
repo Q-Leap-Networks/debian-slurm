@@ -75,7 +75,7 @@
  * of the plugin.  If major and minor revisions are desired, the major
  * version number may be multiplied by a suitable magnitude constant such
  * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum versions for their plugins as this API matures.
+ * minimum version for their plugins as this API matures.
  */
 const char plugin_name[]        = "topology 3d_torus plugin";
 const char plugin_type[]        = "topology/3d_torus";
@@ -107,7 +107,15 @@ extern int fini(void)
  *	after a system startup or reconfiguration.
  */
 extern int topo_build_config(void)
-{
+{	static bool first_run = true;
+
+	/* We can only re-order the nodes once at slurmctld startup.
+	 * After that time, many bitmaps are created based upon the
+	 * index of each node name in the array. */
+	if (!first_run)
+		return SLURM_SUCCESS;
+	first_run = false;
+
 #ifndef HAVE_BG
 	nodes_to_hilbert_curve();
 #endif

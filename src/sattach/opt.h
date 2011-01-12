@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  opt.h - definitions for sattach option processing
- *  $Id: opt.h 19190 2009-12-30 00:20:27Z lipari $
+ *  $Id: opt.h 20525 2010-06-21 19:33:28Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -72,6 +72,7 @@ typedef struct sbatch_options {
 	bool output_filter_set;
 	uint32_t error_filter;
 	bool error_filter_set;
+	bool pty;		/* --pty			*/
 } opt_t;
 
 extern opt_t opt;

@@ -68,7 +68,8 @@
 
 #define STAT_FIELDS "jobid,maxvmsize,maxvmsizenode,maxvmsizetask,avevmsize,maxrss,maxrssnode,maxrsstask,averss,maxpages,maxpagesnode,maxpagestask,avepages,mincpu,mincpunode,mincputask,avecpu,ntasks"
 
-#define BUFFER_SIZE 4096
+#define STAT_FIELDS_PID "jobid,nodelist,pids"
+
 #define STATE_COUNT 10
 
 #define MAX_PRINTFIELDS 100
@@ -97,9 +98,9 @@ typedef enum {
 		PRINT_MINCPU,
 		PRINT_MINCPUNODE,
 		PRINT_MINCPUTASK,
+		PRINT_NODELIST,
 		PRINT_NTASKS,
-		PRINT_SYSTEMCPU,
-		PRINT_TOTALCPU,
+		PRINT_PIDS,
 } sstat_print_types_t;
 
 
@@ -110,6 +111,7 @@ typedef struct {
 	List opt_job_list;	/* --jobs */
 	int opt_noheader;	/* can only be cleared */
 	int opt_verbose;	/* --verbose */
+	bool pid_format;
 } sstat_parameters_t;
 
 extern List print_fields_list;
@@ -125,12 +127,12 @@ extern int printfields[MAX_PRINTFIELDS],	/* Indexed into fields[] */
 
 /* process.c */
 char *find_hostname(uint32_t pos, char *hosts);
-void aggregate_sacct(sacct_t *dest, sacct_t *from);
+void aggregate_stats(slurmdb_stats_t *dest, slurmdb_stats_t *from);
 
 /* print.c */
-void print_fields(jobacct_step_rec_t *step);
+void print_fields(slurmdb_step_rec_t *step);
 
 /* options.c */
 void parse_command_line(int argc, char **argv);
 
-#endif /* !_SACCT_H */
+#endif /* !_SSTAT_H */

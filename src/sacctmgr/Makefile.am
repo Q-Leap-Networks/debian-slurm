@@ -7,8 +7,7 @@ INCLUDES = -I$(top_srcdir)
 
 bin_PROGRAMS = sacctmgr
 
-sacctmgr_LDADD =  \
-	$(top_builddir)/src/api/libslurm.o -ldl\
+sacctmgr_LDADD =  $(top_builddir)/src/db_api/libslurmdb.o -ldl \
 	$(READLINE_LIBS)
 
 sacctmgr_SOURCES =	\
@@ -18,7 +17,9 @@ sacctmgr_SOURCES =	\
 	config_functions.c	\
 	cluster_functions.c	\
 	common.c                \
+	event_functions.c	\
 	file_functions.c	\
+	job_functions.c		\
 	sacctmgr.c sacctmgr.h	\
 	qos_functions.c		\
 	txn_functions.c		\

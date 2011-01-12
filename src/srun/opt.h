@@ -1,9 +1,9 @@
 /*****************************************************************************\
  *  opt.h - definitions for srun option processing
- *  $Id: opt.h 20173 2010-04-29 16:14:33Z jette $
+ *  $Id: opt.h 20238 2010-05-11 16:19:16Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona1@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
@@ -54,7 +54,6 @@
 #include <unistd.h>
 
 #include "src/common/macros.h" /* true and false */
-#include "src/srun/core-format.h"
 #include "src/common/env.h"
 #include "src/srun/fname.h"
 
@@ -92,16 +91,16 @@ typedef struct srun_options {
 	char *cwd;		/* current working directory	*/
 	bool cwd_set;		/* true if cwd is explicitly set */
 
-	int  nprocs;		/* --nprocs=n,      -n n	*/
-	bool nprocs_set;	/* true if nprocs explicitly set */
+	int  ntasks;		/* --ntasks=n,      -n n	*/
+	bool ntasks_set;	/* true if ntasks explicitly set */
 	int  cpus_per_task;	/* --cpus-per-task=n, -c n	*/
 	bool cpus_set;		/* true if cpus_per_task explicitly set */
 	int32_t max_threads;	/* --threads, -T (threads in srun) */
 	int32_t min_nodes;	/* --nodes=n,       -N n	*/
 	int32_t max_nodes;	/* --nodes=x-n,       -N x-n	*/
-	int32_t min_sockets_per_node; /* --sockets-per-node=n      */
-	int32_t min_cores_per_socket; /* --cores-per-socket=n      */
-	int32_t min_threads_per_core; /* --threads-per-core=n      */
+	int32_t sockets_per_node; /* --sockets-per-node=n      */
+	int32_t cores_per_socket; /* --cores-per-socket=n      */
+	int32_t threads_per_core; /* --threads-per-core=n      */
 	int32_t ntasks_per_node;   /* --ntasks-per-node=n	*/
 	int32_t ntasks_per_socket; /* --ntasks-per-socket=n	*/
 	int ntasks_per_core;	/* --ntasks-per-core=n		*/
@@ -116,6 +115,8 @@ typedef struct srun_options {
 	bool extra_set;		/* true if extra node info explicitly set */
 	int  time_limit;	/* --time,   -t	(int minutes)	*/
 	char *time_limit_str;	/* --time,   -t (string)	*/
+	int  time_min;		/* --min-time   (int minutes)	*/
+	char *time_min_str;	/* --min-time (string)		*/
 	int  ckpt_interval;	/* --checkpoint (int minutes)	*/
 	char *ckpt_interval_str;/* --checkpoint (string)	*/
 	char *ckpt_dir;  	/* --checkpoint-dir (string)   */
@@ -144,7 +145,6 @@ typedef struct srun_options {
 	char *efname;		/* --error, -e filename         */
 
 	int  slurmd_debug;	/* --slurmd-debug, -D           */
-	core_format_t core_type;/* --core= 	        	*/
 	bool join;		/* --join, 	    -j		*/
 
 	/* no longer need these, they are set globally : 	*/
@@ -178,11 +178,12 @@ typedef struct srun_options {
 	bool preserve_env;	/* --preserve-env		*/
 
 	/* constraint options */
-	int32_t job_min_cpus;	/* --mincpus=n			*/
-	int32_t job_min_memory;	/* --mem=n			*/
+	int32_t pn_min_cpus;	/* --mincpus=n			*/
+	int32_t pn_min_memory;	/* --mem=n			*/
 	int32_t mem_per_cpu;	/* --mem-per-cpu=n		*/
-	long job_min_tmp_disk;	/* --tmp=n			*/
+	long pn_min_tmp_disk;	/* --tmp=n			*/
 	char *constraints;	/* --constraints=, -C constraint*/
+	char *gres;		/* --gres=			*/
 	bool contiguous;	/* --contiguous			*/
 	char *nodelist;		/* --nodelist=node1,node2,...	*/
 	char *alloc_nodelist;   /* grabbed from the environment */
@@ -233,13 +234,13 @@ extern int immediate_exit;	/* exit code for --imediate option & busy */
  * (if new constraints are added above, might want to add them to this
  *  macro or move this to a function if it gets a little complicated)
  */
-#define constraints_given() ((opt.job_min_cpus     != NO_VAL) || \
-			     (opt.job_min_memory   != NO_VAL) || \
+#define constraints_given() ((opt.pn_min_cpus     != NO_VAL) || \
+			     (opt.pn_min_memory   != NO_VAL) || \
 			     (opt.job_max_memory   != NO_VAL) || \
-			     (opt.job_min_tmp_disk != NO_VAL) || \
-			     (opt.job_min_sockets  != NO_VAL) || \
-			     (opt.job_min_cores    != NO_VAL) || \
-			     (opt.job_min_threads  != NO_VAL) || \
+			     (opt.pn_min_tmp_disk != NO_VAL) || \
+			     (opt.pn_min_sockets  != NO_VAL) || \
+			     (opt.pn_min_cores    != NO_VAL) || \
+			     (opt.pn_min_threads  != NO_VAL) || \
 			     (opt.contiguous))
 
 /* process options:

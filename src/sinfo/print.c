@@ -2,7 +2,8 @@
  *  print.c - sinfo print job functions
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
+ *  Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov> and
  *  Morris Jette <jette1@llnl.gov>
@@ -49,6 +50,7 @@
 #include "src/common/hostlist.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
+#include "src/common/parse_time.h"
 #include "src/sinfo/print.h"
 #include "src/sinfo/sinfo.h"
 
@@ -245,14 +247,15 @@ format_add_function(List list, int width, bool right, char *suffix,
 
 static void _set_node_field_size(List sinfo_list)
 {
-	char tmp[MAXHOSTRANGELEN];
+	char *tmp = NULL;
 	ListIterator i = list_iterator_create(sinfo_list);
 	sinfo_data_t *current;
 	int max_width = MIN_NODE_FIELD_SIZE, this_width = 0;
 
 	while ((current = (sinfo_data_t *) list_next(i)) != NULL) {
-		this_width = hostlist_ranged_string(current->nodes,
-					sizeof(tmp), tmp);
+		tmp = hostlist_ranged_string_xmalloc(current->nodes);
+		this_width = strlen(tmp);
+		xfree(tmp);
 		max_width = MAX(max_width, this_width);
 	}
 	list_iterator_destroy(i);
@@ -285,10 +288,16 @@ int _print_avail(sinfo_data_t * sinfo_data, int width,
 	if (sinfo_data) {
 		if (sinfo_data->part_info == NULL)
 			_print_str("n/a", width, right_justify, true);
-		else if (sinfo_data->part_info->state_up)
+		else if (sinfo_data->part_info->state_up == PARTITION_UP)
 			_print_str("up", width, right_justify, true);
-		else
+		else if (sinfo_data->part_info->state_up == PARTITION_DOWN)
 			_print_str("down", width, right_justify, true);
+		else if (sinfo_data->part_info->state_up == PARTITION_DRAIN)
+			_print_str("drain", width, right_justify, true);
+		else if (sinfo_data->part_info->state_up == PARTITION_INACTIVE)
+			_print_str("inactive", width, right_justify, true);
+		else
+			_print_str("unknown", width, right_justify, true);
 	} else
 		_print_str("AVAIL", width, right_justify, true);
 
@@ -325,21 +334,25 @@ int _print_cpus_aiot(sinfo_data_t * sinfo_data, int width,
 	char tmpo[8];
 	char tmpt[8];
 	if (sinfo_data) {
-#ifdef HAVE_BG
-		convert_num_unit((float)sinfo_data->cpus_alloc,
-				 tmpa, sizeof(tmpa), UNIT_NONE);
-		convert_num_unit((float)sinfo_data->cpus_idle,
-				 tmpi, sizeof(tmpi), UNIT_NONE);
-		convert_num_unit((float)sinfo_data->cpus_other,
-				 tmpo, sizeof(tmpo), UNIT_NONE);
-		convert_num_unit((float)sinfo_data->cpus_total,
-				 tmpt, sizeof(tmpt), UNIT_NONE);
-#else
-		sprintf(tmpa, "%u", sinfo_data->cpus_alloc);
-		sprintf(tmpi, "%u", sinfo_data->cpus_idle);
-		sprintf(tmpo, "%u", sinfo_data->cpus_other);
-		sprintf(tmpt, "%u", sinfo_data->cpus_total);
-#endif
+		if(params.cluster_flags & CLUSTER_FLAG_BG) {
+			convert_num_unit((float)sinfo_data->cpus_alloc,
+					 tmpa, sizeof(tmpa), UNIT_NONE);
+			convert_num_unit((float)sinfo_data->cpus_idle,
+					 tmpi, sizeof(tmpi), UNIT_NONE);
+			convert_num_unit((float)sinfo_data->cpus_other,
+					 tmpo, sizeof(tmpo), UNIT_NONE);
+			convert_num_unit((float)sinfo_data->cpus_total,
+					 tmpt, sizeof(tmpt), UNIT_NONE);
+		} else {
+			snprintf(tmpa, sizeof(tmpa), "%u",
+				 sinfo_data->cpus_alloc);
+			snprintf(tmpi, sizeof(tmpi), "%u",
+				 sinfo_data->cpus_idle);
+			snprintf(tmpo, sizeof(tmpo), "%u",
+				 sinfo_data->cpus_other);
+			snprintf(tmpt, sizeof(tmpt), "%u",
+				 sinfo_data->cpus_total);
+		}
 		snprintf(id, FORMAT_STRING_SIZE, "%s/%s/%s/%s",
 			 tmpa, tmpi, tmpo, tmpt);
 		_print_str(id, width, right_justify, true);
@@ -468,6 +481,19 @@ int _print_features(sinfo_data_t * sinfo_data, int width,
 	return SLURM_SUCCESS;
 }
 
+int _print_gres(sinfo_data_t * sinfo_data, int width,
+			bool right_justify, char *suffix)
+{
+	if (sinfo_data)
+		_print_str(sinfo_data->gres, width, right_justify, true);
+	else
+		_print_str("GRES", width, right_justify, true);
+
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
 int _print_groups(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix)
 {
@@ -531,16 +557,17 @@ int _print_node_list(sinfo_data_t * sinfo_data, int width,
 		width = params.node_field_size;
 
 	if (sinfo_data) {
-		char tmp[MAXHOSTRANGELEN];
-		hostlist_ranged_string(sinfo_data->nodes,
-					sizeof(tmp), tmp);
+		char *tmp = NULL;
+		tmp = hostlist_ranged_string_xmalloc(
+				sinfo_data->nodes);
 		_print_str(tmp, width, right_justify, true);
+		xfree(tmp);
 	} else {
-#ifdef HAVE_BG
-		_print_str("BP_LIST", width, right_justify, false);
-#else
-		_print_str("NODELIST", width, right_justify, false);
-#endif
+		char *title = "NODELIST";
+		if(params.cluster_flags & CLUSTER_FLAG_BG)
+			title = "BP_LIST";
+
+		_print_str(title, width, right_justify, false);
 	}
 
 	if (suffix)
@@ -554,12 +581,12 @@ int _print_nodes_t(sinfo_data_t * sinfo_data, int width,
 	char id[FORMAT_STRING_SIZE];
 	char tmp[8];
 	if (sinfo_data) {
-#ifdef HAVE_BG
-		convert_num_unit((float)sinfo_data->nodes_total, tmp,
-				 sizeof(tmp), UNIT_NONE);
-#else
-		snprintf(tmp, sizeof(tmp), "%d", sinfo_data->nodes_total);
-#endif
+		if(params.cluster_flags & CLUSTER_FLAG_BG)
+			convert_num_unit((float)sinfo_data->nodes_total,
+					 tmp, sizeof(tmp), UNIT_NONE);
+		else
+			snprintf(tmp, sizeof(tmp), "%d",
+				 sinfo_data->nodes_total);
 		snprintf(id, FORMAT_STRING_SIZE, "%s", tmp);
 		_print_str(id, width, right_justify, true);
 	} else
@@ -577,15 +604,17 @@ int _print_nodes_ai(sinfo_data_t * sinfo_data, int width,
 	char tmpa[8];
 	char tmpi[8];
 	if (sinfo_data) {
-#ifdef HAVE_BG
-		convert_num_unit((float)sinfo_data->nodes_alloc,
-				 tmpa, sizeof(tmpa), UNIT_NONE);
-		convert_num_unit((float)sinfo_data->nodes_idle,
-				 tmpi, sizeof(tmpi), UNIT_NONE);
-#else
-		snprintf(tmpa, sizeof(tmpa), "%d", sinfo_data->nodes_alloc);
-		snprintf(tmpi, sizeof(tmpi), "%d", sinfo_data->nodes_idle);
-#endif
+		if(params.cluster_flags & CLUSTER_FLAG_BG) {
+			convert_num_unit((float)sinfo_data->nodes_alloc,
+					 tmpa, sizeof(tmpa), UNIT_NONE);
+			convert_num_unit((float)sinfo_data->nodes_idle,
+					 tmpi, sizeof(tmpi), UNIT_NONE);
+		} else {
+			snprintf(tmpa, sizeof(tmpa), "%d",
+				 sinfo_data->nodes_alloc);
+			snprintf(tmpi, sizeof(tmpi), "%d",
+				 sinfo_data->nodes_idle);
+		}
 		snprintf(id, FORMAT_STRING_SIZE, "%s/%s",
 		         tmpa, tmpi);
 		_print_str(id, width, right_justify, true);
@@ -606,22 +635,25 @@ int _print_nodes_aiot(sinfo_data_t * sinfo_data, int width,
 	char tmpo[8];
 	char tmpt[8];
 	if (sinfo_data) {
-#ifdef HAVE_BG
-		convert_num_unit((float)sinfo_data->nodes_alloc,
-				 tmpa, sizeof(tmpa), UNIT_NONE);
-		convert_num_unit((float)sinfo_data->nodes_idle,
-				 tmpi, sizeof(tmpi), UNIT_NONE);
-		convert_num_unit((float)sinfo_data->nodes_other,
-				 tmpo, sizeof(tmpo), UNIT_NONE);
-		convert_num_unit((float)sinfo_data->nodes_total,
-				 tmpt, sizeof(tmpt), UNIT_NONE);
-#else
-		snprintf(tmpa, sizeof(tmpa), "%u", sinfo_data->nodes_alloc);
-		snprintf(tmpi, sizeof(tmpi), "%u", sinfo_data->nodes_idle);
-		snprintf(tmpo, sizeof(tmpo), "%u", sinfo_data->nodes_other);
-		snprintf(tmpt, sizeof(tmpt), "%u", sinfo_data->nodes_total);
-#endif
-
+		if(params.cluster_flags & CLUSTER_FLAG_BG) {
+			convert_num_unit((float)sinfo_data->nodes_alloc,
+					 tmpa, sizeof(tmpa), UNIT_NONE);
+			convert_num_unit((float)sinfo_data->nodes_idle,
+					 tmpi, sizeof(tmpi), UNIT_NONE);
+			convert_num_unit((float)sinfo_data->nodes_other,
+					 tmpo, sizeof(tmpo), UNIT_NONE);
+			convert_num_unit((float)sinfo_data->nodes_total,
+					 tmpt, sizeof(tmpt), UNIT_NONE);
+		} else {
+			snprintf(tmpa, sizeof(tmpa), "%u",
+				 sinfo_data->nodes_alloc);
+			snprintf(tmpi, sizeof(tmpi), "%u",
+				 sinfo_data->nodes_idle);
+			snprintf(tmpo, sizeof(tmpo), "%u",
+				 sinfo_data->nodes_other);
+			snprintf(tmpt, sizeof(tmpt), "%u",
+				 sinfo_data->nodes_total);
+		}
 		snprintf(id, FORMAT_STRING_SIZE, "%s/%s/%s/%s",
 		         tmpa, tmpi, tmpo, tmpt);
 		_print_str(id, width, right_justify, true);
@@ -642,7 +674,7 @@ int _print_partition(sinfo_data_t * sinfo_data, int width,
 		else {
 			char *tmp;
 			tmp = xstrdup(sinfo_data->part_info->name);
-			if (sinfo_data->part_info->default_part) {
+			if (sinfo_data->part_info->flags & PART_FLAG_DEFAULT) {
 				if (strlen(tmp) < width)
 					xstrcat(tmp, "*");
 				else if (width > 0)
@@ -662,6 +694,23 @@ int _print_partition(sinfo_data_t * sinfo_data, int width,
 int _print_prefix(sinfo_data_t * job, int width, bool right_justify,
 		char* suffix)
 {
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
+int _print_preempt_mode(sinfo_data_t * sinfo_data, int width,
+			bool right_justify, char *suffix)
+{
+	if (sinfo_data) {
+		uint16_t preempt_mode = sinfo_data->part_info->preempt_mode;
+		if (preempt_mode == (uint16_t) NO_VAL)
+			preempt_mode =  slurm_get_preempt_mode();
+		_print_str(preempt_mode_string(preempt_mode), 
+			   width, right_justify, true);
+	} else
+		_print_str("PREEMPT_MODE", width, right_justify, true);
+
 	if (suffix)
 		printf("%s", suffix);
 	return SLURM_SUCCESS;
@@ -707,7 +756,7 @@ int _print_root(sinfo_data_t * sinfo_data, int width,
 	if (sinfo_data) {
 		if (sinfo_data->part_info == NULL)
 			_print_str("n/a", width, right_justify, true);
-		else if (sinfo_data->part_info->root_only)
+		else if (sinfo_data->part_info->flags & PART_FLAG_ROOT_ONLY)
 			_print_str("yes", width, right_justify, true);
 		else
 			_print_str("no", width, right_justify, true);
@@ -820,6 +869,71 @@ int _print_time(sinfo_data_t * sinfo_data, int width,
 					width, right_justify, true);
 	} else
 		_print_str("TIMELIMIT", width, right_justify, true);
+
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
+int _print_timestamp(sinfo_data_t * sinfo_data, int width,
+			bool right_justify, char *suffix)
+{
+	if (sinfo_data && sinfo_data->reason_time) {
+		char time_str[32];
+		slurm_make_time_str(&sinfo_data->reason_time,
+				    time_str, sizeof(time_str));
+		_print_str(time_str, width, right_justify, true);
+	} else if (sinfo_data)
+		_print_str("Unknown", width, right_justify, true);
+	else
+		_print_str("TIMESTAMP", width, right_justify, true);
+
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
+int _print_user(sinfo_data_t * sinfo_data, int width,
+			bool right_justify, char *suffix)
+{
+	if (sinfo_data && (sinfo_data->reason_uid != NO_VAL)) {
+		char user[FORMAT_STRING_SIZE];
+		struct passwd *pw = NULL;
+
+		if ((pw=getpwuid(sinfo_data->reason_uid)))
+			snprintf(user, sizeof(user), "%s", pw->pw_name);
+		else
+			snprintf(user, sizeof(user), "Unk(%u)",
+				 sinfo_data->reason_uid);
+		_print_str(user, width, right_justify, true);
+	} else if (sinfo_data)
+		_print_str("Unknown", width, right_justify, true);
+	else
+		_print_str("USER", width, right_justify, true);
+
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
+int _print_user_long(sinfo_data_t * sinfo_data, int width,
+			bool right_justify, char *suffix)
+{
+	if (sinfo_data && (sinfo_data->reason_uid != NO_VAL)) {
+		char user[FORMAT_STRING_SIZE];
+		struct passwd *pw = NULL;
+
+		if ((pw=getpwuid(sinfo_data->reason_uid)))
+			snprintf(user, sizeof(user), "%s(%u)", pw->pw_name,
+				 sinfo_data->reason_uid);
+		else
+			snprintf(user, sizeof(user), "Unk(%u)",
+				 sinfo_data->reason_uid);
+		_print_str(user, width, right_justify, true);
+	} else if (sinfo_data)
+		_print_str("Unknown", width, right_justify, true);
+	else
+		_print_str("USER", width, right_justify, true);
 
 	if (suffix)
 		printf("%s", suffix);

@@ -43,6 +43,10 @@ Print a help message describing all \fBscancel\fR options.
 Interactive mode. Confirm each job_id.step_id before performing the cancel operation.
 
 .TP
+\fB\-M\fR, \fB\-\-clusters\fR=<\fIstring\fR>
+Cluster to issue commands to.
+
+.TP
 \fB\-n\fR, \fB\-\-name\fR=\fIjob_name\fR
 Restrict the scancel operation to jobs with this job name.
 
@@ -181,6 +185,12 @@ bypass the SIGTERM.
 .LP
 Cancelling a job step will not result in a job being terminated.
 The job must be cancelled to release a resource allocation.
+
+.SH "AUTHORIZATION"
+
+When using the SLURM db, users who have AdminLevel's defined (Operator
+or Admin) and users who are account coordinators are given the
+authority to invoke scancel on other user's jobs.
 
 .SH "EXAMPLES"
 .TP

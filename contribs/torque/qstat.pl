@@ -49,6 +49,7 @@ use Getopt::Long 2.24 qw(:config no_ignore_case);
 use lib "${FindBin::Bin}/../lib/perl";
 use autouse 'Pod::Usage' => qw(pod2usage);
 use Slurm ':all';
+use Slurmdb ':all'; # needed for getting the correct cluster dims
 use Switch;
 
 # Parse Command Line Arguments
@@ -131,7 +132,7 @@ my $job_flags = SHOW_ALL | SHOW_DETAIL;
 if(defined($queueList)) {
 	my @queueIds = split(/,/, $queueList) if $queueList;
 
-	my $resp = Slurm->load_partitions(1);
+	my $resp = Slurm->load_partitions(0, SHOW_ALL);
 	if(!$resp) {
 		die "Problem loading jobs.\n";
 	}
@@ -151,9 +152,9 @@ if(defined($queueList)) {
 		$rc = 0;
 	}
 } elsif($queueStatus) {
-	my $jresp = Slurm->load_jobs($job_flags);
+	my $jresp = Slurm->load_jobs(0, $job_flags);
 	die "Problem loading jobs.\n" if(!$jresp);
-	my $resp = Slurm->load_partitions(1);
+	my $resp = Slurm->load_partitions(0, SHOW_ALL);
 	die "Problem loading partitions.\n" if(!$resp);
 	my $total_running = 0;
 	my $total_queued = 0;
@@ -164,9 +165,9 @@ if(defined($queueList)) {
 		foreach my $job (@{$jresp->{job_array}}) {
 			next if($job->{'partition'} ne $part->{'name'});
 			$part->{'running_jobs'}++
-				if($job->{'job_state'} = JOB_RUNNING);
+				if($job->{'job_state'} == JOB_RUNNING);
 			$part->{'queued_jobs'}++
-				if($job->{'job_state'} = JOB_PENDING);
+				if($job->{'job_state'} == JOB_PENDING);
 		}
 		$total_running += $part->{'running_jobs'};
 		$total_queued += $part->{'queued_jobs'};
@@ -180,7 +181,7 @@ if(defined($queueList)) {
 	my @jobIds = @ARGV;
 	my @userIds = split(/,/, $userList) if $userList;
 
-	my $resp = Slurm->load_jobs($job_flags);
+	my $resp = Slurm->load_jobs(0, $job_flags);
 	if(!$resp) {
 		die "Problem loading jobs.\n";
 	}
@@ -439,7 +440,7 @@ sub print_job_brief
 	}
 	printf("%-19.19s %-16.16s %-15.15s %-8.8s %-1.1s %-15.15s\n",
 	       $job->{'job_id'}, $job->{'name'}, $job->{'user_name'},
-	       ddhhmm($job->{'statPSUtil'}), $job->{'stateCode'},
+	       ddhhmm($job->{'statPSUtl'}), $job->{'stateCode'},
 	       $job->{'partition'});
 }
 
@@ -479,7 +480,7 @@ sub print_job_select
 	       $job->{'num_nodes'} || "--",
 	       $job->{'num_procs'} || "--",
 	       $job->{'job_min_memory'} || "--",
-	       hhmm($job->{'time_limit'}),
+	       hhmm($job->{'time_limit'} * 60),
 	       $job->{'stateCode'},
 	       hhmm($job->{'aWDuration'}));
 
@@ -526,7 +527,7 @@ sub print_job_full
 	my $user_group = getgrgid($job->{'group_id'});
 	printf("\tegroup = %s(%d)\n", $user_group, $job->{'group_id'});
 
-	printf("\tResource_List.walltime = %s\n", hhmmss($job->{'aWDuration'}));
+	printf("\tResource_List.walltime = %s\n", hhmmss($job->{'time_limit'} * 60));
 	printf("\tResource_List.nodect = %d\n", $job->{'num_nodes'})
 		if $job->{'num_nodes'};
 	printf("\tResource_List.ncpus = %s\n", $job->{'num_procs'})

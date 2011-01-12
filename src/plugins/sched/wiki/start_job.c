@@ -54,10 +54,10 @@ static int	_start_job(uint32_t jobid, int task_cnt, char *hostlist,
 extern int	start_job(char *cmd_ptr, int *err_code, char **err_msg)
 {
 	char *arg_ptr, *task_ptr, *tasklist, *tmp_char;
-	int i, rc, task_cnt;
+	int rc, task_cnt;
 	uint32_t jobid;
 	hostlist_t hl = (hostlist_t) NULL;
-	char host_string[MAXHOSTRANGELEN];
+	char *host_string;
 	static char reply_msg[128];
 
 	arg_ptr = strstr(cmd_ptr, "ARG=");
@@ -97,19 +97,19 @@ extern int	start_job(char *cmd_ptr, int *err_code, char **err_msg)
 	}
 	hostlist_uniq(hl);
 	hostlist_sort(hl);
-	i = hostlist_ranged_string(hl, sizeof(host_string), host_string);
+	host_string = hostlist_ranged_string_xmalloc(hl);
 	hostlist_destroy(hl);
-	if (i < 0) {
+	if (host_string == NULL) {
 		*err_code = -300;
 		*err_msg = "STARTJOB has invalid TASKLIST";
-		error("wiki: STARTJOB has invalid TASKLIST: %s",
-			host_string);
+		error("wiki: STARTJOB has invalid TASKLIST: %s", tasklist);
 		xfree(tasklist);
 		return -1;
 	}
 
 	rc = _start_job(jobid, task_cnt, host_string, tasklist,
 			err_code, err_msg);
+	xfree(host_string);
 	xfree(tasklist);
 	if (rc == 0) {
 		snprintf(reply_msg, sizeof(reply_msg),
@@ -194,7 +194,7 @@ static int	_start_job(uint32_t jobid, int task_cnt, char *hostlist,
 				"job %u, %s",
 				jobid, hostlist);
 			xfree(new_node_list);
-			bit_free(new_bitmap);
+			FREE_NULL_BITMAP(new_bitmap);
 			rc = -1;
 			goto fini;
 		}
@@ -248,8 +248,8 @@ static int	_start_job(uint32_t jobid, int task_cnt, char *hostlist,
 	job_ptr->details->req_nodes = new_node_list;
 	save_req_bitmap = job_ptr->details->req_node_bitmap;
 	job_ptr->details->req_node_bitmap = new_bitmap;
-	old_task_cnt = job_ptr->num_procs;
-	job_ptr->num_procs = MAX(task_cnt, old_task_cnt);
+	old_task_cnt = job_ptr->details->min_cpus;
+	job_ptr->details->min_cpus = MAX(task_cnt, old_task_cnt);
 	job_ptr->priority = 100000000;
 
  fini:	unlock_slurmctld(job_write_lock);
@@ -257,7 +257,7 @@ static int	_start_job(uint32_t jobid, int task_cnt, char *hostlist,
 		return rc;
 
 	/* No errors so far */
-	(void) schedule();	/* provides own locking */
+	(void) schedule(INFINITE);	/* provides own locking */
 
 	/* Check to insure the job was actually started */
 	lock_slurmctld(job_write_lock);
@@ -290,7 +290,7 @@ static int	_start_job(uint32_t jobid, int task_cnt, char *hostlist,
 
 		/* restore some of job state */
 		job_ptr->priority = 0;
-		job_ptr->num_procs = old_task_cnt;
+		job_ptr->details->min_cpus = old_task_cnt;
 		rc = -1;
 	}
 

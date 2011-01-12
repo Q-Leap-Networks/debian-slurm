@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  xassert.c - replacement for assert which sends error to log instead
  *		of stderr
- *  $Id: xassert.c 19095 2009-12-01 22:59:18Z da $
+ *  $Id: xassert.c 19579 2010-02-24 00:11:35Z jette $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -57,7 +57,7 @@ strong_alias(__xassert_failed,	slurm_xassert_failed);
 
 void __xassert_failed(char *expr, const char *file, int line, char *func)
 {
-	error("%s:%d: %s(): Assertion (%s) failed.\n", file, line, func, expr);
+	error("%s:%d: %s(): Assertion (%s) failed.", file, line, func, expr);
 	log_flush();
 	abort();
 }

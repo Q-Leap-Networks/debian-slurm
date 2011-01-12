@@ -36,10 +36,6 @@
 
 #include "affinity.h"
 
-#ifdef HAVE_PLPA
-#  include <plpa.h>
-#endif
-
 void slurm_chkaffinity(cpu_set_t *mask, slurmd_job_t *job, int statval)
 {
 	char *bind_type, *action, *status, *units;
@@ -143,7 +139,7 @@ int get_cpuset(cpu_set_t *mask, slurmd_job_t *job)
 	char buftype[1024];
 
 	slurm_sprint_cpu_bind_type(buftype, job->cpu_bind_type);
-	debug3("get_cpuset (%s[%d]) %s\n", buftype, job->cpu_bind_type,
+	debug3("get_cpuset (%s[%d]) %s", buftype, job->cpu_bind_type,
 		job->cpu_bind);
 	CPU_ZERO(mask);
 
@@ -280,17 +276,13 @@ int slurm_setaffinity(pid_t pid, size_t size, const cpu_set_t *mask)
 	int rval;
 	char mstr[1 + CPU_SETSIZE / 4];
 
-#ifdef HAVE_PLPA
-	rval = plpa_sched_setaffinity(pid, size, (plpa_cpu_set_t *) mask);
-#else
-#  ifdef SCHED_GETAFFINITY_THREE_ARGS
+#ifdef SCHED_GETAFFINITY_THREE_ARGS
 	rval = sched_setaffinity(pid, size, mask);
-#  else
+#else
 	rval = sched_setaffinity(pid, mask);
-#  endif
 #endif
 	if (rval) {
-		verbose("sched_setaffinity(%d,%d,0x%s) failed: %m",
+		verbose("sched_setaffinity(%d,%zd,0x%s) failed: %m",
 			pid, size, cpuset_to_str(mask, mstr));
 	}
 	return (rval);
@@ -302,17 +294,13 @@ int slurm_getaffinity(pid_t pid, size_t size, cpu_set_t *mask)
 	char mstr[1 + CPU_SETSIZE / 4];
 
 	CPU_ZERO(mask);
-#ifdef HAVE_PLPA
-	rval = plpa_sched_getaffinity(pid, size, (plpa_cpu_set_t *) mask);
-#else
-#  ifdef SCHED_GETAFFINITY_THREE_ARGS
+#ifdef SCHED_GETAFFINITY_THREE_ARGS
 	rval = sched_getaffinity(pid, size, mask);
-#  else
+#else
 	rval = sched_getaffinity(pid, mask);
-#  endif
 #endif
 	if (rval) {
-		verbose("sched_getaffinity(%d,%d,0x%s) failed with status %d",
+		verbose("sched_getaffinity(%d,%zd,0x%s) failed with status %d",
 				pid, size, cpuset_to_str(mask, mstr), rval);
 	} else {
 		debug3("sched_getaffinity(%d) = 0x%s",

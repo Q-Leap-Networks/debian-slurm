@@ -16,7 +16,7 @@
 @SET_MAKE@
 
 # Makefile for common library
-# If you are linking to this lib any know you are not linking to
+# If you are linking to this lib and know you are not linking to
 # anything else that will need variables here link to
 # $(top_builddir)/src/common/libcommon.la
 # if you are linking to a stand alone program that needs all symbols link to
@@ -71,6 +71,7 @@ am__aclocal_m4_deps = $(top_srcdir)/auxdir/acx_pthread.m4 \
 	$(top_srcdir)/auxdir/x_ac_env.m4 \
 	$(top_srcdir)/auxdir/x_ac_federation.m4 \
 	$(top_srcdir)/auxdir/x_ac_gpl_licensed.m4 \
+	$(top_srcdir)/auxdir/x_ac_hwloc.m4 \
 	$(top_srcdir)/auxdir/x_ac_iso.m4 \
 	$(top_srcdir)/auxdir/x_ac_lua.m4 \
 	$(top_srcdir)/auxdir/x_ac_munge.m4 \
@@ -111,9 +112,11 @@ am__libcommon_la_SOURCES_DIST = assoc_mgr.c assoc_mgr.h \
 	slurm_protocol_socket_common.h slurm_protocol_common.h \
 	slurm_protocol_interface.h slurm_protocol_defs.c \
 	slurm_protocol_defs.h slurm_rlimits_info.h \
-	slurm_rlimits_info.c slurmdbd_defs.c slurmdbd_defs.h uid.c \
-	uid.h util-net.c util-net.h slurm_auth.c slurm_auth.h \
-	jobacct_common.c jobacct_common.h slurm_accounting_storage.c \
+	slurm_rlimits_info.c slurmdb_defs.c slurmdb_defs.h \
+	slurmdb_pack.c slurmdb_pack.h slurmdbd_defs.c slurmdbd_defs.h \
+	working_cluster.c working_cluster.h uid.c uid.h util-net.c \
+	util-net.h slurm_auth.c slurm_auth.h jobacct_common.c \
+	jobacct_common.h slurm_accounting_storage.c \
 	slurm_accounting_storage.h slurm_jobacct_gather.c \
 	slurm_jobacct_gather.h slurm_jobcomp.c slurm_jobcomp.h \
 	slurm_topology.c slurm_topology.h switch.c switch.h arg_desc.c \
@@ -126,7 +129,7 @@ am__libcommon_la_SOURCES_DIST = assoc_mgr.c assoc_mgr.h \
 	global_defaults.c timers.c timers.h slurm_xlator.h stepd_api.c \
 	stepd_api.h write_labelled_message.c write_labelled_message.h \
 	proc_args.c proc_args.h slurm_strcasestr.c slurm_strcasestr.h \
-	node_conf.h node_conf.c
+	node_conf.h node_conf.c gres.h gres.c
 @HAVE_UNSETENV_FALSE@am__objects_1 = unsetenv.lo
 am_libcommon_la_OBJECTS = assoc_mgr.lo basil_resv_conf.lo xmalloc.lo \
 	xassert.lo xstring.lo xsignal.lo forward.lo strlcpy.lo list.lo \
@@ -136,8 +139,9 @@ am_libcommon_la_OBJECTS = assoc_mgr.lo basil_resv_conf.lo xmalloc.lo \
 	slurm_cred.lo slurm_errno.lo slurm_priority.lo \
 	slurm_protocol_api.lo slurm_protocol_pack.lo \
 	slurm_protocol_util.lo slurm_protocol_socket_implementation.lo \
-	slurm_protocol_defs.lo slurm_rlimits_info.lo slurmdbd_defs.lo \
-	uid.lo util-net.lo slurm_auth.lo jobacct_common.lo \
+	slurm_protocol_defs.lo slurm_rlimits_info.lo slurmdb_defs.lo \
+	slurmdb_pack.lo slurmdbd_defs.lo working_cluster.lo uid.lo \
+	util-net.lo slurm_auth.lo jobacct_common.lo \
 	slurm_accounting_storage.lo slurm_jobacct_gather.lo \
 	slurm_jobcomp.lo slurm_topology.lo switch.lo arg_desc.lo \
 	malloc.lo getopt.lo getopt1.lo $(am__objects_1) \
@@ -145,7 +149,7 @@ am_libcommon_la_OBJECTS = assoc_mgr.lo basil_resv_conf.lo xmalloc.lo \
 	slurm_step_layout.lo checkpoint.lo job_resources.lo \
 	parse_time.lo job_options.lo global_defaults.lo timers.lo \
 	stepd_api.lo write_labelled_message.lo proc_args.lo \
-	slurm_strcasestr.lo node_conf.lo
+	slurm_strcasestr.lo node_conf.lo gres.lo
 am__EXTRA_libcommon_la_SOURCES_DIST = unsetenv.c unsetenv.h
 libcommon_la_OBJECTS = $(am_libcommon_la_OBJECTS)
 libcommon_la_LINK = $(LIBTOOL) --tag=CC $(AM_LIBTOOLFLAGS) \
@@ -216,7 +220,7 @@ CCDEPMODE = @CCDEPMODE@
 CFLAGS = @CFLAGS@
 CMD_LDFLAGS = @CMD_LDFLAGS@
 CPP = @CPP@
-CPPFLAGS = @CPPFLAGS@
+CPPFLAGS = -DGRES_CONFIG_FILE=\"$(sysconfdir)/gres.conf\"
 CXX = @CXX@
 CXXCPP = @CXXCPP@
 CXXDEPMODE = @CXXDEPMODE@
@@ -244,6 +248,9 @@ HAVE_ELAN = @HAVE_ELAN@
 HAVE_FEDERATION = @HAVE_FEDERATION@
 HAVE_OPENSSL = @HAVE_OPENSSL@
 HAVE_SOME_CURSES = @HAVE_SOME_CURSES@
+HWLOC_CPPFLAGS = @HWLOC_CPPFLAGS@
+HWLOC_LDFLAGS = @HWLOC_LDFLAGS@
+HWLOC_LIBS = @HWLOC_LIBS@
 INSTALL = @INSTALL@
 INSTALL_DATA = @INSTALL_DATA@
 INSTALL_PROGRAM = @INSTALL_PROGRAM@
@@ -287,7 +294,8 @@ PATH_SEPARATOR = @PATH_SEPARATOR@
 PGSQL_CFLAGS = @PGSQL_CFLAGS@
 PGSQL_LIBS = @PGSQL_LIBS@
 PKG_CONFIG = @PKG_CONFIG@
-PLPA_LIBS = @PLPA_LIBS@
+PKG_CONFIG_LIBDIR = @PKG_CONFIG_LIBDIR@
+PKG_CONFIG_PATH = @PKG_CONFIG_PATH@
 PROCTRACKDIR = @PROCTRACKDIR@
 PROJECT = @PROJECT@
 PTHREAD_CC = @PTHREAD_CC@
@@ -302,6 +310,7 @@ SEMAPHORE_SOURCES = @SEMAPHORE_SOURCES@
 SET_MAKE = @SET_MAKE@
 SHELL = @SHELL@
 SLURMCTLD_PORT = @SLURMCTLD_PORT@
+SLURMCTLD_PORT_COUNT = @SLURMCTLD_PORT_COUNT@
 SLURMDBD_PORT = @SLURMDBD_PORT@
 SLURMD_PORT = @SLURMD_PORT@
 SLURM_API_AGE = @SLURM_API_AGE@
@@ -313,7 +322,7 @@ SLURM_MAJOR = @SLURM_MAJOR@
 SLURM_MICRO = @SLURM_MICRO@
 SLURM_MINOR = @SLURM_MINOR@
 SLURM_PREFIX = @SLURM_PREFIX@
-SLURM_VERSION = @SLURM_VERSION@
+SLURM_VERSION_NUMBER = @SLURM_VERSION_NUMBER@
 SLURM_VERSION_STRING = @SLURM_VERSION_STRING@
 SO_LDFLAGS = @SO_LDFLAGS@
 SSL_CPPFLAGS = @SSL_CPPFLAGS@
@@ -438,7 +447,10 @@ libcommon_la_SOURCES = \
 	slurm_protocol_defs.h		\
 	slurm_rlimits_info.h		\
 	slurm_rlimits_info.c		\
+	slurmdb_defs.c slurmdb_defs.h   \
+	slurmdb_pack.c slurmdb_pack.h   \
 	slurmdbd_defs.c slurmdbd_defs.h	\
+	working_cluster.c working_cluster.h   \
 	uid.c uid.h			\
 	util-net.c util-net.h		\
 	slurm_auth.c slurm_auth.h	\
@@ -470,7 +482,8 @@ libcommon_la_SOURCES = \
 	write_labelled_message.h	\
 	proc_args.c proc_args.h		\
 	slurm_strcasestr.c slurm_strcasestr.h \
-	node_conf.h node_conf.c
+	node_conf.h node_conf.c		\
+	gres.h gres.c
 
 EXTRA_libcommon_la_SOURCES = \
 	$(extra_unsetenv_src)
@@ -583,6 +596,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/getopt.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/getopt1.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/global_defaults.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/gres.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/hostlist.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/io_hdr.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/job_options.Plo@am__quote@
@@ -625,6 +639,8 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurm_step_layout.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurm_strcasestr.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurm_topology.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurmdb_defs.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurmdb_pack.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurmdbd_defs.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/stepd_api.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/strlcpy.Plo@am__quote@
@@ -633,6 +649,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/uid.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/unsetenv.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/util-net.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/working_cluster.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/write_labelled_message.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/xassert.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/xmalloc.Plo@am__quote@

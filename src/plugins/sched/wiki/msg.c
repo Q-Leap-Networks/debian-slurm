@@ -70,11 +70,11 @@ uint16_t use_host_exp = 0;
 static char *	_get_wiki_conf_path(void);
 static void *	_msg_thread(void *no_data);
 static int	_parse_msg(char *msg, char **req);
-static void	_proc_msg(slurm_fd new_fd, char *msg);
+static void	_proc_msg(slurm_fd_t new_fd, char *msg);
 static size_t	_read_bytes(int fd, char *buf, const size_t size);
-static char *	_recv_msg(slurm_fd new_fd);
-static size_t	_send_msg(slurm_fd new_fd, char *buf, size_t size);
-static void	_send_reply(slurm_fd new_fd, char *response);
+static char *	_recv_msg(slurm_fd_t new_fd);
+static size_t	_send_msg(slurm_fd_t new_fd, char *buf, size_t size);
+static void	_send_reply(slurm_fd_t new_fd, char *response);
 static size_t	_write_bytes(int fd, char *buf, const size_t size);
 
 /*****************************************************************************\
@@ -111,7 +111,7 @@ extern void term_msg_thread(void)
 	pthread_mutex_lock(&thread_flag_mutex);
 	if (thread_running) {
 		int fd;
-                slurm_addr addr;
+                slurm_addr_t addr;
 
 		thread_shutdown = true;
 
@@ -142,8 +142,8 @@ extern void term_msg_thread(void)
 \*****************************************************************************/
 static void *_msg_thread(void *no_data)
 {
-	slurm_fd sock_fd = -1, new_fd;
-	slurm_addr cli_addr;
+	slurm_fd_t sock_fd = -1, new_fd;
+	slurm_addr_t cli_addr;
 	char *msg;
 	slurm_ctl_conf_t *conf;
 	int i;
@@ -285,7 +285,7 @@ extern int parse_wiki_config(void)
 
 	debug("Reading wiki.conf file (%s)",wiki_conf);
 	tbl = s_p_hashtbl_create(options);
-	if (s_p_parse_file(tbl, wiki_conf) == SLURM_ERROR)
+	if (s_p_parse_file(tbl, NULL, wiki_conf) == SLURM_ERROR)
 		fatal("something wrong with opening/reading wiki.conf file");
 
 	if (! s_p_get_string(&key, "AuthKey", tbl))
@@ -497,7 +497,7 @@ static size_t	_write_bytes(int fd, char *buf, const size_t size)
  * RET - The message which must be xfreed or
  *       NULL on error
 \*****************************************************************************/
-static char *	_recv_msg(slurm_fd new_fd)
+static char *	_recv_msg(slurm_fd_t new_fd)
 {
 	char header[10];
 	unsigned long size;
@@ -526,7 +526,7 @@ static char *	_recv_msg(slurm_fd new_fd)
 		return NULL;
 	}
 
-	if (slurm_get_debug_flags() && DEBUG_FLAG_WIKI)
+	if (slurm_get_debug_flags() & DEBUG_FLAG_WIKI)
 		info("wiki msg recv:%s", buf);
 
 	return buf;
@@ -537,12 +537,12 @@ static char *	_recv_msg(slurm_fd new_fd)
  *
  * RET - Number of data bytes written (excludes header)
 \*****************************************************************************/
-static size_t	_send_msg(slurm_fd new_fd, char *buf, size_t size)
+static size_t	_send_msg(slurm_fd_t new_fd, char *buf, size_t size)
 {
 	char header[10];
 	size_t data_sent;
 
-	if (slurm_get_debug_flags() && DEBUG_FLAG_WIKI)
+	if (slurm_get_debug_flags() & DEBUG_FLAG_WIKI)
 		info("wiki msg send:%s", buf);
 
 	(void) sprintf(header, "%08lu\n", (unsigned long) size);
@@ -554,7 +554,7 @@ static size_t	_send_msg(slurm_fd new_fd, char *buf, size_t size)
 	data_sent = _write_bytes((int) new_fd, buf, size);
 	if (data_sent != size) {
 		error("wiki: unable to write data message (%lu of %lu) %m",
-			data_sent, size);
+			(long unsigned) data_sent, (long unsigned) size);
 	}
 
 	return data_sent;
@@ -638,7 +638,7 @@ static int	_parse_msg(char *msg, char **req)
 /*****************************************************************************\
  * Parse, process and respond to a request
 \*****************************************************************************/
-static void	_proc_msg(slurm_fd new_fd, char *msg)
+static void	_proc_msg(slurm_fd_t new_fd, char *msg)
 {
 	DEF_TIMERS;
 	char *req, *cmd_ptr, *msg_type = NULL;
@@ -711,7 +711,7 @@ static void	_proc_msg(slurm_fd new_fd, char *msg)
 	return;
 }
 
-static void	_send_reply(slurm_fd new_fd, char *response)
+static void	_send_reply(slurm_fd_t new_fd, char *response)
 {
 	size_t i;
 	char *buf, sum[20], *tmp;

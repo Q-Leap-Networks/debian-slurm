@@ -2,7 +2,7 @@
  *  sbatch.c - Submit a SLURM batch script.$
  *****************************************************************************
  *  Copyright (C) 2006-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -53,19 +53,21 @@
 #include <slurm/slurm.h>
 
 #include "src/common/env.h"
+#include "src/common/plugstack.h"
 #include "src/common/read_config.h"
 #include "src/common/slurm_rlimits_info.h"
 #include "src/common/xstring.h"
 #include "src/common/xmalloc.h"
-#include "src/common/plugstack.h"
 
 #include "src/sbatch/opt.h"
+#include "src/sbatch/mult_cluster.h"
 
 #define MAX_RETRIES 15
 
-static int   fill_job_desc_from_opts(job_desc_msg_t *desc);
-static void *get_script_buffer(const char *filename, int *size);
-static char *script_wrap(char *command_string);
+static void  _env_merge_filter(job_desc_msg_t *desc);
+static int   _fill_job_desc_from_opts(job_desc_msg_t *desc);
+static void *_get_script_buffer(const char *filename, int *size);
+static char *_script_wrap(char *command_string);
 static void  _set_exit_code(void);
 static void  _set_prio_process_env(void);
 static int   _set_rlimit_env(void);
@@ -106,9 +108,9 @@ int main(int argc, char *argv[])
 	}
 
 	if (opt.wrap != NULL) {
-		script_body = script_wrap(opt.wrap);
+		script_body = _script_wrap(opt.wrap);
 	} else {
-		script_body = get_script_buffer(script_name, &script_size);
+		script_body = _get_script_buffer(script_name, &script_size);
 	}
 	if (script_body == NULL)
 		exit(error_exit);
@@ -139,11 +141,16 @@ int main(int argc, char *argv[])
 	_set_submit_dir_env();
 	_set_umask_env();
 	slurm_init_job_desc_msg(&desc);
-	if (fill_job_desc_from_opts(&desc) == -1) {
+	if (_fill_job_desc_from_opts(&desc) == -1) {
 		exit(error_exit);
 	}
 
 	desc.script = (char *)script_body;
+
+	/* If can run on multiple clusters find the earliest run time
+	 * and run it there */
+	if (sbatch_set_first_avail_cluster(&desc) != SLURM_SUCCESS)
+		exit(error_exit);
 
 	while (slurm_submit_batch_job(&desc, &resp) < 0) {
 		static char *msg;
@@ -164,21 +171,57 @@ int main(int argc, char *argv[])
 		}
 
 		if (retries)
-			debug(msg);
+			debug("%s", msg);
 		else if (errno == ESLURM_NODES_BUSY)
-			info(msg);	/* Not an error, powering up nodes */
+			info("%s", msg); /* Not an error, powering up nodes */
 		else
-			error(msg);
+			error("%s", msg);
 		sleep (++retries);
         }
-	printf("Submitted batch job %u\n", resp->job_id);
+
+	printf("Submitted batch job %u", resp->job_id);
+	if (working_cluster_rec)
+		printf(" on cluster %s", working_cluster_rec->name);
+	printf("\n");
+
 	xfree(desc.script);
 	slurm_free_submit_response_response_msg(resp);
 	return 0;
 }
 
+/* Propagate select user environment variables to the job */
+static void _env_merge_filter(job_desc_msg_t *desc)
+{
+	extern char **environ;
+	int i, len;
+	char *save_env[2] = { NULL, NULL }, *tmp, *tok, *last = NULL;
+
+	tmp = xstrdup(opt.export_env);
+	tok = strtok_r(tmp, ",", &last);
+	while (tok) {
+		if (strchr(tok, '=')) {
+			save_env[0] = tok;
+			env_array_merge(&desc->environment,
+					(const char **)save_env);
+		} else {
+			len = strlen(tok);
+			for (i=0; environ[i]; i++) {
+				if (strncmp(tok, environ[i], len) ||
+				    (environ[i][len] != '='))
+					continue;
+				save_env[0] = environ[i];
+				env_array_merge(&desc->environment,
+						(const char **)save_env);
+				break;
+			}
+		}
+		tok = strtok_r(NULL, ",", &last);
+	}
+	xfree(tmp);
+}
+
 /* Returns 0 on success, -1 on failure */
-static int fill_job_desc_from_opts(job_desc_msg_t *desc)
+static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 {
 	extern char **environ;
 
@@ -187,6 +230,7 @@ static int fill_job_desc_from_opts(job_desc_msg_t *desc)
 	desc->contiguous = opt.contiguous ? 1 : 0;
 	desc->features = opt.constraints;
 	desc->immediate = opt.immediate;
+	desc->gres = opt.gres;
 	if (opt.job_name != NULL)
 		desc->name = xstrdup(opt.job_name);
 	else
@@ -239,13 +283,15 @@ static int fill_job_desc_from_opts(job_desc_msg_t *desc)
 
 	if (opt.hold)
 		desc->priority     = 0;
-#ifdef HAVE_BG
-	if (opt.geometry[0] > 0) {
+
+	if ((int)opt.geometry[0] > 0) {
 		int i;
-		for (i=0; i<SYSTEM_DIMENSIONS; i++)
+		int dims = slurmdb_setup_cluster_dims();
+
+		for (i=0; i<dims; i++)
 			desc->geometry[i] = opt.geometry[i];
 	}
-#endif
+
 	if (opt.conn_type != (uint16_t) NO_VAL)
 		desc->conn_type = opt.conn_type;
 	if (opt.reboot)
@@ -263,20 +309,22 @@ static int fill_job_desc_from_opts(job_desc_msg_t *desc)
 
 	/* job constraints */
 	if (opt.mincpus > -1)
-		desc->job_min_cpus = opt.mincpus;
+		desc->pn_min_cpus = opt.mincpus;
 	if (opt.realmem > -1)
-		desc->job_min_memory = opt.realmem;
+		desc->pn_min_memory = opt.realmem;
 	else if (opt.mem_per_cpu > -1)
-		desc->job_min_memory = opt.mem_per_cpu | MEM_PER_CPU;
+		desc->pn_min_memory = opt.mem_per_cpu | MEM_PER_CPU;
 	if (opt.tmpdisk > -1)
-		desc->job_min_tmp_disk = opt.tmpdisk;
+		desc->pn_min_tmp_disk = opt.tmpdisk;
 	if (opt.overcommit) {
-		desc->num_procs = MAX(opt.min_nodes, 1);
+		desc->min_cpus = MAX(opt.min_nodes, 1);
 		desc->overcommit = opt.overcommit;
 	} else
-		desc->num_procs = opt.nprocs * opt.cpus_per_task;
-	if (opt.nprocs_set)
-		desc->num_tasks = opt.nprocs;
+		desc->min_cpus = opt.ntasks * opt.cpus_per_task;
+	desc->max_cpus = desc->max_cpus;
+
+	if (opt.ntasks_set)
+		desc->num_tasks = opt.ntasks;
 	if (opt.cpus_set)
 		desc->cpus_per_task = opt.cpus_per_task;
 	if (opt.ntasks_per_socket > -1)
@@ -285,38 +333,51 @@ static int fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->ntasks_per_core = opt.ntasks_per_core;
 
 	/* node constraints */
-	if (opt.min_sockets_per_node != NO_VAL)
-		desc->min_sockets = opt.min_sockets_per_node;
-	if (opt.min_cores_per_socket != NO_VAL)
-		desc->min_cores = opt.min_cores_per_socket;
-	if (opt.min_threads_per_core != NO_VAL)
-		desc->min_threads = opt.min_threads_per_core;
+	if (opt.sockets_per_node != NO_VAL)
+		desc->sockets_per_node = opt.sockets_per_node;
+	if (opt.cores_per_socket != NO_VAL)
+		desc->cores_per_socket = opt.cores_per_socket;
+	if (opt.threads_per_core != NO_VAL)
+		desc->threads_per_core = opt.threads_per_core;
 
 	if (opt.no_kill)
 		desc->kill_on_node_fail = 0;
 	if (opt.time_limit != NO_VAL)
 		desc->time_limit = opt.time_limit;
+	if (opt.time_min  != NO_VAL)
+		desc->time_min = opt.time_min;
 	desc->shared = opt.shared;
 
+	desc->wait_all_nodes = opt.wait_all_nodes;
 	if (opt.warn_signal)
 		desc->warn_signal = opt.warn_signal;
 	if (opt.warn_time)
 		desc->warn_time = opt.warn_time;
 
 	desc->environment = NULL;
-	if (opt.get_user_env_time >= 0) {
+	if (opt.export_env == NULL) {
+		env_array_merge(&desc->environment, (const char **)environ);
+	} else if (!strcasecmp(opt.export_env, "ALL")) {
+		env_array_merge(&desc->environment, (const char **)environ);
+	} else if (!strcasecmp(opt.export_env, "NONE")) {
 		desc->environment = env_array_create();
+		opt.get_user_env_time = 0;
+	} else {
+		_env_merge_filter(desc);
+		opt.get_user_env_time = 0;
+	}
+	if (opt.get_user_env_time >= 0) {
 		env_array_overwrite(&desc->environment,
 				    "SLURM_GET_USER_ENV", "1");
 	}
-	env_array_merge(&desc->environment, (const char **)environ);
+
 	if(opt.distribution == SLURM_DIST_ARBITRARY) {
 		env_array_overwrite_fmt(&desc->environment,
 					"SLURM_ARBITRARY_NODELIST",
 					"%s", desc->req_nodes);
 	}
 
-	desc->env_size = envcount (desc->environment);
+	desc->env_size = envcount(desc->environment);
 	desc->argv = opt.script_argv;
 	desc->argc = opt.script_argc;
 	desc->std_err  = opt.efname;
@@ -491,7 +552,7 @@ static bool contains_dos_linebreak(const void *buf, int size)
 /*
  * If "filename" is NULL, the batch script is read from standard input.
  */
-static void *get_script_buffer(const char *filename, int *size)
+static void *_get_script_buffer(const char *filename, int *size)
 {
 	int fd;
 	char *buf = NULL;
@@ -567,7 +628,7 @@ fail:
 }
 
 /* Wrap a single command string in a simple shell script */
-static char *script_wrap(char *command_string)
+static char *_script_wrap(char *command_string)
 {
 	char *script = NULL;
 

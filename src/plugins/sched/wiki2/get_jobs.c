@@ -2,7 +2,7 @@
  *  get_jobs.c - Process Wiki get job info request
  *****************************************************************************
  *  Copyright (C) 2006-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -55,10 +55,10 @@ static void	_get_job_comment(struct job_record *job_ptr,
 static uint16_t _get_job_cpus_per_task(struct job_record *job_ptr);
 static uint32_t	_get_job_end_time(struct job_record *job_ptr);
 static char *	_get_job_features(struct job_record *job_ptr);
-static uint32_t	_get_job_min_disk(struct job_record *job_ptr);
-static uint32_t	_get_job_min_mem(struct job_record *job_ptr);
+static uint32_t	_get_pn_min_disk(struct job_record *job_ptr);
+static uint32_t	_get_pn_min_mem(struct job_record *job_ptr);
 static uint32_t	_get_job_max_nodes(struct job_record *job_ptr);
-static uint32_t	_get_job_min_nodes(struct job_record *job_ptr);
+static uint32_t	_get_pn_min_nodes(struct job_record *job_ptr);
 static char *	_get_job_state(struct job_record *job_ptr);
 static uint32_t	_get_job_submit_time(struct job_record *job_ptr);
 static uint32_t	_get_job_suspend_time(struct job_record *job_ptr);
@@ -100,8 +100,11 @@ reject_msg_t reject_msgs[REJECT_MSG_MAX];
  *	[TASKLIST=<node1:node2>;]	nodes in use, if running or completing
  *	[REJMESSAGE=<str>;]		reason job is not running, if any
  *	[IWD=<directory>;]		Initial Working Directory
- *	UPDATETIME=<uts>;		time last active
  *	[FLAGS=INTERACTIVE;]		set if interactive (not batch) job
+ *	[GRES=<name>[:<count>[*cpus]],...;] generic resources required by the
+ *					job on a per node basis
+ *	[WCKEY=<key>;]			workload characterization key for job
+ *	UPDATETIME=<uts>;		time last active
  *	WCLIMIT=<secs>;			wall clock time limit, seconds
  *	TASKS=<cpus>;			CPUs required
  *	NODES=<nodes>;			count of nodes required or allocated
@@ -237,7 +240,7 @@ static char *   _dump_all_jobs(int *job_cnt, time_t update_time)
 static char *	_dump_job(struct job_record *job_ptr, time_t update_time)
 {
 	char *buf = NULL, tmp[16384];
-	char *gname, *quote, *uname;
+	char *gname, *pname, *quote, *uname;
 	uint32_t end_time, suspend_time, min_mem;
 	int i, rej_sent = 0;
 
@@ -331,6 +334,16 @@ static char *	_dump_job(struct job_record *job_ptr, time_t update_time)
 	if (job_ptr->batch_flag == 0)
 		xstrcat(buf, "FLAGS=INTERACTIVE;");
 
+	if (job_ptr->gres) {
+		snprintf(tmp, sizeof(tmp),"GRES=%s;", job_ptr->gres);
+		xstrcat(buf, tmp);
+	}
+
+	if (job_ptr->wckey) {
+		snprintf(tmp, sizeof(tmp),"WCKEY=%s;", job_ptr->wckey);
+		xstrcat(buf, tmp);
+	}
+
 	snprintf(tmp, sizeof(tmp),
 		"UPDATETIME=%u;WCLIMIT=%u;TASKS=%u;",
 		(uint32_t) job_ptr->time_last_active,
@@ -341,7 +354,7 @@ static char *	_dump_job(struct job_record *job_ptr, time_t update_time)
 	if (!IS_JOB_FINISHED(job_ptr)) {
 		snprintf(tmp, sizeof(tmp),
 			"NODES=%u;",
-			_get_job_min_nodes(job_ptr));
+			_get_pn_min_nodes(job_ptr));
 		xstrcat(buf, tmp);
 	}
 
@@ -350,21 +363,24 @@ static char *	_dump_job(struct job_record *job_ptr, time_t update_time)
 		_get_job_cpus_per_task(job_ptr));
 	xstrcat(buf, tmp);
 
+	if (job_ptr->part_ptr)
+		pname = job_ptr->part_ptr->name;
+	else
+		pname = "UNKNOWN";	/* should never see this */
 	snprintf(tmp, sizeof(tmp),
 		"QUEUETIME=%u;STARTTIME=%u;RCLASS=%s;",
 		_get_job_submit_time(job_ptr),
-		(uint32_t) job_ptr->start_time,
-		job_ptr->partition);
+		(uint32_t) job_ptr->start_time, pname);
 	xstrcat(buf, tmp);
 
-	min_mem = _get_job_min_mem(job_ptr);
+	min_mem = _get_pn_min_mem(job_ptr);
 	if (min_mem & MEM_PER_CPU) {
 		min_mem &= ~MEM_PER_CPU;
 	}
 	snprintf(tmp, sizeof(tmp),
 		"RMEM=%u;RDISK=%u;",
 		 min_mem,
-		_get_job_min_disk(job_ptr));
+		_get_pn_min_disk(job_ptr));
 	xstrcat(buf, tmp);
 
 	_get_job_comment(job_ptr, tmp, sizeof(tmp));
@@ -489,18 +505,18 @@ static uint16_t _get_job_cpus_per_task(struct job_record *job_ptr)
 	return cpus_per_task;
 }
 
-static uint32_t _get_job_min_mem(struct job_record *job_ptr)
+static uint32_t _get_pn_min_mem(struct job_record *job_ptr)
 {
 	if (job_ptr->details)
-		return job_ptr->details->job_min_memory;
+		return job_ptr->details->pn_min_memory;
 	return (uint32_t) 0;
 }
 
-static uint32_t _get_job_min_disk(struct job_record *job_ptr)
+static uint32_t _get_pn_min_disk(struct job_record *job_ptr)
 
 {
 	if (job_ptr->details)
-		return job_ptr->details->job_min_tmp_disk;
+		return job_ptr->details->pn_min_tmp_disk;
 	return (uint32_t) 0;
 }
 
@@ -531,7 +547,7 @@ static uint32_t	_get_job_max_nodes(struct job_record *job_ptr)
 	return max_nodes;
 }
 
-static uint32_t	_get_job_min_nodes(struct job_record *job_ptr)
+static uint32_t	_get_pn_min_nodes(struct job_record *job_ptr)
 {
 	uint32_t min_nodes = 1;
 
@@ -568,15 +584,15 @@ static uint32_t _get_job_tasks(struct job_record *job_ptr)
 	uint32_t task_cnt;
 
 	if (IS_JOB_STARTED(job_ptr)) {
-		task_cnt = job_ptr->total_procs;
+		task_cnt = job_ptr->total_cpus;
 	} else {
-		if (job_ptr->num_procs)
-			task_cnt = job_ptr->num_procs;
+		if (job_ptr->details && job_ptr->details->min_cpus)
+			task_cnt = job_ptr->details->min_cpus;
 		else
 			task_cnt = 1;
 		if (job_ptr->details) {
 			task_cnt = MAX(task_cnt,
-				       (_get_job_min_nodes(job_ptr) *
+				       (_get_pn_min_nodes(job_ptr) *
 				        job_ptr->details->
 					ntasks_per_node));
 		}

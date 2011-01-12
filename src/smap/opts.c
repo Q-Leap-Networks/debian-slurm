@@ -59,6 +59,8 @@ extern void parse_command_line(int argc, char *argv[])
 		{"noheader", no_argument, 0, 'h'},
 		{"iterate", required_argument, 0, 'i'},
 		{"ionodes", required_argument, 0, 'I'},
+		{"cluster", required_argument, 0, 'M'},
+		{"clusters",required_argument, 0, 'M'},
 		{"nodes", required_argument, 0, 'n'},
 		{"quiet", no_argument, 0, 'Q'},
 		{"resolve", required_argument, 0, 'R'},
@@ -66,12 +68,14 @@ extern void parse_command_line(int argc, char *argv[])
 		{"version", no_argument, 0, 'V'},
 		{"help", no_argument, 0, OPT_LONG_HELP},
 		{"usage", no_argument, 0, OPT_LONG_USAGE},
-		{"hide", no_argument, 0, OPT_LONG_HIDE},
+		{"show_hidden", no_argument, 0, 'H'},
 		{NULL, 0, 0, 0}
 	};
 
+	memset(&params, 0, sizeof(params));
+
 	while ((opt_char =
-		getopt_long(argc, argv, "cD:hi:I:n:QR:vV",
+		getopt_long(argc, argv, "cD:hi:I:Hn:M:QR:vV",
 			    long_options, &option_index)) != -1) {
 		switch (opt_char) {
 		case '?':
@@ -99,6 +103,9 @@ extern void parse_command_line(int argc, char *argv[])
 		case 'h':
 			params.no_header = true;
 			break;
+		case 'H':
+			params.all_flag = true;
+			break;
 		case 'i':
 			params.iterate = atoi(optarg);
 			if (params.iterate <= 0) {
@@ -119,6 +126,17 @@ extern void parse_command_line(int argc, char *argv[])
 				      optarg);
 				exit(1);
 			}
+			break;
+		case 'M':
+			if(params.clusters)
+				list_destroy(params.clusters);
+			if(!(params.clusters =
+			     slurmdb_get_info_cluster(optarg))) {
+				error("'%s' invalid entry for --cluster",
+				      optarg);
+				exit(1);
+			}
+			working_cluster_rec = list_peek(params.clusters);
 			break;
 		case 'n':
 			/*
@@ -150,11 +168,11 @@ extern void parse_command_line(int argc, char *argv[])
 		case OPT_LONG_USAGE:
 			_usage();
 			exit(0);
-		case OPT_LONG_HIDE:
-			params.all_flag = false;
-			break;
 		}
 	}
+	params.cluster_base = hostlist_get_base();
+	params.cluster_dims = slurmdb_setup_cluster_dims();
+	params.cluster_flags = slurmdb_setup_cluster_flags();
 }
 
 extern void print_date()
@@ -186,9 +204,10 @@ static void _usage(void)
 {
 #ifdef HAVE_BG
 	printf("Usage: smap [-chQV] [-D bcjrs] [-i seconds] "
-	       "[-n nodelist] [-i ionodelist]\n");
+	       "[-n nodelist] [-i ionodelist] [-M cluster_name]\n");
 #else
-	printf("Usage: smap [-chQV] [-D jrs] [-i seconds] [-n nodelist]\n");
+	printf("Usage: smap [-chQV] [-D jrs] [-i seconds] [-n nodelist] "
+	       "[-M cluster_name]\n");
 #endif
 }
 
@@ -205,6 +224,7 @@ Usage: smap [OPTIONS]\n\
                              r = reservations\n\
                              s = slurm partitions\n\
   -h, --noheader             no headers on output\n\
+  -H, --show_hidden          display hidden partitions and their jobs\n\
   -i, --iterate=seconds      specify an interation period\n\
   -I, --ionodes=[ionodes]    only show objects with these ionodes\n\
                              This should be used inconjuction with the -n\n\
@@ -212,6 +232,9 @@ Usage: smap [OPTIONS]\n\
                              here.  Specify the node name with the -n option.\n\
                              This option is only valid on Bluegene systems,\n\
                              and only valid when querying blocks.\n\
+  -M, --cluster=cluster_name cluster to issue commands to.  Default is\n\
+                             current cluster.  cluster with no name will\n\
+                             reset to default.\n\
   -n, --nodes=[nodes]        only show objects with these nodes.\n\
                              If querying to the ionode level use the -I\n\
                              option in conjunction with this option.\n\

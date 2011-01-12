@@ -59,19 +59,15 @@
 
 #define BASIL_DEBUG 1
 
-#ifdef HAVE_CRAY_XT
-#ifndef APBASIL_LOC
-static int last_res_id = 0;
-#endif	/* !APBASIL_LOC */
+#ifdef HAVE_CRAY
 
-#ifdef APBASIL_LOC
 /* Make sure that each SLURM node has a BASIL node ID */
 static void _validate_basil_node_id(void)
 {
 	int i;
 	struct node_record *node_ptr = node_record_table_ptr;
 
-	for (i=0; i<node_record_cnt; i++, node_ptr++)
+	for (i = 0;  i < node_record_count; i++, node_ptr++) {
 		if (node_ptr->basil_node_id != NO_VAL)
 			continue;
 		if (IS_NODE_DOWN(node_ptr))
@@ -82,8 +78,7 @@ static void _validate_basil_node_id(void)
 		set_node_down(node_ptr->name, "No BASIL node_id");
 	}
 }
-#endif	/* APBASIL_LOC */
-#endif	/* HAVE_CRAY_XT */
+#endif	/* HAVE_CRAY */
 
 /*
  * basil_query - Query BASIL for node and reservation state.
@@ -93,144 +88,37 @@ static void _validate_basil_node_id(void)
 extern int basil_query(void)
 {
 	int error_code = SLURM_SUCCESS;
-#ifdef HAVE_CRAY_XT
-#ifdef APBASIL_LOC
-	struct config_record *config_ptr;
+#ifdef HAVE_CRAY
 	struct node_record *node_ptr;
-	struct job_record *job_ptr;
-	ListIterator job_iterator;
 	int i;
-	char *reason, *res_id;
 	static bool first_run = true;
 
-	/* Issue the BASIL QUERY request */
-	if (request_failure) {
-		fatal("basil query error: %s", "TBD");
-		return SLURM_ERROR;
-	}
+	/*
+	 * Issue the BASIL INVENTORY QUERY
+	 * FIXME: Still to be done,
+	 *        return SLURM_ERROR on failure
+	 */
 	debug("basil query initiated");
 
 	if (first_run) {
 		/* Set basil_node_id to NO_VAL since the default value
 		 * of zero is a valid BASIL node ID */
 		node_ptr = node_record_table_ptr;
-		for (i=0; i<node_record_cnt; i++, node_ptr++)
+		for (i = 0; i < node_record_count; i++, node_ptr++)
 			node_ptr->basil_node_id = NO_VAL;
 		first_run = false;
 	}
 
-	/* Validate configuration for each node that BASIL reports */
-	for (each_basil_node) {
-#if BASIL_DEBUG
-		/* Log node state according to BASIL */
-		info("basil query: name=%s arch=%s",
-		     basil_node_name, basil_node_arch, etc.);
-#endif	/* BASIL_DEBUG */
-
-		/* NOTE: Cray should provide X-, Y- and Z-coordinates
-		 * in the future. When that happens, we'll want to use
-		 * those numbers to generate the hostname:
-		 * slurm_host_name = xmalloc(sizeof(conf->node_prefix) + 4);
-		 * sprintf(slurm_host_name: %s%d%d%d", basil_node_name, X,Y,Z);
-		 * Until then the node name must contain a 3-digit numberic
-		 * suffix specifying the X-, Y- and Z-coordinates.
-		 */
-		node_ptr = find_node_record(basil_node_name);
-		if (node_ptr == NULL) {
-			error("basil node %s not found in slurm",
-			      basil_node_name);
-			continue;
-		}
-
-		/* Record BASIL's node_id for use in reservations */
-		node_ptr->basil_node_id = basil_node_id;
-
-		/* Update architecture in slurmctld's node record */
-		if (node_ptr->arch == NULL) {
-			xfree(node_ptr->arch);
-			node_ptr->arch = xstrdup(basil_node_arch);
-		}
-
-		/* Update slurmctld's node state if necessary */
-		reason = NULL;
-		if (!IS_NODE_DOWN(node_ptr)) {
-			if (strcmp(basil_state, "UP"))
-				reason = "basil state not UP";
-			else if (strcmp(basil_role, "BATCH"))
-				reason = "basil role not BATCH";
-		}
-
-		/* Calculate the total count of processors and
-		 * MB of memory on the node */
-		config_ptr = node_ptr->config_ptr;
-		if ((slurmctld_conf.fast_schedule != 2) &&
-		    (basil_cpus < config_ptr->cpus)) {
-			error("Node %s has low cpu count %d",
- 			      node_ptr->name, basil_cpus);
-			reason = "Low CPUs";
-		}
-		node_ptr->cpus = basil_cpus;
-		if ((slurmctld_conf.fast_schedule != 2) &&
-		    (basil_memory < config_ptr->real_memory)) {
-			error("Node %s has low real_memory size %d",
-			     node_ptr->name, basil_memory);
-			reason = "Low RealMemory";
-		}
-		node_ptr->real_memory = basil_memory;
-
-		if (reason) {
-			last_node_update = time(NULL);
-			set_node_down(node_ptr->name, reason);
-		}
-	}
+	/* Validate configuration for each node that BASIL reports: TBD */
 	_validate_basil_node_id();
 
-	/* Confirm that each BASIL reservation is still valid,
-	 * purge vestigial reservations */
-	for (each_basil_reservation) {
-		bool found = false;
-		job_iterator = list_iterator_create(job_list);
-		while ((job_ptr = (struct job_record *)
-				  list_next(job_iterator))) {
-			select_g_get_jobinfo(job_ptr->select_jobinfo,
-					     SELECT_DATA_RESV_ID, &res_id);
-			found = !strcmp(res_id, basil_reservation_id);
-			xfree(res_id);
-			if (found)
-				break;
-		}
-		list_iterator_destroy(job_iterator);
-		if (found) {
-			error("vestigial basil reservation %s being removed",
-			      basil_reservation_id);
-			basil_dealloc(basil_reservation_id);
-		}
-	}
-#else
-	struct job_record *job_ptr;
-	ListIterator job_iterator;
-	char *res_id, *tmp;
-	int job_res_id;
-
-	/* Capture the highest reservation ID recorded to avoid re-use */
-	job_iterator = list_iterator_create(job_list);
-	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
-		res_id = NULL;
-		select_g_get_jobinfo(job_ptr->select_jobinfo,
-				     SELECT_DATA_RESV_ID, &res_id);
-		if (res_id) {
-			tmp = strchr(res_id, '_');
-			if (tmp) {
-				job_res_id = atoi(tmp+1);
-				last_res_id = MAX(last_res_id, job_res_id);
-			}
-			xfree(res_id);
-		}
-	}
-	list_iterator_destroy(job_iterator);
-	debug("basil_query() executed, last_res_id=%d", last_res_id);
-#endif	/* APBASIL_LOC */
-#endif	/* HAVE_CRAY_XT */
+	/*
+	 * Confirm that each BASIL reservation is still valid,
+	 * iterate through each current ALPS reservation,
+	 * purge vestigial reservations.
+	 * FIXME: still to be done
+	 */
+#endif	/* HAVE_CRAY */
 
 	return error_code;
 }
@@ -243,27 +131,18 @@ extern int basil_query(void)
 extern int basil_reserve(struct job_record *job_ptr)
 {
 	int error_code = SLURM_SUCCESS;
-#ifdef HAVE_CRAY_XT
-#ifdef APBASIL_LOC
-	/* Issue the BASIL RESERVE request */
-	if (request_failure) {
-		error("basil reserve error: %s", "TBD");
-		return SLURM_ERROR;
-	}
-	select_g_set_jobinfo(job_ptr->select_jobinfo,
-			     SELECT_DATA_RESV_ID, reservation_id);
-	debug("basil reservation made job_id=%u resv_id=%s",
+#ifdef HAVE_CRAY
+	uint32_t reservation_id;
+
+	/*
+	 * Issue the BASIL RESERVE request
+	 * FIXME: still to be done, return SLURM_ERROR on error.
+	 */
+	select_g_select_jobinfo_set(job_ptr->select_jobinfo,
+				    SELECT_JOBDATA_RESV_ID, &reservation_id);
+	debug("basil reservation made job_id=%u resv_id=%u",
 	      job_ptr->job_id, reservation_id);
-#else
-	char reservation_id[32];
-	snprintf(reservation_id, sizeof(reservation_id),
-		"resv_%d", ++last_res_id);
-	select_g_set_jobinfo(job_ptr->select_jobinfo,
-			     SELECT_DATA_RESV_ID, reservation_id);
-	debug("basil reservation made job_id=%u resv_id=%s",
-	      job_ptr->job_id, reservation_id);
-#endif	/* APBASIL_LOC */
-#endif	/* HAVE_CRAY_XT */
+#endif	/* HAVE_CRAY */
 	return error_code;
 }
 
@@ -275,15 +154,14 @@ extern int basil_reserve(struct job_record *job_ptr)
 extern int basil_release(struct job_record *job_ptr)
 {
 	int error_code = SLURM_SUCCESS;
-#ifdef HAVE_CRAY_XT
-	char *reservation_id = NULL;
-	select_g_get_jobinfo(job_ptr->select_jobinfo,
-			     SELECT_DATA_RESV_ID, &reservation_id);
-	if (reservation_id) {
+#ifdef HAVE_CRAY
+	uint32_t reservation_id = 0;
+	select_g_select_jobinfo_get(job_ptr->select_jobinfo,
+				    SELECT_JOBDATA_RESV_ID, &reservation_id);
+	if (reservation_id)
 		error_code = basil_release_id(reservation_id);
-		xfree(reservation_id);
-	}
-#endif	/* HAVE_CRAY_XT */
+
+#endif	/* HAVE_CRAY */
 	return error_code;
 }
 
@@ -292,20 +170,15 @@ extern int basil_release(struct job_record *job_ptr)
  * IN reservation_id - ID of reservation to release
  * RET 0 or error code
  */
-extern int basil_release_id(char *reservation_id)
+extern int basil_release_id(uint32_t reservation_id)
 {
 	int error_code = SLURM_SUCCESS;
-#ifdef HAVE_CRAY_XT
-#ifdef APBASIL_LOC
-	/* Issue the BASIL RELEASE request */
-	if (request_failure) {
-		error("basil release of %s error: %s", reservation_id, "TBD");
-		return SLURM_ERROR;
-	}
-	debug("basil release of reservation %s complete", reservation_id);
-#else
-	debug("basil release of reservation %s complete", reservation_id);
-#endif	/* APBASIL_LOC */
-#endif	/* HAVE_CRAY_XT */
+#ifdef HAVE_CRAY
+	/*
+	 * Issue the BASIL RELEASE request
+	 * FIXME: still to be done, return SLURM_ERROR on error.
+	 */
+	debug("basil release of reservation %d complete", reservation_id);
+#endif	/* HAVE_CRAY */
 	return error_code;
 }

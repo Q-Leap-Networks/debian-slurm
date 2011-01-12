@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  jobcomp_script.c - Script running slurm job completion logging plugin.
- *  $Id: jobcomp_script.c 19896 2010-03-26 21:49:42Z jette $
+ *  $Id: jobcomp_script.c 21212 2010-09-21 22:17:38Z jette $
  *****************************************************************************
  *  Produced at Center for High Performance Computing, North Dakota State
  *  University
@@ -122,7 +122,7 @@
  * of the plugin.  If major and minor revisions are desired, the major
  * version number may be multiplied by a suitable magnitude constant such
  * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum versions for their plugins as the job completion logging API
+ * minimum version for their plugins as the job completion logging API
  * matures.
  */
 const char plugin_name[]       	= "Job completion logging script plugin";
@@ -205,25 +205,36 @@ static struct jobcomp_info * _jobcomp_info_create (struct job_record *job)
 	j->gid = job->group_id;
 	j->name = xstrdup (job->name);
 
-	/*
-	 *  Job will typically be COMPLETING when this code is called.
-	 *  We remove the flags to hopefully get the eventual
-	 *  completion state: e.g.: JOB_FAILED, TIMEOUT, ....
-	 */
-	state = job->job_state & JOB_STATE_BASE;
-	j->jobstate = xstrdup (job_state_string (state));
+	if (IS_JOB_RESIZING(job)) {
+		state = JOB_RESIZING;
+		j->jobstate = xstrdup (job_state_string (state));
+		if (job->resize_time)
+			j->start = job->resize_time;
+		else
+			j->start = job->start_time;
+		j->end = time(NULL);
+	} else {
+		/* Job state will typically have JOB_COMPLETING or JOB_RESIZING
+		 * flag set when called. We remove the flags to get the eventual
+		 * completion state: JOB_FAILED, JOB_TIMEOUT, etc. */
+		state = job->job_state & JOB_STATE_BASE;
+		j->jobstate = xstrdup (job_state_string (state));
+		if (job->resize_time)
+			j->start = job->resize_time;
+		else
+			j->start = job->start_time;
+		j->end = job->end_time;
+	}
 
 	j->partition = xstrdup (job->partition);
 	if ((job->time_limit == NO_VAL) && job->part_ptr)
 		j->limit = job->part_ptr->max_time;
 	else
 		j->limit = job->time_limit;
-	j->start = job->start_time;
-	j->end = job->end_time;
 	j->submit = job->details ? job->details->submit_time:job->start_time;
 	j->batch_flag = job->batch_flag;
 	j->nodes = xstrdup (job->nodes);
-	j->nprocs = job->total_procs;
+	j->nprocs = job->total_cpus;
 	j->nnodes = job->node_cnt;
 	j->account = job->account ? xstrdup (job->account) : NULL;
 	if (job->details && job->details->work_dir)
@@ -325,6 +336,9 @@ static int _env_append (char ***envp, const char *name, const char *val)
 
 static int _env_append_fmt (char ***envp, const char *name,
 		const char *fmt, ...)
+  __attribute__ ((format (printf, 3, 4)));
+static int _env_append_fmt (char ***envp, const char *name,
+		const char *fmt, ...)
 {
 	char val[1024];
 	va_list ap;
@@ -347,9 +361,9 @@ static char ** _create_environment (struct jobcomp_info *job)
 	_env_append_fmt (&env, "JOBID", "%u",  job->jobid);
 	_env_append_fmt (&env, "UID",   "%u",  job->uid);
 	_env_append_fmt (&env, "GID",   "%u",  job->gid);
-	_env_append_fmt (&env, "START", "%lu", job->start);
-	_env_append_fmt (&env, "END",   "%lu", job->end);
-	_env_append_fmt (&env, "SUBMIT","%lu", job->submit);
+	_env_append_fmt (&env, "START", "%ld", (long)job->start);
+	_env_append_fmt (&env, "END",   "%ld", (long)job->end);
+	_env_append_fmt (&env, "SUBMIT","%ld", (long)job->submit);
 	_env_append_fmt (&env, "PROCS", "%u",  job->nprocs);
 	_env_append_fmt (&env, "NODECNT", "%u", job->nnodes);
 
@@ -370,7 +384,8 @@ static char ** _create_environment (struct jobcomp_info *job)
 	if (job->limit == INFINITE)
 		_env_append (&env, "LIMIT", "UNLIMITED");
 	else
-		_env_append_fmt (&env, "LIMIT", "%lu", job->limit);
+		_env_append_fmt (&env, "LIMIT", "%lu",
+		                 (unsigned long) job->limit);
 
 	if ((tz = getenv ("TZ")))
 		_env_append_fmt (&env, "TZ", "%s", tz);
@@ -433,7 +448,7 @@ static void _jobcomp_child (char * script, struct jobcomp_info *job)
 	/*
 	 * Failure of execve implies error
 	 */
-	error ("jobcomp/script: execve(%s): %m\n", script);
+	error ("jobcomp/script: execve(%s): %m", script);
 	exit (1);
 }
 
@@ -461,7 +476,7 @@ static int _jobcomp_exec_child (char *script, struct jobcomp_info *job)
 		error ("jobcomp/script: waitpid: %m");
 
 	if (WEXITSTATUS(status))
-		error ("jobcomp/script: script %s exited with status %d\n",
+		error ("jobcomp/script: script %s exited with status %d",
 		       script, WEXITSTATUS(status));
 
 	return (0);
@@ -628,7 +643,7 @@ extern int fini ( void )
  * in/out job_list List of job_rec_t *
  * note List needs to be freed when called
  */
-extern List slurm_jobcomp_get_jobs(acct_job_cond_t *job_cond)
+extern List slurm_jobcomp_get_jobs(slurmdb_job_cond_t *job_cond)
 {
 
 	info("This function is not implemented.");
@@ -638,7 +653,7 @@ extern List slurm_jobcomp_get_jobs(acct_job_cond_t *job_cond)
 /*
  * expire old info from the storage
  */
-extern int slurm_jobcomp_archive(acct_archive_cond_t *archive_cond)
+extern int slurm_jobcomp_archive(slurmdb_archive_cond_t *archive_cond)
 {
 	info("This function is not implemented.");
 	return SLURM_SUCCESS;

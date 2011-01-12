@@ -3,7 +3,7 @@
  *	provides interface to read, write, update, and configurations.
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Portions Copyright (C) 2008 Vijay Ramasubramanian.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
@@ -46,6 +46,7 @@
 #define OPT_LONG_HIDE   0x102
 
 char *command_name;
+List clusters = NULL;
 int all_flag;		/* display even hidden partitions */
 int detail_flag;	/* display additional details */
 int exit_code;		/* scontrol's exit code, =1 on any error at any time */
@@ -54,6 +55,13 @@ int input_words;	/* number of words of input permitted */
 int one_liner;		/* one record per line if =1 */
 int quiet_flag;		/* quiet=1, verbose=-1, normal=0 */
 int verbosity;		/* count of "-v" options */
+uint32_t cluster_flags; /*what type of cluster are we talking to */
+block_info_msg_t *old_block_info_ptr = NULL;
+job_info_msg_t *old_job_info_ptr = NULL;
+node_info_msg_t *old_node_info_ptr = NULL;
+partition_info_msg_t *old_part_info_ptr = NULL;
+reserve_info_msg_t *old_res_info_ptr = NULL;
+slurm_ctl_conf_info_msg_t *old_slurm_ctl_conf_ptr = NULL;
 
 static void	_create_it (int argc, char *argv[]);
 static void	_delete_it (int argc, char *argv[]);
@@ -83,6 +91,8 @@ main (int argc, char *argv[])
 	int option_index;
 	static struct option long_options[] = {
 		{"all",      0, 0, 'a'},
+		{"cluster",  1, 0, 'M'},
+		{"clusters", 1, 0, 'M'},
 		{"details",  0, 0, 'd'},
 		{"help",     0, 0, 'h'},
 		{"hide",     0, 0, OPT_LONG_HIDE},
@@ -107,7 +117,7 @@ main (int argc, char *argv[])
 	if (getenv ("SCONTROL_ALL"))
 		all_flag= 1;
 
-	while((opt_char = getopt_long(argc, argv, "adhoQvV",
+	while((opt_char = getopt_long(argc, argv, "adhM:oQvV",
 			long_options, &option_index)) != -1) {
 		switch (opt_char) {
 		case (int)'?':
@@ -128,6 +138,19 @@ main (int argc, char *argv[])
 		case OPT_LONG_HIDE:
 			all_flag = 0;
 			detail_flag = 0;
+			break;
+		case (int)'M':
+			if(clusters) {
+				list_destroy(clusters);
+				clusters = NULL;
+				working_cluster_rec = NULL;
+			}
+			if(!(clusters = slurmdb_get_info_cluster(optarg))) {
+				error("'%s' invalid entry for --cluster",
+				      optarg);
+				exit(1);
+			}
+			working_cluster_rec = list_peek(clusters);
 			break;
 		case (int)'o':
 			one_liner = 1;
@@ -150,6 +173,8 @@ main (int argc, char *argv[])
 			exit(exit_code);
 		}
 	}
+
+	cluster_flags = slurmdb_setup_cluster_flags();
 
 	if (verbosity) {
 		opts.stderr_level += verbosity;
@@ -179,7 +204,8 @@ main (int argc, char *argv[])
 			break;
 		error_code = _get_command (&input_field_count, input_fields);
 	}
-
+	if(clusters)
+		list_destroy(clusters);
 	exit(exit_code);
 }
 
@@ -304,13 +330,12 @@ static void
 _print_config (char *config_param)
 {
 	int error_code;
-	static slurm_ctl_conf_info_msg_t *old_slurm_ctl_conf_ptr = NULL;
 	slurm_ctl_conf_info_msg_t  *slurm_ctl_conf_ptr = NULL;
 
 	if (old_slurm_ctl_conf_ptr) {
 		error_code = slurm_load_ctl_conf (
 				old_slurm_ctl_conf_ptr->last_update,
-			 &slurm_ctl_conf_ptr);
+				&slurm_ctl_conf_ptr);
 		if (error_code == SLURM_SUCCESS)
 			slurm_free_ctl_conf(old_slurm_ctl_conf_ptr);
 		else if (slurm_get_errno () == SLURM_NO_CHANGE_IN_DATA) {
@@ -517,6 +542,46 @@ _process_command (int argc, char *argv[])
 		}
 		scontrol_print_completing();
 	}
+	else if (strncasecmp (tag, "cluster", MAX(taglen, 2)) == 0) {
+		if(clusters) {
+			list_destroy(clusters);
+			clusters = NULL;
+			working_cluster_rec = NULL;
+		}
+		if (argc >= 2) {
+			if(!(clusters = slurmdb_get_info_cluster(argv[1]))) {
+				error("'%s' invalid entry for --cluster",
+				      optarg);
+				exit(1);
+			}
+			working_cluster_rec = list_peek(clusters);
+		}
+		cluster_flags = slurmdb_setup_cluster_flags();
+		slurm_free_block_info_msg(old_block_info_ptr);
+		old_block_info_ptr = NULL;
+		slurm_free_job_info_msg(old_job_info_ptr);
+		old_job_info_ptr = NULL;
+		slurm_free_node_info_msg(old_node_info_ptr);
+		old_node_info_ptr = NULL;
+		slurm_free_partition_info_msg(old_part_info_ptr);
+		old_part_info_ptr = NULL;
+		slurm_free_reservation_info_msg(old_res_info_ptr);
+		old_res_info_ptr = NULL;
+		slurm_free_ctl_conf(old_slurm_ctl_conf_ptr);
+		old_slurm_ctl_conf_ptr = NULL;
+		/* if(old_block_info_ptr) */
+		/* 	old_block_info_ptr->last_update = 0; */
+		/* if(old_job_info_ptr) */
+		/* 	old_job_info_ptr->last_update = 0; */
+		/* if(old_node_info_ptr) */
+		/* 	old_node_info_ptr->last_update = 0; */
+		/* if(old_part_info_ptr) */
+		/* 	old_part_info_ptr->last_update = 0; */
+		/* if(old_res_info_ptr) */
+		/* 	old_res_info_ptr->last_update = 0; */
+		/* if(old_slurm_ctl_conf_ptr) */
+		/* 	old_slurm_ctl_conf_ptr->last_update = 0; */
+	}
 	else if (strncasecmp (tag, "create", MAX(taglen, 2)) == 0) {
 		if (argc < 2) {
 			exit_code = 1;
@@ -614,7 +679,7 @@ _process_command (int argc, char *argv[])
 			fprintf (stderr, "too many arguments for keyword:%s\n",
 			         tag);
 		}
-		error_code = slurm_reconfigure ();
+		error_code = slurm_reconfigure();
 		if (error_code) {
 			exit_code = 1;
 			if (quiet_flag != 1)
@@ -670,8 +735,10 @@ _process_command (int argc, char *argv[])
 		}
 
 	}
-	else if ((strncasecmp (tag, "suspend", MAX(taglen, 2)) == 0)
-	||       (strncasecmp (tag, "resume", MAX(taglen, 3)) == 0)) {
+	else if ((strncasecmp (tag, "hold",  4) == 0) ||
+		 (strncasecmp (tag, "holdu", 5) == 0) ||
+		 (strncasecmp (tag, "uhold", 5) == 0) ||
+	         (strncasecmp (tag, "release", MAX(taglen, 3)) == 0)) {
 		if (argc > 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
@@ -686,12 +753,56 @@ _process_command (int argc, char *argv[])
 					"too few arguments for keyword:%s\n",
 					tag);
 		} else {
-			error_code =scontrol_suspend(argv[0], argv[1]);
+			error_code = scontrol_hold(argv[0], argv[1]);
+			if (error_code) {
+				exit_code = 1;
+				if (quiet_flag != 1)
+					slurm_perror ("slurm_update_job error");
+			}
+		}
+	}
+	else if ((strncasecmp (tag, "suspend", MAX(taglen, 2)) == 0) ||
+	         (strncasecmp (tag, "resume", MAX(taglen, 3)) == 0)) {
+		if (argc > 2) {
+			exit_code = 1;
+			if (quiet_flag != 1)
+				fprintf(stderr,
+					"too many arguments for keyword:%s\n",
+					tag);
+		}
+		else if (argc < 2) {
+			exit_code = 1;
+			if (quiet_flag != 1)
+				fprintf(stderr,
+					"too few arguments for keyword:%s\n",
+					tag);
+		} else {
+			error_code = scontrol_suspend(argv[0], argv[1]);
 			if (error_code) {
 				exit_code = 1;
 				if (quiet_flag != 1)
 					slurm_perror ("slurm_suspend error");
 			}
+		}
+	}
+	else if (strncasecmp (tag, "wait_job", MAX(taglen, 2)) == 0) {
+		if (argc > 2) {
+			exit_code = 1;
+			if (quiet_flag != 1)
+				fprintf(stderr,
+					"too many arguments for keyword:%s\n",
+					tag);
+		}
+		else if (argc < 2) {
+			exit_code = 1;
+			if (quiet_flag != 1)
+				fprintf(stderr,
+					"too few arguments for keyword:%s\n",
+					tag);
+		} else {
+			error_code = scontrol_job_ready(argv[1]);
+			if (error_code)
+				exit_code = 1;
 		}
 	}
 	else if (strncasecmp (tag, "setdebug", MAX(taglen, 2)) == 0) {
@@ -729,18 +840,70 @@ _process_command (int argc, char *argv[])
 					level = -1;
 					exit_code = 1;
 					if (quiet_flag != 1)
-						fprintf(stderr, "invalid debug "
-							"level: %s\n", argv[1]);
+						fprintf(stderr, "invalid "
+							"debug level: %s\n",
+							argv[1]);
 				}
 			}
 			if (level != -1) {
-				error_code = slurm_set_debug_level(level);
+				error_code = slurm_set_debug_level(
+					level);
 				if (error_code) {
 					exit_code = 1;
 					if (quiet_flag != 1)
 						slurm_perror(
 							"slurm_set_debug_level "
 							"error");
+				}
+			}
+		}
+	}
+	else if (strncasecmp (tag, "schedloglevel", MAX(taglen, 2)) == 0) {
+		if (argc > 2) {
+			exit_code = 1;
+			if (quiet_flag != 1)
+				fprintf(stderr,
+					"too many arguments for keyword:%s\n",
+					tag);
+		} else if (argc < 2) {
+			exit_code = 1;
+			if (quiet_flag != 1)
+				fprintf(stderr,
+					"too few arguments for keyword:%s\n",
+					tag);
+		} else {
+			int level = -1;
+			char *endptr;
+			char *levels[] = {
+				"disable", "enable", NULL};
+			int index = 0;
+			while (levels[index]) {
+				if (strcasecmp(argv[1], levels[index]) == 0) {
+					level = index;
+					break;
+				}
+				index ++;
+			}
+			if (level == -1) {
+				/* effective levels: 0 - 1 */
+				level = (int)strtoul (argv[1], &endptr, 10);
+				if (*endptr != '\0' || level > 1) {
+					level = -1;
+					exit_code = 1;
+					if (quiet_flag != 1)
+						fprintf(stderr, "invalid schedlog "
+							"level: %s\n", argv[1]);
+				}
+			}
+			if (level != -1) {
+				error_code = slurm_set_schedlog_level(
+					level);
+				if (error_code) {
+					exit_code = 1;
+					if (quiet_flag != 1)
+						slurm_perror(
+							"slurm_set_schedlog_level"
+							" error");
 				}
 			}
 		}
@@ -899,7 +1062,7 @@ _create_it (int argc, char *argv[])
 
 	if (i >= argc) {
 		exit_code = 1;
-		error("Invalid creation entity: %s\n", argv[0]);
+		error("Invalid creation entity: %s", argv[0]);
 	} else if (error_code)
 		exit_code = 1;
 }
@@ -919,7 +1082,7 @@ _delete_it (int argc, char *argv[])
 	int taglen = 0;
 
 	if (argc != 1) {
-		error("Only one option follows delete.  %d given.\n", argc);
+		error("Only one option follows delete.  %d given.", argc);
 		exit_code = 1;
 		return;
 	}
@@ -931,7 +1094,7 @@ _delete_it (int argc, char *argv[])
 		val++;
 	} else {
 		error("Proper format is 'delete Partition=p'"
-		      " or 'delete Reservation=r'\n");
+		      " or 'delete Reservation=r'");
 		exit_code = 1;
 		return;
 	}
@@ -954,21 +1117,22 @@ _delete_it (int argc, char *argv[])
 			slurm_perror(errmsg);
 		}
 	} else if (strncasecmp (tag, "BlockName", MAX(taglen, 3)) == 0) {
-#ifdef HAVE_BG
-		update_block_msg_t   block_msg;
-		slurm_init_update_block_msg ( &block_msg );
-
-		block_msg.bg_block_id = val;
-		block_msg.state = RM_PARTITION_NAV;
-		if (slurm_update_block(&block_msg)) {
-			char errmsg[64];
-			snprintf(errmsg, 64, "delete_block %s", argv[0]);
-			slurm_perror(errmsg);
+		if(cluster_flags & CLUSTER_FLAG_BG) {
+			update_block_msg_t   block_msg;
+			slurm_init_update_block_msg ( &block_msg );
+			block_msg.bg_block_id = val;
+			block_msg.state = RM_PARTITION_NAV;
+			if (slurm_update_block(&block_msg)) {
+				char errmsg[64];
+				snprintf(errmsg, 64, "delete_block %s",
+					 argv[0]);
+				slurm_perror(errmsg);
+			}
+		} else {
+			exit_code = 1;
+			fprintf(stderr,
+				"This only works on a bluegene system.\n");
 		}
-#else
-		exit_code = 1;
-		fprintf(stderr, "This only works on a bluegene system.\n");
-#endif
 	} else {
 		exit_code = 1;
 		fprintf(stderr, "Invalid deletion entity: %s\n", argv[0]);
@@ -1029,7 +1193,7 @@ _show_it (int argc, char *argv[])
 		}
 		_print_daemons ();
 	} else if (strncasecmp (tag, "jobs", MAX(taglen, 1)) == 0 ||
-		 strncasecmp (tag, "jobid", MAX(taglen, 1)) == 0 ) {
+		   strncasecmp (tag, "jobid", MAX(taglen, 1)) == 0 ) {
 		scontrol_print_job (val);
 	} else if (strncasecmp (tag, "hostnames", MAX(taglen, 5)) == 0) {
 		if (val)
@@ -1046,10 +1210,10 @@ _show_it (int argc, char *argv[])
 	} else if (strncasecmp (tag, "nodes", MAX(taglen, 1)) == 0) {
 		scontrol_print_node_list (val);
 	} else if (strncasecmp (tag, "partitions", MAX(taglen, 1)) == 0 ||
-		 strncasecmp (tag, "partitionname", MAX(taglen, 1)) == 0) {
+		   strncasecmp (tag, "partitionname", MAX(taglen, 1)) == 0) {
 		scontrol_print_part (val);
 	} else if (strncasecmp (tag, "reservations", MAX(taglen, 1)) == 0 ||
-		 strncasecmp (tag, "reservationname", MAX(taglen, 1)) == 0) {
+		   strncasecmp (tag, "reservationname", MAX(taglen, 1)) == 0) {
 		scontrol_print_res (val);
 	} else if (strncasecmp (tag, "slurmd", MAX(taglen, 2)) == 0) {
 		_print_slurmd (val);
@@ -1081,7 +1245,7 @@ _update_it (int argc, char *argv[])
 	int i, error_code = SLURM_SUCCESS;
 	int nodetag=0, partag=0, jobtag=0;
 	int blocktag=0, subtag=0, restag=0;
-	int debugtag=0;
+	int debugtag=0, steptag=0;
 
 	/* First identify the entity to update */
 	for (i=0; i<argc; i++) {
@@ -1097,8 +1261,10 @@ _update_it (int argc, char *argv[])
 			nodetag=1;
 		} else if (!strncasecmp(tag, "PartitionName", MAX(taglen, 3))) {
 			partag=1;
-		} else if (!strncasecmp(tag, "JobId", MAX(taglen, 1))) {
+		} else if (!strncasecmp(tag, "JobId", MAX(taglen, 3))) {
 			jobtag=1;
+		} else if (!strncasecmp(tag, "StepId", MAX(taglen, 4))) {
+			steptag=1;
 		} else if (!strncasecmp(tag, "BlockName", MAX(taglen, 3))) {
 			blocktag=1;
 		} else if (!strncasecmp(tag, "SubBPName", MAX(taglen, 3))) {
@@ -1113,14 +1279,16 @@ _update_it (int argc, char *argv[])
 	}
 
 	/* The order of tests matters here.  An update job request can include
-	   partition and reservation tags, possibly before the jobid tag, but
-	   none of the other updates have a jobid tag, so check jobtag first.
-	   Likewise, check restag next, because reservations can have a
-	   partition tag.  The order of the rest doesn't matter because there
-	   aren't any other duplicate tags.  */
+	 * partition and reservation tags, possibly before the jobid tag, but
+	 * none of the other updates have a jobid tag, so check jobtag first.
+	 * Likewise, check restag next, because reservations can have a
+	 * partition tag.  The order of the rest doesn't matter because there
+	 * aren't any other duplicate tags.  */
 
 	if (jobtag)
 		error_code = scontrol_update_job (argc, argv);
+	else if (steptag)
+		error_code = scontrol_update_step (argc, argv);
 	else if (restag)
 		error_code = scontrol_update_res (argc, argv);
 	else if (nodetag)
@@ -1137,12 +1305,12 @@ _update_it (int argc, char *argv[])
 		exit_code = 1;
 		fprintf(stderr, "No valid entity in update command\n");
 		fprintf(stderr, "Input line must include \"NodeName\", ");
-#ifdef HAVE_BG
-		fprintf(stderr, "\"BlockName\", \"SubBPName\" "
-			"(i.e. bgl000[0-3]),");
-#endif
+		if(cluster_flags & CLUSTER_FLAG_BG) {
+			fprintf(stderr, "\"BlockName\", \"SubBPName\" "
+				"(i.e. bgl000[0-3]),");
+		}
 		fprintf(stderr, "\"PartitionName\", \"Reservation\", "
-				"\"JobId\", or \"SlurmctldDebug\" \n");
+			"\"JobId\", or \"SlurmctldDebug\" \n");
 	}
 
 	if (error_code) {
@@ -1162,9 +1330,14 @@ _update_it (int argc, char *argv[])
 static int
 _update_bluegene_block (int argc, char *argv[])
 {
-#ifdef HAVE_BG
 	int i, update_cnt = 0;
 	update_block_msg_t block_msg;
+
+	if(!(cluster_flags & CLUSTER_FLAG_BG)) {
+		exit_code = 1;
+		fprintf(stderr, "This only works on a bluegene system.\n");
+		return 0;
+	}
 
 	slurm_init_update_block_msg ( &block_msg );
 
@@ -1179,27 +1352,32 @@ _update_bluegene_block (int argc, char *argv[])
 			vallen = strlen(val);
 		} else {
 			exit_code = 1;
-			error("Invalid input for BlueGene block update %s",
+			error("Invalid input for BlueGene block "
+			      "update %s",
 			      argv[i]);
 			return 0;
 		}
 
-		if (strncasecmp(tag, "BlockName", MAX(taglen, 2)) == 0) {
+		if (!strncasecmp(tag, "BlockName", MAX(taglen, 2))) {
 			block_msg.bg_block_id = val;
-		} else if (strncasecmp(tag, "State", MAX(taglen, 2)) == 0) {
-			if (strncasecmp(val, "ERROR", MAX(vallen, 1)) == 0)
+		} else if (!strncasecmp(tag, "State", MAX(taglen, 2))) {
+			if (!strncasecmp(val, "ERROR", MAX(vallen, 1)))
 				block_msg.state = RM_PARTITION_ERROR;
-			else if (strncasecmp(val, "FREE", MAX(vallen, 1)) == 0)
+			else if (!strncasecmp(val, "FREE", MAX(vallen, 1)))
 				block_msg.state = RM_PARTITION_FREE;
-			else if (strncasecmp(val, "REMOVE",
-					     MAX(vallen, 1)) == 0)
+			else if (!strncasecmp(val, "RECREATE", MAX(vallen, 3)))
+				block_msg.state = RM_PARTITION_CONFIGURING;
+			else if (!strncasecmp(val, "REMOVE", MAX(vallen, 3)))
 				block_msg.state = RM_PARTITION_NAV;
+			else if (!strncasecmp(val, "RESUME", MAX(vallen, 3)))
+				block_msg.state = RM_PARTITION_DEALLOCATING;
 			else {
 				exit_code = 1;
 				fprintf (stderr, "Invalid input: %s\n",
 					 argv[i]);
-				fprintf (stderr, "Acceptable State values "
-					"are FREE, ERROR, REMOVE\n");
+				fprintf (stderr,
+					 "Acceptable State values "
+					 "are FREE, ERROR, RECREATE, REMOVE\n");
 				return 0;
 			}
 			update_cnt++;
@@ -1225,11 +1403,6 @@ _update_bluegene_block (int argc, char *argv[])
 		return slurm_get_errno ();
 	} else
 		return 0;
-#else
-	exit_code = 1;
-	fprintf(stderr, "This only works on a bluegene system.\n");
-	return 0;
-#endif
 }
 
 /*
@@ -1243,9 +1416,14 @@ _update_bluegene_block (int argc, char *argv[])
 static int
 _update_bluegene_subbp (int argc, char *argv[])
 {
-#ifdef HAVE_BG
 	int i, update_cnt = 0;
 	update_block_msg_t block_msg;
+
+	if(!(cluster_flags & CLUSTER_FLAG_BG)) {
+		exit_code = 1;
+		fprintf(stderr, "This only works on a bluegene system.\n");
+		return 0;
+	}
 
 	slurm_init_update_block_msg ( &block_msg );
 
@@ -1265,19 +1443,19 @@ _update_bluegene_subbp (int argc, char *argv[])
 			return 0;
 		}
 
-		if (strncasecmp(tag, "SubBPName", MAX(taglen, 2)) == 0)
+		if (!strncasecmp(tag, "SubBPName", MAX(taglen, 2)))
 			block_msg.nodes = val;
-		else if (strncasecmp(tag, "State", MAX(taglen, 2)) == 0) {
-			if (strncasecmp(val, "ERROR", MAX(vallen, 1)) == 0)
+		else if (!strncasecmp(tag, "State", MAX(taglen, 2))) {
+			if (!strncasecmp(val, "ERROR", MAX(vallen, 1)))
 				block_msg.state = RM_PARTITION_ERROR;
-			else if (strncasecmp(val, "FREE", MAX(vallen, 1)) == 0)
+			else if (!strncasecmp(val, "FREE", MAX(vallen, 1)))
 				block_msg.state = RM_PARTITION_FREE;
 			else {
 				exit_code = 1;
 				fprintf (stderr, "Invalid input: %s\n",
 					 argv[i]);
 				fprintf (stderr, "Acceptable State values "
-					"are FREE and ERROR\n");
+					 "are FREE and ERROR\n");
 				return 0;
 			}
 			update_cnt++;
@@ -1303,11 +1481,6 @@ _update_bluegene_subbp (int argc, char *argv[])
 		return slurm_get_errno ();
 	} else
 		return 0;
-#else
-	exit_code = 1;
-	fprintf(stderr, "This only works on a bluegene system.\n");
-	return 0;
-#endif
 }
 
 /*
@@ -1341,9 +1514,10 @@ _usage () {
 scontrol [<OPTION>] [<COMMAND>]                                            \n\
     Valid <OPTION> values are:                                             \n\
      -a or --all: equivalent to \"all\" command                            \n\
-     -d or --detail: equivalent to \"detail\" command                      \n\
+     -d or --details: equivalent to \"details\" command                    \n\
      -h or --help: equivalent to \"help\" command                          \n\
      --hide: equivalent to \"hide\" command                                \n\
+     -M or --cluster: equivalent to \"cluster\" command                    \n\
      -o or --oneliner: equivalent to \"oneliner\" command                  \n\
      -Q or --quiet: equivalent to \"quiet\" command                        \n\
      -v or --verbose: equivalent to \"verbose\" command                    \n\
@@ -1358,18 +1532,23 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
                               generating a core file.                      \n\
      all                      display information about all partitions,    \n\
                               including hidden partitions.                 \n\
+     cluster                  cluster to issue commands to.  Default is    \n\
+                              current cluster.  cluster with no name will  \n\
+                              reset to default.                            \n\
      checkpoint <CH_OP><ID>   perform a checkpoint operation on identified \n\
                               job or job step \n\
      completing               display jobs in completing state along with  \n\
                               their completing or down nodes               \n\
      create <SPECIFICATIONS>  create a new partition or reservation        \n\
-     detail                   evokes additional details from the \"show\"  \n\
+     details                  evokes additional details from the \"show\"  \n\
                               command                                      \n\
      delete <SPECIFICATIONS>  delete the specified partition or reservation\n\
                               On Dynamic layout Bluegene systems you can also\n\
                               delete blocks.                               \n\
      exit                     terminate scontrol                           \n\
      help                     print this description of use.               \n\
+     hold <job_id>            prevent specified job from starting (see release)\n\
+     holdu <job_id>           place user hold on specified job (see release)\n\
      hide                     do not display information about hidden      \n\
                               partitions                                   \n\
      listpids <job_id<.step>> List pids associated with the given jobid, or\n\
@@ -1385,25 +1564,30 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
      quiet                    print no messages other than error messages. \n\
      quit                     terminate this command.                      \n\
      reconfigure              re-read configuration files.                 \n\
+     release <job_id>         permit specified job to start (see hold)     \n\
      requeue <job_id>         re-queue a batch job                         \n\
+     resume <job_id>          resume previously suspended job (see suspend)\n\
      setdebug <level>         set slurmctld debug level                    \n\
+     schedloglevel <slevel>   set scheduler log level                      \n\
      show <ENTITY> [<ID>]     display state of identified entity, default  \n\
                               is all records.                              \n\
      shutdown <OPTS>          shutdown slurm daemons                       \n\
-     takeover                 ask slurm backup controller to take over     \n\
                               (the primary controller will be stopped)     \n\
-     suspend <job_id>         susend specified job                         \n\
-     resume <job_id>          resume previously suspended job              \n\
-     update <SPECIFICATIONS>  update job, node, partition, reservation, or \n\
-                              bluegene block/subbp configuration           \n\
+     suspend <job_id>         susend specified job (see resume)            \n\
+     takeover                 ask slurm backup controller to take over     \n\
+     uhold <job_id>           place user hold on specified job (see release)\n\
+     update <SPECIFICATIONS>  update job, node, partition, reservation,    \n\
+                              step or bluegene block/subbp configuration   \n\
      verbose                  enable detailed logging.                     \n\
      version                  display tool version number.                 \n\
+     wait_job <job_id>        wait until the nodes allocated to the job    \n\
+                              are booted and usable                        \n\
      !!                       Repeat the last command entered.             \n\
                                                                            \n\
   <ENTITY> may be \"config\", \"daemons\", \"job\", \"node\", \"partition\"\n\
        \"reservation\", \"hostlist\", \"hostnames\", \"slurmd\",           \n\
        \"topology\", or \"step\"                                           \n\
-       (also for BlueGene only: \"block\" or \"subbp\").                  \n\
+       (also for BlueGene only: \"block\" or \"subbp\").                   \n\
                                                                            \n\
   <ID> may be a configuration parameter name, job id, node name, partition \n\
        name, reservation name, job step id, or hostlist or pathname to a   \n\
@@ -1416,6 +1600,9 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
   <LEVEL> may be an integer value like SlurmctldDebug in the slurm.conf    \n\
        file or the name of the most detailed errors to report (e.g. \"info\",\n\
        \"verbose\", \"debug\", \"debug2\", etc.).                          \n\
+                                                                           \n\
+  <SLEVEL> may be an integer value like SlurmSchedLogLevel in the          \n\
+       slurm.conf file or \"enable\" or \"disable\".                       \n\
                                                                            \n\
   <OPTS> may be \"slurmctld\" to shutdown just the slurmctld daemon,       \n\
        otherwise all slurm daemons are shutdown                            \n\
@@ -1433,7 +1620,7 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
   (Bluegene systems only)                                                  \n\
                                                                            \n\
   <CH_OP> identify checkpoint operations and may be \"able\", \"disable\", \n\
-  \"enable\", \"create\", \"vacate\", \"restart\", or \"error\".           \n\
+  \"enable\", \"create\", \"vacate\", \"requeue\", \"restart\", or \"error\"\n\
   Additional options include \"ImageDir=<dir>\", \"MaxWait=<seconds>\" and \n\
   \"StickToNodes\"   \n\
                                                                            \n\

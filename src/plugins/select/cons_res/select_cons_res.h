@@ -4,6 +4,7 @@
  *  $Id: select_cons_res.h,v 1.3 2006/10/31 20:01:38 palermo Exp $
  *****************************************************************************
  *  Copyright (C) 2006 Hewlett-Packard Development Company, L.P.
+*   Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
  *  Written by Susanne M. Balle, <susanne.balle@hp.com>
  *  CODE-OCEC-09-009. All rights reserved.
  *
@@ -47,6 +48,7 @@
 #include <slurm/slurm_errno.h>
 
 #include "src/common/bitstring.h"
+#include "src/common/gres.h"
 #include "src/common/list.h"
 #include "src/common/log.h"
 #include "src/common/node_select.h"
@@ -110,12 +112,14 @@ struct node_res_record {
 
 /* per-node resource usage record */
 struct node_use_record {
-	uint16_t node_state;		/* see node_cr_state comments */
 	uint32_t alloc_memory;		/* real memory reserved by already
 					 * scheduled jobs */
+	List gres_list;			/* list of gres state info managed by 
+					 * plugins */
+	uint16_t node_state;		/* see node_cr_state comments */
 };
 
-
+extern uint32_t select_debug_flags;
 extern uint16_t select_fast_schedule;
 
 extern struct part_res_record *select_part_record;
@@ -124,9 +128,5 @@ extern struct node_use_record *select_node_usage;
 
 extern void cr_sort_part_rows(struct part_res_record *p_ptr);
 extern uint32_t cr_get_coremap_offset(uint32_t node_index);
-extern uint32_t cr_get_node_num_cores(uint32_t node_index);
-
-extern bool cr_preemption_enabled(void);
-extern bool cr_preemption_killing(void);
 
 #endif /* !_CONS_RES_H */

@@ -146,6 +146,12 @@ slurm_auth_get_ops( slurm_auth_context_t c )
         if ( c->cur_plugin != PLUGIN_INVALID_HANDLE )
         	return &c->ops;
 
+	if(errno != EPLUGIN_NOTFOUND) {
+		error("Couldn't load specified plugin name for %s: %s",
+		      c->auth_type, plugin_strerror(errno));
+		return NULL;
+	}
+
 	error("Couldn't find the specified plugin name for %s "
 	      "looking at all files",
 	      c->auth_type);
@@ -304,7 +310,7 @@ _slurm_auth_context_destroy( slurm_auth_context_t c )
         return rc;
 }
 
-int inline
+inline int
 slurm_auth_init( char *auth_type )
 {
         int retval = SLURM_SUCCESS;

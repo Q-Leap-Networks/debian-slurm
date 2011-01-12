@@ -58,6 +58,8 @@
 
 #include "../block_allocator/block_allocator.h"
 
+#define BLOCK_MAGIC 0x3afd
+
 typedef struct bg_record {
 	rm_partition_t *bg_block;       /* structure to hold info from db2 */
 	pm_partition_id_t bg_block_id;	/* ID returned from MMCS	*/
@@ -73,23 +75,27 @@ typedef struct bg_record {
 					   0 = not booting,
 					   1 = booting */
 	int bp_count;                   /* size */
-	rm_connection_type_t conn_type;  /* MESH or Torus or NAV */
+	rm_connection_type_t conn_type; /* MESH or Torus or NAV */
 	uint32_t cpu_cnt;               /* count of cpus per block */
-	int full_block;                 /* whether or not block is the full
+	int free_cnt;                   /* How many are trying
+					   to free this block at the
+					   same time */
+	bool full_block;                /* whether or not block is the full
 					   block */
-	uint16_t geo[BA_SYSTEM_DIMENSIONS];  /* geometry */
+	uint16_t geo[HIGHEST_DIMENSIONS];  /* geometry */
 	char *ionodes; 		        /* String of ionodes in block
 					 * NULL if not a small block*/
+	bitstr_t *ionode_bitmap;        /* for small blocks bitmap to
+					   keep track which ionodes we
+					   are on.  NULL if not a small block*/
 	struct job_record *job_ptr;	/* pointer to job running on
 					 * block or NULL if no job */
 	int job_running;                /* job id of job running of if
 					 * block is in an error state
 					 * BLOCK_ERROR_STATE */
-	bitstr_t *ionode_bitmap;        /* for small blocks bitmap to
-					   keep track which ionodes we
-					   are on.  NULL if not a small block*/
 	char *linuximage;               /* LinuxImage/CnloadImage for
 					 * this block */
+	uint16_t magic;	        	/* magic number */
 	char *mloaderimage;             /* mloaderImage for this block */
 	int modifying;                  /* flag to say the block is
 					   being modified or not at
@@ -103,9 +109,10 @@ typedef struct bg_record {
 					   pointer to the original */
 	char *ramdiskimage;             /* RamDiskImage/IoloadImg for
 					 * this block */
+	char *reason;                   /* reason block is in error state */
 	rm_partition_state_t state;     /* Current state of the block */
-	int start[BA_SYSTEM_DIMENSIONS];/* start node */
-	int switch_count;               /* number of switches used. */
+	uint16_t start[HIGHEST_DIMENSIONS];  /* start node */
+	uint32_t switch_count;          /* number of switches used. */
 	char *target_name;		/* when a block is freed this
 					   is the name of the user we
 					   want on the block */
@@ -131,9 +138,7 @@ extern bg_record_t *find_bg_record_in_list(List my_list, char *bg_block_id);
    updated before call of function.
 */
 extern int update_block_user(bg_record_t *bg_block_id, int set);
-extern void drain_as_needed(bg_record_t *bg_record, char *reason);
-
-extern int set_ionodes(bg_record_t *bg_record, int io_start, int io_nodes);
+extern void requeue_and_error(bg_record_t *bg_record, char *reason);
 
 extern int add_bg_record(List records, List used_nodes, blockreq_t *blockreq,
 			 bool no_check, bitoff_t io_start);

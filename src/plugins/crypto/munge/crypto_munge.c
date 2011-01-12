@@ -90,7 +90,7 @@
  * of the plugin.  If major and minor revisions are desired, the major
  * version number may be multiplied by a suitable magnitude constant such
  * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum versions for their plugins as the authentication API matures.
+ * minimum version for their plugins as the authentication API matures.
  */
 const char plugin_name[]        = "Munge cryptographic signature plugin";
 const char plugin_type[]        = "crypto/munge";
@@ -216,7 +216,7 @@ crypto_verify_sign(void * key, char *buffer, unsigned int buf_size,
 {
 	uid_t uid;
 	gid_t gid;
-	void *buf_out;
+	void *buf_out = NULL;
 	int   buf_out_size;
 	int   rc = 0;
 	munge_err_t err;
@@ -232,14 +232,15 @@ crypto_verify_sign(void * key, char *buffer, unsigned int buf_size,
 		 * munged.
 		 */
 		if (err != EMUNGE_CRED_REPLAYED) {
-			return err;
+			rc = err;
+			goto end_it;
 		} else {
 			debug2("We had a replayed crypto, "
 			       "but this is expected in multiple "
 			       "slurmd mode.");
 		}
 #else
-		return err;
+		goto end_it;
 #endif
 	}
 
@@ -253,7 +254,8 @@ crypto_verify_sign(void * key, char *buffer, unsigned int buf_size,
 		rc = ESIG_BUF_SIZE_MISMATCH;
 	else if (memcmp(buffer, buf_out, buf_size))
 		rc = ESIG_BUF_DATA_MISMATCH;
-
-	free(buf_out);
+end_it:
+	if (buf_out)
+		free(buf_out);
 	return rc;
 }

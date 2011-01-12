@@ -2,7 +2,7 @@
  *  update_job.c - update job functions for scontrol.
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -38,12 +38,14 @@
 \*****************************************************************************/
 
 #include "scontrol.h"
+#include "src/common/env.h"
 #include "src/common/proc_args.h"
 
 static int _parse_checkpoint_args(int argc, char **argv,
 				  uint16_t *max_wait, char **image_dir);
 static int _parse_restart_args(int argc, char **argv,
 			       uint16_t *stick, char **image_dir);
+static void _update_job_size(uint32_t job_id);
 
 /*
  * scontrol_checkpoint - perform some checkpoint/resume operation
@@ -119,6 +121,12 @@ scontrol_checkpoint(char *op, char *job_step_id_str, int argc, char *argv[])
 		rc = slurm_checkpoint_create (job_id, step_id, max_wait,
 					      image_dir);
 
+	} else if (strncasecmp(op, "requeue", MAX(oplen, 2)) == 0) {
+		if (_parse_checkpoint_args(argc, argv, &max_wait, &image_dir)){
+			return 0;
+		}
+		rc = slurm_checkpoint_requeue (job_id, max_wait, image_dir);
+
 	} else if (strncasecmp(op, "vacate", MAX(oplen, 2)) == 0) {
 		if (_parse_checkpoint_args(argc, argv, &max_wait, &image_dir)){
 			return 0;
@@ -193,22 +201,25 @@ _parse_restart_args(int argc, char **argv, uint16_t *stick, char **image_dir)
 }
 
 /*
- * scontrol_suspend - perform some suspend/resume operation
+ * scontrol_hold - perform some job hold/release operation
  * IN op - suspend/resume operation
  * IN job_id_str - a job id
  * RET 0 if no slurm error, errno otherwise. parsing error prints
  *		error message and returns 0
  */
 extern int
-scontrol_suspend(char *op, char *job_id_str)
+scontrol_hold(char *op, char *job_id_str)
 {
 	int rc = SLURM_SUCCESS;
-	uint32_t job_id = 0;
 	char *next_str;
+	job_desc_msg_t job_msg;
+	uint16_t job_state;
+
+	slurm_init_job_desc_msg (&job_msg);
 
 	if (job_id_str) {
-		job_id = (uint32_t) strtol (job_id_str, &next_str, 10);
-		if (next_str[0] != '\0') {
+		job_msg.job_id = (uint32_t) strtol(job_id_str, &next_str, 10);
+		if ((job_msg.job_id == 0) || (next_str[0] != '\0')) {
 			fprintf(stderr, "Invalid job id specified\n");
 			exit_code = 1;
 			return 0;
@@ -219,12 +230,61 @@ scontrol_suspend(char *op, char *job_id_str)
 		return 0;
 	}
 
-	if (strncasecmp(op, "suspend", MAX(strlen(op), 2)) == 0)
-		rc = slurm_suspend (job_id);
-	else
-		rc = slurm_resume (job_id);
+	job_state = scontrol_get_job_state(job_msg.job_id);
+	if (job_state == (uint16_t) NO_VAL)
+		return SLURM_ERROR;
+	if ((job_state & JOB_STATE_BASE) != JOB_PENDING) {
+		slurm_seterrno(ESLURM_JOB_NOT_PENDING);
+		return ESLURM_JOB_NOT_PENDING;
+	}
+
+	if ((strncasecmp(op, "holdu", 5) == 0) ||
+	    (strncasecmp(op, "uhold", 5) == 0)) {
+		job_msg.priority = 0;
+		job_msg.alloc_sid = ALLOC_SID_USER_HOLD;
+	} else if (strncasecmp(op, "hold", 4) == 0) {
+		job_msg.priority = 0;
+		job_msg.alloc_sid = 0;
+	} else
+		job_msg.priority = 1;
+
+	if (slurm_update_job(&job_msg))
+		return slurm_get_errno();
 
 	return rc;
+}
+
+
+/*
+ * scontrol_suspend - perform some suspend/resume operation
+ * IN op - suspend/resume operation
+ * IN job_id_str - a job id
+ * RET 0 if no slurm error, errno otherwise. parsing error prints
+ *		error message and returns 0
+ */
+extern int
+scontrol_suspend(char *op, char *job_id_str)
+{
+	uint32_t job_id = 0;
+	char *next_str;
+
+	if (job_id_str) {
+		job_id = (uint32_t) strtol (job_id_str, &next_str, 10);
+		if (next_str[0] != '\0') {
+			fprintf(stderr, "Invalid job id specified\n");
+			exit_code = 1;
+			return SLURM_SUCCESS;
+		}
+	} else {
+		fprintf(stderr, "Invalid job id specified\n");
+		exit_code = 1;
+		return SLURM_SUCCESS;
+	}
+
+	if (strncasecmp(op, "suspend", MAX(strlen(op), 2)) == 0)
+		return slurm_suspend(job_id);
+	else
+		return slurm_resume(job_id);
 }
 
 /*
@@ -269,6 +329,7 @@ scontrol_requeue(char *job_id_str)
 extern int
 scontrol_update_job (int argc, char *argv[])
 {
+	bool update_size = false;
 	int i, update_cnt = 0;
 	char *tag, *val;
 	int taglen, vallen;
@@ -296,7 +357,7 @@ scontrol_update_job (int argc, char *argv[])
 			return -1;
 		}
 
-		if (strncasecmp(tag, "JobId", MAX(taglen, 1)) == 0) {
+		if (strncasecmp(tag, "JobId", MAX(taglen, 3)) == 0) {
 			job_msg.job_id =
 				(uint32_t) strtol(val, (char **) NULL, 10);
 		}
@@ -304,7 +365,7 @@ scontrol_update_job (int argc, char *argv[])
 			job_msg.comment = val;
 			update_cnt++;
 		}
-		else if (strncasecmp(tag, "TimeLimit", MAX(taglen, 2)) == 0) {
+		else if (strncasecmp(tag, "TimeLimit", MAX(taglen, 5)) == 0) {
 			int time_limit = time_str2mins(val);
 			if ((time_limit < 0) && (time_limit != INFINITE)) {
 				error("Invalid TimeLimit value");
@@ -312,6 +373,16 @@ scontrol_update_job (int argc, char *argv[])
 				return 0;
 			}
 			job_msg.time_limit = time_limit;
+			update_cnt++;
+		}
+		else if (strncasecmp(tag, "TimeMin", MAX(taglen, 5)) == 0) {
+			int time_min = time_str2mins(val);
+			if ((time_min < 0) && (time_min != INFINITE)) {
+				error("Invalid TimeMin value");
+				exit_code = 1;
+				return 0;
+			}
+			job_msg.time_min = time_min;
 			update_cnt++;
 		}
 		else if (strncasecmp(tag, "Priority", MAX(taglen, 2)) == 0) {
@@ -332,10 +403,24 @@ scontrol_update_job (int argc, char *argv[])
 			job_msg.nice = NICE_OFFSET + nice;
 			update_cnt++;
 		}
-		/* ReqProcs was replaced by NumTasks in SLURM version 2.1 */
-		else if ((strncasecmp(tag, "ReqProcs", MAX(taglen, 4)) == 0) ||
-			 (strncasecmp(tag, "NumTasks", MAX(taglen, 8)) == 0)) {
-			job_msg.num_procs =
+		else if (strncasecmp(tag, "NumCPUs", MAX(taglen, 6)) == 0) {
+			int min_cpus, max_cpus=0;
+			if (!get_resource_arg_range(val, "NumCPUs", &min_cpus,
+						   &max_cpus, false) ||
+			    (min_cpus <= 0) ||
+			    (max_cpus && (max_cpus < min_cpus))) {
+				error("Invalid NumCPUs value: %s", val);
+				exit_code = 1;
+				return 0;
+			}
+			job_msg.min_cpus = min_cpus;
+			if (max_cpus)
+				job_msg.max_cpus = max_cpus;
+			update_cnt++;
+		}
+		/* ReqProcs was removed in SLURM version 2.1 */
+		else if (strncasecmp(tag, "ReqProcs", MAX(taglen, 8)) == 0) {
+			job_msg.num_tasks =
 				(uint32_t) strtol(val, (char **) NULL, 10);
 			update_cnt++;
 		}
@@ -355,15 +440,16 @@ scontrol_update_job (int argc, char *argv[])
 				false);
 			if(!rc)
 				return rc;
+			update_size = true;
 			update_cnt++;
 		}
 		else if (strncasecmp(tag, "ReqSockets", MAX(taglen, 4)) == 0) {
-			job_msg.min_sockets =
+			job_msg.sockets_per_node =
 				(uint16_t) strtol(val, (char **) NULL, 10);
 			update_cnt++;
 		}
 		else if (strncasecmp(tag, "ReqCores", MAX(taglen, 4)) == 0) {
-			job_msg.min_cores =
+			job_msg.cores_per_socket =
 				(uint16_t) strtol(val, (char **) NULL, 10);
 			update_cnt++;
 		}
@@ -373,31 +459,31 @@ scontrol_update_job (int argc, char *argv[])
                         update_cnt++;
                 }
 		else if (strncasecmp(tag, "ReqThreads", MAX(taglen, 4)) == 0) {
-			job_msg.min_threads =
+			job_msg.threads_per_core =
 				(uint16_t) strtol(val, (char **) NULL, 10);
 			update_cnt++;
 		}
 		else if (strncasecmp(tag, "MinCPUsNode", MAX(taglen, 4)) == 0) {
-			job_msg.job_min_cpus =
+			job_msg.pn_min_cpus =
 				(uint32_t) strtol(val, (char **) NULL, 10);
 			update_cnt++;
 		}
 		else if (strncasecmp(tag, "MinMemoryNode",
 				     MAX(taglen, 10)) == 0) {
-			job_msg.job_min_memory =
+			job_msg.pn_min_memory =
 				(uint32_t) strtol(val, (char **) NULL, 10);
 			update_cnt++;
 		}
 		else if (strncasecmp(tag, "MinMemoryCPU",
 				     MAX(taglen, 10)) == 0) {
-			job_msg.job_min_memory =
+			job_msg.pn_min_memory =
 				(uint32_t) strtol(val, (char **) NULL, 10);
-			job_msg.job_min_memory |= MEM_PER_CPU;
+			job_msg.pn_min_memory |= MEM_PER_CPU;
 			update_cnt++;
 		}
 		else if (strncasecmp(tag, "MinTmpDiskNode",
 				     MAX(taglen, 5)) == 0) {
-			job_msg.job_min_tmp_disk =
+			job_msg.pn_min_tmp_disk =
 				(uint32_t) strtol(val, (char **) NULL, 10);
 			update_cnt++;
 		}
@@ -444,16 +530,22 @@ scontrol_update_job (int argc, char *argv[])
 							(char **) NULL, 10);
 			update_cnt++;
 		}
-		else if (strncasecmp(tag, "ExcNodeList", MAX(taglen, 1)) == 0){
+		else if (strncasecmp(tag, "ExcNodeList", MAX(taglen, 3)) == 0){
 			job_msg.exc_nodes = val;
 			update_cnt++;
 		}
-		else if (strncasecmp(tag, "ReqNodeList", MAX(taglen, 8)) == 0){
+		else if (!strncasecmp(tag, "NodeList",    MAX(taglen, 8)) ||
+			 !strncasecmp(tag, "ReqNodeList", MAX(taglen, 8))) {
 			job_msg.req_nodes = val;
+			update_size = true;
 			update_cnt++;
 		}
 		else if (strncasecmp(tag, "Features", MAX(taglen, 1)) == 0) {
 			job_msg.features = val;
+			update_cnt++;
+		}
+		else if (strncasecmp(tag, "Gres", MAX(taglen, 2)) == 0) {
+			job_msg.gres = val;
 			update_cnt++;
 		}
 		else if (strncasecmp(tag, "Account", MAX(taglen, 1)) == 0) {
@@ -464,15 +556,15 @@ scontrol_update_job (int argc, char *argv[])
 			job_msg.dependency = val;
 			update_cnt++;
 		}
-#ifdef HAVE_BG
-		else if (strncasecmp(tag, "Geometry", MAX(taglen, 1)) == 0) {
+		else if (strncasecmp(tag, "Geometry", MAX(taglen, 2)) == 0) {
 			char* token, *delimiter = ",x", *next_ptr;
 			int j, rc = 0;
-			uint16_t geo[SYSTEM_DIMENSIONS];
+			int dims = slurmdb_setup_cluster_dims();
+			uint16_t geo[dims];
 			char* geometry_tmp = xstrdup(val);
 			char* original_ptr = geometry_tmp;
 			token = strtok_r(geometry_tmp, delimiter, &next_ptr);
-			for (j=0; j<SYSTEM_DIMENSIONS; j++) {
+			for (j=0; j<dims; j++) {
 				if (token == NULL) {
 					error("insufficient dimensions in "
 						"Geometry");
@@ -499,7 +591,7 @@ scontrol_update_job (int argc, char *argv[])
 			if (rc != 0)
 				exit_code = 1;
 			else {
-				for (j=0; j<SYSTEM_DIMENSIONS; j++)
+				for (j=0; j<dims; j++)
 					job_msg.geometry[j] = geo[j];
 				update_cnt++;
 			}
@@ -522,7 +614,6 @@ scontrol_update_job (int argc, char *argv[])
 			if(job_msg.conn_type != (uint16_t)NO_VAL)
 				update_cnt++;
 		}
-#endif
 		else if (strncasecmp(tag, "Licenses", MAX(taglen, 1)) == 0) {
 			job_msg.licenses = val;
 			update_cnt++;
@@ -556,8 +647,11 @@ scontrol_update_job (int argc, char *argv[])
 
 	if (slurm_update_job(&job_msg))
 		return slurm_get_errno ();
-	else
+	else {
+		if (update_size)
+			_update_job_size(job_msg.job_id);
 		return 0;
+	}
 }
 
 /*
@@ -594,3 +688,88 @@ scontrol_job_notify(int argc, char *argv[])
 		return 0;
 }
 
+static void _update_job_size(uint32_t job_id)
+{
+	resource_allocation_response_msg_t *alloc_info;
+	char *fname_csh = NULL, *fname_sh = NULL;
+	FILE *resize_csh = NULL, *resize_sh = NULL;
+
+	if (!getenv("SLURM_JOBID"))
+		return;		/*No job environment here to update */
+
+	if (slurm_allocation_lookup_lite(job_id, &alloc_info) !=
+	    SLURM_SUCCESS) {
+		slurm_perror("slurm_allocation_lookup_lite");
+		return;
+	}
+
+	xstrfmtcat(fname_csh, "slurm_job_%u_resize.csh", job_id);
+	xstrfmtcat(fname_sh,  "slurm_job_%u_resize.sh", job_id);
+	(void) unlink(fname_csh);
+	(void) unlink(fname_sh);
+ 	if (!(resize_csh = fopen(fname_csh, "w"))) {
+		fprintf(stderr, "Could not create file %s: %s\n", fname_csh, 
+			strerror(errno));
+		goto fini;
+	}
+ 	if (!(resize_sh = fopen(fname_sh, "w"))) {
+		fprintf(stderr, "Could not create file %s: %s\n", fname_sh, 
+			strerror(errno));
+		goto fini;
+	}
+	chmod(fname_csh, 0700);	/* Make file executable */
+	chmod(fname_sh,  0700);
+
+	if (getenv("SLURM_NODELIST")) {
+		fprintf(resize_sh, "export SLURM_NODELIST=\"%s\"\n",
+			alloc_info->node_list);
+		fprintf(resize_csh, "setenv SLURM_NODELIST \"%s\"\n",
+			alloc_info->node_list);
+	}
+	if (getenv("SLURM_JOB_NODELIST")) {
+		fprintf(resize_sh, "export SLURM_JOB_NODELIST=\"%s\"\n", 
+			alloc_info->node_list);
+		fprintf(resize_csh, "setenv SLURM_JOB_NODELIST \"%s\"\n", 
+			alloc_info->node_list);
+	}
+	if (getenv("SLURM_NNODES")) {
+		fprintf(resize_sh, "export SLURM_NNODES=%u\n",
+			alloc_info->node_cnt);
+		fprintf(resize_csh, "setenv SLURM_NNODES %u\n",
+			alloc_info->node_cnt);
+	}
+	if (getenv("SLURM_JOB_NUM_NODES")) {
+		fprintf(resize_sh, "export SLURM_JOB_NUM_NODES=%u\n",
+			alloc_info->node_cnt);
+		fprintf(resize_csh, "setenv SLURM_JOB_NUM_NODES %u\n",
+			alloc_info->node_cnt);
+	}
+	if (getenv("SLURM_JOB_CPUS_PER_NODE")) {
+		char *tmp;
+		tmp = uint32_compressed_to_str(alloc_info->num_cpu_groups,
+					       alloc_info->cpus_per_node,
+					       alloc_info->cpu_count_reps);
+		fprintf(resize_sh, "export SLURM_JOB_CPUS_PER_NODE=\"%s\"\n",
+			tmp);
+		fprintf(resize_csh, "setenv SLURM_JOB_CPUS_PER_NODE \"%s\"\n",
+			tmp);
+		xfree(tmp);
+	}
+	if (getenv("SLURM_TASKS_PER_NODE")) {
+		/* We don't have sufficient information to recreate this */
+		fprintf(resize_sh, "unset SLURM_TASKS_PER_NODE\n");
+		fprintf(resize_csh, "unsetenv SLURM_TASKS_PER_NODE\n");
+	}
+
+	printf("To reset SLURM environment variables, execute\n");
+	printf("  For bash or sh shells:  . ./%s\n", fname_sh);
+	printf("  For csh shells:         source ./%s\n", fname_csh);
+
+fini:	slurm_free_resource_allocation_response_msg(alloc_info);
+	xfree(fname_csh);
+	xfree(fname_sh);
+	if (resize_csh)
+		fclose(resize_csh);
+	if (resize_sh)
+		fclose(resize_sh);
+}

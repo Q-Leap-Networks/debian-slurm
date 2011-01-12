@@ -96,7 +96,7 @@ static int _ckpt_step(struct step_record * step_ptr, uint16_t wait, int vacate);
  * of the plugin.  If major and minor revisions are desired, the major
  * version number may be multiplied by a suitable magnitude constant such
  * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum versions for their plugins as the checkpoint API matures.
+ * minimum version for their plugins as the checkpoint API matures.
  */
 const char plugin_name[]       	= "OpenMPI checkpoint plugin";
 const char plugin_type[]       	= "checkpoint/ompi";
@@ -169,6 +169,7 @@ extern int slurm_ckpt_op (uint32_t job_id, uint32_t step_id,
 			rc = _ckpt_step(step_ptr, data, 1);
 			break;
 		case CHECK_RESTART:
+		case CHECK_REQUEUE:
 			/* Lots of work is required in Slurm to restart a
 			 * checkpointed job. For now the user can submit a
 			 * new job and execute "ompi_restart <snapshot>" */
@@ -243,35 +244,42 @@ extern int slurm_ckpt_free_job(check_jobinfo_t jobinfo)
 	return SLURM_SUCCESS;
 }
 
-extern int slurm_ckpt_pack_job(check_jobinfo_t jobinfo, Buf buffer)
+extern int slurm_ckpt_pack_job(check_jobinfo_t jobinfo, Buf buffer,
+			       uint16_t protocol_version)
 {
 	struct check_job_info *check_ptr =
 		(struct check_job_info *)jobinfo;
 
-	pack16(check_ptr->disabled, buffer);
-	pack16(check_ptr->reply_cnt, buffer);
-	pack16(check_ptr->wait_time, buffer);
+	if(protocol_version >= SLURM_2_1_PROTOCOL_VERSION) {
+		pack16(check_ptr->disabled, buffer);
+		pack16(check_ptr->reply_cnt, buffer);
+		pack16(check_ptr->wait_time, buffer);
 
-	pack32(check_ptr->error_code, buffer);
-	packstr(check_ptr->error_msg, buffer);
-	pack_time(check_ptr->time_stamp, buffer);
+		pack32(check_ptr->error_code, buffer);
+		packstr(check_ptr->error_msg, buffer);
+		pack_time(check_ptr->time_stamp, buffer);
+	}
 
 	return SLURM_SUCCESS;
 }
 
-extern int slurm_ckpt_unpack_job(check_jobinfo_t jobinfo, Buf buffer)
+extern int slurm_ckpt_unpack_job(check_jobinfo_t jobinfo, Buf buffer,
+				 uint16_t protocol_version)
 {
 	uint32_t uint32_tmp;
 	struct check_job_info *check_ptr =
 		(struct check_job_info *)jobinfo;
 
-	safe_unpack16(&check_ptr->disabled, buffer);
-	safe_unpack16(&check_ptr->reply_cnt, buffer);
-	safe_unpack16(&check_ptr->wait_time, buffer);
+	if(protocol_version >= SLURM_2_1_PROTOCOL_VERSION) {
+		safe_unpack16(&check_ptr->disabled, buffer);
+		safe_unpack16(&check_ptr->reply_cnt, buffer);
+		safe_unpack16(&check_ptr->wait_time, buffer);
 
-	safe_unpack32(&check_ptr->error_code, buffer);
-	safe_unpackstr_xmalloc(&check_ptr->error_msg, &uint32_tmp, buffer);
-	safe_unpack_time(&check_ptr->time_stamp, buffer);
+		safe_unpack32(&check_ptr->error_code, buffer);
+		safe_unpackstr_xmalloc(&check_ptr->error_msg,
+				       &uint32_tmp, buffer);
+		safe_unpack_time(&check_ptr->time_stamp, buffer);
+	}
 
 	return SLURM_SUCCESS;
 

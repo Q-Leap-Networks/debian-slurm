@@ -108,9 +108,10 @@ extern int slurm_load_topo(topo_info_response_msg_t **resp)
  * IN topo_info_msg_ptr - switch topology information message pointer
  * IN one_liner - print as a single line if not zero
  */
-extern void slurm_print_topo_info_msg(FILE * out,
-				      topo_info_response_msg_t *topo_info_msg_ptr,
-				      int one_liner)
+extern void slurm_print_topo_info_msg(
+	FILE * out,
+	topo_info_response_msg_t *topo_info_msg_ptr,
+	int one_liner)
 {
 	int i;
 	topo_info_t *topo_ptr = topo_info_msg_ptr->topo_array;

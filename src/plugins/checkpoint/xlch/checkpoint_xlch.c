@@ -142,7 +142,7 @@ static char *scch_path = SLURM_PREFIX "/sbin/scch";
  * of the plugin.  If major and minor revisions are desired, the major
  * version number may be multiplied by a suitable magnitude constant such
  * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum versions for their plugins as the checkpoint API matures.
+ * minimum version for their plugins as the checkpoint API matures.
  */
 const char plugin_name[]       	= "XLCH checkpoint plugin";
 const char plugin_type[]       	= "checkpoint/xlch";
@@ -253,6 +253,7 @@ extern int slurm_ckpt_op (uint32_t job_id, uint32_t step_id,
 			rc = _step_ckpt(step_ptr, data, image_dir, SIGKILL);
 			break;
 		case CHECK_RESTART:
+		case CHECK_REQUEUE:
 			rc = ESLURM_NOT_SUPPORTED;
 			break;
 		case CHECK_ERROR:
@@ -382,47 +383,54 @@ extern int slurm_ckpt_free_job(check_jobinfo_t jobinfo)
 	return SLURM_SUCCESS;
 }
 
-extern int slurm_ckpt_pack_job(check_jobinfo_t jobinfo, Buf buffer)
+extern int slurm_ckpt_pack_job(check_jobinfo_t jobinfo, Buf buffer,
+			       uint16_t protocol_version)
 {
 	struct check_job_info *check_ptr =
 		(struct check_job_info *)jobinfo;
 
-	pack16(check_ptr->disabled, buffer);
-	pack16(check_ptr->task_cnt, buffer);
-	pack16(check_ptr->reply_cnt, buffer);
-	pack16(check_ptr->wait_time, buffer);
-	pack_bit_fmt(check_ptr->replied, buffer);
+	if(protocol_version >= SLURM_2_1_PROTOCOL_VERSION) {
+		pack16(check_ptr->disabled, buffer);
+		pack16(check_ptr->task_cnt, buffer);
+		pack16(check_ptr->reply_cnt, buffer);
+		pack16(check_ptr->wait_time, buffer);
+		pack_bit_fmt(check_ptr->replied, buffer);
 
-	pack32(check_ptr->error_code, buffer);
-	packstr(check_ptr->error_msg, buffer);
-	pack_time(check_ptr->time_stamp, buffer);
+		pack32(check_ptr->error_code, buffer);
+		packstr(check_ptr->error_msg, buffer);
+		pack_time(check_ptr->time_stamp, buffer);
+	}
 
 	return SLURM_SUCCESS;
 }
 
-extern int slurm_ckpt_unpack_job(check_jobinfo_t jobinfo, Buf buffer)
+extern int slurm_ckpt_unpack_job(check_jobinfo_t jobinfo, Buf buffer,
+				 uint16_t protocol_version)
 {
 	uint32_t uint32_tmp;
 	char *task_inx_str;
 	struct check_job_info *check_ptr =
 		(struct check_job_info *)jobinfo;
 
-	safe_unpack16(&check_ptr->disabled, buffer);
-	safe_unpack16(&check_ptr->task_cnt, buffer);
-	safe_unpack16(&check_ptr->reply_cnt, buffer);
-	safe_unpack16(&check_ptr->wait_time, buffer);
-	safe_unpackstr_xmalloc(&task_inx_str, &uint32_tmp, buffer);
-	if (task_inx_str == NULL)
-		check_ptr->replied = NULL;
-	else {
-		check_ptr->replied = bit_alloc(check_ptr->task_cnt);
-		bit_unfmt(check_ptr->replied, task_inx_str);
-		xfree(task_inx_str);
-	}
+	if(protocol_version >= SLURM_2_1_PROTOCOL_VERSION) {
+		safe_unpack16(&check_ptr->disabled, buffer);
+		safe_unpack16(&check_ptr->task_cnt, buffer);
+		safe_unpack16(&check_ptr->reply_cnt, buffer);
+		safe_unpack16(&check_ptr->wait_time, buffer);
+		safe_unpackstr_xmalloc(&task_inx_str, &uint32_tmp, buffer);
+		if (task_inx_str == NULL)
+			check_ptr->replied = NULL;
+		else {
+			check_ptr->replied = bit_alloc(check_ptr->task_cnt);
+			bit_unfmt(check_ptr->replied, task_inx_str);
+			xfree(task_inx_str);
+		}
 
-	safe_unpack32(&check_ptr->error_code, buffer);
-	safe_unpackstr_xmalloc(&check_ptr->error_msg, &uint32_tmp, buffer);
-	safe_unpack_time(&check_ptr->time_stamp, buffer);
+		safe_unpack32(&check_ptr->error_code, buffer);
+		safe_unpackstr_xmalloc(&check_ptr->error_msg,
+				       &uint32_tmp, buffer);
+		safe_unpack_time(&check_ptr->time_stamp, buffer);
+	}
 
 	return SLURM_SUCCESS;
 

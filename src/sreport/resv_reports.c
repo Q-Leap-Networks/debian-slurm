@@ -69,7 +69,7 @@ typedef enum {
 static List print_fields_list = NULL; /* types are of print_field_t */
 
 static int _set_resv_cond(int *start, int argc, char *argv[],
-			  acct_reservation_cond_t *resv_cond,
+			  slurmdb_reservation_cond_t *resv_cond,
 			  List format_list)
 {
 	int i;
@@ -81,7 +81,7 @@ static int _set_resv_cond(int *start, int argc, char *argv[],
 	int option = 0;
 
 	if(!resv_cond) {
-		error("We need an acct_reservation_cond to call this");
+		error("We need an slurmdb_reservation_cond to call this");
 		return SLURM_ERROR;
 	}
 
@@ -173,7 +173,7 @@ static int _set_resv_cond(int *start, int argc, char *argv[],
 	*/
 	start_time = resv_cond->time_start;
 	end_time = resv_cond->time_end;
-	set_start_end_time(&start_time, &end_time);
+	slurmdb_report_set_start_end_time(&start_time, &end_time);
 	resv_cond->time_start = start_time;
 	resv_cond->time_end = end_time;
 
@@ -214,13 +214,13 @@ static int _setup_print_fields_list(List format_list)
 				MAX(command_len, 2))) {
 			field->type = PRINT_RESV_ACPU;
 			field->name = xstrdup("Allocated");
-			if(time_format == SREPORT_TIME_SECS_PER
-			   || time_format == SREPORT_TIME_MINS_PER
-			   || time_format == SREPORT_TIME_HOURS_PER)
+			if(time_format == SLURMDB_REPORT_TIME_SECS_PER
+			   || time_format == SLURMDB_REPORT_TIME_MINS_PER
+			   || time_format == SLURMDB_REPORT_TIME_HOURS_PER)
 				field->len = 20;
 			else
 				field->len = 9;
-			field->print_routine = sreport_print_time;
+			field->print_routine = slurmdb_report_print_time;
 		} else if(!strncasecmp("Associations",
 				       object, MAX(command_len, 2))) {
 			field->type = PRINT_RESV_ASSOCS;
@@ -242,23 +242,23 @@ static int _setup_print_fields_list(List format_list)
 		} else if(!strncasecmp("down", object, MAX(command_len, 1))) {
 			field->type = PRINT_RESV_DCPU;
 			field->name = xstrdup("Down");
-			if(time_format == SREPORT_TIME_SECS_PER
-			   || time_format == SREPORT_TIME_MINS_PER
-			   || time_format == SREPORT_TIME_HOURS_PER)
+			if(time_format == SLURMDB_REPORT_TIME_SECS_PER
+			   || time_format == SLURMDB_REPORT_TIME_MINS_PER
+			   || time_format == SLURMDB_REPORT_TIME_HOURS_PER)
 				field->len = 20;
 			else
 				field->len = 9;
-			field->print_routine = sreport_print_time;
+			field->print_routine = slurmdb_report_print_time;
 		} else if(!strncasecmp("idle", object, MAX(command_len, 1))) {
 			field->type = PRINT_RESV_ICPU;
 			field->name = xstrdup("Idle");
-			if(time_format == SREPORT_TIME_SECS_PER
-			   || time_format == SREPORT_TIME_MINS_PER
-			   || time_format == SREPORT_TIME_HOURS_PER)
+			if(time_format == SLURMDB_REPORT_TIME_SECS_PER
+			   || time_format == SLURMDB_REPORT_TIME_MINS_PER
+			   || time_format == SLURMDB_REPORT_TIME_HOURS_PER)
 				field->len = 20;
 			else
 				field->len = 9;
-			field->print_routine = sreport_print_time;
+			field->print_routine = slurmdb_report_print_time;
 		} else if(!strncasecmp("Nodes", object, MAX(command_len, 2))) {
 			field->type = PRINT_RESV_NODES;
 			field->name = xstrdup("Nodes");
@@ -314,8 +314,8 @@ static int _setup_print_fields_list(List format_list)
 static List _get_resv_list(int argc, char *argv[],
 			   char *report_name, List format_list)
 {
-	acct_reservation_cond_t *resv_cond =
-		xmalloc(sizeof(acct_reservation_cond_t));
+	slurmdb_reservation_cond_t *resv_cond =
+		xmalloc(sizeof(slurmdb_reservation_cond_t));
 	int i=0;
 	List resv_list = NULL;
 
@@ -323,8 +323,7 @@ static List _get_resv_list(int argc, char *argv[],
 
 	_set_resv_cond(&i, argc, argv, resv_cond, format_list);
 
-	resv_list = acct_storage_g_get_reservations(db_conn, my_uid,
-						    resv_cond);
+	resv_list = slurmdb_reservations_get(db_conn, resv_cond);
 	if(!resv_list) {
 		exit_code=1;
 		fprintf(stderr, " Problem with resv query.\n");
@@ -346,7 +345,7 @@ static List _get_resv_list(int argc, char *argv[],
 		printf("%s %s - %s\n",
 		       report_name, start_char, end_char);
 		switch(time_format) {
-		case SREPORT_TIME_PERCENT:
+		case SLURMDB_REPORT_TIME_PERCENT:
 			printf("Time reported in %s\n", time_format_string);
 			break;
 		default:
@@ -357,7 +356,7 @@ static List _get_resv_list(int argc, char *argv[],
 		       "----------------------------------------\n");
 	}
 
-	destroy_acct_reservation_cond(resv_cond);
+	slurmdb_destroy_reservation_cond(resv_cond);
 
 	return resv_list;
 }
@@ -368,8 +367,8 @@ extern int resv_utilization(int argc, char *argv[])
 	ListIterator itr = NULL;
 	ListIterator tot_itr = NULL;
 	ListIterator itr2 = NULL;
-	acct_reservation_rec_t *resv = NULL;
-	acct_reservation_rec_t *tot_resv = NULL;
+	slurmdb_reservation_rec_t *resv = NULL;
+	slurmdb_reservation_rec_t *tot_resv = NULL;
 
 	print_field_t *field = NULL;
 	int32_t total_time = 0;

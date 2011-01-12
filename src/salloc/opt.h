@@ -2,7 +2,7 @@
  *  opt.h - definitions for salloc option processing
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona1@llnl.gov>,
  *    Christopher J. Morrone <morrone2@llnl.gov>, et. al.
@@ -71,19 +71,19 @@ typedef struct salloc_options {
 	uid_t euid;		/* effective user --uid=user	*/
 	gid_t egid;		/* effective group --gid=group	*/
 
-	int  nprocs;		/* --nprocs=n,      -n n	*/
-	bool nprocs_set;	/* true if nprocs explicitly set */
+	int  ntasks;		/* --ntasks=n,      -n n	*/
+	bool ntasks_set;	/* true if ntasks explicitly set */
 	int  cpus_per_task;	/* --cpus-per-task=n, -c n	*/
 	bool cpus_set;		/* true if cpus_per_task explicitly set */
 	int  min_nodes;		/* --nodes=n,       -N n	*/
 	int  max_nodes;		/* --nodes=x-n,       -N x-n	*/
 	bool nodes_set;		/* true if nodes explicitly set */
-	int min_sockets_per_node; /* --sockets-per-node=n      */
-	int min_cores_per_socket; /* --cores-per-socket=n      */
-	int min_threads_per_core; /* --threads-per-core=n      */
-	int ntasks_per_node;   /* --ntasks-per-node=n	    */
-	int ntasks_per_socket; /* --ntasks-per-socket=n     */
-	int ntasks_per_core;   /* --ntasks-per-core=n	    */
+	int sockets_per_node;	/* --sockets-per-node=n		*/
+	int cores_per_socket;	/* --cores-per-socket=n		*/
+	int threads_per_core;	/* --threads-per-core=n		*/
+	int ntasks_per_node;	/* --ntasks-per-node=n		*/
+	int ntasks_per_socket;	/* --ntasks-per-socket=n	*/
+	int ntasks_per_core;	/* --ntasks-per-core=n		*/
 	cpu_bind_type_t cpu_bind_type; /* --cpu_bind=           */
 	char *cpu_bind;		/* binding map for map/mask_cpu */
 	mem_bind_type_t mem_bind_type; /* --mem_bind=		*/
@@ -91,6 +91,8 @@ typedef struct salloc_options {
 	bool extra_set;		/* true if extra node info explicitly set */
 	int  time_limit;	/* --time,   -t	(int minutes)	*/
 	char *time_limit_str;	/* --time,   -t (string)	*/
+	int  time_min;		/* --min-time 	(int minutes)	*/
+	char *time_min_str;	/* --min-time (string)		*/
 	char *partition;	/* --partition=n,   -p n   	*/
 	enum task_dist_states
 		distribution;	/* --distribution=, -m dist	*/
@@ -125,6 +127,7 @@ typedef struct salloc_options {
 	int realmem;		/* --mem=n			*/
 	long tmpdisk;		/* --tmp=n			*/
 	char *constraints;	/* --constraints=, -C constraint*/
+	char *gres;		/* --gres			*/
 	bool contiguous;	/* --contiguous			*/
 	char *nodelist;		/* --nodelist=node1,node2,...	*/
 	char *exc_nodes;	/* --exclude=node1,node2,... -x	*/
@@ -150,6 +153,7 @@ typedef struct salloc_options {
 	int get_user_env_mode; 	/* --get-user-env=[S|L]		*/
 	char *cwd;		/* current working directory	*/
 	char *reservation;	/* --reservation		*/
+	uint16_t wait_all_nodes;  /* --wait-nodes-ready=val	*/
 	char *wckey;            /* --wckey workload characterization key */
 	char **spank_job_env;	/* SPANK controlled environment for job
 				 * Prolog and Epilog		*/

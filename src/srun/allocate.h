@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/srun/allocate.h - node allocation functions for srun
- * $Id: allocate.h 19095 2009-12-01 22:59:18Z da $
+ * $Id: allocate.h 20623 2010-07-01 16:24:19Z da $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -73,7 +73,7 @@ int cleanup_allocation();
 int allocate_test(void);
 
 /* Set up port to handle messages from slurmctld */
-slurm_fd slurmctld_msg_init(void);
+slurm_fd_t slurmctld_msg_init(void);
 
 /*
  * Create a job_desc_msg_t object, filled in from the current srun options

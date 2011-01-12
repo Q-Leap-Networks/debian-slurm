@@ -46,7 +46,8 @@
  *****************************************************************************
  *  COPYRIGHT: For the implementation of the functions
  *
- *  Copyright (C) 2005-2006 The Regents of the University of California.
+ *  Copyright (C) 2005-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -108,7 +109,7 @@
 struct kvs_rec {
 	char *		kvs_name;
 	uint16_t	kvs_state;	/* see KVS_STATE_* */
-	uint16_t	kvs_cnt;	/* count of key-pairs */
+	uint32_t	kvs_cnt;	/* count of key-pairs */
 	uint16_t	kvs_inx;	/* iteration index */
 	uint16_t *	kvs_key_states;	/* see KVS_KEY_STATE_* */
 	char **		kvs_keys;
@@ -119,7 +120,7 @@ struct kvs_rec {
 
 static void _del_kvs_rec( struct kvs_rec *kvs_ptr );
 static void _init_kvs( char kvsname[] );
-static void inline _kvs_dump(void);
+inline static void _kvs_dump(void);
 static int  _kvs_put( const char kvsname[], const char key[],
 		const char value[], int local);
 static void _kvs_swap(struct kvs_rec *kvs_ptr, int inx1, int inx2);
@@ -133,6 +134,7 @@ int pmi_size;
 int pmi_spawned;
 int pmi_rank;
 int pmi_debug;
+static int pmi_kvs_no_dup_keys = 0;
 
 static pthread_mutex_t kvs_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -179,6 +181,12 @@ int PMI_Init( int *spawned )
 	if (pmi_debug)
 		fprintf(stderr, "In: PMI_Init\n");
 
+	env = getenv("SLURM_PMI_KVS_NO_DUP_KEYS");
+	if (env)
+		pmi_kvs_no_dup_keys = 1;
+	else
+		pmi_kvs_no_dup_keys = 0;
+
 	if (spawned == NULL)
 		return PMI_ERR_INVALID_ARG;
 
@@ -189,13 +197,13 @@ int PMI_Init( int *spawned )
 	if (env)
 		pmi_jobid = atoi(env);
 	else
-		pmi_jobid = 1;
+		pmi_jobid = 0;
 
 	env = getenv("SLURM_STEPID");
 	if (env)
 		pmi_stepid = atoi(env);
 	else
-		pmi_stepid = 1;
+		pmi_stepid = 0;
 
 	env = getenv("PMI_SPAWNED");
 	if (env)
@@ -335,13 +343,8 @@ int PMI_Get_size( int *size )
 
 	if (size == NULL)
 		return PMI_ERR_INVALID_ARG;
-
-	if (!pmi_init) {
-		int spawned;
-		PMI_Init(&spawned);
-		if (!pmi_init)
-			return PMI_FAIL;
-	}
+	if (pmi_init == 0)
+		return PMI_FAIL;
 
 	*size = pmi_size;
 	return PMI_SUCCESS;
@@ -369,13 +372,8 @@ int PMI_Get_rank( int *rank )
 
 	if (rank == NULL)
 		return PMI_ERR_INVALID_ARG;
-
-	if (!pmi_init) {
-		int spawned;
-		PMI_Init(&spawned);
-		if (!pmi_init)
-			return PMI_FAIL;
-	}
+	if (pmi_init == 0)
+		return PMI_FAIL;
 
 	*rank = pmi_rank;
 	return PMI_SUCCESS;
@@ -398,28 +396,15 @@ Return values:
 @*/
 int PMI_Get_universe_size( int *size )
 {
-	char *env;
-
 	if (pmi_debug)
 		fprintf(stderr, "In: PMI_Get_universe_size\n");
 
 	if (size == NULL)
 		return PMI_ERR_INVALID_ARG;
+	if (pmi_init == 0)
+		return PMI_FAIL;
 
-	env = getenv("SLURM_NPROCS");
-	if (env) {
-		*size = atoi(env);
-		return PMI_SUCCESS;
-	}
-
-	env = getenv("SLURM_NNODES");
-	if (env) {
-		/* FIXME: We want a processor count here */
-		*size = atoi(env);
-		return PMI_SUCCESS;
-	}
-
-	*size = 1;
+	*size = pmi_size;
 	return PMI_SUCCESS;
 }
 
@@ -438,21 +423,15 @@ Return values:
 @*/
 int PMI_Get_appnum( int *appnum )
 {
-	char *env;
-
 	if (pmi_debug)
 		fprintf(stderr, "In: PMI_Get_appnum\n");
 
 	if (appnum == NULL)
 		return PMI_ERR_INVALID_ARG;
+	if (pmi_init == 0)
+		return PMI_FAIL;
 
-	env = getenv("SLURM_JOB_ID");
-	if (env) {
-		*appnum = atoi(env);
-		return PMI_SUCCESS;
-	}
-
-	*appnum =1;
+	*appnum = pmi_jobid;
 	return PMI_SUCCESS;
 }
 
@@ -658,6 +637,13 @@ int PMI_Barrier( void )
 	if (pmi_debug)
 		fprintf(stderr, "In: PMI_Barrier\n");
 
+	if (pmi_init == 0)
+		return PMI_FAIL;
+
+	/* Simple operation without srun (no-op) */
+	if ((pmi_jobid == 0) && (pmi_stepid == 0))
+		return rc;
+
 	/* Issue the RPC */
 	if (slurm_get_kvs_comm_set(&kvs_set_ptr, pmi_rank, pmi_size)
 			!= SLURM_SUCCESS)
@@ -711,6 +697,14 @@ int PMI_Get_clique_size( int *size )
 
 	if (size == NULL)
 		return PMI_ERR_INVALID_ARG;
+	if (pmi_init == 0)
+		return PMI_FAIL;
+
+	/* Simple operation without srun */
+	if ((pmi_jobid == 0) && (pmi_stepid == 0)) {
+		*size = 1;
+		return PMI_SUCCESS;
+	}
 
 	env = getenv("SLURM_GTIDS");
 	if (env) {
@@ -757,6 +751,16 @@ int PMI_Get_clique_ranks( int ranks[], int length )
 
 	if (ranks == NULL)
 		return PMI_ERR_INVALID_ARG;
+	if (pmi_init == 0)
+		return PMI_FAIL;
+
+	/* Simple operation without srun */
+	if ((pmi_jobid == 0) && (pmi_stepid == 0)) {
+		if (length < 1)
+			return PMI_ERR_INVALID_LENGTH;
+		ranks[0] = 0;
+		return PMI_SUCCESS;
+	}
 
 	env = getenv("SLURM_GTIDS");
 	if (env) {
@@ -798,8 +802,13 @@ int PMI_Abort(int exit_code, const char error_msg[])
 	}
 
 	if (pmi_init) {
-		slurm_kill_job_step((uint32_t) pmi_jobid, (uint32_t) pmi_stepid,
-				SIGKILL);
+		if ((pmi_jobid == 0) && (pmi_stepid == 0)) {
+			/* Simple operation without srun */
+			kill(0, SIGKILL);
+		} else {
+			slurm_kill_job_step((uint32_t) pmi_jobid,
+					    (uint32_t) pmi_stepid, SIGKILL);
+		}
 	}
 	exit(exit_code);
 }
@@ -988,7 +997,7 @@ int PMI_KVS_Create( char kvsname[], int length )
 
 	if (kvsname == NULL)
 		return PMI_ERR_INVALID_ARG;
-	if ((pmi_jobid < 0) || (pmi_stepid < 0))
+	if (pmi_init == 0)
 		return PMI_FAIL;
 
 	pthread_mutex_lock(&kvs_mutex);
@@ -1094,6 +1103,10 @@ static int _kvs_put( const char kvsname[], const char key[], const char value[],
 	for (i=0; i<kvs_rec_cnt; i++) {
 		if (strncmp(kvs_recs[i].kvs_name, kvsname, PMI_MAX_KVSNAME_LEN))
 			continue;
+		if (pmi_kvs_no_dup_keys) {
+			j = kvs_recs[i].kvs_cnt;
+			goto no_dup;
+		}
 		/* search for duplicate key */
 		for (j=0; j<kvs_recs[i].kvs_cnt; j++) {
 			if (strncmp(kvs_recs[i].kvs_keys[j], key,
@@ -1115,6 +1128,7 @@ static int _kvs_put( const char kvsname[], const char key[], const char value[],
 			}
 			goto fini;
 		}
+no_dup:
 		/* create new key */
 		kvs_recs[i].kvs_cnt++;
 		kvs_recs[i].kvs_key_states = realloc(kvs_recs[i].kvs_key_states,
@@ -1173,13 +1187,19 @@ the specified keyval space. It is a process local operation.
 int PMI_KVS_Commit( const char kvsname[] )
 {
 	struct kvs_comm_set kvs_set;
-	int i, j, rc, local_pairs;
+	int i, j, rc = PMI_SUCCESS, local_pairs;
 
 	if (pmi_debug)
 		fprintf(stderr, "In: PMI_KVS_Commit\n");
 
 	if ((kvsname == NULL) || (strlen(kvsname) > PMI_MAX_KVSNAME_LEN))
 		return PMI_ERR_INVALID_ARG;
+	if (pmi_init == 0)
+		return PMI_FAIL;
+
+	/* Simple operation without srun (no-op) */
+	if ((pmi_jobid == 0) && (pmi_stepid == 0))
+		return rc;
 
 	/* Pack records into RPC for sending to slurmd_step
 	 * NOTE: For performance reasons, we only send key-pairs
@@ -1229,10 +1249,9 @@ int PMI_KVS_Commit( const char kvsname[] )
 
 	/* Send the RPC */
 	if (slurm_send_kvs_comm_set(&kvs_set, pmi_rank, pmi_size)
-			!= SLURM_SUCCESS)
+			!= SLURM_SUCCESS) {
 		rc = PMI_FAIL;
-	else
-		rc = PMI_SUCCESS;
+	}
 	pthread_mutex_unlock(&kvs_mutex);
 
 	/* Free any temporary storage */
@@ -1867,7 +1886,7 @@ static int IsPmiKey(char * key) {
 	return 0;
 }
 
-static void inline _kvs_dump(void)
+inline static void _kvs_dump(void)
 {
 #if _DEBUG
 	int i, j;

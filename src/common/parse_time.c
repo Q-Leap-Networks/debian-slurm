@@ -40,10 +40,12 @@
 #  include "config.h"
 #endif
 
+#include <limits.h>
 #include <stdio.h>
-#include <time.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <time.h>
 
 #ifndef   __USE_ISOC99
 #  define __USE_ISOC99 /* isblank() */
@@ -51,11 +53,29 @@
 #include <ctype.h>
 
 #include <slurm/slurm.h>
+#include "src/common/macros.h"
 
 #define _RUN_STAND_ALONE 0
 
 time_t     time_now;
 struct tm *time_now_tm;
+
+typedef struct unit_names {
+	char *name;
+	int name_len;
+	int multiplier;
+} unit_names_t;
+static unit_names_t un[] = {
+	{"minutes",	7,	60},
+	{"minute",	6,	60},
+	{"hours",	5,	(60*60)},
+	{"hour",	4,	(60*60)},
+	{"days",	4,	(24*60*60)},
+	{"day",		3,	(24*60*60)},
+	{"weeks",	5,	(7*24*60*60)},
+	{"week",	4,	(7*24*60*60)},
+	{NULL,		0,	0}
+};
 
 /* convert time differential string into a number of seconds
  * time_str (in): string to parse
@@ -65,34 +85,25 @@ struct tm *time_now_tm;
  */
 static int _get_delta(char *time_str, int *pos, long *delta)
 {
-	int offset;
+	int i, offset;
 	long cnt = 0;
 	int digit = 0;
 
-	offset = (*pos) + 1;
-	for ( ; ((time_str[offset]!='\0')&&(time_str[offset]!='\n')); offset++) {
+	for (offset = (*pos) + 1;
+	     ((time_str[offset] != '\0') && (time_str[offset] != '\n'));
+	     offset++) {
 		if (isspace(time_str[offset]))
 			continue;
-		if (strncasecmp(time_str+offset, "minutes", 7) == 0) {
-			cnt *= 60;
-			offset +=7;
-			break;
+		for (i=0; un[i].name; i++) {
+			if (!strncasecmp((time_str + offset),
+					 un[i].name, un[i].name_len)) {
+				offset += un[i].name_len;
+				cnt    *= un[i].multiplier;
+				break;
+			}
 		}
-		if (strncasecmp(time_str+offset, "hours", 5) == 0) {
-			cnt *= (60 * 60);
-			offset += 5;
-			break;
-		}
-		if (strncasecmp(time_str+offset, "days", 4) == 0) {
-			cnt *= (24 * 60 * 60);
-			offset += 4;
-			break;
-		}
-		if (strncasecmp(time_str+offset, "weeks", 5) == 0) {
-			cnt *= (7 * 24 * 60 * 60);
-			offset += 5;
-			break;
-		}
+		if (un[i].name)
+			break;	/* processed unit name */
 		if ((time_str[offset] >= '0') && (time_str[offset] <= '9')) {
 			cnt = (cnt * 10) + (time_str[offset] - '0');
 			digit++;
@@ -128,9 +139,11 @@ _get_time(char *time_str, int *pos, int *hour, int *minute, int * second)
 	if ((time_str[offset] < '0') || (time_str[offset] > '9'))
 		goto prob;
 	hr = time_str[offset++] - '0';
-	if ((time_str[offset] < '0') || (time_str[offset] > '9'))
-		goto prob;
-	hr = (hr * 10) + time_str[offset++] - '0';
+	if (time_str[offset] != ':') {
+		if ((time_str[offset] < '0') || (time_str[offset] > '9'))
+			goto prob;
+		hr = (hr * 10) + time_str[offset++] - '0';
+	}
 	if (hr > 23) {
 		offset -= 2;
 		goto prob;
@@ -330,12 +343,22 @@ extern time_t parse_time(char *time_str, int past)
 	int    pos = 0;
 	struct tm res_tm;
 
+	if (strncasecmp(time_str, "uts", 3) == 0) {
+		char *last = NULL;
+		long uts = strtol(time_str+3, &last, 10);
+		if ((uts < 1000000) || (uts == LONG_MAX) ||
+		    (last == NULL) || (last[0] != '\0'))
+			goto prob;
+		return (time_t) uts;
+	}
+
 	time_now = time(NULL);
 	time_now_tm = localtime(&time_now);
 
-	for (pos=0; ((time_str[pos] != '\0')&&(time_str[pos] != '\n')); pos++) {
-		if (isblank(time_str[pos]) || (time_str[pos] == '-')
-		    || (time_str[pos] == 'T'))
+	for (pos=0; ((time_str[pos] != '\0') && (time_str[pos] != '\n'));
+	     pos++) {
+		if (isblank(time_str[pos]) ||
+		    (time_str[pos] == '-') || (time_str[pos] == 'T'))
 			continue;
 		if (strncasecmp(time_str+pos, "today", 5) == 0) {
 			month = time_now_tm->tm_mon;
@@ -411,7 +434,8 @@ extern time_t parse_time(char *time_str, int past)
 			/* invalid */
 			goto prob;
 		/* We have some numeric value to process */
-		if (time_str[pos+2] == ':') {	/* time */
+		if ((time_str[pos+1] == ':') || (time_str[pos+2] == ':')) {
+			/* Parse the time stamp */
 			if (_get_time(time_str, &pos, &hour, &minute, &second))
 				goto prob;
 			continue;
@@ -614,8 +638,7 @@ extern int time_str2mins(char *string)
 	if (sec == -1)
 		sec = 0;
 	res = (((days * 24) + hr) * 60) + min;
-	if (sec > 0)
-		res++;	/* round up */
+	res += (sec + 59) / 60;	/* round up */
 	return res;
 }
 
@@ -651,7 +674,6 @@ extern void mins2time_str(uint32_t time, char *string, int size)
 		minutes = time % 60;
 		hours = time / 60 % 24;
 		days = time / 1440;
-
 		if (days)
 			snprintf(string, size,
 				"%ld-%2.2ld:%2.2ld:%2.2ld",

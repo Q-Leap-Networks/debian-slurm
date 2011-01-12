@@ -46,8 +46,9 @@ pthread_mutex_t pgsql_lock = PTHREAD_MUTEX_INITIALIZER;
 
 extern int *destroy_pgsql_db_info(pgsql_db_info_t *db_info)
 {
-	if(db_info) {
+	if (db_info) {
 		xfree(db_info->host);
+		xfree(db_info->backup);
 		xfree(db_info->user);
 		xfree(db_info->pass);
 		xfree(db_info);
@@ -78,7 +79,8 @@ extern int _create_db(char *db_name, pgsql_db_info_t *db_info)
 		result = PQexec(pgsql_db, create_line);
 		if (PQresultStatus(result) != PGRES_COMMAND_OK) {
 			fatal("PQexec failed: %d %s\n%s",
-			     PQresultStatus(result), PQerrorMessage(pgsql_db), create_line);
+			      PQresultStatus(result), PQerrorMessage(pgsql_db),
+			      create_line);
 		}
 		PQclear(result);
 		pgsql_close_db_connection(&pgsql_db);
@@ -108,12 +110,13 @@ extern int pgsql_get_db_connection(PGconn **pgsql_db, char *db_name,
 					    db_info->user,
 					    db_info->pass);
 
-	while(!storage_init) {
+	while (!storage_init) {
+		//debug2("pgsql connect: %s", connect_line);
 		*pgsql_db = PQconnectdb(connect_line);
 
-		if(PQstatus(*pgsql_db) != CONNECTION_OK) {
-			if(!strcmp(PQerrorMessage(*pgsql_db),
-				   "no password supplied")) {
+		if (PQstatus(*pgsql_db) != CONNECTION_OK) {
+			if (!strcmp(PQerrorMessage(*pgsql_db),
+				    "no password supplied")) {
 				PQfinish(*pgsql_db);
 				fatal("This Postgres connection needs "
 				      "a password.  It doesn't appear to "
@@ -123,7 +126,29 @@ extern int pgsql_get_db_connection(PGconn **pgsql_db, char *db_name,
 			info("Database %s not created. Creating", db_name);
 			pgsql_close_db_connection(pgsql_db);
 			_create_db(db_name, db_info);
+
 		} else {
+			char *language_line = "CREATE LANGUAGE plpgsql;";
+			PGresult *result = NULL;
+			const char *ver;
+			ver = PQparameterStatus(*pgsql_db, "server_version");
+			if (atof(ver) < 8.3)
+				fatal("server version 8.3 or above required");
+
+			/* This needs to be done for the accounting_storage
+			   plugin, and most likely any pgsql plugin.  */
+			result = PQexec(*pgsql_db, language_line);
+			if ((PQresultStatus(result) != PGRES_COMMAND_OK)
+			    && strcmp("ERROR:  language \"plpgsql\" "
+				      "already exists\n",
+				      PQerrorMessage(*pgsql_db))) {
+				fatal("PQexec failed: %d %s\n%s",
+				      PQresultStatus(result),
+				      PQerrorMessage(*pgsql_db),
+				      language_line);
+			}
+			PQclear(result);
+
 			storage_init = true;
 		}
 	}
@@ -133,7 +158,7 @@ extern int pgsql_get_db_connection(PGconn **pgsql_db, char *db_name,
 
 extern int pgsql_close_db_connection(PGconn **pgsql_db)
 {
-	if(pgsql_db && *pgsql_db) {
+	if (pgsql_db && *pgsql_db) {
 		PQfinish(*pgsql_db);
 		*pgsql_db = NULL;
 	}
@@ -144,14 +169,18 @@ extern int pgsql_db_query(PGconn *pgsql_db, char *query)
 {
 	PGresult *result = NULL;
 
-	if(!pgsql_db)
+	if (!pgsql_db)
 		fatal("You haven't inited this storage yet.");
 
-	if(!(result = pgsql_db_query_ret(pgsql_db, query)))
+	if (!(result = pgsql_db_query_ret(pgsql_db, query)))
 		return SLURM_ERROR;
 
 	PQclear(result);
 	return SLURM_SUCCESS;
+}
+extern int pgsql_db_start_transaction(PGconn *pgsql_db)
+{
+	return pgsql_db_query(pgsql_db, "BEGIN WORK");
 }
 
 extern int pgsql_db_commit(PGconn *pgsql_db)
@@ -169,13 +198,13 @@ extern PGresult *pgsql_db_query_ret(PGconn *pgsql_db, char *query)
 {
 	PGresult *result = NULL;
 
-	if(!pgsql_db)
+	if (!pgsql_db)
 		fatal("You haven't inited this storage yet.");
 
 	result = PQexec(pgsql_db, query);
 
-	if(PQresultStatus(result) != PGRES_COMMAND_OK
-	   && PQresultStatus(result) != PGRES_TUPLES_OK) {
+	if (PQresultStatus(result) != PGRES_COMMAND_OK
+	    && PQresultStatus(result) != PGRES_TUPLES_OK) {
 		error("PQexec failed: %d %s", PQresultStatus(result),
 		      PQerrorMessage(pgsql_db));
 		info("query was %s", query);
@@ -192,16 +221,16 @@ extern int pgsql_insert_ret_id(PGconn *pgsql_db, char *sequence_name,
 	PGresult *result = NULL;
 
 	slurm_mutex_lock(&pgsql_lock);
-	if(pgsql_db_query(pgsql_db, query) != SLURM_ERROR)  {
+	if (pgsql_db_query(pgsql_db, query) != SLURM_ERROR)  {
 		char *new_query = xstrdup_printf(
 			"select last_value from %s", sequence_name);
 
-		if((result = pgsql_db_query_ret(pgsql_db, new_query))) {
+		if ((result = pgsql_db_query_ret(pgsql_db, new_query))) {
 			new_id = atoi(PQgetvalue(result, 0, 0));
 			PQclear(result);
 		}
 		xfree(new_query);
-		if(!new_id) {
+		if (!new_id) {
 			/* should have new id */
 			error("We should have gotten a new id: %s",
 			      PQerrorMessage(pgsql_db));
@@ -212,8 +241,29 @@ extern int pgsql_insert_ret_id(PGconn *pgsql_db, char *sequence_name,
 	return new_id;
 
 }
+extern int pgsql_query_ret_id(PGconn *pgsql_db, char *query)
+{
+	int new_id = 0;
+	PGresult *result = NULL;
 
-extern int pgsql_db_create_table(PGconn *pgsql_db,
+	slurm_mutex_lock(&pgsql_lock);
+	result = pgsql_db_query_ret(pgsql_db, query);
+	if (result) {
+		new_id = atoi(PQgetvalue(result, 0, 0));
+		PQclear(result);
+	} else {
+		/* should have new id */
+		error("pgsql_query_ret_id() query failed: %s",
+		      PQerrorMessage(pgsql_db));
+	}
+	slurm_mutex_unlock(&pgsql_lock);
+
+	return new_id;
+
+}
+
+
+extern int pgsql_db_create_table(PGconn *pgsql_db, char *schema,
 				 char *table_name, storage_field_t *fields,
 				 char *ending)
 {
@@ -222,13 +272,13 @@ extern int pgsql_db_create_table(PGconn *pgsql_db,
 	char *next = NULL;
 	int i = 0;
 
-	query = xstrdup_printf("create table %s (", table_name);
+	query = xstrdup_printf("create table %s.%s (", schema, table_name);
 	i=0;
-	while(fields && fields->name) {
+	while (fields && fields->name) {
 		next = xstrdup_printf(" %s %s",
 				      fields->name,
 				      fields->options);
-		if(i)
+		if (i)
 			xstrcat(tmp, ",");
 		xstrcat(tmp, next);
 		xfree(next);
@@ -239,7 +289,7 @@ extern int pgsql_db_create_table(PGconn *pgsql_db,
 	xfree(tmp);
 	xstrcat(query, ending);
 
-	if(pgsql_db_query(pgsql_db, query) == SLURM_ERROR) {
+	if (pgsql_db_query(pgsql_db, query) == SLURM_ERROR) {
 		xfree(query);
 		return SLURM_ERROR;
 	}
@@ -248,8 +298,9 @@ extern int pgsql_db_create_table(PGconn *pgsql_db,
 	return SLURM_SUCCESS;
 }
 
-extern int pgsql_db_make_table_current(PGconn *pgsql_db, char *table_name,
-				       storage_field_t *fields)
+extern int
+pgsql_db_make_table_current(PGconn *pgsql_db, char *schema, char *table_name,
+			    storage_field_t *fields)
 {
 	char *query = NULL, *opt_part = NULL, *temp_char = NULL;
 	char *type = NULL;
@@ -266,9 +317,10 @@ extern int pgsql_db_make_table_current(PGconn *pgsql_db, char *table_name,
 
 	query = xstrdup_printf("select column_name from "
 			       "information_schema.columns where "
-			       "table_name='%s'", table_name);
+			       "table_name='%s' and table_schema='%s' ",
+			       table_name, schema);
 
-	if(!(result = pgsql_db_query_ret(pgsql_db, query))) {
+	if (!(result = pgsql_db_query_ret(pgsql_db, query))) {
 		xfree(query);
 		return SLURM_ERROR;
 	}
@@ -280,47 +332,46 @@ extern int pgsql_db_make_table_current(PGconn *pgsql_db, char *table_name,
 	}
 	PQclear(result);
 	itr = list_iterator_create(columns);
-	query = xstrdup_printf("alter table %s", table_name);
+	query = xstrdup_printf("alter table %s.%s", schema, table_name);
 	START_TIMER;
 	i=0;
-	while(fields[i].name) {
+	while (fields[i].name) {
 		int found = 0;
-		if(!strcmp("serial", fields[i].options)) {
+		not_null = 0;
+		if (!strcasecmp("serial", fields[i].options)) {
 			i++;
 			continue;
 		}
 		opt_part = xstrdup(fields[i].options);
 		original_ptr = opt_part;
 		opt_part = strtok_r(opt_part, " ", &temp_char);
-		if(opt_part) {
+		if (opt_part) {
+			/* XXX: only one identifier supported */
 			type = xstrdup(opt_part);
-			opt_part = temp_char;
-			opt_part = strtok_r(opt_part, " ", &temp_char);
-			while(opt_part) {
-				if(!strcmp("not null", opt_part)) {
-					not_null = 1;
-					opt_part = temp_char;
-					opt_part = strtok_r(opt_part,
-							    " ", &temp_char);
-				} else if(!strcmp("default", opt_part)){
-					opt_part = temp_char;
-					opt_part = strtok_r(opt_part,
+			opt_part = strtok_r(NULL, " ", &temp_char);
+			while (opt_part) {
+				if (!strcasecmp("not", opt_part)) {
+					opt_part = strtok_r(NULL, " ",
+							    &temp_char);
+					if (!strcasecmp("null", opt_part)) {
+						not_null = 1;
+
+					}
+				} else if (!strcasecmp("default", opt_part)){
+					opt_part = strtok_r(NULL,
 							    " ", &temp_char);
 					default_str = xstrdup(opt_part);
 				}
-				if(opt_part) {
-					opt_part = temp_char;
-					opt_part = strtok_r(opt_part,
-							    " ", &temp_char);
-				}
+				opt_part = strtok_r(NULL,
+						    " ", &temp_char);
 			}
 		} else {
 			type = xstrdup(fields[i].options);
 		}
 		xfree(original_ptr);
 		list_iterator_reset(itr);
-		while((col = list_next(itr))) {
-			if(!strcmp(col, fields[i].name)) {
+		while ((col = list_next(itr))) {
+			if (!strcmp(col, fields[i].name)) {
 				list_delete_item(itr);
 				found = 1;
 				break;
@@ -328,23 +379,23 @@ extern int pgsql_db_make_table_current(PGconn *pgsql_db, char *table_name,
 		}
 
 		temp_char = NULL;
-		if(!found) {
+		if (!found) {
 			info("adding column %s", fields[i].name);
-			if(default_str)
+			if (default_str)
 				xstrfmtcat(temp_char,
 					   " default %s", default_str);
 
-			if(not_null)
+			if (not_null)
 				xstrcat(temp_char, " not null");
 
 			xstrfmtcat(query,
 				   " add %s %s",
 				   fields[i].name, type);
-			if(temp_char)
+			if (temp_char)
 				xstrcat(query, temp_char);
 			xstrcat(query, ",");
 		} else {
-			if(default_str)
+			if (default_str)
 				xstrfmtcat(temp_char,
 					   " alter %s set default %s,",
 					   fields[i].name, default_str);
@@ -353,7 +404,7 @@ extern int pgsql_db_make_table_current(PGconn *pgsql_db, char *table_name,
 					   " alter %s drop default,",
 					   fields[i].name);
 
-			if(not_null)
+			if (not_null)
 				xstrfmtcat(temp_char,
 					   " alter %s set not null,",
 					   fields[i].name);
@@ -374,7 +425,8 @@ extern int pgsql_db_make_table_current(PGconn *pgsql_db, char *table_name,
 	list_destroy(columns);
 	query[strlen(query)-1] = ';';
 
-	if(pgsql_db_query(pgsql_db, query)) {
+	//debug4("pgsql db create/alter table:\n %s", query);
+	if (pgsql_db_query(pgsql_db, query)) {
 		xfree(query);
 		return SLURM_ERROR;
 	}

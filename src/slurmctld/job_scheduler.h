@@ -3,7 +3,7 @@
  *	of pending jobs in priority order
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette@llnl.gov>, et. al.
  *  Derived from dsh written by Jim Garlick <garlick1@llnl.gov>
@@ -44,11 +44,10 @@
 
 #include "src/slurmctld/slurmctld.h"
 
-struct job_queue {
+typedef struct job_queue_rec {
 	struct job_record *job_ptr;
-	uint32_t job_priority;
-	uint16_t part_priority;
-};
+	struct part_record *part_ptr;
+} job_queue_rec_t;
 
 /*
  * build_feature_list - Translate a job's feature string into a feature_list
@@ -60,11 +59,10 @@ extern int build_feature_list(struct job_record *job_ptr);
 
 /*
  * build_job_queue - build (non-priority ordered) list of pending jobs
- * OUT job_queue - pointer to job queue
- * RET number of entries in job_queue
- * NOTE: the buffer at *job_queue must be xfreed by the caller
+ * RET the job queue
+ * NOTE: the caller must call list_destroy() on RET value to free memory
  */
-extern int build_job_queue(struct job_queue **job_queue);
+extern List build_job_queue(void);
 
 /*
  * epilog_slurmctld - execute the prolog_slurmctld for a job that has just
@@ -117,17 +115,24 @@ extern void print_job_dependency(struct job_record *job_ptr);
  */
 extern int prolog_slurmctld(struct job_record *job_ptr);
 
+/* If a job can run in multiple partitions, make sure that the one 
+ * actually used is first in the string. Needed for job state save/restore */
+extern void rebuild_job_part_list(struct job_record *job_ptr);
+
 /*
  * schedule - attempt to schedule all pending jobs
  *	pending jobs for each partition will be scheduled in priority
  *	order until a request fails
+ * IN job_limit - maximum number of jobs to test now, avoid testing the full
+ *		  queue on every job submit (0 means to use the system default,
+ *		  SchedulerParameters for default_queue_depth)
  * RET count of jobs scheduled
  * Note: We re-build the queue every time. Jobs can not only be added
  *	or removed from the queue, but have their priority or partition
  *	changed with the update_job RPC. In general nodes will be in priority
  *	order (by submit time), so the sorting should be pretty fast.
  */
-extern int schedule(void);
+extern int schedule(uint32_t job_limit);
 
 /*
  * set_job_elig_time - set the eligible time for pending jobs once their
@@ -137,10 +142,13 @@ extern void set_job_elig_time(void);
 
 /*
  * sort_job_queue - sort job_queue in decending priority order
- * IN job_queue_size - count of elements in the job queue
- * IN/OUT job_queue - pointer to sorted job queue
+ * IN/OUT job_queue - sorted job queue previously made by build_job_queue()
  */
-extern void sort_job_queue(struct job_queue *job_queue, int job_queue_size);
+extern void sort_job_queue(List job_queue);
+
+/* Note this differs from the ListCmpF typedef since we want jobs sorted
+ *	in order of decreasing priority */
+extern int sort_job_queue2(void *x, void *y);
 
 /*
  * Determine if a job's dependencies are met

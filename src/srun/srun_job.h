@@ -106,7 +106,7 @@ typedef struct srun_job {
 	fname_t *efname;
 
 	/* Output streams and stdin fileno */
-	select_jobinfo_t *select_jobinfo;
+	dynamic_plugin_data_t *select_jobinfo;
 
 	/* Pseudo terminial support */
 	pthread_t pty_id;	/* pthread to communicate window size changes */
@@ -137,6 +137,6 @@ extern srun_job_t * job_create_structure(
 void    job_update_io_fnames(srun_job_t *j);
 
 /* Set up port to handle messages from slurmctld */
-slurm_fd slurmctld_msg_init(void);
+slurm_fd_t slurmctld_msg_init(void);
 
 #endif /* !_HAVE_JOB_H */

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  allocate.c - allocate nodes for a job or step with supplied contraints
- *  $Id: allocate.c 19303 2010-01-21 22:42:24Z da $
+ *  $Id: allocate.c 21512 2010-11-09 18:21:22Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -74,14 +74,14 @@ extern pid_t getsid(pid_t pid);		/* missing from <unistd.h> */
 #define MIN_ALLOC_WAIT  5	/* seconds */
 
 typedef struct {
-	slurm_addr address;
+	slurm_addr_t address;
 	int fd;
 	char *hostname;
 	uint16_t port;
 } listen_t;
 
 static int _handle_rc_msg(slurm_msg_t *msg);
-static listen_t *_create_allocation_response_socket();
+static listen_t *_create_allocation_response_socket(char *interface_hostname);
 static void _destroy_allocation_response_socket(listen_t *listen);
 static resource_allocation_response_msg_t *_wait_for_allocation_response(
 	uint32_t job_id, const listen_t *listen, int timeout);
@@ -91,7 +91,7 @@ static resource_allocation_response_msg_t *_wait_for_allocation_response(
  * IN job_desc_msg - description of resource allocation request
  * OUT slurm_alloc_msg - response to request
  * RET 0 on success, otherwise return -1 and set errno to indicate the error
- * NOTE: free the allocated using slurm_free_resource_allocation_response_msg
+ * NOTE: free the response using slurm_free_resource_allocation_response_msg()
  */
 int
 slurm_allocate_resources (job_desc_msg_t *req,
@@ -165,8 +165,7 @@ slurm_allocate_resources (job_desc_msg_t *req,
  * RET allocation structure on success, NULL on error set errno to
  *	indicate the error (errno will be ETIMEDOUT if the timeout is reached
  *      with no allocation granted)
- * NOTE: free the allocation structure using
- *	slurm_free_resource_allocation_response_msg
+ * NOTE: free the response using slurm_free_resource_allocation_response_msg()
  */
 resource_allocation_response_msg_t *
 slurm_allocate_resources_blocking (const job_desc_msg_t *user_req,
@@ -245,7 +244,7 @@ slurm_allocate_resources_blocking (const job_desc_msg_t *user_req,
 		}
 		break;
 	case RESPONSE_RESOURCE_ALLOCATION:
-		/* Yay, the controller has acknowledge our request!  But did
+		/* Yay, the controller has acknowledged our request!  But did
 		   we really get an allocation yet? */
 		resp = (resource_allocation_response_msg_t *) resp_msg.data;
 		if (resp->node_cnt > 0) {
@@ -296,7 +295,8 @@ int slurm_job_will_run (job_desc_msg_t *req)
 	char buf[64];
 	bool host_set = false;
 	int rc;
-
+	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
+	char *type = "processors";
 	/* req.immediate = true;    implicit */
 	if ((req->alloc_node == NULL) &&
 	    (gethostname_short(buf, sizeof(buf)) == 0)) {
@@ -321,18 +321,15 @@ int slurm_job_will_run (job_desc_msg_t *req)
 			return SLURM_PROTOCOL_ERROR;
 		break;
 	case RESPONSE_JOB_WILL_RUN:
+		if(cluster_flags & CLUSTER_FLAG_BG)
+			type = "cnodes";
 		will_run_resp = (will_run_response_msg_t *) resp_msg.data;
 		slurm_make_time_str(&will_run_resp->start_time,
 				    buf, sizeof(buf));
-		info("Job %u to start at %s using %u "
-#ifdef HAVE_BG
-		     "cnodes"
-#else
-		     "processors"
-#endif
+		info("Job %u to start at %s using %u %s"
 		     " on %s",
 		     will_run_resp->job_id, buf,
-		     will_run_resp->proc_cnt,
+		     will_run_resp->proc_cnt, type,
 		     will_run_resp->node_list);
 		if (will_run_resp->preemptee_job_id) {
 			ListIterator itr;
@@ -445,7 +442,7 @@ slurm_allocation_lookup(uint32_t jobid,
  * IN jobid - job allocation identifier
  * OUT info - job allocation information
  * RET 0 on success, otherwise return -1 and set errno to indicate the error
- * NOTE: free the "resp" using slurm_free_resource_allocation_response_msg
+ * NOTE: free the response using slurm_free_resource_allocation_response_msg()
  */
 int
 slurm_allocation_lookup_lite(uint32_t jobid,
@@ -616,7 +613,7 @@ char *slurm_read_hostfile(char *filename, int n)
 	fclose(fp);
 
 	if (hostlist_count(hostlist) <= 0) {
-		error("Hostlist is empty!\n");
+		error("Hostlist is empty!");
 		goto cleanup_hostfile;
 	}
 	if (hostlist_count(hostlist) < n) {
@@ -637,7 +634,7 @@ char *slurm_read_hostfile(char *filename, int n)
 		goto cleanup_hostfile;
 	}
 
-	debug2("Hostlist from SLURM_HOSTFILE = %s\n", nodelist);
+	debug2("Hostlist from SLURM_HOSTFILE = %s", nodelist);
 
 cleanup_hostfile:
 	hostlist_destroy(hostlist);
@@ -712,8 +709,8 @@ _handle_msg(slurm_msg_t *msg, resource_allocation_response_msg_t **resp)
 			info("Job has been cancelled");
 			break;
 		default:
-			error("received spurious message type: %d\n",
-				 msg->msg_type);
+			error("received spurious message type: %d",
+			      msg->msg_type);
 	}
 	return rc;
 }
@@ -728,7 +725,7 @@ _accept_msg_connection(int listen_fd,
 {
 	int	     conn_fd;
 	slurm_msg_t  *msg = NULL;
-	slurm_addr   cli_addr;
+	slurm_addr_t   cli_addr;
 	char         host[256];
 	uint16_t     port;
 	int          rc = 0;

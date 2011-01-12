@@ -1,7 +1,9 @@
 /*****************************************************************************\
  *  update_part.c - partition update function for scontrol.
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
+ *  Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -117,9 +119,9 @@ scontrol_parse_part_options (int argc, char *argv[], int *update_cnt_ptr,
 		}
 		else if (strncasecmp(tag, "Default", MAX(taglen, 7)) == 0) {
 			if (strncasecmp(val, "NO", MAX(vallen, 1)) == 0)
-				part_msg_ptr->default_part = 0;
+				part_msg_ptr->flags |= PART_FLAG_DEFAULT_CLR;
 			else if (strncasecmp(val, "YES", MAX(vallen, 1)) == 0)
-				part_msg_ptr->default_part = 1;
+				part_msg_ptr->flags |= PART_FLAG_DEFAULT;
 			else {
 				exit_code = 1;
 				error("Invalid input: %s", argv[i]);
@@ -129,11 +131,25 @@ scontrol_parse_part_options (int argc, char *argv[], int *update_cnt_ptr,
 			}
 			(*update_cnt_ptr)++;
 		}
+		else if (!strncasecmp(tag, "DisableRootJobs", MAX(taglen, 1))) {
+			if (strncasecmp(val, "NO", MAX(vallen, 1)) == 0)
+				part_msg_ptr->flags |= PART_FLAG_NO_ROOT_CLR;
+			else if (strncasecmp(val, "YES", MAX(vallen, 1)) == 0)
+				part_msg_ptr->flags |= PART_FLAG_NO_ROOT;
+			else {
+				exit_code = 1;
+				error("Invalid input: %s", argv[i]);
+				error("Acceptable DisableRootJobs values "
+					"are YES and NO");
+				return -1;
+			}
+			(*update_cnt_ptr)++;
+		}
 		else if (strncasecmp(tag, "Hidden", MAX(taglen, 1)) == 0) {
 			if (strncasecmp(val, "NO", MAX(vallen, 1)) == 0)
-				part_msg_ptr->hidden = 0;
+				part_msg_ptr->flags |= PART_FLAG_HIDDEN_CLR;
 			else if (strncasecmp(val, "YES", MAX(vallen, 1)) == 0)
-				part_msg_ptr->hidden = 1;
+				part_msg_ptr->flags |= PART_FLAG_HIDDEN;
 			else {
 				exit_code = 1;
 				error("Invalid input: %s", argv[i]);
@@ -145,9 +161,9 @@ scontrol_parse_part_options (int argc, char *argv[], int *update_cnt_ptr,
 		}
 		else if (strncasecmp(tag, "RootOnly", MAX(taglen, 1)) == 0) {
 			if (strncasecmp(val, "NO", MAX(vallen, 1)) == 0)
-				part_msg_ptr->root_only = 0;
+				part_msg_ptr->flags |= PART_FLAG_ROOT_ONLY_CLR;
 			else if (strncasecmp(val, "YES", MAX(vallen, 1)) == 0)
-				part_msg_ptr->root_only = 1;
+				part_msg_ptr->flags |= PART_FLAG_ROOT_ONLY;
 			else {
 				exit_code = 1;
 				error("Invalid input: %s", argv[i]);
@@ -199,21 +215,35 @@ scontrol_parse_part_options (int argc, char *argv[], int *update_cnt_ptr,
 			}
 			(*update_cnt_ptr)++;
 		}
-		else if (strncasecmp(tag, "Priority", MAX(taglen, 2)) == 0) {
+		else if (strncasecmp(tag, "PreemptMode", MAX(taglen, 3)) == 0) {
+			uint16_t new_mode = preempt_mode_num(val);
+			if (new_mode != (uint16_t) NO_VAL)
+				part_msg_ptr->preempt_mode = new_mode;
+			else {
+				error("Invalid input: %s", argv[i]);
+				return -1;
+			}
+			(*update_cnt_ptr)++;
+		}
+		else if (strncasecmp(tag, "Priority", MAX(taglen, 3)) == 0) {
 			part_msg_ptr->priority = (uint16_t) strtol(val,
 					(char **) NULL, 10);
 			(*update_cnt_ptr)++;
 		}
 		else if (strncasecmp(tag, "State", MAX(taglen, 2)) == 0) {
-			if (strncasecmp(val, "DOWN", MAX(vallen, 1)) == 0)
-				part_msg_ptr->state_up = 0;
+			if (strncasecmp(val, "INACTIVE", MAX(vallen, 1)) == 0)
+				part_msg_ptr->state_up = PARTITION_INACTIVE;
+			else if (strncasecmp(val, "DOWN", MAX(vallen, 1)) == 0)
+				part_msg_ptr->state_up = PARTITION_DOWN;
 			else if (strncasecmp(val, "UP", MAX(vallen, 1)) == 0)
-				part_msg_ptr->state_up = 1;
+				part_msg_ptr->state_up = PARTITION_UP;
+			else if (strncasecmp(val, "DRAIN", MAX(vallen, 1)) == 0)
+				part_msg_ptr->state_up = PARTITION_DRAIN;
 			else {
 				exit_code = 1;
 				error("Invalid input: %s", argv[i]);
 				error("Acceptable State values "
-					"are UP and DOWN");
+					"are UP, DOWN, DRAIN and INACTIVE");
 				return -1;
 			}
 			(*update_cnt_ptr)++;
@@ -222,12 +252,16 @@ scontrol_parse_part_options (int argc, char *argv[], int *update_cnt_ptr,
 			part_msg_ptr->nodes = val;
 			(*update_cnt_ptr)++;
 		}
-		else if (strncasecmp(tag, "AllowGroups", MAX(taglen, 1)) == 0){
+		else if (strncasecmp(tag, "AllowGroups", MAX(taglen, 5)) == 0){
 			part_msg_ptr->allow_groups = val;
 			(*update_cnt_ptr)++;
 		}
-		else if (strncasecmp(tag, "AllocNodes", MAX(taglen, 1)) == 0) {
+		else if (strncasecmp(tag, "AllocNodes", MAX(taglen, 5)) == 0) {
 			part_msg_ptr->allow_alloc_nodes = val;
+			(*update_cnt_ptr)++;
+		}
+		else if (strncasecmp(tag, "Alternate", MAX(taglen, 3)) == 0) {
+			part_msg_ptr->alternate = val;
 			(*update_cnt_ptr)++;
 		}
 		else {

@@ -3,7 +3,7 @@
  *  - default: never return if errors are encountered.
  *  - attempt to report file, line, and calling function on assertion failure
  *  - use configurable slurm log facility for reporting errors
- *  $Id: xmalloc.h 19095 2009-12-01 22:59:18Z da $
+ *  $Id: xmalloc.h 20020 2010-04-14 00:08:32Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -57,7 +57,7 @@
  * when there is an error allocating the memory.
  *
  * xrealloc(p, newsize) changes the size of the block pointed to by p to the
- * value of newsize. Newly allocated memory is not zeroed. If p is NULL,
+ * value of newsize. Newly allocated memory is zeroed. If p is NULL,
  * xrealloc() performs the same function as  `p = xmalloc(newsize)'. If p
  * is not NULL, it is required to have been initialized with a call to
  * [try_]xmalloc() or [try_]xrealloc().

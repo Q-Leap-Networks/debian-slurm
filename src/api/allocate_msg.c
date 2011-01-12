@@ -141,6 +141,7 @@ extern allocation_msg_thread_t *slurm_allocation_msg_thr_create(
 	if (pthread_create(&msg_thr->id, &attr,
 			   _msg_thr_internal, (void *)msg_thr->handle) != 0) {
 		error("pthread_create of message thread: %m");
+		msg_thr->id = 0;
 		slurm_attr_destroy(&attr);
 		eio_handle_destroy(msg_thr->handle);
 		xfree(msg_thr);
@@ -266,7 +267,7 @@ _handle_msg(void *arg, slurm_msg_t *msg)
 		_handle_node_fail(msg_thr, msg);
 		break;
 	default:
-		error("received spurious message type: %d\n",
+		error("received spurious message type: %d",
 		      msg->msg_type);
 		break;
 	}

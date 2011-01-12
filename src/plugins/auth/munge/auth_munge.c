@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  auth_munge.c - SLURM auth implementation via Chris Dunlap's Munge
- *  $Id: auth_munge.c 19789 2010-03-18 18:04:15Z jette $
+ *  $Id: auth_munge.c 21178 2010-09-17 23:16:02Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -507,8 +507,13 @@ _decode_cred(slurm_auth_credential_t *c, char *socket)
 	}
 
     again:
+	c->buf = NULL;
 	if ((e = munge_decode(c->m_str, ctx, &c->buf, &c->len, &c->uid,
 			      &c->gid))) {
+		if (c->buf) {
+			free(c->buf);
+			c->buf = NULL;
+		}
 		if ((e == EMUNGE_SOCKET) && retry--) {
 			error ("Munge decode failed: %s (retrying ...)",
 				munge_ctx_strerror(ctx));

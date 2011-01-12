@@ -15,7 +15,7 @@
  *  priority job.
  *****************************************************************************
  *  Copyright (C) 2003-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -79,6 +79,18 @@
 #include "src/slurmctld/srun_comm.h"
 #include "backfill.h"
 
+#ifndef BACKFILL_INTERVAL
+#  define BACKFILL_INTERVAL	30
+#endif
+
+/* Do not build job/resource/time record for more than this
+ * far in the future, in seconds, currently one day */
+#ifndef BACKFILL_WINDOW
+#define   BACKFILL_WINDOW		(24 * 60 * 60)
+#endif
+
+#define SLURMCTLD_THREAD_LIMIT	5
+
 typedef struct node_space_map {
 	time_t begin_time;
 	time_t end_time;
@@ -88,38 +100,32 @@ typedef struct node_space_map {
 int backfilled_jobs = 0;
 
 /*********************** local variables *********************/
-static bool new_work      = false;
 static bool stop_backfill = false;
 static pthread_mutex_t thread_flag_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t term_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  term_cond = PTHREAD_COND_INITIALIZER;
+static bool config_flag = false;
+static uint32_t debug_flags = 0;
+static int backfill_interval = BACKFILL_INTERVAL;
+static int backfill_window = BACKFILL_WINDOW;
 static int max_backfill_job_cnt = 50;
-
-#ifndef BACKFILL_INTERVAL
-#  ifdef HAVE_BG
-#    define BACKFILL_INTERVAL	5
-#  else
-#    define BACKFILL_INTERVAL	10
-#  endif
-#endif
-
-/* Set __DEBUG to get detailed logging for this thread without
- * detailed logging for the entire slurmctld daemon */
-#define __DEBUG			0
-
-/* Do not build job/resource/time record for more than this
- * far in the future, in seconds, currently one day */
-#define BACKFILL_WINDOW		(24 * 60 * 60)
 
 /*********************** local functions *********************/
 static void _add_reservation(uint32_t start_time, uint32_t end_reserve,
 			     bitstr_t *res_bitmap,
 			     node_space_map_t *node_space,
 			     int *node_space_recs);
-static void _attempt_backfill(void);
+static int  _attempt_backfill(void);
 static void _diff_tv_str(struct timeval *tv1,struct timeval *tv2,
 		char *tv_str, int len_tv_str);
 static bool _job_is_completing(void);
-static bool _more_work(void);
+static void _load_config(void);
+static bool _many_pending_rpcs(void);
+static bool _more_work(time_t last_backfill_time);
+static void _my_sleep(int secs);
 static int  _num_feature_count(struct job_record *job_ptr);
+static void _reset_job_time_limit(struct job_record *job_ptr, time_t now,
+				  node_space_map_t *node_space);
 static int  _start_job(struct job_record *job_ptr, bitstr_t *avail_bitmap);
 static bool _test_resv_overlap(node_space_map_t *node_space, 
 			       bitstr_t *use_bitmap, uint32_t start_time, 
@@ -128,7 +134,6 @@ static int  _try_sched(struct job_record *job_ptr, bitstr_t **avail_bitmap,
 		       uint32_t min_nodes, uint32_t max_nodes,
 		       uint32_t req_nodes);
 
-#if __DEBUG
 /* Log resource allocate table */
 static void _dump_node_space_table(node_space_map_t *node_space_ptr)
 {
@@ -150,7 +155,6 @@ static void _dump_node_space_table(node_space_map_t *node_space_ptr)
 	}
 	info("=========================================");
 }
-#endif
 
 /*
  * _diff_tv_str - build a string showing the time difference between two times
@@ -172,7 +176,7 @@ static void _diff_tv_str(struct timeval *tv1,struct timeval *tv2,
  * _job_is_completing - Determine if jobs are in the process of completing.
  *	This is a variant of job_is_completing in slurmctld/job_scheduler.c.
  *	It always gives completing jobs at least 5 secs to complete.
- * RET - True of any job is in the process of completing
+ * RET - True if any job is in the process of completing
  */
 static bool _job_is_completing(void)
 {
@@ -185,7 +189,7 @@ static bool _job_is_completing(void)
 	if (job_list == NULL)
 		return completing;
 
-	recent = time(NULL) - MIN(complete_wait, 5);
+	recent = time(NULL) - MAX(complete_wait, 5);
 	job_iterator = list_iterator_create(job_list);
 	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
 		if (IS_JOB_COMPLETING(job_ptr) &&
@@ -197,6 +201,19 @@ static bool _job_is_completing(void)
 	list_iterator_destroy(job_iterator);
 
 	return completing;
+}
+
+/*
+ * _many_pending_rpcs - Determine if slurmctld is busy with many active RPCs
+ * RET - True if slurmctld currently has more than SLURMCTLD_THREAD_LIMIT
+ *	 active RPCs
+ */
+static bool _many_pending_rpcs(void)
+{
+	//info("thread_count = %u", slurmctld_config.server_thread_count);
+	if (slurmctld_config.server_thread_count > SLURMCTLD_THREAD_LIMIT)
+		return true;
+	return false;
 }
 
 /* test if job has feature count specification */
@@ -317,28 +334,42 @@ static int  _try_sched(struct job_record *job_ptr, bitstr_t **avail_bitmap,
 /* Terminate backfill_agent */
 extern void stop_backfill_agent(void)
 {
+	pthread_mutex_lock(&term_lock);
 	stop_backfill = true;
+	pthread_cond_signal(&term_cond);
+	pthread_mutex_unlock(&term_lock);
 }
 
-
-/* backfill_agent - detached thread periodically attempts to backfill jobs */
-extern void *backfill_agent(void *args)
+static void _my_sleep(int secs)
 {
-	struct timeval tv1, tv2;
-	char tv_str[20], *sched_params, *tmp_ptr;
-	time_t now;
-	int backfill_interval = BACKFILL_INTERVAL, i, iter;
-	static time_t last_backfill_time = 0;
-	/* Read config, and partitions; Write jobs and nodes */
-	slurmctld_lock_t all_locks = {
-		READ_LOCK, WRITE_LOCK, WRITE_LOCK, READ_LOCK };
+	struct timespec ts = {0, 0};
+
+	ts.tv_sec = time(NULL) + secs;
+	pthread_mutex_lock(&term_lock);
+	if (!stop_backfill)
+		pthread_cond_timedwait(&term_cond, &term_lock, &ts);
+	pthread_mutex_unlock(&term_lock);
+}
+
+static void _load_config(void)
+{
+	char *sched_params, *tmp_ptr;
 
 	sched_params = slurm_get_sched_params();
+	debug_flags  = slurm_get_debug_flags();
+
 	if (sched_params && (tmp_ptr=strstr(sched_params, "interval=")))
 		backfill_interval = atoi(tmp_ptr + 9);
 	if (backfill_interval < 1) {
 		fatal("Invalid backfill scheduler interval: %d",
 		      backfill_interval);
+	}
+
+	if (sched_params && (tmp_ptr=strstr(sched_params, "bf_window=")))
+		backfill_window = atoi(tmp_ptr + 10) * 60;  /* mins to secs */
+	if (backfill_window < 1) {
+		fatal("Invalid backfill scheduler window: %d",
+		      backfill_window);
 	}
 	if (sched_params && (tmp_ptr=strstr(sched_params, "max_job_bf=")))
 		max_backfill_job_cnt = atoi(tmp_ptr + 11);
@@ -346,97 +377,143 @@ extern void *backfill_agent(void *args)
 		fatal("Invalid backfill scheduler max_job_bf: %d",
 		      max_backfill_job_cnt);
 	}
+	xfree(sched_params);
+}
 
+/* Note that slurm.conf has changed */
+extern void backfill_reconfig(void)
+{
+	config_flag = true;
+}
+
+/* backfill_agent - detached thread periodically attempts to backfill jobs */
+extern void *backfill_agent(void *args)
+{
+	struct timeval tv1, tv2;
+	char tv_str[20];
+	time_t now;
+	double wait_time;
+	static time_t last_backfill_time = 0;
+	/* Read config and partitions; Write jobs and nodes */
+	slurmctld_lock_t all_locks = {
+		READ_LOCK, WRITE_LOCK, WRITE_LOCK, READ_LOCK };
+
+	_load_config();
+	last_backfill_time = time(NULL);
 	while (!stop_backfill) {
-		iter = (BACKFILL_CHECK_SEC * 1000000) /
-		       STOP_CHECK_USEC;
-		for (i=0; ((i<iter) && (!stop_backfill)); i++) {
-			/* test stop_backfill every 0.2 sec for
-			 * 5.0 secs to avoid running continuously */
-			usleep(STOP_CHECK_USEC);
-		}
+		_my_sleep(backfill_interval);
 		if (stop_backfill)
 			break;
-
+		if (config_flag) {
+			config_flag = false;
+			_load_config();
+		}
 		now = time(NULL);
-		if ((difftime(now, last_backfill_time) < backfill_interval) ||
-		    _job_is_completing() ||
-		    !_more_work())	/* _more_work() test must be last */
+		wait_time = difftime(now, last_backfill_time);
+		if ((wait_time < backfill_interval) ||
+		    _job_is_completing() || _many_pending_rpcs() ||
+		    !_more_work(last_backfill_time))
 			continue;
-		last_backfill_time = now;
 
 		gettimeofday(&tv1, NULL);
 		lock_slurmctld(all_locks);
-		_attempt_backfill();
+		while (_attempt_backfill()) ;
+		last_backfill_time = time(NULL);
 		unlock_slurmctld(all_locks);
 		gettimeofday(&tv2, NULL);
 		_diff_tv_str(&tv1, &tv2, tv_str, 20);
-#if __DEBUG
-		info("backfill: completed, %s", tv_str);
-#endif
+		if (debug_flags & DEBUG_FLAG_BACKFILL)
+			info("backfill: completed, %s", tv_str);
 	}
 	return NULL;
 }
 
-static void _attempt_backfill(void)
+/* Return non-zero to break the backfill loop if change in job, node or
+ * partition state or the backfill scheduler needs to be stopped. */
+static int _yield_locks(void)
+{
+	slurmctld_lock_t all_locks = {
+		READ_LOCK, WRITE_LOCK, WRITE_LOCK, READ_LOCK };
+	time_t job_update, node_update, part_update;
+
+	job_update  = last_job_update;
+	node_update = last_node_update;
+	part_update = last_part_update;
+
+	unlock_slurmctld(all_locks);
+	_my_sleep(backfill_interval);
+	lock_slurmctld(all_locks);
+
+	if ((last_job_update  == job_update)  && 
+	    (last_node_update == node_update) && 
+	    (last_part_update == part_update) &&
+	    (! stop_backfill) && (! config_flag)) 
+		return 0;
+	else
+		return 1;
+}
+
+static int _attempt_backfill(void)
 {
 	bool filter_root = false;
-	struct job_queue *job_queue = NULL;
-	int i, j,job_queue_size, node_space_recs;
+	List job_queue;
+	job_queue_rec_t *job_queue_rec;
+	int i, j, node_space_recs;
 	struct job_record *job_ptr;
 	struct part_record *part_ptr;
-	uint32_t end_time, end_reserve, time_limit;
+	uint32_t end_time, end_reserve;
+	uint32_t time_limit, comp_time_limit, orig_time_limit;
 	uint32_t min_nodes, max_nodes, req_nodes;
 	bitstr_t *avail_bitmap = NULL, *resv_bitmap = NULL;
-	time_t now = time(NULL), later_start, start_res;
+	time_t now = time(NULL), sched_start, later_start, start_res;
 	node_space_map_t *node_space;
 	static int sched_timeout = 0;
+	int this_sched_timeout = 0, rc = 0;
 
-	if(!sched_timeout)
-		sched_timeout = MIN(slurm_get_msg_timeout(), 10);
+	sched_start = now;
+	if (sched_timeout == 0) {
+		sched_timeout = slurm_get_msg_timeout() / 2;
+		sched_timeout = MAX(sched_timeout, 1);
+		sched_timeout = MIN(sched_timeout, 10);
+	}
+	this_sched_timeout = sched_timeout;
 
 	if (slurm_get_root_filter())
 		filter_root = true;
 
-	job_queue_size = build_job_queue(&job_queue);
-	if (job_queue_size == 0)
-		return;
-
-	sort_job_queue(job_queue, job_queue_size);
+	job_queue = build_job_queue();
+	if (list_count(job_queue) <= 1) {
+		debug("backfill: no jobs to backfill");
+		list_destroy(job_queue);
+		return 0;
+	}
 
 	node_space = xmalloc(sizeof(node_space_map_t) *
 			     (max_backfill_job_cnt + 3));
-	node_space[0].begin_time = now;
-	node_space[0].end_time = now + BACKFILL_WINDOW;
+	node_space[0].begin_time = sched_start;
+	node_space[0].end_time = sched_start + backfill_window;
 	node_space[0].avail_bitmap = bit_copy(avail_node_bitmap);
 	node_space[0].next = 0;
 	node_space_recs = 1;
-#if __DEBUG
-	_dump_node_space_table(node_space);
-#endif
+	if (debug_flags & DEBUG_FLAG_BACKFILL)
+		_dump_node_space_table(node_space);
 
-	for (i = 0; i < job_queue_size; i++) {
-		job_ptr = job_queue[i].job_ptr;
-		part_ptr = job_ptr->part_ptr;
-#if __DEBUG
-		info("backfill test for job %u", job_ptr->job_id);
-#endif
+	while ((job_queue_rec = (job_queue_rec_t *) 
+				list_pop_bottom(job_queue, sort_job_queue2))) {
+		job_ptr  = job_queue_rec->job_ptr;
+		part_ptr = job_queue_rec->part_ptr;
+		xfree(job_queue_rec);
+		if (!IS_JOB_PENDING(job_ptr))
+			continue;	/* started in other partition */
+		job_ptr->part_ptr = part_ptr;
 
-		if (part_ptr == NULL) {
-			part_ptr = find_part_record(job_ptr->partition);
-			if (part_ptr == NULL) {
-				error("Could not find partition %s for job %u",
-				      job_ptr->partition, job_ptr->job_id);
-				continue;
-			}
-			job_ptr->part_ptr = part_ptr;
-			error("partition pointer reset for job %u, part %s",
-			      job_ptr->job_id, job_ptr->partition);
-		}
-		if ((part_ptr->state_up == 0) ||
+		if (debug_flags & DEBUG_FLAG_BACKFILL)
+			info("backfill test for job %u", job_ptr->job_id);
+
+		if (((part_ptr->state_up & PARTITION_SCHED) == 0) ||
 		    (part_ptr->node_bitmap == NULL))
 		 	continue;
-		if ((part_ptr->root_only) && filter_root)
+		if ((part_ptr->flags & PART_FLAG_ROOT_ONLY) && filter_root)
 			continue;
 
 		if ((!job_independent(job_ptr, 0)) ||
@@ -474,6 +551,10 @@ static void _attempt_backfill(void)
 				time_limit = MIN(job_ptr->time_limit,
 						 part_ptr->max_time);
 		}
+		comp_time_limit = time_limit;
+		orig_time_limit = job_ptr->time_limit;
+		if (job_ptr->time_min && (job_ptr->time_min < time_limit))
+			time_limit = job_ptr->time_limit = job_ptr->time_min;
 
 		/* Determine impact of any resource reservations */
 		later_start = now;
@@ -481,8 +562,10 @@ static void _attempt_backfill(void)
 		start_res   = later_start;
 		later_start = 0;
 		j = job_test_resv(job_ptr, &start_res, true, &avail_bitmap);
-		if (j != SLURM_SUCCESS)
+		if (j != SLURM_SUCCESS) {
+			job_ptr->time_limit = orig_time_limit;
 			continue;
+		}
 		if (start_res > now)
 			end_time = (time_limit * 60) + start_res;
 		else
@@ -523,6 +606,7 @@ static void _attempt_backfill(void)
 		    (job_req_node_filter(job_ptr, avail_bitmap))) {
 			if (later_start)
 				goto TRY_LATER;
+			job_ptr->time_limit = orig_time_limit;
 			continue;
 		}
 
@@ -531,21 +615,43 @@ static void _attempt_backfill(void)
 		resv_bitmap = bit_copy(avail_bitmap);
 		bit_not(resv_bitmap);
 
+		if ((time(NULL) - sched_start) >= this_sched_timeout) {
+			debug("backfill: loop taking too long, yielding locks");
+			if (_yield_locks()) {
+				debug("backfill: system state changed, "
+				      "breaking out");
+				rc = 1;
+				break;
+			} else {
+				this_sched_timeout += sched_timeout;
+			}
+		}
+		/* this is the time consuming operation */
 		j = _try_sched(job_ptr, &avail_bitmap,
 			       min_nodes, max_nodes, req_nodes);
+		now = time(NULL);
 		if (j != SLURM_SUCCESS) {
-			if((time(NULL) - now) >= sched_timeout) {
-				debug("backfill: loop taking to long "
-				      "breaking out");
-				break;
-			}
+			job_ptr->time_limit = orig_time_limit;
 			continue;	/* not runable */
 		}
 
-		job_ptr->start_time = MAX(job_ptr->start_time, start_res);
-		last_job_update = now;
+		if (start_res > job_ptr->start_time) {
+			job_ptr->start_time = start_res;
+			last_job_update = now;
+		}
 		if (job_ptr->start_time <= now) {
 			int rc = _start_job(job_ptr, resv_bitmap);
+			if ((rc == SLURM_SUCCESS) && job_ptr->time_min) {
+				/* Set time limit as high as possible */
+				job_ptr->time_limit = comp_time_limit;
+				job_ptr->end_time = job_ptr->start_time + 
+						    (comp_time_limit * 60);
+				_reset_job_time_limit(job_ptr, now,
+						      node_space);
+				time_limit = job_ptr->time_limit;
+			} else {
+				job_ptr->time_limit = orig_time_limit;
+			}
 			if (rc == ESLURM_ACCOUNTING_POLICY) {
 				/* Unknown future start time, just skip job */
 				continue;
@@ -557,8 +663,16 @@ static void _attempt_backfill(void)
 				/* Started this job, move to next one */
 				continue;
 			}
+		} else
+			job_ptr->time_limit = orig_time_limit;
+
+		if (later_start && (job_ptr->start_time > later_start)) {
+			/* Try later when some nodes currently reserved for
+			 * pending jobs are free */
+			goto TRY_LATER;
 		}
-		if (job_ptr->start_time > (now + BACKFILL_WINDOW)) {
+
+		if (job_ptr->start_time > (sched_start + backfill_window)) {
 			/* Starts too far in the future to worry about */
 			continue;
 		}
@@ -584,24 +698,20 @@ static void _attempt_backfill(void)
 		bit_not(avail_bitmap);
 		_add_reservation(job_ptr->start_time, end_reserve,
 				 avail_bitmap, node_space, &node_space_recs);
-#if __DEBUG
-		_dump_node_space_table(node_space);
-#endif
-		if ((time(NULL) - now) >= sched_timeout) {
-			debug("backfill: loop taking to long breaking out");
-			break;
-		}
+		if (debug_flags & DEBUG_FLAG_BACKFILL)
+			_dump_node_space_table(node_space);
 	}
 	FREE_NULL_BITMAP(avail_bitmap);
 	FREE_NULL_BITMAP(resv_bitmap);
 
 	for (i=0; ; ) {
-		bit_free(node_space[i].avail_bitmap);
+		FREE_NULL_BITMAP(node_space[i].avail_bitmap);
 		if ((i = node_space[i].next) == 0)
 			break;
 	}
 	xfree(node_space);
-	xfree(job_queue);
+	list_destroy(job_queue);
+	return rc;
 }
 
 /* Try to start the job on any non-reserved nodes */
@@ -618,7 +728,7 @@ static int _start_job(struct job_record *job_ptr, bitstr_t *resv_bitmap)
 		job_ptr->details->exc_node_bitmap = bit_copy(resv_bitmap);
 
 	rc = select_nodes(job_ptr, false, NULL);
-	bit_free(job_ptr->details->exc_node_bitmap);
+	FREE_NULL_BITMAP(job_ptr->details->exc_node_bitmap);
 	job_ptr->details->exc_node_bitmap = orig_exc_nodes;
 	if (rc == SLURM_SUCCESS) {
 		/* job initiated */
@@ -630,9 +740,10 @@ static int _start_job(struct job_record *job_ptr, bitstr_t *resv_bitmap)
 		else if (job_ptr->details->prolog_running == 0)
 			launch_job(job_ptr);
 		backfilled_jobs++;
-#if __DEBUG
-		info("backfill: Jobs backfilled: %d", backfilled_jobs);
-#endif
+		if (debug_flags & DEBUG_FLAG_BACKFILL) {
+			info("backfill: Jobs backfilled since boot: %d",
+			     backfilled_jobs);
+		}
 	} else if ((job_ptr->job_id != fail_jobid) &&
 		   (rc != ESLURM_ACCOUNTING_POLICY)) {
 		char *node_list;
@@ -653,33 +764,50 @@ static int _start_job(struct job_record *job_ptr, bitstr_t *resv_bitmap)
 	return rc;
 }
 
-/* trigger the attempt of a backfill */
-extern void run_backfill (void)
+/* Reset a job's time limit (and end_time) as high as possible 
+ *	within the range job_ptr->time_min and job_ptr->time_limit.
+ *	Avoid using resources reserved for pending jobs or in resource
+ *	reservations */
+static void _reset_job_time_limit(struct job_record *job_ptr, time_t now,
+				  node_space_map_t *node_space)
 {
-	pthread_mutex_lock( &thread_flag_mutex );
-	new_work = true;
-	pthread_mutex_unlock( &thread_flag_mutex );
+	int32_t j, resv_delay;
+	uint32_t orig_time_limit = job_ptr->time_limit;
+
+	for (j=0; ; ) {
+		if ((node_space[j].begin_time != now) &&
+		    (node_space[j].begin_time < job_ptr->end_time) &&
+		    (!bit_super_set(job_ptr->node_bitmap,
+				    node_space[j].avail_bitmap))) {
+			/* Job overlaps pending job's resource reservation */
+			resv_delay = difftime(node_space[j].begin_time, now);
+			resv_delay /= 60;	/* seconds to minutes */
+			if (resv_delay < job_ptr->time_limit)
+				job_ptr->time_limit = resv_delay;
+		}
+		if ((j = node_space[j].next) == 0)
+			break;
+	}
+	job_ptr->time_limit = MAX(job_ptr->time_min, job_ptr->time_limit);
+	job_ptr->end_time = job_ptr->start_time + (job_ptr->time_limit * 60);
+
+	job_time_adj_resv(job_ptr);
+
+	if (orig_time_limit != job_ptr->time_limit) {
+		info("backfill: job %u time limit changed from %u to %u",
+		     job_ptr->job_id, orig_time_limit, job_ptr->time_limit);
+	}
 }
 
 /* Report if any changes occurred to job, node or partition information */
-static bool _more_work (void)
+static bool _more_work (time_t last_backfill_time)
 {
-	bool rc;
-	static time_t backfill_job_time  = (time_t) 0;
-	static time_t backfill_node_time = (time_t) 0;
-	static time_t backfill_part_time = (time_t) 0;
+	bool rc = false;
 
 	pthread_mutex_lock( &thread_flag_mutex );
-	if ( (backfill_job_time  == last_job_update ) &&
-	     (backfill_node_time == last_node_update) &&
-	     (backfill_part_time == last_part_update) &&
-	     (new_work == false) ) {
-		rc = false;
-	} else {
-		backfill_job_time  = last_job_update;
-		backfill_node_time = last_node_update;
-		backfill_part_time = last_part_update;
-		new_work = false;
+	if ( (last_job_update  >= last_backfill_time ) ||
+	     (last_node_update >= last_backfill_time ) ||
+	     (last_part_update >= last_backfill_time ) ) {
 		rc = true;
 	}
 	pthread_mutex_unlock( &thread_flag_mutex );

@@ -68,9 +68,21 @@
 #include "src/common/xstring.h"
 #include "src/common/xmalloc.h"
 #include "src/slurmctld/agent.h"
+#include "src/slurmctld/acct_policy.h"
 #include "src/slurmctld/slurmctld.h"
 #include "src/slurmctld/locks.h"
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
+
+/* These are defined here so when we link with something other than
+ * the slurmctld we will have these symbols defined.  They will get
+ * overwritten when linking with the slurmctld.
+ */
+#if defined (__APPLE__)
+void acct_policy_add_job_submit(struct job_record *job_ptr)
+	__attribute__((weak_import));
+#else
+void acct_policy_add_job_submit(struct job_record *job_ptr);
+#endif
 
 #define MAX_PATH_LEN 1024
 
@@ -90,6 +102,7 @@ struct ckpt_req {
 	uint16_t wait;
 	char *image_dir;
 	char *nodelist;
+	uint32_t op;
 	uint16_t sig_done;
 };
 
@@ -140,7 +153,7 @@ static pthread_cond_t ckpt_agent_cond = PTHREAD_COND_INITIALIZER;
  * of the plugin.  If major and minor revisions are desired, the major
  * version number may be multiplied by a suitable magnitude constant such
  * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum versions for their plugins as the checkpoint API matures.
+ * minimum version for their plugins as the checkpoint API matures.
  */
 const char plugin_name[]       	= "BLCR checkpoint plugin";
 const char plugin_type[]       	= "checkpoint/blcr";
@@ -213,6 +226,12 @@ extern int slurm_ckpt_op (uint32_t job_id, uint32_t step_id,
 	case CHECK_ENABLE:
 		check_ptr->disabled--;
 		break;
+	case CHECK_REQUEUE:
+		if (step_id != SLURM_BATCH_SCRIPT) {
+			rc = ESLURM_NOT_SUPPORTED;
+			break;
+		}
+		/* no break */
 	case CHECK_VACATE:
 		done_sig = SIGTERM;
 		/* no break */
@@ -244,6 +263,7 @@ extern int slurm_ckpt_op (uint32_t job_id, uint32_t step_id,
 		req_ptr->image_dir = xstrdup(image_dir);
 		req_ptr->nodelist = xstrdup(nodelist);
 		req_ptr->sig_done = done_sig;
+		req_ptr->op = op;
 
 		slurm_attr_init(&attr);
 		if (pthread_attr_setdetachstate(&attr,
@@ -292,7 +312,7 @@ extern int slurm_ckpt_comp ( struct step_record * step_ptr, time_t event_time,
 		uint32_t error_code, char *error_msg )
 {
 	error("checkpoint/blcr: slurm_ckpt_comp not implemented");
-	return SLURM_FAILURE;
+	return ESLURM_NOT_SUPPORTED;
 }
 
 extern int slurm_ckpt_task_comp ( struct step_record * step_ptr,
@@ -300,7 +320,7 @@ extern int slurm_ckpt_task_comp ( struct step_record * step_ptr,
 				  uint32_t error_code, char *error_msg )
 {
 	error("checkpoint/blcr: slurm_ckpt_task_comp not implemented");
-	return SLURM_FAILURE;
+	return ESLURM_NOT_SUPPORTED;
 }
 
 extern int slurm_ckpt_alloc_job(check_jobinfo_t *jobinfo)
@@ -321,29 +341,36 @@ extern int slurm_ckpt_free_job(check_jobinfo_t jobinfo)
 	return SLURM_SUCCESS;
 }
 
-extern int slurm_ckpt_pack_job(check_jobinfo_t jobinfo, Buf buffer)
+extern int slurm_ckpt_pack_job(check_jobinfo_t jobinfo, Buf buffer,
+			       uint16_t protocol_version)
 {
 	struct check_job_info *check_ptr =
 		(struct check_job_info *)jobinfo;
 
-	pack16(check_ptr->disabled, buffer);
-	pack_time(check_ptr->time_stamp, buffer);
-	pack32(check_ptr->error_code, buffer);
-	packstr(check_ptr->error_msg, buffer);
+	if(protocol_version >= SLURM_2_1_PROTOCOL_VERSION) {
+		pack16(check_ptr->disabled, buffer);
+		pack_time(check_ptr->time_stamp, buffer);
+		pack32(check_ptr->error_code, buffer);
+		packstr(check_ptr->error_msg, buffer);
+	}
 
 	return SLURM_SUCCESS;
 }
 
-extern int slurm_ckpt_unpack_job(check_jobinfo_t jobinfo, Buf buffer)
+extern int slurm_ckpt_unpack_job(check_jobinfo_t jobinfo, Buf buffer,
+				 uint16_t protocol_version)
 {
 	uint32_t uint32_tmp;
 	struct check_job_info *check_ptr =
 		(struct check_job_info *)jobinfo;
 
-	safe_unpack16(&check_ptr->disabled, buffer);
-	safe_unpack_time(&check_ptr->time_stamp, buffer);
-	safe_unpack32(&check_ptr->error_code, buffer);
-	safe_unpackstr_xmalloc(&check_ptr->error_msg, &uint32_tmp, buffer);
+	if(protocol_version >= SLURM_2_1_PROTOCOL_VERSION) {
+		safe_unpack16(&check_ptr->disabled, buffer);
+		safe_unpack_time(&check_ptr->time_stamp, buffer);
+		safe_unpack32(&check_ptr->error_code, buffer);
+		safe_unpackstr_xmalloc(&check_ptr->error_msg,
+				       &uint32_tmp, buffer);
+	}
 
 	return SLURM_SUCCESS;
 
@@ -407,19 +434,19 @@ extern int slurm_ckpt_signal_tasks(slurmd_job_t *job, char *image_dir)
 	/*
 	 * the tasks must be checkpointed concurrently.
 	 */
-	children = xmalloc(sizeof(pid_t) * job->ntasks);
-	fd = xmalloc(sizeof(int) * 2 * job->ntasks);
+	children = xmalloc(sizeof(pid_t) * job->node_tasks);
+	fd = xmalloc(sizeof(int) * 2 * job->node_tasks);
 	if (!children || !fd) {
 		error("slurm_ckpt_signal_tasks: memory exhausted");
 		rc = SLURM_FAILURE;
 		goto out;
 	}
-	for (i = 0; i < job->ntasks; i ++) {
+	for (i = 0; i < job->node_tasks; i ++) {
 		fd[i*2] = -1;
 		fd[i*2+1] = -1;
 	}
 
-	for (i = 0; i < job->ntasks; i ++) {
+	for (i = 0; i < job->node_tasks; i ++) {
 		if (job->batch) {
 			sprintf(context_file, "%s/script.ckpt", image_dir);
 		} else {
@@ -479,13 +506,13 @@ extern int slurm_ckpt_signal_tasks(slurmd_job_t *job, char *image_dir)
 
  out_wait:
 	c = (rc == SLURM_SUCCESS) ? 0 : 1;
-	for (i = 0; i < job->ntasks; i ++) {
+	for (i = 0; i < job->node_tasks; i ++) {
 		if (fd[i*2+1] >= 0) {
 			while(write(fd[i*2+1], &c, 1) < 0 && errno == EINTR);
 		}
 	}
 	/* wait children in sequence is OK */
-	for (i = 0; i < job->ntasks; i ++) {
+	for (i = 0; i < job->node_tasks; i ++) {
 		if (children[i] == 0)
 			continue;
 		while(waitpid(children[i], &status, 0) < 0 && errno == EINTR);
@@ -545,6 +572,31 @@ static void _send_sig(uint32_t job_id, uint32_t step_id, uint16_t signal,
 	agent_queue_request(agent_args);
 }
 
+static void _requeue_when_finished(uint32_t job_id)
+{
+	/* Locks: read job */
+	slurmctld_lock_t job_write_lock = {
+		NO_LOCK, WRITE_LOCK, NO_LOCK, NO_LOCK };
+	struct job_record *job_ptr;
+
+	while (1) {
+		lock_slurmctld(job_write_lock);
+		job_ptr = find_job_record(job_id);
+		if (IS_JOB_FINISHED(job_ptr)) {
+			job_ptr->job_state = JOB_PENDING;
+			job_ptr->details->submit_time = time(NULL);
+			job_ptr->restart_cnt++;
+			/* Since the job completion logger
+			 * removes the submit we need to add it again. */
+			acct_policy_add_job_submit(job_ptr);
+			unlock_slurmctld(job_write_lock);
+			break;
+		} else {
+			unlock_slurmctld(job_write_lock);
+			sleep(1);
+		}
+	}
+}
 
 /* Checkpoint processing pthread
  * Never returns, but is cancelled on plugin termiantion */
@@ -568,14 +620,20 @@ static void *_ckpt_agent_thr(void *arg)
 	ckpt_agent_count ++;
 	slurm_mutex_unlock(&ckpt_agent_mutex);
 
-	debug3("checkpoint/blcr: sending checkpoint tasks request to %u.%u",
-	       req->job_id, req->step_id);
+	debug3("checkpoint/blcr: sending checkpoint tasks request %u to %u.%u",
+	       req->op, req->job_id, req->step_id);
 
 	rc = checkpoint_tasks(req->job_id, req->step_id, req->begin_time,
 			      req->image_dir, req->wait, req->nodelist);
+	if (rc != SLURM_SUCCESS) {
+		error("checkpoint/blcr: error on checkpoint request %u to "
+		      "%u.%u: %s", req->op, req->job_id, req->step_id,
+		      slurm_strerror(rc));
+	}
+	if (req->op == CHECK_REQUEUE)
+		_requeue_when_finished(req->job_id);
 
 	lock_slurmctld(job_write_lock);
-
 	job_ptr = find_job_record(req->job_id);
 	if (!job_ptr) {
 		error("_ckpt_agent_thr: job finished");

@@ -174,6 +174,7 @@ static void _do_power_work(void)
 		    (susp_state == 0)					&&
 		    ((suspend_rate == 0) || (suspend_cnt < suspend_rate)) &&
 		    IS_NODE_IDLE(node_ptr)				&&
+		    (node_ptr->sus_job_cnt == 0)			&&
 		    (!IS_NODE_COMPLETING(node_ptr))			&&
 		    (!IS_NODE_POWER_UP(node_ptr))			&&
 		    (node_ptr->last_idle < (now - idle_time))		&&
@@ -206,7 +207,7 @@ static void _do_power_work(void)
 		else
 			error("power_save: bitmap2nodename");
 		xfree(nodes);
-		bit_free(sleep_node_bitmap);
+		FREE_NULL_BITMAP(sleep_node_bitmap);
 		last_node_update = now;
 	}
 
@@ -218,7 +219,7 @@ static void _do_power_work(void)
 		else
 			error("power_save: bitmap2nodename");
 		xfree(nodes);
-		bit_free(wake_node_bitmap);
+		FREE_NULL_BITMAP(wake_node_bitmap);
 		last_node_update = now;
 	}
 }
@@ -256,7 +257,7 @@ static void _re_wake(void)
 		} else
 			error("power_save: bitmap2nodename");
 		xfree(nodes);
-		bit_free(wake_node_bitmap);
+		FREE_NULL_BITMAP(wake_node_bitmap);
 	}
 }
 
@@ -657,5 +658,6 @@ fini:	_clear_power_config();
 	slurm_mutex_lock(&power_mutex);
 	power_save_enabled = false;
 	slurm_mutex_unlock(&power_mutex);
+	pthread_exit(NULL);
 	return NULL;
 }

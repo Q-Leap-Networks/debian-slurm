@@ -3,7 +3,7 @@
  *	logic could be placed for broadcast communications.
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>, et. al.
  *  Derived from pdsh written by Jim Garlick <garlick1@llnl.gov>
@@ -76,18 +76,19 @@
 #include <unistd.h>
 #include <stdlib.h>
 
+#include "src/common/forward.h"
 #include "src/common/list.h"
 #include "src/common/log.h"
 #include "src/common/macros.h"
 #include "src/common/node_select.h"
+#include "src/common/parse_time.h"
+#include "src/common/slurm_protocol_api.h"
+#include "src/common/slurm_protocol_interface.h"
+#include "src/common/uid.h"
 #include "src/common/xsignal.h"
 #include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
-#include "src/common/slurm_protocol_api.h"
-#include "src/common/slurm_protocol_interface.h"
-#include "src/common/uid.h"
-#include "src/common/forward.h"
 #include "src/slurmctld/agent.h"
 #include "src/slurmctld/job_scheduler.h"
 #include "src/slurmctld/locks.h"
@@ -108,9 +109,9 @@ typedef enum {
 
 typedef struct thd_complete {
 	bool work_done; 	/* assume all threads complete */
-	int fail_cnt;   	/* assume no threads failures */
+	int fail_cnt;		/* assume no threads failures */
 	int no_resp_cnt;	/* assume all threads respond */
-	int retry_cnt;  	/* assume no required retries */
+	int retry_cnt;		/* assume no required retries */
 	int max_delay;
 	time_t now;
 } thd_complete_t;
@@ -122,9 +123,9 @@ typedef struct thd {
 	time_t start_time;		/* start time */
 	time_t end_time;		/* end time or delta time
 					 * upon termination */
-	slurm_addr *addr;	        /* specific addr to send to
+	slurm_addr_t *addr;		/* specific addr to send to
 					 * will not do nodelist if set */
-	char *nodelist;	                /* list of nodes to send to */
+	char *nodelist;			/* list of nodes to send to */
 	List ret_list;
 } thd_t;
 
@@ -166,7 +167,7 @@ typedef struct mail_info {
 
 static void _sig_handler(int dummy);
 static int  _batch_launch_defer(queued_request_t *queued_req_ptr);
-static inline int _comm_err(char *node_name);
+static inline int _comm_err(char *node_name, slurm_msg_type_t msg_type);
 static void _list_delete_retry(void *retry_entry);
 static agent_info_t *_make_agent_info(agent_arg_t *agent_arg_ptr);
 static task_info_t *_make_task_data(agent_info_t *agent_info_ptr, int inx);
@@ -265,7 +266,7 @@ void *agent(void *args)
 		error("pthread_create error %m");
 		if (++retries > MAX_RETRIES)
 			fatal("Can't create pthread");
-		sleep(1);	/* sleep and again */
+		usleep(10000);	/* sleep and retry */
 	}
 	slurm_attr_destroy(&attr_wdog);
 #if 	AGENT_THREAD_COUNT < 1
@@ -304,7 +305,7 @@ void *agent(void *args)
 			else {
 				slurm_mutex_unlock(&agent_info_ptr->
 						     thread_mutex);
-				sleep(1);
+				usleep(10000);	/* sleep and retry */
 				slurm_mutex_lock(&agent_info_ptr->
 						   thread_mutex);
 			}
@@ -382,7 +383,6 @@ static agent_info_t *_make_agent_info(agent_arg_t *agent_arg_ptr)
 	int *span = NULL;
 	int thr_count = 0;
 	hostlist_t hl = NULL;
-	char buf[8192];
 	char *name = NULL;
 
 	agent_info_ptr = xmalloc(sizeof(agent_info_t));
@@ -398,7 +398,8 @@ static agent_info_t *_make_agent_info(agent_arg_t *agent_arg_ptr)
 	agent_info_ptr->msg_type       = agent_arg_ptr->msg_type;
 	agent_info_ptr->msg_args_pptr  = &agent_arg_ptr->msg_args;
 
-	if ((agent_arg_ptr->msg_type != REQUEST_SHUTDOWN)	&&
+	if ((agent_arg_ptr->msg_type != REQUEST_JOB_NOTIFY)	&&
+	    (agent_arg_ptr->msg_type != REQUEST_SHUTDOWN)	&&
 	    (agent_arg_ptr->msg_type != REQUEST_RECONFIGURE)	&&
 	    (agent_arg_ptr->msg_type != SRUN_EXEC)		&&
 	    (agent_arg_ptr->msg_type != SRUN_TIMEOUT)		&&
@@ -444,9 +445,9 @@ static agent_info_t *_make_agent_info(agent_arg_t *agent_arg_ptr)
 			i++;
 		}
 		hostlist_uniq(hl);
-		hostlist_ranged_string(hl, sizeof(buf), buf);
+		thread_ptr[thr_count].nodelist = 
+			hostlist_ranged_string_xmalloc(hl);
 		hostlist_destroy(hl);
-		thread_ptr[thr_count].nodelist = xstrdup(buf);
 #if 0
 		info("sending to nodes %s", thread_ptr[thr_count].nodelist);
 #endif
@@ -481,9 +482,8 @@ static void _update_wdog_state(thd_t *thread_ptr,
 	case DSH_ACTIVE:
 		thd_comp->work_done = false;
 		if (thread_ptr->end_time <= thd_comp->now) {
-			debug3("agent thread %lu timed out\n",
-			       (unsigned long)
-			       thread_ptr->thread);
+			debug3("agent thread %lu timed out",
+			       (unsigned long) thread_ptr->thread);
 			if (pthread_kill(thread_ptr->thread, SIGUSR1) == ESRCH)
 				*state = DSH_NO_RESP;
 			else
@@ -527,11 +527,11 @@ static void *_wdog(void *args)
 	if ( (agent_ptr->msg_type == SRUN_JOB_COMPLETE)			||
 	     (agent_ptr->msg_type == SRUN_STEP_MISSING)			||
 	     (agent_ptr->msg_type == SRUN_EXEC)				||
+	     (agent_ptr->msg_type == SRUN_NODE_FAIL)			||
 	     (agent_ptr->msg_type == SRUN_PING)				||
 	     (agent_ptr->msg_type == SRUN_TIMEOUT)			||
 	     (agent_ptr->msg_type == SRUN_USER_MSG)			||
-	     (agent_ptr->msg_type == RESPONSE_RESOURCE_ALLOCATION)	||
-	     (agent_ptr->msg_type == SRUN_NODE_FAIL) )
+	     (agent_ptr->msg_type == RESPONSE_RESOURCE_ALLOCATION) )
 		srun_agent = true;
 
 	thd_comp.max_delay = 0;
@@ -571,7 +571,7 @@ static void *_wdog(void *args)
 	}
 
 	if (srun_agent) {
-	        _notify_slurmctld_jobs(agent_ptr);
+		_notify_slurmctld_jobs(agent_ptr);
 	} else {
 		_notify_slurmctld_nodes(agent_ptr,
 					thd_comp.no_resp_cnt,
@@ -615,8 +615,8 @@ static void _notify_slurmctld_jobs(agent_info_t *agent_ptr)
 		step_id = NO_VAL;
 	} else if ((agent_ptr->msg_type == SRUN_JOB_COMPLETE)		||
 		   (agent_ptr->msg_type == SRUN_STEP_MISSING)		||
-	           (agent_ptr->msg_type == SRUN_EXEC)			||
-	           (agent_ptr->msg_type == SRUN_USER_MSG)) {
+		   (agent_ptr->msg_type == SRUN_EXEC)			||
+		   (agent_ptr->msg_type == SRUN_USER_MSG)) {
 		return;		/* no need to note srun response */
 	} else if (agent_ptr->msg_type == SRUN_NODE_FAIL) {
 		return;		/* no need to note srun response */
@@ -662,7 +662,7 @@ static void _notify_slurmctld_nodes(agent_info_t *agent_ptr,
 			batch_job_launch_msg_t *launch_msg_ptr =
 					*agent_ptr->msg_args_pptr;
 			uint32_t job_id = launch_msg_ptr->job_id;
-			job_complete(job_id, 0, true, 0);
+			job_complete(job_id, 0, true, false, 0);
 		}
 		unlock_slurmctld(node_write_lock);
 #else
@@ -739,7 +739,7 @@ finished:	;
 	if (run_scheduler) {
 		run_scheduler = false;
 		/* below functions all have their own locking */
-		if (schedule())	{
+		if (schedule(0))	{
 			schedule_job_save();
 			schedule_node_save();
 		}
@@ -755,13 +755,14 @@ finished:	;
 
 /* Report a communications error for specified node
  * This also gets logged as a non-responsive node */
-static inline int _comm_err(char *node_name)
+static inline int _comm_err(char *node_name, slurm_msg_type_t msg_type)
 {
 	int rc = 1;
 #if AGENT_IS_THREAD
 	if ((rc = is_node_resp (node_name)))
 #endif
-		verbose("agent/is_node_resp: %s: %m", node_name);
+		verbose("agent/is_node_resp: node:%s rpc:%d : %m",
+			node_name, msg_type);
 	return rc;
 }
 
@@ -888,7 +889,7 @@ static void *_thread_per_group_rpc(void *args)
 			thread_state = DSH_DONE;
 		} else {
 			if (!srun_agent)
-				_comm_err(thread_ptr->nodelist);
+				_comm_err(thread_ptr->nodelist, msg_type);
 		}
 		goto cleanup;
 	}
@@ -896,7 +897,7 @@ static void *_thread_per_group_rpc(void *args)
 	//info("got %d messages back", list_count(ret_list));
 	found = 0;
 	itr = list_iterator_create(ret_list);
-	while((ret_data_info = list_next(itr)) != NULL) {
+	while ((ret_data_info = list_next(itr)) != NULL) {
 		rc = slurm_get_return_code(ret_data_info->type,
 					   ret_data_info->data);
 #if AGENT_IS_THREAD
@@ -929,7 +930,7 @@ static void *_thread_per_group_rpc(void *args)
 			thread_state = DSH_DONE;
 			ret_data_info->err = thread_state;
 			lock_slurmctld(job_write_lock);
-			job_complete(job_id, 0, false, _wif_status());
+			job_complete(job_id, 0, false, false, _wif_status());
 			unlock_slurmctld(job_write_lock);
 			continue;
 		}
@@ -985,9 +986,10 @@ static void *_thread_per_group_rpc(void *args)
 					errno = ret_data_info->err;
 				else
 					errno = rc;
-				rc = _comm_err(ret_data_info->node_name);
+				rc = _comm_err(ret_data_info->node_name,
+					       msg_type);
 			}
-			if(srun_agent)
+			if (srun_agent)
 				thread_state = DSH_FAILED;
 			else if(ret_data_info->type == RESPONSE_FORWARD_FAILED)
 				/* check if a forward failed */
@@ -1284,9 +1286,7 @@ void agent_queue_request(agent_arg_t *agent_arg_ptr)
 				    agent, (void *) agent_arg_ptr);
 		slurm_attr_destroy(&attr_agent);
 		if (rc == 0) {
-			sleep(1);
-			if (!pthread_kill(thread_agent, 0))
-				info("Shutdown agent still running");
+			usleep(10000);	/* give agent a chance to start */
 			return;
 		}
 	}
@@ -1331,7 +1331,7 @@ static void _spawn_retry_agent(agent_arg_t * agent_arg_ptr)
 		error("pthread_create error %m");
 		if (++retries > MAX_RETRIES)
 			fatal("Can't create pthread");
-		sleep(1);	/* sleep and try again */
+		usleep(10000);	/* sleep and retry */
 	}
 	slurm_attr_destroy(&attr_agent);
 }
@@ -1401,6 +1401,8 @@ static void _purge_agent_args(agent_arg_t *agent_arg_ptr)
 		else if (agent_arg_ptr->msg_type == SRUN_STEP_MISSING)
 			slurm_free_srun_step_missing_msg(
 				agent_arg_ptr->msg_args);
+		else if (agent_arg_ptr->msg_type == REQUEST_JOB_NOTIFY)
+			slurm_free_job_notify_msg(agent_arg_ptr->msg_args);
 		else
 			xfree(agent_arg_ptr->msg_args);
 	}
@@ -1462,7 +1464,35 @@ static char *_mail_type_str(uint16_t mail_type)
 		return "Ended";
 	if (mail_type == MAIL_JOB_FAIL)
 		return "Failed";
+	if (mail_type == MAIL_JOB_REQUEUE)
+		return "Requeued";
 	return "unknown";
+}
+
+static void _set_job_time(struct job_record *job_ptr, uint16_t mail_type,
+			  char *buf, int buf_len)
+{
+	time_t interval = NO_VAL;
+
+	buf[0] = '\0';
+	if ((mail_type == MAIL_JOB_BEGIN) && job_ptr->start_time &&
+	    job_ptr->details && job_ptr->details->submit_time) {
+		interval = job_ptr->start_time - job_ptr->details->submit_time;
+		snprintf(buf, buf_len, ", Queued time ");
+		secs2time_str(interval, buf+14, buf_len-14);
+	}
+
+	if (((mail_type == MAIL_JOB_END) || (mail_type == MAIL_JOB_FAIL) ||
+	     (mail_type == MAIL_JOB_REQUEUE)) &&
+	    (job_ptr->start_time && job_ptr->end_time)) {
+		if (job_ptr->suspend_time) {
+			interval  = job_ptr->end_time - job_ptr->suspend_time;
+			interval += job_ptr->pre_sus_time;
+		} else
+			interval = job_ptr->end_time - job_ptr->start_time;
+		snprintf(buf, buf_len, ", Run time ");
+		secs2time_str(interval, buf+11, buf_len-11);
+	}
 }
 
 /*
@@ -1472,6 +1502,7 @@ static char *_mail_type_str(uint16_t mail_type)
  */
 extern void mail_job_info (struct job_record *job_ptr, uint16_t mail_type)
 {
+	char job_time[128];
 	mail_info_t *mi = _mail_alloc();
 
 	if (!job_ptr->mail_user)
@@ -1479,12 +1510,13 @@ extern void mail_job_info (struct job_record *job_ptr, uint16_t mail_type)
 	else
 		mi->user_name = xstrdup(job_ptr->mail_user);
 
-	mi->message = xmalloc(sizeof(char)*128);
-	sprintf(mi->message, "SLURM Job_id=%u Name=%.24s %s",
+	mi->message = xmalloc(256);
+	_set_job_time(job_ptr, mail_type, job_time, sizeof(job_time));
+	sprintf(mi->message, "SLURM Job_id=%u Name=%.24s %s%s",
 		job_ptr->job_id, job_ptr->name,
-		_mail_type_str(mail_type));
+		_mail_type_str(mail_type), job_time);
 
-	info ("msg to %s: %s", mi->user_name, mi->message);
+	debug("email msg to %s: %s", mi->user_name, mi->message);
 
 	slurm_mutex_lock(&mail_mutex);
 	if (!mail_list) {
@@ -1505,13 +1537,13 @@ extern void mail_job_info (struct job_record *job_ptr, uint16_t mail_type)
  */
 static int _batch_launch_defer(queued_request_t *queued_req_ptr)
 {
-	char hostname[512];
+	char *hostname;
 	agent_arg_t *agent_arg_ptr;
 	batch_job_launch_msg_t *launch_msg_ptr;
 	struct node_record *node_ptr;
 	time_t now = time(NULL);
 	struct job_record  *job_ptr;
-	int delay_time;
+	int delay_time, nodes_ready = 0;
 
 	agent_arg_ptr = queued_req_ptr->agent_arg_ptr;
 	if (agent_arg_ptr->msg_type != REQUEST_BATCH_JOB_LAUNCH)
@@ -1532,23 +1564,33 @@ static int _batch_launch_defer(queued_request_t *queued_req_ptr)
 		return -1;	/* job cancelled while waiting */
 	}
 
-	hostlist_deranged_string(agent_arg_ptr->hostlist,
-				 sizeof(hostname), hostname);
-	node_ptr = find_node_record(hostname);
-	if (node_ptr == NULL) {
-		error("agent(batch_launch) removed pending request for job "
-		      "%u, missing node %s",
-		      launch_msg_ptr->job_id, agent_arg_ptr->hostlist);
-		return -1;	/* invalid request?? */
+	if (job_ptr->wait_all_nodes) {
+		(void) job_node_ready(launch_msg_ptr->job_id, &nodes_ready);
+	} else {
+		hostname = hostlist_deranged_string_xmalloc(
+					agent_arg_ptr->hostlist);
+		node_ptr = find_node_record(hostname);
+		if (node_ptr == NULL) {
+			error("agent(batch_launch) removed pending request for "
+			      "job %u, missing node %s",
+			      launch_msg_ptr->job_id, hostname);
+			xfree(hostname);
+			return -1;	/* invalid request?? */
+		}
+		xfree(hostname);
+		if (!IS_NODE_POWER_SAVE(node_ptr) &&
+		    !IS_NODE_NO_RESPOND(node_ptr)) {
+			nodes_ready = 1;
+		}
 	}
 
 	delay_time = difftime(now, job_ptr->start_time);
-	if (!IS_NODE_POWER_SAVE(node_ptr) && !IS_NODE_NO_RESPOND(node_ptr)) {
+	if (nodes_ready) {
 		/* ready to launch, adjust time limit for boot time */
-		if (delay_time && (job_ptr->time_limit != INFINITE) && 
+		if (delay_time && (job_ptr->time_limit != INFINITE) &&
 		    (!wiki2_sched)) {
 			info("Job %u launch delayed by %d secs, "
-			     "updating end_time", 
+			     "updating end_time",
 			     launch_msg_ptr->job_id, delay_time);
 			job_ptr->end_time += delay_time;
 		}
@@ -1561,13 +1603,12 @@ static int _batch_launch_defer(queued_request_t *queued_req_ptr)
 		queued_req_ptr->last_attempt  = now;
 	} else if (difftime(now, queued_req_ptr->first_attempt) >=
 				 slurm_get_resume_timeout()) {
-		error("agent waited too long for node %s to respond, "
-		      "sending batch request anyway...",
-		      node_ptr->name);
-		if (delay_time && (job_ptr->time_limit != INFINITE) && 
+		error("agent waited too long for nodes to respond, "
+		      "sending batch request anyway...");
+		if (delay_time && (job_ptr->time_limit != INFINITE) &&
 		    (!wiki2_sched)) {
 			info("Job %u launch delayed by %d secs, "
-			     "updating end_time", 
+			     "updating end_time",
 			     launch_msg_ptr->job_id, delay_time);
 			job_ptr->end_time += delay_time;
 		}

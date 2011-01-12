@@ -1,7 +1,8 @@
 /*****************************************************************************\
  *  preempt_none.c - disable job preemption plugin.
  *****************************************************************************
- *  Copyright (C) 2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2009-2010 Lawrence Livermore National Security.
+ *  Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -44,6 +45,7 @@
 #include "src/common/log.h"
 #include "src/common/plugin.h"
 #include "src/slurmctld/slurmctld.h"
+#include "src/slurmctld/job_scheduler.h"
 
 const char	plugin_name[]	= "Preemption disabled";
 const char	plugin_type[]	= "preempt/none";
@@ -72,4 +74,29 @@ extern void fini( void )
 extern List find_preemptable_jobs(struct job_record *job_ptr)
 {
 	return (List) NULL;
+}
+
+/**************************************************************************/
+/* TAG(                 job_preempt_mode                                ) */
+/**************************************************************************/
+extern uint16_t job_preempt_mode(struct job_record *job_ptr)
+{
+	return (uint16_t) PREEMPT_MODE_OFF;
+}
+
+/**************************************************************************/
+/* TAG(                 preemption_enabled                              ) */
+/**************************************************************************/
+extern bool preemption_enabled(void)
+{
+	return false;
+}
+
+/***************************************************************************/
+/* Return true if the preemptor can preempt the preemptee, otherwise false */
+/***************************************************************************/
+extern bool job_preempt_check(job_queue_rec_t *preemptor,
+			      job_queue_rec_t *preemptee)
+{
+	return false;
 }

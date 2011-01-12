@@ -59,15 +59,18 @@
 #include <libpq-fe.h>
 
 typedef struct {
+	char *cluster_name;
 	PGconn *db_conn;
 	bool rollback;
 	List update_list;
 	int conn;
+	int cluster_changed;
 } pgsql_conn_t;
 
 typedef struct {
 	uint32_t port;
 	char *host;
+	char *backup;
 	char *user;
 	char *pass;
 } pgsql_db_info_t;
@@ -87,6 +90,7 @@ extern int pgsql_get_db_connection(PGconn **pgsql_db, char *db_name,
 extern int pgsql_close_db_connection(PGconn **pgsql_db);
 
 extern int pgsql_db_query(PGconn *pgsql_db, char *query);
+extern int pgsql_db_start_transaction(PGconn *pgsql_db);
 extern int pgsql_db_commit(PGconn *pgsql_db);
 extern int pgsql_db_rollback(PGconn *pgsql_db);
 
@@ -95,10 +99,14 @@ extern PGresult *pgsql_db_query_ret(PGconn *pgsql_db, char *query);
 extern int pgsql_insert_ret_id(PGconn *pgsql_db,
 			       char *sequence_name, char *query);
 
-extern int pgsql_db_create_table(PGconn *pgsql_db,
+extern int pgsql_query_ret_id(PGconn *pgsql_db, char *query);
+
+extern int pgsql_db_create_table(PGconn *pgsql_db, char *schema,
 				 char *table_name, storage_field_t *fields,
 				 char *ending);
 
-extern int pgsql_db_make_table_current(PGconn *pgsql_db, char *table_name,
+extern int pgsql_db_make_table_current(PGconn *pgsql_db, char *schema,
+				       char *table_name,
 				       storage_field_t *fields);
+
 #endif

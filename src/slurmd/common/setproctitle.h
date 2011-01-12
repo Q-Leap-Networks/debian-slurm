@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/slurmd/common/setproctitle.h - Emulation of BSD setproctitle()
- * $Id: setproctitle.h 17276 2009-04-17 17:03:49Z jette $
+ * $Id: setproctitle.h 21149 2010-09-14 22:04:42Z da $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -45,7 +45,8 @@
 #endif
 
 #ifndef HAVE_SETPROCTITLE
-void setproctitle(const char *fmt, ...);
+void setproctitle(const char *fmt, ...)
+  __attribute__ ((format (printf, 1, 2)));
 void init_setproctitle(int argc, char *argv[]);
 void fini_setproctitle(void);
 #endif

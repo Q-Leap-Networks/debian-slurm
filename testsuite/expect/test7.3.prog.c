@@ -76,6 +76,9 @@ int main (int argc, char *argv[])
 	job_req.time_limit = 1;
 	if (slurm_allocate_resources(&job_req, &job_resp)) {
 		slurm_perror ("slurm_allocate_resources");
+		printf("INFO: min_nodes=%u max_nodes=%u user_id=%u group_id=%u",
+		       job_req.min_nodes, job_req.max_nodes,
+		       job_req.user_id, job_req.group_id);
 		exit(0);
 	}
 	printf("job_id %u\n", job_resp->job_id);
@@ -114,10 +117,17 @@ int main (int argc, char *argv[])
 	 */
 	slurm_step_ctx_params_t_init(step_params);
 	step_params->job_id = job_resp->job_id;
-	step_params->node_count = nodes;
+	step_params->min_nodes = nodes;
 	step_params->task_count = tasks;
 
 	ctx = slurm_step_ctx_create(step_params);
+	if ((ctx == NULL) &&
+	    (slurm_get_errno() == ESLURM_PROLOG_RUNNING)) {
+		printf("SlurmctldProlog is still running, "
+		       "sleep and try again\n");
+		sleep(10);
+		ctx = slurm_step_ctx_create(step_params);
+	}
 	if (ctx == NULL) {
 		slurm_perror("slurm_step_ctx_create");
 		rc = 1;

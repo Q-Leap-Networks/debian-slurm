@@ -3,8 +3,9 @@
  *  file
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Portions Copyright (C) 2008 Vijay Ramasubramanian.
+ *  Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Mette <jette1@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
@@ -61,13 +62,13 @@ extern char *default_plugstack;
 #define DEFAULT_ACCOUNTING_STORAGE_TYPE "accounting_storage/none"
 #define DEFAULT_AUTH_TYPE          "auth/munge"
 #define DEFAULT_BATCH_START_TIMEOUT 10
-#define DEFAULT_CACHE_GROUPS        0
 #define DEFAULT_COMPLETE_WAIT       0
 #define DEFAULT_CRYPTO_TYPE        "crypto/munge"
 #define DEFAULT_EPILOG_MSG_TIME     2000
 #define DEFAULT_FAST_SCHEDULE       1
 #define DEFAULT_FIRST_JOB_ID        1
 #define DEFAULT_GET_ENV_TIMEOUT     2
+#define DEFAULT_GROUP_INFO          600
 /* NOTE: DEFAULT_INACTIVE_LIMIT must be 0 for Blue Gene/L systems */
 #define DEFAULT_INACTIVE_LIMIT      0
 #define DEFAULT_JOB_ACCT_GATHER_TYPE  "jobacct_gather/none"
@@ -84,7 +85,7 @@ extern char *default_plugstack;
 #define DEFAULT_KILL_TREE           0
 #define DEFAULT_KILL_WAIT           30
 #define DEFAULT_MAIL_PROG           "/bin/mail"
-#define DEFAULT_MAX_JOB_COUNT       5000
+#define DEFAULT_MAX_JOB_COUNT       10000
 #define DEFAULT_MEM_PER_CPU         0
 #define DEFAULT_MAX_MEM_PER_CPU     0
 #define DEFAULT_MIN_JOB_AGE         300
@@ -101,19 +102,27 @@ extern char *default_plugstack;
 #define DEFAULT_PRIORITY_DECAY      604800 /* 7 days */
 #define DEFAULT_PRIORITY_CALC_PERIOD 300 /* in seconds */
 #define DEFAULT_PRIORITY_TYPE       "priority/basic"
-#define DEFAULT_PROPAGATE_PRIO_PROCESS 0
 #define DEFAULT_RETURN_TO_SERVICE   0
 #define DEFAULT_RESUME_RATE         300
 #define DEFAULT_RESUME_TIMEOUT      60
 #define DEFAULT_SAVE_STATE_LOC      "/tmp"
 #define DEFAULT_SCHEDROOTFILTER     1
 #define DEFAULT_SCHEDULER_PORT      7321
+#define DEFAULT_SCHED_LOG_LEVEL     0
 #define DEFAULT_SCHED_TIME_SLICE    30
 #define DEFAULT_SCHEDTYPE           "sched/builtin"
-#ifdef HAVE_BG		/* Blue Gene specific default configuration parameters */
-#  define DEFAULT_SELECT_TYPE       "select/bluegene"
+#ifdef HAVE_BG	/* Blue Gene specific default configuration parameters */
+#  ifdef HAVE_BGQ
+#     define DEFAULT_SELECT_TYPE       "select/bgq"
+#  else
+#     define DEFAULT_SELECT_TYPE       "select/bluegene"
+#  endif
 #else
-#  define DEFAULT_SELECT_TYPE       "select/linear"
+#  ifdef HAVE_CRAY /* Cray specific default configuration parameters */
+#     define DEFAULT_SELECT_TYPE       "select/cray"
+#  else
+#     define DEFAULT_SELECT_TYPE       "select/linear"
+#  endif
 #endif
 #define DEFAULT_SLURMCTLD_PIDFILE   "/var/run/slurmctld.pid"
 #define DEFAULT_SLURMCTLD_TIMEOUT   120
@@ -146,7 +155,8 @@ typedef struct slurm_conf_node {
 	char *nodenames;
 	char *hostnames;
 	char *addresses;
-	char *feature;		/* arbitrary list of features associated */
+	char *gres;		/* arbitrary list of node's generic resources */
+	char *feature;		/* arbitrary list of node's features */
 	uint16_t port;
 	uint16_t cpus;		/* count of cpus running on the node */
 	uint16_t sockets;       /* number of sockets per node */
@@ -166,6 +176,7 @@ typedef struct slurm_conf_partition {
 				 * NULL indicates all */
 	char *allow_groups;	/* comma delimited list of groups,
 				 * NULL indicates all */
+	char *alternate;	/* name of alternate partition */
 	bool default_flag;	/* Set if default partition */
 	uint32_t default_time;	/* minutes or INFINITE */
 	uint16_t disable_root_jobs; /* if set then user root can't run
@@ -179,10 +190,11 @@ typedef struct slurm_conf_partition {
 	uint32_t min_nodes;	/* per job */
 	char	*name;		/* name of the partition */
 	char 	*nodes;		/* comma delimited list names of nodes */
+	uint16_t preempt_mode;	/* See PREEMPT_MODE_* in slurm/slurm.h */
 	uint16_t priority;	/* scheduling priority for jobs */
 	bool     root_only_flag;/* 1 if allocate/submit RPC can only be
 				   issued by user root */
-	bool     state_up_flag;	/* 1 if state is up, 0 if down */
+	uint16_t state_up;	/* for states see PARTITION_* in slurm.h */
 	uint32_t total_nodes;	/* total number of nodes in the partition */
 	uint32_t total_cpus;	/* total number of cpus in the partition */
 } slurm_conf_partition_t;
@@ -314,13 +326,13 @@ extern char *slurm_conf_get_aliased_nodename(void);
 extern uint16_t slurm_conf_get_port(const char *node_name);
 
 /*
- * slurm_conf_get_addr - Return the slurm_addr for a given NodeName in
+ * slurm_conf_get_addr - Return the slurm_addr_t for a given NodeName in
  *	the parameter "address".  The return code is SLURM_SUCCESS on success,
  *	and SLURM_FAILURE if the address lookup failed.
  *
  * NOTE: Caller must NOT be holding slurm_conf_lock().
  */
-extern int slurm_conf_get_addr(const char *node_name, slurm_addr *address);
+extern int slurm_conf_get_addr(const char *node_name, slurm_addr_t *address);
 
 /*
  * slurm_conf_get_cpus_sct -

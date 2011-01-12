@@ -7,7 +7,7 @@
 #          "FAILURE: ..." otherwise with an explanation of the failure, OR
 #          anything else indicates a failure mode that must be investigated.
 ############################################################################
-# Copyright (C) 2008 Lawrence Livermore National Security.
+# Copyright (C) 2008-2010 Lawrence Livermore National Security.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Joseph Donaghy <donaghy1@llnl.gov>
 # CODE-OCEC-09-009. All rights reserved.
@@ -55,8 +55,7 @@ set mj		MaxJobs
 set ms		MaxSubmitJobs
 set mn		MaxNodes
 set mw		MaxWall
-set clu		cluster
-set tc1		tcluster1
+set tc1		slurm_test-cluster.1
 set fs1		2500
 set gc1		50
 set gj1		100
@@ -91,7 +90,7 @@ if { [string compare [check_accounting_admin_level] "Administrator"] } {
 	set nothing 0
 	set matches 0
 
-set my_pid [spawn $sacctmgr -i $del $clu $tc1]
+set my_pid [spawn $sacctmgr -i $del cluster $tc1]
 
 	expect {
 		-re "privilege to perform this action" {
@@ -149,9 +148,10 @@ set my_pid [spawn $sacctmgr -i $del $clu $tc1]
 #
 # Use sacctmgr to create a cluster
 #
-set sadd_pid [spawn $sacctmgr -i add $clu $nams=$tc1 $fs=$fs1 \
-$gc=$gc1 $gj=$gj1 $gn=$gn1 $gs=$gs1 $mc=$mc1 $mm=$mm1 \
-$mj=$mj1 $ms=$ms1 $mn=$mn1 $mw=$mw1]
+set bad_name 0
+set sadd_pid [spawn $sacctmgr -i add cluster name=$tc1 fairshare=$fs1 \
+GrpCPUs=$gc1 GrpJobs=$gj1 GrpNodes=$gn1 GrpSubmitJobs=$gs1 MaxCPUs=$mc1 MaxCPUMins=$mm1 \
+MaxJobs=$mj1 MaxSubmitJobs=$ms1 MaxNodes=$mn1 MaxWall=$mw1]
 expect {
 	-re "privilege to preform this action" {
 		set access_err 1
@@ -213,6 +213,10 @@ expect {
 		incr amatches
 		exp_continue
 	}
+	-re "No '.' in name allowed" {
+		set bad_name 1
+		exp_continue
+	}
 	timeout {
 		send_user "\nFAILURE: sacctmgr add not responding\n"
 		slow_kill $sadd_pid
@@ -222,6 +226,14 @@ expect {
 		wait
 	}
 }
+
+if {$bad_name != 0} {
+	send_user "\nWARNING: The version of your database is too old to"
+	send_user "\n         handle a '.' in the name of the cluster."
+	send_user "\n         Please upgrade at your earliest convienence.\n"
+	exit $exit_code
+}
+
 if {$access_err != 0} {
 	send_user "\nWARNING: not authorized to perform this test\n"
 	exit $exit_code
@@ -238,7 +250,7 @@ if { ![check_acct_associations] } {
 #
 # Use sacctmgr to delete the test cluster
 #
-set sadel_pid [spawn $sacctmgr -i $del $clu $tc1]
+set sadel_pid [spawn $sacctmgr -i $del cluster $tc1]
 expect {
 	-re "Deleting clusters" {
 		incr dmatches
@@ -269,7 +281,7 @@ if { ![check_acct_associations] } {
 }
 
 if {$exit_code == 0} {
-	send_user "\nSUCCESS\n"
+	print_success $test_id
 }
 
 exit $exit_code

@@ -60,6 +60,7 @@ am__aclocal_m4_deps = $(top_srcdir)/auxdir/acx_pthread.m4 \
 	$(top_srcdir)/auxdir/x_ac_env.m4 \
 	$(top_srcdir)/auxdir/x_ac_federation.m4 \
 	$(top_srcdir)/auxdir/x_ac_gpl_licensed.m4 \
+	$(top_srcdir)/auxdir/x_ac_hwloc.m4 \
 	$(top_srcdir)/auxdir/x_ac_iso.m4 \
 	$(top_srcdir)/auxdir/x_ac_lua.m4 \
 	$(top_srcdir)/auxdir/x_ac_munge.m4 \
@@ -105,15 +106,48 @@ am__installdirs = "$(DESTDIR)$(pkglibdir)"
 LTLIBRARIES = $(pkglib_LTLIBRARIES)
 am__DEPENDENCIES_1 =
 @WITH_PGSQL_TRUE@accounting_storage_pgsql_la_DEPENDENCIES = $(top_builddir)/src/database/libslurm_pgsql.la \
-@WITH_PGSQL_TRUE@	$(am__DEPENDENCIES_1)
+@WITH_PGSQL_TRUE@	$(am__DEPENDENCIES_1) \
+@WITH_PGSQL_TRUE@	../common/libaccounting_storage_common.la
 am__accounting_storage_pgsql_la_SOURCES_DIST =  \
-	accounting_storage_pgsql.c pgsql_jobacct_process.c \
-	pgsql_jobacct_process.h
-@WITH_PGSQL_TRUE@am_accounting_storage_pgsql_la_OBJECTS = accounting_storage_pgsql_la-accounting_storage_pgsql.lo \
-@WITH_PGSQL_TRUE@	accounting_storage_pgsql_la-pgsql_jobacct_process.lo
+	accounting_storage_pgsql.c accounting_storage_pgsql.h \
+	as_pg_common.c as_pg_common.h as_pg_acct.c as_pg_acct.h \
+	as_pg_archive.c as_pg_archive.h as_pg_assoc.c as_pg_assoc.h \
+	as_pg_cluster.c as_pg_cluster.h as_pg_event.c as_pg_event.h \
+	as_pg_get_jobs.c as_pg_get_jobs.h as_pg_job.c as_pg_job.h \
+	as_pg_problem.c as_pg_problem.h as_pg_qos.c as_pg_qos.h \
+	as_pg_resv.c as_pg_resv.h as_pg_rollup.c as_pg_rollup.h \
+	as_pg_txn.c as_pg_txn.h as_pg_usage.c as_pg_usage.h \
+	as_pg_user.c as_pg_user.h as_pg_wckey.c as_pg_wckey.h
+am__objects_1 =  \
+	accounting_storage_pgsql_la-accounting_storage_pgsql.lo \
+	accounting_storage_pgsql_la-as_pg_common.lo \
+	accounting_storage_pgsql_la-as_pg_acct.lo \
+	accounting_storage_pgsql_la-as_pg_archive.lo \
+	accounting_storage_pgsql_la-as_pg_assoc.lo \
+	accounting_storage_pgsql_la-as_pg_cluster.lo \
+	accounting_storage_pgsql_la-as_pg_event.lo \
+	accounting_storage_pgsql_la-as_pg_get_jobs.lo \
+	accounting_storage_pgsql_la-as_pg_job.lo \
+	accounting_storage_pgsql_la-as_pg_problem.lo \
+	accounting_storage_pgsql_la-as_pg_qos.lo \
+	accounting_storage_pgsql_la-as_pg_resv.lo \
+	accounting_storage_pgsql_la-as_pg_rollup.lo \
+	accounting_storage_pgsql_la-as_pg_txn.lo \
+	accounting_storage_pgsql_la-as_pg_usage.lo \
+	accounting_storage_pgsql_la-as_pg_user.lo \
+	accounting_storage_pgsql_la-as_pg_wckey.lo
+@WITH_PGSQL_TRUE@am_accounting_storage_pgsql_la_OBJECTS =  \
+@WITH_PGSQL_TRUE@	$(am__objects_1)
 am__EXTRA_accounting_storage_pgsql_la_SOURCES_DIST =  \
-	accounting_storage_pgsql.c pgsql_jobacct_process.c \
-	pgsql_jobacct_process.h
+	accounting_storage_pgsql.c accounting_storage_pgsql.h \
+	as_pg_common.c as_pg_common.h as_pg_acct.c as_pg_acct.h \
+	as_pg_archive.c as_pg_archive.h as_pg_assoc.c as_pg_assoc.h \
+	as_pg_cluster.c as_pg_cluster.h as_pg_event.c as_pg_event.h \
+	as_pg_get_jobs.c as_pg_get_jobs.h as_pg_job.c as_pg_job.h \
+	as_pg_problem.c as_pg_problem.h as_pg_qos.c as_pg_qos.h \
+	as_pg_resv.c as_pg_resv.h as_pg_rollup.c as_pg_rollup.h \
+	as_pg_txn.c as_pg_txn.h as_pg_usage.c as_pg_usage.h \
+	as_pg_user.c as_pg_user.h as_pg_wckey.c as_pg_wckey.h
 accounting_storage_pgsql_la_OBJECTS =  \
 	$(am_accounting_storage_pgsql_la_OBJECTS)
 accounting_storage_pgsql_la_LINK = $(LIBTOOL) --tag=CC \
@@ -191,6 +225,9 @@ HAVE_ELAN = @HAVE_ELAN@
 HAVE_FEDERATION = @HAVE_FEDERATION@
 HAVE_OPENSSL = @HAVE_OPENSSL@
 HAVE_SOME_CURSES = @HAVE_SOME_CURSES@
+HWLOC_CPPFLAGS = @HWLOC_CPPFLAGS@
+HWLOC_LDFLAGS = @HWLOC_LDFLAGS@
+HWLOC_LIBS = @HWLOC_LIBS@
 INSTALL = @INSTALL@
 INSTALL_DATA = @INSTALL_DATA@
 INSTALL_PROGRAM = @INSTALL_PROGRAM@
@@ -234,7 +271,8 @@ PATH_SEPARATOR = @PATH_SEPARATOR@
 PGSQL_CFLAGS = @PGSQL_CFLAGS@
 PGSQL_LIBS = @PGSQL_LIBS@
 PKG_CONFIG = @PKG_CONFIG@
-PLPA_LIBS = @PLPA_LIBS@
+PKG_CONFIG_LIBDIR = @PKG_CONFIG_LIBDIR@
+PKG_CONFIG_PATH = @PKG_CONFIG_PATH@
 PROCTRACKDIR = @PROCTRACKDIR@
 PROJECT = @PROJECT@
 PTHREAD_CC = @PTHREAD_CC@
@@ -249,6 +287,7 @@ SEMAPHORE_SOURCES = @SEMAPHORE_SOURCES@
 SET_MAKE = @SET_MAKE@
 SHELL = @SHELL@
 SLURMCTLD_PORT = @SLURMCTLD_PORT@
+SLURMCTLD_PORT_COUNT = @SLURMCTLD_PORT_COUNT@
 SLURMDBD_PORT = @SLURMDBD_PORT@
 SLURMD_PORT = @SLURMD_PORT@
 SLURM_API_AGE = @SLURM_API_AGE@
@@ -260,7 +299,7 @@ SLURM_MAJOR = @SLURM_MAJOR@
 SLURM_MICRO = @SLURM_MICRO@
 SLURM_MINOR = @SLURM_MINOR@
 SLURM_PREFIX = @SLURM_PREFIX@
-SLURM_VERSION = @SLURM_VERSION@
+SLURM_VERSION_NUMBER = @SLURM_VERSION_NUMBER@
 SLURM_VERSION_STRING = @SLURM_VERSION_STRING@
 SO_LDFLAGS = @SO_LDFLAGS@
 SSL_CPPFLAGS = @SSL_CPPFLAGS@
@@ -331,20 +370,35 @@ top_srcdir = @top_srcdir@
 AUTOMAKE_OPTIONS = foreign
 PLUGIN_FLAGS = -module -avoid-version --export-dynamic
 INCLUDES = -I$(top_srcdir) -I$(top_srcdir)/src/common
+AS_PG_SOURCES = accounting_storage_pgsql.c accounting_storage_pgsql.h \
+	       as_pg_common.c as_pg_common.h \
+	       as_pg_acct.c as_pg_acct.h \
+	       as_pg_archive.c as_pg_archive.h \
+	       as_pg_assoc.c as_pg_assoc.h \
+	       as_pg_cluster.c as_pg_cluster.h \
+	       as_pg_event.c as_pg_event.h \
+	       as_pg_get_jobs.c as_pg_get_jobs.h \
+	       as_pg_job.c as_pg_job.h \
+	       as_pg_problem.c as_pg_problem.h \
+	       as_pg_qos.c as_pg_qos.h \
+	       as_pg_resv.c as_pg_resv.h \
+	       as_pg_rollup.c as_pg_rollup.h \
+	       as_pg_txn.c as_pg_txn.h \
+	       as_pg_usage.c as_pg_usage.h \
+	       as_pg_user.c as_pg_user.h \
+	       as_pg_wckey.c as_pg_wckey.h
+
 @WITH_PGSQL_TRUE@pkglib_LTLIBRARIES = accounting_storage_pgsql.la
 
 # Pgsql storage plugin.
-@WITH_PGSQL_TRUE@accounting_storage_pgsql_la_SOURCES = accounting_storage_pgsql.c \
-@WITH_PGSQL_TRUE@		pgsql_jobacct_process.c pgsql_jobacct_process.h
-
+@WITH_PGSQL_TRUE@accounting_storage_pgsql_la_SOURCES = $(AS_PG_SOURCES)
 @WITH_PGSQL_TRUE@accounting_storage_pgsql_la_LDFLAGS = $(SO_LDFLAGS) $(PLUGIN_FLAGS)
 @WITH_PGSQL_TRUE@accounting_storage_pgsql_la_CFLAGS = $(PGSQL_CFLAGS)
 @WITH_PGSQL_TRUE@accounting_storage_pgsql_la_LIBADD = \
-@WITH_PGSQL_TRUE@	$(top_builddir)/src/database/libslurm_pgsql.la $(PGSQL_LIBS)
+@WITH_PGSQL_TRUE@	$(top_builddir)/src/database/libslurm_pgsql.la $(PGSQL_LIBS) \
+@WITH_PGSQL_TRUE@	../common/libaccounting_storage_common.la
 
-@WITH_PGSQL_FALSE@EXTRA_accounting_storage_pgsql_la_SOURCES = accounting_storage_pgsql.c \
-@WITH_PGSQL_FALSE@		pgsql_jobacct_process.c pgsql_jobacct_process.h
-
+@WITH_PGSQL_FALSE@EXTRA_accounting_storage_pgsql_la_SOURCES = $(AS_PG_SOURCES)
 all: all-am
 
 .SUFFIXES:
@@ -420,7 +474,22 @@ distclean-compile:
 	-rm -f *.tab.c
 
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/accounting_storage_pgsql_la-accounting_storage_pgsql.Plo@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/accounting_storage_pgsql_la-pgsql_jobacct_process.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/accounting_storage_pgsql_la-as_pg_acct.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/accounting_storage_pgsql_la-as_pg_archive.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/accounting_storage_pgsql_la-as_pg_assoc.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/accounting_storage_pgsql_la-as_pg_cluster.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/accounting_storage_pgsql_la-as_pg_common.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/accounting_storage_pgsql_la-as_pg_event.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/accounting_storage_pgsql_la-as_pg_get_jobs.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/accounting_storage_pgsql_la-as_pg_job.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/accounting_storage_pgsql_la-as_pg_problem.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/accounting_storage_pgsql_la-as_pg_qos.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/accounting_storage_pgsql_la-as_pg_resv.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/accounting_storage_pgsql_la-as_pg_rollup.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/accounting_storage_pgsql_la-as_pg_txn.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/accounting_storage_pgsql_la-as_pg_usage.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/accounting_storage_pgsql_la-as_pg_user.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/accounting_storage_pgsql_la-as_pg_wckey.Plo@am__quote@
 
 .c.o:
 @am__fastdepCC_TRUE@	$(COMPILE) -MT $@ -MD -MP -MF $(DEPDIR)/$*.Tpo -c -o $@ $<
@@ -450,12 +519,117 @@ accounting_storage_pgsql_la-accounting_storage_pgsql.lo: accounting_storage_pgsq
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -c -o accounting_storage_pgsql_la-accounting_storage_pgsql.lo `test -f 'accounting_storage_pgsql.c' || echo '$(srcdir)/'`accounting_storage_pgsql.c
 
-accounting_storage_pgsql_la-pgsql_jobacct_process.lo: pgsql_jobacct_process.c
-@am__fastdepCC_TRUE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -MT accounting_storage_pgsql_la-pgsql_jobacct_process.lo -MD -MP -MF $(DEPDIR)/accounting_storage_pgsql_la-pgsql_jobacct_process.Tpo -c -o accounting_storage_pgsql_la-pgsql_jobacct_process.lo `test -f 'pgsql_jobacct_process.c' || echo '$(srcdir)/'`pgsql_jobacct_process.c
-@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/accounting_storage_pgsql_la-pgsql_jobacct_process.Tpo $(DEPDIR)/accounting_storage_pgsql_la-pgsql_jobacct_process.Plo
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='pgsql_jobacct_process.c' object='accounting_storage_pgsql_la-pgsql_jobacct_process.lo' libtool=yes @AMDEPBACKSLASH@
+accounting_storage_pgsql_la-as_pg_common.lo: as_pg_common.c
+@am__fastdepCC_TRUE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -MT accounting_storage_pgsql_la-as_pg_common.lo -MD -MP -MF $(DEPDIR)/accounting_storage_pgsql_la-as_pg_common.Tpo -c -o accounting_storage_pgsql_la-as_pg_common.lo `test -f 'as_pg_common.c' || echo '$(srcdir)/'`as_pg_common.c
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/accounting_storage_pgsql_la-as_pg_common.Tpo $(DEPDIR)/accounting_storage_pgsql_la-as_pg_common.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='as_pg_common.c' object='accounting_storage_pgsql_la-as_pg_common.lo' libtool=yes @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
-@am__fastdepCC_FALSE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -c -o accounting_storage_pgsql_la-pgsql_jobacct_process.lo `test -f 'pgsql_jobacct_process.c' || echo '$(srcdir)/'`pgsql_jobacct_process.c
+@am__fastdepCC_FALSE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -c -o accounting_storage_pgsql_la-as_pg_common.lo `test -f 'as_pg_common.c' || echo '$(srcdir)/'`as_pg_common.c
+
+accounting_storage_pgsql_la-as_pg_acct.lo: as_pg_acct.c
+@am__fastdepCC_TRUE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -MT accounting_storage_pgsql_la-as_pg_acct.lo -MD -MP -MF $(DEPDIR)/accounting_storage_pgsql_la-as_pg_acct.Tpo -c -o accounting_storage_pgsql_la-as_pg_acct.lo `test -f 'as_pg_acct.c' || echo '$(srcdir)/'`as_pg_acct.c
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/accounting_storage_pgsql_la-as_pg_acct.Tpo $(DEPDIR)/accounting_storage_pgsql_la-as_pg_acct.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='as_pg_acct.c' object='accounting_storage_pgsql_la-as_pg_acct.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -c -o accounting_storage_pgsql_la-as_pg_acct.lo `test -f 'as_pg_acct.c' || echo '$(srcdir)/'`as_pg_acct.c
+
+accounting_storage_pgsql_la-as_pg_archive.lo: as_pg_archive.c
+@am__fastdepCC_TRUE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -MT accounting_storage_pgsql_la-as_pg_archive.lo -MD -MP -MF $(DEPDIR)/accounting_storage_pgsql_la-as_pg_archive.Tpo -c -o accounting_storage_pgsql_la-as_pg_archive.lo `test -f 'as_pg_archive.c' || echo '$(srcdir)/'`as_pg_archive.c
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/accounting_storage_pgsql_la-as_pg_archive.Tpo $(DEPDIR)/accounting_storage_pgsql_la-as_pg_archive.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='as_pg_archive.c' object='accounting_storage_pgsql_la-as_pg_archive.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -c -o accounting_storage_pgsql_la-as_pg_archive.lo `test -f 'as_pg_archive.c' || echo '$(srcdir)/'`as_pg_archive.c
+
+accounting_storage_pgsql_la-as_pg_assoc.lo: as_pg_assoc.c
+@am__fastdepCC_TRUE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -MT accounting_storage_pgsql_la-as_pg_assoc.lo -MD -MP -MF $(DEPDIR)/accounting_storage_pgsql_la-as_pg_assoc.Tpo -c -o accounting_storage_pgsql_la-as_pg_assoc.lo `test -f 'as_pg_assoc.c' || echo '$(srcdir)/'`as_pg_assoc.c
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/accounting_storage_pgsql_la-as_pg_assoc.Tpo $(DEPDIR)/accounting_storage_pgsql_la-as_pg_assoc.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='as_pg_assoc.c' object='accounting_storage_pgsql_la-as_pg_assoc.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -c -o accounting_storage_pgsql_la-as_pg_assoc.lo `test -f 'as_pg_assoc.c' || echo '$(srcdir)/'`as_pg_assoc.c
+
+accounting_storage_pgsql_la-as_pg_cluster.lo: as_pg_cluster.c
+@am__fastdepCC_TRUE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -MT accounting_storage_pgsql_la-as_pg_cluster.lo -MD -MP -MF $(DEPDIR)/accounting_storage_pgsql_la-as_pg_cluster.Tpo -c -o accounting_storage_pgsql_la-as_pg_cluster.lo `test -f 'as_pg_cluster.c' || echo '$(srcdir)/'`as_pg_cluster.c
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/accounting_storage_pgsql_la-as_pg_cluster.Tpo $(DEPDIR)/accounting_storage_pgsql_la-as_pg_cluster.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='as_pg_cluster.c' object='accounting_storage_pgsql_la-as_pg_cluster.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -c -o accounting_storage_pgsql_la-as_pg_cluster.lo `test -f 'as_pg_cluster.c' || echo '$(srcdir)/'`as_pg_cluster.c
+
+accounting_storage_pgsql_la-as_pg_event.lo: as_pg_event.c
+@am__fastdepCC_TRUE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -MT accounting_storage_pgsql_la-as_pg_event.lo -MD -MP -MF $(DEPDIR)/accounting_storage_pgsql_la-as_pg_event.Tpo -c -o accounting_storage_pgsql_la-as_pg_event.lo `test -f 'as_pg_event.c' || echo '$(srcdir)/'`as_pg_event.c
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/accounting_storage_pgsql_la-as_pg_event.Tpo $(DEPDIR)/accounting_storage_pgsql_la-as_pg_event.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='as_pg_event.c' object='accounting_storage_pgsql_la-as_pg_event.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -c -o accounting_storage_pgsql_la-as_pg_event.lo `test -f 'as_pg_event.c' || echo '$(srcdir)/'`as_pg_event.c
+
+accounting_storage_pgsql_la-as_pg_get_jobs.lo: as_pg_get_jobs.c
+@am__fastdepCC_TRUE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -MT accounting_storage_pgsql_la-as_pg_get_jobs.lo -MD -MP -MF $(DEPDIR)/accounting_storage_pgsql_la-as_pg_get_jobs.Tpo -c -o accounting_storage_pgsql_la-as_pg_get_jobs.lo `test -f 'as_pg_get_jobs.c' || echo '$(srcdir)/'`as_pg_get_jobs.c
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/accounting_storage_pgsql_la-as_pg_get_jobs.Tpo $(DEPDIR)/accounting_storage_pgsql_la-as_pg_get_jobs.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='as_pg_get_jobs.c' object='accounting_storage_pgsql_la-as_pg_get_jobs.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -c -o accounting_storage_pgsql_la-as_pg_get_jobs.lo `test -f 'as_pg_get_jobs.c' || echo '$(srcdir)/'`as_pg_get_jobs.c
+
+accounting_storage_pgsql_la-as_pg_job.lo: as_pg_job.c
+@am__fastdepCC_TRUE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -MT accounting_storage_pgsql_la-as_pg_job.lo -MD -MP -MF $(DEPDIR)/accounting_storage_pgsql_la-as_pg_job.Tpo -c -o accounting_storage_pgsql_la-as_pg_job.lo `test -f 'as_pg_job.c' || echo '$(srcdir)/'`as_pg_job.c
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/accounting_storage_pgsql_la-as_pg_job.Tpo $(DEPDIR)/accounting_storage_pgsql_la-as_pg_job.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='as_pg_job.c' object='accounting_storage_pgsql_la-as_pg_job.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -c -o accounting_storage_pgsql_la-as_pg_job.lo `test -f 'as_pg_job.c' || echo '$(srcdir)/'`as_pg_job.c
+
+accounting_storage_pgsql_la-as_pg_problem.lo: as_pg_problem.c
+@am__fastdepCC_TRUE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -MT accounting_storage_pgsql_la-as_pg_problem.lo -MD -MP -MF $(DEPDIR)/accounting_storage_pgsql_la-as_pg_problem.Tpo -c -o accounting_storage_pgsql_la-as_pg_problem.lo `test -f 'as_pg_problem.c' || echo '$(srcdir)/'`as_pg_problem.c
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/accounting_storage_pgsql_la-as_pg_problem.Tpo $(DEPDIR)/accounting_storage_pgsql_la-as_pg_problem.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='as_pg_problem.c' object='accounting_storage_pgsql_la-as_pg_problem.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -c -o accounting_storage_pgsql_la-as_pg_problem.lo `test -f 'as_pg_problem.c' || echo '$(srcdir)/'`as_pg_problem.c
+
+accounting_storage_pgsql_la-as_pg_qos.lo: as_pg_qos.c
+@am__fastdepCC_TRUE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -MT accounting_storage_pgsql_la-as_pg_qos.lo -MD -MP -MF $(DEPDIR)/accounting_storage_pgsql_la-as_pg_qos.Tpo -c -o accounting_storage_pgsql_la-as_pg_qos.lo `test -f 'as_pg_qos.c' || echo '$(srcdir)/'`as_pg_qos.c
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/accounting_storage_pgsql_la-as_pg_qos.Tpo $(DEPDIR)/accounting_storage_pgsql_la-as_pg_qos.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='as_pg_qos.c' object='accounting_storage_pgsql_la-as_pg_qos.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -c -o accounting_storage_pgsql_la-as_pg_qos.lo `test -f 'as_pg_qos.c' || echo '$(srcdir)/'`as_pg_qos.c
+
+accounting_storage_pgsql_la-as_pg_resv.lo: as_pg_resv.c
+@am__fastdepCC_TRUE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -MT accounting_storage_pgsql_la-as_pg_resv.lo -MD -MP -MF $(DEPDIR)/accounting_storage_pgsql_la-as_pg_resv.Tpo -c -o accounting_storage_pgsql_la-as_pg_resv.lo `test -f 'as_pg_resv.c' || echo '$(srcdir)/'`as_pg_resv.c
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/accounting_storage_pgsql_la-as_pg_resv.Tpo $(DEPDIR)/accounting_storage_pgsql_la-as_pg_resv.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='as_pg_resv.c' object='accounting_storage_pgsql_la-as_pg_resv.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -c -o accounting_storage_pgsql_la-as_pg_resv.lo `test -f 'as_pg_resv.c' || echo '$(srcdir)/'`as_pg_resv.c
+
+accounting_storage_pgsql_la-as_pg_rollup.lo: as_pg_rollup.c
+@am__fastdepCC_TRUE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -MT accounting_storage_pgsql_la-as_pg_rollup.lo -MD -MP -MF $(DEPDIR)/accounting_storage_pgsql_la-as_pg_rollup.Tpo -c -o accounting_storage_pgsql_la-as_pg_rollup.lo `test -f 'as_pg_rollup.c' || echo '$(srcdir)/'`as_pg_rollup.c
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/accounting_storage_pgsql_la-as_pg_rollup.Tpo $(DEPDIR)/accounting_storage_pgsql_la-as_pg_rollup.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='as_pg_rollup.c' object='accounting_storage_pgsql_la-as_pg_rollup.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -c -o accounting_storage_pgsql_la-as_pg_rollup.lo `test -f 'as_pg_rollup.c' || echo '$(srcdir)/'`as_pg_rollup.c
+
+accounting_storage_pgsql_la-as_pg_txn.lo: as_pg_txn.c
+@am__fastdepCC_TRUE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -MT accounting_storage_pgsql_la-as_pg_txn.lo -MD -MP -MF $(DEPDIR)/accounting_storage_pgsql_la-as_pg_txn.Tpo -c -o accounting_storage_pgsql_la-as_pg_txn.lo `test -f 'as_pg_txn.c' || echo '$(srcdir)/'`as_pg_txn.c
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/accounting_storage_pgsql_la-as_pg_txn.Tpo $(DEPDIR)/accounting_storage_pgsql_la-as_pg_txn.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='as_pg_txn.c' object='accounting_storage_pgsql_la-as_pg_txn.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -c -o accounting_storage_pgsql_la-as_pg_txn.lo `test -f 'as_pg_txn.c' || echo '$(srcdir)/'`as_pg_txn.c
+
+accounting_storage_pgsql_la-as_pg_usage.lo: as_pg_usage.c
+@am__fastdepCC_TRUE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -MT accounting_storage_pgsql_la-as_pg_usage.lo -MD -MP -MF $(DEPDIR)/accounting_storage_pgsql_la-as_pg_usage.Tpo -c -o accounting_storage_pgsql_la-as_pg_usage.lo `test -f 'as_pg_usage.c' || echo '$(srcdir)/'`as_pg_usage.c
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/accounting_storage_pgsql_la-as_pg_usage.Tpo $(DEPDIR)/accounting_storage_pgsql_la-as_pg_usage.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='as_pg_usage.c' object='accounting_storage_pgsql_la-as_pg_usage.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -c -o accounting_storage_pgsql_la-as_pg_usage.lo `test -f 'as_pg_usage.c' || echo '$(srcdir)/'`as_pg_usage.c
+
+accounting_storage_pgsql_la-as_pg_user.lo: as_pg_user.c
+@am__fastdepCC_TRUE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -MT accounting_storage_pgsql_la-as_pg_user.lo -MD -MP -MF $(DEPDIR)/accounting_storage_pgsql_la-as_pg_user.Tpo -c -o accounting_storage_pgsql_la-as_pg_user.lo `test -f 'as_pg_user.c' || echo '$(srcdir)/'`as_pg_user.c
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/accounting_storage_pgsql_la-as_pg_user.Tpo $(DEPDIR)/accounting_storage_pgsql_la-as_pg_user.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='as_pg_user.c' object='accounting_storage_pgsql_la-as_pg_user.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -c -o accounting_storage_pgsql_la-as_pg_user.lo `test -f 'as_pg_user.c' || echo '$(srcdir)/'`as_pg_user.c
+
+accounting_storage_pgsql_la-as_pg_wckey.lo: as_pg_wckey.c
+@am__fastdepCC_TRUE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -MT accounting_storage_pgsql_la-as_pg_wckey.lo -MD -MP -MF $(DEPDIR)/accounting_storage_pgsql_la-as_pg_wckey.Tpo -c -o accounting_storage_pgsql_la-as_pg_wckey.lo `test -f 'as_pg_wckey.c' || echo '$(srcdir)/'`as_pg_wckey.c
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/accounting_storage_pgsql_la-as_pg_wckey.Tpo $(DEPDIR)/accounting_storage_pgsql_la-as_pg_wckey.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='as_pg_wckey.c' object='accounting_storage_pgsql_la-as_pg_wckey.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(LIBTOOL)  --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(accounting_storage_pgsql_la_CFLAGS) $(CFLAGS) -c -o accounting_storage_pgsql_la-as_pg_wckey.lo `test -f 'as_pg_wckey.c' || echo '$(srcdir)/'`as_pg_wckey.c
 
 mostlyclean-libtool:
 	-rm -f *.lo

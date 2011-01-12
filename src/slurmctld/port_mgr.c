@@ -169,7 +169,7 @@ extern int reserve_port_config(char *mpi_params)
 		if (port_resv_table) {
 			info("Clearing port reservations");
 			for (i=0; i<port_resv_cnt; i++)
-				bit_free(port_resv_table[i]);
+				FREE_NULL_BITMAP(port_resv_table[i]);
 			xfree(port_resv_table);
 			port_resv_cnt = 0;
 			port_resv_min = port_resv_max = 0;
@@ -266,12 +266,7 @@ extern int resv_port_alloc(struct step_record *step_ptr)
 		hostlist_push(hl, port_str);
 	}
 	hostlist_sort(hl);
-	for (i=1024; ; i*=2) {
-		step_ptr->resv_ports = xmalloc(i);
-		if (hostlist_ranged_string(hl, i, step_ptr->resv_ports) >= 0)
-			break;
-		xfree(step_ptr->resv_ports);
-	}
+	step_ptr->resv_ports = hostlist_ranged_string_xmalloc(hl);
 	hostlist_destroy(hl);
 	step_ptr->resv_port_array = port_array;
 

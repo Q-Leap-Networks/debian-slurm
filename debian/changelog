@@ -1,3 +1,11 @@
+slurm-llnl (2.2.0-1) unstable; urgency=low
+
+  * New upstream major release 
+  * libsurm22{,-dev} replace libsurm21{,-dev}
+  * New libsurmdb22{,-dev} package
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Wed, 12 Jan 2011 13:25:42 +0100
+
 slurm-llnl (2.1.16-2) unstable; urgency=low
 
   * Making slurm-llnl{,-slurmdbd} postrm scripts independent by ucf

@@ -2,7 +2,8 @@
  *  slurmctld.h - definitions of functions and structures for slurmcltd use
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
+ *  Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
@@ -84,46 +85,60 @@
 /*****************************************************************************\
  *  GENERAL CONFIGURATION parameters and data structures
 \*****************************************************************************/
-/* Maximum parallel threads to service incoming RPCs */
-#define MAX_SERVER_THREADS 100
-
-/* Maximum size we want to support for user strings (e.g. job comment).
- * Try to prevent user from filling slurmctld's memory */
-#define MAX_STR_LEN  64 * 1024
+/* Maximum parallel threads to service incoming RPCs.
+ * Since some systems schedule pthread on a First-In-Last-Out basis,
+ * increasing this value is strongly discouraged. */
+#ifndef MAX_SERVER_THREADS
+#define MAX_SERVER_THREADS 256
+#endif
 
 /* Perform full slurmctld's state every PERIODIC_CHECKPOINT seconds */
+#ifndef PERIODIC_CHECKPOINT
 #define	PERIODIC_CHECKPOINT	300
+#endif
 
 /* Retry an incomplete RPC agent request every RPC_RETRY_INTERVAL seconds */
+#ifndef RPC_RETRY_INTERVAL
 #define	RPC_RETRY_INTERVAL	60
+#endif
 
 /* Attempt to schedule jobs every PERIODIC_SCHEDULE seconds despite
  * any RPC activity. This will catch any state transisions that may
  * have otherwise been missed */
+#ifndef PERIODIC_SCHEDULE
 #define	PERIODIC_SCHEDULE	60
+#endif
 
 /* Check for jobs reaching their time limit every PERIODIC_TIMEOUT seconds */
+#ifndef PERIODIC_TIMEOUT
 #define	PERIODIC_TIMEOUT	30
+#endif
 
 /* Attempt to purge defunct job records and resend job kill requests
  * every PURGE_JOB_INTERVAL seconds */
+#ifndef PURGE_JOB_INTERVAL
 #define PURGE_JOB_INTERVAL 60
+#endif
 
 /* Process pending trigger events every TRIGGER_INTERVAL seconds */
+#ifndef TRIGGER_INTERVAL
 #define TRIGGER_INTERVAL 15
+#endif
 
 /* Report current node accounting state every PERIODIC_NODE_ACCT seconds */
+#ifndef PERIODIC_NODE_ACCT
 #define PERIODIC_NODE_ACCT 300
+#endif
 
 /* Pathname of group file record for checking update times */
+#ifndef GROUP_FILE
 #define GROUP_FILE	"/etc/group"
-
-/* Check for updates to GROUP_FILE every PERIODIC_GROUP_CHECK seconds,
- * Update the group uid_t access list as needed */
-#define	PERIODIC_GROUP_CHECK	600
+#endif
 
 /* Seconds to wait for backup controller response to REQUEST_CONTROL RPC */
+#ifndef CONTROL_TIMEOUT
 #define CONTROL_TIMEOUT 4	/* seconds */
+#endif
 
 /*****************************************************************************\
  *  General configuration parameters and data structures
@@ -160,7 +175,8 @@ extern char *slurmctld_cluster_name;	/* name of cluster */
 extern void *acct_db_conn;
 extern int   accounting_enforce;
 extern int   association_based_accounting;
-extern int   cluster_procs;
+extern uint32_t   cluster_cpus;
+extern int   with_slurmdbd;
 
 /*****************************************************************************\
  *  NODE parameters and data structures, mostly in src/common/node_conf.h
@@ -173,6 +189,7 @@ extern bool ping_nodes_now;		/* if set, ping nodes immediately */
  *
  *  avail_node_bitmap       Set if node's state is not DOWN, DRAINING/DRAINED,
  *                          FAILING or NO_RESPOND (i.e. available to run a job)
+ *  cg_node_bitmap          Set if node in completing state
  *  idle_node_bitmap        Set if node has no jobs allocated to it
  *  power_node_bitmap       Set for nodes which are powered down
  *  share_node_bitmap       Set if any job allocated resources on that node
@@ -183,6 +200,7 @@ extern bool ping_nodes_now;		/* if set, ping nodes immediately */
 \*****************************************************************************/
 extern bitstr_t *avail_node_bitmap;	/* bitmap of available nodes,
 					 * state not DOWN, DRAIN or FAILING */
+extern bitstr_t *cg_node_bitmap;	/* bitmap of completing nodes */
 extern bitstr_t *idle_node_bitmap;	/* bitmap of idle nodes */
 extern bitstr_t *power_node_bitmap;	/* Powered down nodes */
 extern bitstr_t *share_node_bitmap;	/* bitmap of sharable nodes */
@@ -194,36 +212,34 @@ extern bitstr_t *up_node_bitmap;	/* bitmap of up nodes, not DOWN */
 #define PART_MAGIC 0xaefe8495
 
 struct part_record {
-	uint16_t disable_root_jobs; /* if set then user root can't run jobs */
-	uint32_t magic;		/* magic cookie to test data integrity */
-	char *name;		/* name of the partition */
-	uint16_t hidden;	/* 1 if hidden by default */
-	uint32_t max_time;	/* minutes or INFINITE */
-	uint32_t default_time;	/* minutes, NO_VAL or INFINITE */
-	uint32_t max_nodes;	/* per job or INFINITE */
-	uint32_t max_nodes_orig;/* unscaled value (c-nodes on BlueGene) */
-	uint32_t min_nodes;	/* per job */
-	uint32_t min_nodes_orig;/* unscaled value (c-nodes on BlueGene) */
-	uint32_t total_nodes;	/* total number of nodes in the partition */
-	uint32_t total_cpus;	/* total number of cpus in the partition */
-	uint32_t min_offset;	/* select plugin min offset */
-	uint32_t max_offset;	/* select plugin max offset */
-	uint16_t root_only;	/* 1 if allocate/submit RPC can only be
-				   issued by user root */
-	uint16_t max_share;	/* number of jobs to gang schedule */
-	double   norm_priority;	/* normalized scheduling priority for
-				 * jobs (DON'T PACK) */
-	uint16_t priority;	/* scheduling priority for jobs */
-	uint16_t state_up;	/* 1 if state is up, 0 if down */
-	char *nodes;		/* comma delimited list names of nodes */
-	char *allow_groups;	/* comma delimited list of groups,
-				 * NULL indicates all */
 	char *allow_alloc_nodes;/* comma delimited list of allowed
 				 * allocating nodes
 				 * NULL indicates all */
-
+	char *allow_groups;	/* comma delimited list of groups,
+				 * NULL indicates all */
 	uid_t *allow_uids;	/* zero terminated list of allowed users */
+	char *alternate; 	/* name of alternate partition */
+	uint32_t default_time;	/* minutes, NO_VAL or INFINITE */
+	uint16_t flags;		/* see PART_FLAG_* in slurm.h */
+	uint32_t magic;		/* magic cookie to test data integrity */
+	uint32_t max_nodes;	/* per job or INFINITE */
+	uint32_t max_nodes_orig;/* unscaled value (c-nodes on BlueGene) */
+	uint32_t max_offset;	/* select plugin max offset */
+	uint16_t max_share;	/* number of jobs to gang schedule */
+	uint32_t max_time;	/* minutes or INFINITE */
+	uint32_t min_nodes;	/* per job */
+	uint32_t min_offset;	/* select plugin min offset */
+	uint32_t min_nodes_orig;/* unscaled value (c-nodes on BlueGene) */
+	char *name;		/* name of the partition */
 	bitstr_t *node_bitmap;	/* bitmap of nodes in partition */
+	char *nodes;		/* comma delimited list names of nodes */
+	double   norm_priority;	/* normalized scheduling priority for
+				 * jobs (DON'T PACK) */
+	uint16_t preempt_mode;	/* See PREEMPT_MODE_* in slurm/slurm.h */
+	uint16_t priority;	/* scheduling priority for jobs */
+	uint16_t state_up;	/* See PARTITION_* states in slurm.h */
+	uint32_t total_nodes;	/* total number of nodes in the partition */
+	uint32_t total_cpus;	/* total number of cpus in the partition */
 };
 
 extern List part_list;			/* list of part_record entries */
@@ -274,12 +290,11 @@ typedef struct slurmctld_resv {
 /*****************************************************************************\
  *  JOB parameters and data structures
 \*****************************************************************************/
-extern time_t last_job_update;	/* time of last update to part records */
+extern time_t last_job_update;	/* time of last update to job records */
 
 #define DETAILS_MAGIC	0xdea84e7
 #define JOB_MAGIC	0xf0b7392c
 #define STEP_MAGIC	0xce593bc1
-#define KILL_ON_STEP_DONE	1
 
 #define FEATURE_OP_OR  0
 #define FEATURE_OP_AND 1
@@ -317,17 +332,13 @@ struct job_details {
 	List feature_list;		/* required features with
 					 * node counts */
 	char *features;			/* required features */
-	/* job constraints: */
-	uint32_t job_min_cpus;		/* minimum processors per node */
-	uint32_t job_min_memory;	/* minimum memory per node (MB) OR
-					 * memory per allocated
-					 * CPU | MEM_PER_CPU */
-	uint32_t job_min_tmp_disk;	/* minimum tempdisk per node, MB */
 	uint32_t magic;			/* magic cookie for data integrity */
+	uint32_t max_cpus;		/* maximum number of cpus */
 	uint32_t max_nodes;		/* maximum number of nodes */
 	multi_core_data_t *mc_ptr;	/* multi-core specific data */
 	char *mem_bind;			/* binding map for map/mask_cpu */
 	uint16_t mem_bind_type;		/* see mem_bind_type_t */
+	uint32_t min_cpus;		/* minimum number of cpus */
 	uint32_t min_nodes;		/* minimum number of nodes */
 	uint16_t nice;		        /* requested priority change,
 					 * NICE_OFFSET == no change */
@@ -337,6 +348,12 @@ struct job_details {
 	uint8_t overcommit;		/* processors being over subscribed */
 	uint16_t plane_size;		/* plane size when task_dist =
 					 * SLURM_DIST_PLANE */
+	/* job constraints: */
+	uint32_t pn_min_cpus;		/* minimum processors per node */
+	uint32_t pn_min_memory;	        /* minimum memory per node (MB) OR
+					 * memory per allocated
+					 * CPU | MEM_PER_CPU */
+	uint32_t pn_min_tmp_disk;	/* minimum tempdisk per node, MB */
 	uint8_t prolog_running;		/* set while prolog_slurmctld is
 					 * running */
 	uint32_t reserved_resources;	/* CPU minutes of resources reserved
@@ -378,9 +395,10 @@ struct job_record {
 	time_t ckpt_time;	        /* last time job was periodically
 					 * checkpointed */
 	char *comment;			/* arbitrary comment */
-	uint32_t cpu_cnt;		/* current count of cpus held
-					 * by the job (N/A for
-					 * bluegene systems) */
+	uint32_t cpu_cnt;		/* current count of CPUs held
+					 * by the job, decremented while job is
+					 * completing (N/A for bluegene
+					 * systems) */
 	uint16_t cr_enabled;            /* specify if if Consumable Resources
                                          * is enabled. Needed since CR deals
                                          * with a finer granularity in its
@@ -391,6 +409,7 @@ struct job_record {
                                          * 1 if cr is enabled */
 	uint32_t db_index;              /* used only for database
 					 * plugins */
+	uint32_t derived_ec;		/* highest exit code of all job steps */
 	struct job_details *details;	/* job details */
 	uint16_t direct_set_prio;	/* Priority set directly if
 					 * set the system will not
@@ -399,18 +418,25 @@ struct job_record {
 					 * actual or expected */
 	uint32_t exit_code;		/* exit code for job (status from
 					 * wait call) */
+	char *gres;			/* generic resources */
+	List gres_list;			/* generic resource allocation detail */
 	uint32_t group_id;		/* group submitted under */
 	uint32_t job_id;		/* job ID */
 	struct job_record *job_next;	/* next entry with same hash index */
 	enum job_states job_state;	/* state of the job */
 	uint16_t kill_on_node_fail;	/* 1 if job should be killed on
 					 * node failure */
-	uint16_t kill_on_step_done;	/* 1 if job should be killed when
-					 * the job step completes, 2 if kill
-					 * in progress */
 	char *licenses;			/* licenses required by the job */
 	List license_list;		/* structure with license info */
-	bool limit_set_max_nodes;	/* if max_nodes was set from
+	uint16_t limit_set_max_cpus;	/* if max_cpus was set from
+					 * a limit false if user set */
+        uint16_t limit_set_max_nodes;	/* if max_nodes was set from
+					 * a limit false if user set */
+	uint16_t limit_set_min_cpus;	/* if max_cpus was set from
+					 * a limit false if user set */
+        uint16_t limit_set_min_nodes;	/* if max_nodes was set from
+					 * a limit false if user set */
+	uint16_t limit_set_time;    	/* if time_limit was set from
 					 * a limit false if user set */
 	uint16_t mail_type;		/* see MAIL_JOB_* in slurm.h */
 	char *mail_user;		/* user to get e-mail notification */
@@ -419,17 +445,18 @@ struct job_record {
 	char *network;			/* network/switch requirement spec */
 	uint32_t next_step_id;		/* next step id to be used */
 	char *nodes;			/* list of nodes allocated to job */
-	slurm_addr *node_addr;		/* addresses of the nodes allocated to
+	slurm_addr_t *node_addr;	/* addresses of the nodes allocated to
 					 * job */
 	bitstr_t *node_bitmap;		/* bitmap of nodes allocated to job */
+	bitstr_t *node_bitmap_cg;	/* bitmap of nodes completing job */
 	uint32_t node_cnt;		/* count of nodes currently
 					 * allocated to job */
 	char *nodes_completing;		/* nodes still in completing state
 					 * for this job, used to insure
 					 * epilog is not re-run for job */
-	uint32_t num_procs;		/* count of required processors */
 	uint16_t other_port;		/* port for client communications */
-	char *partition;		/* name of the partition */
+	char *partition;		/* name of job partition(s) */
+	List part_ptr_list;		/* list of pointers to partition recs */
 	bool part_nodes_missing;	/* set if job's nodes removed from this
 					 * partition */
 	struct part_record *part_ptr;	/* pointer to the partition record */
@@ -437,22 +464,22 @@ struct job_record {
 	uint32_t priority;		/* relative priority of the job,
 					 * zero == held (don't initiate) */
 	double priority_fs;		/* cached value used by sprio command */
-	uint16_t qos;			/* quality of service,
-					 * used only by Moab */
+	uint32_t qos_id;		/* quality of service id */
 	void *qos_ptr;	                /* pointer to the quality of
-					 * service record used for this job,
-					 * used only by Moab, it is
+					 * service record used for
+					 * this job, it is
 					 * void* because of interdependencies
 					 * in the header files, confirm the
 					 * value before use */
 	uint16_t restart_cnt;		/* count of restarts */
+	time_t resize_time;		/* time of latest size change */
 	uint32_t resv_id;		/* reservation ID */
 	char *resv_name;		/* reservation name */
 	struct slurmctld_resv *resv_ptr;/* reservation structure pointer */
 	uint16_t resv_flags;		/* see RESERVE_FLAG_* in slurm.h */
 	uint32_t requid;            	/* requester user ID */
 	char *resp_host;		/* host for srun communications */
-	select_jobinfo_t *select_jobinfo;/* opaque data, BlueGene */
+	dynamic_plugin_data_t *select_jobinfo;/* opaque data, BlueGene */
 	job_resources_t *job_resrcs;	/* details of allocated cores */
 	char **spank_job_env;		/* environment variables for job prolog
 					 * and epilog scripts as set by SPANK
@@ -468,10 +495,17 @@ struct job_record {
 	time_t time_last_active;	/* time of last job activity */
 	uint32_t time_limit;		/* time_limit minutes or INFINITE,
 					 * NO_VAL implies partition max_time */
+	uint32_t time_min;		/* minimum time_limit minutes or
+					 * INFINITE,
+					 * zero implies same as time_limit */
 	time_t tot_sus_time;		/* total time in suspend state */
-	uint32_t total_procs;		/* number of allocated processors,
+	uint32_t total_cpus;		/* number of allocated cpus,
+					 * for accounting */
+	uint32_t total_nodes;	        /* number of allocated nodes
 					 * for accounting */
 	uint32_t user_id;		/* user the job runs as */
+	uint16_t wait_all_nodes;	/* if set, wait for all nodes to boot
+					 * before starting the job */
 	uint16_t warn_signal;		/* signal to send before end_time */
 	uint16_t warn_time;		/* when to send signal before
 					 * end_time (secs) */
@@ -479,11 +513,13 @@ struct job_record {
 };
 
 /* Job dependency specification, used in "depend_list" within job_record */
-#define SLURM_DEPEND_AFTER		1
-#define SLURM_DEPEND_AFTER_ANY		2
-#define SLURM_DEPEND_AFTER_NOT_OK	3
-#define SLURM_DEPEND_AFTER_OK		4
-#define SLURM_DEPEND_SINGLETON		5
+#define SLURM_DEPEND_AFTER		1	/* After job begins */
+#define SLURM_DEPEND_AFTER_ANY		2	/* After job completes */
+#define SLURM_DEPEND_AFTER_NOT_OK	3	/* After job fails */
+#define SLURM_DEPEND_AFTER_OK		4	/* After job completes
+						 * successfully */
+#define SLURM_DEPEND_SINGLETON		5	/* Only one job for this
+						 * user/name at a time */
 struct	depend_spec {
 	uint16_t	depend_type;	/* SLURM_DEPEND_* type */
 	uint32_t	job_id;		/* SLURM job_id */
@@ -506,6 +542,8 @@ struct 	step_record {
 	uint16_t exclusive;		/* dedicated resources for the step */
 	uint32_t exit_code;		/* highest exit code from any task */
 	bitstr_t *exit_node_bitmap;	/* bitmap of exited nodes */
+	char *gres;			/* generic resources required */
+	List gres_list;			/* generic resource allocation detail */
 	char *host;			/* host for srun communications */
 	struct job_record* job_ptr; 	/* ptr to the job that owns the step */
 	jobacctinfo_t *jobacct;         /* keep track of process info in the
@@ -578,6 +616,9 @@ enum select_plugindata_info {
 extern void abort_job_on_node(uint32_t job_id, struct job_record *job_ptr,
 			      struct node_record *node_ptr);
 
+/* Build a bitmap of nodes completing this job */
+extern void build_cg_bitmap(struct job_record *job_ptr);
+
 /* Given a config_record with it's bitmap already set, update feature_list */
 extern void  build_config_feature_list(struct config_record *config_ptr);
 
@@ -642,10 +683,11 @@ extern int delete_step_record (struct job_record *job_ptr, uint32_t step_id);
  *  no-op for nodes already drained or draining
  * IN nodes - nodes to drain
  * IN reason - reason to drain the nodes
+ * IN reason_uid - who set the reason
  * RET SLURM_SUCCESS or error code
  * global: node_record_table_ptr - pointer to global node table
  */
-extern int drain_nodes ( char *nodes, char *reason );
+extern int drain_nodes ( char *nodes, char *reason, uint32_t reason_uid );
 
 /* dump_all_job_state - save the state of all jobs to file
  * RET 0 or error code */
@@ -666,10 +708,12 @@ extern void dump_job_desc(job_desc_msg_t * job_specs);
 /*
  * dump_job_step_state - dump the state of a specific job step to a buffer,
  *	load with load_step_state
+ * IN job_ptr - pointer to job for which information is to be dumpped
  * IN step_ptr - pointer to job step for which information is to be dumpped
  * IN/OUT buffer - location to store data, pointers automatically advanced
  */
-extern void dump_job_step_state(struct step_record *step_ptr, Buf buffer);
+extern void dump_job_step_state(struct job_record *job_ptr, 
+				struct step_record *step_ptr, Buf buffer);
 
 /*
  * dump_step_desc - dump the incoming step initiate request message
@@ -699,10 +743,9 @@ extern struct node_record *find_first_node_record (bitstr_t *node_bitmap);
 /*
  * find_part_record - find a record for partition with specified name
  * IN name - name of the desired partition
- * RET pointer to node partition or NULL if not found
- * global: part_list - global partition list
+ * RET pointer to partition or NULL if not found
  */
-extern struct part_record *find_part_record (char *name);
+extern struct part_record *find_part_record(char *name);
 
 /*
  * find_step_record - return a pointer to the step record with the given
@@ -735,6 +778,14 @@ extern char *get_job_script (struct job_record *job_ptr);
  *	the next job
  */
 extern uint32_t get_next_job_id(void);
+
+/*
+ * get_part_list - find record for named partition(s)
+ * IN name - partition name(s) in a comma separated list
+ * RET List of pointers to the partitions or NULL if not found
+ * NOTE: Caller must free the returned list
+ */
+extern List get_part_list(char *name);
 
 /*
  * init_job_conf - initialize the job configuration tables and values.
@@ -784,7 +835,7 @@ extern bool is_node_down (char *name);
 extern bool is_node_resp (char *name);
 
 /*
- * job_allocate - create job_records for the suppied job specification and
+ * job_allocate - create job_records for the supplied job specification and
  *	allocate nodes for it.
  * IN job_specs - job specifications
  * IN immediate - if set then either initiate the job immediately or fail
@@ -823,14 +874,14 @@ extern int job_cancel_by_assoc_id(uint32_t assoc_id);
  *	a QOS is removed from the association database).
  * RET count of cancelled jobs
  */
-extern int job_cancel_by_qos_id(uint16_t qos_id);
+extern int job_cancel_by_qos_id(uint32_t qos_id);
 
 /* Perform checkpoint operation on a job */
 extern int job_checkpoint(checkpoint_msg_t *ckpt_ptr, uid_t uid,
-			  slurm_fd conn_fd);
+			  slurm_fd_t conn_fd, uint16_t protocol_version);
 
 /* log the completion of the specified job */
-extern void job_completion_logger(struct job_record  *job_ptr);
+extern void job_completion_logger(struct job_record  *job_ptr, bool requeue);
 
 /*
  * job_epilog_complete - Note the completion of the epilog script for a
@@ -870,6 +921,12 @@ extern int job_fail(uint32_t job_id);
  */
 extern int job_node_ready(uint32_t job_id, int *ready);
 
+/* Record accounting information for a job immediately before changing size */
+extern void job_pre_resize_acctg(struct job_record *job_ptr);
+
+/* Record accounting information for a job immediately after changing size */
+extern void job_post_resize_acctg(struct job_record *job_ptr);
+
 /*
  * job_restart - Restart a batch job from checkpointed state
  *
@@ -880,10 +937,11 @@ extern int job_node_ready(uint32_t job_id, int *ready);
  * IN ckpt_ptr - checkpoint request message
  * IN uid - user id of the user issuing the RPC
  * IN conn_fd - file descriptor on which to send reply
+ * IN protocol_version - slurm protocol version of client
  * RET 0 on success, otherwise ESLURM error code
  */
 extern int job_restart(checkpoint_msg_t *ckpt_ptr, uid_t uid,
-		       slurm_fd conn_fd);
+		       slurm_fd_t conn_fd, uint16_t protocol_version);
 
 /*
  * job_signal - signal the specified job
@@ -896,7 +954,7 @@ extern int job_restart(checkpoint_msg_t *ckpt_ptr, uid_t uid,
  *	last_job_update - time of last job table update
  */
 extern int job_signal(uint32_t job_id, uint16_t signal, uint16_t batch_flag,
-		uid_t uid);
+		      uid_t uid);
 
 /*
  * job_step_cancel - cancel the specified job step
@@ -914,29 +972,32 @@ extern int job_step_cancel (uint32_t job_id, uint32_t job_step_id, uid_t uid );
  * IN ckpt_ptr - checkpoint request message
  * IN uid - user id of the user issuing the RPC
  * IN conn_fd - file descriptor on which to send reply
+ * IN protocol_version - slurm protocol version of client
  * RET 0 on success, otherwise ESLURM error code
  */
 extern int job_step_checkpoint(checkpoint_msg_t *ckpt_ptr,
-		uid_t uid, slurm_fd conn_fd);
+		uid_t uid, slurm_fd_t conn_fd, uint16_t protocol_version);
 
 /*
  * job_step_checkpoint_comp - note job step checkpoint completion
  * IN ckpt_ptr - checkpoint complete status message
  * IN uid - user id of the user issuing the RPC
  * IN conn_fd - file descriptor on which to send reply
+ * IN protocol_version - slurm protocol version of client
  * RET 0 on success, otherwise ESLURM error code
  */
 extern int job_step_checkpoint_comp(checkpoint_comp_msg_t *ckpt_ptr,
-		uid_t uid, slurm_fd conn_fd);
+		uid_t uid, slurm_fd_t conn_fd, uint16_t protocol_version);
 /*
  * job_step_checkpoint_task_comp - note task checkpoint completion
  * IN ckpt_ptr - checkpoint task complete status message
  * IN uid - user id of the user issuing the RPC
  * IN conn_fd - file descriptor on which to send reply
+ * IN protocol_version - slurm protocol version of client
  * RET 0 on success, otherwise ESLURM error code
  */
 extern int job_step_checkpoint_task_comp(checkpoint_task_comp_msg_t *ckpt_ptr,
-                uid_t uid, slurm_fd conn_fd);
+                uid_t uid, slurm_fd_t conn_fd, uint16_t protocol_version);
 
 /*
  * job_suspend - perform some suspend/resume operation
@@ -948,23 +1009,26 @@ extern int job_step_checkpoint_task_comp(checkpoint_task_comp_msg_t *ckpt_ptr,
  *		   suspending it, this is used to distinguish
  *		   jobs explicitly suspended by admins/users from
  *		   jobs suspended though automatic preemption
+ * IN protocol_version - slurm protocol version of client
  * RET 0 on success, otherwise ESLURM error code
  */
 extern int job_suspend(suspend_msg_t *sus_ptr, uid_t uid,
-		       slurm_fd conn_fd, bool clear_prio);
+		       slurm_fd_t conn_fd, bool clear_prio,
+		       uint16_t protocol_version);
 
 /*
  * job_complete - note the normal termination the specified job
  * IN job_id - id of the job which completed
  * IN uid - user id of user issuing the RPC
  * IN requeue - job should be run again if possible
+ * IN node_fail - true of job terminated due to node failure
  * IN job_return_code - job's return code, if set then set state to JOB_FAILED
  * RET - 0 on success, otherwise ESLURM error code
  * global: job_list - pointer global job list
  *	last_job_update - time of last job table update
  */
-extern int job_complete (uint32_t job_id, uid_t uid, bool requeue,
-		uint32_t job_return_code);
+extern int job_complete(uint32_t job_id, uid_t uid, bool requeue,
+			bool node_fail, uint32_t job_return_code);
 
 /*
  * job_independent - determine if this job has a depenentent job pending
@@ -991,9 +1055,11 @@ extern int job_req_node_filter(struct job_record *job_ptr,
  * IN uid - user id of user issuing the RPC
  * IN job_id - id of the job to be requeued
  * IN conn_fd - file descriptor on which to send reply, -1 if none
+ * IN protocol_version - slurm protocol version of client
  * RET 0 on success, otherwise ESLURM error code
  */
-extern int job_requeue (uid_t uid, uint32_t job_id, slurm_fd conn_fd);
+extern int job_requeue (uid_t uid, uint32_t job_id, slurm_fd_t conn_fd,
+			uint16_t protocol_version);
 
 /*
  * job_step_complete - note normal completion the specified job step
@@ -1107,7 +1173,7 @@ extern int load_all_job_state ( void );
  * load_all_node_state - Load the node state from file, recover on slurmctld
  *	restart. Execute this after loading the configuration file data.
  *	Data goes into common storage.
- * IN state_only - if true over-write only node state, features and reason
+ * IN state_only - if true over-write only node state, features, gres and reason
  * RET 0 or error code
  */
 extern int load_all_node_state ( bool state_only );
@@ -1133,11 +1199,14 @@ extern void load_part_uid_allow_list ( int force );
 extern int load_all_part_state ( void );
 
 /*
- * Create a new job step from data in a buffer (as created by dump_job_step_state)
+ * Create a new job step from data in a buffer (as created by
+ * dump_job_stepstate)
  * IN/OUT - job_ptr - point to a job for which the step is to be loaded.
- * IN/OUT buffer - location from which to get data, pointers automatically advanced
+ * IN/OUT buffer - location from which to get data, pointers
+ *                 automatically advanced
  */
-extern int load_step_state(struct job_record *job_ptr, Buf buffer);
+extern int load_step_state(struct job_record *job_ptr, Buf buffer,
+			   uint16_t protocol_version);
 
 /* make_node_alloc - flag specified node as allocated to a job
  * IN node_ptr - pointer to node being allocated
@@ -1199,13 +1268,15 @@ extern int job_alloc_info(uint32_t uid, uint32_t job_id,
  * OUT buffer_size - set to size of the buffer in bytes
  * IN show_flags - job filtering options
  * IN uid - uid of user making request (for partition filtering)
+ * IN protocol_version - slurm protocol version of client
  * global: job_list - global list of job records
  * NOTE: the buffer at *buffer_ptr must be xfreed by the caller
  * NOTE: change _unpack_job_desc_msg() in common/slurm_protocol_pack.c
  *	whenever the data format changes
  */
 extern void pack_all_jobs(char **buffer_ptr, int *buffer_size,
-		uint16_t show_flags, uid_t uid);
+			  uint16_t show_flags, uid_t uid,
+			  uint16_t protocol_version);
 
 /*
  * pack_all_node - dump all configuration and node information for all nodes
@@ -1214,13 +1285,15 @@ extern void pack_all_jobs(char **buffer_ptr, int *buffer_size,
  * OUT buffer_size - set to size of the buffer in bytes
  * IN show_flags - node filtering options
  * IN uid - uid of user making request (for partition filtering)
+ * IN protocol_version - slurm protocol version of client
  * global: node_record_table_ptr - pointer to global node table
  * NOTE: the caller must xfree the buffer at *buffer_ptr
  * NOTE: change slurm_load_node() in api/node_info.c when data format changes
  * NOTE: READ lock_slurmctld config before entry
  */
 extern void pack_all_node (char **buffer_ptr, int *buffer_size,
-		uint16_t show_flags, uid_t uid);
+			   uint16_t show_flags, uid_t uid,
+			   uint16_t protocol_version);
 
 /*
  * pack_ctld_job_step_info_response_msg - packs job step info
@@ -1243,12 +1316,14 @@ extern int pack_ctld_job_step_info_response_msg(uint32_t job_id,
  * OUT buffer_size - set to size of the buffer in bytes
  * IN show_flags - partition filtering options
  * IN uid - uid of user making request (for partition filtering)
+ * IN protocol_version - slurm protocol version of client
  * global: part_list - global list of partition records
  * NOTE: the buffer at *buffer_ptr must be xfreed by the caller
  * NOTE: change slurm_load_part() in api/part_info.c if data format changes
  */
 extern void pack_all_part(char **buffer_ptr, int *buffer_size,
-		uint16_t show_flags, uid_t uid);
+			  uint16_t show_flags, uid_t uid,
+			  uint16_t protocol_version);
 
 /*
  * pack_job - dump all configuration information about a specific job in
@@ -1261,7 +1336,7 @@ extern void pack_all_part(char **buffer_ptr, int *buffer_size,
  *	  whenever the data format changes
  */
 extern void pack_job (struct job_record *dump_job_ptr, uint16_t show_flags,
-		      Buf buffer);
+		      Buf buffer, uint16_t protocol_version);
 
 /*
  * pack_part - dump all configuration information about a specific partition
@@ -1273,7 +1348,8 @@ extern void pack_job (struct job_record *dump_job_ptr, uint16_t show_flags,
  * NOTE: if you make any changes here be sure to make the corresponding
  *	changes to load_part_config in api/partition_info.c
  */
-extern void pack_part (struct part_record *part_ptr, Buf buffer);
+extern void pack_part (struct part_record *part_ptr, Buf buffer,
+		       uint16_t protocol_version);
 
 /*
  * pack_one_job - dump information for one jobs in
@@ -1288,7 +1364,8 @@ extern void pack_part (struct part_record *part_ptr, Buf buffer);
  *	whenever the data format changes
  */
 extern int pack_one_job(char **buffer_ptr, int *buffer_size,
-			uint32_t job_id, uint16_t show_flags, uid_t uid);
+			uint32_t job_id, uint16_t show_flags, uid_t uid,
+			uint16_t protocol_version);
 
 /* part_filter_clear - Clear the partition's hidden flag based upon a user's
  * group access. This must follow a call to part_filter_set() */
@@ -1303,11 +1380,12 @@ extern void part_fini (void);
 
 /*
  * purge_old_job - purge old job records.
- *	the jobs must have completed at least MIN_JOB_AGE minutes ago
- * global: job_list - global job table
- *	last_job_update - time of last job table update
+ *	The jobs must have completed at least MIN_JOB_AGE minutes ago.
+ *	Test job dependencies, handle after_ok, after_not_ok before
+ *	purging any jobs.
+ * NOTE: READ lock slurmctld config and WRITE lock jobs before entry
  */
-extern void purge_old_job (void);
+void purge_old_job(void);
 
 /*
  * rehash_jobs - Create or rebuild the job hash table.
@@ -1332,10 +1410,13 @@ extern void reset_job_bitmaps (void);
 extern void reset_job_priority(void);
 
 /*
- * restore_node_features - Restore node features based upon state
- *      saved (preserves interactive updates)
+ * restore_node_features - Make node and config (from slurm.conf) fields
+ *	consistent for Features, Gres and Weight
+ * IN recover - 
+ *              0, 1 - use data from config record, built using slurm.conf
+ *              2 = use data from node record, built from saved state
  */
-extern void restore_node_features(void);
+extern void restore_node_features(int recover);
 
 /* Update time stamps for job step resume */
 extern void resume_job_step(struct job_record *job_ptr);
@@ -1376,7 +1457,7 @@ extern void set_node_down (char *name, char *reason);
  */
 extern void set_slurmctld_state_loc(void);
 
-/* set_slurmd_addr - establish the slurm_addr for the slurmd on each node
+/* set_slurmd_addr - establish the slurm_addr_t for the slurmd on each node
  *	Uses common data structures. */
 extern void set_slurmd_addr (void);
 
@@ -1388,6 +1469,17 @@ extern void set_slurmd_addr (void);
  */
 void signal_step_tasks(struct step_record *step_ptr, uint16_t signal,
 		       slurm_msg_type_t msg_type);
+
+/*
+ * signal_step_tasks_on_node - send specific signal to specific job step
+ *                             on a specific node.
+ * IN node_name - name of node on which to signal tasks
+ * IN step_ptr - step record pointer
+ * IN signal - signal to send
+ * IN msg_type - message type to send
+ */
+void signal_step_tasks_on_node(char* node_name, struct step_record *step_ptr,
+			       uint16_t signal, slurm_msg_type_t msg_type);
 
 /*
  * slurmctld_shutdown - wake up slurm_rpc_mgr thread via signal
@@ -1406,16 +1498,13 @@ extern void step_alloc_lps(struct step_record *step_ptr);
  *	according to the step_specs.
  * IN step_specs - job step specifications
  * OUT new_step_record - pointer to the new step_record (NULL on error)
- * IN kill_job_when_step_done - if set kill the job on step completion
  * IN batch_step - set if step is a batch script
  * RET - 0 or error code
  * NOTE: don't free the returned step_record because that is managed through
  * 	the job.
  */
-extern int step_create ( job_step_create_request_msg_t *step_specs,
-			 struct step_record** new_step_record,
-			 bool kill_job_when_step_done,
-			 bool batch_step );
+extern int step_create(job_step_create_request_msg_t *step_specs,
+		       struct step_record** new_step_record, bool batch_step);
 
 /*
  * step_layout_create - creates a step_layout according to the inputs.
@@ -1531,6 +1620,10 @@ extern int update_node ( update_node_msg_t * update_node_msg )  ;
  */
 extern int update_part (update_part_msg_t * part_desc, bool create_flag);
 
+/* Process job step update request from specified user,
+ * RET - 0 or error code */
+extern int update_step(step_update_request_msg_t *req, uid_t uid);
+
 /*
  * validate_alloc_node - validate that the allocating node
  * is allowed to use this partition
@@ -1579,11 +1672,27 @@ extern int validate_nodes_via_front_end(
 		slurm_node_registration_status_msg_t *reg_msg);
 
 /*
- * validate_super_user - validate that the uid is authorized to see
+ * validate_slurm_user - validate that the uid is authorized to see
  *      privileged data (either user root or SlurmUser)
  * IN uid - user to validate
  * RET true if permitted to run, false otherwise
  */
-extern bool validate_super_user (uid_t uid);
+extern bool validate_slurm_user(uid_t uid);
+
+/*
+ * validate_super_user - validate that the uid is authorized at the
+ *      root, SlurmUser, or SLURMDB_ADMIN_SUPER_USER level
+ * IN uid - user to validate
+ * RET true if permitted to run, false otherwise
+ */
+extern bool validate_super_user(uid_t uid);
+
+/*
+ * validate_operator - validate that the uid is authorized at the
+ *      root, SlurmUser, or SLURMDB_ADMIN_OPERATOR level
+ * IN uid - user to validate
+ * RET true if permitted to run, false otherwise
+ */
+extern bool validate_operator(uid_t uid);
 
 #endif /* !_HAVE_SLURMCTLD_H */

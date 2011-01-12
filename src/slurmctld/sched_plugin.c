@@ -115,7 +115,13 @@ slurm_sched_get_ops( slurm_sched_context_t *c )
         if ( c->cur_plugin != PLUGIN_INVALID_HANDLE )
         	return &c->ops;
 
-	error("Couldn't find the specified plugin name for %s "
+	if(errno != EPLUGIN_NOTFOUND) {
+		error("Couldn't load specified plugin name for %s: %s",
+		      c->sched_type, plugin_strerror(errno));
+		return NULL;
+	}
+
+	error("sched: Couldn't find the specified plugin name for %s "
 	      "looking at all files",
 	      c->sched_type);
 
@@ -124,7 +130,7 @@ slurm_sched_get_ops( slurm_sched_context_t *c )
 		char *plugin_dir;
 		c->plugin_list = plugrack_create();
 		if ( c->plugin_list == NULL ) {
-			error( "cannot create plugin manager" );
+			error( "sched: cannot create plugin manager" );
 			return NULL;
 		}
 		plugrack_set_major_type( c->plugin_list, "sched" );
@@ -138,7 +144,8 @@ slurm_sched_get_ops( slurm_sched_context_t *c )
 
 	c->cur_plugin = plugrack_use_by_type( c->plugin_list, c->sched_type );
 	if ( c->cur_plugin == PLUGIN_INVALID_HANDLE ) {
-		error( "cannot find scheduler plugin for %s", c->sched_type );
+		error( "sched: cannot find scheduler plugin for %s", 
+		       c->sched_type );
 		return NULL;
 	}
 
@@ -147,7 +154,7 @@ slurm_sched_get_ops( slurm_sched_context_t *c )
 			      n_syms,
 			      syms,
 			      (void **) &c->ops ) < n_syms ) {
-		error( "incomplete scheduling plugin detected" );
+		error( "sched: incomplete scheduling plugin detected" );
 		return NULL;
 	}
 
@@ -367,10 +374,6 @@ slurm_sched_job_is_pending( void )
 	if ( slurm_sched_init() < 0 )
 		return;
 
-	if ( (slurm_get_preempt_mode() & PREEMPT_MODE_GANG) &&
-	     (gs_reconfig() != SLURM_SUCCESS))
-		error( "cannot reconfigure gang scheduler" );
-
 	(*(g_sched_context->ops.job_is_pending))();
 }
 
@@ -383,12 +386,9 @@ slurm_sched_partition_change( void )
 	if ( slurm_sched_init() < 0 )
 		return;
 
-#if 0
-	/* Must have job write lock and node read lock set here */
 	if ( (slurm_get_preempt_mode() & PREEMPT_MODE_GANG) &&
-	     (gs_job_scan() != SLURM_SUCCESS))
-		error( "gang scheduler could not rescan jobs" );
-#endif
+	     (gs_reconfig() != SLURM_SUCCESS))
+		error( "cannot reconfigure gang scheduler" );
 
 	(*(g_sched_context->ops.partition_change))();
 }
