@@ -2171,10 +2171,10 @@ static int _will_run_test(struct job_record *job_ptr, bitstr_t *bitmap,
 	List cr_job_list;
 	ListIterator job_iterator, preemptee_iterator;
 	bitstr_t *orig_map;
-	int i, rc = SLURM_ERROR;
-	int max_run_jobs = max_share - 1;	/* exclude this job */
+	int i, max_run_jobs, rc = SLURM_ERROR;
 	time_t now = time(NULL);
 
+	max_run_jobs = MAX((max_share - 1), 1);	/* exclude this job */
 	orig_map = bit_copy(bitmap);
 	if (!orig_map)
 		fatal("bit_copy: malloc failure");
@@ -2506,6 +2506,11 @@ extern int select_p_job_ready(struct job_record *job_ptr)
 {
 	int i, i_first, i_last;
 	struct node_record *node_ptr;
+
+	if (!IS_JOB_RUNNING(job_ptr) && !IS_JOB_SUSPENDED(job_ptr)) {
+		/* Gang scheduling might suspend job immediately */
+		return 0;
+	}
 
 	if ((job_ptr->node_bitmap == NULL) ||
 	    ((i_first = bit_ffs(job_ptr->node_bitmap)) == -1))

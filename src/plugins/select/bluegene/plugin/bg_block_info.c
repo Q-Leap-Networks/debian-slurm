@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  bg_block_info.c - bluegene block information from the db2 database.
  *
- *  $Id: bg_block_info.c 21904 2010-12-28 18:45:52Z da $
+ *  $Id: bg_block_info.c 22095 2011-01-15 00:14:40Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -205,11 +205,12 @@ extern int block_ready(struct job_record *job_ptr)
 			rc = READY_JOB_FATAL;	/* fatal error */
 		}
 		slurm_mutex_unlock(&block_state_mutex);
-		xfree(block_id);
 	} else
 		rc = READY_JOB_ERROR;
-/* 	info("returning %d for job %u %d %d", */
-/* 	     rc, job_ptr->job_id, READY_JOB_ERROR, READY_JOB_FATAL); */
+	/* info("returning %d for job %u block %s %d %d", */
+	/*      rc, job_ptr->job_id, block_id, */
+	/*      READY_JOB_ERROR, READY_JOB_FATAL); */
+	xfree(block_id);
 	return rc;
 }
 
@@ -285,9 +286,13 @@ extern int update_block_list()
 	slurm_mutex_lock(&block_state_mutex);
 	itr = list_iterator_create(bg_lists->main);
 	while ((bg_record = (bg_record_t *) list_next(itr)) != NULL) {
-		if ((bg_record->magic != BLOCK_MAGIC)
-		    || !bg_record->bg_block_id)
+		if (bg_record->magic != BLOCK_MAGIC) {
+			/* block is gone */
+			list_remove(itr);
 			continue;
+		} else if (!bg_record->bg_block_id)
+			continue;
+
 		name = bg_record->bg_block_id;
 		if ((rc = bridge_get_block_info(name, &block_ptr))
 		    != STATUS_OK) {
@@ -626,7 +631,11 @@ extern int update_block_list_state(List block_list)
 
 	itr = list_iterator_create(block_list);
 	while ((bg_record = (bg_record_t *) list_next(itr)) != NULL) {
-		if (!bg_record->bg_block_id)
+		if (bg_record->magic != BLOCK_MAGIC) {
+			/* block is gone */
+			list_remove(itr);
+			continue;
+		} else if (!bg_record->bg_block_id)
 			continue;
 
 		name = bg_record->bg_block_id;
@@ -642,8 +651,11 @@ extern int update_block_list_state(List block_list)
 				case PARTITION_NOT_FOUND:
 					debug("block %s not found, removing "
 					      "from slurm", name);
-					list_remove(itr);
-					destroy_bg_record(bg_record);
+					/* Just set to free,
+					   everything will be cleaned
+					   up outside this.
+					*/
+					bg_record->state = RM_PARTITION_FREE;
 					continue;
 					break;
 				default:

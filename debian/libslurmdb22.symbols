@@ -816,6 +816,7 @@ libslurmdb.so.22 libslurmdb22 #MINVER#
  slurmdb_report_set_start_end_time@Base 2.2.0
  slurmdb_report_user_top_usage@Base 2.2.0
  slurmdb_reservations_get@Base 2.2.0
+ slurmdb_send_accounting_update@Base 2.2.1
  slurmdb_setup_cluster_dims@Base 2.2.0
  slurmdb_setup_cluster_flags@Base 2.2.0
  slurmdb_slurmdbd_free_id_rc_msg@Base 2.2.0

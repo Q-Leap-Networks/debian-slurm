@@ -1,0 +1,91 @@
+Description: Upstream changes introduced in version 2.2.1-1
+ This patch has been created by dpkg-source during the package build.
+ Here's the last changelog entry, hopefully it gives details on why
+ those changes were made:
+ .
+ slurm-llnl (2.2.1-1) unstable; urgency=low
+ .
+   * New upstream release
+ .
+ The person named in the Author field signed this changelog entry.
+Author: Gennaro Oliva <oliva.g@na.icar.cnr.it>
+
+---
+The information above should follow the Patch Tagging Guidelines, please
+checkout http://dep.debian.net/deps/dep3/ to learn about the format. Here
+are templates for supplementary fields that you might want to add:
+
+Origin: <vendor|upstream|other>, <url of original patch>
+Bug: <url in upstream bugtracker>
+Bug-Debian: http://bugs.debian.org/<bugnumber>
+Bug-Ubuntu: https://launchpad.net/bugs/<bugnumber>
+Forwarded: <no|not-needed|url proving that it has been forwarded>
+Reviewed-By: <name and email of someone who approved the patch>
+Last-Update: <YYYY-MM-DD>
+
+--- slurm-llnl-2.2.1.orig/doc/html/configurator.html.in
++++ slurm-llnl-2.2.1/doc/html/configurator.html.in
+@@ -163,7 +163,7 @@ function displayfile()
+    "#JobSubmitPlugins=1 <br>" +
+    "#KillOnBadExit=0 <br>" +
+    "#Licenses=foo*4,bar <br>" +
+-   "#MailProg=/bin/mail <br>" +
++   "#MailProg=/usr/bin/mail <br>" +
+    "#MaxJobCount=5000 <br>" +
+    "#MaxTasksPerNode=128 <br>" +
+    "MpiDefault=" + get_radio_value(document.config.mpi_default) + "<br>" +
+--- slurm-llnl-2.2.1.orig/doc/man/man5/slurm.conf.5
++++ slurm-llnl-2.2.1/doc/man/man5/slurm.conf.5
+@@ -722,7 +722,7 @@ not explicitly listed in the job submiss
+ .TP
+ \fBMailProg\fR
+ Fully qualified pathname to the program used to send email per user request.
+-The default value is "/bin/mail".
++The default value is "/usr/bin/mail".
+ 
+ .TP
+ \fBMaxJobCount\fR
+--- slurm-llnl-2.2.1.orig/doc/man/man1/strigger.1
++++ slurm-llnl-2.2.1/doc/man/man1/strigger.1
+@@ -257,7 +257,7 @@ primary slurmctld fails.
+ 	strigger \-\-set \-\-primary_slurmctld_failure \\
+ 	         \-\-program=/usr/sbin/primary_slurmctld_failure
+ 	# Notify the administrator of the failure using by e\-mail
+-	/bin/mail slurm_admin@site.com \-s Primary_SLURMCTLD_FAILURE
++	/usr/bin/mail slurm_admin@site.com \-s Primary_SLURMCTLD_FAILURE
+ 
+ 	> strigger \-\-set \-\-primary_slurmctld_failure \\
+ 	           \-\-program=/usr/sbin/primary_slurmctld_failure
+@@ -276,7 +276,7 @@ argument to the script by SLURM).
+ 	strigger \-\-set \-\-node \-\-down \\
+ 	         \-\-program=/usr/sbin/slurm_admin_notify
+ 	# Notify administrator using by e\-mail
+-	/bin/mail slurm_admin@site.com \-s NodesDown:$*
++	/usr/bin/mail slurm_admin@site.com \-s NodesDown:$*
+ 
+ 	> strigger \-\-set \-\-node \-\-down \\
+ 	           \-\-program=/usr/sbin/slurm_admin_notify
+--- slurm-llnl-2.2.1.orig/doc/man/man1/sbatch.1
++++ slurm-llnl-2.2.1/doc/man/man1/sbatch.1
+@@ -507,8 +507,8 @@ Multiple license names should be comma s
+ \fB\-M\fR, \fB\-\-clusters\fR=<\fIstring\fR>
+ Clusters to issue commands to.  Multiple cluster names may be comma separated.
+ The job will be submitted to the one cluster providing the earliest expected
+-job initiation time. The default value is the current cluster.  A value of
+-'\fIall\fR' will query to run on all clusters.  Note the
++job initiation time. The default value is the current cluster. A value of
++\(aq\fIall\fR' will query to run on all clusters.  Note the
+ \fB\-\-export\fR option to control environment variables exported
+ between clusters.
+ 
+--- slurm-llnl-2.2.1.orig/src/common/read_config.h
++++ slurm-llnl-2.2.1/src/common/read_config.h
+@@ -84,7 +84,7 @@ extern char *default_plugstack;
+ #define DEFAULT_KILL_ON_BAD_EXIT    0
+ #define DEFAULT_KILL_TREE           0
+ #define DEFAULT_KILL_WAIT           30
+-#define DEFAULT_MAIL_PROG           "/bin/mail"
++#define DEFAULT_MAIL_PROG           "/usr/bin/mail"
+ #define DEFAULT_MAX_JOB_COUNT       10000
+ #define DEFAULT_MEM_PER_CPU         0
+ #define DEFAULT_MAX_MEM_PER_CPU     0

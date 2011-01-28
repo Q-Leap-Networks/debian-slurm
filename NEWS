@@ -1,6 +1,64 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 2.2.1
+========================
+ -- Fix setting derived exit code correctly for jobs that happen to have the
+    same jobid.
+ -- Better checking for time overflow when rolling up in accounting.
+ -- Add scancel --reservation option to cancel all jobs associated with a
+    specific reservation.
+ -- Treat reservation with no nodes like one that starts later (let jobs of any
+    size get queued and do not block any pending jobs).
+ -- Fix bug in gang scheduling logic that would temporarily resume to many jobs
+    after a job completed.
+ -- Change srun message about job step being deferred due to SlurmctldProlog
+    running to be more clear and only print when --verbose option is used.
+ -- Made it so you could remove the hold on jobs with sview by setting the
+    priority to infinite.
+ -- BLUEGENE - better checking small blocks in dynamic mode whether a full
+    midplane job could run or not.
+ -- Decrease the maximum sleep time between srun job step creation retry
+    attempts from 60 seconds to 29 seconds. This should eliminate a possible
+    synchronization problem with gang scheduling that could result in job
+    step creation requests only occuring when a job is suspended.
+ -- Fix to prevent changing a held job's state from HELD to DEPENDENCY
+    until the job is released. Patch from Rod Schultz, Bull.
+ -- Fixed sprio -M to reflect PriorityWeight values from remote cluster.
+ -- Fix bug in sview when trying to update arbitrary field on more than one
+    job. Formerly would display information about one job, but update next
+    selected job.
+ -- Made it so QOS with UsageFactor set to 0 would make it so jobs running
+    under that QOS wouldn't add time to fairshare or association/qos
+    limits.
+ -- Fixed issue where QOS priority wasn't re-normalized until a slurmctld
+    restart when a QOS priority was changed.
+ -- Fix sprio to use calculated numbers from slurmctld instead of
+    calulating it own numbers.
+ -- BLUEGENE - fixed race condition with preemption where if the wind blows the
+    right way the slurmctld could lock up when preempting jobs to run others.
+ -- BLUEGENE - fixed epilog to wait until MMCS job is totally complete before
+    finishing.
+ -- BLUEGENE - more robust checking for states when freeing blocks.
+ -- Added correct files to the slurm.spec file for correct perl api rpm
+    creation.
+ -- Added flag "NoReserve" to a QOS to make it so all jobs are created equal
+    within a QOS.  So if larger, higher priority jobs are unable to run they
+    don't prevent smaller jobs from running even if running the smaller
+    jobs delay the start of the larger, higher priority jobs.
+ -- BLUEGENE - Check preemptees one by one to preempt lower priority jobs first
+    instead of first fit.
+ -- In select/cons_res, correct handling of the option
+    SelectTypeParameters=CR_ONE_TASK_PER_CORE.
+ -- Fix for checking QOS to override partition limits, previously if not using
+    QOS some limits would be overlooked.
+ -- Fix bug which would terminate a job step if any of the nodes allocated to
+    it were removed from the job's allocation. Now only the tasks on those
+    nodes are terminated.
+ -- Fixed issue when using a storage_accounting plugin directly without the
+    slurmDBD updates weren't always sent correctly to the slurmctld, appears to
+    OS dependent, reported by Fredrik Tegenfeldt.
+
 * Changes in SLURM 2.2.0
 ========================
  -- Change format of Duration field in "scontrol show reservation" output from
@@ -779,6 +837,7 @@ documents those changes that are of interest to users and admins.
 =========================
  -- Correct format of --begin reported in salloc, sbatch and srun --help
     message.
+ -- Correct logic for regular users to increase nice value of their own jobs.
 
 * Changes in SLURM 2.1.16
 =========================
@@ -6032,4 +6091,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 21879 2010-12-27 16:51:17Z da $
+$Id: NEWS 22224 2011-01-26 23:41:18Z da $
