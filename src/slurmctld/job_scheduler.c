@@ -138,15 +138,17 @@ static void _job_queue_rec_del(void *x)
 
 /*
  * build_job_queue - build (non-priority ordered) list of pending jobs
+ * IN clear_start - if set then clear the start_time for pending jobs
  * RET the job queue
  * NOTE: the caller must call list_destroy() on RET value to free memory
  */
-extern List build_job_queue(void)
+extern List build_job_queue(bool clear_start)
 {
 	List job_queue;
 	ListIterator job_iterator, part_iterator;
 	struct job_record *job_ptr = NULL;
 	struct part_record *part_ptr;
+	bool job_is_pending;
 
 	job_queue = list_create(_job_queue_rec_del);
 	if (job_queue == NULL)
@@ -156,8 +158,11 @@ extern List build_job_queue(void)
 		fatal("list_iterator_create memory allocation failure");
 	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
 		xassert (job_ptr->magic == JOB_MAGIC);
-		if ((!IS_JOB_PENDING(job_ptr)) || IS_JOB_COMPLETING(job_ptr))
+		job_is_pending = IS_JOB_PENDING(job_ptr);
+		if (!job_is_pending || IS_JOB_COMPLETING(job_ptr))
 			continue;
+		if (job_is_pending && clear_start)
+			job_ptr->start_time = (time_t) 0;
 		if (job_ptr->priority == 0)	{ /* held */
 			if ((job_ptr->state_reason != WAIT_HELD) &&
 			    (job_ptr->state_reason != WAIT_HELD_USER)) {
@@ -384,7 +389,7 @@ extern int schedule(uint32_t job_limit)
 	save_avail_node_bitmap = bit_copy(avail_node_bitmap);
 
 	debug("sched: Running job scheduler");
-	job_queue = build_job_queue();
+	job_queue = build_job_queue(false);
 	while ((job_queue_rec = list_pop_bottom(job_queue, sort_job_queue2))) {
 		job_ptr  = job_queue_rec->job_ptr;
 		part_ptr = job_queue_rec->part_ptr;
@@ -416,8 +421,10 @@ extern int schedule(uint32_t job_limit)
 		if ((job_ptr->resv_name == NULL) &&
 		    _failed_partition(job_ptr->part_ptr, failed_parts,
 				      failed_part_cnt)) {
-			job_ptr->state_reason = WAIT_PRIORITY;
-			xfree(job_ptr->state_desc);
+			if (job_ptr->priority != 1) {	/* not system hold */
+				job_ptr->state_reason = WAIT_PRIORITY;
+				xfree(job_ptr->state_desc);
+			}
 			debug3("sched: JobId=%u. State=%s. Reason=%s. "
 			       "Priority=%u. Partition=%s.",
 			       job_ptr->job_id,
@@ -598,10 +605,18 @@ extern int sort_job_queue2(void *x, void *y)
 {
 	job_queue_rec_t *job_rec1 = (job_queue_rec_t *) x;
 	job_queue_rec_t *job_rec2 = (job_queue_rec_t *) y;
+	bool has_resv1, has_resv2;
 
 	if (slurm_job_preempt_check(job_rec1, job_rec2))
 		return -1;
 	if (slurm_job_preempt_check(job_rec2, job_rec1))
+		return 1;
+
+	has_resv1 = (job_rec1->job_ptr->resv_id != 0);
+	has_resv2 = (job_rec2->job_ptr->resv_id != 0);
+	if (has_resv1 && !has_resv2)
+		return -1;
+	if (!has_resv1 && has_resv2)
 		return 1;
 
 	if (job_rec1->job_ptr->priority < job_rec2->job_ptr->priority)
@@ -1274,6 +1289,19 @@ static char **_build_env(struct job_record *job_ptr)
 	select_g_select_jobinfo_get(job_ptr->select_jobinfo,
 				    SELECT_JOBDATA_BLOCK_ID, &name);
 	setenvf(&my_env, "MPIRUN_PARTITION", "%s", name);
+# ifdef HAVE_BGP
+	{
+		uint16_t conn_type = (uint16_t)NO_VAL;
+		select_g_select_jobinfo_get(job_ptr->select_jobinfo,
+					    SELECT_JOBDATA_CONN_TYPE,
+					    &conn_type);
+		if (conn_type > SELECT_SMALL) {
+			/* SUBMIT_POOL over rides
+			   HTC_SUBMIT_POOL */
+			setenvf(&my_env, "SUBMIT_POOL", "%s", name);
+		}
+	}
+# endif
 	xfree(name);
 #endif
 	setenvf(&my_env, "SLURM_JOB_ACCOUNT", "%s", job_ptr->account);

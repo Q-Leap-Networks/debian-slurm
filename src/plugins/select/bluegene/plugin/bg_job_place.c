@@ -604,8 +604,13 @@ static int _check_for_booted_overlapping_blocks(
 				}
 			}
 
-			if ((found_record->job_running != NO_JOB_RUNNING)
-			    || (found_record->state == RM_PARTITION_ERROR)) {
+			if (((bg_conf->layout_mode == LAYOUT_DYNAMIC)
+			     || ((!SELECT_IS_CHECK_FULL_SET(query_mode)
+				  || SELECT_IS_MODE_RUN_NOW(query_mode))
+				 && (bg_conf->layout_mode != LAYOUT_DYNAMIC)))
+			    && ((found_record->job_running != NO_JOB_RUNNING)
+				|| (found_record->state
+				    == RM_PARTITION_ERROR))) {
 				if ((found_record->job_running
 				     == BLOCK_ERROR_STATE)
 				    || (found_record->state
@@ -615,16 +620,15 @@ static int _check_for_booted_overlapping_blocks(
 					      "is in an error state.",
 					      bg_record->bg_block_id,
 					      found_record->bg_block_id);
-				else
-					if (bg_conf->slurm_debug_flags
-					    & DEBUG_FLAG_BG_PICK)
-						info("can't use %s, there is "
-						     "a job (%d) running on "
-						     "an overlapping "
-						     "block %s",
-						     bg_record->bg_block_id,
-						     found_record->job_running,
-						     found_record->bg_block_id);
+				else if (bg_conf->slurm_debug_flags
+					 & DEBUG_FLAG_BG_PICK)
+					info("can't use %s, there is "
+					     "a job (%d) running on "
+					     "an overlapping "
+					     "block %s",
+					     bg_record->bg_block_id,
+					     found_record->job_running,
+					     found_record->bg_block_id);
 
 				if (bg_conf->layout_mode == LAYOUT_DYNAMIC) {
 					List tmp_list = list_create(NULL);
@@ -1318,8 +1322,17 @@ static int _sync_block_lists(List full_list, List incomp_list)
 			if (bg_record->free_cnt == new_record->free_cnt
 			    && bit_equal(bg_record->bitmap, new_record->bitmap)
 			    && bit_equal(bg_record->ionode_bitmap,
-					 new_record->ionode_bitmap))
+					 new_record->ionode_bitmap)) {
+				/* now make sure the conn_type is the same for
+				   regular sized blocks */
+				if ((bg_record->node_cnt
+				     >= bg_conf->bp_node_cnt)
+				    && bg_record->conn_type
+				    != new_record->conn_type)
+					continue;
+
 				break;
+			}
 		}
 
 		if (!bg_record) {

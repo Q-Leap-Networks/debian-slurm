@@ -836,14 +836,6 @@ _check_job_credential(launch_tasks_request_msg_t *req, uid_t uid,
 			error("cons_res: zero processors allocated to step");
 			step_cores = 1;
 		}
-		if (tasks_to_launch > step_cores) {
-			/* This is expected with the --overcommit option
-			 * or hyperthreads */
-			debug("cons_res: More than one tasks per logical "
-			      "processor (%d > %u) on host [%u.%u %ld %s] ",
-			      tasks_to_launch, step_cores, arg.jobid,
-			      arg.stepid, (long) arg.uid, arg.step_hostlist);
-		}
 		/* NOTE: step_cores is the count of allocated resources
 		 * (typically cores). Convert to CPU count as needed */
 		if (i_last_bit <= i_first_bit)
@@ -854,6 +846,14 @@ _check_job_credential(launch_tasks_request_msg_t *req, uid_t uid,
 				info("scaling CPU count by factor of %d", i);
 				step_cores *= i;
 			}
+		}
+		if (tasks_to_launch > step_cores) {
+			/* This is expected with the --overcommit option
+			 * or hyperthreads */
+			debug("cons_res: More than one tasks per logical "
+			      "processor (%d > %u) on host [%u.%u %ld %s] ",
+			      tasks_to_launch, step_cores, arg.jobid,
+			      arg.stepid, (long) arg.uid, arg.step_hostlist);
 		}
 	} else {
 		step_cores = 1;
@@ -1042,18 +1042,28 @@ _rpc_launch_tasks(slurm_msg_t *msg)
 static void
 _prolog_error(batch_job_launch_msg_t *req, int rc)
 {
-	char *err_name_ptr, err_name[128], path_name[MAXPATHLEN];
+	char *err_name_ptr, err_name[256], path_name[MAXPATHLEN];
+	char *fmt_char;
 	int fd;
 
-	if (req->std_err)
-		err_name_ptr = req->std_err;
-	else if (req->std_out)
-		err_name_ptr = req->std_out;
-	else {
+	if (req->std_err || req->std_out) {
+		if (req->std_err)
+			strncpy(err_name, req->std_err, sizeof(err_name));
+		else
+			strncpy(err_name, req->std_out, sizeof(err_name));
+		if ((fmt_char = strchr(err_name, (int) '%')) &&
+		    (fmt_char[1] == 'j') && !strchr(fmt_char+1, (int) '%')) {
+			char tmp_name[256];
+			fmt_char[1] = 'u';
+			snprintf(tmp_name, sizeof(tmp_name), err_name,
+				 req->job_id);
+			strncpy(err_name, tmp_name, sizeof(err_name));
+		}
+	} else {
 		snprintf(err_name, sizeof(err_name), "slurm-%u.out",
 			 req->job_id);
-		err_name_ptr = err_name;
 	}
+	err_name_ptr = err_name;
 	if (err_name_ptr[0] == '/')
 		snprintf(path_name, MAXPATHLEN, "%s", err_name_ptr);
 	else if (req->work_dir)
@@ -3660,6 +3670,10 @@ _build_env(uint32_t jobid, uid_t uid, char *resv_id,
 	if (resv_id) {
 #ifdef HAVE_BG
 		setenvf(&env, "MPIRUN_PARTITION", "%s", resv_id);
+# ifdef HAVE_BGP
+		/* Needed for HTC jobs */
+		setenvf(&env, "SUBMIT_POOL", "%s", resv_id);
+# endif
 #endif
 #ifdef HAVE_CRAY
 		setenvf(&env, "BASIL_RESERVATION_ID", "%s", resv_id);

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  jobcomp_script.c - Script running slurm job completion logging plugin.
- *  $Id: jobcomp_script.c 21212 2010-09-21 22:17:38Z jette $
+ *  $Id: jobcomp_script.c 22818 2011-03-21 15:20:11Z jette $
  *****************************************************************************
  *  Produced at Center for High Performance Computing, North Dakota State
  *  University
@@ -221,7 +221,11 @@ static struct jobcomp_info * _jobcomp_info_create (struct job_record *job)
 		j->jobstate = xstrdup (job_state_string (state));
 		if (job->resize_time)
 			j->start = job->resize_time;
-		else
+		else if (job->start_time > job->end_time) {
+			/* Job cancelled while pending and
+			 * expected start time is in the future. */
+			j->start = 0;
+		} else
 			j->start = job->start_time;
 		j->end = job->end_time;
 	}

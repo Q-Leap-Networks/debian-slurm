@@ -156,32 +156,12 @@ int main(int argc, char *argv[])
 	char **env = NULL;
 	int status = 0;
 	int retries = 0;
-	pid_t pid = 0;
+	pid_t pid  = getpid();
+	pid_t tpgid = 0;
 	pid_t rc_pid = 0;
 	int i, rc = 0;
 	static char *msg = "Slurm job queue full, sleeping and retrying.";
 	slurm_allocation_callbacks_t callbacks;
-
-	is_interactive = isatty(STDIN_FILENO);
-	if (is_interactive) {
-		bool sent_msg = false;
-		/* Wait as long as we are running in the background */
-		while (tcgetpgrp(STDIN_FILENO) != (pid = getpgrp())) {
-			if (!sent_msg) {
-				error("Waiting for program to be placed in "
-				      "the foreground");
-				sent_msg = true;
-			}
-			killpg(pid, SIGTTIN);
-		}
-
-		/*
-		 * Save tty attributes and reset at exit, in case a child
-		 * process died before properly resetting terminal.
-		 */
-		tcgetattr (STDIN_FILENO, &saved_tty_attributes);
-		atexit (_reset_input_mode);
-	}
 
 	log_init(xbasename(argv[0]), logopt, 0, NULL);
 	_set_exit_code();
@@ -237,6 +217,48 @@ int main(int argc, char *argv[])
 	}
 
 	/*
+	 * Job control for interactive salloc sessions: only if ...
+	 *
+	 * a) input is from a terminal (stdin has valid termios attributes),
+	 * b) controlling terminal exists (non-negative tpgid),
+	 * c) salloc is not run in allocation-only (--no-shell) mode,
+	 * d) salloc runs in its own process group (true in interactive
+	 *    shells that support job control),
+	 * e) salloc has been configured at compile-time to support background
+	 *    execution and is not currently in the background process group.
+	 */
+	if (tcgetattr(STDIN_FILENO, &saved_tty_attributes) < 0) {
+		/*
+		 * Test existence of controlling terminal (tpgid > 0)
+		 * after first making sure stdin is not redirected.
+		 */
+	} else if ((tpgid = tcgetpgrp(STDIN_FILENO)) < 0) {
+		if (!opt.no_shell) {
+			error("no controlling terminal: please set --no-shell");
+			exit(error_exit);
+		}
+	} else if ((!opt.no_shell) && (pid == getpgrp())) {
+		if (tpgid == pid)
+			is_interactive = true;
+#ifdef SALLOC_RUN_FOREGROUND
+		while (tcgetpgrp(STDIN_FILENO) != pid) {
+			if (!is_interactive) {
+				error("Waiting for program to be placed in "
+				      "the foreground");
+				is_interactive = true;
+			}
+			killpg(pid, SIGTTIN);
+		}
+#endif
+	}
+	/*
+	 * Reset saved tty attributes at exit, in case a child
+	 * process died before properly resetting terminal.
+	 */
+	if (is_interactive)
+		atexit (_reset_input_mode);
+
+	/*
 	 * Request a job allocation
 	 */
 	slurm_init_job_desc_msg(&desc);
@@ -287,6 +309,7 @@ int main(int argc, char *argv[])
 	if (alloc == NULL) {
 		if (allocation_interrupted) {
 			/* cancelled by signal */
+			info("Job aborted due to signal");
 		} else if (errno == EINTR) {
 			error("Interrupted by signal."
 			      "  Allocation request rescinded.");

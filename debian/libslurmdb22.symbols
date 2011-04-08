@@ -84,6 +84,7 @@ libslurmdb.so.22 libslurmdb22 #MINVER#
  slurm_conf_expand_slurmd_path@Base 2.2.0
  slurm_conf_get_addr@Base 2.2.0
  slurm_conf_get_aliased_nodename@Base 2.2.0
+ slurm_conf_get_aliases@Base 2.2.4
  slurm_conf_get_cpus_sct@Base 2.2.0
  slurm_conf_get_hostname@Base 2.2.0
  slurm_conf_get_nodeaddr@Base 2.2.0

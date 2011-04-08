@@ -1467,16 +1467,22 @@ static int _will_run_test(struct job_record *job_ptr, bitstr_t *bitmap,
 	}
 
 	/* Remove the running jobs one at a time from exp_node_cr and try
-	 * scheduling the pending job after each one */
+	 * scheduling the pending job after each one. */
 	if (rc != SLURM_SUCCESS) {
 		list_sort(cr_job_list, _cr_job_list_sort);
 		job_iterator = list_iterator_create(cr_job_list);
 		if (job_iterator == NULL)
 			fatal ("memory allocation failure");
 		while ((tmp_job_ptr = list_next(job_iterator))) {
+		        int ovrlap;
+			bit_or(bitmap, orig_map);
+			ovrlap = bit_overlap(bitmap, tmp_job_ptr->node_bitmap);
+			if (ovrlap == 0)	/* job has no usable nodes */
+				continue;	/* skip it */
+			debug2("cons_res: _will_run_test, job %u: overlap=%d",
+			       tmp_job_ptr->job_id, ovrlap);
 			_rm_job_from_res(future_part, future_usage,
 					 tmp_job_ptr, 0);
-			bit_or(bitmap, orig_map);
 			rc = cr_job_test(job_ptr, bitmap, min_nodes,
 					 max_nodes, req_nodes,
 					 SELECT_MODE_WILL_RUN, cr_type,

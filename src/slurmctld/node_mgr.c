@@ -1508,23 +1508,25 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg)
 		threads2 = cores2   * config_ptr->threads;
 
 		if (threads1 < threads2) {
-			error("Node %s has low socket*core*thread count %u",
-				reg_msg->node_name, threads1);
+			error("Node %s has low socket*core*thread count "
+			      "(%d < %d)",
+			      reg_msg->node_name, threads1, threads2);
 			error_code = EINVAL;
 			reason_down = "Low socket*core*thread count";
 		} else if ((slurmctld_conf.fast_schedule == 0) &&
 			   ((cr_flag == 1) || gang_flag) && (cores1 < cores2)) {
-			error("Node %s has low socket*core count %u",
-			      reg_msg->node_name, cores1);
+			error("Node %s has low socket*core count (%d < %d)",
+			      reg_msg->node_name, cores1, cores2);
 			error_code = EINVAL;
 			reason_down = "Low socket*core count";
 		} else if ((slurmctld_conf.fast_schedule == 0) &&
 			   ((cr_flag == 1) || gang_flag) &&
 			   ((sockets1 > sockets2) || (cores1 > cores2) ||
 			    (threads1 > threads2))) {
-			error("Node %s has high socket*core*thread count %u, "
-			      "extra resources ignored",
-			      reg_msg->node_name, threads1);
+			error("Node %s has high socket,core,thread count "
+			      "(%d,%d,%d > %d,%d,%d), extra resources ignored",
+			      reg_msg->node_name, sockets1, cores1, threads1,
+			      sockets2, cores2, threads2);
 			/* Preserve configured values */
 			reg_msg->sockets = config_ptr->sockets;
 			reg_msg->cores   = config_ptr->cores;
@@ -1532,16 +1534,18 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg)
 		}
 
 		if (reg_msg->cpus < config_ptr->cpus) {
-			error ("Node %s has low cpu count %u",
-				reg_msg->node_name, reg_msg->cpus);
+			error("Node %s has low cpu count (%u < %u)",
+			      reg_msg->node_name, reg_msg->cpus,
+			      config_ptr->cpus);
 			error_code  = EINVAL;
 			reason_down = "Low CPUs";
 		} else if ((slurmctld_conf.fast_schedule == 0) &&
 			   ((cr_flag == 1) || gang_flag) &&
 			   (reg_msg->cpus > config_ptr->cpus)) {
-			error("Node %s has high CPU count %u, "
+			error("Node %s has high CPU count (%u > %u), "
 			      "extra resources ignored",
-			      reg_msg->node_name, reg_msg->cpus);
+			      reg_msg->node_name, reg_msg->cpus,
+			      config_ptr->cpus);
 			reg_msg->cpus    = config_ptr->cpus;
 		}
 	}
@@ -1563,8 +1567,9 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg)
 
 	if ((slurmctld_conf.fast_schedule != 2) &&
 	    (reg_msg->real_memory < config_ptr->real_memory)) {
-		error ("Node %s has low real_memory size %u",
-		       reg_msg->node_name, reg_msg->real_memory);
+		error("Node %s has low real_memory size (%u < %u)",
+		      reg_msg->node_name, reg_msg->real_memory,
+		      config_ptr->real_memory);
 		error_code  = EINVAL;
 		reason_down = "Low RealMemory";
 	}
@@ -1572,8 +1577,9 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg)
 
 	if ((slurmctld_conf.fast_schedule != 2) &&
 	    (reg_msg->tmp_disk < config_ptr->tmp_disk)) {
-		error ("Node %s has low tmp_disk size %u",
-		       reg_msg->node_name, reg_msg->tmp_disk);
+		error("Node %s has low tmp_disk size (%u < %u)",
+		      reg_msg->node_name, reg_msg->tmp_disk,
+		      config_ptr->tmp_disk);
 		error_code = EINVAL;
 		reason_down = "Low TmpDisk";
 	}
@@ -2525,8 +2531,9 @@ void make_node_idle(struct node_record *node_ptr,
 		   (node_ptr->run_job_cnt == 0) &&
 		   (node_ptr->comp_job_cnt == 0)) {
 		node_ptr->node_state = NODE_STATE_IDLE | node_flags;
-		bit_set(idle_node_bitmap, inx);
 		bit_clear(avail_node_bitmap, inx);
+		bit_set(idle_node_bitmap, inx);
+		bit_set(up_node_bitmap, inx);
 		debug3("make_node_idle: Node %s is DRAINED",
 		       node_ptr->name);
 		node_ptr->last_idle = now;
@@ -2536,11 +2543,19 @@ void make_node_idle(struct node_record *node_ptr,
 						slurm_get_slurm_user_id());
 	} else if (node_ptr->run_job_cnt) {
 		node_ptr->node_state = NODE_STATE_ALLOCATED | node_flags;
+		if (!IS_NODE_NO_RESPOND(node_ptr) &&
+		     !IS_NODE_FAIL(node_ptr) && !IS_NODE_DRAIN(node_ptr))
+			bit_set(avail_node_bitmap, inx);
+		bit_set(up_node_bitmap, inx);
 	} else {
 		node_ptr->node_state = NODE_STATE_IDLE | node_flags;
 		if (!IS_NODE_NO_RESPOND(node_ptr) &&
+		     !IS_NODE_FAIL(node_ptr) && !IS_NODE_DRAIN(node_ptr))
+			bit_set(avail_node_bitmap, inx);
+		if (!IS_NODE_NO_RESPOND(node_ptr) &&
 		    !IS_NODE_COMPLETING(node_ptr))
 			bit_set(idle_node_bitmap, inx);
+		bit_set(up_node_bitmap, inx);
 		node_ptr->last_idle = now;
 	}
 }

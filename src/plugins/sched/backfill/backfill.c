@@ -228,6 +228,8 @@ static int _num_feature_count(struct job_record *job_ptr)
 		return rc;
 
 	feat_iter = list_iterator_create(detail_ptr->feature_list);
+	if (feat_iter == NULL)
+		fatal("list_iterator_create: malloc failure");
 	while ((feat_ptr = (struct feature_record *) list_next(feat_iter))) {
 		if (feat_ptr->count)
 			rc++;
@@ -269,6 +271,8 @@ static int  _try_sched(struct job_record *job_ptr, bitstr_t **avail_bitmap,
 		list_size = list_count(detail_ptr->feature_list);
 		feat_cnt_orig = xmalloc(sizeof(uint16_t) * list_size);
 		feat_iter = list_iterator_create(detail_ptr->feature_list);
+		if (feat_iter == NULL)
+			fatal("list_iterator_create: malloc failure");
 		while ((feat_ptr =
 			(struct feature_record *) list_next(feat_iter))) {
 			high_cnt = MAX(high_cnt, feat_ptr->count);
@@ -482,7 +486,7 @@ static int _attempt_backfill(void)
 	if (slurm_get_root_filter())
 		filter_root = true;
 
-	job_queue = build_job_queue();
+	job_queue = build_job_queue(true);
 	if (list_count(job_queue) <= 1) {
 		debug("backfill: no jobs to backfill");
 		list_destroy(job_queue);
@@ -510,6 +514,18 @@ static int _attempt_backfill(void)
 
 		if (debug_flags & DEBUG_FLAG_BACKFILL)
 			info("backfill test for job %u", job_ptr->job_id);
+
+		if ((job_ptr->state_reason == WAIT_ASSOC_JOB_LIMIT) ||
+		    (job_ptr->state_reason == WAIT_ASSOC_RESOURCE_LIMIT) ||
+		    (job_ptr->state_reason == WAIT_ASSOC_TIME_LIMIT)) {
+			debug2("backfill: job %u is not allowed to run now. "
+			       "Skipping it. State=%s. Reason=%s. Priority=%u",
+			       job_ptr->job_id,
+			       job_state_string(job_ptr->job_state),
+			       job_reason_string(job_ptr->state_reason),
+			       job_ptr->priority);
+			continue;
+		}
 
 		if (((part_ptr->state_up & PARTITION_SCHED) == 0) ||
 		    (part_ptr->node_bitmap == NULL))
@@ -554,7 +570,9 @@ static int _attempt_backfill(void)
 		}
 		comp_time_limit = time_limit;
 		orig_time_limit = job_ptr->time_limit;
-		if (job_ptr->time_min && (job_ptr->time_min < time_limit))
+		if (qos_ptr && (qos_ptr->flags & QOS_FLAG_NO_RESERVE))
+			time_limit = job_ptr->time_limit = 1;
+		else if (job_ptr->time_min && (job_ptr->time_min < time_limit))
 			time_limit = job_ptr->time_limit = job_ptr->time_min;
 
 		/* Determine impact of any resource reservations */
@@ -605,8 +623,10 @@ static int _attempt_backfill(void)
 		     (!bit_super_set(job_ptr->details->req_node_bitmap,
 				     avail_bitmap))) ||
 		    (job_req_node_filter(job_ptr, avail_bitmap))) {
-			if (later_start)
+			if (later_start) {
+				job_ptr->start_time = 0;	
 				goto TRY_LATER;
+			}
 			job_ptr->time_limit = orig_time_limit;
 			continue;
 		}
@@ -628,11 +648,16 @@ static int _attempt_backfill(void)
 			}
 		}
 		/* this is the time consuming operation */
+		debug2("backfill: entering _try_sched for job %u.",
+		       job_ptr->job_id);
 		j = _try_sched(job_ptr, &avail_bitmap,
 			       min_nodes, max_nodes, req_nodes);
+		debug2("backfill: finished _try_sched for job %u.",
+		       job_ptr->job_id);
 		now = time(NULL);
 		if (j != SLURM_SUCCESS) {
 			job_ptr->time_limit = orig_time_limit;
+			job_ptr->start_time = 0;	
 			continue;	/* not runable */
 		}
 
@@ -642,7 +667,9 @@ static int _attempt_backfill(void)
 		}
 		if (job_ptr->start_time <= now) {
 			int rc = _start_job(job_ptr, resv_bitmap);
-			if ((rc == SLURM_SUCCESS) && job_ptr->time_min) {
+			if (qos_ptr && (qos_ptr->flags & QOS_FLAG_NO_RESERVE))
+				job_ptr->time_limit = orig_time_limit;
+			else if ((rc == SLURM_SUCCESS) && job_ptr->time_min) {
 				/* Set time limit as high as possible */
 				job_ptr->time_limit = comp_time_limit;
 				job_ptr->end_time = job_ptr->start_time +
@@ -655,10 +682,12 @@ static int _attempt_backfill(void)
 			}
 			if (rc == ESLURM_ACCOUNTING_POLICY) {
 				/* Unknown future start time, just skip job */
+				job_ptr->start_time = 0;	
 				continue;
 			} else if (rc != SLURM_SUCCESS) {
 				/* Planned to start job, but something bad
 				 * happended. */
+				job_ptr->start_time = 0;	
 				break;
 			} else {
 				/* Started this job, move to next one */
@@ -670,6 +699,7 @@ static int _attempt_backfill(void)
 		if (later_start && (job_ptr->start_time > later_start)) {
 			/* Try later when some nodes currently reserved for
 			 * pending jobs are free */
+			job_ptr->start_time = 0;	
 			goto TRY_LATER;
 		}
 
@@ -690,6 +720,7 @@ static int _attempt_backfill(void)
 			 * job to be backfill scheduled, which the sched
 			 * plugin does not know about. Try again later. */
 			later_start = job_ptr->start_time;
+			job_ptr->start_time = 0;	
 			goto TRY_LATER;
 		}
 

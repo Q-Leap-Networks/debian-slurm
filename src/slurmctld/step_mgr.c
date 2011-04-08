@@ -644,6 +644,23 @@ _pick_step_nodes (struct job_record  *job_ptr,
 				gres_cnt /= cpus_per_task;
 			total_tasks = MIN(total_tasks, gres_cnt);
 
+			if (step_spec->plane_size != (uint16_t) NO_VAL) {
+				if (avail_tasks < step_spec->plane_size)
+					avail_tasks = 0;
+				else {
+					/* Round count down */
+					avail_tasks /= step_spec->plane_size;
+					avail_tasks *= step_spec->plane_size;
+				}
+				if (total_tasks < step_spec->plane_size)
+					total_tasks = 0;
+				else {
+					/* Round count down */
+					total_tasks /= step_spec->plane_size;
+					total_tasks *= step_spec->plane_size;
+				}
+			}
+
 			if (step_spec->max_nodes &&
 			    (nodes_picked_cnt >= step_spec->max_nodes))
 				bit_clear(nodes_avail, i);
@@ -1573,8 +1590,8 @@ step_create(job_step_create_request_msg_t *step_specs,
 		step_specs->node_list = xstrdup(step_node_list);
 	}
 	if (slurm_get_debug_flags() & DEBUG_FLAG_STEPS) {
-		verbose("got %s and %s looking for %u nodes", step_node_list,
-			step_specs->node_list, step_specs->min_nodes);
+		verbose("Picked nodes %s when accumulating from %s",
+			step_node_list, step_specs->node_list);
 	}
 	step_ptr->step_node_bitmap = nodeset;
 
@@ -1710,7 +1727,7 @@ extern slurm_step_layout_t *step_layout_create(struct step_record *step_ptr,
 					       uint32_t num_tasks,
 					       uint16_t cpus_per_task,
 					       uint16_t task_dist,
-					       uint32_t plane_size)
+					       uint16_t plane_size)
 {
 	uint16_t cpus_per_node[node_count];
 	uint32_t cpu_count_reps[node_count], gres_cpus;
@@ -2257,8 +2274,9 @@ extern int step_partial_comp(step_complete_msg_t *req, uid_t uid,
 		return SLURM_SUCCESS;
 	}
 	if (req->range_last < req->range_first) {
-		error("step_partial_comp: JobID=%u range=%u-%u",
-		      req->job_id, req->range_first, req->range_last);
+		error("step_partial_comp: StepID=%u.%u range=%u-%u",
+		      req->job_id, req->job_step_id, req->range_first,
+		      req->range_last);
 		return EINVAL;
 	}
 
@@ -2268,8 +2286,10 @@ extern int step_partial_comp(step_complete_msg_t *req, uid_t uid,
 		/* initialize the node bitmap for exited nodes */
 		nodes = bit_set_count(step_ptr->step_node_bitmap);
 		if (req->range_last >= nodes) {	/* range is zero origin */
-			error("step_partial_comp: JobID=%u last=%u, nodes=%d",
-			      req->job_id, req->range_last, nodes);
+			error("step_partial_comp: StepID=%u.%u last=%u "
+			      "nodes=%d",
+			      req->job_id, req->job_step_id, req->range_last,
+			      nodes);
 			return EINVAL;
 		}
 		step_ptr->exit_node_bitmap = bit_alloc(nodes);
@@ -2279,8 +2299,10 @@ extern int step_partial_comp(step_complete_msg_t *req, uid_t uid,
 	} else {
 		nodes = _bitstr_bits(step_ptr->exit_node_bitmap);
 		if (req->range_last >= nodes) {	/* range is zero origin */
-			error("step_partial_comp: JobID=%u last=%u, nodes=%d",
-			      req->job_id, req->range_last, nodes);
+			error("step_partial_comp: StepID=%u.%u last=%u "
+			      "nodes=%d",
+			      req->job_id, req->job_step_id, req->range_last,
+			      nodes);
 			return EINVAL;
 		}
 		step_ptr->exit_code = MAX(step_ptr->exit_code, req->step_rc);

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmd/slurmd.c - main slurm node server daemon
- *  $Id: slurmd.c 21936 2010-12-29 22:11:02Z jette $
+ *  $Id: slurmd.c 22502 2011-02-16 22:30:25Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
@@ -776,7 +776,8 @@ _read_config(void)
 		    &conf->block_map, &conf->block_map_inv);
 
 	if (((cf->fast_schedule == 0) && !cr_flag && !gang_flag) || 
-	    (conf->actual_cpus < conf->conf_cpus)) {
+	    ((cf->fast_schedule == 1) &&
+	     (conf->actual_cpus < conf->conf_cpus))) {
 		conf->cpus    = conf->actual_cpus;
 		conf->sockets = conf->actual_sockets;
 		conf->cores   = conf->actual_cores;
