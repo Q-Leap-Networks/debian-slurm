@@ -32,6 +32,12 @@ endif
 
 config.status: configure
 	dh_testdir
+ifneq "$(wildcard /usr/share/misc/config.sub)" ""
+	cp -f /usr/share/misc/config.sub config.sub
+endif
+ifneq "$(wildcard /usr/share/misc/config.guess)" ""
+	cp -f /usr/share/misc/config.guess config.guess
+endif
 	# Add here commands to configure the package.
 	CFLAGS="$(CFLAGS)" ./configure --host=$(DEB_HOST_GNU_TYPE) --build=$(DEB_BUILD_GNU_TYPE) --prefix=/usr --mandir=\$${prefix}/share/man --infodir=\$${prefix}/share/info --sysconfdir=/etc/slurm-llnl --with-munge --localstatedir=/var/run/slurm-llnl --without-blcr --libexecdir=/usr/share --enable-pam
 
@@ -64,18 +70,11 @@ clean:
 	[ ! -f contribs/torque/Makefile ] || $(MAKE) -C contribs/torque distclean
 	[ ! -f Makefile ] || $(MAKE) distclean
 
-
-ifneq "$(wildcard /usr/share/misc/config.sub)" ""
-	  cp -f /usr/share/misc/config.sub config.sub
-  endif
-  ifneq "$(wildcard /usr/share/misc/config.guess)" ""
-	  cp -f /usr/share/misc/config.guess config.guess
-  endif
-
-
 	  rm -rf .pc contribs/pam/.deps \
 		src/plugins/accounting_storage/common/.deps \
 		src/plugins/accounting_storage/common/.libs
+	  rm -f config.sub
+	  rm -f config.guess
 	  dh_clean
 
   install: install-indep install-arch

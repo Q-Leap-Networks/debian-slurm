@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/req.h - slurmstepd request handling
- *  $Id: req.h 16616 2009-02-20 17:00:27Z jette $
+ *  $Id$
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

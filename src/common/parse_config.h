@@ -3,7 +3,7 @@
  *
  *  NOTE: when you see the prefix "s_p_", think "slurm parser".
  *
- *  $Id: parse_config.h 19763 2010-03-16 23:07:17Z da $
+ *  $Id$
  *****************************************************************************
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

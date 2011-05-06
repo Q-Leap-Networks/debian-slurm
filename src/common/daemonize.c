@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  daemonize.c - daemonization routine
- *  $Id: daemonize.c 21754 2010-12-10 17:44:30Z da $
+ *  $Id$
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

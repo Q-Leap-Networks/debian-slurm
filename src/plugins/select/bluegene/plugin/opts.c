@@ -1,6 +1,6 @@
 /****************************************************************************\
  *  opts.c - sfree command line option processing functions
- *  $Id: opts.c 21904 2010-12-28 18:45:52Z da $
+ *  $Id$
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

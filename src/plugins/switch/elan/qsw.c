@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  qsw.c - Library routines for initiating jobs on QsNet.
- *  $Id: qsw.c 20467 2010-06-11 16:18:38Z jette $
+ *  $Id$
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

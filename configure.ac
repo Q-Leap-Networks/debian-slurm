@@ -1,4 +1,4 @@
-# $Id: configure.ac 22705 2011-03-08 18:43:27Z jette $
+# $Id$
 # This file is to be processed with autoconf to generate a configure script
 
 dnl Prologue

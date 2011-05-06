@@ -1,6 +1,6 @@
 /*****************************************************************************\
  **  federation_keys.h - Key definitions used by the get_jobinfo functions
- **  $Id: federation_keys.h 19095 2009-12-01 22:59:18Z da $
+ **  $Id$
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

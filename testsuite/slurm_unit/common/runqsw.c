@@ -1,5 +1,5 @@
 /*
- * $Id: runqsw.c 21149 2010-09-14 22:04:42Z da $
+ * $Id$
  * $Source$
  *
  * Demo the routines in common/qsw.c

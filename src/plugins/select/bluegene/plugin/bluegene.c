@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  bluegene.c - blue gene node configuration processing module.
  *
- *  $Id: bluegene.c 22587 2011-03-01 21:19:25Z da $
+ *  $Id$
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

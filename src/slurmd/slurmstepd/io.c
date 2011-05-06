@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/slurmd/slurmstepd/io.c - Standard I/O handling routines for slurmstepd
- * $Id: io.c 21149 2010-09-14 22:04:42Z da $
+ * $Id$
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

@@ -1,27 +1,9 @@
-Description: Upstream changes introduced in version 2.2.1-1
- This patch has been created by dpkg-source during the package build.
- Here's the last changelog entry, hopefully it gives details on why
- those changes were made:
- .
- slurm-llnl (2.2.1-1) unstable; urgency=low
- .
-   * New upstream release
- .
- The person named in the Author field signed this changelog entry.
+Description: mail command absolute pathname
+ This patch changes the default command to /usr/bin/mail in various
+ configuration files and manual pages.
 Author: Gennaro Oliva <oliva.g@na.icar.cnr.it>
-
----
-The information above should follow the Patch Tagging Guidelines, please
-checkout http://dep.debian.net/deps/dep3/ to learn about the format. Here
-are templates for supplementary fields that you might want to add:
-
-Origin: <vendor|upstream|other>, <url of original patch>
-Bug: <url in upstream bugtracker>
-Bug-Debian: http://bugs.debian.org/<bugnumber>
-Bug-Ubuntu: https://launchpad.net/bugs/<bugnumber>
-Forwarded: <no|not-needed|url proving that it has been forwarded>
-Reviewed-By: <name and email of someone who approved the patch>
-Last-Update: <YYYY-MM-DD>
+Bug-Debian: http://bugs.debian.org/588862
+Forwarded: no
 
 --- slurm-llnl-2.2.1.orig/src/common/read_config.h
 +++ slurm-llnl-2.2.1/src/common/read_config.h

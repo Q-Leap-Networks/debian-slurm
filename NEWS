@@ -1,6 +1,42 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 2.2.5
+========================
+ -- Correct init.d/slurm status to have non-zero exit code if ANY Slurm
+    damon that should be running on the node is not running. Patch from Rod
+    Schulz, Bull.
+ -- Improve accuracy of response to "srun --test-only jobid=#".
+ -- Correct logic to properly support --ntasks-per-node option in the
+    select/cons_res plugin. Patch from Rod Schulz, Bull.
+ -- Fix bug in select/cons_res with respect to generic resource (gres)
+    scheduling which prevented some jobs from starting as soon as possible.
+ -- Fix memory leak in select/cons_res when backfill scheduling generic
+    resources (gres).
+ -- Fix for when configuring a node with more resources than in real life
+    and using task/affinity.
+ -- Fix so slurmctld will pack correctly 2.1 step information. (Only needed if
+    a 2.1 client is talking to a 2.2 slurmctld.)
+ -- Set powered down node's state to IDLE+POWER after slurmctld restart instead
+    of leaving in UNKNOWN+POWER. Patch from Andrej Gritsenko.
+ -- Fix bug where is srun's executable is not on it's current search path, but
+    can be found in the user's default search path. Modify slurmstepd to find
+    the executable. Patch from Andrej Gritsenko.
+ -- Make sview display correct cpu count for steps.
+ -- BLUEGENE - when running in overlap mode make sure to check the connection
+    type so you can create overlapping blocks on the exact same nodes with
+    different connection types (i.e. one torus, one mesh).
+ -- Fix memory leak if MPI ports are reserved (for OpenMPI) and srun's
+    --resv-ports option is used.
+ -- Fix some anomalies in select/cons_res task layout when using the 
+    --cpus-per-task option. Patch from Martin Perry, Bull.
+ -- Improve backfill scheduling logic when job specifies --ntasks-per-node and
+    --mem-per-cpu options on a heterogeneous cluster. Patch from Bjorn-Helge
+    Mevik, University of Oslo.
+ -- Fix issue when changing a users name in accounting, if using wckeys would
+    execute correctly, but bad memcopy would core the DBD.  No information
+    would be lost or corrupted, but you would need to restart the DBD.
+
 * Changes in SLURM 2.2.4
 ========================
  -- For batch jobs for which the Prolog fails, substitute the job ID for any
@@ -54,7 +90,7 @@ documents those changes that are of interest to users and admins.
 
 * Changes in SLURM 2.2.3
 ========================
- -- Update srun, salloc, and sbatch man page description of --distribution
+ -- Update srun, salloc, and sbatch man page descript((detail_ptr->pn_min_memory & (MEM_PER_CPU)) &ion of --distribution
     option. Patches from Rod Schulz, Bull.
  -- Applied patch from Martin Perry to fix "Incorrect results for task/affinity
     block second distribution and cpus-per-task > 1" bug.
@@ -6245,4 +6281,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 22954 2011-03-30 16:14:50Z da $
+$Id$

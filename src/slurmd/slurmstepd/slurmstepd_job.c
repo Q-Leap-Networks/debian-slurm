@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/slurmstepd_job.c - slurmd_job_t routines
- *  $Id: slurmstepd_job.c 21423 2010-10-26 21:32:49Z da $
+ *  $Id$
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  node_info.c - get/print the node state information of slurm
- *  $Id: node_info.c 20888 2010-08-04 21:30:08Z da $
+ *  $Id$
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/common/macros.h - some standard macros for slurm
- * $Id: macros.h 21570 2010-11-17 15:13:28Z da $
+ * $Id$
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

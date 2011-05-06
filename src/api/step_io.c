@@ -1,6 +1,6 @@
 /****************************************************************************\
  *  step_io.c - process stdin, stdout, and stderr for parallel jobs.
- *  $Id: step_io.c 21726 2010-12-08 19:39:15Z da $
+ *  $Id$
  *****************************************************************************
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

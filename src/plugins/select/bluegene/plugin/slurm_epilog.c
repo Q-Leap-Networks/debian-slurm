@@ -3,7 +3,7 @@
  *      owned by this user. This is executed via SLURM to synchronize the
  *      user's job execution with slurmctld configuration of partitions.
  *
- * $Id: slurm_epilog.c 20255 2010-05-12 22:43:51Z da $
+ * $Id$
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

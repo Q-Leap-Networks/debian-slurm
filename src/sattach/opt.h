@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  opt.h - definitions for sattach option processing
- *  $Id: opt.h 20525 2010-06-21 19:33:28Z jette $
+ *  $Id$
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

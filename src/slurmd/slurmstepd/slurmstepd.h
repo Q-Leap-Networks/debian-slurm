@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/slurmd/slurmstepd/slurmstepd.h - slurmstepd general header file
- * $Id: slurmstepd.h 20622 2010-07-01 16:17:05Z da $
+ * $Id$
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/slurmd/slurmd/req.h - slurmd request handling
- * $Id: req.h 19138 2009-12-08 18:07:50Z da $
+ * $Id$
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

@@ -2,6 +2,8 @@ contribs/sjobexit/Makefile
 contribs/pam/Makefile
 contribs/slurmdb-direct/Makefile
 contribs/perlapi/libslurmdb/Makefile
+contribs/perlapi/libslurmdb/perl/const-c.inc
+contribs/perlapi/libslurmdb/perl/const-xs.inc
 contribs/perlapi/libslurm/Makefile
 contribs/perlapi/Makefile
 contribs/phpext/Makefile

@@ -1,5 +1,5 @@
 /*****************************************************************************\
- *  $Id: fd.c 19084 2009-12-01 20:42:11Z da $
+ *  $Id$
  *****************************************************************************
  *  Copyright (C) 2001-2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
