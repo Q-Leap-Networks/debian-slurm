@@ -1,3 +1,10 @@
+slurm-llnl (2.2.7-1) unstable; urgency=low
+
+  * New upstream release
+  * Empty dependency_libs entries in .la files (Closes: #633286) 
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Mon, 11 Jul 2011 16:01:19 +0200
+
 slurm-llnl (2.2.6-1) unstable; urgency=low
 
   * New upstream release

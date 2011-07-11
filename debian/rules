@@ -106,6 +106,7 @@ clean:
 	# Add here commands to install the arch part of the package into 
 	# debian/tmp.
 	$(MAKE) install DESTDIR=$(CURDIR)/debian/slurm-llnl
+	sed -i "/dependency_libs/ s/'.*'/''/" `find . -name '*.la'`
 	rm -fr debian/slurm-llnl/usr/lib/slurm/src
 	rm -f  debian/slurm-llnl/usr/sbin/slurm_epilog
 	rm -f  debian/slurm-llnl/usr/sbin/slurm_prolog
