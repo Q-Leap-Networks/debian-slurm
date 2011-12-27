@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -48,6 +48,24 @@
 #include "src/common/xmalloc.h"
 #include "src/slurmdbd/read_config.h"
 
+uint16_t _get_slurm_version(uint32_t rpc_version)
+{
+	uint16_t version;
+
+	if (rpc_version >= 9)
+		version = SLURM_PROTOCOL_VERSION;
+	else if (rpc_version >= 8)
+		version = SLURM_2_2_PROTOCOL_VERSION;
+	else if (rpc_version >= 6)
+		version = SLURM_2_1_PROTOCOL_VERSION;
+	else if (rpc_version >= 5)
+		version = SLURM_2_0_PROTOCOL_VERSION;
+	else
+		version = SLURM_1_3_PROTOCOL_VERSION;
+
+	return version;
+}
+
 /*
  * check_header_version checks to see that the specified header was sent
  * from a node running the same version of the protocol as the current node
@@ -56,13 +74,18 @@
  */
 int check_header_version(header_t * header)
 {
+	uint16_t check_version = SLURM_PROTOCOL_VERSION;
+
+	if (working_cluster_rec)
+		check_version = _get_slurm_version(
+			working_cluster_rec->rpc_version);
+
 	if (slurmdbd_conf) {
-		if (header->version != SLURM_PROTOCOL_VERSION
-		    && header->version != SLURM_2_1_PROTOCOL_VERSION
-		    && header->version != SLURM_2_0_PROTOCOL_VERSION
-		    && header->version != SLURM_1_3_PROTOCOL_VERSION)
+		if ((header->version != SLURM_PROTOCOL_VERSION)     &&
+		    (header->version != SLURM_2_2_PROTOCOL_VERSION) &&
+		    (header->version != SLURM_2_1_PROTOCOL_VERSION))
 			slurm_seterrno_ret(SLURM_PROTOCOL_VERSION_ERROR);
-	} else if (header->version != SLURM_PROTOCOL_VERSION) {
+	} else if (header->version != check_version) {
 		/* Starting with 2.2 we will handle previous versions
 		 * of SLURM for some calls */
 		switch(header->msg_type) {
@@ -76,31 +99,52 @@ int check_header_version(header_t * header)
 		case REQUEST_COMPLETE_JOB_ALLOCATION:
 		case REQUEST_CREATE_PARTITION:
 		case REQUEST_CREATE_RESERVATION:
+		case REQUEST_DELETE_PARTITION:
+		case REQUEST_DELETE_RESERVATION:
+		case REQUEST_FRONT_END_INFO:
+		case REQUEST_JOB_ALLOCATION_INFO:
+		case REQUEST_JOB_ALLOCATION_INFO_LITE:
 		case REQUEST_JOB_END_TIME:
 		case REQUEST_JOB_INFO:
 		case REQUEST_JOB_INFO_SINGLE:
+		case REQUEST_JOB_NOTIFY:
 		case REQUEST_JOB_READY:
 		case REQUEST_JOB_REQUEUE:
 		case REQUEST_JOB_STEP_INFO:
 		case REQUEST_JOB_WILL_RUN:
 		case REQUEST_NODE_INFO:
 		case REQUEST_PARTITION_INFO:
+		case REQUEST_PING:
 		case REQUEST_PRIORITY_FACTORS:
 		case REQUEST_RECONFIGURE:
 		case REQUEST_RESERVATION_INFO:
+		case REQUEST_SET_DEBUG_FLAGS:
 		case REQUEST_SET_DEBUG_LEVEL:
+		case REQUEST_SET_SCHEDLOG_LEVEL:
 		case REQUEST_SHARE_INFO:
 		case REQUEST_SHUTDOWN:
 		case REQUEST_SHUTDOWN_IMMEDIATE:
+		case REQUEST_SPANK_ENVIRONMENT:
 		case REQUEST_STEP_COMPLETE:		/* From slurmstepd */
 		case REQUEST_STEP_LAYOUT:
 		case REQUEST_SUBMIT_BATCH_JOB:
 		case REQUEST_SUSPEND:
+		case REQUEST_TERMINATE_JOB:
+		case REQUEST_TERMINATE_TASKS:
 		case REQUEST_TOPO_INFO:
+		case REQUEST_TRIGGER_CLEAR:
+		case REQUEST_TRIGGER_GET:
+		case REQUEST_TRIGGER_PULL:
+		case REQUEST_TRIGGER_SET:
 		case REQUEST_UPDATE_BLOCK:
+		case REQUEST_UPDATE_FRONT_END:
 		case REQUEST_UPDATE_JOB:
+		case REQUEST_UPDATE_JOB_STEP:
+		case REQUEST_UPDATE_NODE:
 		case REQUEST_UPDATE_PARTITION:
-			if (header->version == SLURM_2_1_PROTOCOL_VERSION)
+		case REQUEST_UPDATE_RESERVATION:
+			if ((header->version == SLURM_2_2_PROTOCOL_VERSION)
+			    || (header->version == SLURM_2_1_PROTOCOL_VERSION))
 				break;
 		default:
 			slurm_seterrno_ret(SLURM_PROTOCOL_VERSION_ERROR);
@@ -125,18 +169,14 @@ void init_header(header_t *header, slurm_msg_t *msg, uint16_t flags)
 	   protocol version changes. */
 	if (msg->protocol_version != (uint16_t)NO_VAL)
 		header->version = msg->protocol_version;
+	else if (working_cluster_rec)
+		header->version = _get_slurm_version(
+			working_cluster_rec->rpc_version);
 	else if ((msg->msg_type == ACCOUNTING_UPDATE_MSG) ||
 	         (msg->msg_type == ACCOUNTING_FIRST_REG)) {
 		uint32_t rpc_version =
 			((accounting_update_msg_t *)msg->data)->rpc_version;
-		if (rpc_version >= 8)
-			header->version = SLURM_PROTOCOL_VERSION;
-		else if (rpc_version >= 6)
-			header->version = SLURM_2_1_PROTOCOL_VERSION;
-		else if (rpc_version >= 5)
-			header->version = SLURM_2_0_PROTOCOL_VERSION;
-		else
-			header->version = SLURM_1_3_PROTOCOL_VERSION;
+		header->version = _get_slurm_version(rpc_version);
 	} else
 		header->version = SLURM_PROTOCOL_VERSION;
 

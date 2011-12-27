@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -189,7 +189,6 @@ int srun(int ac, char **av)
 	resource_allocation_response_msg_t *resp;
 	int debug_level;
 	env_t *env = xmalloc(sizeof(env_t));
-	uint32_t job_id = 0;
 	log_options_t logopt = LOG_OPTS_STDERR_ONLY;
 	slurm_step_launch_params_t launch_params;
 	slurm_step_launch_callbacks_t callbacks;
@@ -214,7 +213,12 @@ int srun(int ac, char **av)
 	 * which are not designed to handle them */
 	if (xsignal_block(sig_array) < 0)
 		error("Unable to block signals");
-
+#ifndef HAVE_CRAY_EMULATION
+	if (is_cray_system() || is_cray_select_type()) {
+		error("operation not supported on Cray systems - use aprun(1)");
+		exit(error_exit);
+	}
+#endif
 	/* Initialize plugin stack, read options from plugins, etc.
 	 */
 	init_spank_env();
@@ -283,8 +287,8 @@ int srun(int ac, char **av)
 			exit(error_exit);
 		}
 	} else if ((resp = existing_allocation())) {
-
-		job_id = resp->job_id;
+		select_g_alter_node_cnt(SELECT_APPLY_NODE_MAX_OFFSET,
+					&resp->node_cnt);
 		if (opt.nodes_set_env && !opt.nodes_set_opt &&
 		    (opt.min_nodes > resp->node_cnt)) {
 			/* This signifies the job used the --no-kill option
@@ -319,7 +323,7 @@ int srun(int ac, char **av)
 			exit(error_exit);
 	} else {
 		/* Combined job allocation and job step launch */
-#ifdef HAVE_FRONT_END
+#if defined HAVE_FRONT_END && (!defined HAVE_BGQ || !defined HAVE_BG_FILES)
 		uid_t my_uid = getuid();
 		if ((my_uid != 0) &&
 		    (my_uid != slurm_get_slurm_user_id())) {
@@ -331,6 +335,11 @@ int srun(int ac, char **av)
 			fatal("--relative option invalid for job allocation "
 			      "request");
 		}
+
+		if (!opt.job_name_set_env && opt.job_name_set_cmd)
+			setenvfs("SLURM_JOB_NAME=%s", opt.job_name);
+		else if (!opt.job_name_set_env && opt.argc)
+			setenvfs("SLURM_JOB_NAME=%s", opt.argv[0]);
 
 		if ( !(resp = allocate_nodes()) )
 			exit(error_exit);
@@ -373,7 +382,8 @@ int srun(int ac, char **av)
 	/*
 	 *  Enhance environment for job
 	 */
-	env->cpus_per_task = opt.cpus_per_task;
+	if (opt.cpus_set)
+		env->cpus_per_task = opt.cpus_per_task;
 	if (opt.ntasks_per_node != NO_VAL)
 		env->ntasks_per_node = opt.ntasks_per_node;
 	if (opt.ntasks_per_socket != NO_VAL)
@@ -431,7 +441,12 @@ int srun(int ac, char **av)
 	xfree(env);
 
  re_launch:
+#if defined HAVE_BGQ
+//#if defined HAVE_BGQ && defined HAVE_BG_FILES
+	task_state = task_state_create(1);
+#else
 	task_state = task_state_create(opt.ntasks);
+#endif
 	slurm_step_launch_params_t_init(&launch_params);
 	launch_params.gid = opt.gid;
 	launch_params.argc = opt.argc;
@@ -454,7 +469,10 @@ int srun(int ac, char **av)
 	if (opt.acctg_freq >= 0)
 		launch_params.acctg_freq = opt.acctg_freq;
 	launch_params.pty = opt.pty;
-	launch_params.cpus_per_task	= opt.cpus_per_task;
+	if (opt.cpus_set)
+		launch_params.cpus_per_task	= opt.cpus_per_task;
+	else
+		launch_params.cpus_per_task	= 1;
 	launch_params.task_dist         = opt.distribution;
 	launch_params.ckpt_dir		= opt.ckpt_dir;
 	launch_params.restart_dir       = opt.restart_dir;
@@ -1220,7 +1238,9 @@ _update_task_exit_state(uint32_t ntasks, uint32_t taskids[], int abnormal)
 
 static int _kill_on_bad_exit(void)
 {
-	return (opt.kill_bad_exit || slurm_get_kill_on_bad_exit());
+	if (opt.kill_bad_exit == NO_VAL)
+		return slurm_get_kill_on_bad_exit();
+	return opt.kill_bad_exit;
 }
 
 static void _setup_max_wait_timer(void)
@@ -1345,8 +1365,9 @@ static void _handle_intr(void)
 {
 	static time_t last_intr      = 0;
 	static time_t last_intr_sent = 0;
+	time_t now = time(NULL);
 
-	if (!opt.quit_on_intr && ((time(NULL) - last_intr) > 1)) {
+	if (!opt.quit_on_intr && ((now - last_intr) > 1)) {
 		if  (opt.disable_status) {
 			info("sending Ctrl-C to job %u.%u",
 			     job->jobid, job->stepid);
@@ -1363,7 +1384,7 @@ static void _handle_intr(void)
 		update_job_state(job, SRUN_JOB_CANCELLED);
 		/* terminate job */
 		if (job->state < SRUN_JOB_FORCETERM) {
-			if ((time(NULL) - last_intr_sent) < 1) {
+			if ((now - last_intr_sent) < 1) {
 				job_force_termination(job);
 				slurm_step_launch_abort(job->step_ctx);
 				return;
@@ -1371,7 +1392,7 @@ static void _handle_intr(void)
 
 			info("sending Ctrl-C to job %u.%u",
 			     job->jobid, job->stepid);
-			last_intr_sent = time(NULL);
+			last_intr_sent = now;
 			slurm_step_launch_fwd_signal(job->step_ctx, SIGINT);
 			slurm_step_launch_abort(job->step_ctx);
 		} else {

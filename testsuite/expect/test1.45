@@ -14,7 +14,7 @@
 # CODE-OCEC-09-009. All rights reserved.
 #
 # This file is part of SLURM, a resource management program.
-# For details, see <https://computing.llnl.gov/linux/slurm/>.
+# For details, see <http://www.schedmd.com/slurmdocs/>.
 # Please also read the included file: DISCLAIMER.
 #
 # SLURM is free software; you can redistribute it and/or modify it under
@@ -50,6 +50,11 @@ set num_procs_test3  ""
 
 
 print_header $test_id
+
+if {[test_cray]} {
+	send_user "\nWARNING: This test is incompatible with Cray systems\n"
+	exit $exit_code
+}
 
 if { [test_xcpu] } {
 	send_user "\nWARNING: This test is incompatible with XCPU systems\n"
@@ -139,8 +144,12 @@ if {$num_procs_test1 != $num_procs_test2} {
 }
 
 if {$num_nodes_test3 != 1} {
-	send_user "\nFAILURE: SLURM_NNODES should be 1 ($num_nodes_test3 != 1)\n"
-	set exit_code 1
+	if { [test_bluegene] } {
+		send_user "\nWARNING: Can not confirm SLURM_NNODES value, likely expanded to smallest block size\n"
+	} else {
+		send_user "\nFAILURE: SLURM_NNODES should be 1 ($num_nodes_test3 != 1)\n"
+		set exit_code 1
+	}
 }
 
 if {$num_procs_test3 != 1} {

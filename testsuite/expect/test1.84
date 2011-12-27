@@ -19,7 +19,7 @@
 # CODE-OCEC-09-009. All rights reserved.
 #
 # This file is part of SLURM, a resource management program.
-# For details, see <https://computing.llnl.gov/linux/slurm/>.
+# For details, see <http://www.schedmd.com/slurmdocs/>.
 # Please also read the included file: DISCLAIMER.
 #
 # SLURM is free software; you can redistribute it and/or modify it under
@@ -50,6 +50,14 @@ if { [test_front_end] } {
 }
 if {[test_multiple_slurmd] != 0} {
 	send_user "\nWARNING: This test is incompatible with multiple slurmd systems\n"
+	exit 0
+}
+
+# Various configurations allocate nodes, sockets, cores, cpus or threads;
+# not all of which are compatible with this test
+set select_type [test_select_type]
+if {[string compare $select_type "cons_res"]} {
+	send_user "\nWARNING: This test is incompatible with select/$select_type\n"
 	exit 0
 }
 

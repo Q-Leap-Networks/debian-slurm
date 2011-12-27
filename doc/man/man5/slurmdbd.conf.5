@@ -3,10 +3,11 @@
 slurmdbd.conf \- Slurm Database Daemon (SlurmDBD) configuration file
 
 .SH "DESCRIPTION"
-\fB/etc/slurmdb.conf\fP is an ASCII file which describes Slurm Database
+\fBslurmdb.conf\fP is an ASCII file which describes Slurm Database
 Daemon (SlurmDBD) configuration information.
-You can use the \fBSLURM_CONF\fR environment variable to override the built\-in
-location of this file.
+The file location can be modified at system build time using the
+DEFAULT_SLURM_CONF parameter or at execution time by setting the SLURM_CONF
+environment variable.
 .LP
 The contents of the file are case insensitive except for the names of nodes
 and files. Any text following a "#" in the configuration file is treated
@@ -158,6 +159,9 @@ unless something is explicitly set by the admin with the create.
 Fully qualified pathname of a file into which the Slurm Database Daemon's
 logs are written.
 The default value is none (performs logging via syslog).
+.br
+See the section \fBLOGGING\fR in the slurm.conf man page
+if a pathname is specified.
 
 .TP
 \fBMessageTimeout\fR
@@ -324,6 +328,12 @@ with to store the job accounting data.
 Boolean yes or no.  Used to set display and track of the Workload
 Characterization Key. Must be set to track wckey usage.
 
+.TP
+\fBTrackSlurmctldDown\fR
+Boolean yes or no.  If set the slurmdbd will mark all idle resources on the
+cluster as down when a slurmctld disconnects or is no longer reachable.  The
+default is no.
+
 .SH "EXAMPLE"
 .LP
 #
@@ -376,7 +386,7 @@ Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 CODE\-OCEC\-09\-009. All rights reserved.
 .LP
 This file is part of SLURM, a resource management program.
-For details, see <https://computing.llnl.gov/linux/slurm/>.
+For details, see <http://www.schedmd.com/slurmdocs/>.
 .LP
 SLURM is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free
@@ -395,4 +405,4 @@ details.
 .LP
 \fBslurm.conf\fR(5),
 \fBslurmctld\fR(8), \fBslurmdbd\fR(8)
-\fBsyslog\fR(2)
+\fBsyslog\fR (2)

@@ -9,7 +9,7 @@
  *  Written by Danny Auble <da@llnl.gov>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -265,6 +265,7 @@ static void _state_time_string(char **extra, uint32_t state,
 	case JOB_FAILED:
 	case JOB_TIMEOUT:
 	case JOB_NODE_FAIL:
+	case JOB_PREEMPTED:
 	default:
 		xstrfmtcat(*extra, "(t1.state=%u AND (t1.time_end!=0 AND ", state);
 		if(start && !end) {

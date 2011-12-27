@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -208,7 +208,7 @@ void print_fields(type_t type, void *object)
 			default:
 				break;
 			}
-			if(tmp_dub != (double)NO_VAL)
+			if (!fuzzy_equal(tmp_dub, NO_VAL))
 				tmp_char = _elapsed_time((long)tmp_dub, 0);
 
 			field->print_routine(field,
@@ -229,7 +229,7 @@ void print_fields(type_t type, void *object)
 			default:
 				break;
 			}
-			if(tmp_dub != (double)NO_VAL)
+			if (!fuzzy_equal(tmp_dub, NO_VAL))
 				convert_num_unit((float)tmp_dub,
 						 outbuf, sizeof(outbuf),
 						 UNIT_KILO);
@@ -251,7 +251,7 @@ void print_fields(type_t type, void *object)
 			default:
 				break;
 			}
-			if(tmp_dub != (double)NO_VAL)
+			if (!fuzzy_equal(tmp_dub, NO_VAL))
 				convert_num_unit((float)tmp_dub,
 						 outbuf, sizeof(outbuf),
 						 UNIT_KILO);
@@ -273,7 +273,7 @@ void print_fields(type_t type, void *object)
 			default:
 				break;
 			}
-			if(tmp_dub != (double)NO_VAL)
+			if (!fuzzy_equal(tmp_dub, NO_VAL))
 				convert_num_unit((float)tmp_dub,
 						 outbuf, sizeof(outbuf),
 						 UNIT_KILO);
@@ -309,6 +309,21 @@ void print_fields(type_t type, void *object)
 				break;
 			case JOBCOMP:
 			default:
+				break;
+			}
+			field->print_routine(field,
+					     tmp_char,
+					     (curr_inx == field_count));
+			break;
+		case PRINT_COMMENT:
+			switch(type) {
+			case JOB:
+				tmp_char = job->derived_es;
+				break;
+			case JOBSTEP:
+			case JOBCOMP:
+			default:
+				tmp_char = NULL;
 				break;
 			}
 			field->print_routine(field,
@@ -372,21 +387,6 @@ void print_fields(type_t type, void *object)
 
 			field->print_routine(field,
 					     outbuf,
-					     (curr_inx == field_count));
-			break;
-		case PRINT_DERIVED_ES:
-			switch(type) {
-			case JOB:
-				tmp_char = job->derived_es;
-				break;
-			case JOBSTEP:
-			case JOBCOMP:
-			default:
-				tmp_char = NULL;
-				break;
-			}
-			field->print_routine(field,
-					     tmp_char,
 					     (curr_inx == field_count));
 			break;
 		case PRINT_ELAPSED:
@@ -786,7 +786,7 @@ void print_fields(type_t type, void *object)
 			default:
 				break;
 			}
-			if(tmp_dub != (double)NO_VAL)
+			if (!fuzzy_equal(tmp_dub, NO_VAL))
 				tmp_char = _elapsed_time((long)tmp_dub, 0);
 			field->print_routine(field,
 					     tmp_char,
@@ -1107,7 +1107,7 @@ void print_fields(type_t type, void *object)
 			}
 
 			if (((tmp_int & JOB_STATE_BASE) == JOB_CANCELLED) &&
-			    (tmp_int2 != NO_VAL))
+			    (tmp_int2 != -1))
 				snprintf(outbuf, FORMAT_STRING_SIZE,
 					 "%s by %d",
 					 job_state_string(tmp_int),

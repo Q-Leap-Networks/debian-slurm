@@ -1,7 +1,7 @@
 #!/usr/bin/expect
 ############################################################################
-# Purpose: Verify the ability to modify the Derived Exit Code/String fields
-#          of a job record in the database.
+# Purpose: Verify the ability to modify the Derived Exit Code and Comment
+#          fields of a job record in the database.
 #
 # Output:  "TEST: #.#" followed by "SUCCESS" if test was successful, OR
 #          "FAILURE: ..." otherwise with an explanation of the failure, OR
@@ -13,7 +13,7 @@
 # CODE-OCEC-09-009. All rights reserved.
 #
 # This file is part of SLURM, a resource management program.
-# For details, see <https://computing.llnl.gov/linux/slurm/>.
+# For details, see <http://www.schedmd.com/slurmdocs/>.
 # Please also read the included file: DISCLAIMER.
 #
 # SLURM is free software; you can redistribute it and/or modify it under
@@ -125,9 +125,11 @@ if {$matches != 2} {
 
 #
 # Modify the DerivedExitCode and String of the job
+# (after waiting for the job to get written from slurmctld daemon to slurmdbd)
 #
+sleep 5
 set matches 0
-spawn $sacctmgr -i modify job job=$job_id set DerivedExitCode=22 DerivedExitString=hello
+spawn $sacctmgr -i modify job job=$job_id set DerivedExitCode=22 Comment=hello
 expect {
 	-re "$job_id" {
 		incr matches
@@ -143,7 +145,7 @@ expect {
 }
 
 if {$matches != 1} {
-	send_user "\nFAILURE: sacctmgr failed to change DerivedExitCode/String\n"
+	send_user "\nFAILURE: sacctmgr failed to change DerivedExitCode/Comment\n"
 	exit 1
 }
 
@@ -152,7 +154,7 @@ if {$matches != 1} {
 # matches the above modification and that ExitCode did not change.
 #
 set matches 0
-spawn $sacct -n -P -X -j $job_id -o ExitCode,DerivedExitCode,DerivedExitStr
+spawn $sacct -n -P -X -j $job_id -o ExitCode,DerivedExitCode,Comment
 expect {
 	-re "0:0\\|0:22\\|hello" {	# Job record
 		incr matches

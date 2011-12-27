@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -31,7 +31,7 @@
 #include <stdint.h>
 #include <pthread.h>
 
-#include <slurm/slurm.h>
+#include "slurm/slurm.h"
 
 #include "src/common/eio.h"
 #include "src/common/list.h"

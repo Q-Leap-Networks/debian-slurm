@@ -9,7 +9,7 @@
  *  Written by Danny Auble <da@llnl.gov>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -860,7 +860,7 @@ js_pg_step_complete(pgsql_conn_t *pg_conn,
 	time_t now;
 	int elapsed;
 	int comp_status;
-	int cpus = 0, tasks = 0;
+	int cpus = 0;
 	struct jobacctinfo *jobacct = (struct jobacctinfo *)step_ptr->jobacct;
 	struct jobacctinfo dummy_jobacct;
 	double ave_vsize = 0, ave_rss = 0, ave_pages = 0;
@@ -904,20 +904,17 @@ js_pg_step_complete(pgsql_conn_t *pg_conn,
 
 	if(slurmdbd_conf) {
 		now = step_ptr->job_ptr->end_time;
-		tasks = step_ptr->job_ptr->details->num_tasks;
 		cpus = step_ptr->cpu_count;
 	} else {
 		now = time(NULL);
 #ifdef HAVE_BG
-		tasks = cpus = step_ptr->job_ptr->details->min_cpus;
+		cpus = step_ptr->job_ptr->details->min_cpus;
 
 #else
 		if(!step_ptr->step_layout || !step_ptr->step_layout->task_cnt)
-			tasks = cpus = step_ptr->job_ptr->total_cpus;
-		else {
+			cpus = step_ptr->job_ptr->total_cpus;
+		else
 			cpus = step_ptr->cpu_count;
-			tasks = step_ptr->step_layout->task_cnt;
-		}
 #endif
 	}
 
@@ -1014,10 +1011,9 @@ js_pg_suspend(pgsql_conn_t *pg_conn, uint32_t old_db_inx,
 {
  	char *query = NULL;
  	int rc = SLURM_SUCCESS;
- 	time_t submit_time;
  	uint32_t job_db_inx;
 
- 	if(check_db_connection(pg_conn) != SLURM_SUCCESS)
+ 	if (check_db_connection(pg_conn) != SLURM_SUCCESS)
  		return ESLURM_DB_CONNECTION;
 
  	if (! cluster_in_db(pg_conn, pg_conn->cluster_name) ) {
@@ -1025,16 +1021,11 @@ js_pg_suspend(pgsql_conn_t *pg_conn, uint32_t old_db_inx,
  		return SLURM_ERROR;
  	}
 
- 	if (job_ptr->resize_time)
- 		submit_time = job_ptr->resize_time;
- 	else
- 		submit_time = job_ptr->details->submit_time;
-
  	if (_check_job_db_index(pg_conn, job_ptr) != SLURM_SUCCESS)
  		return SLURM_SUCCESS;
 
- 	if(IS_JOB_RESIZING(job_ptr)) {
- 		if(!old_db_inx) {
+ 	if (IS_JOB_RESIZING(job_ptr)) {
+ 		if (!old_db_inx) {
  			error("No old db inx given for job %u cluster %s, "
  			      "can't update suspend table.",
  			      job_ptr->job_id, pg_conn->cluster_name);
@@ -1050,14 +1041,14 @@ js_pg_suspend(pgsql_conn_t *pg_conn, uint32_t old_db_inx,
  	} else
  		job_db_inx = job_ptr->db_index;
 
- 	query = xstrdup_printf(
+ 	xstrfmtcat(query,
  		"UPDATE %s.%s SET time_suspended=%d-time_suspended, state=%d "
- 		"WHERE job_db_inx=%d", pg_conn->cluster_name, job_table,
+ 		"WHERE job_db_inx=%d;", pg_conn->cluster_name, job_table,
  		(int)job_ptr->suspend_time,
  		(int)(job_ptr->job_state & JOB_STATE_BASE),
  		(int)job_ptr->db_index);
 
- 	if(IS_JOB_SUSPENDED(job_ptr))
+ 	if (IS_JOB_SUSPENDED(job_ptr))
  		xstrfmtcat(query,
  			   "INSERT INTO %s.%s (job_db_inx, id_assoc, "
  			   "  time_start, time_end) VALUES (%d, %d, %ld, 0);",
@@ -1073,10 +1064,10 @@ js_pg_suspend(pgsql_conn_t *pg_conn, uint32_t old_db_inx,
  			   job_ptr->db_index);
 
  	rc = DEF_QUERY_RET_RC;
- 	if(rc == SLURM_SUCCESS) {
+ 	if (rc == SLURM_SUCCESS) {
  		query = xstrdup_printf(
  			"UPDATE %s.%s SET time_suspended=%d-time_suspended, "
- 			"state=%d WHERE job_db_inx=%d and time_end=0",
+ 			"state=%d WHERE job_db_inx=%d and time_end=0;",
  			pg_conn->cluster_name,
  			step_table, (int)job_ptr->suspend_time,
  			(int)job_ptr->job_state, (int)job_ptr->db_index);

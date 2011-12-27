@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -49,7 +49,8 @@
 #include <string.h>
 #include <time.h>
 #include <inttypes.h>
-#include <slurm/slurm_errno.h>
+
+#include "slurm/slurm_errno.h"
 
 #include "src/common/pack.h"
 #include "src/common/macros.h"
@@ -73,6 +74,8 @@ strong_alias(init_buf,		slurm_init_buf);
 strong_alias(xfer_buf_data,	slurm_xfer_buf_data);
 strong_alias(pack_time,		slurm_pack_time);
 strong_alias(unpack_time,	slurm_unpack_time);
+strong_alias(packdouble,	slurm_packdouble);
+strong_alias(unpackdouble,	slurm_unpackdouble);
 strong_alias(pack64,		slurm_pack64);
 strong_alias(unpack64,		slurm_unpack64);
 strong_alias(pack32,		slurm_pack32);

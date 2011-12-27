@@ -14,7 +14,7 @@
 # CODE-OCEC-09-009. All rights reserved.
 #
 # This file is part of SLURM, a resource management program.
-# For details, see <https://computing.llnl.gov/linux/slurm/>.
+# For details, see <http://www.schedmd.com/slurmdocs/>.
 # Please also read the included file: DISCLAIMER.
 #
 # SLURM is free software; you can redistribute it and/or modify it under
@@ -44,10 +44,10 @@ set sleep_time  5
 
 # allocate a set of nodes (node_cnt) and the quit right after
 proc allocate_and_quit { node_cnt node error_cnt check} {
-	global salloc number alpha_numeric_under max_job_delay prompt
+	global salloc number alpha_numeric_under bin_bash max_job_delay prompt
 	set job_id 0
 	set block ""
-	set line "-N$node_cnt-$node_cnt"
+	set line "-N$node_cnt-$node_cnt -t5 $bin_bash"
 	if {[string compare $node ""]} {
 		set line "$line -w $node"
 	}
@@ -333,7 +333,7 @@ proc check_node { node error_cnt alloc_cnt } {
 }
 
 # set a block in a error state
-proc change_block_state { block state} {
+proc change_block_state { block state } {
 	global scontrol
 
 	set exit_code 0
@@ -473,9 +473,17 @@ if {$type == 0} {
 	exit 1
 }
 
-
-
-if {![string compare $type "P"]} {
+if {![string compare $type "Q"]} {
+	if {$psets >= 32} {
+		set smallest 16
+	} elseif {$psets >= 16} {
+		set smallest 32
+	} elseif {$psets >= 8} {
+		set smallest 64
+	} else {
+		set smallest 128
+	}
+} elseif {![string compare $type "P"]} {
 	if {$psets >= 32} {
 		set smallest 16
 	} elseif {$psets >= 16} {

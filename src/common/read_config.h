@@ -11,7 +11,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -43,6 +43,7 @@
 #ifndef _READ_CONFIG_H
 #define _READ_CONFIG_H
 
+#include "src/common/list.h"
 #include "src/common/slurm_protocol_defs.h"
 #include "src/common/slurm_protocol_socket_common.h"
 #include "src/common/parse_config.h"
@@ -86,6 +87,8 @@ extern char *default_plugstack;
 #define DEFAULT_KILL_WAIT           30
 #define DEFAULT_MAIL_PROG           "/bin/mail"
 #define DEFAULT_MAX_JOB_COUNT       10000
+#define DEFAULT_MAX_JOB_ID          0xffff0000
+#define DEFAULT_MAX_STEP_COUNT      40000
 #define DEFAULT_MEM_PER_CPU         0
 #define DEFAULT_MAX_MEM_PER_CPU     0
 #define DEFAULT_MIN_JOB_AGE         300
@@ -96,7 +99,11 @@ extern char *default_plugstack;
 #  define DEFAULT_PROCTRACK_TYPE    "proctrack/aix"
 #else
 #  define DEFAULT_CHECKPOINT_TYPE   "checkpoint/none"
-#  define DEFAULT_PROCTRACK_TYPE    "proctrack/pgid"
+#  if defined HAVE_REAL_CRAY/* ALPS requires cluster-unique job container IDs */
+#    define DEFAULT_PROCTRACK_TYPE    "proctrack/sgi_job"
+#  else
+#    define DEFAULT_PROCTRACK_TYPE    "proctrack/pgid"
+#  endif
 #endif
 #define DEFAULT_PREEMPT_TYPE        "preempt/none"
 #define DEFAULT_PRIORITY_DECAY      604800 /* 7 days */
@@ -112,17 +119,11 @@ extern char *default_plugstack;
 #define DEFAULT_SCHED_TIME_SLICE    30
 #define DEFAULT_SCHEDTYPE           "sched/builtin"
 #ifdef HAVE_BG	/* Blue Gene specific default configuration parameters */
-#  ifdef HAVE_BGQ
-#     define DEFAULT_SELECT_TYPE       "select/bgq"
-#  else
-#     define DEFAULT_SELECT_TYPE       "select/bluegene"
-#  endif
+#  define DEFAULT_SELECT_TYPE       "select/bluegene"
+#elif defined HAVE_CRAY
+#  define DEFAULT_SELECT_TYPE       "select/cray"
 #else
-#  ifdef HAVE_CRAY /* Cray specific default configuration parameters */
-#     define DEFAULT_SELECT_TYPE       "select/cray"
-#  else
-#     define DEFAULT_SELECT_TYPE       "select/linear"
-#  endif
+#  define DEFAULT_SELECT_TYPE       "select/linear"
 #endif
 #define DEFAULT_SLURMCTLD_PIDFILE   "/var/run/slurmctld.pid"
 #define DEFAULT_SLURMCTLD_TIMEOUT   120
@@ -141,15 +142,25 @@ extern char *default_plugstack;
 #define DEFAULT_SWITCH_TYPE         "switch/none"
 #define DEFAULT_TASK_PLUGIN         "task/none"
 #define DEFAULT_TMP_FS              "/tmp"
-#ifdef HAVE_3D
+#if defined HAVE_3D && !defined HAVE_CRAY
 #  define DEFAULT_TOPOLOGY_PLUGIN     "topology/3d_torus"
 #else
 #  define DEFAULT_TOPOLOGY_PLUGIN     "topology/none"
 #endif
 #define DEFAULT_WAIT_TIME           0
-#define DEFAULT_TREE_WIDTH          50
+#  define DEFAULT_TREE_WIDTH        50
 #define DEFAULT_UNKILLABLE_TIMEOUT  60 /* seconds */
 #define DEFAULT_MAX_TASKS_PER_NODE  128
+
+typedef struct slurm_conf_frontend {
+	char *frontends;		/* frontend node name */
+	char *addresses;		/* frontend node address */
+	uint16_t port;			/* frontend specific port */
+	char *reason;			/* reason for down frontend node */
+	uint16_t node_state;		/* enum node_states, ORed with
+					 * NODE_STATE_NO_RESPOND if not
+					 * responding */
+} slurm_conf_frontend_t;
 
 typedef struct slurm_conf_node {
 	char *nodenames;
@@ -177,15 +188,17 @@ typedef struct slurm_conf_partition {
 	char *allow_groups;	/* comma delimited list of groups,
 				 * NULL indicates all */
 	char *alternate;	/* name of alternate partition */
+	uint32_t def_mem_per_cpu; /* default MB memory per allocated CPU */
 	bool default_flag;	/* Set if default partition */
 	uint32_t default_time;	/* minutes or INFINITE */
 	uint16_t disable_root_jobs; /* if set then user root can't run
 				     * jobs if NO_VAL use global
 				     * default */
-
+	uint32_t grace_time;	/* default grace time for partition */
 	bool     hidden_flag;	/* 1 if hidden by default */
 	uint16_t max_share;	/* number of jobs to gang schedule */
 	uint32_t max_time;	/* minutes or INFINITE */
+	uint32_t max_mem_per_cpu; /* maximum MB memory per allocated CPU */
 	uint32_t max_nodes;	/* per job or INFINITE */
 	uint32_t min_nodes;	/* per job */
 	char	*name;		/* name of the partition */
@@ -209,6 +222,17 @@ typedef struct {
 	char *name;
 	char *value;
 } config_key_pair_t;
+
+/* Destroy a front_end record built by slurm_conf_frontend_array() */
+extern void destroy_frontend(void *ptr);
+
+/*
+ * list_find_frontend - find an entry in the front_end list, see list.h for
+ *	documentation
+ * IN key - is feature name or NULL for all features
+ * RET 1 if found, 0 otherwise
+ */
+extern int list_find_frontend (void *front_end_entry, void *key);
 
 /*
  * slurm_conf_init - load the slurm configuration from the a file.
@@ -256,6 +280,15 @@ extern int slurm_conf_destroy(void);
 extern slurm_ctl_conf_t *slurm_conf_lock(void);
 
 extern void slurm_conf_unlock(void);
+
+
+/*
+ * Set "ptr_array" with the pointer to an array of pointers to
+ * slurm_conf_frontend_t structures.
+ *
+ * Return value is the length of the array.
+ */
+extern int slurm_conf_frontend_array(slurm_conf_frontend_t **ptr_array[]);
 
 /*
  * Set "ptr_array" with the pointer to an array of pointers to

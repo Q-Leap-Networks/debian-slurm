@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -331,6 +331,20 @@ uint32_t slurm_get_debug_flags(void)
 	return debug_flags;
 }
 
+/* slurm_set_debug_flags
+ */
+void slurm_set_debug_flags(uint32_t debug_flags)
+{
+	slurm_ctl_conf_t *conf;
+
+	if (slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		conf->debug_flags = debug_flags;
+		slurm_conf_unlock();
+	}
+}
+
 /* slurm_get_max_mem_per_cpu
  * RET MaxMemPerCPU/Node value from slurm.conf
  */
@@ -368,7 +382,7 @@ uint32_t slurm_get_epilog_msg_time(void)
 /* slurm_get_env_timeout
  * return default timeout for srun/sbatch --get-user-env option
  */
-inline int slurm_get_env_timeout(void)
+extern int slurm_get_env_timeout(void)
 {
 	int timeout = 0;
 	slurm_ctl_conf_t *conf;
@@ -1665,6 +1679,24 @@ char *slurm_get_select_type(void)
 	return select_type;
 }
 
+/* slurm_get_select_type_param
+ * get select_type_param from slurmctld_conf object
+ * RET uint16_t   - select_type_param
+ */
+uint16_t slurm_get_select_type_param(void)
+{
+	uint16_t select_type_param = 0;
+	slurm_ctl_conf_t *conf;
+
+	if (slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		select_type_param = conf->select_type_param;
+		slurm_conf_unlock();
+	}
+	return select_type_param;
+}
+
 /** Return true if (remote) system runs Cray XT/XE */
 bool is_cray_select_type(void)
 {
@@ -2642,15 +2674,13 @@ int slurm_send_node_msg(slurm_fd_t fd, slurm_msg_t * msg)
 	Buf      buffer;
 	int      rc;
 	void *   auth_cred;
-	uint16_t auth_flags = SLURM_PROTOCOL_NO_FLAGS;
 
 	/*
 	 * Initialize header with Auth credential and message type.
 	 */
-	if (msg->flags & SLURM_GLOBAL_AUTH_KEY) {
-		auth_flags = SLURM_GLOBAL_AUTH_KEY;
+	if (msg->flags & SLURM_GLOBAL_AUTH_KEY)
 		auth_cred = g_slurm_auth_create(NULL, 2, _global_auth_key());
-	} else
+	else
 		auth_cred = g_slurm_auth_create(NULL, 2, NULL);
 	if (auth_cred == NULL) {
 		error("authentication: %s",
@@ -2699,10 +2729,15 @@ int slurm_send_node_msg(slurm_fd_t fd, slurm_msg_t * msg)
 				get_buf_offset(buffer),
 				SLURM_PROTOCOL_NO_SEND_RECV_FLAGS );
 
-	if (rc < 0) {
+	if ((rc < 0) && (errno == ENOTCONN)) {
+		debug3("slurm_msg_sendto: peer has disappeared for msg_type=%u",
+		       msg->msg_type);
+	} else if (rc < 0) {
+		slurm_addr_t peer_addr;
 		char addr_str[32];
-		slurm_print_slurm_addr(&msg->address, addr_str,
-				       sizeof(addr_str));
+
+		slurm_get_peer_addr(fd, &peer_addr);
+		slurm_print_slurm_addr(&peer_addr, addr_str, sizeof(addr_str));
 		error("slurm_msg_sendto: address:port=%s msg_type=%u: %m",
 		      addr_str, msg->msg_type);
 	}
@@ -2943,23 +2978,6 @@ void slurm_print_slurm_addr(slurm_addr_t * address, char *buf, size_t n)
 /**********************************************************************\
  * slurm_addr_t pack routines
 \**********************************************************************/
-
-/*
- *  Pack just the message with no header and send back the buffer.
- */
-Buf slurm_pack_msg_no_header(slurm_msg_t * msg)
-{
-	Buf      buffer = NULL;
-
-	buffer = init_buf(0);
-
-	/*
-	 * Pack message into buffer
-	 */
-	pack_msg(msg, buffer);
-
-	return buffer;
-}
 
 /* slurm_pack_slurm_addr
  * packs a slurm_addr_t into a buffer to serialization transport
@@ -3367,26 +3385,7 @@ List slurm_send_recv_msgs(const char *nodelist, slurm_msg_t *msg,
 		return NULL;
 	}
 
-#ifdef HAVE_FRONT_END
-	{
-		char *name = NULL;
-		/* only send to the front end node */
-		name = nodelist_nth_host(nodelist, 0);
-		if (!name) {
-			error("slurm_send_recv_msgs: "
-			      "can't get the first name out of %s",
-			      nodelist);
-			return NULL;
-		}
-/* 	info("got %s and %s", nodelist, name); */
-		hl = hostlist_create(name);
-		free(name);
-	}
-#else
-/* 	info("total sending to %s",nodelist); */
 	hl = hostlist_create(nodelist);
-#endif
-
 	if (!hl) {
 		error("slurm_send_recv_msgs: problem creating hostlist");
 		return NULL;
@@ -3441,7 +3440,7 @@ List slurm_send_addr_recv_msgs(slurm_msg_t *msg, char *name, int timeout)
 
 
 /*
- *  Open a connection to the "address" specified in the the slurm msg "req"
+ *  Open a connection to the "address" specified in the slurm msg "req".
  *    Then read back an "rc" message returning the "return_code" specified
  *    in the response in the "rc" parameter.
  * IN req	- a slurm_msg struct to be sent by the function

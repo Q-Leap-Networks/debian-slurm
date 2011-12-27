@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -57,8 +57,9 @@
 
 #include <stdarg.h>
 #include <ctype.h>
+#include <time.h>
 
-#include <slurm/slurm_errno.h>
+#include "slurm/slurm_errno.h"
 
 #include "src/common/macros.h"
 #include "src/common/strlcpy.h"
@@ -325,8 +326,7 @@ char *xstrdup_printf(const char *fmt, ...)
  */
 char * xstrndup(const char *str, size_t n)
 {
-	size_t siz,
-	       rsiz;
+	size_t siz;
 	char   *result;
 
 	if (str == NULL)
@@ -338,7 +338,7 @@ char * xstrndup(const char *str, size_t n)
 	siz++;
 	result = (char *)xmalloc(siz);
 
-	rsiz = strlcpy(result, str, siz);
+	(void) strlcpy(result, str, siz);
 
 	return result;
 }
@@ -469,7 +469,7 @@ bool xstring_is_whitespace(const char *str)
 
 	len = strlen(str);
 	for (i = 0; i < len; i++) {
-		if (!isspace(str[i])) {
+		if (!isspace((int)str[i])) {
 			return false;
 		}
 	}
@@ -485,7 +485,7 @@ char *xstrtolower(char *str)
 	if(str) {
 		int j = 0;
 		while(str[j]) {
-			str[j] = tolower(str[j]);
+			str[j] = tolower((int)str[j]);
 			j++;
 		}
 	}

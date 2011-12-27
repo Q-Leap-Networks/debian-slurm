@@ -7,13 +7,13 @@
 #          "FAILURE: ..." otherwise with an explanation of the failure, OR
 #          anything else indicates a failure mode that must be investigated.
 ############################################################################
-# Copyright (C) 2002 The Regents of the University of California.
+# Copyright (C) 2002-2007 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
 # CODE-OCEC-09-009. All rights reserved.
 #
 # This file is part of SLURM, a resource management program.
-# For details, see <https://computing.llnl.gov/linux/slurm/>.
+# For details, see <http://www.schedmd.com/slurmdocs/>.
 # Please also read the included file: DISCLAIMER.
 #
 # SLURM is free software; you can redistribute it and/or modify it under
@@ -35,23 +35,57 @@ source ./globals
 set test_id        "3.3"
 set authorized     1
 set exit_code      0
+set node_list      ""
 set node_name      ""
 set read_state     ""
 
 print_header $test_id
 
+if {[test_cray]} {
+        send_user "\nWARNING: This test is incompatible with Cray systems\n"
+        exit $exit_code
+}
+
 #
 # Identify a node and its state
 #
-spawn $scontrol show node
+spawn $sinfo --noheader -o  "NodeName=%N State=%t "
 expect {
-        -re "NodeName=($alpha_numeric_under) " {
-                if {[string compare $node_name ""] == 0} {
-                        set node_name $expect_out(1,string)
+        -re "NodeName=($alpha_numeric_nodelist) State=idle " {
+                if {[string compare $node_list ""] == 0} {
+                        set node_list $expect_out(1,string)
                 }
                 exp_continue
         }
- 	timeout {
+        -re "NodeName=($alpha_numeric_nodelist) State=allocated " {
+                if {[string compare $node_list ""] == 0} {
+                        set node_list $expect_out(1,string)
+                }
+                exp_continue
+        }
+	timeout {
+		send_user "\nFAILURE: sinfo not responding\n"
+		set exit_code 1
+	}
+	eof {
+		wait
+	}
+}
+if {[string compare $node_list ""] == 0} {
+	send_user "\nWARNING: no nodes in usable state for this test\n"
+	exit 0
+}
+
+#
+# Convert node list to a single node name
+#
+log_user 0
+spawn $scontrol show hostnames $node_list
+expect {
+        -re "($alpha_numeric_nodelist)" {
+		set node_name $expect_out(1,string)
+        }
+	timeout {
 		send_user "\nFAILURE: scontrol not responding\n"
 		set exit_code 1
 	}
@@ -59,10 +93,7 @@ expect {
 		wait
 	}
 }
-
-#
-# Validate current node information
-#
+log_user 1
 if {[string compare $node_name ""] == 0} {
 	send_user "\nWARNING: no nodes in usable state for this test\n"
 	exit 0

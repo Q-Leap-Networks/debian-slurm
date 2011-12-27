@@ -3,12 +3,13 @@
  *****************************************************************************
  *  Copyright (C) 2010 Lawrence Livermore National Security.
  *  Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
+ *  Supported by the Oak Ridge National Laboratory Extreme Scale Systems Center
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -52,9 +53,11 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "src/common/slurm_xlator.h"	/* Must be first */
 #include "other_select.h"
+#include "basil_interface.h"
+#include "cray_config.h"
 
-#define NOT_FROM_CONTROLLER -2
 /* These are defined here so when we link with something other than
  * the slurmctld we will have these symbols defined.  They will get
  * overwritten when linking with the slurmctld.
@@ -62,38 +65,42 @@
 #if defined (__APPLE__)
 slurm_ctl_conf_t slurmctld_conf __attribute__((weak_import));
 struct node_record *node_record_table_ptr __attribute__((weak_import));
-int bg_recover __attribute__((weak_import)) = NOT_FROM_CONTROLLER;
 List part_list __attribute__((weak_import));
 List job_list __attribute__((weak_import));
 int node_record_count __attribute__((weak_import));
 time_t last_node_update __attribute__((weak_import));
 struct switch_record *switch_record_table __attribute__((weak_import));
 int switch_record_cnt __attribute__((weak_import));
+slurmdb_cluster_rec_t *working_cluster_rec  __attribute__((weak_import)) = NULL;
+void *acct_db_conn __attribute__((weak_import)) = NULL;
+bitstr_t *avail_node_bitmap __attribute__((weak_import)) = NULL;
 #else
 slurm_ctl_conf_t slurmctld_conf;
 struct node_record *node_record_table_ptr;
-int bg_recover = NOT_FROM_CONTROLLER;
 List part_list;
 List job_list;
 int node_record_count;
 time_t last_node_update;
 struct switch_record *switch_record_table;
 int switch_record_cnt;
+slurmdb_cluster_rec_t *working_cluster_rec = NULL;
+void *acct_db_conn = NULL;
+bitstr_t *avail_node_bitmap = NULL;
 #endif
 
-#define JOBINFO_MAGIC 0x8cb3
-#define NODEINFO_MAGIC 0x82a3
+/*
+ * SIGRTMIN isn't defined on osx, so lets keep it above the signals in use.
+ */
+#if !defined (SIGRTMIN) && defined (__APPLE__)
+#  define SIGRTMIN SIGUSR2+1
+#endif
 
-struct select_jobinfo {
-	uint16_t		magic;		/* magic number */
-	select_jobinfo_t	*other_jobinfo;
-	uint32_t		reservation_id;	/* BASIL reservation ID */
-};
-
-struct select_nodeinfo {
-	uint16_t magic;		/* magic number */
-	select_nodeinfo_t *other_nodeinfo;
-};
+/* All current (2011) XT/XE installations have a maximum dimension of 3,
+ * smaller systems deploy a 2D Torus which has no connectivity in
+ * X-dimension.  We know the highest system dimensions possible here
+ * are 3 so we set it to that.  Do not use SYSTEM_DIMENSIONS since
+ * that could easily be wrong if built on a non Cray system. */
+static int select_cray_dim_size[3] = {-1};
 
 /*
  * These variables are required by the generic plugin interface.  If they
@@ -125,9 +132,8 @@ struct select_nodeinfo {
  */
 const char plugin_name[]	= "Cray node selection plugin";
 const char plugin_type[]	= "select/cray";
-uint32_t plugin_id	        = 104;
-const uint32_t plugin_version	= 1;
-
+uint32_t plugin_id		= 104;
+const uint32_t plugin_version	= 100;
 
 /*
  * init() is called when the plugin is loaded, before any other functions
@@ -138,7 +144,7 @@ extern int init ( void )
 	/*
 	 * FIXME: At the moment the smallest Cray allocation unit are still
 	 * full nodes. Node sharing (even across NUMA sockets of the same
-	 * node) is, as of CLE 3.1 (summer 2010) still not supported, i.e.
+	 * node) is, as of CLE 3.x (Summer 2011) still not supported, i.e.
 	 * as per the LIMITATIONS section of the aprun(1) manpage of the
 	 * 3.1.27A release).
 	 * Hence for the moment we can only use select/linear.  If some
@@ -147,15 +153,13 @@ extern int init ( void )
 	 * if (slurmctld_conf.select_type_param & CR_CONS_RES)
 	 *	plugin_id = 105;
 	 */
-#ifndef HAVE_CRAY
-	if (bg_recover != NOT_FROM_CONTROLLER)
-		fatal("select/cray is incompatible with a non Cray system");
-#endif
+	create_config();
 	return SLURM_SUCCESS;
 }
 
 extern int fini ( void )
 {
+	destroy_config();
 	return SLURM_SUCCESS;
 }
 
@@ -179,8 +183,22 @@ extern int select_p_job_init(List job_list)
 	return other_job_init(job_list);
 }
 
+/*
+ * select_p_node_ranking - generate node ranking for Cray nodes
+ */
+extern bool select_p_node_ranking(struct node_record *node_ptr, int node_cnt)
+{
+	if (basil_node_ranking(node_ptr, node_cnt) < 0)
+		fatal("can not resolve node coordinates: ALPS problem?");
+	return true;
+}
+
 extern int select_p_node_init(struct node_record *node_ptr, int node_cnt)
 {
+	if (basil_geometry(node_ptr, node_cnt)) {
+		error("can not get initial ALPS node state");
+		return SLURM_ERROR;
+	}
 	return other_node_init(node_ptr, node_cnt);
 }
 
@@ -226,7 +244,6 @@ extern int select_p_job_test(struct job_record *job_ptr, bitstr_t *bitmap,
 			     List preemptee_candidates,
 			     List *preemptee_job_list)
 {
-
 	return other_job_test(job_ptr, bitmap, min_nodes, max_nodes,
 			      req_nodes, mode, preemptee_candidates,
 			      preemptee_job_list);
@@ -234,35 +251,136 @@ extern int select_p_job_test(struct job_record *job_ptr, bitstr_t *bitmap,
 
 extern int select_p_job_begin(struct job_record *job_ptr)
 {
+	xassert(job_ptr);
 
+	if (do_basil_reserve(job_ptr) != SLURM_SUCCESS) {
+		job_ptr->state_reason = WAIT_RESOURCES;
+		xfree(job_ptr->state_desc);
+		return SLURM_ERROR;
+	}
 	return other_job_begin(job_ptr);
 }
 
 extern int select_p_job_ready(struct job_record *job_ptr)
 {
+	int rc = SLURM_SUCCESS;
+
+	xassert(job_ptr);
+	/*
+	 * Convention:	this function may be called also from stepdmgr, to
+	 *		confirm the ALPS reservation of a batch job. In this
+	 *		case, job_ptr only has minimal information and sets
+	 *		job_state == NO_VAL to distinguish this call from one
+	 *		done by slurmctld. It also sets batch_flag == 0, which
+	 *		means that we need to confirm only if batch_flag is 0,
+	 *		and execute the other_job_ready() only in slurmctld.
+	 */
+	if (!job_ptr->batch_flag)
+		rc = do_basil_confirm(job_ptr);
+	if (rc != SLURM_SUCCESS || (job_ptr->job_state == (uint16_t)NO_VAL))
+		return rc;
 	return other_job_ready(job_ptr);
 }
-
 
 extern int select_p_job_resized(struct job_record *job_ptr,
 				struct node_record *node_ptr)
 {
-	return other_job_resized(job_ptr, node_ptr);
+	/* return other_job_resized(job_ptr, node_ptr); */
+	return ESLURM_NOT_SUPPORTED;
+}
+
+extern bool select_p_job_expand_allow(void)
+{
+	return false;
+}
+
+extern int select_p_job_expand(struct job_record *from_job_ptr,
+			       struct job_record *to_job_ptr)
+{
+	return ESLURM_NOT_SUPPORTED;
+}
+
+extern int select_p_job_signal(struct job_record *job_ptr, int signal)
+{
+	xassert(job_ptr);
+	/*
+	 * Release the ALPS reservation already here for those signals that are
+	 * likely to terminate the job. Otherwise there is a race condition if a
+	 * script has more than one aprun line: while the apkill of the current
+	 * aprun line is underway, the job script proceeds to run and executes
+	 * the next following aprun line, until reaching the end of the script.
+	 * This not only creates large delays, it can also mess up cleaning up
+	 * after the job. Releasing the reservation will stop any new aprun
+	 * lines from being executed.
+	 */
+	switch (signal) {
+		case SIGCONT:
+		case SIGSTOP:
+		case SIGTSTP:
+		case SIGTTIN:
+		case SIGTTOU:
+		case SIGURG:
+		case SIGCHLD:
+		case SIGWINCH:
+			break;
+		default:
+			if (signal < SIGRTMIN)
+				do_basil_release(job_ptr);
+	}
+
+	if (do_basil_signal(job_ptr, signal) != SLURM_SUCCESS)
+		return SLURM_ERROR;
+	return other_job_signal(job_ptr, signal);
 }
 
 extern int select_p_job_fini(struct job_record *job_ptr)
 {
+	if (job_ptr == NULL)
+		return SLURM_SUCCESS;
+	if (do_basil_release(job_ptr) != SLURM_SUCCESS)
+		return SLURM_ERROR;
+	/*
+	 * Convention: like select_p_job_ready, may be called also from
+	 *             stepdmgr, where job_state == NO_VAL is used to
+	 *             distinguish the context from that of slurmctld.
+	 */
+	if (job_ptr->job_state == (uint16_t)NO_VAL)
+		return SLURM_SUCCESS;
 	return other_job_fini(job_ptr);
 }
 
-extern int select_p_job_suspend(struct job_record *job_ptr)
+extern int select_p_job_suspend(struct job_record *job_ptr, bool indf_susp)
 {
-	return other_job_suspend(job_ptr);
+	if (job_ptr == NULL)
+		return SLURM_SUCCESS;
+
+	if (do_basil_switch(job_ptr, 1) != SLURM_SUCCESS)
+		return SLURM_ERROR;
+
+	return other_job_suspend(job_ptr, indf_susp);
 }
 
-extern int select_p_job_resume(struct job_record *job_ptr)
+extern int select_p_job_resume(struct job_record *job_ptr, bool indf_susp)
 {
-	return other_job_resume(job_ptr);
+	if (job_ptr == NULL)
+		return SLURM_SUCCESS;
+
+	if (do_basil_switch(job_ptr, 0) != SLURM_SUCCESS)
+		return SLURM_ERROR;
+
+	return other_job_resume(job_ptr, indf_susp);
+}
+
+extern bitstr_t *select_p_step_pick_nodes(struct job_record *job_ptr,
+					  select_jobinfo_t *jobinfo,
+					  uint32_t node_count)
+{
+	return other_step_pick_nodes(job_ptr, jobinfo, node_count);
+}
+
+extern int select_p_step_finish(struct step_record *step_ptr)
+{
+	return other_step_finish(step_ptr);
 }
 
 extern int select_p_pack_select_info(time_t last_query_time,
@@ -273,12 +391,12 @@ extern int select_p_pack_select_info(time_t last_query_time,
 				      protocol_version);
 }
 
-extern select_nodeinfo_t *select_p_select_nodeinfo_alloc(uint32_t size)
+extern select_nodeinfo_t *select_p_select_nodeinfo_alloc(void)
 {
 	select_nodeinfo_t *nodeinfo = xmalloc(sizeof(struct select_nodeinfo));
 
 	nodeinfo->magic = NODEINFO_MAGIC;
-	nodeinfo->other_nodeinfo = other_select_nodeinfo_alloc(size);
+	nodeinfo->other_nodeinfo = other_select_nodeinfo_alloc();
 
 	return nodeinfo;
 }
@@ -349,11 +467,11 @@ extern int select_p_select_nodeinfo_get(select_nodeinfo_t *nodeinfo,
 	select_nodeinfo_t **select_nodeinfo = (select_nodeinfo_t **) data;
 
 	if (nodeinfo == NULL) {
-		error("other_get_nodeinfo: nodeinfo not set");
+		error("select/cray nodeinfo_get: nodeinfo not set");
 		return SLURM_ERROR;
 	}
 	if (nodeinfo->magic != NODEINFO_MAGIC) {
-		error("set_nodeinfo: nodeinfo magic bad");
+		error("select/cray nodeinfo_get: nodeinfo magic bad");
 		return SLURM_ERROR;
 	}
 
@@ -385,19 +503,23 @@ extern int select_p_select_jobinfo_set(select_jobinfo_t *jobinfo,
 {
 	int rc = SLURM_SUCCESS;
 	uint32_t *uint32 = (uint32_t *) data;
+	uint64_t *uint64 = (uint64_t *) data;
 
 	if (jobinfo == NULL) {
-		error("set_jobinfo: jobinfo not set");
+		error("select/cray jobinfo_set: jobinfo not set");
 		return SLURM_ERROR;
 	}
 	if (jobinfo->magic != JOBINFO_MAGIC) {
-		error("set_jobinfo: jobinfo magic bad");
+		error("select/cray jobinfo_set: jobinfo magic bad");
 		return SLURM_ERROR;
 	}
 
 	switch (data_type) {
 	case SELECT_JOBDATA_RESV_ID:
 		jobinfo->reservation_id = *uint32;
+		break;
+	case SELECT_JOBDATA_PAGG_ID:
+		jobinfo->confirm_cookie = *uint64;
 		break;
 	default:
 		rc = other_select_jobinfo_set(jobinfo, data_type, data);
@@ -413,14 +535,15 @@ extern int select_p_select_jobinfo_get(select_jobinfo_t *jobinfo,
 {
 	int rc = SLURM_SUCCESS;
 	uint32_t *uint32 = (uint32_t *) data;
+	uint64_t *uint64 = (uint64_t *) data;
 	select_jobinfo_t **select_jobinfo = (select_jobinfo_t **) data;
 
 	if (jobinfo == NULL) {
-		error("get_jobinfo: jobinfo not set");
+		error("select/cray jobinfo_get: jobinfo not set");
 		return SLURM_ERROR;
 	}
 	if (jobinfo->magic != JOBINFO_MAGIC) {
-		error("get_jobinfo: jobinfo magic bad");
+		error("select/cray jobinfo_get: jobinfo magic bad");
 		return SLURM_ERROR;
 	}
 
@@ -430,6 +553,9 @@ extern int select_p_select_jobinfo_get(select_jobinfo_t *jobinfo,
 		break;
 	case SELECT_JOBDATA_RESV_ID:
 		*uint32 = jobinfo->reservation_id;
+		break;
+	case SELECT_JOBDATA_PAGG_ID:
+		*uint64 = jobinfo->confirm_cookie;
 		break;
 	default:
 		rc = other_select_jobinfo_get(jobinfo, data_type, data);
@@ -446,11 +572,12 @@ extern select_jobinfo_t *select_p_select_jobinfo_copy(select_jobinfo_t *jobinfo)
 	if (jobinfo == NULL)
 		;
 	else if (jobinfo->magic != JOBINFO_MAGIC)
-		error("copy_jobinfo: jobinfo magic bad");
+		error("select/cray jobinfo_copy: jobinfo magic bad");
 	else {
 		rc = xmalloc(sizeof(struct select_jobinfo));
 		rc->magic = JOBINFO_MAGIC;
 		rc->reservation_id = jobinfo->reservation_id;
+		rc->confirm_cookie = jobinfo->confirm_cookie;
 	}
 	return rc;
 }
@@ -461,7 +588,7 @@ extern int select_p_select_jobinfo_free(select_jobinfo_t *jobinfo)
 
 	if (jobinfo) {
 		if (jobinfo->magic != JOBINFO_MAGIC) {
-			error("free_jobinfo: jobinfo magic bad");
+			error("select/cray jobinfo_free: jobinfo magic bad");
 			return EINVAL;
 		}
 
@@ -483,6 +610,7 @@ extern int select_p_select_jobinfo_pack(select_jobinfo_t *jobinfo, Buf buffer,
 			return SLURM_SUCCESS;
 		}
 		pack32(jobinfo->reservation_id, buffer);
+		pack64(jobinfo->confirm_cookie, buffer);
 		rc = other_select_jobinfo_pack(jobinfo->other_jobinfo, buffer,
 					       protocol_version);
 	}
@@ -500,6 +628,7 @@ extern int select_p_select_jobinfo_unpack(select_jobinfo_t **jobinfo_pptr,
 	jobinfo->magic = JOBINFO_MAGIC;
 	if (protocol_version >= SLURM_2_2_PROTOCOL_VERSION) {
 		safe_unpack32(&jobinfo->reservation_id, buffer);
+		safe_unpack64(&jobinfo->confirm_cookie, buffer);
 		rc = other_select_jobinfo_unpack(&jobinfo->other_jobinfo,
 						 buffer, protocol_version);
 	}
@@ -521,39 +650,44 @@ extern char *select_p_select_jobinfo_sprint(select_jobinfo_t *jobinfo,
 {
 
 	if (buf == NULL) {
-		error("sprint_jobinfo: buf is null");
+		error("select/cray jobinfo_sprint: buf is null");
 		return NULL;
 	}
 
 	if ((mode != SELECT_PRINT_DATA)
 	    && jobinfo && (jobinfo->magic != JOBINFO_MAGIC)) {
-		error("sprint_jobinfo: jobinfo magic bad");
+		error("select/cray jobinfo_sprint: jobinfo magic bad");
 		return NULL;
 	}
 
 	if (jobinfo == NULL) {
 		if (mode != SELECT_PRINT_HEAD) {
-			error("sprint_jobinfo: jobinfo bad");
+			error("select/cray jobinfo_sprint: jobinfo bad");
 			return NULL;
 		}
 	}
 
 	switch (mode) {
+	/*
+	 * SLURM only knows the ALPS reservation ID. The application IDs (APIDs)
+	 * of the reservation need to be queried from the Inventory response.
+	 * The maximum known reservation ID is 4096, it wraps around after that.
+	 */
 	case SELECT_PRINT_HEAD:
-		snprintf(buf, size, "RESV_ID");
+		snprintf(buf, size, "ALPS");
 		break;
 	case SELECT_PRINT_DATA:
 		if (jobinfo->reservation_id)
-			snprintf(buf, size, "%7u", jobinfo->reservation_id);
+			snprintf(buf, size, "%4u", jobinfo->reservation_id);
 		else
-			snprintf(buf, size, "%7s", "none");
+			snprintf(buf, size, "%4s", "none");
 		break;
 	case SELECT_PRINT_MIXED:
 		if (jobinfo->reservation_id)
-			snprintf(buf, size, "Resv_ID=%u",
+			snprintf(buf, size, "resId=%u",
 				 jobinfo->reservation_id);
 		else
-			snprintf(buf, size, "Resv_ID=none");
+			snprintf(buf, size, "resId=none");
 		break;
 	case SELECT_PRINT_RESV_ID:
 		snprintf(buf, size, "%u", jobinfo->reservation_id);
@@ -574,32 +708,33 @@ extern char *select_p_select_jobinfo_xstrdup(select_jobinfo_t *jobinfo,
 
 	if ((mode != SELECT_PRINT_DATA)
 	    && jobinfo && (jobinfo->magic != JOBINFO_MAGIC)) {
-		error("xstrdup_jobinfo: jobinfo magic bad");
+		error("select/cray jobinfo_xstrdup: jobinfo magic bad");
 		return NULL;
 	}
 
 	if (jobinfo == NULL) {
 		if (mode != SELECT_PRINT_HEAD) {
-			error("xstrdup_jobinfo: jobinfo bad");
+			error("select/cray jobinfo_xstrdup: jobinfo bad");
 			return NULL;
 		}
 	}
 
 	switch (mode) {
+	/* See comment in select_p_select_jobinfo_sprint() regarding format. */
 	case SELECT_PRINT_HEAD:
-		xstrcat(buf, "RESV_ID");
+		xstrcat(buf, "ALPS");
 		break;
 	case SELECT_PRINT_DATA:
 		if (jobinfo->reservation_id)
-			xstrfmtcat(buf, "%7u", jobinfo->reservation_id);
+			xstrfmtcat(buf, "%4u", jobinfo->reservation_id);
 		else
-			xstrfmtcat(buf, "%7s", "none");
+			xstrfmtcat(buf, "%4s", "none");
 		break;
 	case SELECT_PRINT_MIXED:
 		if (jobinfo->reservation_id)
-			xstrfmtcat(buf, "Resv_ID=%u", jobinfo->reservation_id);
+			xstrfmtcat(buf, "resId=%u", jobinfo->reservation_id);
 		else
-			xstrcat(buf, "Resv_ID=none");
+			xstrcat(buf, "resId=none");
 		break;
 	case SELECT_PRINT_RESV_ID:
 		xstrfmtcat(buf, "%u", jobinfo->reservation_id);
@@ -635,9 +770,9 @@ extern int select_p_update_node_config(int index)
 	return other_update_node_config(index);
 }
 
-extern int select_p_update_node_state(int index, uint16_t state)
+extern int select_p_update_node_state(struct node_record *node_ptr)
 {
-	return other_update_node_state(index, state);
+	return other_update_node_state(node_ptr);
 }
 
 extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
@@ -647,5 +782,73 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 
 extern int select_p_reconfigure(void)
 {
+	if (basil_inventory())
+		return SLURM_ERROR;
 	return other_reconfigure();
+}
+
+extern bitstr_t * select_p_resv_test(bitstr_t *avail_bitmap, uint32_t node_cnt)
+{
+	return other_resv_test(avail_bitmap, node_cnt);
+}
+
+extern void select_p_ba_init(node_info_msg_t *node_info_ptr, bool sanity_check)
+{
+	int i, j, offset;
+	int dims = slurmdb_setup_cluster_dims();
+
+	if (select_cray_dim_size[0] == -1) {
+		node_info_t *node_ptr;
+
+		/* init the rest of the dim sizes. All current (2011)
+		 * XT/XE installations have a maximum dimension of 3,
+		 * smaller systems deploy a 2D Torus which has no
+		 * connectivity in X-dimension.  Just incase they
+		 * decide to change it where we only get 2 instead of
+		 * 3 we will initialize it later. */
+		for (i = 1; i < dims; i++)
+			select_cray_dim_size[i] = -1;
+		for (i = 0; i < node_info_ptr->record_count; i++) {
+			node_ptr = &(node_info_ptr->node_array[i]);
+			if (!node_ptr->node_addr ||
+			    (strlen(node_ptr->node_addr) != dims))
+				continue;
+			for (j = 0; j < dims; j++) {
+				offset = select_char2coord(
+					node_ptr->node_addr[j]);
+				select_cray_dim_size[j] =
+					MAX((offset+1),
+					    select_cray_dim_size[j]);
+			}
+		}
+	}
+
+	/*
+	 * Override the generic setup of dim_size made in _setup_cluster_rec()
+	 * FIXME: use a better way, e.g. encoding the 3-dim triplet as a
+	 *        string which gets stored in a database (event_table?) entry.
+	 */
+	if (working_cluster_rec) {
+		xfree(working_cluster_rec->dim_size);
+		working_cluster_rec->dim_size = xmalloc(sizeof(int) * dims);
+		for (j = 0; j < dims; j++)
+			working_cluster_rec->dim_size[j] =
+				select_cray_dim_size[j];
+	}
+
+	other_ba_init(node_info_ptr, sanity_check);
+}
+
+extern int *select_p_ba_get_dims(void)
+{
+	/* Size of system in each dimension as set by basil_geometry(),
+	 * which might not be called yet */
+	if (select_cray_dim_size[0] != -1)
+		return select_cray_dim_size;
+	return NULL;
+}
+
+extern void select_p_ba_fini(void)
+{
+	other_ba_fini();
 }

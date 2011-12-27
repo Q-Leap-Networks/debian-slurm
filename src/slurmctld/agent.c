@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -207,7 +207,7 @@ static bool wiki2_sched_test = false;
  *	across a set of nodes. Use agent_queue_request() if immediate
  *	execution is not essential.
  * IN pointer to agent_arg_t, which is xfree'd (including hostlist,
- *	and msg_args) upon completion if AGENT_IS_THREAD is set
+ *	and msg_args) upon completion
  * RET always NULL (function format just for use as pthread)
  */
 void *agent(void *args)
@@ -330,9 +330,7 @@ void *agent(void *args)
 	slurm_mutex_unlock(&agent_info_ptr->thread_mutex);
 
       cleanup:
-#if AGENT_IS_THREAD
 	_purge_agent_args(agent_arg_ptr);
-#endif
 
 	if (agent_info_ptr) {
 		xfree(agent_info_ptr->thread_struct);
@@ -377,7 +375,7 @@ static int _valid_agent_arg(agent_arg_t *agent_arg_ptr)
 
 static agent_info_t *_make_agent_info(agent_arg_t *agent_arg_ptr)
 {
-	int i = 0, j=0;
+	int i = 0, j = 0;
 	agent_info_t *agent_info_ptr = NULL;
 	thd_t *thread_ptr = NULL;
 	int *span = NULL;
@@ -404,14 +402,20 @@ static agent_info_t *_make_agent_info(agent_arg_t *agent_arg_ptr)
 	    (agent_arg_ptr->msg_type != SRUN_EXEC)		&&
 	    (agent_arg_ptr->msg_type != SRUN_TIMEOUT)		&&
 	    (agent_arg_ptr->msg_type != SRUN_NODE_FAIL)		&&
+	    (agent_arg_ptr->msg_type != SRUN_REQUEST_SUSPEND)	&&
 	    (agent_arg_ptr->msg_type != SRUN_USER_MSG)		&&
 	    (agent_arg_ptr->msg_type != SRUN_STEP_MISSING)	&&
 	    (agent_arg_ptr->msg_type != SRUN_JOB_COMPLETE)) {
+#ifdef HAVE_FRONT_END
+		span = set_span(agent_arg_ptr->node_count,
+				agent_arg_ptr->node_count);
+#else
 		/* Sending message to a possibly large number of slurmd.
 		 * Push all message forwarding to slurmd in order to
 		 * offload as much work from slurmctld as possible. */
-		agent_info_ptr->get_reply = true;
 		span = set_span(agent_arg_ptr->node_count, 1);
+#endif
+		agent_info_ptr->get_reply = true;
 	} else {
 		/* Message is going to one node (for srun) or we want
 		 * it to get processed ASAP (SHUTDOWN or RECONFIGURE).
@@ -436,9 +440,9 @@ static agent_info_t *_make_agent_info(agent_arg_t *agent_arg_ptr)
 		}
 		free(name);
 		i++;
-		for(j = 0; j < span[thr_count]; j++) {
+		for (j = 0; j < span[thr_count]; j++) {
 			name = hostlist_shift(agent_arg_ptr->hostlist);
-			if(!name)
+			if (!name)
 				break;
 			hostlist_push(hl, name);
 			free(name);
@@ -449,7 +453,8 @@ static agent_info_t *_make_agent_info(agent_arg_t *agent_arg_ptr)
 			hostlist_ranged_string_xmalloc(hl);
 		hostlist_destroy(hl);
 #if 0
-		info("sending to nodes %s", thread_ptr[thr_count].nodelist);
+		info("sending msg_type %u to nodes %s",
+		     agent_arg_ptr->msg_type, thread_ptr[thr_count].nodelist);
 #endif
 		thr_count++;
 	}
@@ -593,7 +598,6 @@ static void *_wdog(void *args)
 
 static void _notify_slurmctld_jobs(agent_info_t *agent_ptr)
 {
-#if AGENT_IS_THREAD
 	/* Locks: Write job */
 	slurmctld_lock_t job_write_lock =
 	    { NO_LOCK, WRITE_LOCK, NO_LOCK, NO_LOCK };
@@ -631,9 +635,6 @@ static void _notify_slurmctld_jobs(agent_info_t *agent_ptr)
 	}
 
 	unlock_slurmctld(job_write_lock);
-#else
-	fatal("Code development needed here if agent is not thread");
-#endif
 }
 
 static void _notify_slurmctld_nodes(agent_info_t *agent_ptr,
@@ -643,18 +644,14 @@ static void _notify_slurmctld_nodes(agent_info_t *agent_ptr,
 	ret_data_info_t *ret_data_info = NULL;
 	state_t state;
 	int is_ret_list = 1;
-
-#if AGENT_IS_THREAD
 	/* Locks: Read config, write job, write node */
 	slurmctld_lock_t node_write_lock =
 	    { READ_LOCK, WRITE_LOCK, WRITE_LOCK, NO_LOCK };
-#endif
 	thd_t *thread_ptr = agent_ptr->thread_struct;
 	int i;
 
 	/* Notify slurmctld of non-responding nodes */
 	if (no_resp_cnt) {
-#if AGENT_IS_THREAD
 		/* Update node table data for non-responding nodes */
 		lock_slurmctld(node_write_lock);
 		if (agent_ptr->msg_type == REQUEST_BATCH_JOB_LAUNCH) {
@@ -665,18 +662,15 @@ static void _notify_slurmctld_nodes(agent_info_t *agent_ptr,
 			job_complete(job_id, 0, true, false, 0);
 		}
 		unlock_slurmctld(node_write_lock);
-#else
-		fatal("Code development needed here if agent is not thread");
-#endif
 	}
 	if (retry_cnt && agent_ptr->retry)
 		_queue_agent_retry(agent_ptr, retry_cnt);
 
 	/* Update last_response on responding nodes */
-#if AGENT_IS_THREAD
 	lock_slurmctld(node_write_lock);
 	for (i = 0; i < agent_ptr->thread_count; i++) {
-		if(!thread_ptr[i].ret_list) {
+		char *down_msg, *node_names;
+		if (!thread_ptr[i].ret_list) {
 			state = thread_ptr[i].state;
 			is_ret_list = 0;
 			goto switch_on_state;
@@ -684,52 +678,52 @@ static void _notify_slurmctld_nodes(agent_info_t *agent_ptr,
 		is_ret_list = 1;
 
 		itr = list_iterator_create(thread_ptr[i].ret_list);
-		while((ret_data_info = list_next(itr))) {
+		while ((ret_data_info = list_next(itr))) {
 			state = ret_data_info->err;
 		switch_on_state:
 			switch(state) {
 			case DSH_NO_RESP:
-				if(!is_ret_list) {
+				if (!is_ret_list) {
 					node_not_resp(thread_ptr[i].nodelist,
 						      thread_ptr[i].
 						      start_time);
-					break;
+				} else {
+					node_not_resp(ret_data_info->node_name,
+						      thread_ptr[i].start_time);
 				}
-
-				node_not_resp(ret_data_info->node_name,
-					      thread_ptr[i].start_time);
 				break;
 			case DSH_FAILED:
-#ifdef HAVE_BG
-				error("Prolog/epilog failure");
+				if (is_ret_list)
+					node_names = ret_data_info->node_name;
+				else
+					node_names = thread_ptr[i].nodelist;
+#ifdef HAVE_FRONT_END
+				down_msg = "";
 #else
-				if(!is_ret_list) {
-					set_node_down(thread_ptr[i].nodelist,
-						      "Prolog/epilog failure");
-					break;
-				}
-				set_node_down(ret_data_info->node_name,
-					      "Prolog/epilog failure");
+				set_node_down(node_names,
+					      "Prolog/Epilog failure");
+				down_msg = ", set to state DOWN";
 #endif
+				error("Prolog/Epilog failure on nodes %s%s",
+				      node_names, down_msg);
 				break;
 			case DSH_DONE:
-				if(!is_ret_list) {
+				if (!is_ret_list)
 					node_did_resp(thread_ptr[i].nodelist);
-					break;
-				}
-				node_did_resp(ret_data_info->node_name);
+				else
+					node_did_resp(ret_data_info->node_name);
 				break;
 			default:
-				if(!is_ret_list) {
+				if (!is_ret_list) {
 					error("unknown state returned for %s",
 					      thread_ptr[i].nodelist);
-					break;
+				} else {
+					error("unknown state returned for %s",
+					      ret_data_info->node_name);
 				}
-				error("unknown state returned for %s",
-				      ret_data_info->node_name);
 				break;
 			}
-			if(!is_ret_list)
+			if (!is_ret_list)
 				goto finished;
 		}
 		list_iterator_destroy(itr);
@@ -748,9 +742,6 @@ finished:	;
 	    (agent_ptr->msg_type == REQUEST_HEALTH_CHECK) ||
 	    (agent_ptr->msg_type == REQUEST_NODE_REGISTRATION_STATUS))
 		ping_end();
-#else
-	fatal("Code development needed here if agent is not thread");
-#endif
 }
 
 /* Report a communications error for specified node
@@ -758,9 +749,8 @@ finished:	;
 static inline int _comm_err(char *node_name, slurm_msg_type_t msg_type)
 {
 	int rc = 1;
-#if AGENT_IS_THREAD
+
 	if ((rc = is_node_resp (node_name)))
-#endif
 		verbose("agent/is_node_resp: node:%s rpc:%d : %m",
 			node_name, msg_type);
 	return rc;
@@ -812,14 +802,11 @@ static void *_thread_per_group_rpc(void *args)
 	List ret_list = NULL;
 	ListIterator itr;
 	ret_data_info_t *ret_data_info = NULL;
-	int found = 0;
 	int sig_array[2] = {SIGUSR1, 0};
-
-#if AGENT_IS_THREAD
 	/* Locks: Write job, write node */
 	slurmctld_lock_t job_write_lock = {
 		NO_LOCK, WRITE_LOCK, WRITE_LOCK, NO_LOCK };
-#endif
+
 	xassert(args != NULL);
 	xsignal(SIGUSR1, _sig_handler);
 	xsignal_unblock(sig_array);
@@ -895,12 +882,10 @@ static void *_thread_per_group_rpc(void *args)
 	}
 
 	//info("got %d messages back", list_count(ret_list));
-	found = 0;
 	itr = list_iterator_create(ret_list);
 	while ((ret_data_info = list_next(itr)) != NULL) {
 		rc = slurm_get_return_code(ret_data_info->type,
 					   ret_data_info->data);
-#if AGENT_IS_THREAD
 		/* SPECIAL CASE: Mark node as IDLE if job already
 		   complete */
 		if (is_kill_msg &&
@@ -934,8 +919,6 @@ static void *_thread_per_group_rpc(void *args)
 			unlock_slurmctld(job_write_lock);
 			continue;
 		}
-#endif
-
 
 		if (((msg_type == REQUEST_SIGNAL_TASKS) ||
 		     (msg_type == REQUEST_TERMINATE_TASKS)) &&
@@ -946,8 +929,8 @@ static void *_thread_per_group_rpc(void *args)
 
 		switch (rc) {
 		case SLURM_SUCCESS:
-			/*debug3("agent processed RPC to node %s",
-			  ret_data_info->node_name); */
+			/* debug("agent processed RPC to node %s", */
+			/*       ret_data_info->node_name); */
 			thread_state = DSH_DONE;
 			break;
 		case SLURM_UNKNOWN_FORWARD_ADDR:
@@ -965,9 +948,6 @@ static void *_thread_per_group_rpc(void *args)
 			thread_state = DSH_FAILED;
 			break;
 		case ESLURMD_PROLOG_FAILED:
-			error("Prolog failure on host %s, "
-			      "setting DOWN",
-			      ret_data_info->node_name);
 			thread_state = DSH_FAILED;
 			break;
 		case ESLURM_INVALID_JOB_ID:
@@ -1537,10 +1517,8 @@ extern void mail_job_info (struct job_record *job_ptr, uint16_t mail_type)
  */
 static int _batch_launch_defer(queued_request_t *queued_req_ptr)
 {
-	char *hostname;
 	agent_arg_t *agent_arg_ptr;
 	batch_job_launch_msg_t *launch_msg_ptr;
-	struct node_record *node_ptr;
 	time_t now = time(NULL);
 	struct job_record  *job_ptr;
 	int delay_time, nodes_ready = 0;
@@ -1567,6 +1545,12 @@ static int _batch_launch_defer(queued_request_t *queued_req_ptr)
 	if (job_ptr->wait_all_nodes) {
 		(void) job_node_ready(launch_msg_ptr->job_id, &nodes_ready);
 	} else {
+#ifdef HAVE_FRONT_END
+		nodes_ready = 1;
+#else
+		struct node_record *node_ptr;
+		char *hostname;
+
 		hostname = hostlist_deranged_string_xmalloc(
 					agent_arg_ptr->hostlist);
 		node_ptr = find_node_record(hostname);
@@ -1582,6 +1566,7 @@ static int _batch_launch_defer(queued_request_t *queued_req_ptr)
 		    !IS_NODE_NO_RESPOND(node_ptr)) {
 			nodes_ready = 1;
 		}
+#endif
 	}
 
 	delay_time = difftime(now, job_ptr->start_time);

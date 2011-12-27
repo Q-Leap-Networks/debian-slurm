@@ -9,7 +9,7 @@
  *  Written by Danny Auble <da@llnl.gov>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -60,6 +60,7 @@
 #define	debug5			slurm_debug5
 
 #include "src/common/assoc_mgr.h"
+#include "src/common/macros.h"
 #include "src/common/slurmdbd_defs.h"
 #include "src/common/slurm_auth.h"
 #include "src/common/uid.h"

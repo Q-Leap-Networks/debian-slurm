@@ -1,11 +1,11 @@
 <!--
 Copyright (C) 2005-2007 The Regents of the University of California.
-Copyright (C) 2008-2010 Lawrence Livermore National Security.
+Copyright (C) 2008-2011 Lawrence Livermore National Security.
 Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 Written by Morris Jette <jette1@llnl.gov> and Danny Auble <da@llnl.gov>
 
 This file is part of SLURM, a resource management program.
-For details, see <https://computing.llnl.gov/linux/slurm/>.
+For details, see <http://www.schedmd.com/slurmdocs/>.
 
 SLURM is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free
@@ -37,27 +37,6 @@ function get_field2(name,form)
   if (form.value)
      return name + "=" + form.value
   return ""
-}
-
-function get_accounting_storage_type_field(gather, form_storage)
-{
-  for (var i=0; i < form_storage.length; i++)
-  {
-    if (form_storage[i].checked)
-    {
-      if(form_storage[i].value == "none" && !(gather == "none"))
-      {
-	return "filetxt"
-      }
-      else if(!(form_storage[i].value == "none") && gather == "none")
-      {
-	return "none"
-      }
-      else {
-	return form_storage[i].value
-      }
-    }
-  }
 }
 
 function get_radio_field_skipfirst(name,form)
@@ -152,6 +131,7 @@ function displayfile()
    get_field("Epilog",document.config.epilog) + "<br>" +
    "#PrologSlurmctld= <br>" +
    "#FirstJobId=1 <br>" +
+   "#MaxJobId=999999 <br>" +
    "#GresTypes= <br>" +
    "#GroupUpdateForce=0 <br>" +
    "#GroupUpdateTime=600 <br>" +
@@ -165,6 +145,7 @@ function displayfile()
    "#Licenses=foo*4,bar <br>" +
    "#MailProg=/usr/bin/mail <br>" +
    "#MaxJobCount=5000 <br>" +
+   "#MaxStepCount=40000 <br>" +
    "#MaxTasksPerNode=128 <br>" +
    "MpiDefault=" + get_radio_value(document.config.mpi_default) + "<br>" +
    "#MpiParams=ports=#-# <br>" +
@@ -253,8 +234,9 @@ function displayfile()
    get_field("AccountingStorageLoc",document.config.accounting_storage_loc) + "<br>" +
    get_field("AccountingStoragePass",document.config.accounting_storage_pass) + "<br>" +
    get_field("AccountingStoragePort",document.config.accounting_storage_port) + "<br>" +
-   "AccountingStorageType=accounting_storage/" + get_accounting_storage_type_field(get_radio_value(document.config.job_acct_gather_type), document.config.accounting_storage_type) + "<br>" +
+   "AccountingStorageType=accounting_storage/" + get_radio_value(document.config.accounting_storage_type) + "<br>" +
    get_field("AccountingStorageUser",document.config.accounting_storage_user) + "<br>" +
+   get_field("AccountingStoreJobComment",document.config.acctng_store_job_comment) + "<br>" +
    get_field("ClusterName",document.config.cluster_name) + "<br>" +
    "#DebugFlags= <br>" +
    get_field("JobCompHost",document.config.job_comp_host) + "<br>" +
@@ -288,7 +270,7 @@ function displayfile()
    "# COMPUTE NODES <br>" +
    "NodeName=" + document.config.node_name.value +
    get_field2(" NodeAddr",document.config.node_addr) +
-   get_field2(" Procs",document.config.procs) +
+   get_field2(" CPUs",document.config.procs) +
    get_field2(" RealMemory",document.config.memory) +
    get_field2(" Sockets",document.config.sockets) +
    get_field2(" CoresPerSocket",document.config.cores_per_socket) +
@@ -323,11 +305,11 @@ function displayfile()
 </HEAD>
 <BODY>
 <FORM name=config>
-<H1>SLURM Version 2.2 Configuration Tool</H1>
+<H1>SLURM Version 2.3 Configuration Tool</H1>
 <P>This form can be used to create a SLURM configuration file with
 you controlling many of the important configuration parameters.</P>
 
-<P><B>This tool supports SLURM version 2.2 only.</B>
+<P><B>This tool supports SLURM version 2.3 only.</B>
 Configuration files for other versions of SLURM should be built
 using the tool distributed with it in <i>doc/html/configurator.html</i>.
 Some parameters will be set to default values, but you can
@@ -350,9 +332,7 @@ file. It will appear on your web browser. Save the file in text format
 as <I>slurm.conf</I> for use by SLURM.
 
 <P>For more information about SLURM, see
-<A HREF="https://computing.llnl.gov/linux/slurm/">https://computing.llnl.gov/linux/slurm/</A>
-<P>
-<A HREF="https://www.llnl.gov/disclaimer.html"><B>Privacy and legal notice</B></A>
+<A HREF="http://www.schedmd.com/slurmdocs/slurm.html">http://www.schedmd.com/slurmdocs/slurm.html</A>
 
 <H2>Control Machines</H2>
 Define the hostname of the computer on which the SLURM controller and
@@ -360,7 +340,7 @@ optional backup controller will execute. You can also specify addresses
 of these computers if desired (defaults to their hostnames).
 The IP addresses can be either numeric IP addresses or names.
 Hostname values should should not be the fully qualified domain
-name (e.g. use <I>linux</I> rather than <I>linux.llnl.gov</I>).
+name (e.g. use <I>tux</I> rather than <I>tux.abc.com</I>).
 <P>
 <input type="text" name="control_machine" value="linux0"> <B>ControlMachine</B>:
 Master Controller Hostname
@@ -404,19 +384,19 @@ Name of the one partition to be created
 Maximum time limit of jobs in minutes or INFINITE
 <P>
 The following parameters describe a node's configuration.
-Set a value for <B>Procs</B>.
+Set a value for <B>CPUs</B>.
 The other parameters are optional, but provide more control over scheduled resources:
 <P>
-<input type="text" name="procs" value="1"> <B>Procs</B>: Count of processors
+<input type="text" name="procs" value="1"> <B>CPUs</B>: Count of processors
 on each compute node.
-If Procs is omitted, it will be inferred from:
+If CPUs is omitted, it will be inferred from:
 Sockets, CoresPerSocket, and ThreadsPerCore.
 <P>
 <input type="text" name="sockets" value="">
 <B>Sockets</B>:
 Number of physical processor sockets/chips on the node.
 If Sockets is omitted, it will be inferred from:
-Procs, CoresPerSocket, and ThreadsPerCore.
+CPUs, CoresPerSocket, and ThreadsPerCore.
 <P>
 <input type="text" name="cores_per_socket" value="">
 <B>CoresPerSocket</B>:
@@ -584,7 +564,7 @@ with a job step.<BR>
 Select one value for <B>ProctrackType</B>:<BR>
 <input type="radio" name="proctrack_type" value="aix"> <B>AIX</B>: Use AIX kernel
 extension, recommended for AIX systems<BR>
-<input type="radio" name="proctrack_type" value="cgroup"> <B>Cgroup</B>: Use
+<input type="radio" name="proctrack_type" value="cgroup"> <B>Cgroup</B>:  Use
 Linux <i>cgroups</i> to create a job container and track processes.
 Build a <i>cgroup.conf</i> file as well<BR>
 <input type="radio" name="proctrack_type" value="pgid" checked> <B>Pgid</B>: Use Unix
@@ -661,7 +641,10 @@ Select one value for <B>TaskPlugin</B>:<BR>
 <input type="radio" name="task_plugin" value="none" checked> <B>None</B>: No task launch actions<BR>
 <input type="radio" name="task_plugin" value="affinity"> <B>Affinity</B>:
 CPU affinity support
-(see srun man pages for the --cpu_bind, --mem_bind, and -E options)
+(see srun man pages for the --cpu_bind, --mem_bind, and -E options)<BR>
+<input type="radio" name="task_plugin" value="cgroup"> <B>Cgroup</B>:
+Allocated resources constraints enforcement using Linux Control Groups
+(see cgroup.conf man page)
 <DL><DL>
 <DT><B>TaskPluginParam</B> (As used by <I>TaskPlugin=Affinity</I> only):
 <DT><input type="radio" name="task_plugin_param" value="Cpusets">
@@ -798,6 +781,8 @@ Password we are to use to talk to the database for Job Accounting.
 In the case of SlurmDBD, this will be an alternate socket name for use with a Munge
 daemon providing enterprise-wide authentication (while the default Munge socket
 would provide cluster-wide authentication only).<br>
+<input type="text" name="acctng_store_job_comment" value="YES"> <B>AccountingStoreJobComment</B>:
+Set to NO to prevent the job comment field from being saved to the database<br>
 <input type="text" name="cluster_name" value="cluster"> <B>ClusterName</B>:
 Name to be recorded in database for jobs from this cluster.
 This is important if a single database is used to record information
@@ -857,6 +842,6 @@ before terminating all remaining tasks. A value of zero indicates unlimited wait
 <P>
 </FORM>
 <HR>
-<P class="footer">LLNL-WEB-402631<BR>
-Last modified 25 August 2010</P>
+<a href="disclaimer.html" target="_blank" class="privacy">Legal Notices</a><br>
+Last modified 8 August 2011</P>
 </BODY>

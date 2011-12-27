@@ -2,8 +2,7 @@ Source: slurm-llnl
 Section: admin
 Priority: extra
 Maintainer: Gennaro Oliva <oliva.g@na.icar.cnr.it>
-Uploaders: Dirk Eddelbuettel <edd@debian.org>
-Build-Depends: debhelper (>= 7.0.0), autotools-dev, libmunge-dev, libncurses5-dev, libssl-dev, po-debconf, python, libglade2-dev, libgtk2.0-dev, libmysqlclient-dev, postgresql-server-dev-9.1, libpam0g-dev, libperl-dev, chrpath
+Build-Depends: debhelper (>= 7.0.0), autotools-dev, libmunge-dev, libncurses5-dev, libssl-dev, po-debconf, python, libglade2-dev, libgtk2.0-dev, libmysqlclient-dev, postgresql-server-dev-8.4, libpam0g-dev, libperl-dev, chrpath, libpam0g-dev
 Standards-Version: 3.9.2
 Homepage: https://computing.llnl.gov/linux/slurm/
 
@@ -16,7 +15,7 @@ Description: Simple Linux Utility for Resource Management
  that strives to be simple, scalable, portable, fault-tolerant, and
  interconnect agnostic.
 
-Package: libslurmdb22
+Package: libslurmdb23
 Section: libs
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
@@ -25,7 +24,7 @@ Description: Runtime library files for the SLURM DataBase Daemon
  is an open-source cluster resource management and job scheduling.
  This package contains the SLURM DataBase Daemon runtime library.
 
-Package: libslurm22
+Package: libslurm23
 Section: libs
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
@@ -46,7 +45,7 @@ Description: SLURM PMI library implementation
 Package: libslurm-dev
 Section: libdevel
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, libslurm22 (= ${binary:Version})
+Depends: ${shlibs:Depends}, ${misc:Depends}, libslurm23 (= ${binary:Version})
 Conflicts: libslurm10-dev, libslurm11-dev, libslurm12-dev, libslurm13-dev, libslurm20-dev, libslurm21-dev
 Replaces: libslurm10-dev, libslurm11-dev, libslurm12-dev, libslurm13-dev, libslurm20-dev, libslurm21-dev
 Description: SLURM development files
@@ -57,7 +56,7 @@ Description: SLURM development files
 Package: libslurmdb-dev
 Section: libdevel
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, libslurmdb22 (= ${binary:Version})
+Depends: ${shlibs:Depends}, ${misc:Depends}, libslurmdb23 (= ${binary:Version})
 Description: SLURM DataBase Daemon development files
  SLURM, the Simple Linux Utility for Resource Management,
  is an open-source cluster resource management and job scheduling.
@@ -66,7 +65,7 @@ Description: SLURM DataBase Daemon development files
 Package: libpmi0-dev
 Section: libdevel
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, libpmi0 (= ${binary:Version}), libslurm22 (= ${binary:Version})
+Depends: ${shlibs:Depends}, ${misc:Depends}, libpmi0 (= ${binary:Version}), libslurm23 (= ${binary:Version})
 Description: SLURM PMI library implementation development files
  SLURM, the Simple Linux Utility for Resource Management,
  is an open-source cluster resource management and job scheduling.
@@ -149,4 +148,13 @@ Description: Torque compatibility wrappers for SLURM
  is an open-source cluster resource management and job scheduling.
  .
  This package contains the Torque compatibility wrappers.
+
+Package: libpam-slurm
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: PAM module to authenticate using the SLURM resource manager
+ Pluggable Authentication Module (PAM) for restricting access to compute
+ nodes where SLURM performs resource management. Access to the node is
+ restricted to user root and users who have been allocated resources on
+ that node.
 

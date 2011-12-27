@@ -2,13 +2,13 @@
  *  resv_info.c - Functions related to advanced reservation display
  *  mode of sview.
  *****************************************************************************
- *  Copyright (C) 2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2009-2011 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -92,7 +92,7 @@ static display_data_t display_data_resv[] = {
 #ifdef HAVE_BG
 	 "BP List",
 #else
-	 "NodeList",
+	 "Node List",
 #endif
 	 FALSE, EDIT_TEXTBOX, refresh_resv, create_model_resv, admin_edit_resv},
 	{G_TYPE_STRING, SORTID_TIME_START, "Time Start", FALSE, EDIT_TEXTBOX,
@@ -122,10 +122,45 @@ static display_data_t display_data_resv[] = {
 	{G_TYPE_NONE, -1, NULL, FALSE, EDIT_NONE}
 };
 
+static display_data_t create_data_resv[] = {
+	{G_TYPE_INT, SORTID_POS, NULL, FALSE, EDIT_NONE,
+	 refresh_resv, create_model_resv, admin_edit_resv},
+	{G_TYPE_STRING, SORTID_NAME,  "Name", FALSE, EDIT_TEXTBOX,
+	 refresh_resv, create_model_resv, admin_edit_resv},
+	{G_TYPE_STRING, SORTID_NODE_CNT,   "Node_Count", FALSE, EDIT_TEXTBOX,
+	 refresh_resv, create_model_resv, admin_edit_resv},
+	{G_TYPE_STRING, SORTID_NODELIST,
+#ifdef HAVE_BG
+	 "BP_List",
+#else
+	 "Node_List",
+#endif
+	 FALSE, EDIT_TEXTBOX,
+	 refresh_resv, create_model_resv, admin_edit_resv},
+	{G_TYPE_STRING, SORTID_TIME_START, "Time_Start",
+	 FALSE, EDIT_TEXTBOX,
+	 refresh_resv, create_model_resv, admin_edit_resv},
+	{G_TYPE_STRING, SORTID_TIME_END,   "Time_End", FALSE, EDIT_TEXTBOX,
+	 refresh_resv, create_model_resv, admin_edit_resv},
+	{G_TYPE_STRING, SORTID_DURATION,   "Duration", FALSE, EDIT_TEXTBOX,
+	 refresh_resv, create_model_resv, admin_edit_resv},
+	{G_TYPE_STRING, SORTID_ACCOUNTS,   "Accounts", FALSE, EDIT_TEXTBOX,
+	 refresh_resv, create_model_resv, admin_edit_resv},
+	{G_TYPE_STRING, SORTID_USERS,      "Users", FALSE, EDIT_TEXTBOX,
+	 refresh_resv, create_model_resv, admin_edit_resv},
+	{G_TYPE_STRING, SORTID_PARTITION,  "Partition", FALSE, EDIT_TEXTBOX,
+	 refresh_resv, create_model_resv, admin_edit_resv},
+	{G_TYPE_STRING, SORTID_FEATURES,   "Features", FALSE, EDIT_TEXTBOX,
+	 refresh_resv, create_model_resv, admin_edit_resv},
+	{G_TYPE_STRING, SORTID_FLAGS, "Flags", FALSE, EDIT_TEXTBOX,
+	 refresh_resv, create_model_resv, admin_edit_resv},
+	{G_TYPE_NONE, -1, NULL, FALSE, EDIT_NONE}
+};
+
 static display_data_t options_data_resv[] = {
 	{G_TYPE_INT, SORTID_POS, NULL, FALSE, EDIT_NONE},
 	{G_TYPE_STRING, INFO_PAGE, "Full Info", TRUE, RESV_PAGE},
-	{G_TYPE_STRING, RESV_PAGE, "Remove", TRUE, ADMIN_PAGE},
+	{G_TYPE_STRING, RESV_PAGE, "Remove Reservation", TRUE, ADMIN_PAGE},
 	{G_TYPE_STRING, RESV_PAGE, "Edit Reservation", TRUE, ADMIN_PAGE},
 	{G_TYPE_STRING, JOB_PAGE, "Jobs", TRUE, RESV_PAGE},
 	{G_TYPE_STRING, PART_PAGE, "Partitions", TRUE, RESV_PAGE},
@@ -201,6 +236,13 @@ static uint32_t _parse_flags(const char *flagstr)
 				outflags |= RESERVE_FLAG_NO_WEEKLY;
 			else
 				outflags |= RESERVE_FLAG_WEEKLY;
+		} else if (strncasecmp(curr, "License_Only", MAX(taglen,1))
+			    == 0) {
+			curr += taglen;
+			if (flip)
+				outflags |= RESERVE_FLAG_NO_LIC_ONLY;
+			else
+				outflags |= RESERVE_FLAG_LIC_ONLY;
 		} else {
 			char *temp = g_strdup_printf("Error parsing flags %s.",
 						     flagstr);
@@ -250,7 +292,7 @@ static const char *_set_resv_msg(resv_desc_msg_t *resv_msg,
 				 const char *new_text,
 				 int column)
 {
-	char *type = "";
+	char *type = "", *temp_str;
 	int temp_int = 0;
 	uint32_t f;
 
@@ -303,7 +345,11 @@ static const char *_set_resv_msg(resv_desc_msg_t *resv_msg,
 		type = "name";
 		break;
 	case SORTID_NODE_CNT:
-		temp_int = strtol(new_text, (char **)NULL, 10);
+		temp_int = strtol(new_text, &temp_str, 10);
+		if ((temp_str[0] == 'k') || (temp_str[0] == 'k'))
+			temp_int *= 1024;
+		if ((temp_str[0] == 'm') || (temp_str[0] == 'm'))
+			temp_int *= (1024 * 1024);
 
 		type = "Node Count";
 		if (temp_int <= 0)
@@ -531,61 +577,47 @@ static void _update_resv_record(sview_resv_info_t *sview_resv_info_ptr,
 				GtkTreeStore *treestore,
 				GtkTreeIter *iter)
 {
-	char *tmp_ptr = NULL;
-	char tmp_char[50];
+	char tmp_duration[40], tmp_end[40], tmp_nodes[40], tmp_start[40];
+	char *tmp_flags;
 	reserve_info_t *resv_ptr = sview_resv_info_ptr->resv_ptr;
-
-	gtk_tree_store_set(treestore, iter, SORTID_COLOR,
-			   sview_colors[sview_resv_info_ptr->color_inx], -1);
-	gtk_tree_store_set(treestore, iter, SORTID_COLOR_INX,
-			   sview_resv_info_ptr->color_inx, -1);
-	gtk_tree_store_set(treestore, iter, SORTID_UPDATED, 1, -1);
-
-	gtk_tree_store_set(treestore, iter,
-			   SORTID_ACCOUNTS, resv_ptr->accounts, -1);
 
 	secs2time_str((uint32_t)difftime(resv_ptr->end_time,
 					 resv_ptr->start_time),
-		      tmp_char, sizeof(tmp_char));
-	gtk_tree_store_set(treestore, iter, SORTID_DURATION, tmp_char, -1);
+		      tmp_duration, sizeof(tmp_duration));
 
-	slurm_make_time_str((time_t *)&resv_ptr->end_time, tmp_char,
-			    sizeof(tmp_char));
-	gtk_tree_store_set(treestore, iter, SORTID_TIME_END, tmp_char, -1);
+	slurm_make_time_str((time_t *)&resv_ptr->end_time, tmp_end,
+			    sizeof(tmp_end));
 
-	gtk_tree_store_set(treestore, iter, SORTID_FEATURES,
-			   resv_ptr->features, -1);
-
-	tmp_ptr = reservation_flags_string(resv_ptr->flags);
-	gtk_tree_store_set(treestore, iter, SORTID_FLAGS,
-			   tmp_ptr, -1);
-	xfree(tmp_ptr);
-
-	gtk_tree_store_set(treestore, iter,
-			   SORTID_LICENSES, resv_ptr->licenses, -1);
-
-	gtk_tree_store_set(treestore, iter, SORTID_NAME, resv_ptr->name, -1);
+	tmp_flags = reservation_flags_string(resv_ptr->flags);
 
 	convert_num_unit((float)resv_ptr->node_cnt,
-			 tmp_char, sizeof(tmp_char), UNIT_NONE);
-	gtk_tree_store_set(treestore, iter,
-			   SORTID_NODE_CNT, tmp_char, -1);
+			 tmp_nodes, sizeof(tmp_nodes), UNIT_NONE);
 
-	gtk_tree_store_set(treestore, iter,
-			   SORTID_NODELIST, resv_ptr->node_list, -1);
+	slurm_make_time_str((time_t *)&resv_ptr->start_time, tmp_start,
+			    sizeof(tmp_start));
 
+	/* Combining these records provides a slight performance improvement */
 	gtk_tree_store_set(treestore, iter,
-			   SORTID_NODE_INX, resv_ptr->node_inx, -1);
+			   SORTID_ACCOUNTS,   resv_ptr->accounts,
+			   SORTID_COLOR,
+				sview_colors[sview_resv_info_ptr->color_inx],
+			   SORTID_COLOR_INX,  sview_resv_info_ptr->color_inx,
+			   SORTID_DURATION,   tmp_duration,
+			   SORTID_FEATURES,   resv_ptr->features,
+			   SORTID_FLAGS,      tmp_flags,
+			   SORTID_LICENSES,   resv_ptr->licenses,
+			   SORTID_NAME,       resv_ptr->name,
+			   SORTID_NODE_CNT,   tmp_nodes,
+			   SORTID_NODE_INX,   resv_ptr->node_inx,
+			   SORTID_NODELIST,   resv_ptr->node_list,
+			   SORTID_PARTITION,  resv_ptr->partition,
+			   SORTID_TIME_START, tmp_start,
+			   SORTID_TIME_END,   tmp_end,
+			   SORTID_UPDATED,    1,
+			   SORTID_USERS,      resv_ptr->users, 
+			   -1);
 
-	gtk_tree_store_set(treestore, iter,
-			   SORTID_PARTITION, resv_ptr->partition, -1);
-
-	slurm_make_time_str((time_t *)&resv_ptr->start_time, tmp_char,
-			    sizeof(tmp_char));
-	gtk_tree_store_set(treestore, iter, SORTID_TIME_START, tmp_char, -1);
-
-	gtk_tree_store_set(treestore, iter,
-			   SORTID_USERS, resv_ptr->users, -1);
+	xfree(tmp_flags);
 
 	return;
 }
@@ -726,7 +758,7 @@ update_color:
 	return info_list;
 }
 
-void _display_info_resv(List info_list,	popup_info_t *popup_win)
+static void _display_info_resv(List info_list, popup_info_t *popup_win)
 {
 	specific_info_t *spec_info = popup_win->spec_info;
 	char *name = (char *)spec_info->search_info->gchar_data;
@@ -805,6 +837,50 @@ finished:
 	return;
 }
 
+extern GtkWidget *create_resv_entry(resv_desc_msg_t *resv_msg,
+				    GtkTreeModel *model, GtkTreeIter *iter)
+{
+	GtkScrolledWindow *window = create_scrolled_window();
+	GtkBin *bin = NULL;
+	GtkViewport *view = NULL;
+	GtkTable *table = NULL;
+	int i = 0, row = 0;
+	display_data_t *display_data = create_data_resv;
+
+	gtk_scrolled_window_set_policy(window,
+				       GTK_POLICY_NEVER,
+				       GTK_POLICY_AUTOMATIC);
+	bin = GTK_BIN(&window->container);
+	view = GTK_VIEWPORT(bin->child);
+	bin = GTK_BIN(&view->bin);
+	table = GTK_TABLE(bin->child);
+	gtk_table_resize(table, SORTID_CNT, 2);
+
+	gtk_table_set_homogeneous(table, FALSE);
+
+	for (i = 0; i < SORTID_CNT; i++) {
+		while (display_data++) {
+			if (display_data->id == -1)
+				break;
+			if (!display_data->name)
+				continue;
+			if (display_data->id != i)
+				continue;
+			display_admin_edit(
+				table, resv_msg, &row, model, iter,
+				display_data,
+				G_CALLBACK(_admin_edit_combo_box_resv),
+				G_CALLBACK(_admin_focus_out_resv),
+				_set_active_combo_resv);
+			break;
+		}
+		display_data = create_data_resv;
+	}
+	gtk_table_resize(table, row, 2);
+
+	return GTK_WIDGET(window);
+}
+
 extern void refresh_resv(GtkAction *action, gpointer user_data)
 {
 	popup_info_t *popup_win = (popup_info_t *)user_data;
@@ -878,7 +954,7 @@ extern GtkListStore *create_model_resv(int type)
 		gtk_list_store_append(model, &iter);
 		gtk_list_store_set(model, &iter,
 				   1, SORTID_ACTION,
-				   0, "Remove",
+				   0, "Remove Reservation",
 				   -1);
 		break;
 	default:
@@ -1064,11 +1140,6 @@ display_it:
 		highlight_grid(GTK_TREE_VIEW(display_widget),
 			       SORTID_NODE_INX, SORTID_COLOR_INX,
 			       grid_button_list);
-
-	if (working_sview_config.grid_speedup) {
-		gtk_widget_set_sensitive(GTK_WIDGET(main_grid_table), 0);
-		gtk_widget_set_sensitive(GTK_WIDGET(main_grid_table), 1);
-	}
 
 	if (view == ERROR_VIEW && display_widget) {
 		gtk_widget_destroy(display_widget);
@@ -1452,7 +1523,7 @@ static void _admin_resv(GtkTreeModel *model, GtkTreeIter *iter, char *type)
 
 	resv_msg->name = xstrdup(resvid);
 
-	if (!strcasecmp("Remove", type)) {
+	if (!strcasecmp("Remove Reservation", type)) {
 		resv_name_msg.name = resvid;
 
 		label = gtk_dialog_add_button(GTK_DIALOG(popup),
@@ -1545,7 +1616,7 @@ end_it:
 	return;
 }
 
-extern void cluster_change_resv()
+extern void cluster_change_resv(void)
 {
 	display_data_t *display_data = display_data_resv;
 	while (display_data++) {

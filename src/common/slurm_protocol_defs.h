@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -54,10 +54,10 @@
 #  include <inttypes.h>
 #endif				/*  HAVE_CONFIG_H */
 
-#include <slurm/slurm.h>
-#include <slurm/slurmdb.h>
 #include <sys/wait.h>
 
+#include "slurm/slurm.h"
+#include "slurm/slurmdb.h"
 #include "src/common/bitstring.h"
 #include "src/common/job_options.h"
 #include "src/common/list.h"
@@ -153,11 +153,6 @@ enum task_flag_vals {
 	TASK_UNUSED2 = 0x4
 };
 
-enum suspend_opts {
-	SUSPEND_JOB,		/* Suspend a job now */
-	RESUME_JOB		/* Resume a job now */
-};
-
 /*
  * SLURM Message types
  *
@@ -179,6 +174,7 @@ typedef enum {
 	REQUEST_HEALTH_CHECK,
 	REQUEST_TAKEOVER,
 	REQUEST_SET_SCHEDLOG_LEVEL,
+	REQUEST_SET_DEBUG_FLAGS,
 
 	REQUEST_BUILD_INFO = 2001,
 	RESPONSE_BUILD_INFO,
@@ -210,6 +206,10 @@ typedef enum {
 	REQUEST_TOPO_INFO,
 	RESPONSE_TOPO_INFO,
 	REQUEST_TRIGGER_PULL,
+	REQUEST_FRONT_END_INFO,
+	RESPONSE_FRONT_END_INFO,
+	REQUEST_SPANK_ENVIRONMENT,
+	RESPONCE_SPANK_ENVIRONMENT,
 
 	REQUEST_UPDATE_JOB = 3001,
 	REQUEST_UPDATE_NODE,
@@ -221,6 +221,7 @@ typedef enum {
 	REQUEST_DELETE_RESERVATION,
 	REQUEST_UPDATE_RESERVATION,
 	REQUEST_UPDATE_BLOCK,
+	REQUEST_UPDATE_FRONT_END,
 
 	REQUEST_RESOURCE_ALLOCATION = 4001,
 	RESPONSE_RESOURCE_ALLOCATION,
@@ -292,6 +293,7 @@ typedef enum {
 				 * job/step/task complete responses */
 	REQUEST_FILE_BCAST,
 	TASK_USER_MANAGED_IO_STREAM,
+	REQUEST_KILL_PREEMPTED,
 
 	SRUN_PING = 7001,
 	SRUN_TIMEOUT,
@@ -300,6 +302,7 @@ typedef enum {
 	SRUN_USER_MSG,
 	SRUN_EXEC,
 	SRUN_STEP_MISSING,
+	SRUN_REQUEST_SUSPEND,
 
 	PMI_KVS_PUT_REQ = 7201,
 	PMI_KVS_PUT_RESP,
@@ -312,7 +315,7 @@ typedef enum {
 
 	ACCOUNTING_UPDATE_MSG = 10001,
 	ACCOUNTING_FIRST_REG,
-
+	ACCOUNTING_REGISTER_CTLD,
 } slurm_msg_type_t;
 
 typedef enum {
@@ -492,6 +495,10 @@ typedef struct node_info_request_msg {
 	uint16_t show_flags;
 } node_info_request_msg_t;
 
+typedef struct front_end_info_request_msg {
+	time_t last_update;
+} front_end_info_request_msg_t;
+
 typedef struct block_info_request_msg {
 	time_t last_update;
 	uint16_t show_flags;
@@ -556,6 +563,11 @@ typedef struct last_update_msg {
 	time_t last_update;
 } last_update_msg_t;
 
+typedef struct set_debug_flags_msg {
+	uint32_t debug_flags_minus;
+	uint32_t debug_flags_plus;
+} set_debug_flags_msg_t;
+
 typedef struct set_debug_level_msg {
 	uint32_t debug_level;
 } set_debug_level_msg_t;
@@ -600,6 +612,7 @@ typedef struct job_step_create_response_msg {
 	slurm_step_layout_t *step_layout; /* information about how the
                                            * step is laid out */
 	slurm_cred_t *cred;    	  /* slurm job credential */
+	dynamic_plugin_data_t *select_jobinfo;	/* select opaque data type */
 	switch_jobinfo_t *switch_job;	/* switch context, opaque
                                          * data structure */
 } job_step_create_response_msg_t;
@@ -667,6 +680,7 @@ typedef struct launch_tasks_request_msg {
 	char *restart_dir;	/* restart from checkpoint if set */
 	char **spank_job_env;
 	uint32_t spank_job_env_size;
+	dynamic_plugin_data_t *select_jobinfo; /* select context, opaque data */
 } launch_tasks_request_msg_t;
 
 typedef struct task_user_managed_io_msg {
@@ -687,6 +701,7 @@ typedef struct return_code_msg {
  * from getting the MPIRUN_PARTITION at that time. It is needed for
  * the job epilog. */
 
+#define SIG_PREEMPTED	994	/* Dummy signal value for job preemption */
 #define SIG_DEBUG_WAKE	995	/* Dummy signal value to wake procs stopped 
 				 * for debugger */
 #define SIG_TIME_LIMIT	996	/* Dummy signal value for time limit reached */
@@ -766,6 +781,9 @@ typedef struct batch_job_launch_msg {
 	slurm_cred_t *cred;
 	uint8_t open_mode;	/* stdout/err append or truncate */
 	uint8_t overcommit;	/* if resources being over subscribed */
+	uint32_t pn_min_memory;  /* minimum real memory per node OR
+				  * real memory per CPU | MEM_PER_CPU,
+				  * default=0 (no limit) */
 	uint16_t acctg_freq;	/* accounting polling interval	*/
 	uint32_t job_mem;	/* memory limit for job		*/
 	uint16_t restart_cnt;	/* batch job restart count	*/
@@ -821,14 +839,9 @@ typedef struct checkpoint_resp_msg {
 	char   * error_msg;	/* error message on failure */
 } checkpoint_resp_msg_t;
 
-typedef struct suspend_msg {
-	uint16_t op;            /* suspend operation, see enum suspend_opts */
-	uint32_t job_id;        /* slurm job_id */
-} suspend_msg_t;
-
 typedef struct kvs_get_msg {
-	uint16_t task_id;	/* job step's task id */
-	uint16_t size;		/* count of tasks in job */
+	uint32_t task_id;	/* job step's task id */
+	uint32_t size;		/* count of tasks in job */
 	uint16_t port;		/* port to be sent the kvs data */
 	char * hostname;	/* hostname to be sent the kvs data */
 } kvs_get_msg_t;
@@ -908,6 +921,15 @@ typedef struct {
 	uint16_t rpc_version;
 } accounting_update_msg_t;
 
+typedef struct {
+	uint32_t job_id;	/* ID of job of request */
+} spank_env_request_msg_t;
+
+typedef struct {
+	uint32_t spank_job_env_size;
+	char **spank_job_env;	/* spank environment */
+} spank_env_responce_msg_t;
+
 typedef struct slurm_ctl_conf slurm_ctl_conf_info_msg_t;
 /*****************************************************************************\
  *	SLURM MESSAGE INITIALIZATION
@@ -938,125 +960,135 @@ extern int slurm_sort_char_list_asc(char *name_a, char *name_b);
 extern int slurm_sort_char_list_desc(char *name_a, char *name_b);
 
 /* free message functions */
-inline void slurm_free_checkpoint_tasks_msg(checkpoint_tasks_msg_t * msg);
-inline void slurm_free_last_update_msg(last_update_msg_t * msg);
-inline void slurm_free_return_code_msg(return_code_msg_t * msg);
-inline void slurm_free_job_alloc_info_msg(job_alloc_info_msg_t * msg);
-inline void slurm_free_job_info_request_msg(job_info_request_msg_t *msg);
-inline void slurm_free_job_step_info_request_msg(
+extern void slurm_free_checkpoint_tasks_msg(checkpoint_tasks_msg_t * msg);
+extern void slurm_free_last_update_msg(last_update_msg_t * msg);
+extern void slurm_free_return_code_msg(return_code_msg_t * msg);
+extern void slurm_free_job_alloc_info_msg(job_alloc_info_msg_t * msg);
+extern void slurm_free_job_info_request_msg(job_info_request_msg_t *msg);
+extern void slurm_free_job_step_info_request_msg(
 		job_step_info_request_msg_t *msg);
-inline void slurm_free_node_info_request_msg(node_info_request_msg_t *msg);
-inline void slurm_free_part_info_request_msg(part_info_request_msg_t *msg);
-inline void slurm_free_resv_info_request_msg(resv_info_request_msg_t *msg);
-inline void slurm_free_set_debug_level_msg(set_debug_level_msg_t *msg);
+extern void slurm_free_front_end_info_request_msg(
+		front_end_info_request_msg_t *msg);
+extern void slurm_free_node_info_request_msg(node_info_request_msg_t *msg);
+extern void slurm_free_part_info_request_msg(part_info_request_msg_t *msg);
+extern void slurm_free_resv_info_request_msg(resv_info_request_msg_t *msg);
+extern void slurm_free_set_debug_flags_msg(set_debug_flags_msg_t *msg);
+extern void slurm_free_set_debug_level_msg(set_debug_level_msg_t *msg);
 extern void slurm_destroy_association_shares_object(void *object);
-inline void slurm_free_shares_request_msg(shares_request_msg_t *msg);
-inline void slurm_free_shares_response_msg(shares_response_msg_t *msg);
+extern void slurm_free_shares_request_msg(shares_request_msg_t *msg);
+extern void slurm_free_shares_response_msg(shares_response_msg_t *msg);
 extern void slurm_destroy_priority_factors_object(void *object);
-inline void slurm_free_priority_factors_request_msg(
+extern void slurm_free_priority_factors_request_msg(
 	priority_factors_request_msg_t *msg);
-inline void slurm_free_priority_factors_response_msg(
+extern void slurm_free_priority_factors_response_msg(
 	priority_factors_response_msg_t *msg);
 
 #define	slurm_free_timelimit_msg(msg) \
 	slurm_free_kill_job_msg(msg)
 
-inline void slurm_free_shutdown_msg(shutdown_msg_t * msg);
+extern void slurm_free_shutdown_msg(shutdown_msg_t * msg);
 
-inline void slurm_free_job_desc_msg(job_desc_msg_t * msg);
+extern void slurm_free_job_desc_msg(job_desc_msg_t * msg);
 
-inline void
+extern void
 slurm_free_node_registration_status_msg(slurm_node_registration_status_msg_t *
 					msg);
 
-inline void slurm_free_job_info(job_info_t * job);
-inline void slurm_free_job_info_members(job_info_t * job);
+extern void slurm_free_job_info(job_info_t * job);
+extern void slurm_free_job_info_members(job_info_t * job);
 
-inline void slurm_free_job_id_msg(job_id_msg_t * msg);
-inline void slurm_free_job_id_request_msg(job_id_request_msg_t * msg);
-inline void slurm_free_job_id_response_msg(job_id_response_msg_t * msg);
+extern void slurm_free_job_id_msg(job_id_msg_t * msg);
+extern void slurm_free_job_id_request_msg(job_id_request_msg_t * msg);
+extern void slurm_free_job_id_response_msg(job_id_response_msg_t * msg);
 
-inline void slurm_free_job_step_id_msg(job_step_id_msg_t *msg);
+extern void slurm_free_job_step_id_msg(job_step_id_msg_t *msg);
 
-inline void slurm_free_job_launch_msg(batch_job_launch_msg_t * msg);
+extern void slurm_free_job_launch_msg(batch_job_launch_msg_t * msg);
 
-inline void slurm_free_update_node_msg(update_node_msg_t * msg);
-inline void slurm_free_update_part_msg(update_part_msg_t * msg);
-inline void slurm_free_delete_part_msg(delete_part_msg_t * msg);
-inline void slurm_free_resv_desc_msg(resv_desc_msg_t * msg);
-inline void slurm_free_resv_name_msg(reservation_name_msg_t * msg);
-inline void slurm_free_resv_info_request_msg(resv_info_request_msg_t * msg);
-inline void
-slurm_free_job_step_create_request_msg(job_step_create_request_msg_t * msg);
-inline void
-slurm_free_job_step_create_response_msg(job_step_create_response_msg_t *msg);
-inline void
-slurm_free_complete_job_allocation_msg(complete_job_allocation_msg_t * msg);
-inline void
-slurm_free_complete_batch_script_msg(complete_batch_script_msg_t * msg);
-inline void
-slurm_free_launch_tasks_request_msg(launch_tasks_request_msg_t * msg);
-inline void
-slurm_free_launch_tasks_response_msg(launch_tasks_response_msg_t * msg);
-inline void slurm_free_task_user_managed_io_stream_msg(
-	task_user_managed_io_msg_t *msg);
-inline void slurm_free_task_exit_msg(task_exit_msg_t * msg);
-inline void slurm_free_kill_tasks_msg(kill_tasks_msg_t * msg);
-inline void
-slurm_free_reattach_tasks_request_msg(reattach_tasks_request_msg_t * msg);
-inline void
-slurm_free_reattach_tasks_response_msg(reattach_tasks_response_msg_t * msg);
-inline void slurm_free_kill_job_msg(kill_job_msg_t * msg);
-inline void slurm_free_signal_job_msg(signal_job_msg_t * msg);
-inline void slurm_free_update_job_time_msg(job_time_msg_t * msg);
-inline void slurm_free_job_step_kill_msg(job_step_kill_msg_t * msg);
-inline void slurm_free_epilog_complete_msg(epilog_complete_msg_t * msg);
-inline void slurm_free_srun_job_complete_msg(srun_job_complete_msg_t * msg);
-inline void slurm_free_srun_exec_msg(srun_exec_msg_t *msg);
-inline void slurm_free_srun_ping_msg(srun_ping_msg_t * msg);
-inline void slurm_free_srun_node_fail_msg(srun_node_fail_msg_t * msg);
-inline void slurm_free_srun_step_missing_msg(srun_step_missing_msg_t * msg);
-inline void slurm_free_srun_timeout_msg(srun_timeout_msg_t * msg);
-inline void slurm_free_srun_user_msg(srun_user_msg_t * msg);
-inline void slurm_free_checkpoint_msg(checkpoint_msg_t *msg);
-inline void slurm_free_checkpoint_comp_msg(checkpoint_comp_msg_t *msg);
-inline void slurm_free_checkpoint_task_comp_msg(checkpoint_task_comp_msg_t *msg);
-inline void slurm_free_checkpoint_resp_msg(checkpoint_resp_msg_t *msg);
-inline void slurm_free_suspend_msg(suspend_msg_t *msg);
-void slurm_free_update_step_msg(step_update_request_msg_t * msg);
-void slurm_free_resource_allocation_response_msg (
+extern void slurm_free_update_front_end_msg(update_front_end_msg_t * msg);
+extern void slurm_free_update_node_msg(update_node_msg_t * msg);
+extern void slurm_free_update_part_msg(update_part_msg_t * msg);
+extern void slurm_free_delete_part_msg(delete_part_msg_t * msg);
+extern void slurm_free_resv_desc_msg(resv_desc_msg_t * msg);
+extern void slurm_free_resv_name_msg(reservation_name_msg_t * msg);
+extern void slurm_free_resv_info_request_msg(resv_info_request_msg_t * msg);
+extern void slurm_free_job_step_create_request_msg(
+		job_step_create_request_msg_t * msg);
+extern void slurm_free_job_step_create_response_msg(
+		job_step_create_response_msg_t *msg);
+extern void slurm_free_complete_job_allocation_msg(
+		complete_job_allocation_msg_t * msg);
+extern void slurm_free_complete_batch_script_msg(
+		complete_batch_script_msg_t * msg);
+extern void slurm_free_launch_tasks_request_msg(
+		launch_tasks_request_msg_t * msg);
+extern void slurm_free_launch_tasks_response_msg(
+		launch_tasks_response_msg_t * msg);
+extern void slurm_free_task_user_managed_io_stream_msg(
+		task_user_managed_io_msg_t *msg);
+extern void slurm_free_task_exit_msg(task_exit_msg_t * msg);
+extern void slurm_free_kill_tasks_msg(kill_tasks_msg_t * msg);
+extern void slurm_free_reattach_tasks_request_msg(
+		reattach_tasks_request_msg_t * msg);
+extern void slurm_free_reattach_tasks_response_msg(
+		reattach_tasks_response_msg_t * msg);
+extern void slurm_free_kill_job_msg(kill_job_msg_t * msg);
+extern void slurm_free_signal_job_msg(signal_job_msg_t * msg);
+extern void slurm_free_update_job_time_msg(job_time_msg_t * msg);
+extern void slurm_free_job_step_kill_msg(job_step_kill_msg_t * msg);
+extern void slurm_free_epilog_complete_msg(epilog_complete_msg_t * msg);
+extern void slurm_free_srun_job_complete_msg(srun_job_complete_msg_t * msg);
+extern void slurm_free_srun_exec_msg(srun_exec_msg_t *msg);
+extern void slurm_free_srun_ping_msg(srun_ping_msg_t * msg);
+extern void slurm_free_srun_node_fail_msg(srun_node_fail_msg_t * msg);
+extern void slurm_free_srun_step_missing_msg(srun_step_missing_msg_t * msg);
+extern void slurm_free_srun_timeout_msg(srun_timeout_msg_t * msg);
+extern void slurm_free_srun_user_msg(srun_user_msg_t * msg);
+extern void slurm_free_checkpoint_msg(checkpoint_msg_t *msg);
+extern void slurm_free_checkpoint_comp_msg(checkpoint_comp_msg_t *msg);
+extern void slurm_free_checkpoint_task_comp_msg(checkpoint_task_comp_msg_t *msg);
+extern void slurm_free_checkpoint_resp_msg(checkpoint_resp_msg_t *msg);
+extern void slurm_free_suspend_msg(suspend_msg_t *msg);
+extern void slurm_free_update_step_msg(step_update_request_msg_t * msg);
+extern void slurm_free_resource_allocation_response_msg (
 		resource_allocation_response_msg_t * msg);
-void slurm_free_job_alloc_info_response_msg (
+extern void slurm_free_job_alloc_info_response_msg (
 		job_alloc_info_response_msg_t * msg);
-void slurm_free_job_step_create_response_msg(
+extern void slurm_free_job_step_create_response_msg(
 		job_step_create_response_msg_t * msg);
-void slurm_free_submit_response_response_msg(submit_response_msg_t * msg);
-void slurm_free_ctl_conf(slurm_ctl_conf_info_msg_t * config_ptr);
-void slurm_free_job_info_msg(job_info_msg_t * job_buffer_ptr);
-void slurm_free_job_step_info_response_msg(
+extern void slurm_free_submit_response_response_msg(
+		submit_response_msg_t * msg);
+extern void slurm_free_ctl_conf(slurm_ctl_conf_info_msg_t * config_ptr);
+extern void slurm_free_job_info_msg(job_info_msg_t * job_buffer_ptr);
+extern void slurm_free_job_step_info_response_msg(
 		job_step_info_response_msg_t * msg);
-void slurm_free_job_step_info_members (job_step_info_t * msg);
-void slurm_free_node_info_msg(node_info_msg_t * msg);
-void slurm_free_node_info_members(node_info_t * node);
-void slurm_free_partition_info_msg(partition_info_msg_t * msg);
-void slurm_free_partition_info_members(partition_info_t * part);
-void slurm_free_reservation_info_msg(reserve_info_msg_t * msg);
-void slurm_free_get_kvs_msg(kvs_get_msg_t *msg);
-void slurm_free_will_run_response_msg(will_run_response_msg_t *msg);
-void slurm_free_reserve_info_members(reserve_info_t * resv);
+extern void slurm_free_job_step_info_members (job_step_info_t * msg);
+extern void slurm_free_front_end_info_msg (front_end_info_msg_t * msg);
+extern void slurm_free_front_end_info_members(front_end_info_t * front_end);
+extern void slurm_free_node_info_msg(node_info_msg_t * msg);
+extern void slurm_free_node_info_members(node_info_t * node);
+extern void slurm_free_partition_info_msg(partition_info_msg_t * msg);
+extern void slurm_free_partition_info_members(partition_info_t * part);
+extern void slurm_free_reservation_info_msg(reserve_info_msg_t * msg);
+extern void slurm_free_get_kvs_msg(kvs_get_msg_t *msg);
+extern void slurm_free_will_run_response_msg(will_run_response_msg_t *msg);
+extern void slurm_free_reserve_info_members(reserve_info_t * resv);
 extern void slurm_free_topo_info_msg(topo_info_response_msg_t *msg);
 extern void slurm_free_file_bcast_msg(file_bcast_msg_t *msg);
 extern void slurm_free_step_complete_msg(step_complete_msg_t *msg);
 extern void slurm_free_job_step_stat(void *object);
 extern void slurm_free_job_step_pids(void *object);
+extern void slurm_free_block_job_info(void *object);
 extern void slurm_free_block_info_members(block_info_t *block_info);
 extern void slurm_free_block_info(block_info_t *block_info);
-void slurm_free_block_info_msg(block_info_msg_t *block_info_msg);
-inline void slurm_free_block_info_request_msg(
+extern void slurm_free_block_info_msg(block_info_msg_t *block_info_msg);
+extern void slurm_free_block_info_request_msg(
 		block_info_request_msg_t *msg);
-inline void slurm_free_job_notify_msg(job_notify_msg_t * msg);
+extern void slurm_free_job_notify_msg(job_notify_msg_t * msg);
 
-inline void slurm_free_accounting_update_msg(accounting_update_msg_t *msg);
+extern void slurm_free_accounting_update_msg(accounting_update_msg_t *msg);
+extern void slurm_free_spank_env_request_msg(spank_env_request_msg_t *msg);
+extern void slurm_free_spank_env_responce_msg(spank_env_responce_msg_t *msg);
 
 extern int slurm_free_msg_data(slurm_msg_type_t type, void *data);
 extern uint32_t slurm_get_return_code(slurm_msg_type_t type, void *data);
@@ -1064,6 +1096,7 @@ extern uint32_t slurm_get_return_code(slurm_msg_type_t type, void *data);
 extern char *preempt_mode_string(uint16_t preempt_mode);
 extern uint16_t preempt_mode_num(const char *preempt_mode);
 
+extern char *sched_param_type_string(uint16_t select_type_param);
 extern char *job_reason_string(enum job_state_reason inx);
 extern char *job_state_string(uint16_t inx);
 extern char *job_state_string_compact(uint16_t inx);
@@ -1074,6 +1107,7 @@ extern void  private_data_string(uint16_t private_data, char *str, int str_len);
 extern void  accounting_enforce_string(uint16_t enforce,
 				       char *str, int str_len);
 extern char *conn_type_string(enum connection_type conn_type);
+extern char *conn_type_string_full(uint16_t *conn_type);
 extern char *node_use_string(enum node_use_type node_use);
 /* Translate a state enum to a readable string */
 extern char *bg_block_state_string(uint16_t state);
@@ -1084,8 +1118,8 @@ extern char *bg_block_state_string(uint16_t state);
 extern bool valid_spank_job_env(char **spank_job_env,
 			        uint32_t spank_job_env_size, uid_t uid);
 
-char *trigger_res_type(uint16_t res_type);
-char *trigger_type(uint32_t trig_type);
+extern char *trigger_res_type(uint16_t res_type);
+extern char *trigger_type(uint32_t trig_type);
 
 /* user needs to xfree after */
 extern char *reservation_flags_string(uint16_t flags);

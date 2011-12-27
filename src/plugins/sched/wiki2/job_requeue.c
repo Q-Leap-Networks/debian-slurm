@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -68,7 +68,7 @@ extern int	job_requeue_wiki(char *cmd_ptr, int *err_code, char **err_msg)
 	}
 
 	lock_slurmctld(job_write_lock);
-	slurm_rc = job_requeue(0, jobid, -1, (uint16_t)NO_VAL);
+	slurm_rc = job_requeue(0, jobid, -1, (uint16_t)NO_VAL, false);
 	if (slurm_rc != SLURM_SUCCESS) {
 		unlock_slurmctld(job_write_lock);
 		*err_code = -700;
@@ -85,7 +85,6 @@ extern int	job_requeue_wiki(char *cmd_ptr, int *err_code, char **err_msg)
 		xfree(job_ptr->details->req_nodes);
 		FREE_NULL_BITMAP(job_ptr->details->req_node_bitmap);
 	}
-	job_ptr->priority = 0;
 	info("wiki: requeued job %u", jobid);
 	unlock_slurmctld(job_write_lock);
 	snprintf(reply_msg, sizeof(reply_msg),

@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -53,7 +53,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <slurm/slurm_errno.h>
+#include "slurm/slurm_errno.h"
 
 #include "src/common/slurm_jobcomp.h"
 #include "src/common/switch.h"
@@ -245,7 +245,7 @@ static slurm_errtab_t slurm_errtab[] = {
 	{ ESLURM_RESERVATION_OVERLAP,
 	  "Requested reservation overlaps with another reservation"	},
 	{ ESLURM_PORTS_BUSY,
-	  "Requires ports are in use"				},
+	  "Required ports are in use"				},
 	{ ESLURM_PORTS_INVALID,
 	  "Requires more ports than can be reserved"		},
 	{ ESLURM_PROLOG_RUNNING,
@@ -274,6 +274,12 @@ static slurm_errtab_t slurm_errtab[] = {
 	  "Job is no longer pending execution"			},
 	{ ESLURM_QOS_THRES,
 	  "Requested account has breached requested QOS usage threshold"},
+	{ ESLURM_PARTITION_IN_USE,
+	  "Partition is in use"					},
+	{ ESLURM_STEP_LIMIT,
+	  "Step limit reached for this job"			},
+	{ ESLURM_JOB_SUSPENDED,
+	  "Job is current suspended, requested operation disabled"	},
 
 	/* slurmd error codes */
 
@@ -328,7 +334,7 @@ static slurm_errtab_t slurm_errtab[] = {
 	{ ESLURMD_TOOMANYSTEPS,
 	  "Too many job steps on node"		        	},
 	{ ESLURMD_STEP_EXISTS,
-	  "Job step already in shared memory"	        	},
+	  "Job step already exists"		        	},
 	{ ESLURMD_JOB_NOTRUNNING,
 	  "Job step not running"	        	        },
  	{ ESLURMD_STEP_SUSPENDED,

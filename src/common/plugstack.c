@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -62,7 +62,7 @@
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 /*#include "src/srun/srun_job.h"*/
 
-#include <slurm/spank.h>
+#include "slurm/spank.h"
 
 #define REQUIRED "required"
 #define OPTIONAL "optional"
@@ -1036,7 +1036,7 @@ _find_word_boundary(char *str, char *from, char **next)
 	 * Back up past any non-whitespace if we are pointing in
 	 *  the middle of a word.
 	 */
-	while ((p != str) && !isspace (*p))
+	while ((p != str) && !isspace ((int)*p))
 		--p;
 
 	/*
@@ -1047,7 +1047,7 @@ _find_word_boundary(char *str, char *from, char **next)
 	/*
 	 * Now move back to the end of the previous word
 	 */
-	while ((p != str) && isspace (*p))
+	while ((p != str) && isspace ((int)*p))
 		--p;
 
 	if (p == str) {
@@ -1182,7 +1182,7 @@ int spank_print_options(FILE * fp, int left_pad, int width)
 
 static char _canonical_char (char c)
 {
-	if (!isalnum (c))
+	if (!isalnum ((int)c))
 		return '_';
 	else
 		return c;

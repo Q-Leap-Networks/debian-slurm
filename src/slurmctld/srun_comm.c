@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -96,6 +96,10 @@ extern void srun_allocate (uint32_t job_id)
 		msg_arg->num_cpu_groups	= job_resrcs_ptr->cpu_array_cnt;
 		msg_arg->cpus_per_node  = xmalloc(sizeof(uint16_t) *
 					  job_resrcs_ptr->cpu_array_cnt);
+		if (job_ptr->details) {
+			msg_arg->pn_min_memory = job_ptr->details->
+						 pn_min_memory;
+		}
 		memcpy(msg_arg->cpus_per_node,
 		       job_resrcs_ptr->cpu_array_value,
 		       (sizeof(uint16_t) * job_resrcs_ptr->cpu_array_cnt));
@@ -142,9 +146,11 @@ extern void srun_allocate_abort(struct job_record *job_ptr)
  */
 extern void srun_node_fail (uint32_t job_id, char *node_name)
 {
+#ifndef HAVE_FRONT_END
 	struct node_record *node_ptr;
+#endif
 	struct job_record *job_ptr = find_job_record (job_id);
-	int bit_position;
+	int bit_position = -1;
 	slurm_addr_t * addr;
 	srun_node_fail_msg_t *msg_arg;
 	ListIterator step_iterator;
@@ -155,13 +161,18 @@ extern void srun_node_fail (uint32_t job_id, char *node_name)
 	if (!job_ptr || !IS_JOB_RUNNING(job_ptr))
 		return;
 
+#ifdef HAVE_FRONT_END
+	/* Purge all jobs steps in front end mode */
+#else
 	if (!node_name || (node_ptr = find_node_record(node_name)) == NULL)
 		return;
 	bit_position = node_ptr - node_record_table_ptr;
+#endif
 
 	step_iterator = list_iterator_create(job_ptr->step_list);
 	while ((step_ptr = (struct step_record *) list_next(step_iterator))) {
-		if (!bit_test(step_ptr->step_node_bitmap, bit_position))
+		if ((bit_position >= 0) &&
+		    (!bit_test(step_ptr->step_node_bitmap, bit_position)))
 			continue;	/* job step not on this node */
 		if ( (step_ptr->port    == 0)    ||
 		     (step_ptr->host    == NULL) ||
@@ -298,21 +309,31 @@ extern int srun_user_message(struct job_record *job_ptr, char *msg)
 				   msg_arg);
 		return SLURM_SUCCESS;
 	} else if (job_ptr->batch_flag && IS_JOB_RUNNING(job_ptr)) {
+#ifndef HAVE_FRONT_END
 		struct node_record *node_ptr;
+#endif
 		job_notify_msg_t *notify_msg_ptr;
 		agent_arg_t *agent_arg_ptr;
-
+#ifdef HAVE_FRONT_END
+		if (job_ptr->batch_host == NULL)
+			return ESLURM_DISABLED;	/* no allocated nodes */
+		agent_arg_ptr = (agent_arg_t *) xmalloc(sizeof(agent_arg_t));
+		agent_arg_ptr->hostlist = hostlist_create(job_ptr->batch_host);
+#else
 		node_ptr = find_first_node_record(job_ptr->node_bitmap);
 		if (node_ptr == NULL)
 			return ESLURM_DISABLED;	/* no allocated nodes */
+		agent_arg_ptr = (agent_arg_t *) xmalloc(sizeof(agent_arg_t));
+		agent_arg_ptr->hostlist = hostlist_create(node_ptr->name);
+#endif
+		if (agent_arg_ptr->hostlist == NULL)
+			fatal("hostlist_create: malloc failure");
 		notify_msg_ptr = (job_notify_msg_t *) 
 				 xmalloc(sizeof(job_notify_msg_t));
 		notify_msg_ptr->job_id = job_ptr->job_id;
 		notify_msg_ptr->message = xstrdup(msg);
-		agent_arg_ptr = (agent_arg_t *) xmalloc(sizeof(agent_arg_t));
 		agent_arg_ptr->node_count = 1;
 		agent_arg_ptr->retry = 0;
-		agent_arg_ptr->hostlist = hostlist_create(node_ptr->name);
 		agent_arg_ptr->msg_type = REQUEST_JOB_NOTIFY;
 		agent_arg_ptr->msg_args = (void *) notify_msg_ptr;
 		/* Launch the RPC via agent */
@@ -352,6 +373,33 @@ extern void srun_job_complete (struct job_record *job_ptr)
 		srun_step_complete(step_ptr);
 	}
 	list_iterator_destroy(step_iterator);
+}
+
+/*
+ * srun_job_suspend - notify salloc of suspend/resume operation
+ * IN job_ptr - pointer to the slurmctld job record
+ * IN op - SUSPEND_JOB or RESUME_JOB (enum suspend_opts from slurm.h)
+ * RET - true if message send, otherwise false
+ */
+extern bool srun_job_suspend (struct job_record *job_ptr, uint16_t op)
+{
+	slurm_addr_t * addr;
+	suspend_msg_t *msg_arg;
+	bool msg_sent = false;
+
+	xassert(job_ptr);
+
+	if (job_ptr->other_port && job_ptr->alloc_node && job_ptr->resp_host) {
+		addr = xmalloc(sizeof(struct sockaddr_in));
+		slurm_set_addr(addr, job_ptr->other_port, job_ptr->resp_host);
+		msg_arg = xmalloc(sizeof(suspend_msg_t));
+		msg_arg->job_id  = job_ptr->job_id;
+		msg_arg->op     = op;
+		_srun_agent_launch(addr, job_ptr->alloc_node,
+				   SRUN_REQUEST_SUSPEND, msg_arg);
+		msg_sent = true;
+	}
+	return msg_sent;
 }
 
 /*

@@ -1,14 +1,18 @@
-if WITH_BLCR
-SRUN_CR = srun_cr
-else
-SRUN_CR =
-endif
-
 SUBDIRS = common api db_api database \
-	slurmctld slurmd slurmdbd plugins srun sbcast \
+	slurmctld slurmd slurmdbd plugins sbcast \
 	scontrol scancel squeue sinfo smap sview salloc \
 	sbatch sattach strigger sacct sacctmgr sreport sstat \
-	sshare sprio $(SRUN_CR)
+	sshare sprio
+
+if !BUILD_SRUN2APRUN
+if !REAL_BG_L_P_LOADED
+SUBDIRS += srun
+endif
+endif
+
+if WITH_BLCR
+SUBDIRS += srun_cr
+endif
 
 
 

@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -105,6 +105,8 @@ typedef struct slurm_dbd_conf {
 	char *		storage_type;	/* DB to be used for storage	*/
 	char *		storage_user;	/* user authorized to write DB	*/
 	uint16_t        track_wckey;    /* Whether or not to track wckey*/
+	uint16_t        track_ctld;     /* Whether or not track when a
+					 * slurmctld goes down or not   */
 } slurm_dbd_conf_t;
 
 extern pthread_mutex_t conf_mutex;

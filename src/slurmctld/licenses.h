@@ -1,13 +1,13 @@
 /*****************************************************************************\
  *  licenses.h - Definitions for handling cluster-wide consumable resources
  *****************************************************************************
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2011 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -44,8 +44,8 @@
 
 typedef struct licenses {
 	char *		name;		/* name associated with a license */
-	uint16_t	total;		/* total license configued */
-	uint16_t	used;		/* used licenses */
+	uint32_t	total;		/* total license configued */
+	uint32_t	used;		/* used licenses */
 } licenses_t;
 
 extern List license_list;
@@ -70,6 +70,14 @@ extern void license_free_rec(void *x);
  * RET SLURM_SUCCESS or failure code
  */
 extern int license_job_get(struct job_record *job_ptr);
+
+/*
+ * license_job_merge - The licenses from one job have just been merged into
+ *	another job by appending one job's licenses to another, possibly
+ *	including duplicate names. Reconstruct this job's licenses and
+ *	license_list fields to eliminate duplicates.
+ */
+extern void license_job_merge(struct job_record *job_ptr);
 
 /*
  * license_job_return - Return the licenses allocated to a job

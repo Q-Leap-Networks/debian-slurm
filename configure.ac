@@ -25,6 +25,7 @@ AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_HEADERS([slurm/slurm.h])
 
 dnl This needs to be close to the front to set CFLAGS=-m64
+X_AC_RPATH
 X_AC_BGL
 
 dnl we need to know if this is a bgl in the Makefile.am to do
@@ -33,11 +34,27 @@ AM_CONDITIONAL(BGL_LOADED, test "x$ac_bluegene_loaded" = "xyes")
 AC_SUBST(BGL_LOADED)
 
 X_AC_BGP
+
+dnl ok now check if We have an L or P system, Q is handled differently
+dnl so handle it later.
+AM_CONDITIONAL(BG_L_P_LOADED, test "x$ac_bluegene_loaded" = "xyes")
+AC_SUBST(BG_L_P_LOADED)
+
+dnl ok now check if We are on a real L or P system, (test if to build srun
+dnl or not.  If we are emulating things we should build it.
+AM_CONDITIONAL(REAL_BG_L_P_LOADED, test "x$ac_real_bluegene_loaded" = "xyes")
+AC_SUBST(REAL_BG_L_P_LOADED)
+
 X_AC_BGQ
 
-dnl ok now check if bluegene was loaded at all
+dnl We need to know if this is a Q system
+AM_CONDITIONAL(BGQ_LOADED, test "x$ac_bgq_loaded" = "xyes")
+AC_SUBST(BGQ_LOADED)
+
+dnl ok now check if any bluegene was loaded.
 AM_CONDITIONAL(BLUEGENE_LOADED, test "x$ac_bluegene_loaded" = "xyes")
 AC_SUBST(BLUEGENE_LOADED)
+
 
 X_AC_AIX
 
@@ -54,14 +71,22 @@ case "$host" in
 			[Define slurm_ prefix function aliases for plugins]) ;;
 esac
 
+ac_have_cygwin=no
 dnl
-dnl add some flags for Solaris
+dnl add some flags for Solaris and cygwin
 dnl
 case "$host" in
+     	*cygwin)   LDFLAGS="$LDFLAGS -no-undefined"
+		   SO_LDFLAGS="$SO_LDFLAGS \$(top_builddir)/src/api/libslurmhelper.la"
+		   AC_SUBST(SO_LDFLAGS)
+		   ac_have_cygwin=yes
+		   ;;
 	*solaris*) CC="/usr/sfw/bin/gcc"
 		   CFLAGS="$CFLAGS -D_POSIX_PTHREAD_SEMANTICS -I/usr/sfw/include"
 		   LDFLAGS="$LDFLAGS -L/usr/sfw/lib"
+		   ;;
 esac
+AM_CONDITIONAL(WITH_CYGWIN, test x"$ac_have_cygwin" == x"yes")
 
 dnl Checks for programs.
 dnl
@@ -71,6 +96,7 @@ AC_PROG_MAKE_SET
 AC_PROG_LIBTOOL
 PKG_PROG_PKG_CONFIG([0.9.0])
 
+AM_CONDITIONAL(WITH_CXX, test -n "$ac_ct_CXX")
 AM_CONDITIONAL(WITH_GNU_LD, test "$with_gnu_ld" = "yes")
 
 
@@ -172,7 +198,6 @@ LDFLAGS="$LDFLAGS "
 CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
 LIBS="$PTHREAD_LIBS $LIBS"
 
-X_AC_CRAY
 X_AC_SUN_CONST
 X_AC_DIMENSIONS
 
@@ -215,6 +240,9 @@ fi
 
 
 X_AC_DATABASES
+
+dnl Cray ALPS/Basil support depends on mySQL
+X_AC_CRAY
 
 dnl checks for system services.
 dnl
@@ -267,6 +295,12 @@ X_AC_SGI_JOB
 dnl check for lua library
 dnl
 X_AC_LUA
+
+dnl check for presence of the man2html command
+dnl
+X_AC_MAN2HTML
+AM_CONDITIONAL(HAVE_MAN2HTML, test "x$ac_have_man2html" = "xyes")
+AC_SUBST(HAVE_MAN2HTML)
 
 dnl check if we can use standard printf functions
 dnl
@@ -335,6 +369,10 @@ dnl Check for compilation of SLURM with BLCR support:
 dnl
 X_AC_BLCR
 
+dnl
+dnl Check to build native SLURM srun command or an aprun (Cray ALPS) wrapper.
+dnl
+X_AC_SRUN2APRUN
 
 dnl All slurm Makefiles:
 
@@ -342,6 +380,9 @@ AC_CONFIG_FILES([Makefile
 		 config.xml
 		 auxdir/Makefile
 		 contribs/Makefile
+		 contribs/arrayrun/Makefile
+		 contribs/cray/Makefile
+		 contribs/lua/Makefile
 		 contribs/pam/Makefile
 		 contribs/perlapi/Makefile
 		 contribs/perlapi/libslurm/Makefile
@@ -370,6 +411,7 @@ AC_CONFIG_FILES([Makefile
 		 src/srun/Makefile
 		 src/srun_cr/Makefile
 		 src/slurmd/Makefile
+		 src/slurmd/common/Makefile
 		 src/slurmd/slurmd/Makefile
 		 src/slurmd/slurmstepd/Makefile
 		 src/slurmdbd/Makefile
@@ -398,7 +440,6 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/checkpoint/aix/Makefile
 		 src/plugins/checkpoint/none/Makefile
 		 src/plugins/checkpoint/ompi/Makefile
-		 src/plugins/checkpoint/xlch/Makefile
 		 src/plugins/checkpoint/blcr/Makefile
 		 src/plugins/checkpoint/blcr/cr_checkpoint.sh
 		 src/plugins/checkpoint/blcr/cr_restart.sh
@@ -433,11 +474,11 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/priority/multifactor/Makefile
 		 src/plugins/proctrack/Makefile
 		 src/plugins/proctrack/aix/Makefile
+		 src/plugins/proctrack/cgroup/Makefile
 		 src/plugins/proctrack/pgid/Makefile
 		 src/plugins/proctrack/linuxproc/Makefile
 		 src/plugins/proctrack/rms/Makefile
 		 src/plugins/proctrack/sgi_job/Makefile
-		 src/plugins/proctrack/cgroup/Makefile
 		 src/plugins/proctrack/lua/Makefile
 		 src/plugins/sched/Makefile
 		 src/plugins/sched/backfill/Makefile
@@ -446,12 +487,16 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/sched/wiki/Makefile
 		 src/plugins/sched/wiki2/Makefile
 		 src/plugins/select/Makefile
-		 src/plugins/select/bgq/Makefile
 		 src/plugins/select/bluegene/Makefile
-		 src/plugins/select/bluegene/block_allocator/Makefile
-		 src/plugins/select/bluegene/plugin/Makefile
+		 src/plugins/select/bluegene/ba/Makefile
+		 src/plugins/select/bluegene/ba_bgq/Makefile
+		 src/plugins/select/bluegene/bl/Makefile
+		 src/plugins/select/bluegene/bl_bgq/Makefile
+		 src/plugins/select/bluegene/sfree/Makefile
 		 src/plugins/select/cons_res/Makefile
 		 src/plugins/select/cray/Makefile
+		 src/plugins/select/cray/libalps/Makefile
+		 src/plugins/select/cray/libemulate/Makefile
 		 src/plugins/select/linear/Makefile
 		 src/plugins/switch/Makefile
 		 src/plugins/switch/elan/Makefile
@@ -468,6 +513,7 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/mpi/openmpi/Makefile
 		 src/plugins/task/Makefile
 		 src/plugins/task/affinity/Makefile
+		 src/plugins/task/cgroup/Makefile
 		 src/plugins/task/none/Makefile
 		 src/plugins/topology/Makefile
 		 src/plugins/topology/3d_torus/Makefile

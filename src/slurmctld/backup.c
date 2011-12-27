@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -53,7 +53,7 @@
 #include <sys/resource.h>
 #include <sys/stat.h>
 
-#include <slurm/slurm_errno.h>
+#include "slurm/slurm_errno.h"
 
 #include "src/common/daemonize.h"
 #include "src/common/log.h"
@@ -179,15 +179,15 @@ void run_backup(void)
 		}
 	}
 
-	/* Since pidfile is created as user root (its owner is
-	 *   changed to SlurmUser) SlurmUser may not be able to
-	 *   remove it, so this is not necessarily an error.
-	 * No longer need slurmctld_conf lock after above join. */
-	if (unlink(slurmctld_conf.slurmctld_pidfile) < 0)
-		verbose("Unable to remove pidfile '%s': %m",
-			slurmctld_conf.slurmctld_pidfile);
-
 	if (slurmctld_config.shutdown_time != 0) {
+		/* Since pidfile is created as user root (its owner is
+		 *   changed to SlurmUser) SlurmUser may not be able to
+		 *   remove it, so this is not necessarily an error.
+		 * No longer need slurmctld_conf lock after above join. */
+		if (unlink(slurmctld_conf.slurmctld_pidfile) < 0)
+			verbose("Unable to remove pidfile '%s': %m",
+				slurmctld_conf.slurmctld_pidfile);
+
 		info("BackupController terminating");
 		pthread_join(slurmctld_config.thread_id_sig, NULL);
 		log_fini();
@@ -533,9 +533,10 @@ static void _trigger_slurmctld_event(uint32_t trig_type)
 	ti.res_type = TRIGGER_RES_TYPE_SLURMCTLD;
 	ti.trig_type = trig_type;
 	if (slurm_pull_trigger(&ti)) {
-		error("error from _trigger_slurmctld_event in backup.c");
+		error("_trigger_slurmctld_event %u failure in backup.c: %m",
+		      trig_type);
 		return;
 	}
-	verbose("trigger pulled for SLURMCTLD event successful");
+	verbose("trigger pulled for SLURMCTLD event %u successful", trig_type);
 	return;
 }

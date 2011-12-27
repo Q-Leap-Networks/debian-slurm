@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -40,10 +40,9 @@
 #  include "config.h"
 #endif
 
-#include <slurm/slurm.h>
-#include <slurm/slurm_errno.h>
-
-#include <slurm/slurmdb.h>
+#include "slurm/slurm.h"
+#include "slurm/slurm_errno.h"
+#include "slurm/slurmdb.h"
 
 #include "src/common/slurmdb_defs.h"
 #include "src/common/slurm_accounting_storage.h"

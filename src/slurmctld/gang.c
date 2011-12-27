@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -439,12 +439,11 @@ static int _job_fits_in_active_row(struct job_record *job_ptr,
  * each used socket to avoid activating another job on the same socket */
 static void _fill_sockets(bitstr_t *job_nodemap, struct gs_part *p_ptr)
 {
-	uint32_t c, i, size;
+	uint32_t c, i;
 	int n, first_bit, last_bit;
 
 	if (!job_nodemap || !p_ptr || !p_ptr->active_resmap)
 		return;
-	size      = bit_size(job_nodemap);
 	first_bit = bit_ffs(job_nodemap);
 	last_bit  = bit_fls(job_nodemap);
 	if ((first_bit < 0) || (last_bit < 0))
@@ -623,10 +622,10 @@ static void _preempt_job_dequeue(void)
 		preempt_mode = slurm_job_preempt_mode(job_ptr);
 
 		if (preempt_mode == PREEMPT_MODE_SUSPEND) {
-			if((rc = _suspend_job(job_id)) == ESLURM_DISABLED)
+			if ((rc = _suspend_job(job_id)) == ESLURM_DISABLED)
 				rc = SLURM_SUCCESS;
 		} else if (preempt_mode == PREEMPT_MODE_CANCEL) {
-			rc = job_signal(job_ptr->job_id, SIGKILL, 0, 0);
+			rc = job_signal(job_ptr->job_id, SIGKILL, 0, 0, true);
 			if (rc == SLURM_SUCCESS) {
 				info("preempted job %u has been killed",
 				     job_ptr->job_id);
@@ -656,7 +655,7 @@ static void _preempt_job_dequeue(void)
 			   job_ptr->batch_flag && job_ptr->details &&
 			   (job_ptr->details->requeue > 0)) {
 			rc = job_requeue(0, job_ptr->job_id, -1,
-					 (uint16_t)NO_VAL);
+					 (uint16_t)NO_VAL, true);
 			if (rc == SLURM_SUCCESS) {
 				info("preempted job %u has been requeued",
 				     job_ptr->job_id);
@@ -667,7 +666,7 @@ static void _preempt_job_dequeue(void)
 		}
 		
 		if (rc != SLURM_SUCCESS) {
-			rc = job_signal(job_ptr->job_id, SIGKILL, 0, 0);
+			rc = job_signal(job_ptr->job_id, SIGKILL, 0, 0, true);
 			if (rc == SLURM_SUCCESS)
 				info("preempted job %u had to be killed",
 				     job_ptr->job_id);

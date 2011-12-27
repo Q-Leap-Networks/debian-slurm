@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -46,7 +46,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <slurm/slurm.h>
+#include "slurm/slurm.h"
 
 #include "src/common/parse_time.h"
 #include "src/common/slurm_protocol_api.h"
@@ -185,7 +185,8 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 	else
 		sprintf(tmp_line, " DisableRootJobs=NO");
 	xstrcat(out, tmp_line);
-
+	sprintf(tmp_line, " GraceTime=%u", part_ptr->grace_time);
+	xstrcat(out, tmp_line);
 	if (part_ptr->flags & PART_FLAG_HIDDEN)
 		sprintf(tmp_line, " Hidden=YES");
 	else
@@ -311,6 +312,33 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 
 	sprintf(tmp_line, " TotalNodes=%s", tmp2);
 	xstrcat(out, tmp_line);
+
+	if (part_ptr->def_mem_per_cpu & MEM_PER_CPU) {
+		snprintf(tmp_line, sizeof(tmp_line), " DefMemPerCPU=%u",
+			 part_ptr->def_mem_per_cpu & (~MEM_PER_CPU));
+		xstrcat(out, tmp_line);
+
+	} else if (part_ptr->def_mem_per_cpu == 0) {
+		xstrcat(out, " DefMemPerNode=UNLIMITED");
+	} else {
+		snprintf(tmp_line, sizeof(tmp_line), " DefMemPerNode=%u",
+			 part_ptr->def_mem_per_cpu);
+		xstrcat(out, tmp_line);
+	}
+
+	if (part_ptr->max_mem_per_cpu & MEM_PER_CPU) {
+		snprintf(tmp_line, sizeof(tmp_line), " MaxMemPerCPU=%u",
+			 part_ptr->max_mem_per_cpu & (~MEM_PER_CPU));
+		xstrcat(out, tmp_line);
+
+	} else if (part_ptr->max_mem_per_cpu == 0) {
+		xstrcat(out, " MaxMemPerNode=UNLIMITED");
+	} else {
+		snprintf(tmp_line, sizeof(tmp_line), " MaxMemPerNode=%u",
+			 part_ptr->max_mem_per_cpu);
+		xstrcat(out, tmp_line);
+	}
+
 	if (one_liner)
 		xstrcat(out, "\n");
 	else

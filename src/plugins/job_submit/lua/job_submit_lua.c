@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -56,14 +56,13 @@
 #include <dlfcn.h>
 #include <pthread.h>
 
-#include <slurm/slurm.h>
-#include <slurm/slurm_errno.h>
-
 #include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
 
-#include <slurm/slurm_errno.h>
+#include "slurm/slurm.h"
+#include "slurm/slurm_errno.h"
+
 #include "src/common/slurm_xlator.h"
 #include "src/slurmctld/slurmctld.h"
 
@@ -259,6 +258,8 @@ static int _get_job_rec_field (lua_State *L)
 		lua_pushstring (L, job_ptr->account);
 	} else if (!strcmp(name, "comment")) {
 		lua_pushstring (L, job_ptr->comment);
+	} else if (!strcmp(name, "direct_set_prio")) {
+		lua_pushnumber (L, job_ptr->direct_set_prio);
 	} else if (!strcmp(name, "gres")) {
 		lua_pushstring (L, job_ptr->gres);
 	} else if (!strcmp(name, "job_id")) {
@@ -287,8 +288,15 @@ static int _get_job_rec_field (lua_State *L)
 			lua_pushnumber (L, job_ptr->details->min_nodes);
 		else
 			lua_pushnumber (L, 0);
+	} else if (!strcmp(name, "nice")) {
+		if (job_ptr->details)
+			lua_pushnumber (L, job_ptr->details->nice);
+		else
+			lua_pushnumber (L, (uint16_t)NO_VAL);
 	} else if (!strcmp(name, "partition")) {
 		lua_pushstring (L, job_ptr->partition);
+	} else if (!strcmp(name, "priority")) {
+		lua_pushnumber (L, job_ptr->priority);
 	} else if (!strcmp(name, "time_limit")) {
 		lua_pushnumber (L, job_ptr->time_limit);
 	} else if (!strcmp(name, "time_min")) {

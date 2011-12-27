@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -49,8 +49,8 @@
 #include "src/common/slurmdbd_defs.h"
 #include "src/slurmctld/slurmctld.h"
 #include "src/slurmctld/locks.h"
-#include <slurm/slurm.h>
-#include <slurm/slurm_errno.h>
+#include "slurm/slurm.h"
+#include "slurm/slurm_errno.h"
 
 #define ASSOC_MGR_CACHE_ASSOC 0x0001
 #define ASSOC_MGR_CACHE_QOS 0x0002
@@ -106,6 +106,8 @@ struct assoc_mgr_association_usage {
 				  * (DON'T PACK) */
 	double grp_used_wall;   /* group count of time used in
 				 * running jobs (DON'T PACK) */
+	uint64_t grp_used_cpu_run_secs; /* count of running cpu secs
+					 * (DON'T PACK) */
 
 	uint32_t level_shares;  /* number of shares on this level of
 				 * the tree (DON'T PACK) */
@@ -120,8 +122,6 @@ struct assoc_mgr_association_usage {
 	long double usage_norm;	/* normalized usage (DON'T PACK) */
 	long double usage_raw;	/* measure of resource usage (DON'T PACK) */
 
-	uint64_t used_cpu_run_secs; /* count of running cpu secs
-				     * (DON'T PACK) */
 	uint32_t used_jobs;	/* count of active jobs (DON'T PACK) */
 	uint32_t used_submit_jobs; /* count of jobs pending or running
 				    * (DON'T PACK) */
@@ -163,7 +163,8 @@ extern uint32_t g_qos_max_priority; /* max priority in all qos's */
 extern uint32_t g_qos_count; /* count used for generating qos bitstr's */
 
 
-extern int assoc_mgr_init(void *db_conn, assoc_init_args_t *args);
+extern int assoc_mgr_init(void *db_conn, assoc_init_args_t *args,
+			  int db_conn_errno);
 extern int assoc_mgr_fini(char *state_save_location);
 extern void assoc_mgr_lock(assoc_mgr_lock_t *locks);
 extern void assoc_mgr_unlock(assoc_mgr_lock_t *locks);

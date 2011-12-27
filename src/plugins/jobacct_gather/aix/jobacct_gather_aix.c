@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -100,7 +100,7 @@ const uint32_t plugin_version = 100;
 static bool jobacct_shutdown = 0;
 static bool jobacct_suspended = 0;
 static List task_list = NULL;
-static uint32_t cont_id = (uint32_t)NO_VAL;
+static uint64_t cont_id = (uint64_t)NO_VAL;
 static bool pgid_plugin = false;
 
 #ifdef HAVE_AIX
@@ -207,7 +207,7 @@ static void _get_process_data(void)
 	ListIterator itr;
 	ListIterator itr2;
 
-	if(!pgid_plugin && cont_id == (uint32_t)NO_VAL) {
+	if (!pgid_plugin && (cont_id == (uint64_t)NO_VAL)) {
 		debug("cont_id hasn't been set yet not running poll");
 		return;
 	}
@@ -223,8 +223,8 @@ static void _get_process_data(void)
 	if(!pgid_plugin) {
 		/* get only the processes in the proctrack container */
 		slurm_container_get_pids(cont_id, &pids, &npids);
-		if(!npids) {
-			debug4("no pids in this container %d", cont_id);
+		if (!npids) {
+			debug4("no pids in this container %"PRIu64"", cont_id);
 			goto finished;
 		}
 		for (i = 0; i < npids; i++) {
@@ -570,18 +570,18 @@ extern void jobacct_gather_p_resume_poll()
 	jobacct_suspended = false;
 }
 
-extern int jobacct_gather_p_set_proctrack_container_id(uint32_t id)
+extern int jobacct_gather_p_set_proctrack_container_id(uint64_t id)
 {
-	if(pgid_plugin)
+	if (pgid_plugin)
 		return SLURM_SUCCESS;
 
-	if(cont_id != (uint32_t)NO_VAL)
-		info("Warning: jobacct: set_proctrack_container_id: "
-		     "cont_id is already set to %d you are setting it to %d",
-		     cont_id, id);
-	if(id <= 0) {
+	if (cont_id != (uint64_t)NO_VAL)
+		info("Warning: jobacct: set_proctrack_container_id: cont_id "
+		     "is already set to %"PRIu64" you are setting it to "
+		     "%"PRIu64"", cont_id, id);
+	if (id <= 0) {
 		error("jobacct: set_proctrack_container_id: "
-		      "I was given most likely an unset cont_id %d",
+		      "I was given most likely an unset cont_id %"PRIu64"",
 		      id);
 		return SLURM_ERROR;
 	}

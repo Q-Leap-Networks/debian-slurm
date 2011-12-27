@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -57,7 +57,7 @@ static int _find_node_inx (char *name)
 	int i;
 
 	if ((name == NULL) || (name[0] == '\0')) {
-		info("find_node_record passed NULL name");
+		info("_find_node_inx passed NULL name");
 		return -1;
 	}
 
@@ -74,7 +74,7 @@ static int _find_node_inx (char *name)
 
 static void _display_topology(void)
 {
-	int i, match, match_cnt = 0;
+	int i, match = 0, match_cnt = 0;
 	hostset_t hs;
 	int one_liner = 1;
 
@@ -353,37 +353,50 @@ cleanup:
 	return ret;
 }
 
+/* Translate a three-digit alpha-numeric value into it's
+ * base 36 equivalent number */
+static int _xlate_bp_coord(const char *name)
+{
+	int i, rc = 0;
+
+	for (i=0; i<cluster_dims; i++) {
+		rc *= 36;
+		rc += select_char2coord(name[i]);
+	}
+	return rc;
+}
+
 /* Make a BlueGene node name into a numeric representation of
  * its location.
- * Value is low_coordinate * 1,000,000 +
- *          high_coordinate * 1,000 + I/O node (999 if none)
- * (e.g. bg123[4] -> 123,123,004, bg[234x235] -> 234,235,999)
+ * Value is low_node_coordinate * 1,000 + I/O node (999 if none)
+ * with use of base 36 for the node coordinate:
+ * (e.g. bg123[4]    ->  1,371,004
+ *       bg[234x235] ->  2,704,999
+ *       bglZZZ      -> 46,655,999
  */
 static int _bp_coordinate(const char *name)
 {
-	int i, io_val = 999, low_val = -1, high_val = -1;
+	int i, io_val = 999, low_val = -1;
 
 	for (i=0; name[i]; i++) {
 		if (name[i] == '[') {
 			i++;
-			if (low_val < 0) {
-				char *end_ptr;
-				low_val = strtol(name+i, &end_ptr, 10);
-				if ((end_ptr[0] != '\0') &&
-				    (isdigit(end_ptr[1])))
-					high_val = atoi(end_ptr + 1);
-				else
-					high_val = low_val;
-			} else
+			if (low_val < 0)
+				low_val = _xlate_bp_coord(name+i);
+			else
 				io_val = atoi(name+i);
 			break;
-		} else if ((low_val < 0) && (isdigit(name[i])))
-			low_val = high_val = atoi(name+i);
+		} else if ((low_val < 0) &&
+			   ((name[i] >= '0' && (name[i] <= '9')) ||
+			    (name[i] >= 'A' && (name[i] <= 'Z')))) {
+			low_val = _xlate_bp_coord(name+i);
+			i += 2;
+		}
 	}
 
 	if (low_val < 0)
 		return low_val;
-	return ((low_val * 1000000) + (high_val * 1000) + io_val);
+	return ((low_val * 1000) + io_val);
 }
 
 static int _sort_iter_compare_func_bp_list(GtkTreeModel *model,
@@ -595,6 +608,9 @@ static void _selected_page(GtkMenuItem *menuitem, display_data_t *display_data)
 	case RESV_PAGE:
 		each.pfunc = &popup_all_resv;
 		break;
+	case FRONT_END_PAGE:
+		each.pfunc = &popup_all_front_end;
+		break;
 	case ADMIN_PAGE:
 		switch(display_data->id) {
 		case JOB_PAGE:
@@ -610,6 +626,12 @@ static void _selected_page(GtkMenuItem *menuitem, display_data_t *display_data)
 		case BLOCK_PAGE:
 			select_admin_block(treedata->model, &treedata->iter,
 					   display_data, treedata->treeview);
+			break;
+		case FRONT_END_PAGE:
+			select_admin_front_end(treedata->model,
+					       &treedata->iter,
+					       display_data,
+					       treedata->treeview);
 			break;
 		case RESV_PAGE:
 			select_admin_resv(treedata->model, &treedata->iter,
@@ -701,7 +723,7 @@ extern int build_nodes_bitmap(char *node_names, bitstr_t **bitmap)
 	int node_inx = -1;
 
 	if (TOPO_DEBUG)
-		g_print("..............._node_names2bitmap............%s\n",
+		g_print("...............build_nodes_bitmap............%s\n",
 			node_names);
 	my_bitmap = (bitstr_t *) bit_alloc(g_node_info_ptr->record_count);
 	if (!my_bitmap) {
@@ -710,12 +732,12 @@ extern int build_nodes_bitmap(char *node_names, bitstr_t **bitmap)
 	*bitmap = my_bitmap;
 
 	if (!node_names) {
-		error("_node_name2bitmap: node_names is NULL");
+		error("build_nodes_bitmap: node_names is NULL");
 		return EINVAL;
 	}
 
 	if (!(host_list = hostlist_create(node_names))) {
-		error("_node_name2bitmap: hostlist_create(%s) error",
+		error("build_nodes_bitmap: hostlist_create(%s) error",
 		      node_names);
 		return EINVAL;
 	}
@@ -741,6 +763,7 @@ extern int get_topo_conf(void)
 	int i;
 	switch_record_bitmaps_t sw_nodes_bitmaps;
 	switch_record_bitmaps_t *sw_nodes_bitmaps_ptr;
+
 	if (TOPO_DEBUG)
 		g_print("get_topo_conf\n");
 
@@ -767,28 +790,20 @@ extern int get_topo_conf(void)
 	if (TOPO_DEBUG)
 		g_print("_display_topology,  record_count = %d\n",
 			g_topo_info_msg_ptr->record_count);
-	for (i=0; i < g_topo_info_msg_ptr->record_count;
+	for (i = 0; i < g_topo_info_msg_ptr->record_count;
 	     i++, sw_nodes_bitmaps_ptr++) {
-		if (g_topo_info_msg_ptr->topo_array[i].nodes) {
-			if (TOPO_DEBUG)
-				g_print("ptr->nodes =  %s \n",
-					g_topo_info_msg_ptr->
-					topo_array[i].nodes);
-			if (build_nodes_bitmap(
-				    g_topo_info_msg_ptr->topo_array[i].nodes,
-				    &sw_nodes_bitmaps_ptr->node_bitmap)) {
-				fatal("Invalid node name (%s) in switch "
-				      "config (%s)",
-				      g_topo_info_msg_ptr->topo_array[i].nodes,
-				      g_topo_info_msg_ptr->topo_array[i].name);
-				if (TOPO_DEBUG)
-					g_print("Invalid node name (%s) "
-						"in switch  %s \n",
-						g_topo_info_msg_ptr->
-						topo_array[i].nodes,
-						g_topo_info_msg_ptr->
-						topo_array[i].name);
-			}
+		if (!g_topo_info_msg_ptr->topo_array[i].nodes)
+			continue;
+		if (TOPO_DEBUG)  {
+			g_print("ptr->nodes =  %s \n",
+				g_topo_info_msg_ptr->topo_array[i].nodes);
+		}
+		if (build_nodes_bitmap(
+			    g_topo_info_msg_ptr->topo_array[i].nodes,
+			    &sw_nodes_bitmaps_ptr->node_bitmap)) {
+			g_print("Invalid node name (%s) in switch %s\n",
+				g_topo_info_msg_ptr->topo_array[i].nodes,
+				g_topo_info_msg_ptr->topo_array[i].name);
 		}
 	}
 
@@ -937,6 +952,29 @@ extern void set_page_opts(int page, display_data_t *display_data,
 	itr = list_iterator_create(page_opts->col_list);
 	while ((col_name = list_next(itr))) {
 		replus(col_name);
+		if (strstr(col_name, "list")) {
+			char *orig_ptr = col_name;
+			if (cluster_flags & CLUSTER_FLAG_BG) {
+				xstrsubstitute(col_name, "node", "bp ");
+				xstrsubstitute(col_name, "midplane", "bp ");
+			} else {
+				xstrsubstitute(col_name, "bp ", "node");
+				xstrsubstitute(col_name, "midplane", "node");
+			}
+
+			/* Make sure we have the correct pointer here
+			   since xstrsubstitute() could of changed it
+			   on us.
+			*/
+			if (col_name != orig_ptr) {
+				list_insert(itr, col_name);
+				/* Don't use list_delete_item().
+				   xstrsubstitute() has already
+				   deleted it for us.
+				*/
+				list_remove(itr);
+			}
+		}
 		while (display_data++) {
 			if (display_data->id == -1)
 				break;
@@ -998,7 +1036,7 @@ extern void make_options_menu(GtkTreeView *tree_view, GtkTreePath *path,
 	}
 }
 
-extern GtkScrolledWindow *create_scrolled_window()
+extern GtkScrolledWindow *create_scrolled_window(void)
 {
 	GtkScrolledWindow *scrolled_window = NULL;
 	GtkWidget *table = NULL;
@@ -1019,7 +1057,7 @@ extern GtkScrolledWindow *create_scrolled_window()
 	return scrolled_window;
 }
 
-extern GtkWidget *create_entry()
+extern GtkWidget *create_entry(void)
 {
 	GtkWidget *entry = gtk_entry_new();
 
@@ -1238,9 +1276,13 @@ extern GtkTreeStore *create_treestore(GtkTreeView *tree_view,
 				(int)display_data[i].type);
 		}
 	}
-	gtk_tree_sortable_set_sort_column_id(GTK_TREE_SORTABLE(treestore),
-					     sort_column,
-					     GTK_SORT_ASCENDING);
+
+	if (sort_column >= 0) {
+		gtk_tree_sortable_set_sort_column_id(
+					GTK_TREE_SORTABLE(treestore),
+					sort_column,
+					GTK_SORT_ASCENDING);
+	}
 
 	g_object_unref(treestore);
 
@@ -1351,7 +1393,6 @@ extern gboolean key_pressed(GtkTreeView *tree_view,
 {
 	GtkTreePath *path = NULL;
 	GtkTreeViewColumn *column;
-	GtkTreeSelection *selection = NULL;
 
 	control_key_in_effect = FALSE;
 	enter_key_in_effect = FALSE;
@@ -1360,22 +1401,23 @@ extern gboolean key_pressed(GtkTreeView *tree_view,
 	    (event->keyval == GDK_Control_R))
 		control_key_in_effect = TRUE;
 	else if (event->keyval == GDK_Return) {
+		each_t each;
+		GtkTreeSelection *selection = NULL;
+
 		gtk_tree_view_get_cursor(GTK_TREE_VIEW(tree_view),
 					 &path, &column);
 		selection = gtk_tree_view_get_selection(tree_view);
-		each_t each;
 		memset(&each, 0, sizeof(each_t));
 		each.tree_view = tree_view;
 		each.display_data = signal_params->display_data;
-		global_row_count = gtk_tree_selection_count_selected_rows(
-			gtk_tree_view_get_selection(tree_view));
+		global_row_count =
+			gtk_tree_selection_count_selected_rows(selection);
 		popup_pos.x = 10;
 		popup_pos.x = 10;
 		popup_pos.cntr = 1;
 		popup_pos.slider = 0;
 		gtk_tree_selection_selected_foreach(
-			gtk_tree_view_get_selection(tree_view),
-			_foreach_full_info, &each);
+			selection, _foreach_full_info, &each);
 		/*prevent row_activation from
 		 * performing a redundant 'full info'*/
 		enter_key_in_effect = TRUE;
@@ -1771,7 +1813,7 @@ extern gboolean delete_popup(GtkWidget *widget, GtkWidget *event, char *title)
 	return FALSE;
 }
 
-extern gboolean delete_popups()
+extern gboolean delete_popups(void)
 {
 	ListIterator itr = list_iterator_create(popup_list);
 	popup_info_t *popup_win = NULL;
@@ -1807,6 +1849,9 @@ extern void *popup_thr(popup_info_t *popup_win)
 		break;
 	case RESV_PAGE:
 		specifc_info = specific_info_resv;
+		break;
+	case FRONT_END_PAGE:
+		specifc_info = specific_info_front_end;
 		break;
 	case SUBMIT_PAGE:
 	default:
@@ -1900,7 +1945,7 @@ extern char *str_tolower(char *upper_str)
 	return lower_str;
 }
 
-extern char *get_reason()
+extern char *get_reason(void)
 {
 	char *reason_str = NULL;
 	int len = 0;
@@ -2007,9 +2052,11 @@ extern void display_admin_edit(GtkTable *table, void *type_msg, int *row,
 		char *temp_char = NULL;
 		/* other edittable items that are unknown */
 		entry = create_entry();
-		gtk_tree_model_get(model, iter,
-				   display_data->id,
-				   &temp_char, -1);
+		if (model) {
+			gtk_tree_model_get(model, iter,
+					   display_data->id,
+					   &temp_char, -1);
+		}
 		gtk_entry_set_max_length(GTK_ENTRY(entry),
 					 (DEFAULT_ENTRY_LENGTH +
 					  display_data->id));
@@ -2031,7 +2078,7 @@ extern void display_admin_edit(GtkTable *table, void *type_msg, int *row,
 		return;
 	label = gtk_label_new(display_data->name);
 	/* left justify */
-	gtk_misc_set_alignment(GTK_MISC(label),0.0,0.5);
+	gtk_misc_set_alignment(GTK_MISC(label), 0.0, 0.5);
 	gtk_table_attach(table, label, 0, 1, *row, (*row)+1,
 			 GTK_FILL | GTK_EXPAND, GTK_SHRINK,
 			 0, 0);
@@ -2100,7 +2147,7 @@ extern void add_display_treestore_line(int update,
 	}
 found:
 	gtk_tree_store_set(treestore, iter,
-			   DISPLAY_NAME, name,
+			   DISPLAY_NAME,  name,
 			   DISPLAY_VALUE, value,
 			   -1);
 
@@ -2148,9 +2195,9 @@ extern void add_display_treestore_line_with_font(
 	}
 found:
 	gtk_tree_store_set(treestore, iter,
-			   DISPLAY_NAME, name,
+			   DISPLAY_NAME,  name,
 			   DISPLAY_VALUE, value,
-			   DISPLAY_FONT, font,
+			   DISPLAY_FONT,  font,
 			   -1);
 
 	return;
@@ -2159,24 +2206,7 @@ found:
 extern void sview_widget_modify_bg(GtkWidget *widget, GtkStateType state,
 				   const GdkColor color)
 {
-	if (working_sview_config.grid_speedup) {
-		/* For some reason, QT Themes have a very slow call to for
-		 * gtk_widget_modify_bg as of 7-6-09.
-		 * Here we only take around 40 microsecs where
-		 * gtk_widget_modify_bg takes around 2500.  This isn't
-		 * that big of a deal on most systems, but if you have
-		 * like 10000 nodes this makes an outrageous
-		 * difference.  You must follow this up by doing a
-		 * gtk_widget_set_sensitive 0, and then 1 on the
-		 * parent container to make the color stick.
-		 */
-		GtkRcStyle *rc_style = gtk_widget_get_modifier_style (widget);
-		widget->style->bg[state] = color;
-		rc_style->bg[state] = color;
-		rc_style->color_flags[state] |= GTK_RC_BG;
-		gtk_widget_reset_rc_styles (widget);
-	} else
-		gtk_widget_modify_bg(widget, state, &color);
+	gtk_widget_modify_bg(widget, state, &color);
 }
 
 extern void sview_radio_action_set_current_value(GtkRadioAction *action,
@@ -2232,6 +2262,8 @@ extern char *page_to_str(int page)
 		return "Block";
 	case RESV_PAGE:
 		return "Reservation";
+	case FRONT_END_PAGE:
+		return "Frontend";
 	default:
 		return NULL;
 	}
@@ -2258,13 +2290,15 @@ extern char *tab_pos_to_str(int pos)
 extern char *visible_to_str(sview_config_t *sview_config)
 {
 	char *ret = NULL;
-	int i = 0;
-	for(i=0; i<PAGE_CNT; i++)
-		if (sview_config->page_visible[i]) {
+	int i;
+
+	for (i = 0; i < PAGE_CNT; i++) {
+		if (sview_config->page_visible[i] && (i != TAB_PAGE)) {
 			if (ret)
 				xstrcat(ret, ",");
 			xstrcat(ret, page_to_str(i));
 		}
+	}
 
 	return ret;
 }

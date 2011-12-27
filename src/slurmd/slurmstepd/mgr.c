@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -75,9 +75,15 @@
 #  include <stdlib.h>
 #endif
 
-#include <slurm/slurm_errno.h>
+#ifdef HAVE_PTY_H
+#  include <pty.h>
+#  ifdef HAVE_UTMP_H
+#    include <utmp.h>
+#  endif
+#endif
 
-#include "src/common/basil_resv_conf.h"
+#include "slurm/slurm_errno.h"
+
 #include "src/common/cbuf.h"
 #include "src/common/env.h"
 #include "src/common/fd.h"
@@ -192,7 +198,7 @@ static int  _run_script_as_user(const char *name, const char *path,
 				slurmd_job_t *job, int max_wait, char **env);
 
 /*
- * Batch job mangement prototypes:
+ * Batch job management prototypes:
  */
 static char * _make_batch_dir(slurmd_job_t *job);
 static char * _make_batch_script(batch_job_launch_msg_t *msg, char *path);
@@ -234,6 +240,7 @@ mgr_launch_tasks_setup(launch_tasks_request_msg_t *msg, slurm_addr_t *cli,
 
 	job->envtp->cli = cli;
 	job->envtp->self = self;
+	job->envtp->select_jobinfo = msg->select_jobinfo;
 
 	return job;
 }
@@ -258,6 +265,55 @@ static uint32_t _get_exit_code(slurmd_job_t *job)
 	return step_rc;
 }
 
+#ifdef HAVE_CRAY
+/*
+ * Kludge to better inter-operate with ALPS layer:
+ * - CONFIRM method requires the SID of the shell executing the job script,
+ * - RELEASE method is more robustly called from stepdmgr.
+ *
+ * To avoid calling the same select/cray plugin function also in slurmctld,
+ * we use the following convention:
+ * - only job_id, job_state, alloc_sid, and select_jobinfo set to non-NULL,
+ * - batch_flag is 0 (corresponding call in slurmctld uses batch_flag = 1),
+ * - job_state set to the unlikely value of 'NO_VAL'.
+ */
+static int _call_select_plugin_from_stepd(slurmd_job_t *job, uint64_t pagg_id,
+					  int (*select_fn)(struct job_record *))
+{
+	struct job_record fake_job_record = {0};
+	int rc;
+
+	fake_job_record.job_id		= job->jobid;
+	fake_job_record.job_state	= (uint16_t)NO_VAL;
+	fake_job_record.select_jobinfo	= select_g_select_jobinfo_alloc();
+	select_g_select_jobinfo_set(fake_job_record.select_jobinfo,
+				    SELECT_JOBDATA_RESV_ID, &job->resv_id);
+	if (pagg_id)
+		select_g_select_jobinfo_set(fake_job_record.select_jobinfo,
+				    SELECT_JOBDATA_PAGG_ID, &pagg_id);
+	rc = (*select_fn)(&fake_job_record);
+	select_g_select_jobinfo_free(fake_job_record.select_jobinfo);
+	return rc;
+}
+
+static int _select_cray_plugin_job_ready(slurmd_job_t *job)
+{
+	uint64_t pagg_id = slurm_container_find(job->jmgr_pid);
+
+	if (pagg_id == 0) {
+		error("no PAGG ID: job service disabled on this host?");
+		/*
+		 * If this process is not attached to a container, there is no
+		 * sense in trying to use the SID as fallback, since the call to
+		 * slurm_container_add() in _fork_all_tasks() will fail later.
+		 * Hence drain the node until sgi_job returns proper PAGG IDs.
+		 */
+		return READY_JOB_FATAL;
+	}
+	return _call_select_plugin_from_stepd(job, pagg_id, select_g_job_ready);
+}
+#endif
+
 /*
  * Send batch exit code to slurmctld. Non-zero rc will DRAIN the node.
  */
@@ -271,6 +327,11 @@ batch_finish(slurmd_job_t *job, int rc)
 	if (job->batchdir && (rmdir(job->batchdir) < 0))
 		error("rmdir(%s): %m",  job->batchdir);
 	xfree(job->batchdir);
+
+#ifdef HAVE_CRAY
+	_call_select_plugin_from_stepd(job, 0, select_g_job_fini);
+#endif
+
 	if (job->aborted) {
 		if ((job->stepid == NO_VAL) ||
 		    (job->stepid == SLURM_BATCH_SCRIPT)) {
@@ -644,6 +705,8 @@ _one_step_complete_msg(slurmd_job_t *job, int first, int last)
 	int rc = -1;
 	int retcode;
 	int i;
+	uint16_t port = 0;
+	char ip_buf[16];
 	static bool acct_sent = false;
 
 	debug2("_one_step_complete_msg: first=%d, last=%d", first, last);
@@ -656,7 +719,7 @@ _one_step_complete_msg(slurmd_job_t *job, int first, int last)
 	msg.step_rc = step_complete.step_rc;
 	msg.jobacct = jobacct_gather_g_create(NULL);
 	/************* acct stuff ********************/
-	if(!acct_sent) {
+	if (!acct_sent) {
 		jobacct_gather_g_aggregate(step_complete.jobacct, job->jobacct);
 		jobacct_gather_g_getinfo(step_complete.jobacct,
 					 JOBACCT_DATA_TOTAL, msg.jobacct);
@@ -668,40 +731,53 @@ _one_step_complete_msg(slurmd_job_t *job, int first, int last)
 	req.data = &msg;
 	req.address = step_complete.parent_addr;
 
-	/* Do NOT change this check to "step_complete.rank == 0", because
+	/* Do NOT change this check to "step_complete.rank != 0", because
 	 * there are odd situations where SlurmUser or root could
 	 * craft a launch without a valid credential, and no tree information
 	 * can be built with out the hostlist from the credential.
 	 */
-	if (step_complete.parent_rank == -1) {
+	if (step_complete.parent_rank != -1) {
+		debug3("Rank %d sending complete to rank %d, range %d to %d",
+		       step_complete.rank, step_complete.parent_rank,
+		       first, last);
+		/* On error, pause then try sending to parent again.
+		 * The parent slurmstepd may just not have started yet, because
+		 * of the way that the launch message forwarding works.
+		 */
+		for (i = 0; i < REVERSE_TREE_PARENT_RETRY; i++) {
+			if (i)
+				sleep(1);
+			retcode = slurm_send_recv_rc_msg_only_one(&req, &rc, 0);
+			if ((retcode == 0) && (rc == 0))
+				goto finished;
+		}
+		/* on error AGAIN, send to the slurmctld instead */
+		debug3("Rank %d sending complete to slurmctld instead, range "
+		       "%d to %d", step_complete.rank, first, last);
+	} else {
 		/* this is the base of the tree, its parent is slurmctld */
 		debug3("Rank %d sending complete to slurmctld, range %d to %d",
 		       step_complete.rank, first, last);
-		if (slurm_send_recv_controller_rc_msg(&req, &rc) < 0)
-			error("Rank %d failed sending step completion message"
-			      " to slurmctld (parent)", step_complete.rank);
-		goto finished;
 	}
 
-	debug3("Rank %d sending complete to rank %d, range %d to %d",
-	       step_complete.rank, step_complete.parent_rank, first, last);
-	/* On error, pause then try sending to parent again.
-	 * The parent slurmstepd may just not have started yet, because
-	 * of the way that the launch message forwarding works.
-	 */
-	for (i = 0; i < REVERSE_TREE_PARENT_RETRY; i++) {
-		if (i)
-			sleep(1);
-		retcode = slurm_send_recv_rc_msg_only_one(&req, &rc, 0);
-		if (retcode == 0 && rc == 0)
-			goto finished;
+	/* Retry step complete RPC send to slurmctld indefinitely.
+	 * Prevent orphan job step if slurmctld is down */
+	i = 1;
+	while (slurm_send_recv_controller_rc_msg(&req, &rc) < 0) {
+		if (i++ == 1) {
+			slurm_get_ip_str(&step_complete.parent_addr, &port,
+					 ip_buf, sizeof(ip_buf));
+			error("Rank %d failed sending step completion message "
+			      "directly to slurmctld (%s:%u), retrying",
+			      step_complete.rank, ip_buf, port);
+		}
+		sleep(60);
 	}
-	/* on error AGAIN, send to the slurmctld instead */
-	debug3("Rank %d sending complete to slurmctld instead, range %d to %d",
-	       step_complete.rank, first, last);
-	if (slurm_send_recv_controller_rc_msg(&req, &rc) < 0)
-		error("Rank %d failed sending step completion message"
-		      " directly to slurmctld", step_complete.rank);
+	if (i > 1) {
+		info("Rank %d sent step completion message directly to "
+		     "slurmctld (%s:%u)", step_complete.rank, ip_buf, port);
+	}
+
 finished:
 	jobacct_gather_g_destroy(msg.jobacct);
 }
@@ -837,6 +913,37 @@ job_manager(slurmd_job_t *job)
 		goto fail1;
 	}
 
+#ifdef HAVE_CRAY
+	/*
+	 * We need to call the proctrack/sgi_job container-create function here
+	 * already since the select/cray plugin needs the job container ID in
+	 * order to CONFIRM the ALPS reservation.
+	 * It is not a good idea to perform this setup in _fork_all_tasks(),
+	 * since any transient failure of ALPS (which can happen in practice)
+	 * will then set the frontend node to DRAIN.
+	 */
+	if ((job->cont_id == 0) &&
+	    (slurm_container_create(job) != SLURM_SUCCESS)) {
+		error("failed to create proctrack/sgi_job container: %m");
+		rc = ESLURMD_SETUP_ENVIRONMENT_ERROR;
+		goto fail1;
+	}
+
+	rc = _select_cray_plugin_job_ready(job);
+	if (rc != SLURM_SUCCESS) {
+		/*
+		 * Transient error: slurmctld knows this condition to mean that
+		 * the ALPS (not the SLURM) reservation failed and tries again.
+		 */
+		if (rc == READY_JOB_ERROR)
+			rc = ESLURM_RESERVATION_NOT_USABLE;
+		else
+			rc = ESLURMD_SETUP_ENVIRONMENT_ERROR;
+		error("could not confirm ALPS reservation #%u", job->resv_id);
+		goto fail1;
+	}
+#endif
+
 #ifdef PR_SET_DUMPABLE
 	if (prctl(PR_SET_DUMPABLE, 1) < 0)
 		debug ("Unable to set dumpable to 1");
@@ -950,6 +1057,11 @@ job_manager(slurmd_job_t *job)
 	if (!job->batch && !job->user_managed_io && io_initialized)
 		_wait_for_io(job);
 
+	/*
+	 * Warn task plugin that the user's step have terminated
+	 */
+	post_step(job);
+
 	debug2("Before call to spank_fini()");
 	if (spank_fini (job)  < 0) {
 		error ("spank_fini failed");
@@ -988,6 +1100,110 @@ _spank_task_privileged(slurmd_job_t *job, int taskid, struct priv_state *sp)
 	return(_drop_privileges (job, true, sp));
 }
 
+struct exec_wait_info {
+	int id;
+	pid_t pid;
+	int parentfd;
+	int childfd;
+};
+
+static struct exec_wait_info * exec_wait_info_create (int i)
+{
+	int fdpair[2];
+	struct exec_wait_info * e;
+
+	if (pipe (fdpair) < 0) {
+		error ("exec_wait_info_create: pipe: %m");
+		return NULL;
+	}
+
+	fd_set_close_on_exec(fdpair[0]);
+	fd_set_close_on_exec(fdpair[1]);
+
+	e = xmalloc (sizeof (*e));
+	e->childfd = fdpair[0];
+	e->parentfd = fdpair[1];
+	e->id = i;
+	e->pid = -1;
+
+	return (e);
+}
+
+static void exec_wait_info_destroy (struct exec_wait_info *e)
+{
+	if (e == NULL)
+		return;
+
+	close (e->parentfd);
+	close (e->childfd);
+	e->id = -1;
+	e->pid = -1;
+}
+
+static pid_t exec_wait_get_pid (struct exec_wait_info *e)
+{
+	if (e == NULL)
+		return (-1);
+	return (e->pid);
+}
+
+static struct exec_wait_info * fork_child_with_wait_info (int id)
+{
+	struct exec_wait_info *e;
+
+	if (!(e = exec_wait_info_create (id)))
+		return (NULL);
+
+	if ((e->pid = fork ()) < 0) {
+		exec_wait_info_destroy (e);
+		return (NULL);
+	}
+	else if (e->pid == 0)  /* In child, close parent fd */
+		close (e->parentfd);
+
+	return (e);
+}
+
+static int exec_wait_child_wait_for_parent (struct exec_wait_info *e)
+{
+	char c;
+
+	if (read (e->childfd, &c, sizeof (c)) != 1)
+		return error ("wait_for_parent: failed: %m");
+
+	return (0);
+}
+
+static int exec_wait_signal_child (struct exec_wait_info *e)
+{
+	char c = '\0';
+
+	if (write (e->parentfd, &c, sizeof (c)) != 1)
+		return error ("write to unblock task %d failed: %m", e->id);
+
+	return (0);
+}
+
+static int exec_wait_signal (struct exec_wait_info *e, slurmd_job_t *job)
+{
+	debug3 ("Unblocking %u.%u task %d, writefd = %d",
+	        job->jobid, job->stepid, e->id, e->parentfd);
+	exec_wait_signal_child (e);
+	return (0);
+}
+
+static void prepare_tty (slurmd_job_t *job, slurmd_task_info_t *task)
+{
+#ifdef HAVE_PTY_H
+	if (job->pty && (task->gtid == 0)) {
+		if (login_tty(task->stdin_fd))
+			error("login_tty: %m");
+		else
+			debug3("login_tty good");
+	}
+#endif
+	return;
+}
 
 /* fork and exec N tasks
  */
@@ -996,12 +1212,10 @@ _fork_all_tasks(slurmd_job_t *job)
 {
 	int rc = SLURM_SUCCESS;
 	int i;
-	int *writefds; /* array of write file descriptors */
-	int *readfds; /* array of read file descriptors */
-	int fdpair[2];
 	struct priv_state sprivs;
 	jobacct_id_t jobacct_id;
 	char *oom_value;
+	List exec_wait_list = NULL;
 
 	xassert(job != NULL);
 
@@ -1011,49 +1225,12 @@ _fork_all_tasks(slurmd_job_t *job)
 		return SLURM_ERROR;
 	}
 
-#ifdef HAVE_CRAY
-	if (basil_resv_conf(job->resv_id, job->jobid)) {
-		error("could not confirm reservation");
-		return SLURM_ERROR;
-	}
-#endif
-
 	debug2("Before call to spank_init()");
 	if (spank_init (job) < 0) {
 		error ("Plugin stack initialization failed.");
 		return SLURM_ERROR;
 	}
 	debug2("After call to spank_init()");
-
-	/*
-	 * Pre-allocate a pipe for each of the tasks
-	 */
-	debug3("num tasks on this node = %d", job->node_tasks);
-	writefds = (int *) xmalloc (job->node_tasks * sizeof(int));
-	if (!writefds) {
-		error("writefds xmalloc failed!");
-		return SLURM_ERROR;
-	}
-	readfds = (int *) xmalloc (job->node_tasks * sizeof(int));
-	if (!readfds) {
-		error("readfds xmalloc failed!");
-		return SLURM_ERROR;
-	}
-
-
-	for (i = 0; i < job->node_tasks; i++) {
-		fdpair[0] = -1; fdpair[1] = -1;
-		if (pipe (fdpair) < 0) {
-			error ("exec_all_tasks: pipe: %m");
-			return SLURM_ERROR;
-		}
-		debug3("New fdpair[0] = %d, fdpair[1] = %d",
-		       fdpair[0], fdpair[1]);
-		fd_set_close_on_exec(fdpair[0]);
-		fd_set_close_on_exec(fdpair[1]);
-		readfds[i] = fdpair[0];
-		writefds[i] = fdpair[1];
-	}
 
 	set_oom_adj(0);	/* the tasks may be killed by OOM */
 	if (pre_setuid(job)) {
@@ -1092,27 +1269,33 @@ _fork_all_tasks(slurmd_job_t *job)
 		return SLURM_ERROR;
 	}
 
+	exec_wait_list = list_create ((ListDelF) exec_wait_info_destroy);
+	if (!exec_wait_list)
+		return error ("Unable to create exec_wait_list");
+
 	/*
 	 * Fork all of the task processes.
 	 */
 	for (i = 0; i < job->node_tasks; i++) {
 		char time_stamp[256];
 		pid_t pid;
-		if ((pid = fork ()) < 0) {
+		struct exec_wait_info *ei;
+
+		if ((ei = fork_child_with_wait_info (i)) == NULL) {
 			error("child fork: %m");
 			goto fail2;
-		} else if (pid == 0)  { /* child */
-			int j;
+		} else if ((pid = exec_wait_get_pid (ei)) == 0)  { /* child */
+			/*
+			 *  Destroy exec_wait_list in the child.
+			 *   Only exec_wait_info for previous tasks have been
+			 *   added to the list so far, so everything else
+			 *   can be discarded.
+			 */
+			list_destroy (exec_wait_list);
 
 #ifdef HAVE_AIX
 			(void) mkcrid(0);
 #endif
-			/* Close file descriptors not needed by the child */
-			for (j = 0; j < job->node_tasks; j++) {
-				close(writefds[j]);
-				if (j > i)
-					close(readfds[j]);
-			}
 			/* jobacct_gather_g_endpoll();
 			 * closing jobacct files here causes deadlock */
 
@@ -1136,14 +1319,28 @@ _fork_all_tasks(slurmd_job_t *job)
 
 			xsignal_unblock(slurmstepd_blocked_signals);
 
-			exec_task(job, i, readfds[i]);
+			/*
+			 *  Setup tty before any setpgid() calls
+			 */
+			prepare_tty (job, job->task[i]);
+
+			/*
+			 *  Block until parent notifies us that it is ok to
+			 *   proceed. This allows the parent to place all
+			 *   children in any process groups or containers
+			 *   before they make a call to exec(2).
+			 */
+			exec_wait_child_wait_for_parent (ei);
+
+			exec_task(job, i);
 		}
 
 		/*
 		 * Parent continues:
 		 */
 
-		close(readfds[i]);
+		list_append (exec_wait_list, ei);
+
 		LOG_TIMESTAMP(time_stamp);
 		verbose ("task %lu (%lu) started %s",
 			(unsigned long) job->task[i]->gtid,
@@ -1213,16 +1410,10 @@ _fork_all_tasks(slurmd_job_t *job)
 	/*
 	 * Now it's ok to unblock the tasks, so they may call exec.
 	 */
+	list_for_each (exec_wait_list, (ListForF) exec_wait_signal, job);
+	list_destroy (exec_wait_list);
+
 	for (i = 0; i < job->node_tasks; i++) {
-		char c = '\0';
-
-		debug3("Unblocking %u.%u task %d, writefd = %d",
-		       job->jobid, job->stepid, i, writefds[i]);
-		if (write (writefds[i], &c, sizeof (c)) != 1)
-			error ("write to unblock task %d failed", i);
-
-		close(writefds[i]);
-
 		/*
 		 * Prepare process for attach by parallel debugger
 		 * (if specified and able)
@@ -1231,17 +1422,14 @@ _fork_all_tasks(slurmd_job_t *job)
 				== SLURM_ERROR)
 			rc = SLURM_ERROR;
 	}
-	xfree(writefds);
-	xfree(readfds);
 
 	return rc;
 
 fail2:
 	_reclaim_privileges (&sprivs);
+	if (exec_wait_list)
+		list_destroy (exec_wait_list);
 fail1:
-	xfree(writefds);
-	xfree(readfds);
-
 	pam_finish();
 	return SLURM_ERROR;
 }
@@ -1509,9 +1697,10 @@ _make_batch_dir(slurmd_job_t *job)
 	char path[MAXPATHLEN];
 
 	if (job->stepid == NO_VAL)
-		snprintf(path, 1024, "%s/job%05u", conf->spooldir, job->jobid);
+		snprintf(path, sizeof(path), "%s/job%05u",
+			 conf->spooldir, job->jobid);
 	else {
-		snprintf(path, 1024, "%s/job%05u.%05u",
+		snprintf(path, sizeof(path), "%s/job%05u.%05u",
 			 conf->spooldir, job->jobid, job->stepid);
 	}
 
@@ -1544,7 +1733,12 @@ _make_batch_script(batch_job_launch_msg_t *msg, char *path)
 	FILE *fp = NULL;
 	char  script[MAXPATHLEN];
 
-	snprintf(script, 1024, "%s/%s", path, "slurm_script");
+	if (msg->script == NULL) {
+		error("_make_batch_script: called with NULL script");
+		return NULL;
+	}
+
+	snprintf(script, sizeof(script), "%s/%s", path, "slurm_script");
 
   again:
 	if ((fp = safeopen(script, "w", SAFEOPEN_CREATE_ONLY)) == NULL) {
@@ -1716,7 +1910,7 @@ _send_complete_batch_script_msg(slurmd_job_t *job, int err, int status)
 	req_msg.msg_type= REQUEST_COMPLETE_BATCH_SCRIPT;
 	req_msg.data	= &req;
 
-	info("sending REQUEST_COMPLETE_BATCH_SCRIPT");
+	info("sending REQUEST_COMPLETE_BATCH_SCRIPT, error:%u", err);
 
 	/* Note: these log messages don't go to slurmd.log from here */
 	for (i=0; i<=MAX_RETRY; i++) {
@@ -1840,8 +2034,22 @@ _slurmd_job_log_init(slurmd_job_t *job)
 	log_alter(conf->log_opts, 0, NULL);
 	log_set_argv0(argv0);
 
-	/* Connect slurmd stderr to job's stderr */
-	if (!job->user_managed_io && job->task != NULL) {
+	/*  Connect slurmd stderr to stderr of job, unless we are using
+	 *   user_managed_io or a pty.
+	 *
+	 *  user_managed_io directly connects the client (e.g. poe) to the tasks
+	 *   over a TCP connection, and we fully leave it up to the client
+	 *   to manage the stream with no buffering on slurm's part.
+	 *   We also promise that we will not insert any foreign data into
+	 *   the stream, so here we need to avoid connecting slurmstepd's
+	 *   STDERR_FILENO to the tasks's stderr.
+	 *
+	 *  When pty terminal emulation is used, the pts can potentially
+	 *   cause IO to block, so we need to avoid connecting slurmstepd's
+	 *   STDERR_FILENO to the task's pts on stderr to avoid hangs in
+	 *   the slurmstepd.
+	 */
+	if (!job->user_managed_io && !job->pty && job->task != NULL) {
 		if (dup2(job->task[0]->stderr_fd, STDERR_FILENO) < 0) {
 			error("job_log_init: dup2(stderr): %m");
 			return ESLURMD_IO_ERROR;
@@ -2011,6 +2219,7 @@ _run_script_as_user(const char *name, const char *path, slurmd_job_t *job,
 {
 	int status, rc, opt;
 	pid_t cpid;
+	struct exec_wait_info *ei;
 
 	xassert(env);
 	if (path == NULL || path[0] == '\0')
@@ -2027,11 +2236,11 @@ _run_script_as_user(const char *name, const char *path, slurmd_job_t *job,
 	    (slurm_container_create(job) != SLURM_SUCCESS))
 		error("slurm_container_create: %m");
 
-	if ((cpid = fork()) < 0) {
+	if ((ei = fork_child_with_wait_info(0)) == NULL) {
 		error ("executing %s: fork: %m", name);
 		return -1;
 	}
-	if (cpid == 0) {
+	if ((cpid = exec_wait_get_pid (ei)) == 0) {
 		struct priv_state sprivs;
 		char *argv[2];
 
@@ -2058,6 +2267,11 @@ _run_script_as_user(const char *name, const char *path, slurmd_job_t *job,
 #else
 		setpgrp();
 #endif
+		/*
+		 *  Wait for signal from parent
+		 */
+		exec_wait_child_wait_for_parent (ei);
+
 		execve(path, argv, env);
 		error("execve(): %m");
 		exit(127);
@@ -2065,6 +2279,11 @@ _run_script_as_user(const char *name, const char *path, slurmd_job_t *job,
 
 	if (slurm_container_add(job, cpid) != SLURM_SUCCESS)
 		error("slurm_container_add: %m");
+
+	if (exec_wait_signal_child (ei) < 0)
+		error ("run_script_as_user: Failed to wakeup %s", name);
+	exec_wait_info_destroy (ei);
+
 	if (max_wait < 0)
 		opt = 0;
 	else

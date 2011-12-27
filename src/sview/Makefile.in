@@ -68,6 +68,7 @@ am__aclocal_m4_deps = $(top_srcdir)/auxdir/acx_pthread.m4 \
 	$(top_srcdir)/auxdir/x_ac_hwloc.m4 \
 	$(top_srcdir)/auxdir/x_ac_iso.m4 \
 	$(top_srcdir)/auxdir/x_ac_lua.m4 \
+	$(top_srcdir)/auxdir/x_ac_man2html.m4 \
 	$(top_srcdir)/auxdir/x_ac_munge.m4 \
 	$(top_srcdir)/auxdir/x_ac_ncurses.m4 \
 	$(top_srcdir)/auxdir/x_ac_pam.m4 \
@@ -78,6 +79,7 @@ am__aclocal_m4_deps = $(top_srcdir)/auxdir/acx_pthread.m4 \
 	$(top_srcdir)/auxdir/x_ac_setproctitle.m4 \
 	$(top_srcdir)/auxdir/x_ac_sgi_job.m4 \
 	$(top_srcdir)/auxdir/x_ac_slurm_ssl.m4 \
+	$(top_srcdir)/auxdir/x_ac_srun.m4 \
 	$(top_srcdir)/auxdir/x_ac_sun_const.m4 \
 	$(top_srcdir)/auxdir/x_ac_xcpu.m4 $(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
@@ -89,13 +91,15 @@ CONFIG_CLEAN_VPATH_FILES =
 am__installdirs = "$(DESTDIR)$(bindir)"
 PROGRAMS = $(bin_PROGRAMS)
 am__sview_SOURCES_DIST = sview.c popups.c grid.c part_info.c \
-	job_info.c block_info.c node_info.c resv_info.c submit_info.c \
-	admin_info.c common.c config_info.c defaults.c
+	job_info.c block_info.c front_end_info.c node_info.c \
+	resv_info.c submit_info.c admin_info.c common.c config_info.c \
+	defaults.c
 @HAVE_GTK_TRUE@am_sview_OBJECTS = sview-sview.$(OBJEXT) \
 @HAVE_GTK_TRUE@	sview-popups.$(OBJEXT) sview-grid.$(OBJEXT) \
 @HAVE_GTK_TRUE@	sview-part_info.$(OBJEXT) \
 @HAVE_GTK_TRUE@	sview-job_info.$(OBJEXT) \
 @HAVE_GTK_TRUE@	sview-block_info.$(OBJEXT) \
+@HAVE_GTK_TRUE@	sview-front_end_info.$(OBJEXT) \
 @HAVE_GTK_TRUE@	sview-node_info.$(OBJEXT) \
 @HAVE_GTK_TRUE@	sview-resv_info.$(OBJEXT) \
 @HAVE_GTK_TRUE@	sview-submit_info.$(OBJEXT) \
@@ -104,10 +108,11 @@ am__sview_SOURCES_DIST = sview.c popups.c grid.c part_info.c \
 @HAVE_GTK_TRUE@	sview-config_info.$(OBJEXT) \
 @HAVE_GTK_TRUE@	sview-defaults.$(OBJEXT)
 am__EXTRA_sview_SOURCES_DIST = sview.h sview.c popups.c grid.c \
-	part_info.c job_info.c block_info.c node_info.c resv_info.c \
-	submit_info.c admin_info.c common.c config_info.c defaults.c
+	part_info.c job_info.c block_info.c front_end_info.c \
+	node_info.c resv_info.c submit_info.c admin_info.c common.c \
+	config_info.c defaults.c
 sview_OBJECTS = $(am_sview_OBJECTS)
-@HAVE_GTK_TRUE@sview_DEPENDENCIES = $(top_builddir)/src/plugins/select/bluegene/block_allocator/libbluegene_block_allocator.la \
+@HAVE_GTK_TRUE@sview_DEPENDENCIES =  \
 @HAVE_GTK_TRUE@	$(top_builddir)/src/db_api/libslurmdb.o
 sview_LINK = $(LIBTOOL) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) \
 	--mode=link $(CCLD) $(sview_CFLAGS) $(CFLAGS) $(sview_LDFLAGS) \
@@ -143,7 +148,10 @@ AUTOHEADER = @AUTOHEADER@
 AUTOMAKE = @AUTOMAKE@
 AWK = @AWK@
 BGL_LOADED = @BGL_LOADED@
+BGQ_LOADED = @BGQ_LOADED@
 BG_INCLUDES = @BG_INCLUDES@
+BG_LDFLAGS = @BG_LDFLAGS@
+BG_L_P_LOADED = @BG_L_P_LOADED@
 BLCR_CPPFLAGS = @BLCR_CPPFLAGS@
 BLCR_HOME = @BLCR_HOME@
 BLCR_LDFLAGS = @BLCR_LDFLAGS@
@@ -180,6 +188,7 @@ HAVEPGCONFIG = @HAVEPGCONFIG@
 HAVE_AIX = @HAVE_AIX@
 HAVE_ELAN = @HAVE_ELAN@
 HAVE_FEDERATION = @HAVE_FEDERATION@
+HAVE_MAN2HTML = @HAVE_MAN2HTML@
 HAVE_OPENSSL = @HAVE_OPENSSL@
 HAVE_SOME_CURSES = @HAVE_SOME_CURSES@
 HWLOC_CPPFLAGS = @HWLOC_CPPFLAGS@
@@ -237,6 +246,7 @@ PTHREAD_CFLAGS = @PTHREAD_CFLAGS@
 PTHREAD_LIBS = @PTHREAD_LIBS@
 RANLIB = @RANLIB@
 READLINE_LIBS = @READLINE_LIBS@
+REAL_BG_L_P_LOADED = @REAL_BG_L_P_LOADED@
 RELEASE = @RELEASE@
 SED = @SED@
 SEMAPHORE_LIBS = @SEMAPHORE_LIBS@
@@ -272,6 +282,7 @@ abs_top_srcdir = @abs_top_srcdir@
 ac_ct_CC = @ac_ct_CC@
 ac_ct_CXX = @ac_ct_CXX@
 ac_ct_DUMPBIN = @ac_ct_DUMPBIN@
+ac_have_man2html = @ac_have_man2html@
 am__include = @am__include@
 am__leading_dot = @am__leading_dot@
 am__quote = @am__quote@
@@ -326,20 +337,17 @@ top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 AUTOMAKE_OPTIONS = foreign
 INCLUDES = -I$(top_srcdir) $(BG_INCLUDES)
-@HAVE_GTK_TRUE@sview_LDADD = \
-@HAVE_GTK_TRUE@	$(top_builddir)/src/plugins/select/bluegene/block_allocator/libbluegene_block_allocator.la  \
-@HAVE_GTK_TRUE@	$(top_builddir)/src/db_api/libslurmdb.o -ldl
-
+@HAVE_GTK_TRUE@sview_LDADD = $(top_builddir)/src/db_api/libslurmdb.o -ldl
 @HAVE_GTK_TRUE@noinst_HEADERS = sview.h
 @HAVE_GTK_TRUE@sview_SOURCES = sview.c popups.c grid.c part_info.c job_info.c \
-@HAVE_GTK_TRUE@	block_info.c node_info.c resv_info.c \
+@HAVE_GTK_TRUE@	block_info.c front_end_info.c node_info.c resv_info.c \
 @HAVE_GTK_TRUE@	submit_info.c admin_info.c common.c \
 @HAVE_GTK_TRUE@	config_info.c defaults.c
 
 @HAVE_GTK_TRUE@sview_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(BG_LDFLAGS) $(GTK_LIBS)
 @HAVE_GTK_TRUE@sview_CFLAGS = $(GTK_CFLAGS)
 @HAVE_GTK_FALSE@EXTRA_sview_SOURCES = sview.h sview.c popups.c grid.c part_info.c job_info.c \
-@HAVE_GTK_FALSE@	block_info.c node_info.c resv_info.c \
+@HAVE_GTK_FALSE@	block_info.c front_end_info.c node_info.c resv_info.c \
 @HAVE_GTK_FALSE@	submit_info.c admin_info.c common.c config_info.c defaults.c
 
 all: all-am
@@ -434,6 +442,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/sview-common.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/sview-config_info.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/sview-defaults.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/sview-front_end_info.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/sview-grid.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/sview-job_info.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/sview-node_info.Po@am__quote@
@@ -547,6 +556,20 @@ sview-block_info.obj: block_info.c
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	source='block_info.c' object='sview-block_info.obj' libtool=no @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(sview_CFLAGS) $(CFLAGS) -c -o sview-block_info.obj `if test -f 'block_info.c'; then $(CYGPATH_W) 'block_info.c'; else $(CYGPATH_W) '$(srcdir)/block_info.c'; fi`
+
+sview-front_end_info.o: front_end_info.c
+@am__fastdepCC_TRUE@	$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(sview_CFLAGS) $(CFLAGS) -MT sview-front_end_info.o -MD -MP -MF $(DEPDIR)/sview-front_end_info.Tpo -c -o sview-front_end_info.o `test -f 'front_end_info.c' || echo '$(srcdir)/'`front_end_info.c
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/sview-front_end_info.Tpo $(DEPDIR)/sview-front_end_info.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='front_end_info.c' object='sview-front_end_info.o' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(sview_CFLAGS) $(CFLAGS) -c -o sview-front_end_info.o `test -f 'front_end_info.c' || echo '$(srcdir)/'`front_end_info.c
+
+sview-front_end_info.obj: front_end_info.c
+@am__fastdepCC_TRUE@	$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(sview_CFLAGS) $(CFLAGS) -MT sview-front_end_info.obj -MD -MP -MF $(DEPDIR)/sview-front_end_info.Tpo -c -o sview-front_end_info.obj `if test -f 'front_end_info.c'; then $(CYGPATH_W) 'front_end_info.c'; else $(CYGPATH_W) '$(srcdir)/front_end_info.c'; fi`
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/sview-front_end_info.Tpo $(DEPDIR)/sview-front_end_info.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='front_end_info.c' object='sview-front_end_info.obj' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(sview_CFLAGS) $(CFLAGS) -c -o sview-front_end_info.obj `if test -f 'front_end_info.c'; then $(CYGPATH_W) 'front_end_info.c'; else $(CYGPATH_W) '$(srcdir)/front_end_info.c'; fi`
 
 sview-node_info.o: node_info.c
 @am__fastdepCC_TRUE@	$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(sview_CFLAGS) $(CFLAGS) -MT sview-node_info.o -MD -MP -MF $(DEPDIR)/sview-node_info.Tpo -c -o sview-node_info.o `test -f 'node_info.c' || echo '$(srcdir)/'`node_info.c

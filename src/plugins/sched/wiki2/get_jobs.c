@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -645,7 +645,7 @@ static char *	_get_job_state(struct job_record *job_ptr)
 
 	if (IS_JOB_COMPLETE(job_ptr) || IS_JOB_FAILED(job_ptr))
 		state_str = "Completed";
-	else /* JOB_CANCELLED, JOB_TIMEOUT, JOB_NODE_FAIL */
+	else /* JOB_CANCELLED, JOB_TIMEOUT, JOB_NODE_FAIL, etc. */
 		state_str = "Removed";
 	snprintf(return_msg, sizeof(return_msg), "%s;EXITCODE=%u",
 		state_str, WEXITSTATUS(job_ptr->exit_code));
@@ -703,6 +703,7 @@ extern void wiki_job_requeue(struct job_record *job_ptr, char *reason)
 {
 	int empty = -1, i;
 
+	job_ptr->priority = 0;
 	for (i=0; i<REJECT_MSG_MAX; i++) {
 		if ((reject_msgs[i].job_id == 0) && (empty == -1)) {
 			empty = i;

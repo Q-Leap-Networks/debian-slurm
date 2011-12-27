@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -77,7 +77,7 @@ struct group_cache_rec {
 };
 
 /*
- * get_group_members - indentify the users in a given group name
+ * get_group_members - identify the users in a given group name
  * IN group_name - a single group name
  * RET a zero terminated list of its UIDs or NULL on error
  * NOTE: User root has implicitly access to every group
@@ -93,7 +93,7 @@ extern uid_t *get_group_members(char *group_name)
 	int i, j, uid_cnt;
 #ifdef HAVE_AIX
 	FILE *fp = NULL;
-#elif defined (__APPLE__)
+#elif defined (__APPLE__) || defined (__CYGWIN__)
 #else
 	char pw_buffer[PW_BUF_SIZE];
 	struct passwd pw;
@@ -121,7 +121,7 @@ extern uid_t *get_group_members(char *group_name)
 	setgrent_r(&fp);
 	while (!getgrent_r(&grp, grp_buffer, PW_BUF_SIZE, &fp)) {
 		grp_result = &grp;
-#elif defined (__APPLE__)
+#elif defined (__APPLE__) || defined (__CYGWIN__)
 	setgrent();
 	while ((grp_result = getgrent()) != NULL) {
 #else
@@ -139,15 +139,12 @@ extern uid_t *get_group_members(char *group_name)
 		        for (i=0; grp_result->gr_mem[i]; i++) {
 				if (uid_from_string(grp_result->gr_mem[i],
 						    &my_uid) < 0) {
-				        error("Could not find user %s in "
-					      "configured group %s",
-					      grp_result->gr_mem[i],
-					      group_name);
+					/* Group member without valid login */
 					continue;
 				}
 				if (my_uid == 0)
 					continue;
-				if (j >= uid_cnt) {
+				if (j+1 >= uid_cnt) {
 					uid_cnt += 100;
 					xrealloc(group_uids, 
 						 (sizeof(uid_t) * uid_cnt));
@@ -166,7 +163,7 @@ extern uid_t *get_group_members(char *group_name)
 	setpwent();
 #if defined (__sun)
 	while ((pwd_result = getpwent_r(&pw, pw_buffer, PW_BUF_SIZE)) != NULL) {
-#elif defined (__APPLE__)
+#elif defined (__APPLE__) || defined (__CYGWIN__)
 	while ((pwd_result = getpwent()) != NULL) {
 #else
 	while (!getpwent_r(&pw, pw_buffer, PW_BUF_SIZE, &pwd_result)) {
@@ -174,7 +171,7 @@ extern uid_t *get_group_members(char *group_name)
 #endif
  		if (pwd_result->pw_gid != my_gid)
 			continue;
-		if (j >= uid_cnt) {
+		if (j+1 >= uid_cnt) {
 			uid_cnt += 100;
 			xrealloc(group_uids, (sizeof(uid_t) * uid_cnt));
 		}
@@ -186,7 +183,7 @@ extern uid_t *get_group_members(char *group_name)
 	endpwent();
 #endif
 
-	_put_group_cache(group_name, group_uids, uid_cnt);
+	_put_group_cache(group_name, group_uids, j);
 	_log_group_members(group_name, group_uids);
 	return group_uids;
 }
@@ -257,11 +254,11 @@ static void _put_group_cache(char *group_name, void *group_uids, int uid_cnt)
 			fatal("list_create: malloc failure:");
 	}
 
-	sz = sizeof(uid_t) * (uid_cnt + 1);
+	sz = sizeof(uid_t) * (uid_cnt);
 	cache_rec = xmalloc(sizeof(struct group_cache_rec));
 	cache_rec->group_name = xstrdup(group_name);
 	cache_rec->uid_cnt    = uid_cnt;
-	cache_rec->group_uids = (uid_t *) xmalloc(sz);
+	cache_rec->group_uids = (uid_t *) xmalloc(sizeof(uid_t) + sz);
 	if (uid_cnt > 0)
 		memcpy(cache_rec->group_uids, group_uids, sz);
 	list_append(group_cache_list, cache_rec);

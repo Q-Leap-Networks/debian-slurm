@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -61,7 +61,13 @@
 /* #include "src/common/slurm_rlimits_info.h" */
 #include "src/common/parse_config.h"
 
-#include <slurm/slurm.h>
+#include "slurm/slurm.h"
+
+strong_alias(s_p_get_string,		slurm_s_p_get_string);
+strong_alias(s_p_get_uint32,		slurm_s_p_get_uint32);
+strong_alias(s_p_hashtbl_create,	slurm_s_p_hashtbl_create);
+strong_alias(s_p_hashtbl_destroy,	slurm_s_p_hashtbl_destroy);
+strong_alias(s_p_parse_file,		slurm_s_p_parse_file);
 
 #define BUFFER_SIZE 4096
 
@@ -101,7 +107,7 @@ static int _conf_hashtbl_index(const char *key)
 	for (i = 0; i < 10; i++) {
 		if (key[i] == '\0')
 			break;
-		idx += tolower(key[i]);
+		idx += tolower((int)key[i]);
 	}
 	return idx % CONF_HASH_LEN;
 }
@@ -161,6 +167,25 @@ s_p_hashtbl_t *s_p_hashtbl_create(s_p_options_t options[])
 	}
 
 	return hashtbl;
+}
+
+/* Swap the data in two data structures without changing the linked list
+ * pointers */
+static void _conf_hashtbl_swap_data(s_p_values_t *data_1,
+				    s_p_values_t *data_2)
+{
+	s_p_values_t *next_1, *next_2;
+	s_p_values_t tmp_values;
+
+	next_1 = data_1->next;
+	next_2 = data_2->next;
+
+	memcpy(&tmp_values, data_1, sizeof(s_p_values_t));
+	memcpy(data_1, data_2, sizeof(s_p_values_t));
+	memcpy(data_2, &tmp_values, sizeof(s_p_values_t));
+
+	data_1->next = next_1;
+	data_2->next = next_2;
 }
 
 static void _conf_file_values_free(s_p_values_t *p)
@@ -268,7 +293,7 @@ static int _strip_continuation(char *buf, int len)
 	for (ptr = buf+len-1; ptr >= buf; ptr--) {
 		if (*ptr == '\\')
 			bs++;
-		else if (isspace(*ptr) && bs == 0)
+		else if (isspace((int)*ptr) && bs == 0)
 			continue;
 		else
 			break;
@@ -727,7 +752,7 @@ static int _line_is_space(const char *line)
 	}
 	len = strlen(line);
 	for (i = 0; i < len; i++) {
-		if (!isspace(line[i]))
+		if (!isspace((int)line[i]))
 			return 0;
 	}
 
@@ -767,9 +792,10 @@ int s_p_parse_line(s_p_hashtbl_t *hashtbl, const char *line, char **leftover)
 
 /*
  * Returns 1 if the line is parsed cleanly, and 0 otherwise.
+ * IN ingore_new - if set do not treat unrecongized input as a fatal error
  */
 static int _parse_next_key(s_p_hashtbl_t *hashtbl,
-			   const char *line, char **leftover)
+			   const char *line, char **leftover, bool ignore_new)
 {
 	char *key, *value;
 	s_p_values_t *p;
@@ -782,6 +808,9 @@ static int _parse_next_key(s_p_hashtbl_t *hashtbl,
 			_handle_keyvalue_match(p, value,
 					       new_leftover, &new_leftover);
 			*leftover = new_leftover;
+		} else if (ignore_new) {
+			debug("Parsing error at unrecognized key: %s", key);
+			*leftover = (char *)line;
 		} else {
 			error("Parsing error at unrecognized key: %s", key);
 			xfree(key);
@@ -805,7 +834,8 @@ static int _parse_next_key(s_p_hashtbl_t *hashtbl,
  * no include directive is found.
  */
 static int _parse_include_directive(s_p_hashtbl_t *hashtbl, uint32_t *hash_val,
-				    const char *line, char **leftover)
+				    const char *line, char **leftover,
+				    bool ignore_new)
 {
 	char *ptr;
 	char *fn_start, *fn_stop;
@@ -814,16 +844,16 @@ static int _parse_include_directive(s_p_hashtbl_t *hashtbl, uint32_t *hash_val,
 	*leftover = NULL;
 	if (strncasecmp("include", line, strlen("include")) == 0) {
 		ptr = (char *)line + strlen("include");
-		if (!isspace(*ptr))
+		if (!isspace((int)*ptr))
 			return 0;
-		while (isspace(*ptr))
+		while (isspace((int)*ptr))
 			ptr++;
 		fn_start = ptr;
-		while (!isspace(*ptr))
+		while (!isspace((int)*ptr))
 			ptr++;
 		fn_stop = *leftover = ptr;
 		filename = xstrndup(fn_start, fn_stop-fn_start);
-		if (s_p_parse_file(hashtbl, hash_val, filename)
+		if (s_p_parse_file(hashtbl, hash_val, filename, ignore_new)
 		    == SLURM_SUCCESS) {
 			xfree(filename);
 			return 1;
@@ -836,7 +866,8 @@ static int _parse_include_directive(s_p_hashtbl_t *hashtbl, uint32_t *hash_val,
 	}
 }
 
-int s_p_parse_file(s_p_hashtbl_t *hashtbl, uint32_t *hash_val, char *filename)
+int s_p_parse_file(s_p_hashtbl_t *hashtbl, uint32_t *hash_val, char *filename,
+		   bool ignore_new)
 {
 	FILE *f;
 	char line[BUFFER_SIZE];
@@ -878,9 +909,9 @@ int s_p_parse_file(s_p_hashtbl_t *hashtbl, uint32_t *hash_val, char *filename)
 		}
 
 		inc_rc = _parse_include_directive(hashtbl, hash_val,
-						  line, &leftover);
+						  line, &leftover, ignore_new);
 		if (inc_rc == 0) {
-			_parse_next_key(hashtbl, line, &leftover);
+			_parse_next_key(hashtbl, line, &leftover, ignore_new);
 		} else if (inc_rc < 0) {
 			error("\"Include\" failed in file %s line %d",
 			      filename, line_number);
@@ -893,16 +924,70 @@ int s_p_parse_file(s_p_hashtbl_t *hashtbl, uint32_t *hash_val, char *filename)
 		if (!_line_is_space(leftover)) {
 			char *ptr = xstrdup(leftover);
 			_strip_cr_nl(ptr);
-			error("Parse error in file %s line %d: \"%s\"",
-			      filename, line_number, ptr);
+			if (ignore_new) {
+				debug("Parse error in file %s line %d: \"%s\"",
+				      filename, line_number, ptr);
+			} else {
+				error("Parse error in file %s line %d: \"%s\"",
+				      filename, line_number, ptr);
+				rc = SLURM_ERROR;
+			}
 			xfree(ptr);
-			rc = SLURM_ERROR;
 		}
 		line_number += merged_lines;
 	}
 
 	fclose(f);
 	return rc;
+}
+
+/*
+ * s_p_hashtbl_merge
+ * 
+ * Merge the contents of two s_p_hashtbl_t data structures. Anything in
+ * from_hashtbl that does not also appear in to_hashtbl is transfered to it.
+ * This is intended primary to support multiple lines of DEFAULT configuration
+ * information and preserve the default values while adding new defaults.
+ *
+ * IN from_hashtbl - Source of old data
+ * IN to_hashtbl - Destination for old data
+ */
+void s_p_hashtbl_merge(s_p_hashtbl_t *to_hashtbl, s_p_hashtbl_t *from_hashtbl)
+{
+	int i;
+	s_p_values_t **val_pptr, *val_ptr, *match_ptr;
+
+	if (!to_hashtbl || !from_hashtbl)
+		return;
+
+	for (i = 0; i < CONF_HASH_LEN; i++) {
+		val_pptr = &from_hashtbl[i];
+		val_ptr = from_hashtbl[i];
+		while (val_ptr) {
+			if (val_ptr->data_count == 0) {
+				/* No data in from_hashtbl record to move.
+				 * Skip record */
+				val_pptr = &val_ptr->next;
+				val_ptr = val_ptr->next;
+				continue;
+			}
+			match_ptr = _conf_hashtbl_lookup(to_hashtbl,
+							 val_ptr->key);
+			if (match_ptr) {	/* Found matching key */
+				if (match_ptr->data_count == 0) {
+					_conf_hashtbl_swap_data(val_ptr,
+								match_ptr);
+				}
+				val_pptr = &val_ptr->next;
+				val_ptr = val_ptr->next;
+			} else {	/* No match, move record */
+				*val_pptr = val_ptr->next;
+				val_ptr->next = NULL;
+				_conf_hashtbl_insert(to_hashtbl, val_ptr);
+				val_ptr = *val_pptr;
+			}
+		}
+	}
 }
 
 /*

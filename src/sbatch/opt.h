@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -147,7 +147,7 @@ typedef struct sbatch_options {
 	uint16_t geometry[HIGHEST_DIMENSIONS]; /* --geometry, -g	*/
 	bool reboot;		/* --reboot			*/
 	bool no_rotate;		/* --no_rotate, -R		*/
-	uint16_t conn_type;	/* --conn-type 			*/
+	uint16_t conn_type[HIGHEST_DIMENSIONS];	/* --conn-type 	*/
 	char *blrtsimage;       /* --blrts-image BlrtsImage for block */
 	char *linuximage;       /* --linux-image LinuxImage for block */
 	char *mloaderimage;     /* --mloader-image mloaderImage for block */
@@ -168,6 +168,8 @@ typedef struct sbatch_options {
  	int ckpt_interval;	/* --checkpoint (int minutes)   */
  	char *ckpt_interval_str;/* --checkpoint (string)        */
  	char *ckpt_dir;		/* --checkpoint-dir (string)    */
+	int req_switch;		/* Minimum number of switches   */
+	int wait4switch;	/* Maximum time to wait for minimum switches */
 	char **spank_job_env;	/* SPANK controlled environment for job
 				 * Prolog and Epilog		*/
 	int spank_job_env_size;	/* size of spank_job_env	*/

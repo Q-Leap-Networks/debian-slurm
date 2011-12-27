@@ -15,7 +15,7 @@
 # CODE-OCEC-09-009. All rights reserved.
 #
 # This file is part of SLURM, a resource management program.
-# For details, see <https://computing.llnl.gov/linux/slurm/>.
+# For details, see <http://www.schedmd.com/slurmdocs/>.
 # Please also read the included file: DISCLAIMER.
 #
 # SLURM is free software; you can redistribute it and/or modify it under
@@ -138,6 +138,7 @@ if {$matches < 1} {
 } elseif {$matches != 2} {
 	send_user "\nWARNING: Failed to load PIDs associated with job step.\n"
 	send_user "         This is dependent upon the ProctrackType configured.\n"
+	send_user "         proctrack/pgid does NOT support this functionality.\n"
 }
 
 cancel_job $job_id

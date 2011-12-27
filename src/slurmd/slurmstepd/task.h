@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -44,7 +44,7 @@
 #  include "config.h"
 #endif
 
-#include <slurm/slurm_errno.h>
+#include "slurm/slurm_errno.h"
 
 #if HAVE_SYS_TYPES_H
 #  include <sys/types.h>
@@ -52,6 +52,6 @@
 
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 
-void exec_task(slurmd_job_t *job, int i, int waitfd);
+void exec_task(slurmd_job_t *job, int i);
 
 #endif /* !_TASK_H */

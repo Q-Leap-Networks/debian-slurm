@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -51,6 +51,7 @@
 
 static bool reverse_order;
 
+static int _sort_job_by_batch_host(void *void1, void *void2);
 static int _sort_job_by_gres(void *void1, void *void2);
 static int _sort_job_by_group_id(void *void1, void *void2);
 static int _sort_job_by_group_name(void *void1, void *void2);
@@ -88,6 +89,8 @@ static int _sort_step_by_time_used(void *void1, void *void2);
 static int _sort_step_by_user_id(void *void1, void *void2);
 static int _sort_step_by_user_name(void *void1, void *void2);
 
+static time_t now;
+
 /*****************************************************************************
  * Global Print Functions
  *****************************************************************************/
@@ -95,6 +98,7 @@ static int _sort_step_by_user_name(void *void1, void *void2);
 void sort_job_list(List job_list)
 {
 	int i;
+	now = time(NULL);
 
 	if (params.sort == NULL)
 		params.sort = xstrdup("P,t,-p"); /* Partition,state,priority */
@@ -107,7 +111,9 @@ void sort_job_list(List job_list)
 		if ((i > 0) && (params.sort[i-1] == '-'))
 			reverse_order = true;
 
-		if      (params.sort[i] == 'b')
+		if      (params.sort[i] == 'B')
+			list_sort(job_list, _sort_job_by_batch_host);
+		else if (params.sort[i] == 'b')
 			list_sort(job_list, _sort_job_by_gres);
 		else if (params.sort[i] == 'c')
 			;	/* sort_job_by_min_cpus_per_node */
@@ -187,6 +193,7 @@ void sort_jobs_by_start_time (List jobs)
 void sort_step_list(List step_list)
 {
 	int i;
+	now = time(NULL);
 
 	if (params.sort == NULL)
 		params.sort = xstrdup("P,i");	/* Partition, step id */
@@ -222,6 +229,24 @@ void sort_step_list(List step_list)
 /*****************************************************************************
  * Local Job Sort Functions
  *****************************************************************************/
+static int _sort_job_by_batch_host(void *void1, void *void2)
+{
+	int diff;
+	job_info_t *job1 = (job_info_t *) void1;
+	job_info_t *job2 = (job_info_t *) void2;
+	char *val1 = "", *val2 = "";
+
+	if (job1->batch_host)
+		val1 = job1->batch_host;
+	if (job2->batch_host)
+		val2 = job2->batch_host;
+	diff = strcmp(val1, val2);
+
+	if (reverse_order)
+		diff = -diff;
+	return diff;
+}
+
 static int _sort_job_by_gres(void *void1, void *void2)
 {
 	int diff;
@@ -562,8 +587,6 @@ static int _sort_job_by_time_limit(void *void1, void *void2)
 
 static uint32_t _get_start_time(job_info_t *job)
 {
-	time_t now = time(NULL);
-
 	if (job->start_time == (time_t) 0)
 		return 0xffffffff;
 	if ((job->job_state == JOB_PENDING) && (job->start_time < now))
@@ -830,9 +853,8 @@ static int _sort_step_by_time_used(void *void1, void *void2)
 	int diff;
 	job_step_info_t *step1 = (job_step_info_t *) void1;
 	job_step_info_t *step2 = (job_step_info_t *) void2;
-	time_t now, used1, used2;
+	time_t used1, used2;
 
-	now = time(NULL);
 	used1 = difftime(now, step1->start_time);
 	used2 = difftime(now, step2->start_time);
 	diff = used1 - used2;

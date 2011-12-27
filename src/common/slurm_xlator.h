@@ -34,7 +34,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -234,6 +234,10 @@
 #define	xfer_buf_data		slurm_xfer_buf_data
 #define	pack_time		slurm_pack_time
 #define	unpack_time		slurm_unpack_time
+#define	packdouble		slurm_packdouble
+#define	unpackdouble		slurm_unpackdouble
+#define	pack64			slurm_pack64
+#define	unpack64		slurm_unpack64
 #define	pack32			slurm_pack32
 #define	unpack32		slurm_unpack32
 #define	pack16			slurm_pack16
@@ -299,6 +303,7 @@
 #define	_xstrfmtcat		slurm_xstrfmtcat
 #define	_xmemcat		slurm_xmemcat
 #define	xstrdup			slurm_xstrdup
+#define	xstrdup_printf		slurm_xstrdup_printf
 #define	xbasename		slurm_xbasename
 
 /* slurm_protocol_defs.[ch] functions */
@@ -342,6 +347,16 @@
 #define jobacct_common_alloc_jobacct slurm_jobacct_common_alloc_jobacct
 #define jobacct_common_free_jobacct slurm_jobacct_common_free_jobacct
 
+/* node_select.[ch] functions */
+#define destroy_select_ba_request	slurm_destroy_select_ba_request
+
+/* parse_config.[ch] functions */
+#define s_p_get_string			slurm_s_p_get_string
+#define s_p_get_uint32			slurm_s_p_get_uint32
+#define s_p_hashtbl_create		slurm_s_p_hashtbl_create
+#define s_p_hashtbl_destroy		slurm_s_p_hashtbl_destroy
+#define s_p_parse_file			slurm_s_p_parse_file
+
 #endif /* USE_ALIAS */
 
 /* Include the function definitions after redefining their names. */
@@ -352,11 +367,14 @@
 #include "src/common/list.h"
 #include "src/common/log.h"
 #include "src/common/macros.h"
+#include "src/common/node_select.h"
 #include "src/common/pack.h"
+#include "src/common/parse_config.h"
 #include "src/common/env.h"
 #include "src/common/slurm_auth.h"
 #include "src/common/strlcpy.h"
 #include "src/common/switch.h"
+#include "src/common/working_cluster.h"
 #include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xsignal.h"

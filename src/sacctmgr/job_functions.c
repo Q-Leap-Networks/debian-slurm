@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -109,7 +109,6 @@ static int _set_rec(int *start, int argc, char *argv[],
 	int set = 0;
 	int end = 0;
 	int command_len = 0;
-	int option = 0;
 
 	for (i=(*start); i<argc; i++) {
 		end = parse_option_end(argv[i]);
@@ -117,8 +116,7 @@ static int _set_rec(int *start, int argc, char *argv[],
 			command_len=strlen(argv[i]);
 		else {
 			command_len=end-1;
-			if(argv[i][end] == '=') {
-				option = (int)argv[i][end-1];
+			if (argv[i][end] == '=') {
 				end++;
 			}
 		}
@@ -142,7 +140,9 @@ static int _set_rec(int *start, int argc, char *argv[],
 				     "DerivedExitCode") == SLURM_SUCCESS) {
 				set = 1;
 			}
-		} else if ((!strncasecmp(argv[i], "DerivedExitString",
+		} else if ((!strncasecmp(argv[i], "Comment",
+					 MAX(command_len, 7))) ||
+			   (!strncasecmp(argv[i], "DerivedExitString",
 					 MAX(command_len, 12))) ||
 			   (!strncasecmp(argv[i], "DerivedES",
 					 MAX(command_len, 9)))) {

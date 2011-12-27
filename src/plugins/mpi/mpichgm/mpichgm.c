@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -297,10 +297,8 @@ static void _gmpi_wait_abort(gmpi_state_t *st)
 static void *_gmpi_thr(void *arg)
 {
 	gmpi_state_t *st;
-	mpi_plugin_client_info_t *job;
 
 	st = (gmpi_state_t *) arg;
-	job = st->job;
 
 	debug3("GMPI master thread pid=%lu", (unsigned long) getpid());
 	_gmpi_establish_map(st);

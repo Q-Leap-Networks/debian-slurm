@@ -8,7 +8,7 @@
  *  Written by Danny Auble <da@llnl.gov>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -353,7 +353,8 @@ extern List as_mysql_modify_clusters(mysql_conn_t *mysql_conn, uint32_t uid,
 	}
 
 	if (cluster->control_port) {
-		xstrfmtcat(vals, ", control_port=%u", cluster->control_port);
+		xstrfmtcat(vals, ", control_port=%u, last_port=%u",
+			   cluster->control_port, cluster->control_port);
 		set++;
 		clust_reg = true;
 	}
@@ -1119,6 +1120,7 @@ extern int as_mysql_register_ctld(mysql_conn_t *mysql_conn,
 	char hostname[255];
 	time_t now = time(NULL);
 	uint32_t flags = slurmdb_setup_cluster_flags();
+	int rc = SLURM_SUCCESS;
 
 	if (slurmdbd_conf)
 		fatal("clusteracct_storage_g_register_ctld "
@@ -1143,9 +1145,10 @@ extern int as_mysql_register_ctld(mysql_conn_t *mysql_conn,
 
 	query = xstrdup_printf(
 		"update %s set deleted=0, mod_time=%ld, "
-		"control_host='%s', control_port=%u, rpc_version=%d, "
-		"dimensions=%d, flags=%u, plugin_id_select=%d where name='%s';",
-		cluster_table, now, address, port, SLURMDBD_VERSION,
+		"control_host='%s', control_port=%u, last_port=%u, "
+		"rpc_version=%d, dimensions=%d, flags=%u, "
+		"plugin_id_select=%d where name='%s';",
+		cluster_table, now, address, port, port, SLURMDBD_VERSION,
 		SYSTEM_DIMENSIONS, flags, select_get_plugin_id(), cluster);
 	xstrfmtcat(query,
 		   "insert into %s "
@@ -1159,7 +1162,79 @@ extern int as_mysql_register_ctld(mysql_conn_t *mysql_conn,
 	debug3("%d(%s:%d) query\n%s",
 	       mysql_conn->conn, THIS_FILE, __LINE__, query);
 
-	return mysql_db_query(mysql_conn, query);
+	rc = mysql_db_query(mysql_conn, query);
+	xfree(query);
+	return rc;
+}
+
+extern int as_mysql_fini_ctld(mysql_conn_t *mysql_conn,
+			      slurmdb_cluster_rec_t *cluster_rec)
+{
+	int rc = SLURM_SUCCESS;
+	time_t now = time(NULL);
+	char *query = NULL;
+
+	if (check_connection(mysql_conn) != SLURM_SUCCESS)
+		return ESLURM_DB_CONNECTION;
+
+	/* Here we need to check make sure we are updating the entry
+	   correctly just incase the backup has already gained
+	   control.  If we check the ip and port it is a pretty safe
+	   bet we have the right ctld.
+	*/
+	query = xstrdup_printf(
+		"update %s set mod_time=%ld, control_host='', "
+		"control_port=0 where name='%s' && "
+		"control_host='%s' && control_port=%u;",
+		cluster_table, now, cluster_rec->name,
+		cluster_rec->control_host, cluster_rec->control_port);
+	debug3("%d(%s:%d) query\n%s",
+	       mysql_conn->conn, THIS_FILE, __LINE__, query);
+	rc = mysql_db_query(mysql_conn, query);
+	xfree(query);
+
+	if (rc != SLURM_SUCCESS)
+		return SLURM_ERROR;
+
+	if (!last_affected_rows(mysql_conn)
+	    || (slurmdbd_conf && !slurmdbd_conf->track_ctld))
+		return rc;
+
+	/* If cpus is 0 we can get the current number of cpus by
+	   sending 0 for the cpus param in the as_mysql_cluster_cpus
+	   function.
+	*/
+	if (!cluster_rec->cpu_count) {
+		cluster_rec->cpu_count = as_mysql_cluster_cpus(
+			mysql_conn, cluster_rec->control_host, 0, now);
+	}
+
+	/* Since as_mysql_cluster_cpus could change the
+	   last_affected_rows we can't group this with the above
+	   return.
+	*/
+	if (!cluster_rec->cpu_count)
+		return rc;
+
+	/* If we affected things we need to now drain the nodes in the
+	 * cluster.  This is to give better stats on accounting that
+	 * the ctld was gone so no jobs were able to be scheduled.  We
+	 * drain the nodes since the rollup functionality understands
+	 * how to deal with that and running jobs so we don't get bad
+	 * info.
+	 */
+	query = xstrdup_printf(
+		"insert into \"%s_%s\" (cpu_count, state, "
+		"time_start, reason) "
+		"values ('%u', %u, %ld, 'slurmctld disconnect')",
+		cluster_rec->name, event_table,
+		cluster_rec->cpu_count, NODE_STATE_DOWN, (long)now);
+	debug3("%d(%s:%d) query\n%s",
+	       mysql_conn->conn, THIS_FILE, __LINE__, query);
+	rc = mysql_db_query(mysql_conn, query);
+	xfree(query);
+
+	return rc;
 }
 
 extern int as_mysql_cluster_cpus(mysql_conn_t *mysql_conn,
@@ -1178,10 +1253,9 @@ extern int as_mysql_cluster_cpus(mysql_conn_t *mysql_conn,
 	/* Record the processor count */
 	query = xstrdup_printf(
 		"select cpu_count, cluster_nodes from \"%s_%s\" where "
-		"time_end=0 and node_name='' limit 1",
+		"time_end=0 and node_name='' and state=0 limit 1",
 		mysql_conn->cluster_name, event_table);
-	if (!(result = mysql_db_query_ret(
-		      mysql_conn, query, 0))) {
+	if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
 		xfree(query);
 		if (mysql_errno(mysql_conn->db_conn) == ER_NO_SUCH_TABLE)
 			rc = ESLURM_ACCESS_DENIED;
@@ -1205,8 +1279,19 @@ extern int as_mysql_cluster_cpus(mysql_conn_t *mysql_conn,
 		 * may not be up when we run this in the controller or
 		 * in the slurmdbd.
 		 */
+		if (!cpus) {
+			rc = 0;
+			goto end_it;
+		}
+
 		first = 1;
 		goto add_it;
+	}
+
+	/* If cpus is 0 we want to return the cpu count for this cluster */
+	if (!cpus) {
+		rc = atoi(row[0]);
+		goto end_it;
 	}
 
 	if (slurm_atoul(row[0]) == cpus) {
@@ -1226,12 +1311,12 @@ extern int as_mysql_cluster_cpus(mysql_conn_t *mysql_conn,
 					event_table, cluster_nodes);
 				rc = mysql_db_query(mysql_conn, query);
 				xfree(query);
-				goto end_it;
+				goto update_it;
 			} else if (!strcmp(cluster_nodes, row[1])) {
 				debug3("we have the same nodes in the cluster "
 				       "as before no need to "
 				       "update the database.");
-				goto end_it;
+				goto update_it;
 			}
 		} else
 			goto end_it;
@@ -1257,6 +1342,14 @@ add_it:
 		"values ('%s', %u, %ld, 'Cluster processor count')",
 		mysql_conn->cluster_name, event_table,
 		cluster_nodes, cpus, event_time);
+	rc = mysql_db_query(mysql_conn, query);
+	xfree(query);
+update_it:
+	query = xstrdup_printf(
+		"update \"%s_%s\" set time_end=%ld where time_end=0 "
+		"and state=%u and node_name='';",
+		mysql_conn->cluster_name, event_table, event_time,
+		NODE_STATE_DOWN);
 	rc = mysql_db_query(mysql_conn, query);
 	xfree(query);
 end_it:

@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -108,7 +108,7 @@ _handle_stray_socket(const char *socket_name)
 
 	if ((uid = getuid()) != buf.st_uid) {
 		debug3("_handle_stray_socket: socket %s is not owned by uid %d",
-		       socket_name, uid);
+		       socket_name, (int)uid);
 		return;
 	}
 
@@ -752,7 +752,7 @@ rwfail:
 /*
  * Suspend execution of the job step.  Only root or SlurmUser is
  * authorized to use this call. Since this activity includes a 'sleep 1'
- * in the slurmstepd, initiate the the "suspend" in parallel
+ * in the slurmstepd, initiate the "suspend" in parallel.
  *
  * Returns SLURM_SUCCESS is successful.  On error returns SLURM_ERROR
  * and sets errno.

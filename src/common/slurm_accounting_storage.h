@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -45,8 +45,8 @@
 #include "src/common/slurmdb_defs.h"
 #include "src/common/slurmdb_pack.h"
 
-#include <slurm/slurm.h>
-#include <slurm/slurm_errno.h>
+#include "slurm/slurm.h"
+#include "slurm/slurm_errno.h"
 #include <sys/types.h>
 #include <pwd.h>
 
@@ -451,36 +451,40 @@ extern int clusteracct_storage_g_cluster_cpus(void *db_conn,
 					      time_t event_time);
 
 extern int clusteracct_storage_g_register_ctld(void *db_conn, uint16_t port);
+extern int clusteracct_storage_g_register_disconn_ctld(
+	void *db_conn, char *control_host);
+extern int clusteracct_storage_g_fini_ctld(void *db_conn,
+					   slurmdb_cluster_rec_t *cluster_rec);
 
 /*
  * load into the storage the start of a job
  */
-extern int jobacct_storage_g_job_start (void *db_conn,
-					struct job_record *job_ptr);
+extern int jobacct_storage_g_job_start(void *db_conn,
+				       struct job_record *job_ptr);
 
 /*
  * load into the storage the end of a job
  */
-extern int jobacct_storage_g_job_complete (void *db_conn,
-					   struct job_record *job_ptr);
+extern int jobacct_storage_g_job_complete(void *db_conn,
+					  struct job_record *job_ptr);
 
 /*
  * load into the storage the start of a job step
  */
-extern int jobacct_storage_g_step_start (void *db_conn,
-					 struct step_record *step_ptr);
+extern int jobacct_storage_g_step_start(void *db_conn,
+					struct step_record *step_ptr);
 
 /*
  * load into the storage the end of a job step
  */
-extern int jobacct_storage_g_step_complete (void *db_conn,
-					    struct step_record *step_ptr);
+extern int jobacct_storage_g_step_complete(void *db_conn,
+					   struct step_record *step_ptr);
 
 /*
  * load into the storage a suspention of a job
  */
-extern int jobacct_storage_g_job_suspend (void *db_conn,
-					  struct job_record *job_ptr);
+extern int jobacct_storage_g_job_suspend(void *db_conn,
+					 struct job_record *job_ptr);
 
 /*
  * get info from the storage

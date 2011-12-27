@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -58,7 +58,7 @@
 #include <sys/resource.h>
 #include <sys/stat.h>
 
-#include <slurm/slurm_errno.h>
+#include "slurm/slurm_errno.h"
 
 #include "src/common/assoc_mgr.h"
 #include "src/common/checkpoint.h"
@@ -80,13 +80,14 @@
 #include "src/common/slurm_priority.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/switch.h"
+#include "src/common/timers.h"
 #include "src/common/uid.h"
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
 
 #include "src/slurmctld/acct_policy.h"
 #include "src/slurmctld/agent.h"
-#include "src/slurmctld/basil_interface.h"
+#include "src/slurmctld/front_end.h"
 #include "src/slurmctld/job_scheduler.h"
 #include "src/slurmctld/job_submit.h"
 #include "src/slurmctld/licenses.h"
@@ -124,8 +125,8 @@
 /**************************************************************************\
  * To test for memory leaks, set MEMORY_LEAK_DEBUG to 1 using
  * "configure --enable-memory-leak-debug" then execute
- * > valgrind --tool=memcheck --leak-check=yes --num-callers=6 \
- *    --leak-resolution=med slurmctld -D
+ * $ valgrind --tool=memcheck --leak-check=yes --num-callers=8 \
+ *   --leak-resolution=med ./slurmctld -Dc >valg.ctld.out 2>&1
  *
  * Then exercise the slurmctld functionality before executing
  * > scontrol shutdown
@@ -352,14 +353,6 @@ int main(int argc, char *argv[])
 		      slurmctld_conf.accounting_storage_type);
 	}
 
-	callbacks.acct_full   = trigger_primary_ctld_acct_full;
-	callbacks.dbd_fail    = trigger_primary_dbd_fail;
-	callbacks.dbd_resumed = trigger_primary_dbd_res_op;
-	callbacks.db_fail     = trigger_primary_db_fail;
-	callbacks.db_resumed  = trigger_primary_db_res_op;
-	acct_db_conn = acct_storage_g_get_connection(&callbacks, 0, false,
-						     slurmctld_cluster_name);
-
 	memset(&assoc_init_arg, 0, sizeof(assoc_init_args_t));
 	assoc_init_arg.enforce = accounting_enforce;
 	assoc_init_arg.update_resvs = update_assocs_in_resvs;
@@ -373,7 +366,14 @@ int main(int argc, char *argv[])
 	if (slurmctld_conf.track_wckey)
 		assoc_init_arg.cache_level |= ASSOC_MGR_CACHE_WCKEY;
 
-	if (assoc_mgr_init(acct_db_conn, &assoc_init_arg)) {
+	callbacks.acct_full   = trigger_primary_ctld_acct_full;
+	callbacks.dbd_fail    = trigger_primary_dbd_fail;
+	callbacks.dbd_resumed = trigger_primary_dbd_res_op;
+	callbacks.db_fail     = trigger_primary_db_fail;
+	callbacks.db_resumed  = trigger_primary_db_res_op;
+	acct_db_conn = acct_storage_g_get_connection(&callbacks, 0, false,
+						     slurmctld_cluster_name);
+	if (assoc_mgr_init(acct_db_conn, &assoc_init_arg, errno)) {
 		if (accounting_enforce & ACCOUNTING_ENFORCE_ASSOCS)
 			error("Association database appears down, "
 			      "reading from state file.");
@@ -498,7 +498,7 @@ int main(int argc, char *argv[])
 			 * we call this since we are setting up static
 			 * variables inside the function sending a
 			 * NULL will just use those set before. */
-			if (assoc_mgr_init(acct_db_conn, NULL) &&
+			if (assoc_mgr_init(acct_db_conn, NULL, errno) &&
 			    (accounting_enforce & ACCOUNTING_ENFORCE_ASSOCS) &&
 			    !running_cache) {
 				trigger_primary_dbd_fail();
@@ -585,7 +585,7 @@ int main(int argc, char *argv[])
 
 		if (running_cache) {
 			/* break out and end the association cache
-			 * thread since we are shuting down, no reason
+			 * thread since we are shutting down, no reason
 			 * to wait for current info from the database */
 			slurm_mutex_lock(&assoc_cache_mutex);
 			running_cache = (uint16_t)NO_VAL;
@@ -647,6 +647,7 @@ int main(int argc, char *argv[])
 	job_fini();
 	part_fini();	/* part_fini() must preceed node_fini() */
 	node_fini();
+	purge_front_end_state();
 	resv_fini();
 	trigger_fini();
 	dir_name = slurm_get_state_save_location();
@@ -852,7 +853,6 @@ static void _sig_handler(int signal)
 static void *_slurmctld_rpc_mgr(void *no_data)
 {
 	slurm_fd_t newsockfd;
-	slurm_fd_t maxsockfd;
 	slurm_fd_t *sockfd;	/* our set of socket file descriptors */
 	slurm_addr_t cli_addr, srv_addr;
 	uint16_t port;
@@ -895,7 +895,6 @@ static void *_slurmctld_rpc_mgr(void *no_data)
 	/* initialize ports for RPCs */
 	lock_slurmctld(config_read_lock);
 	nports = slurmctld_conf.slurmctld_port_count;
-	maxsockfd = slurmctld_conf.slurmctld_port + nports;
 	sockfd = xmalloc(sizeof(slurm_fd_t) * nports);
 	for (i=0; i<nports; i++) {
 		sockfd[i] = slurm_init_msg_engine_addrname_port(
@@ -995,7 +994,10 @@ static void *_service_connection(void *arg)
 	slurm_msg_t *msg = xmalloc(sizeof(slurm_msg_t));
 
 	slurm_msg_t_init(msg);
-
+	/*
+	 * slurm_receive_msg sets msg connection fd to accepted fd. This allows
+	 * possibility for slurmctld_req() to close accepted connection.
+	 */
 	if(slurm_receive_msg(conn->newsockfd, msg, 0) != 0) {
 		error("slurm_receive_msg: %m");
 		/* close should only be called when the socket implementation
@@ -1006,9 +1008,6 @@ static void *_service_connection(void *arg)
 		goto cleanup;
 	}
 
-	/* set msg connection fd to accepted fd. This allows
-	 *  possibility for slurmd_req () to close accepted connection
-	 */
 	if(errno != SLURM_SUCCESS) {
 		if (errno == SLURM_PROTOCOL_VERSION_ERROR) {
 			slurm_send_rc_msg(msg, SLURM_PROTOCOL_VERSION_ERROR);
@@ -1121,7 +1120,7 @@ static int _accounting_cluster_ready()
 	*/
 	total_node_bitmap = bit_alloc(node_record_count);
 	bit_nset(total_node_bitmap, 0, node_record_count-1);
-	cluster_nodes = bitmap2node_name(total_node_bitmap);
+	cluster_nodes = bitmap2node_name_sortable(total_node_bitmap, 0);
 	FREE_NULL_BITMAP(total_node_bitmap);
 	unlock_slurmctld(node_read_lock);
 
@@ -1403,9 +1402,6 @@ static void *_slurmctld_background(void *no_data)
 			last_health_check_time = now;
 			lock_slurmctld(node_write_lock);
 			run_health_check();
-#ifdef HAVE_CRAY
-			basil_query();
-#endif
 			unlock_slurmctld(node_write_lock);
 		}
 		if (((difftime(now, last_ping_node_time) >= ping_interval) ||
@@ -1549,6 +1545,7 @@ extern void save_all_state(void)
 	char *save_loc;
 
 	/* Each of these functions lock their own databases */
+	schedule_front_end_save();
 	schedule_job_save();
 	schedule_node_save();
 	schedule_part_save();
@@ -2121,12 +2118,18 @@ static int _ping_backup_controller(void)
 	slurmctld_lock_t config_read_lock = {
 		READ_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
 
+	lock_slurmctld(config_read_lock);
+	if (!slurmctld_conf.backup_addr) {
+		debug4("No backup slurmctld to ping");
+		unlock_slurmctld(config_read_lock);
+		return SLURM_SUCCESS;
+	}
+
 	/*
 	 *  Set address of controller to ping
 	 */
-	slurm_msg_t_init(&req);
-	lock_slurmctld(config_read_lock);
 	debug3("pinging backup slurmctld at %s", slurmctld_conf.backup_addr);
+	slurm_msg_t_init(&req);
 	slurm_set_addr(&req.address, slurmctld_conf.slurmctld_port,
 		       slurmctld_conf.backup_addr);
 	unlock_slurmctld(config_read_lock);

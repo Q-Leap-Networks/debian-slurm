@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -550,6 +550,25 @@ int _print_memory(sinfo_data_t * sinfo_data, int width,
 	return SLURM_SUCCESS;
 }
 
+int _print_node_address(sinfo_data_t * sinfo_data, int width,
+			bool right_justify, char *suffix)
+{
+	if (sinfo_data) {
+		char *tmp = NULL;
+		tmp = hostlist_ranged_string_xmalloc(
+				sinfo_data->node_addr);
+		_print_str(tmp, width, right_justify, true);
+		xfree(tmp);
+	} else {
+		char *title = "NODE_ADDR";
+		_print_str(title, width, right_justify, false);
+	}
+
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
 int _print_node_list(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix)
 {
@@ -567,6 +586,28 @@ int _print_node_list(sinfo_data_t * sinfo_data, int width,
 		if(params.cluster_flags & CLUSTER_FLAG_BG)
 			title = "BP_LIST";
 
+		_print_str(title, width, right_justify, false);
+	}
+
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
+int _print_node_hostnames(sinfo_data_t * sinfo_data, int width,
+			  bool right_justify, char *suffix)
+{
+	if (params.node_field_flag)
+		width = params.node_field_size;
+
+	if (sinfo_data) {
+		char *tmp = NULL;
+		tmp = hostlist_ranged_string_xmalloc(
+				sinfo_data->hostnames);
+		_print_str(tmp, width, right_justify, true);
+		xfree(tmp);
+	} else {
+		char *title = "HOSTNAMES";
 		_print_str(title, width, right_justify, false);
 	}
 

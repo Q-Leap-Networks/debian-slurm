@@ -7,7 +7,7 @@
  *  Written by Danny Auble <da@llnl.gov>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -101,6 +101,8 @@ static int _addto_used_info(slurmdb_association_rec_t *assoc1,
 	assoc1->usage->grp_used_cpus += assoc2->usage->grp_used_cpus;
 	assoc1->usage->grp_used_nodes += assoc2->usage->grp_used_nodes;
 	assoc1->usage->grp_used_wall += assoc2->usage->grp_used_wall;
+	assoc1->usage->grp_used_cpu_run_secs +=
+		assoc2->usage->grp_used_cpu_run_secs;
 
 	assoc1->usage->used_jobs += assoc2->usage->used_jobs;
 	assoc1->usage->used_submit_jobs += assoc2->usage->used_submit_jobs;
@@ -116,6 +118,7 @@ static int _clear_used_assoc_info(slurmdb_association_rec_t *assoc)
 
 	assoc->usage->grp_used_cpus = 0;
 	assoc->usage->grp_used_nodes = 0;
+	assoc->usage->grp_used_cpu_run_secs = 0;
 
 	assoc->usage->used_jobs  = 0;
 	assoc->usage->used_submit_jobs = 0;
@@ -127,6 +130,33 @@ static int _clear_used_assoc_info(slurmdb_association_rec_t *assoc)
 	return SLURM_SUCCESS;
 }
 
+static void _clear_qos_user_limit_info(slurmdb_qos_rec_t *qos_ptr)
+{
+	slurmdb_used_limits_t *used_limits = NULL;
+	ListIterator itr = NULL;
+
+	if (!qos_ptr->usage->user_limit_list
+	    || !list_count(qos_ptr->usage->user_limit_list))
+		return;
+
+	itr = list_iterator_create(qos_ptr->usage->user_limit_list);
+	while ((used_limits = list_next(itr))) {
+		used_limits->cpu_run_mins = 0; /* Currently isn't used
+						  in the code but put
+						  here for future
+						  reference when/if it
+						  is.
+					       */
+		used_limits->cpus = 0;
+		used_limits->jobs = 0;
+		used_limits->nodes = 0;
+		used_limits->submit_jobs = 0;
+	}
+	list_iterator_destroy(itr);
+
+	return;
+}
+
 static int _clear_used_qos_info(slurmdb_qos_rec_t *qos)
 {
 	if (!qos || !qos->usage)
@@ -134,6 +164,7 @@ static int _clear_used_qos_info(slurmdb_qos_rec_t *qos)
 
 	qos->usage->grp_used_cpus = 0;
 	qos->usage->grp_used_nodes = 0;
+	qos->usage->grp_used_cpu_run_secs = 0;
 
 	qos->usage->grp_used_jobs  = 0;
 	qos->usage->grp_used_submit_jobs = 0;
@@ -141,6 +172,8 @@ static int _clear_used_qos_info(slurmdb_qos_rec_t *qos)
 	 * if you need to reset it do it
 	 * else where since sometimes we call this and do not want
 	 * shares reset */
+
+	_clear_qos_user_limit_info(qos);
 
 	return SLURM_SUCCESS;
 }
@@ -1048,7 +1081,8 @@ static void _wr_wrunlock(lock_datatype_t datatype)
 	slurm_mutex_unlock(&locks_mutex);
 }
 
-extern int assoc_mgr_init(void *db_conn, assoc_init_args_t *args)
+extern int assoc_mgr_init(void *db_conn, assoc_init_args_t *args,
+			  int db_conn_errno)
 {
 	static uint16_t enforce = 0;
 	static uint16_t cache_level = ASSOC_MGR_CACHE_ALL;
@@ -1065,7 +1099,9 @@ extern int assoc_mgr_init(void *db_conn, assoc_init_args_t *args)
 	}
 
 	if (args) {
+		cache_level = args->cache_level;
 		enforce = args->enforce;
+
 		if (args->remove_assoc_notify)
 			remove_assoc_notify = args->remove_assoc_notify;
 		if (args->remove_qos_notify)
@@ -1076,7 +1112,6 @@ extern int assoc_mgr_init(void *db_conn, assoc_init_args_t *args)
 			update_qos_notify = args->update_qos_notify;
 		if (args->update_resvs)
 			update_resvs = args->update_resvs;
-		cache_level = args->cache_level;
 		assoc_mgr_refresh_lists(db_conn, args);
 	}
 
@@ -1092,8 +1127,9 @@ extern int assoc_mgr_init(void *db_conn, assoc_init_args_t *args)
 		assoc_mgr_cluster_name = slurm_get_cluster_name();
 	}
 
-	/* check if we can't talk to the db yet */
-	if (errno == ESLURM_ACCESS_DENIED)
+	/* check if we can't talk to the db yet (Do this after all
+	 * the initialization above) */
+	if (db_conn_errno != SLURM_SUCCESS)
 		return SLURM_ERROR;
 
 	/* get qos before association since it is used there */
@@ -1496,6 +1532,8 @@ extern int assoc_mgr_fill_in_assoc(void *db_conn,
 	/* if (!assoc->usage->childern_list) */
 	/* 	assoc->usage->childern_list = ret_assoc->usage->childern_list; */
 	/* assoc->usage->grp_used_cpus   = ret_assoc->usage->grp_used_cpus; */
+	/* assoc->usage->grp_used_cpu_run_mins  = */
+	/* 	ret_assoc->usage->grp_used_cpu_run_mins; */
 	/* assoc->usage->grp_used_nodes  = ret_assoc->usage->grp_used_nodes; */
 	/* assoc->usage->grp_used_wall   = ret_assoc->usage->grp_used_wall; */
 
@@ -1637,6 +1675,7 @@ extern int assoc_mgr_fill_in_qos(void *db_conn, slurmdb_qos_rec_t *qos,
 
 	qos->id = found_qos->id;
 
+	qos->grace_time      = found_qos->grace_time;
 	qos->grp_cpu_mins    = found_qos->grp_cpu_mins;
 	qos->grp_cpu_run_mins= found_qos->grp_cpu_run_mins;
 	qos->grp_cpus        = found_qos->grp_cpus;
@@ -1648,8 +1687,10 @@ extern int assoc_mgr_fill_in_qos(void *db_conn, slurmdb_qos_rec_t *qos,
 	qos->max_cpu_mins_pj = found_qos->max_cpu_mins_pj;
 	qos->max_cpu_run_mins_pu = found_qos->max_cpu_run_mins_pu;
 	qos->max_cpus_pj     = found_qos->max_cpus_pj;
+	qos->max_cpus_pu     = found_qos->max_cpus_pu;
 	qos->max_jobs_pu     = found_qos->max_jobs_pu;
 	qos->max_nodes_pj    = found_qos->max_nodes_pj;
+	qos->max_nodes_pu    = found_qos->max_nodes_pu;
 	qos->max_submit_jobs_pu = found_qos->max_submit_jobs_pu;
 	qos->max_wall_pj     = found_qos->max_wall_pj;
 
@@ -1670,6 +1711,8 @@ extern int assoc_mgr_fill_in_qos(void *db_conn, slurmdb_qos_rec_t *qos,
 	   use the pointer that is returned. */
 
 	/* qos->usage->grp_used_cpus   = found_qos->usage->grp_used_cpus; */
+	/* qos->usage->grp_used_cpu_run_mins  = */
+	/* 	found_qos->usage->grp_used_cpu_run_mins; */
 	/* qos->usage->grp_used_jobs   = found_qos->usage->grp_used_jobs; */
 	/* qos->usage->grp_used_nodes  = found_qos->usage->grp_used_nodes; */
 	/* qos->usage->grp_used_submit_jobs = */
@@ -2063,7 +2106,7 @@ extern List assoc_mgr_get_shares(void *db_conn,
 			/* We only calculate user effective usage when
 			 * we need it
 			 */
-			if (assoc->usage->usage_efctv == (long double)NO_VAL)
+			if (fuzzy_equal(assoc->usage->usage_efctv, NO_VAL))
 				priority_g_set_assoc_usage(assoc);
 
 			share->name = xstrdup(assoc->user);
@@ -2496,8 +2539,11 @@ extern int assoc_mgr_update_assocs(slurmdb_update_object_t *update)
 					goto is_user;
 				itr2 = list_iterator_create(
 					object->usage->childern_list);
-				while ((rec = list_next(itr2)))
-					count += rec->shares_raw;
+				while ((rec = list_next(itr2))) {
+					if (rec->shares_raw
+					    != SLURMDB_FS_USE_PARENT)
+						count += rec->shares_raw;
+				}
 				list_iterator_reset(itr2);
 				while ((rec = list_next(itr2)))
 					rec->usage->level_shares = count;
@@ -2877,6 +2923,8 @@ extern int assoc_mgr_update_qos(slurmdb_update_object_t *update)
 					rec->flags = object->flags;
 			}
 
+			if (object->grace_time != NO_VAL)
+				rec->grace_time = object->grace_time;
 			if (object->grp_cpu_mins != (uint64_t)NO_VAL)
 				rec->grp_cpu_mins = object->grp_cpu_mins;
 			if (object->grp_cpu_run_mins != (uint64_t)NO_VAL)
@@ -2908,11 +2956,19 @@ extern int assoc_mgr_update_qos(slurmdb_update_object_t *update)
 				update_jobs = true;
 				rec->max_cpus_pj = object->max_cpus_pj;
 			}
+			if (object->max_cpus_pu != NO_VAL) {
+				update_jobs = true;
+				rec->max_cpus_pu = object->max_cpus_pu;
+			}
 			if (object->max_jobs_pu != NO_VAL)
 				rec->max_jobs_pu = object->max_jobs_pu;
 			if (object->max_nodes_pj != NO_VAL) {
 				update_jobs = true;
 				rec->max_nodes_pj = object->max_nodes_pj;
+			}
+			if (object->max_nodes_pu != NO_VAL) {
+				update_jobs = true;
+				rec->max_nodes_pu = object->max_nodes_pu;
 			}
 			if (object->max_submit_jobs_pu != NO_VAL)
 				rec->max_submit_jobs_pu =
@@ -2953,11 +3009,10 @@ extern int assoc_mgr_update_qos(slurmdb_update_object_t *update)
 					_set_qos_norm_priority(rec);
 			}
 
-			if (object->usage_factor != (double)NO_VAL)
-				rec->usage_factor =
-					object->usage_factor;
+			if (!fuzzy_equal(object->usage_factor, NO_VAL))
+				rec->usage_factor = object->usage_factor;
 
-			if (object->usage_thres != (double)NO_VAL)
+			if (!fuzzy_equal(object->usage_thres, NO_VAL))
 				rec->usage_thres = object->usage_thres;
 
 			if (update_jobs && update_qos_notify) {
@@ -3450,7 +3505,7 @@ extern int dump_assoc_mgr_state(char *state_save_location)
 
 extern int load_assoc_usage(char *state_save_location)
 {
-	int data_allocated, data_read = 0, error_code = SLURM_SUCCESS;
+	int data_allocated, data_read = 0;
 	uint32_t data_size = 0;
 	uint16_t ver = 0;
 	int state_fd;
@@ -3472,7 +3527,6 @@ extern int load_assoc_usage(char *state_save_location)
 	state_fd = open(state_file, O_RDONLY);
 	if (state_fd < 0) {
 		debug2("No Assoc usage file (%s) to recover", state_file);
-		error_code = ENOENT;
 	} else {
 		data_allocated = BUF_SIZE;
 		data = xmalloc(data_allocated);
@@ -3557,7 +3611,7 @@ unpack_error:
 
 extern int load_qos_usage(char *state_save_location)
 {
-	int data_allocated, data_read = 0, error_code = SLURM_SUCCESS;
+	int data_allocated, data_read = 0;
 	uint32_t data_size = 0;
 	uint16_t ver = 0;
 	int state_fd;
@@ -3579,7 +3633,6 @@ extern int load_qos_usage(char *state_save_location)
 	state_fd = open(state_file, O_RDONLY);
 	if (state_fd < 0) {
 		debug2("No Qos usage file (%s) to recover", state_file);
-		error_code = ENOENT;
 	} else {
 		data_allocated = BUF_SIZE;
 		data = xmalloc(data_allocated);
@@ -3824,7 +3877,8 @@ extern int assoc_mgr_refresh_lists(void *db_conn, assoc_init_args_t *args)
 
 	/* get qos before association since it is used there */
 	if (cache_level & ASSOC_MGR_CACHE_QOS)
-		if (_refresh_assoc_mgr_qos_list(db_conn, enforce) == SLURM_ERROR)
+		if (_refresh_assoc_mgr_qos_list(db_conn, enforce)
+		    == SLURM_ERROR)
 			return SLURM_ERROR;
 
 	/* get user before association/wckey since it is used there */

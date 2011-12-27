@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -130,6 +130,13 @@ static uint32_t _parse_flags(const char *flagstr, const char *msg)
 				outflags |= RESERVE_FLAG_NO_WEEKLY;
 			else
 				outflags |= RESERVE_FLAG_WEEKLY;
+		} else if (strncasecmp(curr, "License_Only", MAX(taglen,1))
+			   == 0) {
+			curr += taglen;
+			if (flip)
+				outflags |= RESERVE_FLAG_NO_LIC_ONLY;
+			else
+				outflags |= RESERVE_FLAG_LIC_ONLY;
 		} else {
 			error("Error parsing flags %s.  %s", flagstr, msg);
 			return 0xffffffff;

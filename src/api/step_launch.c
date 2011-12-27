@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -61,7 +61,7 @@
 #include <sys/un.h>
 #include <netdb.h> /* for gethostbyname */
 
-#include <slurm/slurm.h>
+#include "slurm/slurm.h"
 
 #include "src/common/hostlist.h"
 #include "src/common/slurm_protocol_api.h"
@@ -110,9 +110,9 @@ static int  _start_io_timeout_thread(step_launch_state_t *sls);
 static void *_check_io_timeout(void *_sls);
 
 static struct io_operations message_socket_ops = {
-	readable:	&eio_message_socket_readable,
-	handle_read:	&eio_message_socket_accept,
-	handle_msg:     &_handle_msg
+	.readable = &eio_message_socket_readable,
+	.handle_read = &eio_message_socket_accept,
+	.handle_msg = &_handle_msg
 };
 
 
@@ -181,7 +181,8 @@ int slurm_step_launch (slurm_step_ctx_t *ctx,
 		return SLURM_ERROR;
 	}
 	/* Now, hack the step_layout struct if the following it true.
-	   This looks like an ugly hack to support LAM/MPI's lamboot. */
+	   This looks like an ugly hack to support LAM/MPI's lamboot.
+	   NOTE: This also gets ran for BGQ systems. */
 	if (mpi_hook_client_single_task_per_node()) {
 		for (i = 0; i < ctx->step_resp->step_layout->node_cnt; i++)
 			ctx->step_resp->step_layout->tasks[i] = 1;
@@ -258,6 +259,8 @@ int slurm_step_launch (slurm_step_ctx_t *ctx,
 	launch.tasks_to_launch = ctx->step_resp->step_layout->tasks;
 	launch.cpus_allocated  = ctx->step_resp->step_layout->tasks;
 	launch.global_task_ids = ctx->step_resp->step_layout->tids;
+
+	launch.select_jobinfo  = ctx->step_resp->select_jobinfo;
 
 	launch.user_managed_io = params->user_managed_io ? 1 : 0;
 	ctx->launch_state->user_managed_io = params->user_managed_io;
@@ -562,10 +565,10 @@ void slurm_step_launch_fwd_signal(slurm_step_ctx_t *ctx, int signo)
 		active = 0;
 		num_tasks = sls->layout->tasks[node_id];
 		for (j = 0; j < num_tasks; j++) {
-			if(bit_test(sls->tasks_started,
-				    sls->layout->tids[node_id][j]) &&
-			   !bit_test(sls->tasks_exited,
-				     sls->layout->tids[node_id][j])) {
+			if (bit_test(sls->tasks_started,
+				     sls->layout->tids[node_id][j]) &&
+			    !bit_test(sls->tasks_exited,
+				      sls->layout->tids[node_id][j])) {
 				/* this one has active tasks */
 				active = 1;
 				break;
@@ -575,14 +578,21 @@ void slurm_step_launch_fwd_signal(slurm_step_ctx_t *ctx, int signo)
 		if (!active)
 			continue;
 
-		name = nodelist_nth_host(sls->layout->node_list, node_id);
-		hostlist_push(hl, name);
-		free(name);
+		if (ctx->step_resp->step_layout->front_end) {
+			hostlist_push(hl,
+				      ctx->step_resp->step_layout->front_end);
+			break;
+		} else {
+			name = nodelist_nth_host(sls->layout->node_list,
+						 node_id);
+			hostlist_push(hl, name);
+			free(name);
+		}
 	}
 
 	pthread_mutex_unlock(&sls->lock);
 
-	if(!hostlist_count(hl)) {
+	if (!hostlist_count(hl)) {
 		hostlist_destroy(hl);
 		goto nothing_left;
 	}
@@ -638,11 +648,16 @@ struct step_launch_state *step_launch_state_create(slurm_step_ctx_t *ctx)
 
 	sls = xmalloc(sizeof(struct step_launch_state));
 	sls->slurmctld_socket_fd = -1;
+#if defined HAVE_BGQ
+//#if defined HAVE_BGQ && defined HAVE_BG_FILES
+	sls->tasks_requested = 1;
+#else
 	/* Hack for LAM-MPI's lamboot, launch one task per node */
 	if (mpi_hook_client_single_task_per_node())
 		sls->tasks_requested = layout->node_cnt;
 	else
 		sls->tasks_requested = layout->task_cnt;
+#endif
 	sls->tasks_started = bit_alloc(layout->task_cnt);
 	sls->tasks_exited = bit_alloc(layout->task_cnt);
 	sls->node_io_error = bit_alloc(layout->node_cnt);
@@ -945,7 +960,6 @@ _node_fail_handler(struct step_launch_state *sls, slurm_msg_t *fail_msg)
 	srun_node_fail_msg_t *nf = fail_msg->data;
 	hostset_t fail_nodes, all_nodes;
 	hostlist_iterator_t fail_itr;
-	char *node;
 	int num_node_ids;
 	int *node_ids;
 	int i, j;
@@ -962,7 +976,10 @@ _node_fail_handler(struct step_launch_state *sls, slurm_msg_t *fail_msg)
 	all_nodes = hostset_create(sls->layout->node_list);
 	/* find the index number of each down node */
 	for (i = 0; i < num_node_ids; i++) {
-		node = hostlist_next(fail_itr);
+#ifdef HAVE_FRONT_END
+		node_id = 0;
+#else
+		char *node = hostlist_next(fail_itr);
 		node_id = node_ids[i] = hostset_find(all_nodes, node);
 		if (node_id < 0) {
 			error(  "Internal error: bad SRUN_NODE_FAIL message. "
@@ -971,6 +988,7 @@ _node_fail_handler(struct step_launch_state *sls, slurm_msg_t *fail_msg)
 			continue;
 		}
 		free(node);
+#endif
 
 		/* find all of the tasks that should run on this node and
 		 * mark them as having started and exited.  If they haven't
@@ -1319,6 +1337,9 @@ static int _launch_tasks(slurm_step_ctx_t *ctx,
 			 launch_tasks_request_msg_t *launch_msg,
 			 uint32_t timeout)
 {
+#ifdef HAVE_FRONT_END
+	slurm_cred_arg_t cred_args;
+#endif
 	slurm_msg_t msg;
 	List ret_list = NULL;
 	ListIterator ret_itr;
@@ -1331,7 +1352,7 @@ static int _launch_tasks(slurm_step_ctx_t *ctx,
 		char *name = NULL;
 		hostlist_t hl = hostlist_create(launch_msg->complete_nodelist);
 		int i = 0;
-		while((name = hostlist_shift(hl))) {
+		while ((name = hostlist_shift(hl))) {
 			_print_launch_msg(launch_msg, name, i++);
 			free(name);
 		}
@@ -1342,9 +1363,17 @@ static int _launch_tasks(slurm_step_ctx_t *ctx,
 	msg.msg_type = REQUEST_LAUNCH_TASKS;
 	msg.data = launch_msg;
 
-	if(!(ret_list = slurm_send_recv_msgs(
-		     ctx->step_resp->step_layout->node_list,
-		     &msg, timeout, false))) {
+#ifdef HAVE_FRONT_END
+	slurm_cred_get_args(ctx->step_resp->cred, &cred_args);
+	//info("hostlist=%s", cred_args.step_hostlist);
+	ret_list = slurm_send_recv_msgs(cred_args.step_hostlist, &msg, timeout,
+					false);
+	slurm_cred_free_args(&cred_args);
+#else
+	ret_list = slurm_send_recv_msgs(ctx->step_resp->step_layout->node_list,
+					&msg, timeout, false);
+#endif
+	if (ret_list == NULL) {
 		error("slurm_send_recv_msgs failed miserably: %m");
 		return SLURM_ERROR;
 	}
@@ -1379,7 +1408,7 @@ static int _launch_tasks(slurm_step_ctx_t *ctx,
 	list_iterator_destroy(ret_itr);
 	list_destroy(ret_list);
 
-	if(tot_rc != SLURM_SUCCESS)
+	if (tot_rc != SLURM_SUCCESS)
 		return tot_rc;
 	return rc;
 }
@@ -1495,7 +1524,8 @@ _exec_prog(slurm_msg_t *msg)
 	} else {
 		close(pfd[1]);
 		len = read(pfd[0], buf, sizeof(buf));
-		close(pfd[0]);
+		if (len >= 1)
+			close(pfd[0]);
 		waitpid(child, &status, 0);
 		exit_code = WEXITSTATUS(status);
 	}
@@ -1589,11 +1619,8 @@ _check_io_timeout(void *_sls)
 {
 	int ii;
 	time_t now, next_deadline;
-	client_io_t *cio;
 	struct timespec ts = {0, 0};
 	step_launch_state_t *sls = (step_launch_state_t *)_sls;
-
-	cio = sls->io.normal;
 
 	pthread_mutex_lock(&sls->lock);
 

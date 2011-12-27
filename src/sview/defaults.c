@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -41,12 +41,12 @@
 #include "sview.h"
 #include "src/common/parse_config.h"
 #include "src/common/slurm_strcasestr.h"
-#include "src/common/parse_time.h"
 
 /* These need to be in alpha order (except POS and CNT) */
 enum {
 	SORTID_POS = POS_LOC,
 	SORTID_ADMIN,
+	SORTID_BUTTON_SIZE,
 	SORTID_DEFAULT_PAGE,
 	SORTID_GRID_HORI,
 	SORTID_GRID_VERT,
@@ -71,6 +71,8 @@ static display_data_t display_data_defaults[] = {
 	{G_TYPE_INT, SORTID_POS, NULL, FALSE, EDIT_NONE, NULL},
 	{G_TYPE_STRING, SORTID_ADMIN, "Start in Admin Mode",
 	 TRUE, EDIT_MODEL, NULL, create_model_defaults, NULL},
+	{G_TYPE_STRING, SORTID_BUTTON_SIZE, "Node Button Size in Pixels",
+	 TRUE, EDIT_TEXTBOX, NULL, create_model_defaults, NULL},
 	{G_TYPE_STRING, SORTID_DEFAULT_PAGE, "Default Page",
 	 TRUE, EDIT_MODEL, NULL, create_model_defaults, NULL},
 	{G_TYPE_STRING, SORTID_GRID_HORI, "Grid: Nodes before Horizontal break",
@@ -176,6 +178,14 @@ static const char *_set_sview_config(sview_config_t *sview_config,
 		else
 			sview_config->admin_mode = 0;
 		break;
+	case SORTID_BUTTON_SIZE:
+		type = "Button Size";
+		temp_int = strtol(new_text, (char **)NULL, 10);
+		if ((temp_int <= 0) && (temp_int != INFINITE))
+			goto return_error;
+		sview_config->button_size = temp_int;
+		sview_config->gap_size = MIN(temp_int/2, 2);
+		break;
 	case SORTID_DEFAULT_PAGE:
 		if (!strcasecmp(new_text, "job"))
 			sview_config->default_page = JOB_PAGE;
@@ -187,6 +197,8 @@ static const char *_set_sview_config(sview_config_t *sview_config,
 			sview_config->default_page = BLOCK_PAGE;
 		else if (!strcasecmp(new_text, "node"))
 			sview_config->default_page = NODE_PAGE;
+		else if (!strcasecmp(new_text, "frontend"))
+			sview_config->default_page = FRONT_END_PAGE;
 		else
 			sview_config->default_page = JOB_PAGE;
 		break;
@@ -213,7 +225,6 @@ static const char *_set_sview_config(sview_config_t *sview_config,
 	case SORTID_REFRESH_DELAY:
 		type = "Refresh Delay";
 		temp_int = strtol(new_text, (char **)NULL, 10);
-		//temp_int = time_str2secs((char *)new_text);
 		if ((temp_int <= 0) && (temp_int != INFINITE))
 			goto return_error;
 		sview_config->refresh_delay = temp_int;
@@ -391,6 +402,10 @@ static void _local_display_admin_edit(GtkTable *table,
 			temp_char = xstrdup_printf("%u",
 						   sview_config->grid_x_width);
 			break;
+		case SORTID_BUTTON_SIZE:
+			temp_char = xstrdup_printf("%u",
+						   sview_config->button_size);
+			break;
 		case SORTID_REFRESH_DELAY:
 			temp_char = xstrdup_printf("%u",
 						   sview_config->refresh_delay);
@@ -495,21 +510,24 @@ static void _init_sview_conf()
 {
 	int i;
 
+	default_sview_config.main_width = 1000;
+	default_sview_config.main_height = 500;
+	default_sview_config.fi_popup_width = 800;
+	default_sview_config.fi_popup_height = 500;
+	default_sview_config.button_size = 10;
+	default_sview_config.gap_size = 5;
 	default_sview_config.refresh_delay = 5;
 	default_sview_config.grid_x_width = 0;
 	default_sview_config.grid_hori = 10;
 	default_sview_config.grid_vert = 10;
 	default_sview_config.show_hidden = 0;
 	default_sview_config.admin_mode = FALSE;
-	default_sview_config.grid_speedup = 0;
 	default_sview_config.grid_topological = FALSE;
 	default_sview_config.ruled_treeview = FALSE;
 	default_sview_config.show_grid = TRUE;
 	default_sview_config.default_page = JOB_PAGE;
 	default_sview_config.tab_pos = GTK_POS_TOP;
 
-	if (getenv("SVIEW_GRID_SPEEDUP"))
-		default_sview_config.grid_speedup = 1;
 	for(i=0; i<PAGE_CNT; i++) {
 		memset(&default_sview_config.page_opts[i],
 		       0, sizeof(page_opts_t));
@@ -521,11 +539,12 @@ static void _init_sview_conf()
 	}
 }
 
-extern int load_defaults()
+extern int load_defaults(void)
 {
 	s_p_hashtbl_t *hashtbl = NULL;
 	s_p_options_t sview_conf_options[] = {
 		{"AdminMode", S_P_BOOLEAN},
+		{"ButtonSize", S_P_UINT16},
 		{"DefaultPage", S_P_STRING},
 		{"ExcludedPartitions", S_P_STRING},	/* Vestigial */
 		{"FullInfoPopupWidth", S_P_UINT32},
@@ -542,6 +561,7 @@ extern int load_defaults()
 		{"PageOptsNode", S_P_STRING},
 		{"PageOptsPartition", S_P_STRING},
 		{"PageOptsReservation", S_P_STRING},
+		{"PageOptsFrontend", S_P_STRING},
 		{"RefreshDelay", S_P_UINT16},
 		{"RuledTables", S_P_BOOLEAN},
 		{"SavePageSettings", S_P_BOOLEAN},
@@ -577,10 +597,15 @@ extern int load_defaults()
 
 	hashtbl = s_p_hashtbl_create(sview_conf_options);
 
-	if (s_p_parse_file(hashtbl, &hash_val, pathname) == SLURM_ERROR)
+	if (s_p_parse_file(hashtbl, &hash_val, pathname, true) == SLURM_ERROR)
 		error("something wrong with opening/reading conf file");
 
 	s_p_get_boolean(&default_sview_config.admin_mode, "AdminMode", hashtbl);
+	if (s_p_get_uint16(&default_sview_config.button_size, "ButtonSize",
+			   hashtbl)) {
+		default_sview_config.gap_size =
+			MAX(default_sview_config.button_size/2, 2);
+	}
 	if (s_p_get_string(&tmp_str, "DefaultPage", hashtbl)) {
 		if (slurm_strcasestr(tmp_str, "job"))
 			default_sview_config.default_page = JOB_PAGE;
@@ -592,12 +617,12 @@ extern int load_defaults()
 			default_sview_config.default_page = BLOCK_PAGE;
 		else if (slurm_strcasestr(tmp_str, "node"))
 			default_sview_config.default_page = NODE_PAGE;
+		else if (slurm_strcasestr(tmp_str, "frontend"))
+			default_sview_config.default_page = FRONT_END_PAGE;
 		xfree(tmp_str);
 	}
 	s_p_get_uint32(&default_sview_config.grid_hori,
 		       "GridHorizontal", hashtbl);
-	s_p_get_boolean(&default_sview_config.grid_speedup,
-			"GridSpeedup", hashtbl);
 	s_p_get_boolean(&default_sview_config.grid_topological,
 			"GridTopo", hashtbl);
 	if (default_sview_config.grid_topological == 0)
@@ -624,13 +649,6 @@ extern int load_defaults()
 		       "FullInfoPopupWidth", hashtbl);
 	s_p_get_uint32(&default_sview_config.fi_popup_height,
 		       "FullInfoPopupHeight", hashtbl);
-
-	if (default_sview_config.main_width == 0) {
-		default_sview_config.main_width=1000;
-		default_sview_config.main_height=450;
-		default_sview_config.fi_popup_width=600;
-		default_sview_config.fi_popup_height=400;
-	}
 	if (s_p_get_string(&tmp_str, "TabPosition", hashtbl)) {
 		if (slurm_strcasestr(tmp_str, "top"))
 			default_sview_config.tab_pos = GTK_POS_TOP;
@@ -644,7 +662,7 @@ extern int load_defaults()
 	}
 	if (s_p_get_string(&tmp_str, "VisiblePages", hashtbl)) {
 		int i = 0;
-		for(i=0; i<PAGE_CNT; i++)
+		for (i=0; i<PAGE_CNT; i++)
 			default_sview_config.page_visible[i] = FALSE;
 
 		if (slurm_strcasestr(tmp_str, "job"))
@@ -657,6 +675,8 @@ extern int load_defaults()
 			default_sview_config.page_visible[BLOCK_PAGE] = 1;
 		if (slurm_strcasestr(tmp_str, "node"))
 			default_sview_config.page_visible[NODE_PAGE] = 1;
+		if (slurm_strcasestr(tmp_str, "frontend"))
+			default_sview_config.page_visible[FRONT_END_PAGE] = 1;
 		xfree(tmp_str);
 	}
 
@@ -689,7 +709,7 @@ end_it:
 	       sizeof(sview_config_t));
 
 	xfree(pathname);
-	return SLURM_SUCCESS;
+	return rc;
 }
 
 extern int save_defaults(bool final_save)
@@ -742,13 +762,6 @@ extern int save_defaults(bool final_save)
 	xfree(tmp_str);
 	if (rc != SLURM_SUCCESS)
 		goto end_it;
-	tmp_str = xstrdup_printf("GridSpeedup=%s\n",
-				 default_sview_config.grid_speedup ?
-				 "YES" : "NO");
-	rc = _write_to_file(fd, tmp_str);
-	xfree(tmp_str);
-	if (rc != SLURM_SUCCESS)
-		goto end_it;
 	tmp_str = xstrdup_printf("GridTopo=%s\n",
 				 default_sview_config.grid_topological ?
 				 "YES" : "NO");
@@ -764,6 +777,12 @@ extern int save_defaults(bool final_save)
 		goto end_it;
 	tmp_str = xstrdup_printf("GridXWidth=%u\n",
 				 default_sview_config.grid_x_width);
+	rc = _write_to_file(fd, tmp_str);
+	xfree(tmp_str);
+	if (rc != SLURM_SUCCESS)
+		goto end_it;
+	tmp_str = xstrdup_printf("ButtonSize=%u\n",
+				 default_sview_config.button_size);
 	rc = _write_to_file(fd, tmp_str);
 	xfree(tmp_str);
 	if (rc != SLURM_SUCCESS)
@@ -840,9 +859,6 @@ extern int save_defaults(bool final_save)
 	if (rc != SLURM_SUCCESS)
 		goto end_it;
 
-	if (!final_save)
-		goto end_it;
-
 	/* save all current page options */
 	for (i=0; i<PAGE_CNT; i++) {
 		page_opts_t *page_opts =
@@ -878,11 +894,6 @@ extern int save_defaults(bool final_save)
 			list_iterator_destroy(itr);
 		}
 
-		if (page_opts->col_list) {
-			list_destroy(page_opts->col_list);
-			page_opts->col_list = NULL;
-		}
-
 		if (tmp_str2) {
 			replspace(tmp_str2);
 			tmp_str = xstrdup_printf("PageOpts%s=%s\n",
@@ -903,11 +914,14 @@ end_it:
 	if (rc)
 		(void) unlink(new_file);
 	else {			/* file shuffle */
-		int ign;	/* avoid warning */
 		(void) unlink(old_file);
-		ign =  link(reg_file, old_file);
+		if (link(reg_file, old_file))
+			debug4("unable to create link for %s -> %s: %m",
+			       reg_file, old_file);
 		(void) unlink(reg_file);
-		ign =  link(new_file, reg_file);
+		if (link(new_file, reg_file))
+			debug4("unable to create link for %s -> %s: %m",
+			       new_file, reg_file);
 		(void) unlink(new_file);
 	}
 
@@ -968,6 +982,11 @@ extern GtkListStore *create_model_defaults(int type)
 				   0, "node",
 				   1, type,
 				   -1);
+		gtk_list_store_append(model, &iter);
+		gtk_list_store_set(model, &iter,
+				   0, "frontend",
+				   1, type,
+				   -1);
 		break;
 	case SORTID_TAB_POS:
 		model = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_INT);
@@ -998,7 +1017,7 @@ extern GtkListStore *create_model_defaults(int type)
 	return model;
 }
 
-extern int configure_defaults()
+extern int configure_defaults(void)
 {
 	GtkScrolledWindow *window = create_scrolled_window();
 	GtkWidget *popup = gtk_dialog_new_with_buttons(
@@ -1101,6 +1120,7 @@ extern int configure_defaults()
 				cluster_change_part();
 				cluster_change_job();
 				cluster_change_node();
+				cluster_change_front_end();
 			} else if (tmp_config.grid_topological !=
 				   working_sview_config.grid_topological) {
 				apply_hidden_change = FALSE;

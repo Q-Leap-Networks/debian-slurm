@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -105,7 +105,7 @@ static int	_cancel_job(uint32_t jobid, int *err_code, char **err_msg)
 		NO_LOCK, WRITE_LOCK, NO_LOCK, NO_LOCK };
 
 	lock_slurmctld(job_write_lock);
-	slurm_rc = job_signal(jobid, SIGKILL, 0, 0);
+	slurm_rc = job_signal(jobid, SIGKILL, 0, 0, false);
 	if (slurm_rc != SLURM_SUCCESS) {
 		*err_code = -700;
 		*err_msg = slurm_strerror(slurm_rc);

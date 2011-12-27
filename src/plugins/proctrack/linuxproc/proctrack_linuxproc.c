@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -48,8 +48,9 @@
 #endif
 
 #include <sys/types.h>
-#include <slurm/slurm.h>
-#include <slurm/slurm_errno.h>
+
+#include "slurm/slurm.h"
+#include "slurm/slurm_errno.h"
 #include "src/common/log.h"
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 #include "kill_tree.h"
@@ -85,7 +86,7 @@
  */
 const char plugin_name[]      = "Process tracking via linux /proc";
 const char plugin_type[]      = "proctrack/linuxproc";
-const uint32_t plugin_version = 90;
+const uint32_t plugin_version = 91;
 
 
 /*
@@ -105,37 +106,37 @@ extern int fini ( void )
 /*
  * Uses slurmd job-step manager's pid as the unique container id.
  */
-extern int slurm_container_create ( slurmd_job_t *job )
+extern int slurm_container_plugin_create ( slurmd_job_t *job )
 {
-	job->cont_id = (uint32_t)job->jmgr_pid;
+	job->cont_id = (uint64_t)job->jmgr_pid;
 	return SLURM_SUCCESS;
 }
 
-extern int slurm_container_add ( slurmd_job_t *job, pid_t pid )
+extern int slurm_container_plugin_add ( slurmd_job_t *job, pid_t pid )
 {
 	return SLURM_SUCCESS;
 }
 
-extern int slurm_container_signal ( uint32_t id, int signal )
+extern int slurm_container_plugin_signal ( uint64_t id, int signal )
 {
 	return kill_proc_tree((pid_t)id, signal);
 }
 
-extern int slurm_container_destroy ( uint32_t id )
+extern int slurm_container_plugin_destroy ( uint64_t id )
 {
 	return SLURM_SUCCESS;
 }
 
-extern uint32_t slurm_container_find(pid_t pid)
+extern uint64_t slurm_container_plugin_find(pid_t pid)
 {
-	return (uint32_t) find_ancestor(pid, "slurmstepd");
+	return (uint64_t) find_ancestor(pid, "slurmstepd");
 }
 
-extern bool slurm_container_has_pid(uint32_t cont_id, pid_t pid)
+extern bool slurm_container_plugin_has_pid(uint64_t cont_id, pid_t pid)
 {
-	uint32_t cont;
+	uint64_t cont;
 
-	cont = (uint32_t) find_ancestor(pid, "slurmstepd");
+	cont = (uint64_t) find_ancestor(pid, "slurmstepd");
 	if (cont == cont_id)
 		return true;
 
@@ -143,7 +144,7 @@ extern bool slurm_container_has_pid(uint32_t cont_id, pid_t pid)
 }
 
 extern int
-slurm_container_wait(uint32_t cont_id)
+slurm_container_plugin_wait(uint64_t cont_id)
 {
 	int delay = 1;
 
@@ -153,13 +154,13 @@ slurm_container_wait(uint32_t cont_id)
 	}
 
 	/* Spin until the container is successfully destroyed */
-	while (slurm_container_destroy(cont_id) != SLURM_SUCCESS) {
-		slurm_container_signal(cont_id, SIGKILL);
+	while (slurm_container_plugin_destroy(cont_id) != SLURM_SUCCESS) {
+		slurm_container_plugin_signal(cont_id, SIGKILL);
 		sleep(delay);
 		if (delay < 120) {
 			delay *= 2;
 		} else {
-			error("Unable to destroy container %u", cont_id);
+			error("Unable to destroy container %"PRIu64"", cont_id);
 		}
 	}
 
@@ -167,7 +168,7 @@ slurm_container_wait(uint32_t cont_id)
 }
 
 extern int
-slurm_container_get_pids(uint32_t cont_id, pid_t **pids, int *npids)
+slurm_container_plugin_get_pids(uint64_t cont_id, pid_t **pids, int *npids)
 {
 	return proctrack_linuxproc_get_pids((pid_t)cont_id, pids, npids);
 }

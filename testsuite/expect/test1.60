@@ -14,7 +14,7 @@
 # CODE-OCEC-09-009. All rights reserved.
 #
 # This file is part of SLURM, a resource management program.
-# For details, see <https://computing.llnl.gov/linux/slurm/>.
+# For details, see <http://www.schedmd.com/slurmdocs/>.
 # Please also read the included file: DISCLAIMER.
 #
 # SLURM is free software; you can redistribute it and/or modify it under
@@ -48,9 +48,9 @@ set file_out_n_glob  ""
 
 print_header $test_id
 
-if {[test_bluegene] != 0} {
-	send_user "\nWARNING: This test is incompatible with bluegene systems\n"
-	exit 0
+if {[test_front_end]} {
+        send_user "\nWARNING: This test is incompatible with front-end systems\n"
+        exit $exit_code
 }
 
 #
@@ -83,18 +83,14 @@ if {$job_id == 0} {
 }
 
 set node_count 0
-if { [test_bluegene] } {
-	set node_count 1
-} else {
-	spawn $squeue -tall -j $job_id -o "%i %D"
-	expect {
-		-re "$job_id ($number)" {
-			set node_count $expect_out(1,string)
-			exp_continue
-		}
-		eof {
-			wait
-		}
+spawn $squeue -tall -j $job_id -o "%i %D"
+expect {
+	-re "$job_id ($number)" {
+		set node_count $expect_out(1,string)
+		exp_continue
+	}
+	eof {
+		wait
 	}
 }
 if {$node_count == 0} {

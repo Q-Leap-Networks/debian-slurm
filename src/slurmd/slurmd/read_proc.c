@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -221,6 +221,8 @@ parse_proc_stat(char* proc_stat, int *session, unsigned long *time,
 		&start_stack, &kstk_esp, &kstk_eip,
 /*		&signal, &blocked, &sig_ignore, &sig_catch, */ /* can't use */
 		&w_chan, &n_swap, &sn_swap /* , &Exit_signal  */, &l_proc);
+	if (num < 13)
+		error("/proc entry too short (%s)", proc_stat);
 	*time = (utime + stime) / hertz;
 	return 0;
 }

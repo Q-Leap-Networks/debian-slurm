@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -291,6 +291,21 @@ job_format_add_function(List list, int width, bool right, char *suffix,
 	return SLURM_SUCCESS;
 }
 
+int _print_job_batch_host(job_info_t * job, int width, bool right, char* suffix)
+{
+	if (job == NULL)	/* Print the Header instead */
+		_print_str("EXEC_HOST", width, right, true);
+	else {
+		char *eh = job->batch_flag ? job->batch_host : job->alloc_node;
+		char id[FORMAT_STRING_SIZE];
+
+		snprintf(id, FORMAT_STRING_SIZE, "%s", eh ? eh : "n/a");
+		_print_str(id, width, right, true);
+	}
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
 
 int _print_job_job_id(job_info_t * job, int width, bool right, char* suffix)
 {
@@ -351,6 +366,18 @@ int _print_job_name(job_info_t * job, int width, bool right, char* suffix)
 		_print_str("NAME", width, right, true);
 	else
 		_print_str(job->name, width, right, true);
+
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
+int _print_job_licenses(job_info_t * job, int width, bool right, char* suffix)
+{
+	if (job == NULL)	/* Print the Header instead */
+		_print_str("LICENSES", width, right, true);
+	else
+		_print_str(job->licenses, width, right, true);
 
 	if (suffix)
 		printf("%s", suffix);
@@ -589,8 +616,23 @@ int _print_job_nodes(job_info_t * job, int width, bool right, char* suffix)
 		if(params.cluster_flags & CLUSTER_FLAG_BG)
 			title = "BP_LIST";
 		_print_str(title, width, right, false);
-	} else
-		_print_nodes(job->nodes, width, right, false);
+	} else {
+		char *nodes = xstrdup(job->nodes);
+		char *ionodes = NULL;
+
+		if (nodes) {
+			select_g_select_jobinfo_get(job->select_jobinfo,
+						    SELECT_JOBDATA_IONODES,
+						    &ionodes);
+		}
+		if (ionodes) {
+			xstrfmtcat(nodes, "[%s]", ionodes);
+			xfree(ionodes);
+			_print_str(nodes, width, right, false);
+		} else
+			_print_nodes(nodes, width, right, false);
+		xfree(nodes);
+	}
 
 	if (suffix)
 		printf("%s", suffix);
@@ -620,10 +662,9 @@ int _print_job_reason_list(job_info_t * job, int width, bool right,
 		char *nodes = xstrdup(job->nodes);
 		char *ionodes = NULL;
 
-		if(params.cluster_flags & CLUSTER_FLAG_BG)
-			select_g_select_jobinfo_get(job->select_jobinfo,
-						    SELECT_JOBDATA_IONODES,
-						    &ionodes);
+		select_g_select_jobinfo_get(job->select_jobinfo,
+					    SELECT_JOBDATA_IONODES,
+					    &ionodes);
 		if(ionodes) {
 			xstrfmtcat(nodes, "[%s]", ionodes);
 			xfree(ionodes);
@@ -1271,8 +1312,24 @@ int _print_step_nodes(job_step_info_t * step, int width, bool right,
 			title = "BP_LIST";
 
 		_print_str(title, width, right, false);
-	} else
-		_print_nodes(step->nodes, width, right, false);
+	} else {
+		char *nodes = xstrdup(step->nodes);
+		char *ionodes = NULL;
+
+		if (nodes) {
+			select_g_select_jobinfo_get(step->select_jobinfo,
+						    SELECT_JOBDATA_IONODES,
+						    &ionodes);
+		}
+		if (ionodes) {
+			xstrfmtcat(nodes, "[%s]", ionodes);
+			xfree(ionodes);
+			_print_str(nodes, width, right, false);
+		} else
+			_print_nodes(nodes, width, right, false);
+		xfree(nodes);
+	}
+
 	if (suffix)
 		printf("%s", suffix);
 	return SLURM_SUCCESS;
@@ -1421,6 +1478,13 @@ static int _filter_job(job_info_t * job)
 		list_iterator_destroy(iterator);
 		if (filter == 1)
 			return 6;
+	}
+
+	if (params.reservation) {
+		if ((job->resv_name == NULL) ||
+		    (strcmp(job->resv_name, params.reservation))) {
+			return 7;
+		}
 	}
 
 	return 0;

@@ -3,9 +3,6 @@
 /* Define if building universal (internal helper macro) */
 #undef AC_APPLE_UNIVERSAL_BUILD
 
-/* Define the apbasil command location */
-#undef APBASIL_LOC
-
 /* Define the BG_BRIDGE_SO value */
 #undef BG_BRIDGE_SO
 
@@ -39,8 +36,14 @@
 /* Define to 1 if 3-dimensional architecture */
 #undef HAVE_3D
 
+/* Define to 1 if 4-dimensional architecture */
+#undef HAVE_4D
+
 /* Define to 1 for AIX operating system */
 #undef HAVE_AIX
+
+/* Define to 1 if running against an Alps emulation */
+#undef HAVE_ALPS_EMULATION
 
 /* Define to 1 if emulating or running on Blue Gene system */
 #undef HAVE_BG
@@ -63,8 +66,11 @@
 /* Define to 1 if you have the `cfmakeraw' function. */
 #undef HAVE_CFMAKERAW
 
-/* Define if Cray system */
+/* Define to 1 for Cray XT/XE systems */
 #undef HAVE_CRAY
+
+/* Define to 1 for emulating a Cray XT/XE system */
+#undef HAVE_CRAY_EMULATION
 
 /* Define to 1 if you have the <curses.h> header file. */
 #undef HAVE_CURSES_H
@@ -135,6 +141,12 @@
 
 /* define if you have libelanhosts. */
 #undef HAVE_LIBELANHOSTS
+
+/* Define to 1 if you have the `expat' library (-lexpat). */
+#undef HAVE_LIBEXPAT
+
+/* Define to 1 if you have the `job' library (-ljob). */
+#undef HAVE_LIBJOB
 
 /* define if you have libntbl. */
 #undef HAVE_LIBNTBL
@@ -208,6 +220,9 @@
 
 /* Define if you are compiling with readline. */
 #undef HAVE_READLINE
+
+/* Define to 1 for running on a real Cray XT/XE system */
+#undef HAVE_REAL_CRAY
 
 /* Define to 1 if you have the `sched_setaffinity' function. */
 #undef HAVE_SCHED_SETAFFINITY
@@ -389,6 +404,9 @@
 /* Define the project's release. */
 #undef RELEASE
 
+/* Define to 1 for salloc to kill child processes at job termination */
+#undef SALLOC_KILL_CMD
+
 /* Define to 1 to require salloc execution in the foreground. */
 #undef SALLOC_RUN_FOREGROUND
 
@@ -461,7 +479,7 @@
 /* Define to 1 if strerror_r returns char *. */
 #undef STRERROR_R_CHAR_P
 
-/* Define system dimension count */
+/* 3-dimensional architecture */
 #undef SYSTEM_DIMENSIONS
 
 /* Define to 1 if you can safely include both <sys/time.h> and <time.h>. */

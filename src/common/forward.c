@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -47,7 +47,7 @@
 #include <stdlib.h>
 #include <sys/types.h>
 
-#include <slurm/slurm.h>
+#include "slurm/slurm.h"
 
 #include "src/common/forward.h"
 #include "src/common/xmalloc.h"
@@ -84,7 +84,6 @@ void *_forward_thread(void *arg)
 {
 	forward_msg_t *fwd_msg = (forward_msg_t *)arg;
 	Buf buffer = init_buf(fwd_msg->buf_len);
-	int i=0;
 	List ret_list = NULL;
 	slurm_fd_t fd = -1;
 	ret_data_info_t *ret_data_info = NULL;
@@ -182,7 +181,6 @@ void *_forward_thread(void *arg)
 			list_push(fwd_msg->ret_list, ret_data_info);
 			ret_data_info->node_name = xstrdup(name);
 			free(name);
-			i=0;
 			while((name = hostlist_shift(hl))) {
 				ret_data_info =
 					xmalloc(sizeof(ret_data_info_t));
@@ -315,9 +313,9 @@ void *_fwd_tree_thread(void *arg)
 	send_msg.data = fwd_tree->orig_msg->data;
 
 	/* repeat until we are sure the message was sent */
-	while((name = hostlist_shift(fwd_tree->tree_hl))) {
-		if(slurm_conf_get_addr(name, &send_msg.address)
-		   == SLURM_ERROR) {
+	while ((name = hostlist_shift(fwd_tree->tree_hl))) {
+		if (slurm_conf_get_addr(name, &send_msg.address)
+		    == SLURM_ERROR) {
 			error("fwd_tree_thread: can't find address for host "
 			      "%s, check slurm.conf", name);
 			slurm_mutex_lock(fwd_tree->tree_mutex);

@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -41,22 +41,25 @@ int g_node_scaling = 1;
 /* These need to be in alpha order (except POS and CNT) */
 enum {
 	SORTID_POS = POS_LOC,
+	SORTID_ARCH,
 	SORTID_BOOT_TIME,
 	SORTID_COLOR,
 	SORTID_CPUS,
 	SORTID_CORES,
-	SORTID_DISK,
 	SORTID_ERR_CPUS,
 	SORTID_FEATURES,
 	SORTID_GRES,
-	SORTID_MEMORY,
 	SORTID_NAME,
+	SORTID_NODE_ADDR,
+	SORTID_NODE_HOSTNAME,
+	SORTID_MEMORY,	/* RealMemory */
 	SORTID_REASON,
 	SORTID_SLURMD_START_TIME,
 	SORTID_SOCKETS,
 	SORTID_STATE,
 	SORTID_STATE_NUM,
 	SORTID_THREADS,
+	SORTID_DISK,	/* TmpDisk */
 	SORTID_UPDATED,
 	SORTID_USED_CPUS,
 	SORTID_WEIGHT,
@@ -80,6 +83,10 @@ static display_data_t display_data_node[] = {
 	 create_model_node, admin_edit_node},
 	{G_TYPE_STRING, SORTID_NAME, "Name", FALSE, EDIT_NONE, refresh_node,
 	 create_model_node, admin_edit_node},
+	{G_TYPE_STRING, SORTID_NODE_ADDR, "NodeAddr", FALSE, EDIT_NONE,
+	 refresh_node, create_model_node, admin_edit_node},
+	{G_TYPE_STRING, SORTID_NODE_HOSTNAME, "NodeHostName", FALSE, EDIT_NONE,
+	 refresh_node, create_model_node, admin_edit_node},
 	{G_TYPE_STRING, SORTID_COLOR, NULL, TRUE, EDIT_COLOR, refresh_node,
 	 create_model_node, admin_edit_node},
 	{G_TYPE_STRING, SORTID_STATE, "State", FALSE, EDIT_MODEL, refresh_node,
@@ -104,6 +111,8 @@ static display_data_t display_data_node[] = {
 	 create_model_node, admin_edit_node},
 	{G_TYPE_INT, SORTID_WEIGHT,"Weight", FALSE, EDIT_NONE, refresh_node,
 	 create_model_node, admin_edit_node},
+	{G_TYPE_STRING, SORTID_ARCH, "Arch", FALSE,
+	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
 	{G_TYPE_STRING, SORTID_FEATURES, "Features", FALSE,
 	 EDIT_TEXTBOX, refresh_node, create_model_node, admin_edit_node},
 	{G_TYPE_STRING, SORTID_GRES, "Gres", FALSE,
@@ -125,14 +134,14 @@ static display_data_t options_data_node[] = {
 #ifdef HAVE_BG
 	{G_TYPE_STRING, NODE_PAGE, "Drain Base Partition", TRUE, ADMIN_PAGE},
 	{G_TYPE_STRING, NODE_PAGE, "Resume Base Partition", TRUE, ADMIN_PAGE},
-	{G_TYPE_STRING, NODE_PAGE, "Put Base Partition Down",
+	{G_TYPE_STRING, NODE_PAGE, "Set Base Partition Down",
 	 TRUE, ADMIN_PAGE},
 	{G_TYPE_STRING, NODE_PAGE, "Make Base Partition Idle",
 	 TRUE, ADMIN_PAGE},
 #else
 	{G_TYPE_STRING, NODE_PAGE, "Drain Node", TRUE, ADMIN_PAGE},
 	{G_TYPE_STRING, NODE_PAGE, "Resume Node", TRUE, ADMIN_PAGE},
-	{G_TYPE_STRING, NODE_PAGE, "Put Node(s) Down", TRUE, ADMIN_PAGE},
+	{G_TYPE_STRING, NODE_PAGE, "Set Node(s) Down", TRUE, ADMIN_PAGE},
 	{G_TYPE_STRING, NODE_PAGE, "Make Node(s) Idle", TRUE, ADMIN_PAGE},
 #endif
 	{G_TYPE_STRING, NODE_PAGE, "Update Features", TRUE, ADMIN_PAGE},
@@ -170,6 +179,16 @@ static void _layout_node_record(GtkTreeView *treeview,
 				   find_col_name(display_data_node,
 						 SORTID_NAME),
 				   node_ptr->name);
+
+	add_display_treestore_line(update, treestore, &iter,
+				   find_col_name(display_data_node,
+						 SORTID_NODE_ADDR),
+				   node_ptr->node_addr);
+
+	add_display_treestore_line(update, treestore, &iter,
+				   find_col_name(display_data_node,
+						 SORTID_NODE_HOSTNAME),
+				   node_ptr->node_hostname);
 
 	convert_num_unit((float)node_ptr->cpus, tmp_cnt, sizeof(tmp_cnt),
 			 UNIT_NONE);
@@ -264,6 +283,10 @@ static void _layout_node_record(GtkTreeView *treeview,
 				   tmp_cnt);
 	add_display_treestore_line(update, treestore, &iter,
 				   find_col_name(display_data_node,
+						 SORTID_ARCH),
+				   node_ptr->arch);
+	add_display_treestore_line(update, treestore, &iter,
+				   find_col_name(display_data_node,
 						 SORTID_FEATURES),
 				   node_ptr->features);
 	add_display_treestore_line(update, treestore, &iter,
@@ -288,92 +311,85 @@ static void _layout_node_record(GtkTreeView *treeview,
 static void _update_node_record(sview_node_info_t *sview_node_info_ptr,
 				GtkTreeStore *treestore, GtkTreeIter *iter)
 {
-	char tmp_cnt[17];
-	char *upper = NULL, *lower = NULL;
-	uint16_t err_cpus = 0, alloc_cpus = 0;
+	uint16_t alloc_cpus = 0, err_cpus = 0, idle_cpus;
 	node_info_t *node_ptr = sview_node_info_ptr->node_ptr;
-	int idle_cpus = node_ptr->cpus;
+	char tmp_disk[20], tmp_err_cpus[20], tmp_mem[20], tmp_used_cpus[20];
+	char *tmp_state_lower, *tmp_state_upper;
 
-	gtk_tree_store_set(treestore, iter, SORTID_COLOR,
-			   sview_colors[sview_node_info_ptr->pos
-					% sview_colors_cnt], -1);
-
-	gtk_tree_store_set(treestore, iter, SORTID_NAME, node_ptr->name, -1);
-
-	gtk_tree_store_set(treestore, iter, SORTID_STATE_NUM,
-			   node_ptr->node_state, -1);
-	gtk_tree_store_set(treestore, iter, SORTID_CPUS, node_ptr->cpus, -1);
 	select_g_select_nodeinfo_get(node_ptr->select_nodeinfo,
 				     SELECT_NODEDATA_SUBCNT,
 				     NODE_STATE_ALLOCATED,
 				     &alloc_cpus);
 	if (cluster_flags & CLUSTER_FLAG_BG) {
-		if (!alloc_cpus
-		    && (IS_NODE_ALLOCATED(node_ptr)
-			|| IS_NODE_COMPLETING(node_ptr)))
+		if (!alloc_cpus &&
+		    (IS_NODE_ALLOCATED(node_ptr) ||
+		     IS_NODE_COMPLETING(node_ptr)))
 			alloc_cpus = node_ptr->cpus;
 		else
 			alloc_cpus *= cpus_per_node;
 	}
-
-	idle_cpus -= alloc_cpus;
-	convert_num_unit((float)alloc_cpus, tmp_cnt,
-			 sizeof(tmp_cnt), UNIT_NONE);
-	gtk_tree_store_set(treestore, iter, SORTID_USED_CPUS,
-			   tmp_cnt, -1);
+	idle_cpus = node_ptr->cpus - alloc_cpus;
+	convert_num_unit((float)alloc_cpus, tmp_used_cpus,
+			 sizeof(tmp_used_cpus), UNIT_NONE);
 
 	select_g_select_nodeinfo_get(node_ptr->select_nodeinfo,
 				     SELECT_NODEDATA_SUBCNT,
 				     NODE_STATE_ERROR,
 				     &err_cpus);
-
 	if (cluster_flags & CLUSTER_FLAG_BG)
 		err_cpus *= cpus_per_node;
-
 	idle_cpus -= err_cpus;
-	convert_num_unit((float)err_cpus, tmp_cnt, sizeof(tmp_cnt), UNIT_NONE);
-	gtk_tree_store_set(treestore, iter, SORTID_ERR_CPUS,
-			   tmp_cnt, -1);
+	convert_num_unit((float)err_cpus, tmp_err_cpus, sizeof(tmp_err_cpus),
+			 UNIT_NONE);
 
 	if (IS_NODE_DRAIN(node_ptr)) {
 		/* don't worry about mixed since the
-		   whole node is being drained. */
-	} else if ((alloc_cpus && err_cpus)
-		   || (idle_cpus  && (idle_cpus != node_ptr->cpus))) {
+		 * whole node is being drained. */
+	} else if ((alloc_cpus && err_cpus) ||
+		   (idle_cpus  && (idle_cpus != node_ptr->cpus))) {
 		node_ptr->node_state &= NODE_STATE_FLAGS;
 		node_ptr->node_state |= NODE_STATE_MIXED;
 	}
+	tmp_state_upper = node_state_string(node_ptr->node_state);
+	tmp_state_lower = str_tolower(tmp_state_upper);
 
-	upper = node_state_string(node_ptr->node_state);
-	lower = str_tolower(upper);
-
-	gtk_tree_store_set(treestore, iter, SORTID_STATE, lower, -1);
-	xfree(lower);
-
-	gtk_tree_store_set(treestore, iter, SORTID_CORES, node_ptr->cpus, -1);
-	gtk_tree_store_set(treestore, iter, SORTID_SOCKETS,
-			   node_ptr->sockets, -1);
-	gtk_tree_store_set(treestore, iter, SORTID_THREADS,
-			   node_ptr->threads, -1);
-	convert_num_unit((float)node_ptr->real_memory, tmp_cnt, sizeof(tmp_cnt),
+	convert_num_unit((float)node_ptr->real_memory, tmp_mem, sizeof(tmp_mem),
 			 UNIT_MEGA);
-	gtk_tree_store_set(treestore, iter, SORTID_MEMORY, tmp_cnt, -1);
-	convert_num_unit((float)node_ptr->tmp_disk, tmp_cnt, sizeof(tmp_cnt),
+
+	convert_num_unit((float)node_ptr->tmp_disk, tmp_disk, sizeof(tmp_disk),
 			 UNIT_MEGA);
-	gtk_tree_store_set(treestore, iter, SORTID_DISK, tmp_cnt, -1);
-	gtk_tree_store_set(treestore, iter, SORTID_WEIGHT,
-			   node_ptr->weight, -1);
-	gtk_tree_store_set(treestore, iter, SORTID_FEATURES,
-			   node_ptr->features, -1);
-	gtk_tree_store_set(treestore, iter, SORTID_GRES,
-			   node_ptr->gres, -1);
-	gtk_tree_store_set(treestore, iter, SORTID_BOOT_TIME,
-			   sview_node_info_ptr->boot_time, -1);
-	gtk_tree_store_set(treestore, iter, SORTID_SLURMD_START_TIME,
-			   sview_node_info_ptr->slurmd_start_time, -1);
-	gtk_tree_store_set(treestore, iter, SORTID_REASON,
-			   sview_node_info_ptr->reason, -1);
-	gtk_tree_store_set(treestore, iter, SORTID_UPDATED, 1, -1);
+
+
+	/* Combining these records provides a slight performance improvement */
+	gtk_tree_store_set(treestore, iter,
+			   SORTID_ARCH,      node_ptr->arch,
+			   SORTID_BOOT_TIME, sview_node_info_ptr->boot_time,
+			   SORTID_COLOR,
+				sview_colors[sview_node_info_ptr->pos
+				% sview_colors_cnt],
+			   SORTID_CORES,     node_ptr->cpus,
+			   SORTID_CPUS,      node_ptr->cpus,
+			   SORTID_DISK,      tmp_disk,
+			   SORTID_ERR_CPUS,  tmp_err_cpus,
+			   SORTID_FEATURES,  node_ptr->features,
+			   SORTID_GRES,      node_ptr->gres,
+			   SORTID_MEMORY,    tmp_mem,
+			   SORTID_NAME,      node_ptr->name,
+			   SORTID_NODE_ADDR, node_ptr->node_addr,
+			   SORTID_NODE_HOSTNAME, node_ptr->node_hostname,
+			   SORTID_REASON,    sview_node_info_ptr->reason,
+			   SORTID_SLURMD_START_TIME,
+				sview_node_info_ptr->slurmd_start_time,
+			   SORTID_SOCKETS,   node_ptr->sockets,
+			   SORTID_STATE,     tmp_state_lower,
+			   SORTID_STATE_NUM, node_ptr->node_state,
+			   SORTID_THREADS,   node_ptr->threads,
+			   SORTID_USED_CPUS, tmp_used_cpus,
+			   SORTID_WEIGHT,    node_ptr->weight,
+			   SORTID_UPDATED,   1,
+			  -1);
+
+	xfree(tmp_state_lower);
 
 	return;
 }
@@ -385,34 +401,6 @@ static void _append_node_record(sview_node_info_t *sview_node_info,
 	gtk_tree_store_set(treestore, iter, SORTID_POS,
 			   sview_node_info->pos, -1);
 	_update_node_record(sview_node_info, treestore, iter);
-}
-
-static int _get_topo_color_ndx(int node_ndx)
-{
-	int i = 0;
-	int rdx = MAKE_TOPO_2;
-	switch_record_bitmaps_t *sw_nodes_bitmaps_ptr = g_switch_nodes_maps;
-
-	for (i=0; i<g_topo_info_msg_ptr->record_count;
-	     i++, sw_nodes_bitmaps_ptr++) {
-		if (g_topo_info_msg_ptr->topo_array[i].level)
-			continue;
-		if (bit_test(sw_nodes_bitmaps_ptr->node_bitmap, node_ndx)) {
-			rdx = i;
-			break;
-		}
-	}
-	if (rdx == MAKE_TOPO_2)
-		return rdx;
-//	if (rdx != _l_sw_color_ndx) {
-//		_l_sw_color_ndx = rdx;
-//		if (_l_topo_color_ndx == MAKE_TOPO_1)
-//			_l_topo_color_ndx = MAKE_TOPO_2;
-//		else
-//			_l_topo_color_ndx = MAKE_TOPO_1;
-//	}
-//	return _l_topo_color_ndx;
-	return MAKE_TOPO_1;
 }
 
 static void _update_info_node(List info_list, GtkTreeView *tree_view)
@@ -436,38 +424,28 @@ static void _update_info_node(List info_list, GtkTreeView *tree_view)
 			}
 		}
 	}
+
 	itr = list_iterator_create(info_list);
 	while ((sview_node_info = (sview_node_info_t*) list_next(itr))) {
 		node_ptr = sview_node_info->node_ptr;
-		/* get the iter, or find out the list is empty goto add */
-		if (!gtk_tree_model_get_iter(model, &iter, path)) {
-			goto adding;
-		}
-
-		while (1) {
-			/* search for the node name and check to see if
-			   it is in the list */
-			gtk_tree_model_get(model, &iter, SORTID_NAME,
-					   &name, -1);
-			if (!strcmp(name, node_ptr->name)) {
-				/* update with new info */
-				g_free(name);
-				_update_node_record(sview_node_info,
-						    GTK_TREE_STORE(model),
-						    &iter);
-				goto found;
-			}
-			g_free(name);
-
-			if (!gtk_tree_model_iter_next(model, &iter)) {
-				break;
+		if (sview_node_info->iter_set) {
+			gtk_tree_model_get(model, &sview_node_info->iter_ptr,
+					   SORTID_NAME, &name, -1);
+			if (strcmp(name, node_ptr->name)) { /* Bad pointer */
+				sview_node_info->iter_set = false;
+				//g_print("bad node iter pointer\n");
 			}
 		}
-	adding:
-		_append_node_record(sview_node_info,
-				    GTK_TREE_STORE(model), &iter);
-	found:
-		;
+		if (sview_node_info->iter_set) {
+			_update_node_record(sview_node_info,
+					    GTK_TREE_STORE(model),
+					    &sview_node_info->iter_ptr);
+		} else {
+			_append_node_record(sview_node_info,
+					    GTK_TREE_STORE(model),
+					    &sview_node_info->iter_ptr);
+			sview_node_info->iter_set = true;
+		}
 	}
 	list_iterator_destroy(itr);
 
@@ -693,9 +671,7 @@ extern int get_new_info_node(node_info_msg_t **info_ptr, int force)
 		if (*info_ptr != g_node_info_ptr)
 			error_code = SLURM_SUCCESS;
 		*info_ptr = g_node_info_ptr;
-		if (changed)
-			error_code = SLURM_SUCCESS;
-		goto end_it;
+		return error_code;
 	}
 	last = now;
 
@@ -806,9 +782,9 @@ extern int get_new_info_node(node_info_msg_t **info_ptr, int force)
 
 	if (!g_topo_info_msg_ptr &&
 	    default_sview_config.grid_topological) {
-		get_topo_conf(); /*pull in topology NOW*/
+		get_topo_conf(); /* pull in topology NOW */
 	}
-end_it:
+
 	return error_code;
 }
 
@@ -1030,11 +1006,18 @@ extern int update_state_node(GtkDialog *dialog,
 			 nodelist);
 		label = gtk_label_new(tmp_char);
 		state = NODE_RESUME;
+	} else if (!strncasecmp("set", type, 3)) {
+		snprintf(tmp_char, sizeof(tmp_char),
+			 "Are you sure you want to down node(s) %s?\n\n"
+			 "Please put reason.",
+			 nodelist);
+		entry = create_entry();
+		label = gtk_label_new(tmp_char);
+		state = NODE_STATE_DOWN;
 	} else {
+
 		if (!strncasecmp("make", type, 4))
 			type = "idle";
-		else if (!strncasecmp("put", type, 3))
-			type = "down";
 		for(i = 0; i < NODE_STATE_END; i++) {
 			upper = node_state_string(i);
 			lower = str_tolower(upper);
@@ -1183,8 +1166,7 @@ extern void get_info_node(GtkTable *table, display_data_t *display_data)
 	static GtkWidget *display_widget = NULL;
 	List info_list = NULL;
 	int changed = 1;
-	int i = 0;
-	int b_color_ndx;
+	int i = 0, sort_key;
 	sview_node_info_t *sview_node_info_ptr = NULL;
 	ListIterator itr = NULL;
 	GtkTreePath *path = NULL;
@@ -1234,14 +1216,12 @@ extern void get_info_node(GtkTable *table, display_data_t *display_data)
 		gtk_widget_show(label);
 		goto end_it;
 	}
+
 display_it:
-
-	info_list = create_node_info_list(node_info_ptr, changed,
-					  FALSE);
-
+	info_list = create_node_info_list(node_info_ptr, changed, FALSE);
 	if (!info_list)
 		goto reset_curs;
-	i=0;
+	i = 0;
 	/* set up the grid */
 	if (display_widget && GTK_IS_TREE_VIEW(display_widget) &&
 	    gtk_tree_selection_count_selected_rows(
@@ -1252,34 +1232,24 @@ display_it:
 		gtk_tree_view_get_cursor(GTK_TREE_VIEW(display_widget),
 					 &path, &focus_column);
 	}
-	if (!path || working_sview_config.grid_topological) {
+	if (!path) {
+		int array_size = node_info_ptr->record_count;
+		int  *color_inx = xmalloc(sizeof(int) * array_size);
+		bool *color_set_flag = xmalloc(sizeof(bool) * array_size);
 		itr = list_iterator_create(info_list);
 		while ((sview_node_info_ptr = list_next(itr))) {
-			if (g_topo_info_msg_ptr) {
-				//derive topo_color
-				b_color_ndx = _get_topo_color_ndx(i);
-
-				if (b_color_ndx != MAKE_TOPO_2) {
-					/* node belongs to a switch */
-					if (sview_node_info_ptr->node_ptr->
-					    node_state != NODE_STATE_IDLE )
-						b_color_ndx = i;
-				}
-			} else
-				b_color_ndx = i;
-			change_grid_color(grid_button_list, i, i,
-					  b_color_ndx, true, 0);
+			color_set_flag[i] = true;
+			color_inx[i] = i;
 			i++;
 		}
 		list_iterator_destroy(itr);
+		change_grid_color_array(grid_button_list, array_size,
+					color_inx, color_set_flag, true, 0);
+		xfree(color_inx);
+		xfree(color_set_flag);
 	} else
 		highlight_grid(GTK_TREE_VIEW(display_widget),
 			       SORTID_POS, (int)NO_VAL, grid_button_list);
-
-	if (working_sview_config.grid_speedup) {
-		gtk_widget_set_sensitive(GTK_WIDGET(main_grid_table), 0);
-		gtk_widget_set_sensitive(GTK_WIDGET(main_grid_table), 1);
-	}
 
 	if (view == ERROR_VIEW && display_widget) {
 		gtk_widget_destroy(display_widget);
@@ -1296,13 +1266,26 @@ display_it:
 		gtk_table_attach_defaults(GTK_TABLE(table),
 					  GTK_WIDGET(tree_view),
 					  0, 1, 0, 1);
-		/* since this function sets the model of the tree_view
-		   to the treestore we don't really care about
-		   the return value */
+		/* Since this function sets the model of the tree_view to the
+		 * treestore we don't really care about the return value
+		 * On large clusters, sorting on the node name slows GTK down
+		 * by a large margin. */
+		if (node_info_ptr->record_count > 1000)
+			sort_key = -1;
+		else
+			sort_key = SORTID_NAME;
 		create_treestore(tree_view, display_data_node,
-				 SORTID_CNT, SORTID_NAME, SORTID_COLOR);
+				 SORTID_CNT, sort_key, SORTID_COLOR);
 	}
+
 	view = INFO_VIEW;
+	/* If the system has a large number of nodes then not all lines
+	 * will be displayed. You can try different values for the third
+	 * argument of gtk_widget_set_size_request() in an attempt to
+	 * maximumize the data displayed in your environment. These are my
+	 * results: Y=1000 good for 43 lines, Y=-1 good for 1151 lines,
+	 *  Y=64000 good for 2781 lines, Y=99000 good for 1453 lines */
+	/* gtk_widget_set_size_request(display_widget, -1, -1); */
 	_update_info_node(info_list, GTK_TREE_VIEW(display_widget));
 end_it:
 	toggled = FALSE;
@@ -1330,7 +1313,7 @@ extern void specific_info_node(popup_info_t *popup_win)
 	node_info_t *node_ptr = NULL;
 	hostlist_t hostlist = NULL;
 	hostlist_iterator_t host_itr = NULL;
-	int i = -1;
+	int i = -1, sort_key;
 	sview_search_info_t *search_info = spec_info->search_info;
 
 	if (!spec_info->display_widget)
@@ -1387,11 +1370,16 @@ display_it:
 		gtk_table_attach_defaults(popup_win->table,
 					  GTK_WIDGET(tree_view),
 					  0, 1, 0, 1);
-		/* since this function sets the model of the tree_view
-		   to the treestore we don't really care about
-		   the return value */
+		/* Since this function sets the model of the tree_view to the
+		 * treestore we don't really care about the return value
+		 * On large clusters, sorting on the node name slows GTK down
+		 * by a large margin. */
+		if (node_info_ptr->record_count > 1000)
+			sort_key = -1;
+		else
+			sort_key = SORTID_NAME;
 		create_treestore(tree_view, popup_win->display_data,
-				 SORTID_CNT, SORTID_NAME, SORTID_COLOR);
+				 SORTID_CNT, sort_key, SORTID_COLOR);
 	}
 
 	setup_popup_grid_list(popup_win);
@@ -1718,7 +1706,7 @@ extern void admin_node_name(char *name, char *old_value, char *type)
 	return;
 }
 
-extern void cluster_change_node()
+extern void cluster_change_node(void)
 {
 	display_data_t *display_data = options_data_node;
 	while (display_data++) {

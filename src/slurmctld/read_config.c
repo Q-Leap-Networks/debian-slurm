@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -73,7 +73,7 @@
 #include "src/common/xstring.h"
 
 #include "src/slurmctld/acct_policy.h"
-#include "src/slurmctld/basil_interface.h"
+#include "src/slurmctld/front_end.h"
 #include "src/slurmctld/gang.h"
 #include "src/slurmctld/job_scheduler.h"
 #include "src/slurmctld/job_submit.h"
@@ -119,6 +119,51 @@ static int  _update_preempt(uint16_t old_enable_preempt);
 #ifdef 	HAVE_ELAN
 static void _validate_node_proc_count(void);
 #endif
+
+/*
+ * _reorder_node_record_table - order node table in ascending order of node_rank
+ * This depends on the TopologyPlugin and/or SelectPlugin, which may generate
+ * such a ranking.
+ */
+static void _reorder_node_record_table(void)
+{
+	struct node_record *node_ptr, *node_ptr2;
+	int i, j, min_inx;
+	uint32_t min_val;
+
+	/* Now we need to sort the node records */
+	for (i = 0; i < node_record_count; i++) {
+		min_val = node_record_table_ptr[i].node_rank;
+		min_inx = i;
+		for (j = i + 1; j < node_record_count; j++) {
+			if (node_record_table_ptr[j].node_rank < min_val) {
+				min_val = node_record_table_ptr[j].node_rank;
+				min_inx = j;
+			}
+		}
+
+		if (min_inx != i) {	/* swap records */
+			struct node_record node_record_tmp;
+
+			j = sizeof(struct node_record);
+			node_ptr =  node_record_table_ptr + i;
+			node_ptr2 = node_record_table_ptr + min_inx;
+
+			memcpy(&node_record_tmp, node_ptr, j);
+			memcpy(node_ptr, node_ptr2, j);
+			memcpy(node_ptr2, &node_record_tmp, j);
+		}
+	}
+
+#if _DEBUG
+	/* Log the results */
+	for (i=0, node_ptr = node_record_table_ptr; i < node_record_count;
+	     i++, node_ptr++) {
+		info("%s: %u", node_ptr->name, node_ptr->node_rank);
+	}
+#endif
+}
+
 
 /*
  * _build_bitmaps_pre_select - recover some state for jobs and nodes prior to
@@ -327,7 +372,7 @@ static int _handle_downnodes_line(slurm_conf_downnodes_t *down)
 	int state_val = NODE_STATE_DOWN;
 
 	if (down->state != NULL) {
-		state_val = state_str2int(down->state);
+		state_val = state_str2int(down->state, down->nodenames);
 		if (state_val == NO_VAL) {
 			error("Invalid State \"%s\"", down->state);
 			goto cleanup;
@@ -399,6 +444,7 @@ static int _build_all_nodeline_info(void)
 
 	/* Load the node table here */
 	rc = build_all_nodeline_info(false);
+	rc = MAX(build_all_frontend_info(false), rc);
 
 	/* Now perform operations on the node table as needed by slurmctld */
 #ifdef HAVE_BG
@@ -490,8 +536,10 @@ static int _build_single_partitionline_info(slurm_conf_partition_t *part)
 	if (part->root_only_flag)
 		part_ptr->flags |= PART_FLAG_ROOT_ONLY;
 	part_ptr->max_time       = part->max_time;
+	part_ptr->def_mem_per_cpu = part->def_mem_per_cpu;
 	part_ptr->default_time   = part->default_time;
 	part_ptr->max_share      = part->max_share;
+	part_ptr->max_mem_per_cpu = part->max_mem_per_cpu;
 	part_ptr->max_nodes      = part->max_nodes;
 	part_ptr->max_nodes_orig = part->max_nodes;
 	part_ptr->min_nodes      = part->min_nodes;
@@ -499,13 +547,15 @@ static int _build_single_partitionline_info(slurm_conf_partition_t *part)
 	part_ptr->preempt_mode   = part->preempt_mode;
 	part_ptr->priority       = part->priority;
 	part_ptr->state_up       = part->state_up;
+	part_ptr->grace_time     = part->grace_time;
+
 	if (part->allow_groups) {
 		xfree(part_ptr->allow_groups);
 		part_ptr->allow_groups = xstrdup(part->allow_groups);
 	}
  	if (part->allow_alloc_nodes) {
  		if (part_ptr->allow_alloc_nodes) {
- 			int cnt_tot, cnt_uniq, buf_size;
+ 			int cnt_tot, cnt_uniq;
  			hostlist_t hl = hostlist_create(part_ptr->
 							allow_alloc_nodes);
 
@@ -517,8 +567,6 @@ static int _build_single_partitionline_info(slurm_conf_partition_t *part)
  				fatal("Duplicate Allowed Allocating Nodes for "
 				      "Partition %s", part->name);
  			}
- 			buf_size = strlen(part_ptr->allow_alloc_nodes) + 1 +
-				   strlen(part->allow_alloc_nodes) + 1;
  			xfree(part_ptr->allow_alloc_nodes);
  			part_ptr->allow_alloc_nodes =
 				hostlist_ranged_string_xmalloc(hl);
@@ -534,7 +582,7 @@ static int _build_single_partitionline_info(slurm_conf_partition_t *part)
 	}
 	if (part->nodes) {
 		if (part_ptr->nodes) {
-			int cnt_tot, cnt_uniq, buf_size;
+			int cnt_tot, cnt_uniq;
 			hostlist_t hl = hostlist_create(part_ptr->nodes);
 
 			hostlist_push(hl, part->nodes);
@@ -545,8 +593,6 @@ static int _build_single_partitionline_info(slurm_conf_partition_t *part)
 				fatal("Duplicate Nodes for Partition %s",
 					part->name);
 			}
-			buf_size = strlen(part_ptr->nodes) + 1 +
-				   strlen(part->nodes) + 1;
 			xfree(part_ptr->nodes);
 			part_ptr->nodes = hostlist_ranged_string_xmalloc(hl);
 			hostlist_destroy(hl);
@@ -631,6 +677,7 @@ int read_slurm_conf(int recover, bool reconfig)
 	int error_code, i, rc, load_job_ret = SLURM_SUCCESS;
 	int old_node_record_count = 0;
 	struct node_record *old_node_table_ptr = NULL, *node_ptr;
+	bool do_reorder_nodes = false;
 	List old_part_list = NULL;
 	char *old_def_part_name = NULL;
 	char *old_auth_type       = xstrdup(slurmctld_conf.authtype);
@@ -688,6 +735,8 @@ int read_slurm_conf(int recover, bool reconfig)
 	_build_all_nodeline_info();
 	_handle_all_downnodes();
 	_build_all_partitionline_info();
+	if (!reconfig)
+		restore_front_end_state(recover);
 
 	update_logging();
 	g_slurm_jobcomp_init(slurmctld_conf.job_comp_loc);
@@ -706,6 +755,17 @@ int read_slurm_conf(int recover, bool reconfig)
 		_purge_old_part_state(old_part_list, old_def_part_name);
 		return EINVAL;
 	}
+
+	/*
+	 * Node reordering needs to be done by the topology and/or select
+	 * plugin. Reordering the table must be done before hashing the
+	 * nodes, and before any position-relative bitmaps are created.
+	 */
+	do_reorder_nodes |= slurm_topo_generate_node_ranking();
+	do_reorder_nodes |= select_g_node_ranking(node_record_table_ptr,
+						  node_record_count);
+	if (do_reorder_nodes)
+		_reorder_node_record_table();
 
 	rehash_node();
 	rehash_jobs();
@@ -727,21 +787,24 @@ int read_slurm_conf(int recover, bool reconfig)
 		load_last_job_id();
 		reset_first_job_id();
 		(void) slurm_sched_reconfig();
-		xfree(state_save_dir);	/* No select plugin state restore */
 	} else if (recover == 0) {	/* Build everything from slurm.conf */
 		load_last_job_id();
 		reset_first_job_id();
 		(void) slurm_sched_reconfig();
-		xfree(state_save_dir);	/* No select plugin state restore */
 	} else if (recover == 1) {	/* Load job & node state files */
 		(void) load_all_node_state(true);
+		(void) load_all_front_end_state(true);
 		load_job_ret = load_all_job_state();
+		sync_job_priorities();
 	} else if (recover > 1) {	/* Load node, part & job state files */
 		(void) load_all_node_state(false);
+		(void) load_all_front_end_state(false);
 		(void) load_all_part_state();
 		load_job_ret = load_all_job_state();
+		sync_job_priorities();
 	}
 
+	sync_front_end_state();
 	_sync_part_prio();
 	_build_bitmaps_pre_select();
 	if ((select_g_node_init(node_record_table_ptr, node_record_count)
@@ -821,10 +884,6 @@ int read_slurm_conf(int recover, bool reconfig)
 	 * an extremely rare situation */
 	if (load_job_ret)
 		_acct_restore_active_jobs();
-
-#ifdef HAVE_CRAY
-	basil_query();
-#endif
 
 	/* Sync select plugin with synchronized job/node/part data */
 	select_g_reconfigure();
@@ -926,6 +985,8 @@ static int _restore_node_state(int recover,
 		node_ptr->slurmd_start_time = old_node_ptr->slurmd_start_time; 
 		node_ptr->tmp_disk      = old_node_ptr->tmp_disk;
 		node_ptr->weight        = old_node_ptr->weight;
+
+		node_ptr->sus_job_cnt   = old_node_ptr->sus_job_cnt;
 
 		if (node_ptr->gres_list)
 			list_destroy(node_ptr->gres_list);
@@ -1108,6 +1169,11 @@ static int  _restore_part_state(List old_part_list, char *old_def_part_name)
 				      "slurm.conf", part_ptr->name);
 				part_ptr->max_time = old_part_ptr->max_time;
 			}
+			if (part_ptr->grace_time != old_part_ptr->grace_time) {
+				error("Partition %s GraceTime differs from "
+				      "slurm.conf", part_ptr->name);
+				part_ptr->grace_time = old_part_ptr->grace_time;
+			}
 			if (part_ptr->min_nodes_orig !=
 			    old_part_ptr->min_nodes_orig) {
 				error("Partition %s MinNodes differs from "
@@ -1158,6 +1224,7 @@ static int  _restore_part_state(List old_part_list, char *old_def_part_name)
 						   max_nodes_orig;
 			part_ptr->max_share = old_part_ptr->max_share;
 			part_ptr->max_time = old_part_ptr->max_time;
+			part_ptr->grace_time = old_part_ptr->grace_time;
 			part_ptr->min_nodes = old_part_ptr->min_nodes;
 			part_ptr->min_nodes_orig = old_part_ptr->
 						   min_nodes_orig;
@@ -1362,7 +1429,7 @@ static int _sync_nodes_to_comp_job(void)
 			info("Job %u in completing state", job_ptr->job_id);
 			if (!job_ptr->node_bitmap_cg)
 				build_cg_bitmap(job_ptr);
-			deallocate_nodes(job_ptr, false, false);
+			deallocate_nodes(job_ptr, false, false, false);
 			/* The job in completing state at slurmctld restart or
 			 * reconfiguration, do not log completion again.
 			 * job_completion_logger(job_ptr, false); */
@@ -1414,7 +1481,7 @@ static int _sync_nodes_to_active_job(struct job_record *job_ptr)
 			excise_node_from_job(job_ptr, node_ptr);
 			job_post_resize_acctg(job_ptr);
 			accounting_enforce = save_accounting_enforce;
-		} else if (IS_NODE_DOWN(node_ptr)) {
+		} else if (IS_NODE_DOWN(node_ptr) && IS_JOB_RUNNING(job_ptr)) {
 			time_t now = time(NULL);
 			info("Killing job %u on DOWN node %s",
 			     job_ptr->job_id, node_ptr->name);
@@ -1432,6 +1499,10 @@ static int _sync_nodes_to_active_job(struct job_record *job_ptr)
 					       node_flags;
 		}
 	}
+
+	if (IS_JOB_RUNNING(job_ptr) && job_ptr->front_end_ptr)
+		job_ptr->front_end_ptr->job_cnt_run++;
+
 	return cnt;
 }
 
@@ -1452,7 +1523,7 @@ static void _sync_nodes_to_suspended_job(struct job_record *job_ptr)
 
 #ifdef 	HAVE_ELAN
 /* Every node in a given partition must have the same processor count
- * at present, this function insure it */
+ * at present, ensured by this function. */
 static void _validate_node_proc_count(void)
 {
 	ListIterator part_iterator;

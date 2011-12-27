@@ -1,8 +1,11 @@
-slurm-llnl (2.2.7-2) unstable; urgency=low
+slurm-llnl (2.3.2-1) unstable; urgency=low
 
-  * Rebuild package against postgresql-server-dev-9.1 (Closes: #639480)
+  * New upstream release
+  * slurm-llnl-configurator.html updated
+  * libpam-slurm packages merged to slurm-llnl source
+  * libpam-slurm package new versioning following slurm-llnl
 
- -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Sat, 27 Aug 2011 19:19:03 +0200
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Tue, 27 Dec 2011 19:27:46 +0100
 
 slurm-llnl (2.2.7-1) unstable; urgency=low
 

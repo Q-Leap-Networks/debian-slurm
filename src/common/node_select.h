@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -40,11 +40,19 @@
 #ifndef _NODE_SELECT_H
 #define _NODE_SELECT_H
 
-#include <slurm/slurm.h>
-#include <slurm/slurm_errno.h>
+#ifdef HAVE_CONFIG_H
+#  include "config.h"
+#endif /* HAVE_CONFIG_H */
+
+#include "slurm/slurm.h"
+#include "slurm/slurm_errno.h"
 #include "src/common/list.h"
 #include "src/common/plugrack.h"
 #include "src/slurmctld/slurmctld.h"
+
+/* NO_JOB_RUNNING is used by select/blugene, select/bgq, smap and sview */
+#define NO_JOB_RUNNING -1
+#define NOT_FROM_CONTROLLER -2
 
 typedef struct {
 	bitstr_t *avail_nodes;      /* usable nodes are set on input, nodes
@@ -62,6 +70,56 @@ typedef struct {
 } select_will_run_t;
 
 /*
+ * structure that holds the configuration settings for each request
+ */
+typedef struct {
+	bitstr_t *avail_mp_bitmap;   /* pointer to available mps */
+	char *blrtsimage;            /* BlrtsImage for this block */
+	uint16_t conn_type[HIGHEST_DIMENSIONS]; /* mesh, torus, or small */
+	bool elongate;                 /* whether allow elongation or not */
+	int elongate_count;            /* place in elongate_geos list
+					  we are at */
+	List elongate_geos;            /* used on L and P systems for
+					  geos */
+	void *geo_table;               /* pointer to a list of
+					* pointer to different geos */
+	uint16_t geometry[HIGHEST_DIMENSIONS]; /* size of block in geometry */
+	char *linuximage;              /* LinuxImage for this block */
+	char *mloaderimage;            /* mloaderImage for this block */
+	uint16_t deny_pass;            /* PASSTHROUGH_FOUND is set if there are
+					  passthroughs in the block
+					  created you can deny
+					  passthroughs by setting the
+					  appropriate bits */
+	int procs;                     /* Number of Real processors in
+					  block */
+	char *ramdiskimage;            /* RamDiskImage for this block */
+	bool rotate;                   /* whether allow elongation or not */
+	int rotate_count;              /* number of times rotated */
+	char *save_name;               /* name of midplanes in block */
+	int size;                      /* count of midplanes in block */
+	uint16_t small16;              /* number of blocks using 16 cnodes in
+					* block, only used for small
+					* block creation */
+	uint16_t small32;              /* number of blocks using 32 cnodes in
+					* block, only used for small
+					* block creation */
+	uint16_t small64;              /* number of blocks using 64 cnodes in
+					* block, only used for small
+					* block creation */
+	uint16_t small128;             /* number of blocks using 128 cnodes in
+					* block, only used for small
+					* block creation */
+	uint16_t small256;             /* number of blocks using 256 cnodes in
+					* block, only used for small
+					* block creation */
+	uint16_t start[HIGHEST_DIMENSIONS]; /* where to start creation of
+					    block */
+	int start_req;                 /* state there was a start
+					  request */
+} select_ba_request_t;
+
+/*
  * Local data
  */
 typedef struct slurm_select_ops {
@@ -69,6 +127,8 @@ typedef struct slurm_select_ops {
 	int		(*state_save)		(char *dir_name);
 	int		(*state_restore)	(char *dir_name);
 	int		(*job_init)		(List job_list);
+	int		(*node_ranking)		(struct node_record *node_ptr,
+						 int node_cnt);
 	int		(*node_init)		(struct node_record *node_ptr,
 						 int node_cnt);
 	int		(*block_init)		(List block_list);
@@ -82,11 +142,22 @@ typedef struct slurm_select_ops {
 						 List *preemptee_job_list);
 	int		(*job_begin)		(struct job_record *job_ptr);
 	int		(*job_ready)		(struct job_record *job_ptr);
+	bool		(*job_expand_allow)	(void);
+	int		(*job_expand)		(struct job_record *from_job_ptr,
+						 struct job_record *to_job_ptr);
 	int		(*job_resized)		(struct job_record *job_ptr,
 						 struct node_record *node_ptr);
+	int		(*job_signal)		(struct job_record *job_ptr,
+						 int signal);
 	int		(*job_fini)		(struct job_record *job_ptr);
-	int		(*job_suspend)		(struct job_record *job_ptr);
-	int		(*job_resume)		(struct job_record *job_ptr);
+	int		(*job_suspend)		(struct job_record *job_ptr,
+						 bool indf_susp);
+	int		(*job_resume)		(struct job_record *job_ptr,
+						 bool indf_susp);
+	bitstr_t *      (*step_pick_nodes)      (struct job_record *job_ptr,
+						 select_jobinfo_t *step_jobinfo,
+						 uint32_t node_count);
+	int             (*step_finish)          (struct step_record *step_ptr);
 	int		(*pack_select_info)	(time_t last_query_time,
 						 uint16_t show_flags,
 						 Buf *buffer_ptr,
@@ -97,7 +168,7 @@ typedef struct slurm_select_ops {
 	int		(*nodeinfo_unpack)	(select_nodeinfo_t **nodeinfo,
 						 Buf buffer,
 						 uint16_t protocol_version);
-	select_nodeinfo_t *(*nodeinfo_alloc)	(uint32_t size);
+	select_nodeinfo_t *(*nodeinfo_alloc)	(void);
 	int		(*nodeinfo_free)	(select_nodeinfo_t *nodeinfo);
 	int		(*nodeinfo_set_all)	(time_t last_query_time);
 	int		(*nodeinfo_set)		(struct job_record *job_ptr);
@@ -137,10 +208,17 @@ typedef struct slurm_select_ops {
 						 struct job_record *job_ptr,
 						 void *data);
 	int		(*update_node_config)	(int index);
-	int		(*update_node_state)	(int index, uint16_t state);
+	int		(*update_node_state)	(struct node_record *node_ptr);
 	int		(*alter_node_cnt)	(enum select_node_cnt type,
 						 void *data);
 	int		(*reconfigure)		(void);
+	bitstr_t *      (*resv_test)            (bitstr_t *avail_bitmap,
+						 uint32_t node_cnt);
+	void            (*ba_init)              (node_info_msg_t *node_info_ptr,
+						 bool sanity_check);
+	void            (*ba_fini)              (void);
+	int *           (*ba_get_dims)          (void);
+
 } slurm_select_ops_t;
 
 typedef struct slurm_select_context {
@@ -151,16 +229,13 @@ typedef struct slurm_select_context {
 	slurm_select_ops_t ops;
 } slurm_select_context_t;
 
+/* Convert a node coordinate character into its equivalent number:
+ * '0' = 0; '9' = 9; 'A' = 10; etc. */
+extern int select_char2coord(char coord);
+
 /*******************************************\
  * GLOBAL SELECT STATE MANAGEMENT FUNCIONS *
 \*******************************************/
-
-extern int node_select_free_block_info(block_info_t *block_info);
-
-extern void node_select_pack_block_info(block_info_t *block_info, Buf buffer,
-					uint16_t protocol_version);
-extern int node_select_unpack_block_info(block_info_t **block_info, Buf buffer,
-					 uint16_t protocol_version);
 
 /*
  * Initialize context for node selection plugin
@@ -172,8 +247,11 @@ extern int slurm_select_init(bool only_default);
  */
 extern int slurm_select_fini(void);
 
+/* Get this plugin's sequence number in SLURM's internal tables */
 extern int select_get_plugin_id_pos(uint32_t plugin_id);
-extern int select_get_plugin_id();
+
+/* Get the plugin ID number. Unique for each select plugin type */
+extern int select_get_plugin_id(void);
 
 /*
  * Save any global state information
@@ -188,11 +266,9 @@ extern int select_g_state_save(char *dir_name);
  */
 extern int select_g_state_restore(char *dir_name);
 
-/*
- * Note the initialization of job records, issued upon restart of
- * slurmctld and used to synchronize any job state.
- */
-extern int select_g_job_init(List job_list);
+/*********************************\
+ * STATE INITIALIZATION FUNCIONS *
+\*********************************/
 
 /*
  * Note re/initialization of node record data structure
@@ -208,28 +284,74 @@ extern int select_g_node_init(struct node_record *node_ptr, int node_cnt);
 extern int select_g_block_init(List part_list);
 
 /*
- * Update specific block (usually something has gone wrong)
- * IN block_desc_ptr - information about the block
+ * Note the initialization of job records, issued upon restart of
+ * slurmctld and used to synchronize any job state.
+ * IN job_list - List of SLURM jobs from slurmctld
  */
-extern int select_g_update_block (update_block_msg_t *block_desc_ptr);
+extern int select_g_job_init(List job_list);
+
+/* Note reconfiguration or change in partition configuration */
+extern int select_g_reconfigure(void);
+
+/**************************\
+ * NODE SPECIFIC FUNCIONS *
+\**************************/
 
 /*
- * Update specific sub nodes (usually something has gone wrong)
- * IN block_desc_ptr - information about the block
+ * Allocate a select plugin node record.
+ *
+ * NOTE: Call select_g_select_nodeinfo_free() to release the memory in the
+ * returned value
  */
-extern int select_g_update_sub_node (update_block_msg_t *block_desc_ptr);
+extern dynamic_plugin_data_t *select_g_select_nodeinfo_alloc(void);
 
 /*
- * Get select data from a plugin
- * IN node_pts  - current node record
- * IN dinfo   - type of data to get from the node record
- *                (see enum select_plugindata_info)
- * IN job_ptr   - pointer to the job that's related to this query (may be NULL)
- * IN/OUT data  - the data to get from node record
+ * Pack a select plugin node record into a buffer.
+ * IN nodeinfo - The node record to pack
+ * IN/OUT buffer - The buffer to pack the record into
+ * IN protocol_version - Version used for packing the record
  */
-extern int select_g_get_info_from_plugin (enum select_plugindata_info dinfo,
-					  struct job_record *job_ptr,
-					  void *data);
+extern int select_g_select_nodeinfo_pack(dynamic_plugin_data_t *nodeinfo,
+					 Buf buffer,
+					 uint16_t protocol_version);
+
+/*
+ * Unpack a select plugin node record from a buffer.
+ * OUT nodeinfo - The unpacked node record
+ * IN/OUT buffer - The buffer to unpack the record from
+ * IN protocol_version - Version used for unpacking the record
+ *
+ * NOTE: Call select_g_select_nodeinfo_free() to release the memory in the
+ * returned value
+ */
+extern int select_g_select_nodeinfo_unpack(dynamic_plugin_data_t **nodeinfo,
+					   Buf buffer,
+					   uint16_t protocol_version);
+
+/* Free the memory allocated for a select plugin node record */
+extern int select_g_select_nodeinfo_free(dynamic_plugin_data_t *nodeinfo);
+
+/* Reset select plugin specific information about a job
+ * IN job_ptr - The updated job */
+extern int select_g_select_nodeinfo_set(struct job_record *job_ptr);
+
+/* Update slect plugin information about every node as needed (if changed since
+ * previous query)
+ * IN query_time - Time of previous update */
+extern int select_g_select_nodeinfo_set_all(time_t last_query_time);
+
+/*
+ * Get information from a slect plugin node record
+ * IN nodeinfo - The record to get information from
+ * IN dinfo - The data type to be retrieved
+ * IN state - Node state filter to be applied (ie. only get information about
+ *            ALLOCATED nodes
+ * OUT data - The retrieved data
+ */
+extern int select_g_select_nodeinfo_get(dynamic_plugin_data_t *nodeinfo,
+					enum select_nodedata_type dinfo,
+					enum node_states state,
+					void *data);
 
 /*
  * Updated a node configuration. This happens when a node registers with
@@ -240,23 +362,47 @@ extern int select_g_get_info_from_plugin (enum select_plugindata_info dinfo,
 extern int select_g_update_node_config (int index);
 
 /*
- * Updated a node state in the plugin, this should happen when a node is
- * drained or put into a down state then changed back.
- * IN index  - index into the node record list
- * IN state  - state to update to
- * RETURN SLURM_SUCCESS on success || SLURM_ERROR else wise
+ * Assign a 'node_rank' value to each of the node_ptr entries.
+ * IN node_ptr - current node data
+ * IN node_count - number of node entries
+ * Return true if node ranking was performed, false if not.
  */
-extern int select_g_update_node_state (int index, uint16_t state);
+extern bool select_g_node_ranking(struct node_record *node_ptr, int node_cnt);
 
 /*
- * Alter the node count for a job given the type of system we are on
- * IN/OUT job_desc  - current job desc
+ * Updated a node state in the plugin, this should happen when a node is
+ * drained or put into a down state then changed back.
+ * IN node_ptr - Pointer to the node that has been updated
+ * RETURN SLURM_SUCCESS on success || SLURM_ERROR else wise
+ */
+extern int select_g_update_node_state (struct node_record *node_ptr);
+
+/*
+ * Alter the node count based upon system architecture (i.e. on Bluegene
+ * systems, one node/midplane is equivalent to 512 compute nodes
+ * IN type - an enum describing how to transform the count
+ * IN/OUT data - The data to be modified
  */
 extern int select_g_alter_node_cnt (enum select_node_cnt type, void *data);
 
+/***************************\
+ * BLOCK SPECIFIC FUNCIONS *
+\***************************/
+
+/*
+ * Update specific sub nodes (usually something has gone wrong)
+ * IN block_desc_ptr - information about the block
+ */
+extern int select_g_update_sub_node (update_block_msg_t *block_desc_ptr);
+
+/*
+ * Update specific block (usually something has gone wrong)
+ * IN block_desc_ptr - information about the block
+ */
+extern int select_g_update_block (update_block_msg_t *block_desc_ptr);
 
 /******************************************************\
- * JOB-SPECIFIC SELECT CREDENTIAL MANAGEMENT FUNCIONS *
+ * JOB SPECIFIC SELECT CREDENTIAL MANAGEMENT FUNCIONS *
 \******************************************************/
 
 #define SELECT_MODE_BASE         0x00ff
@@ -295,6 +441,84 @@ extern int select_g_alter_node_cnt (enum select_node_cnt type, void *data);
 	((SELECT_IS_MODE_TEST_ONLY(_X) || SELECT_IS_MODE_WILL_RUN(_X))	\
 	 && SELECT_IS_PREEMPT_SET(_X))
 
+/* allocate storage for a select job credential
+ * RET jobinfo - storage for a select job credential
+ * NOTE: storage must be freed using select_g_free_jobinfo
+ */
+extern dynamic_plugin_data_t *select_g_select_jobinfo_alloc(void);
+
+/* copy a select job credential
+ * IN jobinfo - the select job credential to be copied
+ * RET        - the copy or NULL on failure
+ * NOTE: returned value must be freed using select_g_select_jobinfo_free
+ */
+extern dynamic_plugin_data_t *select_g_select_jobinfo_copy(
+	dynamic_plugin_data_t *jobinfo);
+
+/* free storage previously allocated for a select job credential
+ * IN jobinfo  - the select job credential to be freed
+ * RET         - slurm error code
+ */
+extern int select_g_select_jobinfo_free(dynamic_plugin_data_t *jobinfo);
+
+/* pack a select job credential into a buffer in machine independent form
+ * IN jobinfo  - the select job credential to be saved
+ * OUT buffer  - buffer with select credential appended
+ * IN protocol_version - slurm protocol version of client
+ * RET         - slurm error code
+ */
+extern int select_g_select_jobinfo_pack(dynamic_plugin_data_t *jobinfo,
+					Buf buffer,
+					uint16_t protocol_version);
+
+/* unpack a select job credential from a buffer
+ * OUT jobinfo - the select job credential read
+ * IN  buffer  - buffer with select credential read from current pointer loc
+ * IN protocol_version - slurm protocol version of client
+ * RET         - slurm error code
+ * NOTE: returned value must be freed using select_g_select_jobinfo_free
+ */
+extern int select_g_select_jobinfo_unpack(dynamic_plugin_data_t **jobinfo,
+					  Buf buffer,
+					  uint16_t protocol_version);
+
+/* fill in a previously allocated select job credential
+ * IN/OUT jobinfo  - updated select job credential
+ * IN data_type - type of data to enter into job credential
+ * IN data - the data to enter into job credential
+ */
+extern int select_g_select_jobinfo_set(dynamic_plugin_data_t *jobinfo,
+				       enum select_jobdata_type data_type,
+				       void *data);
+
+/* get data from a select job credential
+ * IN jobinfo  - updated select job credential
+ * IN data_type - type of data to enter into job credential
+ * OUT data - the data to get from job credential, caller must xfree
+ *	data for data_type == SELECT_JOBDATA_PART_ID
+ */
+extern int select_g_select_jobinfo_get(dynamic_plugin_data_t *jobinfo,
+				       enum select_jobdata_type data_type,
+				       void *data);
+
+/* write select job info to a string
+ * IN jobinfo - a select job credential
+ * OUT buf    - location to write job info contents
+ * IN size    - byte size of buf
+ * IN mode    - print mode, see enum select_print_mode
+ * RET        - the string, same as buf
+ */
+extern char *select_g_select_jobinfo_sprint(dynamic_plugin_data_t *jobinfo,
+					    char *buf, size_t size, int mode);
+
+/* write select job info to a string
+ * IN jobinfo - a select job credential
+ * OUT buf    - location to write job info contents
+ * IN mode    - print mode, see enum select_print_mode
+ * RET        - the string, same as buf
+ */
+extern char *select_g_select_jobinfo_xstrdup(dynamic_plugin_data_t *jobinfo,
+					     int mode);
 
 /*
  * Select the "best" nodes for given job from those available
@@ -336,6 +560,52 @@ extern int select_g_job_begin(struct job_record *job_ptr);
 extern int select_g_job_ready(struct job_record *job_ptr);
 
 /*
+ * Note termination of job is starting. Executed from slurmctld.
+ * IN job_ptr - pointer to job being terminated
+ */
+extern int select_g_job_fini(struct job_record *job_ptr);
+
+/*
+ * Pass job-step signal to plugin before signalling any job steps, so that
+ * any signal-dependent actions can be taken.
+ * IN job_ptr - job to be signalled
+ * IN signal  - signal(7) number
+ */
+extern int select_g_job_signal(struct job_record *job_ptr, int signal);
+
+/*
+ * Suspend a job. Executed from slurmctld.
+ * IN job_ptr - pointer to job being suspended
+ * IN indf_susp - set if job is being suspended indefinitely by user
+ *                or admin, otherwise suspended for gang scheduling
+ * RET SLURM_SUCCESS or error code
+ */
+extern int select_g_job_suspend(struct job_record *job_ptr, bool indf_susp);
+
+/*
+ * Resume a job. Executed from slurmctld.
+ * IN job_ptr - pointer to job being resumed
+ * IN indf_susp - set if job is being resumed from indefinite suspend by user
+ *                or admin, otherwise resume from gang scheduling
+ * RET SLURM_SUCCESS or error code
+ */
+extern int select_g_job_resume(struct job_record *job_ptr, bool indf_susp);
+
+/*
+ * Test if job expansion is supported
+ */
+extern bool select_g_job_expand_allow(void);
+
+/*
+ * Move the resource allocated to one job into that of another job.
+ *	All resources are removed from "from_job_ptr" and moved into
+ *	"to_job_ptr". Also see other_job_resized().
+ * RET: 0 or an error code
+ */
+extern int select_g_job_expand(struct job_record *from_job_ptr,
+			       struct job_record *to_job_ptr);
+
+/*
  * Modify internal data structures for a job that has changed size
  *	Only support jobs shrinking now.
  * RET: 0 or an error code
@@ -343,133 +613,64 @@ extern int select_g_job_ready(struct job_record *job_ptr);
 extern int select_g_job_resized(struct job_record *job_ptr,
 				struct node_record *node_ptr);
 
-/*
- * Note termination of job is starting. Executed from slurmctld.
- * IN job_ptr - pointer to job being terminated
- */
-extern int select_g_job_fini(struct job_record *job_ptr);
-
-/*
- * Suspend a job. Executed from slurmctld.
- * IN job_ptr - pointer to job being suspended
- * RET SLURM_SUCCESS or error code
- */
-extern int select_g_job_suspend(struct job_record *job_ptr);
-
-/*
- * Resume a job. Executed from slurmctld.
- * IN job_ptr - pointer to job being resumed
- * RET SLURM_SUCCESS or error code
- */
-extern int select_g_job_resume(struct job_record *job_ptr);
-
-/* allocate storage for a select job credential
- * RET jobinfo - storage for a select job credential
- * NOTE: storage must be freed using select_g_free_jobinfo
- */
-extern dynamic_plugin_data_t *select_g_select_jobinfo_alloc(void);
-
-/* free storage previously allocated for a select job credential
- * IN jobinfo  - the select job credential to be freed
- * RET         - slurm error code
- */
-extern int select_g_select_jobinfo_free(dynamic_plugin_data_t *jobinfo);
-
-/* fill in a previously allocated select job credential
- * IN/OUT jobinfo  - updated select job credential
- * IN data_type - type of data to enter into job credential
- * IN data - the data to enter into job credential
- */
-extern int select_g_select_jobinfo_set(dynamic_plugin_data_t *jobinfo,
-				       enum select_jobdata_type data_type,
-				       void *data);
-
-/* get data from a select job credential
- * IN jobinfo  - updated select job credential
- * IN data_type - type of data to enter into job credential
- * OUT data - the data to get from job credential, caller must xfree
- *	data for data_type == SELECT_JOBDATA_PART_ID
- */
-extern int select_g_select_jobinfo_get(dynamic_plugin_data_t *jobinfo,
-				       enum select_jobdata_type data_type,
-				       void *data);
-
-/* copy a select job credential
- * IN jobinfo - the select job credential to be copied
- * RET        - the copy or NULL on failure
- * NOTE: returned value must be freed using select_g_select_jobinfo_free
- */
-extern dynamic_plugin_data_t *select_g_select_jobinfo_copy(
-	dynamic_plugin_data_t *jobinfo);
-
-/* pack a select job credential into a buffer in machine independent form
- * IN jobinfo  - the select job credential to be saved
- * OUT buffer  - buffer with select credential appended
- * IN protocol_version - slurm protocol version of client
- * RET         - slurm error code
- */
-extern int select_g_select_jobinfo_pack(dynamic_plugin_data_t *jobinfo,
-					Buf buffer,
-					uint16_t protocol_version);
-
-/* unpack a select job credential from a buffer
- * OUT jobinfo - the select job credential read
- * IN  buffer  - buffer with select credential read from current pointer loc
- * IN protocol_version - slurm protocol version of client
- * RET         - slurm error code
- * NOTE: returned value must be freed using select_g_select_jobinfo_free
- */
-extern int select_g_select_jobinfo_unpack(dynamic_plugin_data_t **jobinfo,
-					  Buf buffer,
-					  uint16_t protocol_version);
-
-/* write select job info to a string
- * IN jobinfo - a select job credential
- * OUT buf    - location to write job info contents
- * IN size    - byte size of buf
- * IN mode    - print mode, see enum select_print_mode
- * RET        - the string, same as buf
- */
-extern char *select_g_select_jobinfo_sprint(dynamic_plugin_data_t *jobinfo,
-					    char *buf, size_t size, int mode);
-
-/* write select job info to a string
- * IN jobinfo - a select job credential
- * OUT buf    - location to write job info contents
- * IN mode    - print mode, see enum select_print_mode
- * RET        - the string, same as buf
- */
-extern char *select_g_select_jobinfo_xstrdup(dynamic_plugin_data_t *jobinfo,
-					     int mode);
-
 /*******************************************************\
- * NODE-SPECIFIC SELECT CREDENTIAL MANAGEMENT FUNCIONS *
+ * STEP SPECIFIC SELECT CREDENTIAL MANAGEMENT FUNCIONS *
 \*******************************************************/
 
-extern int select_g_select_nodeinfo_pack(
-	dynamic_plugin_data_t *nodeinfo, Buf buffer, uint16_t protocol_version);
+/*
+ * Select the "best" nodes for given job from those available
+ * IN/OUT job_ptr - pointer to job already allocated and running in a
+ *                  block where the step is to run.
+ *                  set's start_time when job expected to start
+ * OUT step_jobinfo - Fill in the resources to be used if not
+ *                    full size of job.
+ * IN node_count  - How many nodes we are looking for.
+ * RET map of slurm nodes to be used for step, NULL if resources not selected
+*
+ * NOTE: Most select plugins return NULL and use common code slurmctld to
+ * select resources for a job step. Only on IBM Bluegene systems does the
+ * select plugin need to select resources and take system topology into
+ * consideration.
+ */
+extern bitstr_t * select_g_step_pick_nodes(struct job_record *job_ptr,
+					   dynamic_plugin_data_t *step_jobinfo,
+					   uint32_t node_count);
+/*
+ * clear what happened in select_g_step_pick_nodes
+ * IN/OUT step_ptr - Flush the resources from the job and step.
+ */
+extern int select_g_step_finish(struct step_record *step_ptr);
 
-extern int select_g_select_nodeinfo_unpack(
-	dynamic_plugin_data_t **nodeinfo, Buf buffer,
-	uint16_t protocol_version);
+/*********************************\
+ * ADVANCE RESERVATION FUNCTIONS *
+\*********************************/
 
-extern dynamic_plugin_data_t *select_g_select_nodeinfo_alloc(uint32_t size);
+/*
+ * select_g_resv_test - Identify the nodes which "best" satisfy a reservation
+ *	request. "best" is defined as either single set of consecutive nodes
+ *	satisfying the request and leaving the minimum number of unused nodes
+ *	OR the fewest number of consecutive node sets
+ * IN avail_bitmap - nodes available for the reservation
+ * IN node_cnt - count of required nodes
+ * RET - nodes selected for use by the reservation
+ */
+extern bitstr_t * select_g_resv_test(bitstr_t *avail_bitmap, uint32_t node_cnt);
 
-extern int select_g_select_nodeinfo_free(dynamic_plugin_data_t *nodeinfo);
+/*****************************\
+ * GET INFORMATION FUNCTIONS *
+\*****************************/
 
-extern int select_g_select_nodeinfo_set_all(time_t last_query_time);
-
-extern int select_g_select_nodeinfo_set(struct job_record *job_ptr);
-
-extern int select_g_select_nodeinfo_get(dynamic_plugin_data_t *nodeinfo,
-					enum select_nodedata_type dinfo,
-					enum node_states state,
-					void *data);
-
-
-/******************************************************\
- * NODE-SELECT PLUGIN SPECIFIC INFORMATION FUNCTIONS  *
-\******************************************************/
+/*
+ * Get select data from a plugin
+ * IN node_pts  - current node record
+ * IN dinfo     - type of data to get from the node record
+ *                (see enum select_plugindata_info)
+ * IN job_ptr   - pointer to the job that's related to this query (may be NULL)
+ * IN/OUT data  - the data to get from node record
+ */
+extern int select_g_get_info_from_plugin (enum select_plugindata_info dinfo,
+					  struct job_record *job_ptr,
+					  void *data);
 
 /* pack node-select plugin specific information into a buffer in
  *	machine independent form
@@ -478,12 +679,31 @@ extern int select_g_select_nodeinfo_get(dynamic_plugin_data_t *nodeinfo,
  * OUT buffer - location to hold the data, consumer must free
  * IN protocol_version - slurm protocol version of client
  * RET - slurm error code
+ *
+ * NOTE: The unpack for this is in common/slurm_protocol_pack.c
  */
 extern int select_g_pack_select_info(time_t last_query_time,
 				     uint16_t show_flags, Buf *buffer,
 				     uint16_t protocol_version);
 
-/* Note reconfiguration or change in partition configuration */
-extern int select_g_reconfigure(void);
+/* Free ba_request value's memory which was allocted by
+ * select_g_pack_select_info() */
+extern void destroy_select_ba_request(void *arg);
+
+/* Log's the ba_request value generated by select_g_pack_select_info() */
+extern void print_select_ba_request(select_ba_request_t* ba_request);
+
+/* Get the number of elements in each dimension of a system
+ * RET - An array of element counts, one element per dimension */
+extern int *select_g_ba_get_dims(void);
+
+/* Construct an internal block allocation table
+ * IN node_info_ptr - Node state information read from slurmctld daemon
+ * IN sanity_check - If set, then verify each node's suffix contains values
+ *                   within the system dimension limits */
+extern void select_g_ba_init(node_info_msg_t *node_info_ptr, bool sanity_check);
+
+/* Free storage allocated by select_g_ba_init() */
+extern void select_g_ba_fini(void);
 
 #endif /*__SELECT_PLUGIN_API_H__*/

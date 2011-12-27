@@ -22,13 +22,6 @@ parallel jobs), backfill scheduling,
 and sophisticated <a href="priority_multifactor.html"> multifactor job
 prioritization</a> algorithms.
 
-<p>SLURM has been developed through the collaborative efforts of
-<a href="https://www.llnl.gov/">Lawrence Livermore National Laboratory (LLNL)</a>,
-<a href="http://www.hp.com/">Hewlett-Packard</a>,
-<a href="http://www.schedmd.com/">SchedMD</a>,
-<a href="http://www.bull.com/">Bull</a>,
-Linux NetworX and many other contributors.</p>
-
 <h2>Architecture</h2>
 <p>SLURM has a centralized manager, <b>slurmctld</b>, to monitor resources and
 work. There may also be a backup manager to assume those responsibilities in the
@@ -69,7 +62,7 @@ MySQL, PGSQL, SlurmDBD (Slurm Database Daemon) or none</li>
 <a href="http://www.theether.org/authd/">authd</a>,
 <a href="http://munge.googlecode.com/">munge</a>, or none (default).</li>
 
-<li><a href="checkpoint_plugins.html">Checkpoint</a>: AIX, OpenMPI, XLCH, or none.</li>
+<li><a href="checkpoint_plugins.html">Checkpoint</a>: AIX, BLCR, OpenMPI, or none.</li>
 
 <li><a href="crypto_plugins.html">Cryptography (Digital Signature Generation)</a>:
 <a href="http://munge.googlecode.com/">munge</a> (default) or
@@ -194,7 +187,7 @@ TmpFS=/tmp
 #
 # Node Configurations
 #
-NodeName=DEFAULT Procs=4 TmpDisk=16384 State=IDLE
+NodeName=DEFAULT CPUs=4 TmpDisk=16384 State=IDLE
 NodeName=lx[0001-0002] State=DRAINED
 NodeName=lx[0003-8000] RealMemory=2048 Weight=2
 NodeName=lx[8001-9999] RealMemory=4096 Weight=6 Feature=video
@@ -209,6 +202,6 @@ PartitionName=DEFAULT MaxTime=UNLIMITED MaxNodes=4096
 PartitionName=batch Nodes=lx[0041-9999]
 </pre>
 
-<p style="text-align:center;">Last modified 31 March 2009</p>
+<p style="text-align:center;">Last modified 5 May 2011</p>
 
 <!--#include virtual="footer.txt"-->

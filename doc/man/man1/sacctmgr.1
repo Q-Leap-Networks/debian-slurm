@@ -34,7 +34,7 @@ commands.
 
 .TP
 \fB\-h\fR, \fB\-\-help\fR
-Print a help message describing the usage of \fBssacctmgr\fR.
+Print a help message describing the usage of \fBsacctmgr\fR.
 This is equivalent to the \fBhelp\fR command.
 
 .TP
@@ -203,7 +203,7 @@ Events like downed or draining nodes on clusters.
 .TP
 \fIjob\fR
 Job - but only two specific fields of the job: Derived Exit Code and
-Derived Exit String
+the Comment String
 
 .TP
 \fIqos\fR
@@ -242,6 +242,15 @@ priority. Can also be the string \fIparent\fR, this means that the
 parent association is used for fairshare. To clear a previously set
 value use the modify command with a new value of \-1.
 
+.TP
+\fIGraceTime\fP=<preemption grace time in seconds>
+Specifies, in units of seconds, the preemption grace time
+to be extended to a job which has been selected for preemption.
+The default value is zero, no preemption grace time is allowed on
+this QOS.
+.P			  
+NOTE: This value is only meaningful for QOS PreemptMode=CANCEL)
+	   
 .TP
 \fIGrpCPUMins\fP=<max cpu minutes>
 Maximum number of CPU minutes running jobs are able to be allocated in
@@ -875,11 +884,15 @@ the user's judgement of whether the job succeeded or failed.  The user
 can only modify the derived exit code of their own job.
 
 .TP
-\fIDerivedExitString\fP
-Initially NULL, the derived exit string can be populated after a job
-completes with a textual description of why the job succeeded or
-failed.  The user can only modify the derived exit string of their own
-job.
+\f3Comment\fP
+The job's comment string when the AccountingStoreJobComment parameter
+in the slurm.conf file is set (or defaults) to YES.  The user can only
+modify the comment string of their own job.
+
+.TP
+The \fIDerivedExitCode\fP and \f3Comment\fP fields are the only fields
+of a job record in the database that can be modified after job
+completion.
 
 .SH "LIST/SHOW JOB FORMAT OPTIONS"
 
@@ -901,12 +914,12 @@ any jobs submitted with this QOS that fall below the UsageThreshold
 will be held until their Fairshare Usage goes above the Threshold.
 .TP
 \fINoReserve\fP
-If set, and using backfill, jobs using this QOS will all be considered
-at the same level within this QOS meaning if a larger, higher priority
-job is unable to run a smaller job will run if possible even if the
-larger higher priority job will be delayed starting.
-NOTE: This could cause starvation on these larger jobs, but if that is
-ok, this flag most likely will increase utilization.
+If this flag is set and backfill scheduling is used, jobs using this QOS will
+not reserve resources in the backfill schedule's  map of resources allocated
+through time. This flag is intended for use with a QOS that may be preempted
+by jobs associated with all other QOS (e.g use with a "standby" QOS). If the
+allocated is used with a QOS which can not be preempted by all other QOS, it
+could result in starvation of larger jobs.
 .TP
 \fIPartitionMaxNodes\fP
 If set jobs using this QOS will be able to
@@ -920,6 +933,11 @@ override the requested partition's MinNodes limit.
 If set jobs using this QOS will be able to
 override the requested partition's TimeLimit.
 .RE
+
+.TP
+\fIGraceTime\fP
+Preemption grace time to be extended to a job which has been 
+selected for preemption.
 
 .TP
 \fIGrpCPUMins\fP
@@ -963,12 +981,20 @@ Maximum number of CPU minutes each job is able to use.
 Maximum number of CPUs each job is able to use.
 
 .TP
+\fIMaxCpusPerUser\fP
+Maximum number of CPUs each user is able to use.
+
+.TP
 \fIMaxJobs\fP
 Maximum number of jobs each user is allowed to run at one time.
 
 .TP
 \fIMaxNodes\fP
 Maximum number of nodes each job is able to use.
+
+.TP
+\fIMaxNodesPerUser\fP
+Maximum number of nodes each user is able to use.
 
 .TP
 \fIMaxSubmitJobs\fP
@@ -992,7 +1018,9 @@ Mechanism used to preempt jobs of this QOS if the clusters \fIPreemptType\fP
 is configured to \fIpreempt/qos\fP.  The default preemption mechanism
 is specified by the cluster\-wide \fIPreemptMode\fP configuration parameter.
 Possible values are "Cluster" (meaning use cluster default), "Cancel",
-"Checkpoint", "Requeue" and "Suspend".
+"Checkpoint" and "Requeue".  This option is not compatible with
+PreemptMode=OFF or PreemptMode=SUSPEND (i.e. preempted jobs must be removed
+from the resources).
 
 .TP
 \fIPriority\fP
@@ -1021,6 +1049,13 @@ Display information with previously deleted data.
 \fIDescription\fP
 An arbitrary string describing a QOS.
 
+.TP
+\fIGraceTime\fP
+Preemption grace time to be extended to a job which has been
+selected for preemption in the format of hh:mm:ss.  The default
+value is zero, no preemption grace time is allowed on this partition.
+NOTE: This value is only meaningful for QOS PreemptMode=CANCEL.
+			  
 .TP
 \fIGrpCPUMins\fP
 Maximum number of CPU minutes running jobs are able to be allocated in
@@ -1087,6 +1122,11 @@ You can still set this, but have to wait for future versions of SLURM
 before it is enforced.)
 
 .TP
+\fIMaxCpusPerUser\fP
+Maximum number of CPUs each user is able to use.
+To clear a previously set value use the modify command with a new value of \-1.
+
+.TP
 \fIMaxJobs\fP
 Maximum number of jobs each user is allowed to run at one time.
 To clear a previously set value use the modify command with a new value of \-1.
@@ -1094,6 +1134,11 @@ To clear a previously set value use the modify command with a new value of \-1.
 .TP
 \fIMaxNodes\fP
 Maximum number of nodes each job is able to use.
+To clear a previously set value use the modify command with a new value of \-1.
+
+.TP
+\fIMaxNodesPerUser\fP
+Maximum number of nodes each user is able to use.
 To clear a previously set value use the modify command with a new value of \-1.
 
 .TP
@@ -1127,7 +1172,9 @@ Mechanism used to preempt jobs of this QOS if the clusters \fIPreemptType\fP
 is configured to \fIpreempt/qos\fP.  The default preemption mechanism
 is specified by the cluster\-wide \fIPreemptMode\fP configuration parameter.
 Possible values are "Cluster" (meaning use cluster default), "Cancel",
-"Checkpoint", "Requeue" and "Suspend".
+"Checkpoint" and "Requeue".  This option is not compatible with
+PreemptMode=OFF or PreemptMode=SUSPEND (i.e. preempted jobs must be removed
+from the resources).
 
 .TP
 \fIPriority\fP
@@ -1700,7 +1747,7 @@ Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 CODE\-OCEC\-09\-009. All rights reserved.
 .LP
 This file is part of SLURM, a resource management program.
-For details, see <https://computing.llnl.gov/linux/slurm/>.
+For details, see <http://www.schedmd.com/slurmdocs/>.
 .LP
 SLURM is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free
@@ -1713,5 +1760,5 @@ FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 details.
 
 .SH "SEE ALSO"
-\fBslurm.conf\fR(5)
+\fBslurm.conf\fR(5),
 \fBslurmdbd\fR(8)

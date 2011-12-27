@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -126,7 +126,10 @@ extern void parse_command_line(int argc, char *argv[])
 		params.sort = xstrdup(env_val);
 	if ( ( env_val = getenv("SLURM_CLUSTERS") ) ) {
 		if (!(params.clusters = slurmdb_get_info_cluster(env_val))) {
-			error("'%s' invalid entry for SLURM_CLUSTERS",
+			error("'%s' can't be reached now, "
+			      "or it is an invalid entry for "
+			      "SLURM_CLUSTERS.  Use 'sacctmgr --list "
+			      "cluster' to see available clusters.",
 			      env_val);
 			exit(1);
 		}
@@ -181,7 +184,10 @@ extern void parse_command_line(int argc, char *argv[])
 				list_destroy(params.clusters);
 			if (!(params.clusters =
 			      slurmdb_get_info_cluster(optarg))) {
-				error("'%s' invalid entry for --cluster",
+				error("'%s' can't be reached now, "
+				      "or it is an invalid entry for "
+				      "--cluster.  Use 'sacctmgr --list "
+				      "cluster' to see available clusters.",
 				      optarg);
 				exit(1);
 			}
@@ -559,6 +565,7 @@ _parse_format( char* format )
 					right_justify,
 					suffix );
 		} else if (field[0] == 'H') {
+			params.match_flags.reason_timestamp_flag = true;
 			format_add_timestamp( params.format_list,
 					      field_size,
 					      right_justify,
@@ -587,8 +594,20 @@ _parse_format( char* format )
 					field_size,
 					right_justify,
 					suffix );
+		} else if (field[0] == 'n') {
+			params.match_flags.hostnames_flag = true;
+			format_add_node_hostnames( params.format_list,
+					field_size,
+					right_justify,
+					suffix );
 		} else if (field[0] == 'N') {
 			format_add_node_list( params.format_list,
+					field_size,
+					right_justify,
+					suffix );
+		} else if (field[0] == 'o') {
+			params.match_flags.node_addr_flag = true;
+			format_add_node_address( params.format_list,
 					field_size,
 					right_justify,
 					suffix );
@@ -640,11 +659,13 @@ _parse_format( char* format )
 					       right_justify,
 					       suffix );
 		} else if (field[0] == 'u') {
+			params.match_flags.reason_user_flag = true;
 			format_add_user( params.format_list,
 					field_size,
 					right_justify,
 					suffix );
 		} else if (field[0] == 'U') {
+			params.match_flags.reason_user_flag = true;
 			format_add_user_long( params.format_list,
 					      field_size,
 					      right_justify,
@@ -805,6 +826,10 @@ void _print_options( void )
 			"true" : "false");
 	printf("reason_flag     = %s\n", params.match_flags.reason_flag ?
 			"true" : "false");
+	printf("reason_timestamp_flag = %s\n",
+			params.match_flags.reason_timestamp_flag ?  "true" : "false");
+	printf("reason_user_flag = %s\n",
+			params.match_flags.reason_user_flag ?  "true" : "false");
 	printf("root_flag       = %s\n", params.match_flags.root_flag ?
 			"true" : "false");
 	printf("share_flag      = %s\n", params.match_flags.share_flag ?

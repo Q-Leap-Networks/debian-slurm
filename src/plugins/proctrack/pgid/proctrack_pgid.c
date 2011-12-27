@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -55,8 +55,9 @@
 #include <sys/types.h>
 #include <signal.h>
 #include <stdlib.h>
-#include <slurm/slurm.h>
-#include <slurm/slurm_errno.h>
+
+#include "slurm/slurm.h"
+#include "slurm/slurm_errno.h"
 #include "src/common/log.h"
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 
@@ -91,7 +92,7 @@
  */
 const char plugin_name[]      = "Process tracking via process group ID plugin";
 const char plugin_type[]      = "proctrack/pgid";
-const uint32_t plugin_version = 90;
+const uint32_t plugin_version = 91;
 
 /*
  * init() is called when the plugin is loaded, before any other functions
@@ -107,7 +108,7 @@ extern int fini ( void )
 	return SLURM_SUCCESS;
 }
 
-extern int slurm_container_create ( slurmd_job_t *job )
+extern int slurm_container_plugin_create ( slurmd_job_t *job )
 {
 	return SLURM_SUCCESS;
 }
@@ -115,71 +116,71 @@ extern int slurm_container_create ( slurmd_job_t *job )
 /*
  * Uses job step process group id.
  */
-extern int slurm_container_add ( slurmd_job_t *job, pid_t pid )
+extern int slurm_container_plugin_add ( slurmd_job_t *job, pid_t pid )
 {
-	job->cont_id = (uint32_t)job->pgid;
+	job->cont_id = (uint64_t)job->pgid;
 	return SLURM_SUCCESS;
 }
 
-extern int slurm_container_signal  ( uint32_t id, int signal )
+extern int slurm_container_plugin_signal  ( uint64_t id, int signal )
 {
 	pid_t pid = (pid_t) id;
 
-	if (!id)	/* no container ID */
-		return ESRCH;
-
-	if (id == getpid() || id == getpgid(0)) {
+	if (!id) {
+		/* no container ID */
+	} else if (pid == getpid() || pid == getpgid(0)) {
 		error("slurm_signal_container would kill caller!");
-		return ESRCH;
+	} else {
+		return killpg(pid, signal);
 	}
-
-	return (int)killpg(pid, signal);
+	slurm_seterrno(ESRCH);
+	return SLURM_ERROR;
 }
 
-extern int slurm_container_destroy ( uint32_t id )
+extern int slurm_container_plugin_destroy ( uint64_t id )
 {
 	return SLURM_SUCCESS;
 }
 
-extern uint32_t slurm_container_find(pid_t pid)
+extern uint64_t slurm_container_plugin_find(pid_t pid)
 {
 	pid_t rc = getpgid(pid);
 
 	if (rc == -1)
-		return (uint32_t) 0;
+		return (uint64_t) 0;
 	else
-		return (uint32_t) rc;
+		return (uint64_t) rc;
 }
 
-extern bool slurm_container_has_pid(uint32_t cont_id, pid_t pid)
+extern bool slurm_container_plugin_has_pid(uint64_t cont_id, pid_t pid)
 {
 	pid_t pgid = getpgid(pid);
 
-	if (pgid == -1 || (uint32_t)pgid != cont_id)
+	if ((pgid == -1) || ((uint64_t)pgid != cont_id))
 		return false;
 
 	return true;
 }
 
 extern int
-slurm_container_wait(uint32_t cont_id)
+slurm_container_plugin_wait(uint64_t cont_id)
 {
 	pid_t pgid = (pid_t)cont_id;
 	int delay = 1;
 
 	if (cont_id == 0 || cont_id == 1) {
-		errno = EINVAL;
+		slurm_seterrno(EINVAL);
 		return SLURM_ERROR;
 	}
 
 	/* Spin until the process group is gone. */
 	while (killpg(pgid, 0) == 0) {
-		slurm_container_signal(cont_id, SIGKILL);
+		slurm_container_plugin_signal(cont_id, SIGKILL);
 		sleep(delay);
 		if (delay < 120) {
 			delay *= 2;
 		} else {
-			error("Unable to destroy container %u", cont_id);
+			error("Unable to destroy container %"PRIu64"", cont_id);
 		}
 	}
 
@@ -187,8 +188,9 @@ slurm_container_wait(uint32_t cont_id)
 }
 
 extern int
-slurm_container_get_pids(uint32_t cont_id, pid_t **pids, int *npids)
+slurm_container_plugin_get_pids(uint64_t cont_id, pid_t **pids, int *npids)
 {
-	error("proctrack/pgid does not implement slurm_container_get_pids");
+	error("proctrack/pgid does not implement "
+	      "slurm_container_plugin_get_pids");
 	return SLURM_ERROR;
 }

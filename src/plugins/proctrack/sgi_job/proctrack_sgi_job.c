@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -53,8 +53,8 @@
 #include <unistd.h>
 #include <dlfcn.h>
 
-#include <slurm/slurm.h>
-#include <slurm/slurm_errno.h>
+#include "slurm/slurm.h"
+#include "slurm/slurm_errno.h"
 #include "src/common/log.h"
 
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
@@ -62,7 +62,7 @@
 
 const char plugin_name[]      = "Process tracking via SGI job module";
 const char plugin_type[]      = "proctrack/sgi_job";
-const uint32_t plugin_version = 90;
+const uint32_t plugin_version = 91;
 
 /*
  * We can't include <job.h> since its prototypes conflict with some
@@ -142,7 +142,7 @@ int init (void)
 	if (!job_ops.getpidcnt)
 		error ("Unable to resolve job_getpidcnt in libjob.so");
 
-	info ("successfully loaded libjob.so");
+	debug ("successfully loaded libjob.so");
 	return SLURM_SUCCESS;
 }
 
@@ -192,10 +192,10 @@ int _job_getpidcnt (jid_t jid)
 	return ((*job_ops.getpidcnt) (jid));
 }
 
-int slurm_container_create (slurmd_job_t *job)
+int slurm_container_plugin_create (slurmd_job_t *job)
 {
 	jid_t jid;
-	job->cont_id = (uint32_t) -1;
+	job->cont_id = (uint64_t) -1;
 
 	if (!libjob_handle)
 		init();
@@ -209,10 +209,10 @@ int slurm_container_create (slurmd_job_t *job)
 	return SLURM_SUCCESS;
 }
 
-int slurm_container_add (slurmd_job_t *job, pid_t pid)
+int slurm_container_plugin_add (slurmd_job_t *job, pid_t pid)
 {
-	if (job->cont_id == (uint32_t) -1) {
-		job->cont_id = (uint32_t) _job_getjid (getpid());
+	if (job->cont_id == (uint64_t) -1) {
+		job->cont_id = (uint64_t) _job_getjid (getpid());
 		/*
 		 *  Detach ourselves from the job container now that there
 		 *   is at least one other process in it.
@@ -225,7 +225,7 @@ int slurm_container_add (slurmd_job_t *job, pid_t pid)
 	return SLURM_SUCCESS;
 }
 
-int slurm_container_signal (uint32_t id, int sig)
+int slurm_container_plugin_signal (uint64_t id, int sig)
 {
 	if ( (_job_killjid ((jid_t) id, sig) < 0)
 	   && (errno != ENODATA) && (errno != EBADF) )
@@ -233,7 +233,7 @@ int slurm_container_signal (uint32_t id, int sig)
 	return (SLURM_SUCCESS);
 }
 
-int slurm_container_destroy (uint32_t id)
+int slurm_container_plugin_destroy (uint64_t id)
 {
 	int status;
 	_job_waitjid ((jid_t) id, &status, 0);
@@ -243,29 +243,29 @@ int slurm_container_destroy (uint32_t id)
 	return SLURM_SUCCESS;
 }
 
-uint32_t slurm_container_find (pid_t pid)
+uint64_t slurm_container_plugin_find (pid_t pid)
 {
 	jid_t jid;
 
 	if ((jid = _job_getjid (pid)) == (jid_t) -1)
-		return ((uint32_t) 0);
+		return ((uint64_t) 0);
 
-	return ((uint32_t) jid);
+	return ((uint64_t) jid);
 }
 
-bool slurm_container_has_pid (uint32_t cont_id, pid_t pid)
+bool slurm_container_plugin_has_pid (uint64_t cont_id, pid_t pid)
 {
 	jid_t jid;
 
 	if ((jid = _job_getjid (pid)) == (jid_t) -1)
 		return false;
-	if ((uint32_t)jid != cont_id)
+	if ((uint64_t)jid != cont_id)
 		return false;
 
 	return true;
 }
 
-int slurm_container_wait (uint32_t id)
+int slurm_container_plugin_wait (uint64_t id)
 {
 	int status;
 	if (_job_waitjid ((jid_t) id, &status, 0) == (jid_t)-1)
@@ -274,7 +274,7 @@ int slurm_container_wait (uint32_t id)
 	return SLURM_SUCCESS;
 }
 
-int slurm_container_get_pids(uint32_t cont_id, pid_t **pids, int *npids)
+int slurm_container_plugin_get_pids(uint64_t cont_id, pid_t **pids, int *npids)
 {
 	int pidcnt, bufsize;
 	pid_t *p;

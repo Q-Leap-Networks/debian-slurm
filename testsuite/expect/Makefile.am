@@ -111,6 +111,7 @@ EXTRA_DIST = \
 	test2.12			\
 	test2.13			\
 	test2.14			\
+	test2.15			\
 	test3.1				\
 	test3.2				\
 	test3.3				\
@@ -123,6 +124,7 @@ EXTRA_DIST = \
 	test3.9				\
 	test3.10			\
 	test3.11			\
+	test3.12			\
 	test4.1				\
 	test4.2				\
 	test4.3				\
@@ -200,6 +202,11 @@ EXTRA_DIST = \
 	test8.7.crypto.c		\
 	test8.7.prog.c			\
 	test8.8				\
+	test8.20			\
+	test8.21			\
+	test8.21.bash			\
+	test8.22			\
+	test8.23			\
 	test9.1				\
 	test9.2				\
 	test9.3				\
@@ -351,6 +358,8 @@ EXTRA_DIST = \
 	test24.1.prog.c			\
 	test24.2			\
 	test25.1			\
+	test26.1			\
+	test26.2			\
 	usleep
 
 distclean-local:

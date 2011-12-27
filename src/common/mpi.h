@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -44,7 +44,7 @@
 #endif
 
 #include <stdbool.h>
-#include <slurm/slurm.h>
+#include "slurm/slurm.h"
 
 typedef struct slurm_mpi_context *slurm_mpi_context_t;
 typedef void mpi_plugin_client_state_t;
@@ -93,8 +93,8 @@ int mpi_hook_slurmstepd_init (char ***env);
  * task.  The process will be running as the user of the job step at that
  * point.
  *
- * If the plugin want to set environment variables for the task,
- * it will add the necessary variables the the env array pointed
+ * If the plugin wants to set environment variables for the task,
+ * it will add the necessary variables the env array pointed
  * to be "env".  If "env" is NULL, a new array will be allocated
  * automaticallly.
  *
@@ -122,7 +122,7 @@ int mpi_hook_client_init (char *mpi_type);
  *
  * If the plugin requires that environment variables be set in the
  * environment of every task, it will add the necessary variables
- * the the env array pointed to be "env".  If "env" is NULL, a new
+ * the env array pointed to be "env".  If "env" is NULL, a new
  * array will be allocated automaticallly.
  *
  * The returned "env" array may be manipulated (and freed) by using

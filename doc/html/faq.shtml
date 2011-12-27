@@ -44,6 +44,8 @@
 the <i>slurm-dev</i> mailing list?</a></li>
 <li><a href="#job_size">Can I change my job's size after it has started
 running?</a></li>
+<li><a href="#mpi_symbols">Why is my MPIHCH2 or MVAPICH2 job not running with
+SLURM? Why does the DAKOTA program not run with SLURM?</a></li>
 </ol>
 
 <h2>For Administrators</h2>
@@ -86,7 +88,7 @@ running?</a></li>
   core files?</a></li>
 <li><a href="#limit_propagation">Is resource limit propagation
   useful on a homogeneous cluster?</a></li>
-<li<a href="#clock">Do I need to maintain synchronized clocks
+<li><a href="#clock">Do I need to maintain synchronized clocks
   on the cluster?</a></li>
 <li><a href="#cred_invalid">Why are &quot;Invalid job credential&quot; errors
   generated?</a></li>
@@ -300,9 +302,9 @@ You can use the scontrol show command to check if these conditions apply.</p>
 <li>Job: ExcNodeList=NULL</li>
 <li>Job: Contiguous=0</li>
 <li>Job: Features=NULL</li>
-<li>Job: MinProcs, MinMemory, and MinTmpDisk satisfied by all nodes in
+<li>Job: MinCPUs, MinMemory, and MinTmpDisk satisfied by all nodes in
 the partition</li>
-<li>Job: MinProcs or MinNodes not to exceed partition's MaxNodes</li>
+<li>Job: MinCPUs or MinNodes not to exceed partition's MaxNodes</li>
 </ul>
 <p>If the partitions specifications differ from those listed above,
 no jobs in that partition will be scheduled by the backfills scheduler.
@@ -646,9 +648,22 @@ http://groups.google.com/group/slurm-devel</a></p>
 
 <p><a name="job_size"><b>24. Can I change my job's size after it has started
 running?</b></a><br>
-Beginning with Slurm version 2.2 it is possible to decrease a job's size after
-it has started, but it is not currently possible to increase a job's size.
-Use the <i>scontrol</i> command to change a job's size either by specifying
+Support to decrease the size of a running job was added to SLURM version 2.2.
+The ability to increase the size of a running job was added to SLURM version 2.3.
+While the size of a pending job may be changed with few restrictions, several
+significant restrictions apply to changing the size of a running job as noted
+below:
+<ol>
+<li>Support is not available on BlueGene or Cray system due to limitations
+in the software underlying SLURM.</li>
+<li>Job(s) changing size must not be in a suspended state, including jobs
+suspended for gang scheduling. The jobs must be in a state of pending or
+running. We plan to modify the gang scheduling logic in the future to
+concurrently schedule a job to be used for expanding another job and the
+job to be expanded.</li>
+</ol></p>
+
+<p>Use the <i>scontrol</i> command to change a job's size either by specifying
 a new node count (<i>NumNodes=</i>) for the job or identify the specific nodes
 (<i>NodeList=</i>) that you want the job to retain. 
 Any job steps running on the nodes which are reliquished by the job will be
@@ -658,11 +673,13 @@ containing information about the job's environment will no longer be valid and
 should either be removed or altered (e.g. SLURM_NNODES, SLURM_NODELIST and
 SLURM_NPROCS).
 The <i>scontrol</i> command will generate a script that can be executed to
-reset local environment variables
+reset local environment variables.
 You must retain the SLURM_JOBID environment variable in order for the
 <i>srun</i> command to gather information about the job's current state and
-specify the desired node and/or task count in subsequent <i>srun</i> invocations. 
-An example is shown below.
+specify the desired node and/or task count in subsequent <i>srun</i> invocations.
+A new accounting record is generated when a job is resized showing the to have
+been resubmitted and restarted at the new size.
+An example is shown below.</p>
 <pre>
 #!/bin/bash
 srun my_big_job
@@ -671,6 +688,114 @@ scontrol update JobId=$SLURM_JOBID NumNodes=2
 srun -N2 my_small_job
 rm slurm_job_${SLURM_JOBID}_resize.*
 </pre>
+
+<p><b>Increasing a job's size</b><br>
+Directly increasing the size of a running job would adversely effect the
+scheduling of pending jobs.
+For the sake of fairness in job scheduling, expanding a running job requires
+the user to submit a new job, but specify the option
+<i>--dependency=expand:&lt;jobid&gt;</i>.
+This option tells SLURM that the job, when scheduled, can be used to expand
+the specified jobid.
+Other job options would be used to identify the required resources
+(e.g. task count, node count, node features, etc.).
+This new job's time limit will be automatically set to reflect the end time of
+the job being expanded.
+This new job's generic resources specification will be automatically set
+equal to that of the job being merged to. This is due to the current SLURM
+restriction of all nodes associated with a job needing to have the same
+generic resource specification (i.e. a job can not have one GPU on one
+node and two GPUs on another node), although this restriction may be removed
+in the future. This restriction can pose some problems when both jobs can be
+allocated resources on the same node, in which case the generic resources
+allocated to the new job will be released. If the jobs are allocated resources
+on different nodes, the generic resources associated with the resulting job
+allocation after the merge will be consistent as expected.
+Any licenses associated with the new job will be added to those available in
+the job being merged to.
+Note that partition and Quality Of Service (QOS) limits will be applied
+independently to the new job allocation so the expanded job may exceed size
+limits configured for an individual job.</p>
+
+<p>After the new job is allocated resources, merge that job's allocation
+into that of the original job by executing:<br>
+<i>scontrol update jobid=&lt;jobid&gt; NumNodes=0</i><br>
+The <i>jobid</i> above is that of the job to relinquish it's resources.
+To provides more control over when the job expansion occurs, the resources are
+not merged into the original job until explicitly requested.
+These resources will be transfered to the original job and the scontrol
+command will generate a script to reset variables in the second
+job's environment to reflect it's modified resource allocation (which would
+be no resources).
+One would normally exit this second job at this point, since it has no
+associated resources.
+In order to generate a script to modify the environment variables for the
+expanded job, execute:<br>
+<i>scontrol update jobid=&lt;jobid&gt; NumNodes=ALL</i><br>
+Then execute the script generated.
+Note that this command does not change the original job's size, but only
+generates the script to change its environment variables.
+Until the environment variables are modified (e.g. the job's node count,
+CPU count, hostlist, etc.), any srun command will only consider the resources
+in the original resource allocation.
+Note that the original job may have active job steps at the time of it's
+expansion, but they will not be effected by the change.
+An example of the proceedure is shown below in which the original job
+allocation waits until the second resource allocation request can be
+satisfied. The job requesting additional resources could also use the sbatch
+command and permit the original job to continue execution at its initial size.
+Note that the development of additional user tools to manage SLURM resource
+allocations is planned in the future to make this process both simpler and
+more flexible.</p>
+
+<pre>
+$ salloc -N4 bash
+salloc: Granted job allocation 65542
+$ srun hostname
+icrm1
+icrm2
+icrm3
+icrm4
+
+$ salloc -N4 --dependency=expand:$SLURM_JOBID bash
+salloc: Granted job allocation 65543
+$ scontrol update jobid=$SLURM_JOBID NumNodes=0
+To reset SLURM environment variables, execute
+  For bash or sh shells:  . ./slurm_job_65543_resize.sh
+  For csh shells:         source ./slurm_job_65543_resize.csh
+$ exit
+exit
+salloc: Relinquishing job allocation 65543
+
+$ scontrol update jobid=$SLURM_JOBID NumNodes=ALL
+To reset SLURM environment variables, execute
+  For bash or sh shells:  . ./slurm_job_65542_resize.sh
+  For csh shells:         source ./slurm_job_65542_resize.csh
+$ . ./slurm_job_$SLURM_JOBID_resize.sh
+
+$ srun hostname
+icrm1
+icrm2
+icrm3
+icrm4
+icrm5
+icrm6
+icrm7
+icrm8
+$ exit
+exit
+salloc: Relinquishing job allocation 65542
+</pre>
+
+<p><a name="mpi_symbols"><b>25. Why is my MPIHCH2 or MVAPICH2 job not running with
+SLURM? Why does the DAKOTA program not run with SLURM?</b></a><br>
+The SLURM library used to support MPIHCH2 or MVAPICH2 references a variety of
+symbols. If those symbols resolve to functions or variables in your program
+rather than the appropriate library, the application will fail. In the case of
+<a href="http://dakota.sandia.gov">DAKOTA</a>, it contains a function named
+<b>regcomp</b>, which will get used rather than the POSIX regex functions.
+Rename DAKOTA's function and references from regcomp to something else to make
+it work properly.</p>
 
 <p class="footer"><a href="#top">top</a></p>
 
@@ -953,7 +1078,7 @@ $ squeue
 resources than physically exist on the node?</b></a><br>
 Yes in SLURM version 1.2 or higher.
 In the <i>slurm.conf</i> file, set <i>FastSchedule=2</i> and specify
-any desired node resource specifications (<i>Procs</i>, <i>Sockets</i>,
+any desired node resource specifications (<i>CPUs</i>, <i>Sockets</i>,
 <i>CoresPerSocket</i>, <i>ThreadsPerCore</i>, and/or <i>TmpDisk</i>).
 SLURM will use the resource specification for each node that is
 given in <i>slurm.conf</i> and will not check these specifications
@@ -1269,7 +1394,7 @@ address instead of the correct address and make it so the
 communication doesn't work.  Solution is to either remove this line or
 set a different nodeaddr that is known by your other nodes.</p>
 
-<p><a name="stop_sched"><b>38. How can I stop SLURM from scheduling jobs?</b></a></br>
+<p><a name="stop_sched"><b>39. How can I stop SLURM from scheduling jobs?</b></a></br>
 You can stop SLURM from scheduling jobs on a per partition basis by setting
 that partition's state to DOWN. Set its state UP to resume scheduling.
 For example:
@@ -1278,7 +1403,7 @@ $ scontrol update PartitionName=foo State=DOWN
 $ scontrol update PartitionName=bar State=UP
 </pre></p>
 
-<p><a name="scontrol_multi_jobs"><b>39. Can I update multiple jobs with a
+<p><a name="scontrol_multi_jobs"><b>40. Can I update multiple jobs with a
 single <i>scontrol</i> command?</b></a></br>
 No, but you can probably use <i>squeue</i> to build the script taking
 advantage of its filtering and formatting options. For example:
@@ -1286,7 +1411,7 @@ advantage of its filtering and formatting options. For example:
 $ squeue -tpd -h -o "scontrol update jobid=%i priority=1000" >my.script
 </pre></p>
 
-<p><a name="amazon_ec2"><b>40. Can SLURM be used to run jobs on 
+<p><a name="amazon_ec2"><b>41. Can SLURM be used to run jobs on 
 Amazon's EC2?</b></a></br>
 <p>Yes, here is a description of use SLURM use with 
 <a href="http://aws.amazon.com/ec2/">Amazon's EC2</a> courtesy of 
@@ -1310,7 +1435,7 @@ which I then copy over the /usr/local on the first instance and NFS export to
 all other instances.  This way I have persistent home directories and a very
 simple first-login script that configures the virtual cluster for me.</p>
 
-<p><a name="core_dump"><b>41. If a SLURM daemon core dumps, where can I find the
+<p><a name="core_dump"><b>42. If a SLURM daemon core dumps, where can I find the
 core file?</b></a></br>
 <p>For <i>slurmctld</i> the core file will be in the same directory as its
 log files (<i>SlurmctldLogFile</i>) iif configured using an fully qualified
@@ -1326,7 +1451,7 @@ Otherwise it will be found in directory used for saving state
 occurs. It will either be in spawned job's working directory on the same 
 location as that described above for the <i>slurmd</i> daemon.</p>
 
-<p><a name="totalview"><b>42. How can TotalView be configured to operate with
+<p><a name="totalview"><b>43. How can TotalView be configured to operate with
 SLURM?</b></a></br>
 <p>The following lines should also be added to the global <i>.tvdrc</i> file
 for TotalView to operate with SLURM:
@@ -1344,6 +1469,6 @@ dset TV::parallel_configs {
 </pre></p>
 <p class="footer"><a href="#top">top</a></p>
 
-<p style="text-align:center;">Last modified 6 January 2011</p>
+<p style="text-align:center;">Last modified 4 September 2011</p>
 
 <!--#include virtual="footer.txt"-->

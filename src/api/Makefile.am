@@ -44,7 +44,7 @@ current = $(SLURM_API_CURRENT)
 age     = $(SLURM_API_AGE)
 rev     = $(SLURM_API_REVISION)
 
-# libpmi version informaiton
+# libpmi version information
 #
 # The libpmi interface shouldn't be changing any time soon, so for SLURM's
 # libpmi only the library REVISION and AGE should change (and it is debatable
@@ -75,19 +75,22 @@ BUILT_SOURCES = $(VERSION_SCRIPT) $(PMI_VERSION_SCRIPT) libslurm.la
 # Also, libslurmhelper, libslurm.o are for convenience, they are not installed.
 noinst_LTLIBRARIES = libslurmhelper.la
 noinst_PROGRAMS = libslurm.o
+# This is needed if compiling on windows
+EXEEXT=
 
 slurmapi_src =           \
 	allocate.c       \
 	allocate_msg.c   \
+	block_info.c     \
 	cancel.c         \
 	checkpoint.c     \
 	complete.c       \
 	config_info.c    \
+	front_end_info.c \
 	init_msg.c       \
 	job_info.c job_info.h \
 	job_step_info.c  \
 	node_info.c      \
-	block_info.c \
 	partition_info.c \
 	reservation_info.c \
 	signal.c         \
@@ -159,6 +162,7 @@ $(VERSION_SCRIPT) :
 	(echo "{ global:";   \
 	 echo "   islurm_*;"; \
 	 echo "   slurm_*;"; \
+	 echo "   slurmdb_*;"; \
 	 echo "  local: *;"; \
 	 echo "};") > $(VERSION_SCRIPT)
 

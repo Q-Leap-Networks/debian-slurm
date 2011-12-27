@@ -8,7 +8,7 @@
  *  Written by Danny Auble <da@llnl.gov>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -115,6 +115,7 @@ static int _get_account_coords(mysql_conn_t *mysql_conn,
 		coord->name = xstrdup(row[0]);
 		coord->direct = 0;
 	}
+	mysql_free_result(result);
 	return SLURM_SUCCESS;
 }
 

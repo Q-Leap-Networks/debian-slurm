@@ -16,7 +16,7 @@
 # CODE-OCEC-09-009. All rights reserved.
 #
 # This file is part of SLURM, a resource management program.
-# For details, see <https://computing.llnl.gov/linux/slurm/>.
+# For details, see <http://www.schedmd.com/slurmdocs/>.
 # Please also read the included file: DISCLAIMER.
 #
 # SLURM is free software; you can redistribute it and/or modify it under
@@ -46,9 +46,9 @@ if {[is_super_user] == 0} {
 	exit 0
 }
 
-if {[test_bluegene] == 1} {
-	send_user "\nWARNING: This test is incompatible with BlueGene systems\n"
-	exit 0
+if {[test_front_end]} {
+        send_user "\nWARNING: This test is incompatible with front-end systems\n"
+        exit $exit_code
 }
 
 #
@@ -93,8 +93,11 @@ if {[string compare $host_0 ""] == 0} {
 	exit 1
 }
 if {[string compare $nodelist_name ""] == 0} {
-    send_user "\nFAILURE: Did not get nodelist_name of task 0\n"
-    exit 1
+	send_user "\nFAILURE: Did not get nodelist_name of task 0\n"
+	exit 1
+}
+if {[string compare $host_0 $nodelist_name] != 0} {
+	send_user "\nWARNING: hostname inconsistency\n"
 }
 set include_node $host_0
 
@@ -160,7 +163,7 @@ for {set inx 0} {$inx < $iterations} {incr inx} {
 	exec $bin_usleep 250000
 
 	set failures 0
-	set srun_pid [spawn $srun -N1 --nodelist=$include_node -t1 -l $bin_printenv SLURMD_NODENAME]
+	set srun_pid [spawn $srun -N1 --nodelist=$nodelist_name -t1 -l $bin_printenv SLURMD_NODENAME]
 	set   alloc $spawn_id
 
 	set srun_pid1 [spawn $srun -N1 --nodelist=$include_node -Z $bin_usleep 500000]
@@ -219,12 +222,8 @@ for {set inx 0} {$inx < $iterations} {incr inx} {
 	expect {
 		-i $alloc
 		-re "Invalid node name specified" {
-			if {$front_end == 0} {
-				send_user "\nFAILURE: some error happened\n"
-				set failures 1
-			} else {
-				send_user "\nExpected error on front-end systems\n"
-			}
+			send_user "\nFAILURE: some error happened\n"
+			set failures 1
 			exp_continue
 		}
 		-re "error:.*configuring interconnect" {

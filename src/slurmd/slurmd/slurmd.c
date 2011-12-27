@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -85,6 +85,7 @@
 #include "src/common/stepd_api.h"
 #include "src/common/switch.h"
 #include "src/slurmd/common/task_plugin.h"
+#include "src/common/xcpuinfo.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 #include "src/common/xsignal.h"
@@ -173,6 +174,10 @@ main (int argc, char *argv[])
 	uint32_t slurmd_uid = 0;
 	uint32_t curr_uid = 0;
 	char time_stamp[256];
+	log_options_t lopts = LOG_OPTS_INITIALIZER;
+
+	/* NOTE: logfile is NULL at this point */
+	log_init(argv[0], lopts, LOG_DAEMON, NULL);
 
 	/*
 	 * Make sure we have no extra open files which
@@ -202,22 +207,15 @@ main (int argc, char *argv[])
 	conf->argv = &argv;
 	conf->argc = &argc;
 
-	/*
-	 * Process commandline arguments first, since one option may be
-	 * an alternate location for the slurm config file.
-	 */
-	_process_cmdline(*conf->argc, *conf->argv);
-
-	/*
-	 * Read global slurm config file, ovverride necessary values from
-	 * defaults and command line.
-	 */
-	_read_config();
-	/* we should load config file _before_ analyzing SlurmUser below */
+	if (_slurmd_init() < 0) {
+		error( "slurmd initialization failed" );
+		fflush( NULL );
+		exit(1);
+	}
 
 	slurmd_uid = slurm_get_slurmd_user_id();
 	curr_uid = getuid();
-	if(curr_uid != slurmd_uid) {
+	if (curr_uid != slurmd_uid) {
 		struct passwd *pw = NULL;
 		char *slurmd_user = NULL;
 		char *curr_user = NULL;
@@ -241,25 +239,10 @@ main (int argc, char *argv[])
 	}
 	init_setproctitle(argc, argv);
 
-	if (slurm_select_init(1) != SLURM_SUCCESS )
-		fatal( "failed to initialize node selection plugin" );
-
-	log_init(argv[0], conf->log_opts, LOG_DAEMON, conf->logfile);
-
 	xsignal(SIGTERM, &_term_handler);
 	xsignal(SIGINT,  &_term_handler);
 	xsignal(SIGHUP,  &_hup_handler );
 	xsignal_block(blocked_signals);
-
-	/*
-	 * Run slurmd_init() here in order to report early errors
-	 * (with public keyfile)
-	 */
-	if (_slurmd_init() < 0) {
-		error( "slurmd initialization failed" );
-		fflush( NULL );
-		exit(1);
-	}
 
 	debug3("slurmd initialization successful");
 
@@ -717,9 +700,10 @@ _read_config(void)
 {
 	char *path_pubkey = NULL;
 	slurm_ctl_conf_t *cf = NULL;
+#ifndef HAVE_FRONT_END
 	bool cr_flag = false, gang_flag = false;
+#endif
 
-	slurm_conf_reinit(conf->conffile);
 	cf = slurm_conf_lock();
 
 	slurm_mutex_lock(&conf->config_mutex);
@@ -736,10 +720,12 @@ _read_config(void)
 	if (!conf->logfile)
 		conf->logfile = xstrdup(cf->slurmd_logfile);
 
+#ifndef HAVE_FRONT_END
 	if (!strcmp(cf->select_type, "select/cons_res"))
 		cr_flag = true;
 	if (cf->preempt_mode & PREEMPT_MODE_GANG)
 		gang_flag = true;
+#endif
 
 	slurm_conf_unlock();
 	/* node_name may already be set from a command line parameter */
@@ -779,7 +765,7 @@ _read_config(void)
 
 	_update_logging();
 	_update_nice();
-		
+
 	get_procs(&conf->actual_cpus);
 	get_cpuinfo(conf->actual_cpus,
 		    &conf->actual_sockets,
@@ -787,8 +773,19 @@ _read_config(void)
 		    &conf->actual_threads,
 		    &conf->block_map_size,
 		    &conf->block_map, &conf->block_map_inv);
-
-	if (((cf->fast_schedule == 0) && !cr_flag && !gang_flag) || 
+#ifdef HAVE_FRONT_END
+	/*
+	 * When running with multiple frontends, the slurmd S:C:T values are not
+	 * relevant, hence ignored by both _register_front_ends (sets all to 1)
+	 * and validate_nodes_via_front_end (uses slurm.conf values).
+	 * Report actual hardware configuration, irrespective of FastSchedule.
+	 */
+	conf->cpus    = conf->actual_cpus;
+	conf->sockets = conf->actual_sockets;
+	conf->cores   = conf->actual_cores;
+	conf->threads = conf->actual_threads;
+#else
+	if (((cf->fast_schedule == 0) && !cr_flag && !gang_flag) ||
 	    ((cf->fast_schedule == 1) &&
 	     (conf->actual_cpus < conf->conf_cpus))) {
 		conf->cpus    = conf->actual_cpus;
@@ -801,12 +798,13 @@ _read_config(void)
 		conf->cores   = conf->conf_cores;
 		conf->threads = conf->conf_threads;
 	}
+#endif
 
-	if(cf->fast_schedule &&
-	   ((conf->cpus    != conf->actual_cpus)    ||
-	    (conf->sockets != conf->actual_sockets) ||
-	    (conf->cores   != conf->actual_cores)   ||
-	    (conf->threads != conf->actual_threads))) {
+	if (cf->fast_schedule &&
+	    ((conf->cpus    != conf->actual_cpus)    ||
+	     (conf->sockets != conf->actual_sockets) ||
+	     (conf->cores   != conf->actual_cores)   ||
+	     (conf->threads != conf->actual_threads))) {
 		info("Node configuration differs from hardware\n"
 		     "   Procs=%u:%u(hw) Sockets=%u:%u(hw)\n"
 		     "   CoresPerSocket=%u:%u(hw) ThreadsPerCore=%u:%u(hw)",
@@ -864,6 +862,7 @@ _reconfigure(void)
 	bool did_change;
 
 	_reconfig = 0;
+	slurm_conf_reinit(conf->conffile);
 	_read_config();
 
 	/*
@@ -872,7 +871,6 @@ _reconfigure(void)
 	slurm_topo_build_config();
 	_set_topo_info();
 
-	/* _update_logging(); */
 	_print_conf();
 
 	/*
@@ -1193,7 +1191,35 @@ _slurmd_init(void)
 	char slurm_stepd_path[MAXPATHLEN];
 	uint32_t cpu_cnt;
 
+	/*
+	 * Process commandline arguments first, since one option may be
+	 * an alternate location for the slurm config file.
+	 */
+	_process_cmdline(*conf->argc, *conf->argv);
+
+	/*
+	 * Build nodes table like in slurmctld
+	 * This is required by the topology stack
+	 * Node tables setup must preceed _read_config() so that the
+	 * proper hostname is set.
+	 */
+	slurm_conf_init(conf->conffile);
+	init_node_conf();
+	/* slurm_select_init() must be called before
+	 * build_all_nodeline_info() to be called with proper argument. */
+	if (slurm_select_init(1) != SLURM_SUCCESS )
+		return SLURM_FAILURE;
+	build_all_nodeline_info(true);
+	build_all_frontend_info(true);
+
+	/*
+	 * Read global slurm config file, override necessary values from
+	 * defaults and command line.
+	 */
+	_read_config();
+
 	cpu_cnt = MAX(conf->conf_cpus, conf->block_map_size);
+
 	if ((gres_plugin_init() != SLURM_SUCCESS) ||
 	    (gres_plugin_node_config_load(cpu_cnt) != SLURM_SUCCESS))
 		return SLURM_FAILURE;
@@ -1201,24 +1227,11 @@ _slurmd_init(void)
 		return SLURM_FAILURE;
 
 	/*
-	 * Build nodes table like in slurmctld
-	 * This is required by the topology stack
-	 */
-	init_node_conf();
-	build_all_nodeline_info(true);
-
-	/*
 	 * Get and set slurmd topology information
 	 */
 	slurm_topo_build_config();
 	_set_topo_info();
 
-	/*
-	 * Update location of log messages (syslog, stderr, logfile, etc.),
-	 * print current configuration (if in debug mode), and
-	 * load appropriate plugin(s).
-	 */
-	/* _update_logging(); */
 	_print_conf();
 	if (slurm_proctrack_init() != SLURM_SUCCESS)
 		return SLURM_FAILURE;
@@ -1227,11 +1240,19 @@ _slurmd_init(void)
 	if (slurm_auth_init(NULL) != SLURM_SUCCESS)
 		return SLURM_FAILURE;
 
-	if (getrlimit(RLIMIT_NOFILE,&rlim) == 0) {
+	if (getrlimit(RLIMIT_CPU, &rlim) == 0) {
 		rlim.rlim_cur = rlim.rlim_max;
-		setrlimit(RLIMIT_NOFILE,&rlim);
+		setrlimit(RLIMIT_CPU, &rlim);
+		if (rlim.rlim_max != RLIM_INFINITY) {
+			error("Slurmd process CPU time limit is %d seconds",
+			      (int) rlim.rlim_max);
+		}
 	}
 
+	if (getrlimit(RLIMIT_NOFILE, &rlim) == 0) {
+		rlim.rlim_cur = rlim.rlim_max;
+		setrlimit(RLIMIT_NOFILE, &rlim);
+	}
 #ifndef NDEBUG
 	if (getrlimit(RLIMIT_CORE, &rlim) == 0) {
 		rlim.rlim_cur = rlim.rlim_max;
@@ -1363,8 +1384,8 @@ cleanup:
 /**************************************************************************\
  * To test for memory leaks, set MEMORY_LEAK_DEBUG to 1 using
  * "configure --enable-memory-leak-debug" then execute
- * > valgrind --tool=memcheck --leak-check=yes --num-callers=6
- *    --leak-resolution=med slurmd -D
+ * $ valgrind --tool=memcheck --leak-check=yes --num-callers=8 \
+ *   --leak-resolution=med ./slurmd -Dc >valg.slurmd.out 2>&1
  *
  * Then exercise the slurmd functionality before executing
  * > scontrol shutdown

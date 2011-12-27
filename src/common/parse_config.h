@@ -11,7 +11,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -52,7 +52,7 @@
  * looking for code specific to slurm.conf, look in
  * src/common/slurm_conf.[hc].
  *
- * In the parsed file, any amount of white-space is allowed between the the
+ * In the parsed file, any amount of white-space is allowed between the
  * key, equal-sign, and value.  The parser handles comments, line
  * continuations, and escaped characters automatically.  Double-quotes can
  * be used to surround an entire value if white-space is needed within
@@ -132,7 +132,7 @@
  * a "handler" function and a "destroy" function.  The prototypes for each
  * are available below in the typedef of s_p_options_t.
  *
- * The "handler" function is given the the "key" string, "value" string, and a
+ * The "handler" function is given the "key" string, "value" string, and a
  * pointer to the remainder of the "line" on which the key-value pair was found
  * (this is the line after the parser has removed comments and concatenated
  * continued lines).  The handler can transform the value any way it desires,
@@ -182,13 +182,29 @@ void s_p_hashtbl_destroy(s_p_hashtbl_t *hashtbl);
 /* Returns SLURM_SUCCESS if file was opened and parse correctly
  * OUT hash_val - cyclic redundancy check (CRC) character-wise value
  *                of file.
+ * IN ignore_new - do not treat unrecognized keywords as a fatal error,
+ *                 print debug() message and continue
  */
-int s_p_parse_file(s_p_hashtbl_t *hashtbl, uint32_t *hash_val, char *filename);
+int s_p_parse_file(s_p_hashtbl_t *hashtbl, uint32_t *hash_val, char *filename,
+		   bool ignore_new);
 
 /*
  * Returns 1 if the line is parsed cleanly, and 0 otherwise.
  */
 int s_p_parse_line(s_p_hashtbl_t *hashtbl, const char *line, char **leftover);
+
+/*
+ * s_p_hashtbl_merge
+ * 
+ * Merge the contents of two s_p_hashtbl_t data structures. Anything in
+ * from_hashtbl that does not also appear in to_hashtbl is transfered to it.
+ * This is intended primary to support multiple lines of DEFAULT configuration
+ * information and preserve the old default values while adding new defaults.
+ *
+ * IN from_hashtbl - Source of old data
+ * IN to_hashtbl - Destination for old data (if new value not already set)
+ */
+void s_p_hashtbl_merge(s_p_hashtbl_t *to_hashtbl, s_p_hashtbl_t *from_hashtbl);
 
 /*
  * s_p_get_string

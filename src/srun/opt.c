@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -181,6 +181,8 @@
 #define LONG_OPT_DEBUG_SLURMD    0x14f
 #define LONG_OPT_TIME_MIN        0x150
 #define LONG_OPT_GRES            0x151
+#define LONG_OPT_ALPS            0x152
+#define LONG_OPT_REQ_SWITCH      0x153
 
 extern char **environ;
 
@@ -191,6 +193,9 @@ int error_exit = 1;
 int immediate_exit = 1;
 
 /*---- forward declarations of static functions  ----*/
+#if defined HAVE_BG_FILES && HAVE_BGQ
+static const char *runjob_loc = "/bgsys/drivers/ppcfloor/hlcs/bin/runjob";
+#endif
 
 typedef struct env_vars env_vars_t;
 
@@ -321,7 +326,7 @@ static void _opt_default()
 
 	opt.ntasks = 1;
 	opt.ntasks_set = false;
-	opt.cpus_per_task = 1;
+	opt.cpus_per_task = 0;
 	opt.cpus_set = false;
 	opt.min_nodes = 1;
 	opt.max_nodes = 0;
@@ -377,7 +382,7 @@ static void _opt_default()
 	opt.shared = (uint16_t)NO_VAL;
 	opt.exclusive = false;
 	opt.no_kill = false;
-	opt.kill_bad_exit = false;
+	opt.kill_bad_exit = NO_VAL;
 
 	opt.immediate	= 0;
 
@@ -411,11 +416,12 @@ static void _opt_default()
 	/* Default launch msg timeout           */
 	opt.msg_timeout     = slurm_get_msg_timeout();
 
-	for (i=0; i<SYSTEM_DIMENSIONS; i++)
+	for (i=0; i<HIGHEST_DIMENSIONS; i++) {
+		opt.conn_type[i]    = (uint16_t) NO_VAL;
 		opt.geometry[i]	    = (uint16_t) NO_VAL;
+	}
 	opt.reboot          = false;
 	opt.no_rotate	    = false;
-	opt.conn_type	    = (uint16_t) NO_VAL;
 	opt.blrtsimage = NULL;
 	opt.linuximage = NULL;
 	opt.mloaderimage = NULL;
@@ -448,6 +454,8 @@ static void _opt_default()
 	opt.acctg_freq = -1;
 	opt.reservation = NULL;
 	opt.wckey = NULL;
+	opt.req_switch = -1;
+	opt.wait4switch = -1;
 }
 
 /*---[ env var processing ]-----------------------------------------------*/
@@ -485,6 +493,7 @@ env_vars_t env_vars[] = {
 {"SLURM_EPILOG",        OPT_STRING,     &opt.epilog,        NULL             },
 {"SLURM_EXCLUSIVE",     OPT_EXCLUSIVE,  NULL,               NULL             },
 {"SLURM_GEOMETRY",      OPT_GEOMETRY,   NULL,               NULL             },
+{"SLURM_GRES",          OPT_STRING,     &opt.gres,          NULL             },
 {"SLURM_IMMEDIATE",     OPT_IMMEDIATE,  NULL,               NULL             },
 {"SLURM_IOLOAD_IMAGE",  OPT_STRING,     &opt.ramdiskimage,  NULL             },
 /* SLURM_JOBID was used in slurm version 1.3 and below, it is now vestigial */
@@ -495,6 +504,8 @@ env_vars_t env_vars[] = {
 {"SLURM_LABELIO",       OPT_INT,        &opt.labelio,       NULL             },
 {"SLURM_LINUX_IMAGE",   OPT_STRING,     &opt.linuximage,    NULL             },
 {"SLURM_MEM_BIND",      OPT_MEM_BIND,   NULL,               NULL             },
+{"SLURM_MEM_PER_CPU",	OPT_INT,	&opt.mem_per_cpu,   NULL             },
+{"SLURM_MEM_PER_NODE",	OPT_INT,	&opt.pn_min_memory, NULL             },
 {"SLURM_MLOADER_IMAGE", OPT_STRING,     &opt.mloaderimage,  NULL             },
 {"SLURM_MPI_TYPE",      OPT_MPI,        NULL,               NULL             },
 {"SLURM_NCORES_PER_SOCKET",OPT_NCORES,  NULL,               NULL             },
@@ -529,6 +540,8 @@ env_vars_t env_vars[] = {
 {"SLURM_WAIT",          OPT_INT,        &opt.max_wait,      NULL             },
 {"SLURM_WCKEY",         OPT_STRING,     &opt.wckey,         NULL             },
 {"SLURM_WORKING_DIR",   OPT_STRING,     &opt.cwd,           &opt.cwd_set     },
+{"SLURM_REQ_SWITCH",    OPT_INT,        &opt.req_switch,    NULL             },
+{"SLURM_WAIT4SWITCH",   OPT_INT,        &opt.wait4switch,   NULL             },
 {NULL, 0, NULL, NULL}
 };
 
@@ -638,7 +651,7 @@ _process_env_var(env_vars_t *e, const char *val)
 		break;
 
 	case OPT_CONN_TYPE:
-		opt.conn_type = verify_conn_type(val);
+		verify_conn_type(val, opt.conn_type);
 		break;
 
 	case OPT_NO_ROTATE:
@@ -709,7 +722,7 @@ _get_int(const char *arg, const char *what, bool positive)
 
 static void set_options(const int argc, char **argv)
 {
-	int opt_char, option_index = 0, max_val = 0;
+	int opt_char, option_index = 0, max_val = 0, tmp_int;
 	struct utsname name;
 	static struct option long_options[] = {
 		{"attach",        no_argument,       0, 'a'},
@@ -730,7 +743,7 @@ static void set_options(const int argc, char **argv)
 		{"join",          no_argument,       0, 'j'},
 		{"job-name",      required_argument, 0, 'J'},
 		{"no-kill",       no_argument,       0, 'k'},
-		{"kill-on-bad-exit", no_argument,    0, 'K'},
+		{"kill-on-bad-exit", optional_argument, 0, 'K'},
 		{"label",         no_argument,       0, 'l'},
 		{"licenses",      required_argument, 0, 'L'},
 		{"distribution",  required_argument, 0, 'm'},
@@ -755,6 +768,7 @@ static void set_options(const int argc, char **argv)
 		{"disable-status", no_argument,      0, 'X'},
 		{"no-allocate",   no_argument,       0, 'Z'},
 		{"acctg-freq",       required_argument, 0, LONG_OPT_ACCTG_FREQ},
+		{"alps",             required_argument, 0, LONG_OPT_ALPS},
 		{"begin",            required_argument, 0, LONG_OPT_BEGIN},
 		{"blrts-image",      required_argument, 0, LONG_OPT_BLRTS_IMAGE},
 		{"checkpoint",       required_argument, 0, LONG_OPT_CHECKPOINT},
@@ -809,6 +823,7 @@ static void set_options(const int argc, char **argv)
 		{"signal",	     required_argument, 0, LONG_OPT_SIGNAL},
 		{"slurmd-debug",     required_argument, 0, LONG_OPT_DEBUG_SLURMD},
 		{"sockets-per-node", required_argument, 0, LONG_OPT_SOCKETSPERNODE},
+		{"switches",         optional_argument, 0, LONG_OPT_REQ_SWITCH},
 		{"task-epilog",      required_argument, 0, LONG_OPT_TASK_EPILOG},
 		{"task-prolog",      required_argument, 0, LONG_OPT_TASK_PROLOG},
 		{"tasks-per-node",   required_argument, 0, LONG_OPT_NTASKSPERNODE},
@@ -821,8 +836,9 @@ static void set_options(const int argc, char **argv)
 		{"wckey",            required_argument, 0, LONG_OPT_WCKEY},
 		{NULL,               0,                 0, 0}
 	};
-	char *opt_string = "+aA:bB:c:C:d:D:e:Eg:hHi:IjJ:kKlL:m:n:N:"
+	char *opt_string = "+aA:bB:c:C:d:D:e:Eg:hHi:I::jJ:kK::lL:m:n:N:"
 		"o:Op:P:qQr:Rst:T:uU:vVw:W:x:XZ";
+	char *pos_delimit;
 #ifdef HAVE_PTY_H
 	char *tmp_str;
 #endif
@@ -833,7 +849,7 @@ static void set_options(const int argc, char **argv)
 		exit(error_exit);
 	}
 
-	if(opt.progname == NULL)
+	if (opt.progname == NULL)
 		opt.progname = xbasename(argv[0]);
 	else
 		error("opt.progname is already set.");
@@ -875,9 +891,14 @@ static void set_options(const int argc, char **argv)
 			}
 			break;
 		case (int)'c':
+			tmp_int = _get_int(optarg, "cpus-per-task", false);
+			if (opt.cpus_set && (tmp_int > opt.cpus_per_task)) {
+				info("Job step's --cpus-per-task value exceeds"
+				     " that of job (%d > %d). Job step may "
+				     "never run.", tmp_int, opt.cpus_per_task);
+			}
 			opt.cpus_set = true;
-			opt.cpus_per_task =
-				_get_int(optarg, "cpus-per-task", false);
+			opt.cpus_per_task = tmp_int;
 			break;
 		case (int)'C':
 			xfree(opt.constraints);
@@ -944,7 +965,10 @@ static void set_options(const int argc, char **argv)
 			opt.no_kill = true;
 			break;
 		case (int)'K':
-			opt.kill_bad_exit = true;
+			if (optarg)
+				opt.kill_bad_exit = strtol(optarg, NULL, 10);
+			else
+				opt.kill_bad_exit = 1;
 			break;
 		case (int)'l':
 			opt.labelio = true;
@@ -1212,7 +1236,7 @@ static void set_options(const int argc, char **argv)
 			_usage();
 			exit(0);
 		case LONG_OPT_CONNTYPE:
-			opt.conn_type = verify_conn_type(optarg);
+			verify_conn_type(optarg, opt.conn_type);
 			break;
 		case LONG_OPT_TEST_ONLY:
 			opt.test_only = true;
@@ -1445,6 +1469,19 @@ static void set_options(const int argc, char **argv)
 			xfree(opt.gres);
 			opt.gres = xstrdup(optarg);
 			break;
+		case LONG_OPT_ALPS:
+			verbose("Not running ALPS. --alps option ignored.");
+			break;
+		case LONG_OPT_REQ_SWITCH:
+			pos_delimit = strstr(optarg,"@");
+			if (pos_delimit != NULL) {
+				pos_delimit[0] = '\0';
+				pos_delimit++;
+				opt.wait4switch = time_str2mins(pos_delimit) * 60;
+			}
+			opt.req_switch = _get_int(optarg, "switches",
+				true);
+			break;
 		default:
 			if (spank_process_option (opt_char, optarg) < 0) {
 				exit(error_exit);
@@ -1501,7 +1538,7 @@ static void _load_multi(int *argc, char **argv)
  */
 static void _opt_args(int argc, char **argv)
 {
-	int i;
+	int i, command_pos = 0;
 	char **rest = NULL;
 
 	set_options(argc, argv);
@@ -1565,10 +1602,136 @@ static void _opt_args(int argc, char **argv)
 		while (rest[opt.argc] != NULL)
 			opt.argc++;
 	}
+#if defined HAVE_BGQ
+	/* A bit of setup for IBM's runjob.  runjob only has so many
+	   options, so it isn't that bad.
+	*/
+	int32_t node_cnt;
+	if (opt.max_nodes)
+		node_cnt = opt.max_nodes;
+	else
+		node_cnt = opt.min_nodes;
+
+	if (!opt.ntasks_set) {
+		if (opt.ntasks_per_node != NO_VAL)
+			opt.ntasks = node_cnt * opt.ntasks_per_node;
+		else
+			opt.ntasks = node_cnt;
+		opt.ntasks_set = true;
+	} else {
+		if (opt.nodes_set) {
+			if (node_cnt > opt.ntasks) {
+				info("You asked for %d nodes, but only "
+				     "%d tasks, resetting node count to %u",
+				     node_cnt, opt.ntasks, opt.ntasks);
+				opt.max_nodes = opt.min_nodes = node_cnt
+					= opt.ntasks;
+			}
+		} else if (node_cnt > opt.ntasks)
+			opt.max_nodes = opt.min_nodes = node_cnt = opt.ntasks;
+
+		if (!opt.ntasks_per_node || (opt.ntasks_per_node == NO_VAL))
+			opt.ntasks_per_node = opt.ntasks / node_cnt;
+		else if ((opt.ntasks / opt.ntasks_per_node) != node_cnt)
+			fatal("You are requesting for %d tasks, but are "
+			      "also asking for %d tasks per node and %d nodes.",
+			      opt.ntasks, opt.ntasks_per_node, node_cnt);
+	}
+
+#if defined HAVE_BG_FILES
+	if (!opt.test_only) {
+	 	/* Since we need the opt.argc to allocate the opt.argv array
+		 * we need to do this before actually messing with
+		 * things. All the extra options added to argv will be
+		 * handled after the allocation. */
+
+		/* Default location of the actual command to be ran. We always
+		 * have to add 3 options no matter what. */
+		command_pos = 3;
+
+		if (opt.ntasks_per_node != NO_VAL)
+			command_pos += 2;
+		if (opt.ntasks_set)
+			command_pos += 2;
+		if (opt.cwd_set)
+			command_pos += 2;
+		if (opt.labelio)
+			command_pos += 2;
+		opt.argc += command_pos;
+	}
+#endif
+
+#endif
+
 	opt.argv = (char **) xmalloc((opt.argc + 1) * sizeof(char *));
-	for (i = 0; i < opt.argc; i++)
-		opt.argv[i] = xstrdup(rest[i]);
-	opt.argv[i] = NULL;	/* End of argv's (for possible execv) */
+
+#if defined HAVE_BGQ
+#if defined HAVE_BG_FILES
+	if (!opt.test_only) {
+		i = 0;
+		/* Instead of running the actual job, the slurmstepd will be
+		   running runjob to run the job.  srun is just wrapping it
+		   making things all kosher.
+		*/
+		opt.argv[i++] = xstrdup(runjob_loc);
+		if (opt.ntasks_per_node != NO_VAL) {
+			opt.argv[i++]  = xstrdup("-p");
+			opt.argv[i++]  = xstrdup_printf("%d",
+							opt.ntasks_per_node);
+		}
+
+		if (opt.ntasks_set) {
+			opt.argv[i++]  = xstrdup("--np");
+			opt.argv[i++]  = xstrdup_printf("%d", opt.ntasks);
+		}
+
+		if (opt.cwd_set) {
+			opt.argv[i++]  = xstrdup("--cwd");
+			opt.argv[i++]  = xstrdup(opt.cwd);
+		}
+
+		if (opt.labelio) {
+			opt.argv[i++]  = xstrdup("--label");
+			opt.argv[i++]  = xstrdup("short");
+			/* Since we are getting labels from runjob. and we
+			 * don't want 2 sets (slurm's will always be 000)
+			 * remove it case. */
+			opt.labelio = 0;
+		}
+
+		/* Export all the environment so the runjob_mux will get the
+		 * correct info about the job, namely the block. */
+		opt.argv[i++] = xstrdup("--env_all");
+
+		/* With runjob anything after a ':' is treated as the actual
+		 * job, which in this case is exactly what it is.  So, very
+		 * sweet. */
+		opt.argv[i++] = xstrdup(":");
+
+		/* Sanity check to make sure we set it up correctly. */
+		if (i != command_pos) {
+			fatal ("command_pos is set to %d but we are going to "
+			       "put it at %d, please update src/srun/opt.c",
+			       command_pos, i);
+		}
+
+		/* Set default job name to the executable name rather than
+		 * "runjob" */
+		if (!opt.job_name_set_cmd && (command_pos < opt.argc)) {
+			opt.job_name_set_cmd = true;
+			opt.job_name = xstrdup(rest[0]);
+		}
+	}
+#endif
+	if (opt.test_only && !opt.jobid_set && (opt.jobid != NO_VAL)) {
+		/* Do not perform allocate test, only disable use of "runjob" */
+		opt.test_only = false;
+	}
+
+#endif
+	for (i = command_pos; i < opt.argc; i++)
+		opt.argv[i] = xstrdup(rest[i-command_pos]);
+	opt.argv[opt.argc] = NULL;	/* End of argv's (for possible execv) */
 
 	if (opt.multi_prog) {
 		if (opt.argc < 1) {
@@ -1576,17 +1739,21 @@ static void _opt_args(int argc, char **argv)
 			exit(error_exit);
 		}
 		_load_multi(&opt.argc, opt.argv);
-	}
-	else if (opt.argc > 0) {
+	} else if (opt.argc > command_pos) {
 		char *fullpath;
 
-		if ((fullpath = search_path(opt.cwd, opt.argv[0], false, X_OK))) {
-			xfree(opt.argv[0]);
-			opt.argv[0] = fullpath;
+		if ((fullpath = search_path(opt.cwd,
+					    opt.argv[command_pos],
+					    false, X_OK))) {
+			xfree(opt.argv[command_pos]);
+			opt.argv[command_pos] = fullpath;
 		}
 	}
+	/* for (i=0; i<opt.argc; i++) */
+	/* 	info("%d is '%s'", i, opt.argv[i]); */
 
-	if (opt.multi_prog && verify_multi_name(opt.argv[0], opt.ntasks))
+	if (opt.multi_prog && verify_multi_name(opt.argv[command_pos],
+						opt.ntasks))
 		exit(error_exit);
 }
 
@@ -1609,7 +1776,8 @@ static bool _opt_verify(void)
 	 */
 	if (opt.slurmd_debug + LOG_LEVEL_ERROR > LOG_LEVEL_DEBUG2) {
 		opt.slurmd_debug = LOG_LEVEL_DEBUG2 - LOG_LEVEL_ERROR;
-		info("Using srun's max debug increment of %d", opt.slurmd_debug);
+		info("Using srun's max debug increment of %d",
+		     opt.slurmd_debug);
 	}
 
 	if (opt.quiet && _verbose) {
@@ -1638,13 +1806,13 @@ static bool _opt_verify(void)
 		verified = false;
 	}
 
-	if (opt.pn_min_cpus < opt.cpus_per_task)
+	if (opt.cpus_set && (opt.pn_min_cpus < opt.cpus_per_task))
 		opt.pn_min_cpus = opt.cpus_per_task;
 
 	if (opt.argc > 0)
 		opt.cmd_name = base_name(opt.argv[0]);
 
-	if(!opt.nodelist) {
+	if (!opt.nodelist) {
 		if((opt.nodelist = xstrdup(getenv("SLURM_HOSTFILE")))) {
 			/* make sure the file being read in has a / in
 			   it to make sure it is a file in the
@@ -1729,7 +1897,7 @@ static bool _opt_verify(void)
 		verified = false;
 	}
 
-	if (opt.cpus_per_task < 0) {
+	if (opt.cpus_set && (opt.cpus_per_task <= 0)) {
 		error("invalid number of cpus per task (-c %d)",
 		      opt.cpus_per_task);
 		verified = false;
@@ -1742,7 +1910,7 @@ static bool _opt_verify(void)
 		verified = false;
 	}
 
-#ifdef HAVE_BGL
+#if defined(HAVE_BGL)
 	if (opt.blrtsimage && strchr(opt.blrtsimage, ' ')) {
 		error("invalid BlrtsImage given '%s'", opt.blrtsimage);
 		verified = false;
@@ -1953,7 +2121,7 @@ static bool _opt_verify(void)
 	return verified;
 }
 
-/* Initialize the the spank_job_env based upon environment variables set
+/* Initialize the spank_job_env based upon environment variables set
  *	via salloc or sbatch commands */
 extern void init_spank_env(void)
 {
@@ -2109,8 +2277,9 @@ static char *print_constraints()
 
 #define tf_(b) (b == true) ? "true" : "false"
 
-static void _opt_list()
+static void _opt_list(void)
 {
+	int i;
 	char *str;
 
 	info("defined options for program `%s'", opt.progname);
@@ -2122,8 +2291,8 @@ static void _opt_list()
 	info("cwd            : %s", opt.cwd);
 	info("ntasks         : %d %s", opt.ntasks,
 	     opt.ntasks_set ? "(set)" : "(default)");
-	info("cpus_per_task  : %d %s", opt.cpus_per_task,
-	     opt.cpus_set ? "(set)" : "(default)");
+	if (opt.cpus_set)
+		info("cpus_per_task  : %d", opt.cpus_per_task);
 	if (opt.max_nodes)
 		info("nodes          : %d-%d", opt.min_nodes, opt.max_nodes);
 	else {
@@ -2137,6 +2306,8 @@ static void _opt_list()
 	info("job name       : `%s'", opt.job_name);
 	info("reservation    : `%s'", opt.reservation);
 	info("wckey          : `%s'", opt.wckey);
+	info("switch         : %d", opt.req_switch);
+	info("wait-for-switch: %d", opt.wait4switch);
 	info("distribution   : %s", format_task_dist_states(opt.distribution));
 	if(opt.distribution == SLURM_DIST_PLANE)
 		info("plane size   : %u", opt.plane_size);
@@ -2181,8 +2352,11 @@ static void _opt_list()
 	str = print_constraints();
 	info("constraints    : %s", str);
 	xfree(str);
-	if (opt.conn_type != (uint16_t) NO_VAL)
-		info("conn_type      : %u", opt.conn_type);
+	for (i = 0; i < HIGHEST_DIMENSIONS; i++) {
+		if (opt.conn_type[i] == (uint16_t) NO_VAL)
+			break;
+		info("conn_type[%d]    : %u", i, opt.conn_type[i]);
+	}
 	str = print_geometry(opt.geometry);
 	info("geometry       : %s", str);
 	xfree(str);
@@ -2277,6 +2451,7 @@ static void _usage(void)
 "            [--prolog=fname] [--epilog=fname]\n"
 "            [--task-prolog=fname] [--task-epilog=fname]\n"
 "            [--ctrl-comm-ifhn=addr] [--multi-prog]\n"
+"            [--switch=max-switches{@max-time-to-wait}]\n"
 "            [-w hosts...] [-x hosts...] executable [args...]\n");
 }
 
@@ -2322,7 +2497,7 @@ static void _help(void)
 "      --multi-prog            if set the program name specified is the\n"
 "                              configuration specification for multiple programs\n"
 "  -n, --ntasks=ntasks         number of tasks to run\n"
-"      --nice[=value]          decrease secheduling priority by value\n"
+"      --nice[=value]          decrease scheduling priority by value\n"
 "      --ntasks-per-node=n     number of tasks to invoke on each node\n"
 "  -N, --nodes=N               number of nodes on which to run (N = min[-max])\n"
 "  -o, --output=out            location of stdout redirection\n"
@@ -2351,6 +2526,8 @@ static void _help(void)
 "  -W, --wait=sec              seconds to wait after first task exits\n"
 "                              before killing job\n"
 "  -X, --disable-status        Disable Ctrl-C status feature\n"
+"      --switch=max-switches{@max-time-to-wait}\n"
+"                              Optimum switches and max time to wait for optimum\n"
 "\n"
 "Constraint options:\n"
 "      --contiguous            demand a contiguous range of nodes\n"

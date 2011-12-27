@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -107,6 +107,8 @@ static bool      rollback_started    = 0;
 static bool      halt_agent          = 0;
 static slurm_trigger_callbacks_t callback;
 static bool      callbacks_requested = 0;
+static bool      from_ctld           = 0;
+static bool      need_to_register    = 0;
 
 static void * _agent(void *x);
 static void   _close_slurmdbd_fd(void);
@@ -236,13 +238,13 @@ extern int slurm_send_slurmdbd_recv_rc_msg(uint16_t rpc_version,
 	} else {	/* resp->msg_type == DBD_RC */
 		dbd_rc_msg_t *msg = resp->data;
 		*resp_code = msg->return_code;
-		if(msg->return_code != SLURM_SUCCESS
-		   && msg->return_code != ACCOUNTING_FIRST_REG) {
+		if (msg->return_code != SLURM_SUCCESS
+		    && msg->return_code != ACCOUNTING_FIRST_REG) {
 			char *comment = msg->comment;
-			if(!comment)
+			if (!comment)
 				comment = slurm_strerror(msg->return_code);
-			if(msg->sent_type == DBD_REGISTER_CTLD &&
-			   slurm_get_accounting_storage_enforce()) {
+			if (msg->sent_type == DBD_REGISTER_CTLD &&
+			    slurm_get_accounting_storage_enforce()) {
 				error("slurmdbd: Issue with call "
 				      "%s(%u): %u(%s)",
 				      slurmdbd_msg_type_2_str(
@@ -260,7 +262,8 @@ extern int slurm_send_slurmdbd_recv_rc_msg(uint16_t rpc_version,
 					      msg->sent_type, 1),
 				      msg->sent_type, msg->return_code,
 				      comment);
-		}
+		} else if (msg->sent_type == DBD_REGISTER_CTLD)
+			need_to_register = 0;
 		slurmdbd_free_rc_msg(msg);
 	}
 	xfree(resp);
@@ -434,10 +437,15 @@ again:
 			int rc;
 			fd_set_nonblocking(slurmdbd_fd);
 			rc = _send_init_msg();
-			if ((rc == SLURM_SUCCESS) && callbacks_requested) {
-				(callback.dbd_resumed)();
-				(callback.db_resumed)();
+			if (rc == SLURM_SUCCESS) {
+				if (from_ctld)
+					need_to_register = 1;
+				if (callbacks_requested) {
+					(callback.dbd_resumed)();
+					(callback.db_resumed)();
+				}
 			}
+
 			if ((!need_db && (rc == ESLURM_DB_CONNECTION)) ||
 			    (rc == SLURM_SUCCESS)) {
 				debug("slurmdbd: Sent DbdInit msg");
@@ -539,11 +547,6 @@ extern Buf pack_slurmdbd_msg(slurmdbd_msg_t *req, uint16_t rpc_version)
 			(dbd_usage_msg_t *)req->data, rpc_version,
 			req->msg_type, buffer);
 		break;
-	case DBD_GET_JOBS:
-		slurmdbd_pack_get_jobs_msg((dbd_get_jobs_msg_t *)req->data,
-					   rpc_version,
-					   buffer);
-		break;
 	case DBD_INIT:
 		slurmdbd_pack_init_msg((dbd_init_msg_t *)req->data, rpc_version,
 				       buffer, slurmdbd_auth_info);
@@ -598,6 +601,8 @@ extern Buf pack_slurmdbd_msg(slurmdbd_msg_t *req, uint16_t rpc_version)
 					     buffer);
 		break;
 	case DBD_REGISTER_CTLD:
+		from_ctld = 1;
+		need_to_register = 0;
 		slurmdbd_pack_register_ctld_msg(
 			(dbd_register_ctld_msg_t *)req->data, rpc_version,
 			buffer);
@@ -617,6 +622,8 @@ extern Buf pack_slurmdbd_msg(slurmdbd_msg_t *req, uint16_t rpc_version)
 	case DBD_GET_CONFIG:
 		/* No message to pack */
 		break;
+	case DBD_GET_JOBS:
+		/* Defunct RPC */
 	default:
 		error("slurmdbd: Invalid message type pack %u(%s:%u)",
 		      req->msg_type,
@@ -711,11 +718,6 @@ extern int unpack_slurmdbd_msg(slurmdbd_msg_t *resp,
 			(dbd_usage_msg_t **)&resp->data, rpc_version,
 			resp->msg_type, buffer);
 		break;
-	case DBD_GET_JOBS:
-		rc = slurmdbd_unpack_get_jobs_msg(
-			(dbd_get_jobs_msg_t **)&resp->data,
-			rpc_version, buffer);
-		break;
 	case DBD_INIT:
 		rc = slurmdbd_unpack_init_msg((dbd_init_msg_t **)&resp->data,
 					      buffer,
@@ -796,6 +798,8 @@ extern int unpack_slurmdbd_msg(slurmdbd_msg_t *resp,
 	case DBD_GET_CONFIG:
 		/* No message to unpack */
 		break;
+	case DBD_GET_JOBS:
+		/* Defunct RPC */
 	default:
 		error("slurmdbd: Invalid message type unpack %u(%s)",
 		      resp->msg_type,
@@ -1585,8 +1589,8 @@ static int _unpack_return_code(uint16_t rpc_version, Buf buffer)
 		    == SLURM_SUCCESS) {
 			rc = msg->return_code;
 			if (rc != SLURM_SUCCESS) {
-				if(msg->sent_type == DBD_REGISTER_CTLD &&
-				   slurm_get_accounting_storage_enforce()) {
+				if (msg->sent_type == DBD_REGISTER_CTLD &&
+				    slurm_get_accounting_storage_enforce()) {
 					error("slurmdbd: DBD_RC is %d from "
 					      "%s(%u): %s",
 					      rc,
@@ -1607,7 +1611,8 @@ static int _unpack_return_code(uint16_t rpc_version, Buf buffer)
 					      msg->sent_type,
 					      msg->comment);
 
-			}
+			} else if (msg->sent_type == DBD_REGISTER_CTLD)
+				need_to_register = 0;
 			slurmdbd_free_rc_msg(msg);
 		} else
 			error("slurmdbd: unpack message error");
@@ -1661,13 +1666,19 @@ static int _handle_mult_rc_ret(uint16_t rpc_version, int read_timeout)
 		if (agent_list) {
 			ListIterator itr =
 				list_iterator_create(list_msg->my_list);
-			while((out_buf = list_next(itr))) {
-				if((rc = _unpack_return_code(
+			while ((out_buf = list_next(itr))) {
+				Buf b;
+				if ((rc = _unpack_return_code(
 					    rpc_version, out_buf))
 				    != SLURM_SUCCESS)
 					break;
 
-				free_buf(list_dequeue(agent_list));
+				if ((b = list_dequeue(agent_list))) {
+					free_buf(b);
+				} else {
+					error("slurmdbd: DBD_GOT_MULT_MSG "
+					      "unpack message error");
+				}
 			}
 			list_iterator_destroy(itr);
 		}
@@ -1679,8 +1690,8 @@ static int _handle_mult_rc_ret(uint16_t rpc_version, int read_timeout)
 		    == SLURM_SUCCESS) {
 			rc = msg->return_code;
 			if (rc != SLURM_SUCCESS) {
-				if(msg->sent_type == DBD_REGISTER_CTLD &&
-				   slurm_get_accounting_storage_enforce()) {
+				if (msg->sent_type == DBD_REGISTER_CTLD &&
+				    slurm_get_accounting_storage_enforce()) {
 					error("slurmdbd: DBD_RC is %d from "
 					      "%s(%u): %s",
 					      rc,
@@ -1700,7 +1711,9 @@ static int _handle_mult_rc_ret(uint16_t rpc_version, int read_timeout)
 						      msg->sent_type, 1),
 					      msg->sent_type,
 					      msg->comment);
-			}
+			} else if (msg->sent_type == DBD_REGISTER_CTLD)
+				need_to_register = 0;
+
 			slurmdbd_free_rc_msg(msg);
 		} else
 			error("slurmdbd: unpack message error");
@@ -1869,6 +1882,8 @@ static int _fd_writeable(slurm_fd_t fd)
 		}
 		if (ufds.revents & POLLERR) {
 			error("SlurmDBD connection experienced an error: %m");
+			if (callbacks_requested)
+				(callback.dbd_fail)();
 			return 0;
 		}
 		if ((ufds.revents & POLLOUT) == 0) {
@@ -2080,6 +2095,15 @@ static void *_agent(void *x)
 		slurm_mutex_unlock(&agent_lock);
 		/* END_TIMER; */
 		/* info("at the end with %s", TIME_STR); */
+		if (need_to_register) {
+			need_to_register = 0;
+			/* This is going to be always using the
+			   SlurmDBD plugin so sending NULL as the
+			   connection should be ok.
+			*/
+			clusteracct_storage_g_register_ctld(
+				NULL, slurmctld_conf.slurmctld_port);
+		}
 	}
 
 	slurm_mutex_lock(&agent_lock);
@@ -2382,7 +2406,7 @@ static int _purge_job_start_req(void)
 /****************************************************************************\
  * Free data structures
 \****************************************************************************/
-inline void slurmdbd_free_acct_coord_msg(dbd_acct_coord_msg_t *msg)
+extern void slurmdbd_free_acct_coord_msg(dbd_acct_coord_msg_t *msg)
 {
 	if(msg) {
 		if(msg->acct_list) {
@@ -2394,7 +2418,7 @@ inline void slurmdbd_free_acct_coord_msg(dbd_acct_coord_msg_t *msg)
 	}
 }
 
-inline void slurmdbd_free_cluster_cpus_msg(dbd_cluster_cpus_msg_t *msg)
+extern void slurmdbd_free_cluster_cpus_msg(dbd_cluster_cpus_msg_t *msg)
 {
 	if (msg) {
 		xfree(msg->cluster_nodes);
@@ -2402,7 +2426,7 @@ inline void slurmdbd_free_cluster_cpus_msg(dbd_cluster_cpus_msg_t *msg)
 	}
 }
 
-inline void slurmdbd_free_rec_msg(dbd_rec_msg_t *msg,
+extern void slurmdbd_free_rec_msg(dbd_rec_msg_t *msg,
 				  slurmdbd_msg_type_t type)
 {
 	void (*my_destroy) (void *object);
@@ -2424,7 +2448,7 @@ inline void slurmdbd_free_rec_msg(dbd_rec_msg_t *msg,
 	}
 }
 
-inline void slurmdbd_free_cond_msg(dbd_cond_msg_t *msg,
+extern void slurmdbd_free_cond_msg(dbd_cond_msg_t *msg,
 				   slurmdbd_msg_type_t type)
 {
 	void (*my_destroy) (void *object);
@@ -2481,20 +2505,7 @@ inline void slurmdbd_free_cond_msg(dbd_cond_msg_t *msg,
 	}
 }
 
-inline void slurmdbd_free_get_jobs_msg(dbd_get_jobs_msg_t *msg)
-{
-	if (msg) {
-		xfree(msg->cluster_name);
-		if(msg->selected_steps)
-			list_destroy(msg->selected_steps);
-		if(msg->selected_parts)
-			list_destroy(msg->selected_parts);
-		xfree(msg->user);
-		xfree(msg);
-	}
-}
-
-inline void slurmdbd_free_init_msg(dbd_init_msg_t *msg)
+extern void slurmdbd_free_init_msg(dbd_init_msg_t *msg)
 {
 	if(msg) {
 		xfree(msg->cluster_name);
@@ -2502,20 +2513,21 @@ inline void slurmdbd_free_init_msg(dbd_init_msg_t *msg)
 	}
 }
 
-inline void slurmdbd_free_fini_msg(dbd_fini_msg_t *msg)
+extern void slurmdbd_free_fini_msg(dbd_fini_msg_t *msg)
 {
 	xfree(msg);
 }
 
-inline void slurmdbd_free_job_complete_msg(dbd_job_comp_msg_t *msg)
+extern void slurmdbd_free_job_complete_msg(dbd_job_comp_msg_t *msg)
 {
 	if (msg) {
+		xfree(msg->comment);
 		xfree(msg->nodes);
 		xfree(msg);
 	}
 }
 
-inline void slurmdbd_free_job_start_msg(void *in)
+extern void slurmdbd_free_job_start_msg(void *in)
 {
 	dbd_job_start_msg_t *msg = (dbd_job_start_msg_t *)in;
 	if (msg) {
@@ -2536,12 +2548,12 @@ extern void slurmdbd_free_id_rc_msg(void *in)
 	xfree(msg);
 }
 
-inline void slurmdbd_free_job_suspend_msg(dbd_job_suspend_msg_t *msg)
+extern void slurmdbd_free_job_suspend_msg(dbd_job_suspend_msg_t *msg)
 {
 	xfree(msg);
 }
 
-inline void slurmdbd_free_list_msg(dbd_list_msg_t *msg)
+extern void slurmdbd_free_list_msg(dbd_list_msg_t *msg)
 {
 	if (msg) {
 		if(msg->my_list)
@@ -2550,7 +2562,7 @@ inline void slurmdbd_free_list_msg(dbd_list_msg_t *msg)
 	}
 }
 
-inline void slurmdbd_free_modify_msg(dbd_modify_msg_t *msg,
+extern void slurmdbd_free_modify_msg(dbd_modify_msg_t *msg,
 				     slurmdbd_msg_type_t type)
 {
 	void (*destroy_cond) (void *object);
@@ -2595,7 +2607,7 @@ inline void slurmdbd_free_modify_msg(dbd_modify_msg_t *msg,
 	}
 }
 
-inline void slurmdbd_free_node_state_msg(dbd_node_state_msg_t *msg)
+extern void slurmdbd_free_node_state_msg(dbd_node_state_msg_t *msg)
 {
 	if (msg) {
 		xfree(msg->hostlist);
@@ -2604,7 +2616,7 @@ inline void slurmdbd_free_node_state_msg(dbd_node_state_msg_t *msg)
 	}
 }
 
-inline void slurmdbd_free_rc_msg(dbd_rc_msg_t *msg)
+extern void slurmdbd_free_rc_msg(dbd_rc_msg_t *msg)
 {
 	if(msg) {
 		xfree(msg->comment);
@@ -2612,17 +2624,17 @@ inline void slurmdbd_free_rc_msg(dbd_rc_msg_t *msg)
 	}
 }
 
-inline void slurmdbd_free_register_ctld_msg(dbd_register_ctld_msg_t *msg)
+extern void slurmdbd_free_register_ctld_msg(dbd_register_ctld_msg_t *msg)
 {
 	xfree(msg);
 }
 
-inline void slurmdbd_free_roll_usage_msg(dbd_roll_usage_msg_t *msg)
+extern void slurmdbd_free_roll_usage_msg(dbd_roll_usage_msg_t *msg)
 {
 	xfree(msg);
 }
 
-inline void slurmdbd_free_step_complete_msg(dbd_step_comp_msg_t *msg)
+extern void slurmdbd_free_step_complete_msg(dbd_step_comp_msg_t *msg)
 {
 	if (msg) {
 		xfree(msg->jobacct);
@@ -2630,7 +2642,7 @@ inline void slurmdbd_free_step_complete_msg(dbd_step_comp_msg_t *msg)
 	}
 }
 
-inline void slurmdbd_free_step_start_msg(dbd_step_start_msg_t *msg)
+extern void slurmdbd_free_step_start_msg(dbd_step_start_msg_t *msg)
 {
 	if (msg) {
 		xfree(msg->name);
@@ -2640,7 +2652,7 @@ inline void slurmdbd_free_step_start_msg(dbd_step_start_msg_t *msg)
 	}
 }
 
-inline void slurmdbd_free_usage_msg(dbd_usage_msg_t *msg,
+extern void slurmdbd_free_usage_msg(dbd_usage_msg_t *msg,
 				    slurmdbd_msg_type_t type)
 {
 	void (*destroy_rec) (void *object);
@@ -2672,7 +2684,7 @@ inline void slurmdbd_free_usage_msg(dbd_usage_msg_t *msg,
 /****************************************************************************\
  * Pack and unpack data structures
 \****************************************************************************/
-inline void
+extern void
 slurmdbd_pack_acct_coord_msg(dbd_acct_coord_msg_t *msg,
 			     uint16_t rpc_version, Buf buffer)
 {
@@ -2696,7 +2708,7 @@ slurmdbd_pack_acct_coord_msg(dbd_acct_coord_msg_t *msg,
 	slurmdb_pack_user_cond(msg->cond, rpc_version, buffer);
 }
 
-inline int
+extern int
 slurmdbd_unpack_acct_coord_msg(dbd_acct_coord_msg_t **msg,
 			       uint16_t rpc_version, Buf buffer)
 {
@@ -2727,7 +2739,7 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
-inline void
+extern void
 slurmdbd_pack_cluster_cpus_msg(dbd_cluster_cpus_msg_t *msg,
 			       uint16_t rpc_version, Buf buffer)
 {
@@ -2743,7 +2755,7 @@ slurmdbd_pack_cluster_cpus_msg(dbd_cluster_cpus_msg_t *msg,
 	}
 }
 
-inline int
+extern int
 slurmdbd_unpack_cluster_cpus_msg(dbd_cluster_cpus_msg_t **msg,
 				 uint16_t rpc_version, Buf buffer)
 {
@@ -2775,7 +2787,7 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
-inline void slurmdbd_pack_rec_msg(dbd_rec_msg_t *msg,
+extern void slurmdbd_pack_rec_msg(dbd_rec_msg_t *msg,
 				  uint16_t rpc_version,
 				  slurmdbd_msg_type_t type, Buf buffer)
 {
@@ -2795,7 +2807,7 @@ inline void slurmdbd_pack_rec_msg(dbd_rec_msg_t *msg,
 	(*(my_function))(msg->rec, rpc_version, buffer);
 }
 
-inline int slurmdbd_unpack_rec_msg(dbd_rec_msg_t **msg,
+extern int slurmdbd_unpack_rec_msg(dbd_rec_msg_t **msg,
 				   uint16_t rpc_version,
 				   slurmdbd_msg_type_t type, Buf buffer)
 {
@@ -2827,7 +2839,7 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
-inline void slurmdbd_pack_cond_msg(dbd_cond_msg_t *msg,
+extern void slurmdbd_pack_cond_msg(dbd_cond_msg_t *msg,
 				   uint16_t rpc_version,
 				   slurmdbd_msg_type_t type, Buf buffer)
 {
@@ -2882,7 +2894,7 @@ inline void slurmdbd_pack_cond_msg(dbd_cond_msg_t *msg,
 	(*(my_function))(msg->cond, rpc_version, buffer);
 }
 
-inline int slurmdbd_unpack_cond_msg(dbd_cond_msg_t **msg,
+extern int slurmdbd_unpack_cond_msg(dbd_cond_msg_t **msg,
 				    uint16_t rpc_version,
 				    slurmdbd_msg_type_t type, Buf buffer)
 {
@@ -2949,99 +2961,7 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
-inline void slurmdbd_pack_get_jobs_msg(dbd_get_jobs_msg_t *msg,
-				       uint16_t rpc_version, Buf buffer)
-{
-	uint32_t i = 0;
-	ListIterator itr = NULL;
-	slurmdb_selected_step_t *job = NULL;
-	char *part = NULL;
-
-	packstr(msg->cluster_name, buffer);
-
-	pack16(msg->completion, buffer);
-
-	pack32(msg->gid, buffer);
-
-	pack_time(msg->last_update, buffer);
-
-	if(msg->selected_steps)
-		i = list_count(msg->selected_steps);
-
-	pack32(i, buffer);
-	if(i) {
-		itr = list_iterator_create(msg->selected_steps);
-		while((job = list_next(itr))) {
-			slurmdb_pack_selected_step(job, rpc_version, buffer);
-		}
-		list_iterator_destroy(itr);
-	}
-
-	i = 0;
-	if(msg->selected_parts)
-		i = list_count(msg->selected_parts);
-
-	pack32(i, buffer);
-	if(i) {
-		itr = list_iterator_create(msg->selected_parts);
-		while((part = list_next(itr))) {
-			packstr(part, buffer);
-		}
-		list_iterator_destroy(itr);
-	}
-	packstr(msg->user, buffer);
-}
-
-inline int slurmdbd_unpack_get_jobs_msg(dbd_get_jobs_msg_t **msg,
-					uint16_t rpc_version, Buf buffer)
-{
-	int i;
-	uint32_t count = 0;
-	uint32_t uint32_tmp;
-	dbd_get_jobs_msg_t *msg_ptr;
-	slurmdb_selected_step_t *job = NULL;
-	char *part = NULL;
-
-	msg_ptr = xmalloc(sizeof(dbd_get_jobs_msg_t));
-	*msg = msg_ptr;
-
-	safe_unpackstr_xmalloc(&msg_ptr->cluster_name, &uint32_tmp, buffer);
-
-	safe_unpack16(&msg_ptr->completion, buffer);
-
-	safe_unpack32(&msg_ptr->gid, buffer);
-
-	safe_unpack_time(&msg_ptr->last_update, buffer);
-
-	safe_unpack32(&count, buffer);
-	if(count) {
-		msg_ptr->selected_steps =
-			list_create(slurmdb_destroy_selected_step);
-		for(i=0; i<count; i++) {
-			slurmdb_unpack_selected_step(&job, rpc_version, buffer);
-			list_append(msg_ptr->selected_steps, job);
-		}
-	}
-	safe_unpack32(&count, buffer);
-	if(count) {
-		msg_ptr->selected_parts = list_create(slurm_destroy_char);
-		for(i=0; i<count; i++) {
-			safe_unpackstr_xmalloc(&part, &uint32_tmp, buffer);
-			list_append(msg_ptr->selected_parts, part);
-		}
-	}
-
-	safe_unpackstr_xmalloc(&msg_ptr->user, &uint32_tmp, buffer);
-
-	return SLURM_SUCCESS;
-
-unpack_error:
-	slurmdbd_free_get_jobs_msg(msg_ptr);
-	*msg = NULL;
-	return SLURM_ERROR;
-}
-
-inline void
+extern void
 slurmdbd_pack_init_msg(dbd_init_msg_t *msg, uint16_t rpc_version,
 		       Buf buffer, char *auth_info)
 {
@@ -3074,7 +2994,7 @@ slurmdbd_pack_init_msg(dbd_init_msg_t *msg, uint16_t rpc_version,
 	}
 }
 
-inline int
+extern int
 slurmdbd_unpack_init_msg(dbd_init_msg_t **msg,
 			 Buf buffer, char *auth_info)
 {
@@ -3120,14 +3040,14 @@ unpack_error:
 	return rc;
 }
 
-inline void
+extern void
 slurmdbd_pack_fini_msg(dbd_fini_msg_t *msg, uint16_t rpc_version, Buf buffer)
 {
 	pack16(msg->close_conn, buffer);
 	pack16(msg->commit, buffer);
 }
 
-inline int
+extern int
 slurmdbd_unpack_fini_msg(dbd_fini_msg_t **msg, uint16_t rpc_version, Buf buffer)
 {
 	dbd_fini_msg_t *msg_ptr = xmalloc(sizeof(dbd_fini_msg_t));
@@ -3144,11 +3064,24 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
-inline void
+extern void
 slurmdbd_pack_job_complete_msg(dbd_job_comp_msg_t *msg,
 			       uint16_t rpc_version, Buf buffer)
 {
-	if (rpc_version >= 8) {
+	if (rpc_version >= 9) {
+		pack32(msg->assoc_id, buffer);
+		packstr(msg->comment, buffer);
+		pack32(msg->db_index, buffer);
+		pack32(msg->derived_ec, buffer);
+		pack_time(msg->end_time, buffer);
+		pack32(msg->exit_code, buffer);
+		pack32(msg->job_id, buffer);
+		pack16(msg->job_state, buffer);
+		packstr(msg->nodes, buffer);
+		pack32(msg->req_uid, buffer);
+		pack_time(msg->start_time, buffer);
+		pack_time(msg->submit_time, buffer);
+	} else if (rpc_version >= 8) {
 		pack32(msg->assoc_id, buffer);
 		pack32(msg->db_index, buffer);
 		pack32(msg->derived_ec, buffer);
@@ -3174,7 +3107,7 @@ slurmdbd_pack_job_complete_msg(dbd_job_comp_msg_t *msg,
 	}
 }
 
-inline int
+extern int
 slurmdbd_unpack_job_complete_msg(dbd_job_comp_msg_t **msg,
 				 uint16_t rpc_version, Buf buffer)
 {
@@ -3182,7 +3115,20 @@ slurmdbd_unpack_job_complete_msg(dbd_job_comp_msg_t **msg,
 	dbd_job_comp_msg_t *msg_ptr = xmalloc(sizeof(dbd_job_comp_msg_t));
 	*msg = msg_ptr;
 
-	if (rpc_version >= 8) {
+	if (rpc_version >= 9) {
+		safe_unpack32(&msg_ptr->assoc_id, buffer);
+		safe_unpackstr_xmalloc(&msg_ptr->comment, &uint32_tmp, buffer);
+		safe_unpack32(&msg_ptr->db_index, buffer);
+		safe_unpack32(&msg_ptr->derived_ec, buffer);
+		safe_unpack_time(&msg_ptr->end_time, buffer);
+		safe_unpack32(&msg_ptr->exit_code, buffer);
+		safe_unpack32(&msg_ptr->job_id, buffer);
+		safe_unpack16(&msg_ptr->job_state, buffer);
+		safe_unpackstr_xmalloc(&msg_ptr->nodes, &uint32_tmp, buffer);
+		safe_unpack32(&msg_ptr->req_uid, buffer);
+		safe_unpack_time(&msg_ptr->start_time, buffer);
+		safe_unpack_time(&msg_ptr->submit_time, buffer);
+	} else if (rpc_version >= 8) {
 		safe_unpack32(&msg_ptr->assoc_id, buffer);
 		safe_unpack32(&msg_ptr->db_index, buffer);
 		safe_unpack32(&msg_ptr->derived_ec, buffer);
@@ -3214,7 +3160,7 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
-inline void
+extern void
 slurmdbd_pack_job_start_msg(void *in,
 			    uint16_t rpc_version, Buf buffer)
 {
@@ -3270,7 +3216,7 @@ slurmdbd_pack_job_start_msg(void *in,
 	}
 }
 
-inline int
+extern int
 slurmdbd_unpack_job_start_msg(void **msg,
 			      uint16_t rpc_version, Buf buffer)
 {
@@ -3339,7 +3285,7 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
-inline void
+extern void
 slurmdbd_pack_id_rc_msg(void *in,
 			uint16_t rpc_version, Buf buffer)
 {
@@ -3355,7 +3301,7 @@ slurmdbd_pack_id_rc_msg(void *in,
 	}
 }
 
-inline int
+extern int
 slurmdbd_unpack_id_rc_msg(void **msg,
 			  uint16_t rpc_version, Buf buffer)
 {
@@ -3378,7 +3324,7 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
-inline void
+extern void
 slurmdbd_pack_job_suspend_msg(dbd_job_suspend_msg_t *msg,
 			      uint16_t rpc_version, Buf buffer)
 {
@@ -3390,7 +3336,7 @@ slurmdbd_pack_job_suspend_msg(dbd_job_suspend_msg_t *msg,
 	pack_time(msg->suspend_time, buffer);
 }
 
-inline int
+extern int
 slurmdbd_unpack_job_suspend_msg(dbd_job_suspend_msg_t **msg,
 				uint16_t rpc_version, Buf buffer)
 {
@@ -3410,7 +3356,7 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
-inline void slurmdbd_pack_list_msg(dbd_list_msg_t *msg,
+extern void slurmdbd_pack_list_msg(dbd_list_msg_t *msg,
 				   uint16_t rpc_version,
 				   slurmdbd_msg_type_t type,
 				   Buf buffer)
@@ -3498,7 +3444,7 @@ inline void slurmdbd_pack_list_msg(dbd_list_msg_t *msg,
 		pack32(msg->return_code, buffer);
 }
 
-inline int slurmdbd_unpack_list_msg(dbd_list_msg_t **msg, uint16_t rpc_version,
+extern int slurmdbd_unpack_list_msg(dbd_list_msg_t **msg, uint16_t rpc_version,
 				    slurmdbd_msg_type_t type, Buf buffer)
 {
 	int i;
@@ -3611,7 +3557,7 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
-inline void slurmdbd_pack_modify_msg(dbd_modify_msg_t *msg,
+extern void slurmdbd_pack_modify_msg(dbd_modify_msg_t *msg,
 				     uint16_t rpc_version,
 				     slurmdbd_msg_type_t type,
 				     Buf buffer)
@@ -3652,7 +3598,7 @@ inline void slurmdbd_pack_modify_msg(dbd_modify_msg_t *msg,
 	(*(my_rec))(msg->rec, rpc_version, buffer);
 }
 
-inline int slurmdbd_unpack_modify_msg(dbd_modify_msg_t **msg,
+extern int slurmdbd_unpack_modify_msg(dbd_modify_msg_t **msg,
 				      uint16_t rpc_version,
 				      slurmdbd_msg_type_t type,
 				      Buf buffer)
@@ -3707,7 +3653,7 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
-inline void
+extern void
 slurmdbd_pack_node_state_msg(dbd_node_state_msg_t *msg,
 			     uint16_t rpc_version, Buf buffer)
 {
@@ -3730,7 +3676,7 @@ slurmdbd_pack_node_state_msg(dbd_node_state_msg_t *msg,
 	}
 }
 
-inline int
+extern int
 slurmdbd_unpack_node_state_msg(dbd_node_state_msg_t **msg,
 			       uint16_t rpc_version, Buf buffer)
 {
@@ -3769,7 +3715,7 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
-inline void
+extern void
 slurmdbd_pack_rc_msg(dbd_rc_msg_t *msg,
 		     uint16_t rpc_version, Buf buffer)
 {
@@ -3778,7 +3724,7 @@ slurmdbd_pack_rc_msg(dbd_rc_msg_t *msg,
 	pack16(msg->sent_type, buffer);
 }
 
-inline int
+extern int
 slurmdbd_unpack_rc_msg(dbd_rc_msg_t **msg,
 		       uint16_t rpc_version, Buf buffer)
 {
@@ -3796,7 +3742,7 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
-inline void
+extern void
 slurmdbd_pack_register_ctld_msg(dbd_register_ctld_msg_t *msg,
 				uint16_t rpc_version, Buf buffer)
 {
@@ -3811,7 +3757,7 @@ slurmdbd_pack_register_ctld_msg(dbd_register_ctld_msg_t *msg,
 	}
 }
 
-inline int
+extern int
 slurmdbd_unpack_register_ctld_msg(dbd_register_ctld_msg_t **msg,
 				  uint16_t rpc_version, Buf buffer)
 {
@@ -3837,7 +3783,7 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
-inline void
+extern void
 slurmdbd_pack_roll_usage_msg(dbd_roll_usage_msg_t *msg,
 			     uint16_t rpc_version, Buf buffer)
 {
@@ -3848,7 +3794,7 @@ slurmdbd_pack_roll_usage_msg(dbd_roll_usage_msg_t *msg,
 	}
 }
 
-inline int
+extern int
 slurmdbd_unpack_roll_usage_msg(dbd_roll_usage_msg_t **msg,
 			       uint16_t rpc_version, Buf buffer)
 {
@@ -3869,7 +3815,7 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
-inline void
+extern void
 slurmdbd_pack_step_complete_msg(dbd_step_comp_msg_t *msg,
 				uint16_t rpc_version, Buf buffer)
 {
@@ -3887,7 +3833,7 @@ slurmdbd_pack_step_complete_msg(dbd_step_comp_msg_t *msg,
 	pack32(msg->total_cpus, buffer);
 }
 
-inline int
+extern int
 slurmdbd_unpack_step_complete_msg(dbd_step_comp_msg_t **msg,
 				  uint16_t rpc_version, Buf buffer)
 {
@@ -3913,7 +3859,7 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
-inline void
+extern void
 slurmdbd_pack_step_start_msg(dbd_step_start_msg_t *msg, uint16_t rpc_version,
 			     Buf buffer)
 {
@@ -3934,7 +3880,7 @@ slurmdbd_pack_step_start_msg(dbd_step_start_msg_t *msg, uint16_t rpc_version,
 	}
 }
 
-inline int
+extern int
 slurmdbd_unpack_step_start_msg(dbd_step_start_msg_t **msg,
 			       uint16_t rpc_version, Buf buffer)
 {
@@ -3965,7 +3911,7 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
-inline void slurmdbd_pack_usage_msg(dbd_usage_msg_t *msg,
+extern void slurmdbd_pack_usage_msg(dbd_usage_msg_t *msg,
 				    uint16_t rpc_version,
 				    slurmdbd_msg_type_t type,
 				    Buf buffer)
@@ -3995,7 +3941,7 @@ inline void slurmdbd_pack_usage_msg(dbd_usage_msg_t *msg,
 	pack_time(msg->end, buffer);
 }
 
-inline int slurmdbd_unpack_usage_msg(dbd_usage_msg_t **msg,
+extern int slurmdbd_unpack_usage_msg(dbd_usage_msg_t **msg,
 				     uint16_t rpc_version,
 				     slurmdbd_msg_type_t type,
 				     Buf buffer)
@@ -4039,7 +3985,7 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
-inline void slurmdbd_pack_buffer(void *in,
+extern void slurmdbd_pack_buffer(void *in,
 				 uint16_t rpc_version,
 				 Buf buffer)
 {
@@ -4048,7 +3994,7 @@ inline void slurmdbd_pack_buffer(void *in,
 	packmem(get_buf_data(object), get_buf_offset(object), buffer);
 }
 
-inline int slurmdbd_unpack_buffer(void **out,
+extern int slurmdbd_unpack_buffer(void **out,
 				  uint16_t rpc_version,
 				  Buf buffer)
 {

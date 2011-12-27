@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -310,8 +310,7 @@ _slurm_auth_context_destroy( slurm_auth_context_t c )
         return rc;
 }
 
-inline int
-slurm_auth_init( char *auth_type )
+extern int slurm_auth_init( char *auth_type )
 {
         int retval = SLURM_SUCCESS;
 	char *auth_type_local = NULL;

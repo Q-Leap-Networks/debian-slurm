@@ -1,4 +1,4 @@
-.TH "sbatch" "1" "SLURM 2.2" "October 2010" "SLURM Commands"
+.TH "sbatch" "1" "SLURM 2.3" "August 2011" "SLURM Commands"
 
 .SH "NAME"
 sbatch \- Submit a batch script to SLURM.
@@ -24,6 +24,11 @@ number.
 When the job allocation is finally granted for the batch script, SLURM
 runs a single copy of the batch script on the first node in the set of
 allocated nodes.
+
+The following document describes the the influence of various options on the 
+allocation of cpus to jobs and tasks. 
+.br
+http://www.schedmd.com/slurmdocs/cpu_management.html
 
 .SH "OPTIONS"
 .LP
@@ -324,6 +329,11 @@ in some failed state (non-zero exit code, node failure, timed out, etc).
 This job can begin execution after the specified jobs have successfully
 executed (ran to completion with an exit code of zero).
 .TP
+\fBexpand:job_id\fR
+Resources allocated to this job should be used to expand the specified job.
+The job to expand must share the same QOS (Quality of Service) and partition.
+Gang scheduling of resources in the partition is also not supported.
+.TP
 \fBsingleton\fR
 This job can begin execution after any previously launched jobs
 sharing the same job name and user have terminated.
@@ -332,7 +342,7 @@ sharing the same job name and user have terminated.
 .TP
 \fB\-D\fR, \fB\-\-workdir\fR=<\fIdirectory\fR>
 Set the working directory of the batch script to \fIdirectory\fR before
-it it executed.
+it is executed.
 
 .TP
 \fB\-e\fR, \fB\-\-error\fR=<\fIfilename pattern\fR>
@@ -345,10 +355,11 @@ See the \fB\-\-input\fR option for filename specification options.
 
 .TP
 \fB\-\-exclusive\fR
-The job allocation cannot share nodes with other running jobs.  This is
-the oposite of \-\-share, whichever option is seen last on the command line
-will win.  (The default shared/exclusive behaviour depends on system
-configuration.)
+The job allocation can not share nodes with other running jobs.
+This is the opposite of \-\-share, whichever option is seen last
+on the command line will be used. The default shared/exclusive
+behavior depends on system configuration and the partition's \fBShared\fR
+option takes precedence over the job's option.
 
 .TP
 \fB\-\-export\fR=<\fIenvironment variables | ALL | NONE\fR>
@@ -418,7 +429,7 @@ Examples of use include "\-\-gres=gpus:2*cpu,disk=40G" and "\-\-gres=help".
 \fB\-H, \-\-hold\fR
 Specify the job is to be submitted in a held state (priority of zero).
 A held job can now be released using scontrol to reset its priority
-(e.g. "\fIscontrol update jobid=<id> priority=1\fR".
+(e.g. "\fIscontrol release <job_id>\fR").
 
 .TP
 \fB\-h\fR, \fB\-\-help\fR
@@ -534,7 +545,8 @@ method (before the ":") controls the distribution of resources across
 nodes. The optional second distribution method (after the ":")
 controls the distribution of resources across sockets within a node.
 Note that with select/cons_res, the number of cpus allocated on each
-socket and node may be different. Refer to the mc_support.html document
+socket and node may be different. Refer to
+http://www.schedmd.com/slurmdocs/mc_support.html
 for more information on resource allocation, assignment of tasks to
 nodes, and binding of tasks to CPUs.
 .RS
@@ -571,16 +583,16 @@ followed by an optional specification of the task distribution scheme
 within a block of tasks and between the blocks of tasks.  For more
 details (including examples and diagrams), please see
 .br
-https://computing.llnl.gov/linux/slurm/mc_support.html
+http://www.schedmd.com/slurmdocs/mc_support.html
 .br
 and
 .br
-https://computing.llnl.gov/linux/slurm/dist_plane.html.
+http://www.schedmd.com/slurmdocs/dist_plane.html
 .TP
 .B arbitrary
 The arbitrary method of distribution will allocate processes in\-order
 as listed in file designated by the environment variable
-SLURM_HOSTFILE.  If this variable is listed it will over ride any
+SLURM_HOSTFILE.  If this variable is listed it will override any
 other method specified.  If not set the method will default to block.
 Inside the hostfile must contain at minimum the number of hosts
 requested and be one per line or comma separated.  If specifying a
@@ -714,11 +726,9 @@ Specify a minimum number of logical cpus/processors per node.
 .TP
 \fB\-N\fR, \fB\-\-nodes\fR=<\fIminnodes\fR[\-\fImaxnodes\fR]>
 Request that a minimum of \fIminnodes\fR nodes be allocated to this job.
-The scheduler may decide to launch the job on more than \fIminnodes\fR nodes.
-A limit on the maximum node count may be specified with \fImaxnodes\fR
-(e.g. "\-\-nodes=2\-4").  The minimum and maximum node count may be the
-same to specify a specific number of nodes (e.g. "\-\-nodes=2\-2" will ask
-for two and ONLY two nodes).
+A maximum node count may also be specified with \fImaxnodes\fR.
+If only one number is specified, this is used as both the minimum and
+maximum node count.
 The partition's node limits supersede those of the job.
 If a job's node limits are outside of the range permitted for its
 associated partition, the job will be left in a PENDING state.
@@ -734,6 +744,9 @@ behavior is to allocate enough nodes to satisfy the requirements of
 the \fB\-n\fR and \fB\-c\fR options.
 The job will be allocated as many nodes as possible within the range specified
 and without delaying the initiation of the job.
+The node count specification may include a numeric value followed by a suffix
+of "k" (multiplies numeric value by 1,024) or "m" (multiplies numeric value by
+1,048,576).
 
 .TP
 \fB\-n\fR, \fB\-\-ntasks\fR=<\fInumber\fR>
@@ -844,7 +857,7 @@ The default value is specified by the system configuration parameter
 .TP
 \fB\-p\fR, \fB\-\-partition\fR=<\fIpartition_names\fR>
 Request a specific partition for the resource allocation.  If not specified,
-the default behaviour is to allow the slurm controller to select the default
+the default behavior is to allow the slurm controller to select the default
 partition as designated by the system administrator. If the job can use more
 than one partition, specify their names in a comma separate list and the one
 offering earliest initiation will be used.
@@ -863,7 +876,7 @@ options may not be supported on some systems):
 All limits listed below
 .TP
 \fBAS\fR
-The maximum address space for a processes
+The maximum address space for a process
 .TP
 \fBCORE\fR
 The maximum size of core file
@@ -875,7 +888,9 @@ The maximum amount of CPU time
 The maximum size of a process's data segment
 .TP
 \fBFSIZE\fR
-The maximum size of files created
+The maximum size of files created. Note that if the user sets FSIZE to less
+than the current size of the slurmd.log, job launches will fail with 
+a 'File size limit exceeded' error.
 .TP
 \fBMEMLOCK\fR
 The maximum size that may be locked into memory
@@ -919,9 +934,12 @@ Allocate resources for the job from the named reservation.
 
 .TP
 \fB\-s\fR, \fB\-\-share\fR
-The job allocation can share nodes with other running jobs.  (The default
-shared/exclusive behaviour depends on system configuration.)
-This may result in the allocation being granted sooner than if the \-\-share
+The job allocation can share nodes with other running jobs.
+This is the opposite of \-\-exclusive, whichever option is seen last
+on the command line will be used. The default shared/exclusive
+behavior depends on system configuration and the partition's \fBShared\fR
+option takes precedence over the job's option.
+This option may result the allocation being granted sooner than if the \-\-share
 option was not set and allow higher system utilization, but application
 performance will likely suffer due to competition for resources within a node.
 
@@ -942,6 +960,18 @@ the default time will be 60 seconds.
 Restrict node selection to nodes with at least the specified number of
 sockets.  See additional information under \fB\-B\fR option above when
 task/affinity plugin is enabled.
+
+.TP
+\fB\-\-switch\fR=<\fIcount\fR>[@<\fImax\-time\fR>]
+When a tree topology is used, this defines the maximum count of switches
+desired for the job allocation and optionally the maximum time to wait
+for that number of switches. If SLURM finds an allocation containing more
+switches than the count specified, the job remain pending until it either finds
+an allocation with desired switch count or the time limit expires. By default
+there is no switch count limit and there is no delay in starting the job.
+The job's maximum time delay may be limited by the system administrator using
+the \fBSchedulerParameters\fR configuration parameter with the
+\fBmax_switch_wait\fR parameter option.
 
 .TP
 \fB\-t\fR, \fB\-\-time\fR=<\fItime\fR>
@@ -1070,6 +1100,7 @@ SLURM will normally allocate a TORUS if possible for a given geometry.
 If running on a BGP system and wanting to run in HTC mode (only for 1
 midplane and below).  You can use HTC_S for SMP, HTC_D for Dual, HTC_V
 for virtual node mode, and HTC_L for Linux mode.
+A comma separated lists of connection types may be specified, one for each dimension.
 
 .TP
 \fB\-g\fR, \fB\-\-geometry\fR=<\fIXxYxZ\fR>
@@ -1339,7 +1370,7 @@ Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 CODE\-OCEC\-09\-009. All rights reserved.
 .LP
 This file is part of SLURM, a resource management program.
-For details, see <https://computing.llnl.gov/linux/slurm/>.
+For details, see <http://www.schedmd.com/slurmdocs/>.
 .LP
 SLURM is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free
@@ -1353,4 +1384,5 @@ details.
 
 .SH "SEE ALSO"
 .LP
-sinfo(1), sattach(1), salloc(1), squeue(1), scancel(1), scontrol(1), slurm.conf(5), sched_setaffinity(2), numa(3)
+\fBsinfo\fR(1), \fBsattach\fR(1), \fBsalloc\fR(1), \fBsqueue\fR(1), \fBscancel\fR(1), \fBscontrol\fR(1),
+\fBslurm.conf\fR(5), \fBsched_setaffinity\fR (2), \fBnuma\fR (3)

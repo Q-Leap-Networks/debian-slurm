@@ -43,6 +43,8 @@ build_triplet = @build@
 host_triplet = @host@
 target_triplet = @target@
 @HAVE_SOME_CURSES_TRUE@bin_PROGRAMS = smap$(EXEEXT)
+@BLUEGENE_LOADED_TRUE@@HAVE_SOME_CURSES_TRUE@am__append_1 = $(bg_dir)/libconfigure_api.la
+@BLUEGENE_LOADED_TRUE@@HAVE_SOME_CURSES_TRUE@am__append_2 = configure_functions.c
 subdir = src/smap
 DIST_COMMON = $(am__noinst_HEADERS_DIST) $(srcdir)/Makefile.am \
 	$(srcdir)/Makefile.in
@@ -70,6 +72,7 @@ am__aclocal_m4_deps = $(top_srcdir)/auxdir/acx_pthread.m4 \
 	$(top_srcdir)/auxdir/x_ac_hwloc.m4 \
 	$(top_srcdir)/auxdir/x_ac_iso.m4 \
 	$(top_srcdir)/auxdir/x_ac_lua.m4 \
+	$(top_srcdir)/auxdir/x_ac_man2html.m4 \
 	$(top_srcdir)/auxdir/x_ac_munge.m4 \
 	$(top_srcdir)/auxdir/x_ac_ncurses.m4 \
 	$(top_srcdir)/auxdir/x_ac_pam.m4 \
@@ -80,6 +83,7 @@ am__aclocal_m4_deps = $(top_srcdir)/auxdir/acx_pthread.m4 \
 	$(top_srcdir)/auxdir/x_ac_setproctitle.m4 \
 	$(top_srcdir)/auxdir/x_ac_sgi_job.m4 \
 	$(top_srcdir)/auxdir/x_ac_slurm_ssl.m4 \
+	$(top_srcdir)/auxdir/x_ac_srun.m4 \
 	$(top_srcdir)/auxdir/x_ac_sun_const.m4 \
 	$(top_srcdir)/auxdir/x_ac_xcpu.m4 $(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
@@ -91,21 +95,22 @@ CONFIG_CLEAN_VPATH_FILES =
 am__installdirs = "$(DESTDIR)$(bindir)"
 PROGRAMS = $(bin_PROGRAMS)
 am__smap_SOURCES_DIST = smap.c job_functions.c partition_functions.c \
-	configure_functions.c grid_functions.c reservation_functions.c \
-	opts.c
+	grid_functions.c reservation_functions.c opts.c \
+	configure_functions.c
+@BLUEGENE_LOADED_TRUE@@HAVE_SOME_CURSES_TRUE@am__objects_1 = configure_functions.$(OBJEXT)
 @HAVE_SOME_CURSES_TRUE@am_smap_OBJECTS = smap.$(OBJEXT) \
 @HAVE_SOME_CURSES_TRUE@	job_functions.$(OBJEXT) \
 @HAVE_SOME_CURSES_TRUE@	partition_functions.$(OBJEXT) \
-@HAVE_SOME_CURSES_TRUE@	configure_functions.$(OBJEXT) \
 @HAVE_SOME_CURSES_TRUE@	grid_functions.$(OBJEXT) \
 @HAVE_SOME_CURSES_TRUE@	reservation_functions.$(OBJEXT) \
-@HAVE_SOME_CURSES_TRUE@	opts.$(OBJEXT)
+@HAVE_SOME_CURSES_TRUE@	opts.$(OBJEXT) $(am__objects_1)
 am__EXTRA_smap_SOURCES_DIST = smap.h smap.c job_functions.c \
 	partition_functions.c configure_functions.c grid_functions.c \
 	reservation_functions.c opts.c
 smap_OBJECTS = $(am_smap_OBJECTS)
-@HAVE_SOME_CURSES_TRUE@smap_DEPENDENCIES = $(top_builddir)/src/plugins/select/bluegene/block_allocator/libbluegene_block_allocator.la \
-@HAVE_SOME_CURSES_TRUE@	$(top_builddir)/src/api/libslurm.o
+@HAVE_SOME_CURSES_TRUE@smap_DEPENDENCIES =  \
+@HAVE_SOME_CURSES_TRUE@	$(top_builddir)/src/api/libslurm.o \
+@HAVE_SOME_CURSES_TRUE@	$(am__append_1)
 smap_LINK = $(LIBTOOL) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) \
 	--mode=link $(CCLD) $(AM_CFLAGS) $(CFLAGS) $(smap_LDFLAGS) \
 	$(LDFLAGS) -o $@
@@ -139,7 +144,10 @@ AUTOHEADER = @AUTOHEADER@
 AUTOMAKE = @AUTOMAKE@
 AWK = @AWK@
 BGL_LOADED = @BGL_LOADED@
+BGQ_LOADED = @BGQ_LOADED@
 BG_INCLUDES = @BG_INCLUDES@
+BG_LDFLAGS = @BG_LDFLAGS@
+BG_L_P_LOADED = @BG_L_P_LOADED@
 BLCR_CPPFLAGS = @BLCR_CPPFLAGS@
 BLCR_HOME = @BLCR_HOME@
 BLCR_LDFLAGS = @BLCR_LDFLAGS@
@@ -176,6 +184,7 @@ HAVEPGCONFIG = @HAVEPGCONFIG@
 HAVE_AIX = @HAVE_AIX@
 HAVE_ELAN = @HAVE_ELAN@
 HAVE_FEDERATION = @HAVE_FEDERATION@
+HAVE_MAN2HTML = @HAVE_MAN2HTML@
 HAVE_OPENSSL = @HAVE_OPENSSL@
 HAVE_SOME_CURSES = @HAVE_SOME_CURSES@
 HWLOC_CPPFLAGS = @HWLOC_CPPFLAGS@
@@ -233,6 +242,7 @@ PTHREAD_CFLAGS = @PTHREAD_CFLAGS@
 PTHREAD_LIBS = @PTHREAD_LIBS@
 RANLIB = @RANLIB@
 READLINE_LIBS = @READLINE_LIBS@
+REAL_BG_L_P_LOADED = @REAL_BG_L_P_LOADED@
 RELEASE = @RELEASE@
 SED = @SED@
 SEMAPHORE_LIBS = @SEMAPHORE_LIBS@
@@ -268,6 +278,7 @@ abs_top_srcdir = @abs_top_srcdir@
 ac_ct_CC = @ac_ct_CC@
 ac_ct_CXX = @ac_ct_CXX@
 ac_ct_DUMPBIN = @ac_ct_DUMPBIN@
+ac_have_man2html = @ac_have_man2html@
 am__include = @am__include@
 am__leading_dot = @am__leading_dot@
 am__quote = @am__quote@
@@ -322,16 +333,15 @@ top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 AUTOMAKE_OPTIONS = foreign
 INCLUDES = -I$(top_srcdir) $(BG_INCLUDES)
-@HAVE_SOME_CURSES_TRUE@smap_LDADD = \
-@HAVE_SOME_CURSES_TRUE@	$(top_builddir)/src/plugins/select/bluegene/block_allocator/libbluegene_block_allocator.la \
-@HAVE_SOME_CURSES_TRUE@	$(top_builddir)/src/api/libslurm.o -ldl
-
 @HAVE_SOME_CURSES_TRUE@noinst_HEADERS = smap.h
-@HAVE_SOME_CURSES_TRUE@smap_SOURCES = smap.c \
-@HAVE_SOME_CURSES_TRUE@	job_functions.c partition_functions.c \
-@HAVE_SOME_CURSES_TRUE@	configure_functions.c grid_functions.c \
-@HAVE_SOME_CURSES_TRUE@	reservation_functions.c opts.c
-
+@HAVE_SOME_CURSES_TRUE@smap_SOURCES = smap.c job_functions.c \
+@HAVE_SOME_CURSES_TRUE@	partition_functions.c grid_functions.c \
+@HAVE_SOME_CURSES_TRUE@	reservation_functions.c opts.c \
+@HAVE_SOME_CURSES_TRUE@	$(am__append_2)
+@HAVE_SOME_CURSES_TRUE@smap_LDADD =  \
+@HAVE_SOME_CURSES_TRUE@	$(top_builddir)/src/api/libslurm.o -ldl \
+@HAVE_SOME_CURSES_TRUE@	$(am__append_1)
+@BLUEGENE_LOADED_TRUE@@HAVE_SOME_CURSES_TRUE@bg_dir = $(top_builddir)/src/plugins/select/bluegene
 @HAVE_SOME_CURSES_TRUE@smap_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
 @HAVE_SOME_CURSES_FALSE@EXTRA_smap_SOURCES = smap.h smap.c \
 @HAVE_SOME_CURSES_FALSE@	job_functions.c partition_functions.c \

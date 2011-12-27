@@ -3,13 +3,13 @@
  *  of smap.
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2011 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -69,7 +69,7 @@ extern void get_reservation(void)
 
 	if (error_code) {
 		if (quiet_flag != 1) {
-			if(!params.commandline) {
+			if (!params.commandline) {
 				mvwprintw(text_win,
 					  main_ycord, 1,
 					  "slurm_load_reservations: %s",
@@ -91,22 +91,22 @@ extern void get_reservation(void)
 		recs = 0;
 
 	if (!params.commandline) {
-		if((text_line_cnt+printed_resv) > count)
+		if ((text_line_cnt + printed_resv) > count)
 			text_line_cnt--;
 	}
 	printed_resv = 0;
 	count = 0;
-	if(params.hl)
+	if (params.hl)
 		nodes_req = get_requested_node_bitmap();
 	for (i = 0; i < recs; i++) {
 		resv = new_resv_ptr->reservation_array[i];
-		if(nodes_req) {
+		if (nodes_req) {
 			int overlap = 0;
 			bitstr_t *loc_bitmap = bit_alloc(bit_size(nodes_req));
 			inx2bitstr(loc_bitmap, resv.node_inx);
 			overlap = bit_overlap(loc_bitmap, nodes_req);
 			FREE_NULL_BITMAP(loc_bitmap);
-			if(!overlap)
+			if (!overlap)
 				continue;
 		}
 
@@ -116,21 +116,16 @@ extern void get_reservation(void)
 			active = 0;
 
 		if (active && (resv.node_inx[0] != -1)) {
-			if (((params.cluster_flags & CLUSTER_FLAG_BG) == 0) &&
-			    (params.cluster_dims == 3)) {
-				set_grid_inx2(resv.node_list, count);
-			} else {
-				int j = 0;
-				resv.node_cnt = 0;
-				while (resv.node_inx[j] >= 0) {
-					resv.node_cnt +=
-						(resv.node_inx[j + 1] + 1) -
-						 resv.node_inx[j];
-					set_grid_inx(resv.node_inx[j],
-						     resv.node_inx[j + 1],
-						     count);
-					j += 2;
-				}
+			int j = 0;
+			resv.node_cnt = 0;
+			while (resv.node_inx[j] >= 0) {
+				resv.node_cnt +=
+					(resv.node_inx[j + 1] + 1) -
+					 resv.node_inx[j];
+				set_grid_inx(resv.node_inx[j],
+					     resv.node_inx[j + 1],
+					     count);
+				j += 2;
 			}
 		}
 
@@ -153,8 +148,8 @@ extern void get_reservation(void)
 			}
 			count++;
 		}
-		if (count==128)
-			count=0;
+		if (count == 128)
+			count = 0;
 	}
 
 	if (params.commandline && params.iterate)

@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -82,8 +82,6 @@ static int   _get_config(slurmdbd_conn_t *slurmdbd_conn,
 			 Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _get_events(slurmdbd_conn_t *slurmdbd_conn,
 			 Buf in_buffer, Buf *out_buffer, uint32_t *uid);
-static int   _get_jobs(slurmdbd_conn_t *slurmdbd_conn,
-		       Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _get_jobs_cond(slurmdbd_conn_t *slurmdbd_conn,
 			    Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _get_probs(slurmdbd_conn_t *slurmdbd_conn,
@@ -267,10 +265,6 @@ proc_req(slurmdbd_conn_t *slurmdbd_conn,
 			rc = _get_events(slurmdbd_conn,
 					 in_buffer, out_buffer, uid);
 			break;
-		case DBD_GET_JOBS:
-			rc = _get_jobs(slurmdbd_conn,
-				       in_buffer, out_buffer, uid);
-			break;
 		case DBD_GET_JOBS_COND:
 			rc = _get_jobs_cond(slurmdbd_conn,
 					    in_buffer, out_buffer, uid);
@@ -424,6 +418,8 @@ proc_req(slurmdbd_conn_t *slurmdbd_conn,
 			rc = _step_start(slurmdbd_conn,
 					 in_buffer, out_buffer, uid);
 			break;
+		case DBD_GET_JOBS:
+			/* Defunct RPC */
 		default:
 			comment = "Invalid RPC";
 			error("CONN:%u %s msg_type=%d",
@@ -1004,6 +1000,15 @@ static int _cluster_cpus(slurmdbd_conn_t *slurmdbd_conn,
 		rc = SLURM_ERROR;
 	}
 end_it:
+	if (rc == SLURM_SUCCESS)
+		slurmdbd_conn->cluster_cpus = cluster_cpus_msg->cpu_count;
+	if (!slurmdbd_conn->ctld_port) {
+		info("DBD_CLUSTER_CPUS: cluster not registered");
+		slurmdbd_conn->ctld_port =
+			clusteracct_storage_g_register_disconn_ctld(
+				slurmdbd_conn->db_conn, slurmdbd_conn->ip);
+	}
+
 	slurmdbd_free_cluster_cpus_msg(cluster_cpus_msg);
 	*out_buffer = make_dbd_rc_msg(slurmdbd_conn->rpc_version,
 				      rc, comment, DBD_CLUSTER_CPUS);
@@ -1203,85 +1208,6 @@ static int _get_events(slurmdbd_conn_t *slurmdbd_conn,
 	}
 
 	slurmdbd_free_cond_msg(get_msg, DBD_GET_EVENTS);
-
-	if (list_msg.my_list)
-		list_destroy(list_msg.my_list);
-
-	return rc;
-}
-
-static int _get_jobs(slurmdbd_conn_t *slurmdbd_conn,
-		     Buf in_buffer, Buf *out_buffer, uint32_t *uid)
-{
-	dbd_get_jobs_msg_t *get_jobs_msg = NULL;
-	dbd_list_msg_t list_msg;
-	char *comment = NULL;
-	slurmdb_job_cond_t job_cond;
-	int rc = SLURM_SUCCESS;
-
-	debug2("DBD_GET_JOBS: called");
-	if (slurmdbd_unpack_get_jobs_msg(
-		    &get_jobs_msg, slurmdbd_conn->rpc_version, in_buffer)
-	    != SLURM_SUCCESS) {
-		comment = "Failed to unpack DBD_GET_JOBS message";
-		error("CONN:%u %s", slurmdbd_conn->newsockfd, comment);
-		*out_buffer = make_dbd_rc_msg(slurmdbd_conn->rpc_version,
-					      SLURM_ERROR, comment,
-					      DBD_GET_JOBS);
-		return SLURM_ERROR;
-	}
-
-	memset(&job_cond, 0, sizeof(slurmdb_job_cond_t));
-
-	job_cond.acct_list = get_jobs_msg->selected_steps;
-	job_cond.step_list = get_jobs_msg->selected_steps;
-	job_cond.partition_list = get_jobs_msg->selected_parts;
-
-	if (get_jobs_msg->user) {
-		uid_t pw_uid;
-		if (uid_from_string (get_jobs_msg->user, &pw_uid) >= 0) {
-			char *temp = xstrdup_printf("%u", pw_uid);
-			job_cond.userid_list = list_create(slurm_destroy_char);
-			list_append(job_cond.userid_list, temp);
-		}
-	}
-
-	if (get_jobs_msg->gid >=0) {
-		char *temp = xstrdup_printf("%u", get_jobs_msg->gid);
-		job_cond.groupid_list = list_create(slurm_destroy_char);
-		list_append(job_cond.groupid_list, temp);
-	}
-
-	if (get_jobs_msg->cluster_name) {
-		job_cond.cluster_list = list_create(NULL);
-		list_append(job_cond.cluster_list, get_jobs_msg->cluster_name);
-	}
-
-	list_msg.my_list = jobacct_storage_g_get_jobs_cond(
-		slurmdbd_conn->db_conn, *uid, &job_cond);
-
-	if (!errno) {
-		if (!list_msg.my_list)
-			list_msg.my_list = list_create(NULL);
-		*out_buffer = init_buf(1024);
-		pack16((uint16_t) DBD_GOT_JOBS, *out_buffer);
-		slurmdbd_pack_list_msg(&list_msg, slurmdbd_conn->rpc_version,
-				       DBD_GOT_JOBS, *out_buffer);
-	} else {
-		*out_buffer = make_dbd_rc_msg(slurmdbd_conn->rpc_version,
-					      errno, slurm_strerror(errno),
-					      DBD_GET_JOBS);
-		rc = SLURM_ERROR;
-	}
-
-	if (job_cond.cluster_list)
-		list_destroy(job_cond.cluster_list);
-	if (job_cond.userid_list)
-		list_destroy(job_cond.userid_list);
-	if (job_cond.groupid_list)
-		list_destroy(job_cond.groupid_list);
-
-	slurmdbd_free_get_jobs_msg(get_jobs_msg);
 
 	if (list_msg.my_list)
 		list_destroy(list_msg.my_list);
@@ -1848,7 +1774,9 @@ static int  _job_complete(slurmdbd_conn_t *slurmdbd_conn,
 	memset(&details, 0, sizeof(struct job_details));
 
 	job.assoc_id = job_comp_msg->assoc_id;
-	job.db_index = job_comp_msg->db_index;
+	job.comment = job_comp_msg->comment;
+	if (job_comp_msg->db_index != NO_VAL)
+		job.db_index = job_comp_msg->db_index;
 	job.derived_ec = job_comp_msg->derived_ec;
 	job.end_time = job_comp_msg->end_time;
 	job.exit_code = job_comp_msg->exit_code;
@@ -1874,6 +1802,14 @@ static int  _job_complete(slurmdbd_conn_t *slurmdbd_conn,
 
 	/* just incase this gets set we need to clear it */
 	xfree(job.wckey);
+
+	if (!slurmdbd_conn->ctld_port) {
+		info("DBD_JOB_COMPLETE: cluster not registered");
+		slurmdbd_conn->ctld_port =
+			clusteracct_storage_g_register_disconn_ctld(
+				slurmdbd_conn->db_conn, slurmdbd_conn->ip);
+	}
+
 end_it:
 	slurmdbd_free_job_complete_msg(job_comp_msg);
 	*out_buffer = make_dbd_rc_msg(slurmdbd_conn->rpc_version,
@@ -1952,7 +1888,8 @@ static int  _job_suspend(slurmdbd_conn_t *slurmdbd_conn,
 	memset(&details, 0, sizeof(struct job_details));
 
 	job.assoc_id = job_suspend_msg->assoc_id;
-	job.db_index = job_suspend_msg->db_index;
+	if (job_suspend_msg->db_index != NO_VAL)
+		job.db_index = job_suspend_msg->db_index;
 	job.job_id = job_suspend_msg->job_id;
 	job.job_state = job_suspend_msg->job_state;
 	details.submit_time = job_suspend_msg->submit_time;
@@ -2645,7 +2582,8 @@ static void _process_job_start(slurmdbd_conn_t *slurmdbd_conn,
 	job.account = _replace_double_quotes(job_start_msg->account);
 	job.assoc_id = job_start_msg->assoc_id;
 	job.comment = job_start_msg->block_id;
-	job.db_index = job_start_msg->db_index;
+	if (job_start_msg->db_index != NO_VAL)
+		job.db_index = job_start_msg->db_index;
 	details.begin_time = job_start_msg->eligible_time;
 	job.user_id = job_start_msg->uid;
 	job.group_id = job_start_msg->gid;
@@ -2688,6 +2626,13 @@ static void _process_job_start(slurmdbd_conn_t *slurmdbd_conn,
 	/* just incase job.wckey was set because we didn't send one */
 	if (!job_start_msg->wckey)
 		xfree(job.wckey);
+
+	if (!slurmdbd_conn->ctld_port) {
+		info("DBD_JOB_START: cluster not registered");
+		slurmdbd_conn->ctld_port =
+			clusteracct_storage_g_register_disconn_ctld(
+				slurmdbd_conn->db_conn, slurmdbd_conn->ip);
+	}
 }
 
 static int   _register_ctld(slurmdbd_conn_t *slurmdbd_conn,
@@ -2784,6 +2729,10 @@ static int   _register_ctld(slurmdbd_conn_t *slurmdbd_conn,
 #endif
 
 end_it:
+
+	if (rc == SLURM_SUCCESS)
+		slurmdbd_conn->ctld_port = register_ctld_msg->port;
+
 	slurmdbd_free_register_ctld_msg(register_ctld_msg);
 	*out_buffer = make_dbd_rc_msg(slurmdbd_conn->rpc_version,
 				      rc, comment, DBD_REGISTER_CTLD);
@@ -3493,7 +3442,8 @@ static int  _step_complete(slurmdbd_conn_t *slurmdbd_conn,
 	memset(&details, 0, sizeof(struct job_details));
 
 	job.assoc_id = step_comp_msg->assoc_id;
-	job.db_index = step_comp_msg->db_index;
+	if (step_comp_msg->db_index != NO_VAL)
+		job.db_index = step_comp_msg->db_index;
 	job.end_time = step_comp_msg->end_time;
 	step.exit_code = step_comp_msg->exit_code;
 	step.jobacct = step_comp_msg->jobacct;
@@ -3514,6 +3464,14 @@ static int  _step_complete(slurmdbd_conn_t *slurmdbd_conn,
 		rc = SLURM_SUCCESS;
 	/* just incase this gets set we need to clear it */
 	xfree(job.wckey);
+
+	if (!slurmdbd_conn->ctld_port) {
+		info("DBD_STEP_COMPLETE: cluster not registered");
+		slurmdbd_conn->ctld_port =
+			clusteracct_storage_g_register_disconn_ctld(
+				slurmdbd_conn->db_conn, slurmdbd_conn->ip);
+	}
+
 end_it:
 	slurmdbd_free_step_complete_msg(step_comp_msg);
 	*out_buffer = make_dbd_rc_msg(slurmdbd_conn->rpc_version,
@@ -3558,7 +3516,8 @@ static int  _step_start(slurmdbd_conn_t *slurmdbd_conn,
 	memset(&layout, 0, sizeof(slurm_step_layout_t));
 
 	job.assoc_id = step_start_msg->assoc_id;
-	job.db_index = step_start_msg->db_index;
+	if (step_start_msg->db_index != NO_VAL)
+		job.db_index = step_start_msg->db_index;
 	job.job_id = step_start_msg->job_id;
 	step.name = step_start_msg->name;
 	job.nodes = step_start_msg->nodes;
@@ -3583,6 +3542,14 @@ static int  _step_start(slurmdbd_conn_t *slurmdbd_conn,
 
 	/* just incase this gets set we need to clear it */
 	xfree(job.wckey);
+
+	if (!slurmdbd_conn->ctld_port) {
+		info("DBD_STEP_START: cluster not registered");
+		slurmdbd_conn->ctld_port =
+			clusteracct_storage_g_register_disconn_ctld(
+				slurmdbd_conn->db_conn, slurmdbd_conn->ip);
+	}
+
 end_it:
 	slurmdbd_free_step_start_msg(step_start_msg);
 	*out_buffer = make_dbd_rc_msg(slurmdbd_conn->rpc_version,

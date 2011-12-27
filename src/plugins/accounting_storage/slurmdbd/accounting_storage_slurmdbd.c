@@ -7,7 +7,7 @@
  *  Written by Danny Auble <da@llnl.gov>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -51,7 +51,7 @@
 #include <sys/types.h>
 #include <pwd.h>
 
-#include <slurm/slurm_errno.h>
+#include "slurm/slurm_errno.h"
 
 #include "src/common/slurm_xlator.h"
 #include "src/common/jobacct_common.h"
@@ -67,8 +67,13 @@
  * the slurmctld we will have these symbols defined.  They will get
  * overwritten when linking with the slurmctld.
  */
+#if defined(__APPLE__)
+slurm_ctl_conf_t slurmctld_conf __attribute__((weak_import));
+List job_list __attribute__((weak_import)) = NULL;
+#else
 slurm_ctl_conf_t slurmctld_conf;
 List job_list = NULL;
+#endif
 
 /*
  * These variables are required by the generic plugin interface.  If they
@@ -225,7 +230,11 @@ static void *_set_db_inx_thread(void *no_data)
 		 * is can make submitting jobs much
 		 * faster and not lock up the
 		 * controller waiting for the db inx
-		 * back from the database. */
+		 * back from the database.
+		 * Even though there is potential of modifying the
+		 * job db_index here we use a read lock since the
+		 * data isn't that sensitive and will only be updated
+		 * later in this function. */
 		lock_slurmctld(job_read_lock);
 		itr = list_iterator_create(job_list);
 		while ((job_ptr = list_next(itr))) {
@@ -237,6 +246,23 @@ static void *_set_db_inx_thread(void *no_data)
 					_partial_destroy_dbd_job_start(req);
 					continue;
 				}
+
+				/* We set the db_index to NO_VAL here
+				 * to avoid a potential race condition
+				 * where at this moment in time the
+				 * job is only eligible to run and
+				 * before this call to the DBD returns,
+				 * the job starts and needs to send
+				 * the start message as well, but
+				 * won't if the db_index is 0
+				 * resulting in lost information about
+				 * the allocation.  Setting
+				 * it to NO_VAL will inform the DBD of
+				 * this situation and it will handle
+				 * it accordingly.
+				 */
+				job_ptr->db_index = NO_VAL;
+
 				/* we only want to destory the pointer
 				   here not the contents (except
 				   block_id) so call special function
@@ -1948,6 +1974,19 @@ extern int clusteracct_storage_p_register_ctld(void *db_conn, uint16_t port)
 	return rc;
 }
 
+extern int clusteracct_storage_p_register_disconn_ctld(
+	void *db_conn, char *control_host)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int clusteracct_storage_p_fini_ctld(void *db_conn,
+					   char *ip, uint16_t port,
+					   char *cluster_nodes)
+{
+	return SLURM_SUCCESS;
+}
+
 /*
  * load into the storage the start of a job
  */
@@ -2029,6 +2068,10 @@ extern int jobacct_storage_p_job_complete(void *db_conn,
 	memset(&req, 0, sizeof(dbd_job_comp_msg_t));
 
 	req.assoc_id    = job_ptr->assoc_id;
+	if (slurmctld_conf.acctng_store_job_comment)
+		req.comment     = job_ptr->comment;
+	else
+		req.comment     = NULL;
 	req.db_index    = job_ptr->db_index;
 	req.derived_ec  = job_ptr->derived_ec;
 	req.exit_code   = job_ptr->exit_code;
@@ -2072,43 +2115,47 @@ extern int jobacct_storage_p_step_start(void *db_conn,
 	slurmdbd_msg_t msg;
 	dbd_step_start_msg_t req;
 	char temp_bit[BUF_SIZE];
-
-#ifdef HAVE_BG
+	char *temp_nodes = NULL;
 	char *ionodes = NULL;
 
+#ifdef HAVE_BG_L_P
+
 	if (step_ptr->job_ptr->details)
-		cpus = step_ptr->job_ptr->details->min_cpus;
+		tasks = cpus = step_ptr->job_ptr->details->min_cpus;
 	else
-		cpus = step_ptr->job_ptr->cpu_cnt;
-	select_g_select_jobinfo_get(step_ptr->job_ptr->select_jobinfo,
-				    SELECT_JOBDATA_IONODES,
-				    &ionodes);
-	if (ionodes) {
-		snprintf(node_list, BUFFER_SIZE,
-			 "%s[%s]", step_ptr->job_ptr->nodes, ionodes);
-		xfree(ionodes);
-	} else {
-		snprintf(node_list, BUFFER_SIZE, "%s",
-			 step_ptr->job_ptr->nodes);
-	}
+		tasks = cpus = step_ptr->job_ptr->cpu_cnt;
 	select_g_select_jobinfo_get(step_ptr->job_ptr->select_jobinfo,
 				    SELECT_JOBDATA_NODE_CNT,
 				    &nodes);
+	temp_nodes = step_ptr->job_ptr->nodes;
 #else
 	if (!step_ptr->step_layout || !step_ptr->step_layout->task_cnt) {
 		cpus = tasks = step_ptr->job_ptr->total_cpus;
-		snprintf(node_list, BUFFER_SIZE, "%s",
-			 step_ptr->job_ptr->nodes);
 		nodes = step_ptr->job_ptr->total_nodes;
+		temp_nodes = step_ptr->job_ptr->nodes;
 	} else {
 		cpus = step_ptr->cpu_count;
 		tasks = step_ptr->step_layout->task_cnt;
+#ifdef HAVE_BGQ
+		select_g_select_jobinfo_get(step_ptr->select_jobinfo,
+					    SELECT_JOBDATA_NODE_CNT,
+					    &nodes);
+#else
 		nodes = step_ptr->step_layout->node_cnt;
+#endif
 		task_dist = step_ptr->step_layout->task_dist;
-		snprintf(node_list, BUFFER_SIZE, "%s",
-			 step_ptr->step_layout->node_list);
+		temp_nodes = step_ptr->step_layout->node_list;
 	}
 #endif
+	select_g_select_jobinfo_get(step_ptr->select_jobinfo,
+				    SELECT_JOBDATA_IONODES,
+				    &ionodes);
+	if (ionodes) {
+		snprintf(node_list, BUFFER_SIZE, "%s[%s]", temp_nodes, ionodes);
+		xfree(ionodes);
+	} else
+		snprintf(node_list, BUFFER_SIZE, "%s", temp_nodes);
+
 	if (step_ptr->step_id == SLURM_BATCH_SCRIPT) {
 		/* We overload gres with the node name of where the
 		   script was running.
@@ -2172,7 +2219,7 @@ extern int jobacct_storage_p_step_complete(void *db_conn,
 	slurmdbd_msg_t msg;
 	dbd_step_comp_msg_t req;
 
-#ifdef HAVE_BG
+#ifdef HAVE_BG_L_P
 	if (step_ptr->job_ptr->details)
 		tasks = cpus = step_ptr->job_ptr->details->min_cpus;
 	else

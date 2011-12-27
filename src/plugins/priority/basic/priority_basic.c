@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -48,8 +48,9 @@
 #endif
 
 #include <stdio.h>
-#include <slurm/slurm_errno.h>
 #include <math.h>
+
+#include "slurm/slurm_errno.h"
 
 #include "src/common/slurm_priority.h"
 
@@ -109,16 +110,16 @@ extern uint32_t priority_p_set(uint32_t last_prio, struct job_record *job_ptr)
 {
 	uint32_t new_prio = 1;
 
-	if(job_ptr->direct_set_prio)
+	if (job_ptr->direct_set_prio && (job_ptr->priority > 1))
 		return job_ptr->priority;
 
-	if(last_prio >= 2)
+	if (last_prio >= 2)
 		new_prio = (last_prio - 1);
 
-	if(job_ptr->details)
+	if (job_ptr->details)
 		new_prio -= (job_ptr->details->nice - NICE_OFFSET);
 
-	if(new_prio < 1)
+	if (new_prio < 1)
 		new_prio = 1;
 
 	return new_prio;
@@ -126,7 +127,6 @@ extern uint32_t priority_p_set(uint32_t last_prio, struct job_record *job_ptr)
 
 extern void priority_p_reconfig(void)
 {
-
 	return;
 }
 
@@ -139,15 +139,14 @@ extern double priority_p_calc_fs_factor(long double usage_efctv,
 					long double shares_norm)
 {
 	/* This calculation is needed for sshare when ran from a
-	   non-multifactor machine to a multifactor machine.  It
-	   doesn't do anything on regular systems, it should always
-	   return 0 since shares_norm will always be NO_VAL.
-	*/
+	 * non-multifactor machine to a multifactor machine.  It
+	 * doesn't do anything on regular systems, it should always
+	 * return 0 since shares_norm will always be NO_VAL. */
 	double priority_fs;
 
-	xassert(usage_efctv != (long double)NO_VAL);
+	xassert(!fuzzy_equal(usage_efctv, NO_VAL));
 
-	if ((shares_norm <= 0.0) || (shares_norm == (long double)NO_VAL))
+	if ((shares_norm <= 0.0) || fuzzy_equal(shares_norm, NO_VAL))
 		priority_fs = 0.0;
 	else
 		priority_fs = pow(2.0, -(usage_efctv / shares_norm));

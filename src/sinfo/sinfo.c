@@ -3,13 +3,13 @@
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
- *  Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
+ *  Portions Copyright (C) 2010-2011 SchedMD <http://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>, Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -48,9 +48,6 @@
 #include "src/sinfo/sinfo.h"
 #include "src/sinfo/print.h"
 
-#include "src/plugins/select/bluegene/wrap_rm_api.h"
-#include "src/plugins/select/bluegene/plugin/bluegene.h"
-
 /********************
  * Global Variables *
  ********************/
@@ -72,9 +69,9 @@ static bool _filter_out(node_info_t *node_ptr);
 static int  _get_info(bool clear_old);
 static void _sinfo_list_delete(void *data);
 static bool _match_node_data(sinfo_data_t *sinfo_ptr,
-                             node_info_t *node_ptr);
+			     node_info_t *node_ptr);
 static bool _match_part_data(sinfo_data_t *sinfo_ptr,
-                             partition_info_t* part_ptr);
+			     partition_info_t* part_ptr);
 static int  _multi_cluster(List clusters);
 static int  _query_server(partition_info_msg_t ** part_pptr,
 			  node_info_msg_t ** node_pptr,
@@ -182,21 +179,23 @@ static int _bg_report(block_info_msg_t *block_ptr)
 	}
 
 	if (!params.no_header)
-		printf("BG_BLOCK         NODES        OWNER    STATE    CONNECTION USE\n");
+		printf("BG_BLOCK         MIDPLANES       OWNER    STATE    CONNECTION USE\n");
 /*                      1234567890123456 123456789012 12345678 12345678 1234567890 12345+ */
 /*                      RMP_22Apr1544018 bg[123x456]  name     READY    TORUS      COPROCESSOR */
 
 	for (i=0; i<block_ptr->record_count; i++) {
-		printf("%-16.16s %-12.12s %-8.8s %-8.8s %-10.10s %s\n",
+		char *conn_str = conn_type_string_full(
+			block_ptr->block_array[i].conn_type);
+		printf("%-16.16s %-15.15s %-8.8s %-8.8s %-10.10s %s\n",
 		       block_ptr->block_array[i].bg_block_id,
-		       block_ptr->block_array[i].nodes,
+		       block_ptr->block_array[i].mp_str,
 		       block_ptr->block_array[i].owner_name,
 		       bg_block_state_string(
 			       block_ptr->block_array[i].state),
-		       conn_type_string(
-			       block_ptr->block_array[i].conn_type),
+		       conn_str,
 		       node_use_string(
 			       block_ptr->block_array[i].node_use));
+		xfree(conn_str);
 	}
 
 	return SLURM_SUCCESS;
@@ -207,7 +206,7 @@ static int _bg_report(block_info_msg_t *block_ptr)
  * part_pptr IN/OUT - partition information message
  * node_pptr IN/OUT - node information message
  * block_pptr IN/OUT - BlueGene block data
- * clear_old IN - If set, then always replace old data, needed when going 
+ * clear_old IN - If set, then always replace old data, needed when going
  *		  between clusters.
  * RET zero or error code
  */
@@ -502,6 +501,10 @@ static void _sort_hostlist(List sinfo_list)
 
 static bool _match_node_data(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr)
 {
+	if (params.match_flags.hostnames_flag ||
+	    params.match_flags.node_addr_flag)
+		return false;
+
 	if (sinfo_ptr->nodes &&
 	    params.match_flags.features_flag &&
 	    (_strcmp(node_ptr->features, sinfo_ptr->features)))
@@ -516,6 +519,17 @@ static bool _match_node_data(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr)
 	    params.match_flags.reason_flag &&
 	    (_strcmp(node_ptr->reason, sinfo_ptr->reason)))
 		return false;
+
+	if (sinfo_ptr->nodes &&
+	    params.match_flags.reason_timestamp_flag &&
+	    (node_ptr->reason_time != sinfo_ptr->reason_time))
+		return false;
+
+	if (sinfo_ptr->nodes &&
+	    params.match_flags.reason_user_flag &&
+	    node_ptr->reason_uid != sinfo_ptr->reason_uid) {
+		return false;
+	}
 
 	if (params.match_flags.state_flag) {
 		char *state1, *state2;
@@ -562,7 +576,7 @@ static bool _match_node_data(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr)
 }
 
 static bool _match_part_data(sinfo_data_t *sinfo_ptr,
-                             partition_info_t* part_ptr)
+			     partition_info_t* part_ptr)
 {
 	if (part_ptr == sinfo_ptr->part_info) /* identical partition */
 		return true;
@@ -575,7 +589,7 @@ static bool _match_part_data(sinfo_data_t *sinfo_ptr,
 
 	if (params.match_flags.groups_flag &&
 	    (_strcmp(part_ptr->allow_groups,
-	             sinfo_ptr->part_info->allow_groups)))
+		     sinfo_ptr->part_info->allow_groups)))
 		return false;
 
 	if (params.match_flags.job_size_flag &&
@@ -692,7 +706,9 @@ static void _update_sinfo(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr,
 			sinfo_ptr->max_weight = node_ptr->weight;
 	}
 
-	hostlist_push(sinfo_ptr->nodes, node_ptr->name);
+	hostlist_push(sinfo_ptr->nodes,     node_ptr->name);
+	hostlist_push(sinfo_ptr->node_addr, node_ptr->node_addr);
+	hostlist_push(sinfo_ptr->hostnames, node_ptr->node_hostname);
 
 	total_cpus = node_ptr->cpus;
 	total_nodes = node_scaling;
@@ -898,7 +914,9 @@ static sinfo_data_t *_create_sinfo(partition_info_t* part_ptr,
 
 	sinfo_ptr->part_info = part_ptr;
 	sinfo_ptr->part_inx = part_inx;
-	sinfo_ptr->nodes = hostlist_create("");
+	sinfo_ptr->nodes     = hostlist_create("");
+	sinfo_ptr->node_addr = hostlist_create("");
+	sinfo_ptr->hostnames = hostlist_create("");
 
 	if (node_ptr)
 		_update_sinfo(sinfo_ptr, node_ptr, node_scaling);
@@ -911,6 +929,8 @@ static void _sinfo_list_delete(void *data)
 	sinfo_data_t *sinfo_ptr = data;
 
 	hostlist_destroy(sinfo_ptr->nodes);
+	hostlist_destroy(sinfo_ptr->node_addr);
+	hostlist_destroy(sinfo_ptr->hostnames);
 	xfree(sinfo_ptr);
 }
 
@@ -925,4 +945,3 @@ static int _strcmp(char *data1, char *data2)
 		data2 = null_str;
 	return strcmp(data1, data2);
 }
-

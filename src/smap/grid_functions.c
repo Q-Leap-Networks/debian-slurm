@@ -2,14 +2,14 @@
  *  grid_functions.c - Functions related to curses display of smap.
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2011 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -40,156 +40,315 @@
 
 #include "src/smap/smap.h"
 
-static int _coord(char coord)
+static void _calc_coord_3d(int x, int y, int z, int default_y_offset,
+			   int *coord_x, int *coord_y, int *dim_size)
 {
-	if ((coord >= '0') && (coord <= '9'))
-		return (coord - '0');
-	if ((coord >= 'A') && (coord <= 'Z'))
-		return (coord - 'A');
-	return -1;
+	int y_offset;
+
+	*coord_x = (x + (dim_size[2] - 1)) - z + 2;
+	y_offset = default_y_offset - (dim_size[2] * y);
+	*coord_y = (y_offset - y) + z;
 }
 
-extern int set_grid_inx(int start, int end, int count)
+static void _calc_coord_4d(int a, int x, int y, int z, int default_y_offset,
+			   int *coord_x, int *coord_y, int* dim_size)
 {
-	int x, y, z;
+	int x_offset, y_offset;
 
-	for (y = DIM_SIZE[Y] - 1; y >= 0; y--) {
-		for (z = 0; z < DIM_SIZE[Z]; z++) {
-			for (x = 0; x < DIM_SIZE[X]; x++) {
-				if ((ba_system_ptr->grid[x][y][z].index
-				     < start)
-				||  (ba_system_ptr->grid[x][y][z].index
-				     > end))
-					continue;
-				if ((ba_system_ptr->grid[x][y][z].state
-				     == NODE_STATE_DOWN)
-				    ||  (ba_system_ptr->grid[x][y][z].state
-					 & NODE_STATE_DRAIN))
-					continue;
+	x_offset = (dim_size[1] + dim_size[3]) * a + 2;
+	*coord_x = x_offset + (x + (dim_size[3] - 1)) - z;
+	y_offset = default_y_offset - (dim_size[3] * y);
+	*coord_y = (y_offset - y) + z;
+}
 
-				ba_system_ptr->grid[x][y][z].letter =
-					letters[count%62];
-				ba_system_ptr->grid[x][y][z].color =
-					colors[count%6];
-			}
+extern int *get_cluster_dims(node_info_msg_t *node_info_ptr)
+{
+	int *dim_size = slurmdb_setup_cluster_dim_size();
+
+	if ((params.cluster_flags & CLUSTER_FLAG_CRAYXT) && dim_size) {
+		static int cray_dim_size[3] = {-1, -1, -1};
+		/* For now, assume one node per coordinate all
+		 * May need to refine. */
+		cray_dim_size[0] = dim_size[0];
+		cray_dim_size[1] = dim_size[1];
+		cray_dim_size[2] = dim_size[2];
+		return cray_dim_size;
+	}
+
+	if (dim_size == NULL) {
+		static int default_dim_size[1];
+		default_dim_size[0] = node_info_ptr->record_count;
+		return default_dim_size;
+	}
+
+	return dim_size;
+}
+
+#ifdef HAVE_BG
+static void _internal_setup_grid(int level, uint16_t *coords)
+{
+	ba_mp_t *ba_mp;
+	smap_node_t *smap_node;
+
+	if (level > params.cluster_dims)
+		return;
+
+	if (level < params.cluster_dims) {
+		for (coords[level] = 0;
+		     coords[level] < dim_size[level];
+		     coords[level]++) {
+			/* handle the outer dims here */
+			_internal_setup_grid(level+1, coords);
 		}
+		return;
 	}
-	return 1;
+	ba_mp = bg_configure_coord2ba_mp(coords);
+
+	if (!ba_mp || ba_mp->index > smap_system_ptr->node_cnt)
+		return;
+	smap_node = xmalloc(sizeof(smap_node_t));
+	smap_node->coord = xmalloc(sizeof(uint16_t) * params.cluster_dims);
+
+	memcpy(smap_node->coord, coords,
+	       sizeof(uint16_t) * params.cluster_dims);
+	smap_node->index = ba_mp->index;
+	smap_system_ptr->grid[smap_node->index] = smap_node;
 }
+#endif
 
-extern int set_grid_inx2(char *node_names, int count)
+extern void set_grid_inx(int start, int end, int count)
 {
-	hostlist_t hl;
-	hostlist_iterator_t hl_iter;
-	char *host;
-	int i, x, y, z;
+	int i;
 
-	hl = hostlist_create(node_names);
-	hl_iter = hostlist_iterator_create(hl);
-	while ((host = hostlist_next(hl_iter))) {
-		i = strlen(host);
-		x = _coord(host[i-3]);
-		y = _coord(host[i-2]);
-		z = _coord(host[i-1]);
-		ba_system_ptr->grid[x][y][z].letter = letters[count%62];
-		ba_system_ptr->grid[x][y][z].color  = colors[count%6];
-		free(host);
+	if (!smap_system_ptr || !smap_system_ptr->grid)
+		return;
+
+	for (i = 0; i < smap_system_ptr->node_cnt; i++) {
+		if ((smap_system_ptr->grid[i]->index < start) ||
+		    (smap_system_ptr->grid[i]->index > end))
+			continue;
+		if ((smap_system_ptr->grid[i]->state == NODE_STATE_DOWN) ||
+		    (smap_system_ptr->grid[i]->state & NODE_STATE_DRAIN))
+			continue;
+
+		smap_system_ptr->grid[i]->letter = letters[count%62];
+		smap_system_ptr->grid[i]->color  = colors[count%6];
 	}
-	hostlist_iterator_destroy(hl_iter);
-	return 1;
 }
 
 /* This function is only called when HAVE_BG is set */
 extern int set_grid_bg(int *start, int *end, int count, int set)
 {
-	int x=0, y=0, z=0;
-	int i = 0;
+	int node_cnt = 0, i, j;
 
-	assert(end[X] < DIM_SIZE[X]);
-	assert(start[X] >= 0);
-	assert(count >= 0);
-	assert(set >= 0);
-	assert(set <= 2);
-	assert(end[Y] < DIM_SIZE[Y]);
-	assert(start[Y] >= 0);
-	assert(end[Z] < DIM_SIZE[Z]);
-	assert(start[Z] >= 0);
+	if (!smap_system_ptr || !smap_system_ptr->grid)
+		return 0;
 
-	for (x = start[X]; x <= end[X]; x++) {
-		for (y = start[Y]; y <= end[Y]; y++) {
-			for (z = start[Z]; z <= end[Z]; z++) {
-				/* set the color and letter of the
-				   block if the set flag is specified
-				   or if the letter hasn't been set yet
-				*/
-				if(set
-				   || ((ba_system_ptr->grid[x][y][z].letter
-					== '.')
-				       && (ba_system_ptr->grid[x][y][z].letter
-					   != '#'))) {
+	for (i = 0; i < smap_system_ptr->node_cnt; i++) {
+		for (j = 0; j < params.cluster_dims; j++) {
+			if ((smap_system_ptr->grid[i]->coord[j] < start[j]) ||
+			    (smap_system_ptr->grid[i]->coord[j] > end[j]))
+				break;
+		}
+		if (j < params.cluster_dims)
+			continue;	/* outside of boundary */
+		if (set ||
+		    ((smap_system_ptr->grid[i]->letter == '.') &&
+		     (smap_system_ptr->grid[i]->letter != '#'))) {
+			smap_system_ptr->grid[i]->letter = letters[count%62];
+			smap_system_ptr->grid[i]->color  = colors[count%6];
+		}
+		node_cnt++;
+	}
+	return node_cnt;
+}
 
-						ba_system_ptr->
-							grid[x][y][z].letter =
-							letters[count%62];
-						ba_system_ptr->
-							grid[x][y][z].color =
-							colors[count%6];
+/* Build the smap_system_ptr structure from the node records */
+extern void init_grid(node_info_msg_t *node_info_ptr)
+{
+	int i, j, len;
+	int default_y_offset = 0;
+	smap_node_t *smap_node;
+
+	smap_system_ptr = xmalloc(sizeof(smap_system_t));
+
+	if (!node_info_ptr) {
+		if (params.display != COMMANDS)
+			return;
+#ifdef HAVE_BG
+		uint16_t coords[params.cluster_dims];
+
+		smap_system_ptr->node_cnt = 1;
+		for (i=0; i<params.cluster_dims; i++)
+			smap_system_ptr->node_cnt *= dim_size[i];
+		smap_system_ptr->grid = xmalloc(sizeof(smap_node_t *) *
+						smap_system_ptr->node_cnt);
+		/* We need to make sure we set up the wires if we
+		   don't have a node_info_ptr.
+		*/
+		bg_configure_ba_setup_wires();
+
+		_internal_setup_grid(0, coords);
+#endif
+	} else {
+		smap_system_ptr->grid = xmalloc(sizeof(smap_node_t *) *
+						node_info_ptr->record_count);
+		for (i = 0; i < node_info_ptr->record_count; i++) {
+			node_info_t *node_ptr = &node_info_ptr->node_array[i];
+
+			if ((node_ptr->name == NULL) ||
+			    (node_ptr->name[0] == '\0'))
+				continue;
+
+			smap_node = xmalloc(sizeof(smap_node_t));
+
+			len = strlen(node_ptr->name);
+			if (params.cluster_dims == 1) {
+				smap_node->coord = xmalloc(sizeof(uint16_t));
+				j = len - 1;
+				while ((node_ptr->name[j] >= '0') &&
+				       (node_ptr->name[j] <= '9')) {
+					smap_node->coord[0] *= 10;
+					smap_node->coord[0] +=
+						node_ptr->name[j] - '0';
+					j++;
 				}
-				i++;
+			} else if (params.cluster_flags & CLUSTER_FLAG_CRAYXT) {
+				int len_a, len_h;
+				len_a = strlen(node_ptr->node_addr);
+				len_h = strlen(node_ptr->node_hostname);
+				if (len_a < params.cluster_dims) {
+					printf("Invalid node addr %s\n",
+					       node_ptr->node_addr);
+					xfree(smap_node);
+					continue;
+				}
+				if (len_h < 1) {
+					printf("Invalid node hostname %s\n",
+					       node_ptr->node_hostname);
+					xfree(smap_node);
+					continue;
+				}
+				smap_node->coord = xmalloc(sizeof(uint16_t) *
+							   params.cluster_dims);
+				len_a -= params.cluster_dims;
+				for (j = 0; j < params.cluster_dims; j++) {
+					smap_node->coord[j] = select_char2coord(
+						node_ptr->node_addr[len_a+j]);
+				}
+			} else {
+				len -= params.cluster_dims;
+				if (len < 0) {
+					printf("Invalid node name: %s.\n",
+					       node_ptr->name);
+					xfree(smap_node);
+					continue;
+				}
+				smap_node->coord = xmalloc(sizeof(uint16_t) *
+							   params.cluster_dims);
+				for (j = 0; j < params.cluster_dims; j++) {
+					smap_node->coord[j] = select_char2coord(
+						node_ptr->name[len+j]);
+				}
 			}
+			smap_node->index = i;
+			smap_system_ptr->grid[i] = smap_node;
+			smap_system_ptr->node_cnt++;
 		}
 	}
 
-	return i;
+	if (params.cluster_dims == 3) {
+		default_y_offset = (dim_size[2] * dim_size[1]) +
+				   (dim_size[1] - dim_size[2]);
+	} else if (params.cluster_dims == 4) {
+		default_y_offset = (dim_size[3] * dim_size[2]) +
+				   (dim_size[2] - dim_size[3]);
+	}
+	for (i = 0; i < smap_system_ptr->node_cnt; i++) {
+		smap_node = smap_system_ptr->grid[i];
+		if (params.cluster_dims == 1) {
+			smap_node->grid_xcord = i + 1;
+			smap_node->grid_ycord = 1;
+		} else if (params.cluster_dims == 2) {
+			smap_node->grid_xcord = smap_node->coord[0] + 1;
+			smap_node->grid_ycord =
+				dim_size[1] - smap_node->coord[1];
+		} else if (params.cluster_dims == 3) {
+			_calc_coord_3d(smap_node->coord[0], smap_node->coord[1],
+				       smap_node->coord[2],
+				       default_y_offset,
+				       &smap_node->grid_xcord,
+				       &smap_node->grid_ycord, dim_size);
+		} else if (params.cluster_dims == 4) {
+			_calc_coord_4d(smap_node->coord[0], smap_node->coord[1],
+				       smap_node->coord[2], smap_node->coord[3],
+				       default_y_offset,
+				       &smap_node->grid_xcord,
+				       &smap_node->grid_ycord, dim_size);
+		}
+	}
 }
 
-/* print_grid - print values of every grid point */
-extern void print_grid(int dir)
+extern void clear_grid(void)
 {
-	int x;
-	int grid_xcord, grid_ycord = 2;
-	int y, z, offset = DIM_SIZE[Z];
+	smap_node_t *smap_node;
+	int i;
 
-	for (y = DIM_SIZE[Y] - 1; y >= 0; y--) {
-		offset = DIM_SIZE[Z] + 1;
-		for (z = 0; z < DIM_SIZE[Z]; z++) {
-			grid_xcord = offset;
+	if (!smap_system_ptr || !smap_system_ptr->grid)
+		return;
 
-			for (x = 0; x < DIM_SIZE[X]; x++) {
-				if (ba_system_ptr->grid[x][y][z].color)
-					init_pair(ba_system_ptr->
-						  grid[x][y][z].color,
-						  ba_system_ptr->
-						  grid[x][y][z].color,
-						  COLOR_BLACK);
-				else
-					init_pair(ba_system_ptr->
-						  grid[x][y][z].color,
-						  ba_system_ptr->
-						  grid[x][y][z].color,
-                                                  7);
+	for (i = 0; i < smap_system_ptr->node_cnt; i++) {
+		smap_node = smap_system_ptr->grid[i];
+		smap_node->color = COLOR_WHITE;
+		smap_node->letter = '.';
+	}
+}
 
-				wattron(grid_win,
-					COLOR_PAIR(ba_system_ptr->
-						   grid[x][y][z].color));
+extern void free_grid(void)
+{
+	int i;
 
-				mvwprintw(grid_win,
-					  grid_ycord, grid_xcord, "%c",
-					  ba_system_ptr->grid[x][y][z].letter);
-				wattroff(grid_win,
-					 COLOR_PAIR(ba_system_ptr->
-						    grid[x][y][z].color));
-				grid_xcord++;
-			}
-			grid_ycord++;
-			offset--;
+	if (!smap_system_ptr)
+		return;
+
+	if (smap_system_ptr->grid) {
+		for (i = 0; i < smap_system_ptr->node_cnt; i++) {
+			smap_node_t *smap_node = smap_system_ptr->grid[i];
+			xfree(smap_node->coord);
+			xfree(smap_node);
 		}
-		grid_ycord++;
+		xfree(smap_system_ptr->grid);
+	}
+	xfree(smap_system_ptr);
+}
+
+
+/* print_grid - print values of every grid point */
+extern void print_grid(void)
+{
+	int i;
+
+	if (!smap_system_ptr || !smap_system_ptr->grid)
+		return;
+
+	for (i = 0; i < smap_system_ptr->node_cnt; i++) {
+		if (smap_system_ptr->grid[i]->color)
+			init_pair(smap_system_ptr->grid[i]->color,
+				  smap_system_ptr->grid[i]->color, COLOR_BLACK);
+		else
+			init_pair(smap_system_ptr->grid[i]->color,
+				  smap_system_ptr->grid[i]->color, 7);
+		wattron(grid_win, COLOR_PAIR(smap_system_ptr->grid[i]->color));
+		mvwprintw(grid_win,
+			  smap_system_ptr->grid[i]->grid_ycord,
+			  smap_system_ptr->grid[i]->grid_xcord, "%c",
+			  smap_system_ptr->grid[i]->letter);
+		wattroff(grid_win, COLOR_PAIR(smap_system_ptr->grid[i]->color));
 	}
 	return;
 }
 
-bitstr_t *get_requested_node_bitmap()
+bitstr_t *get_requested_node_bitmap(void)
 {
 	static bitstr_t *bitmap = NULL;
 	static node_info_msg_t *old_node_ptr = NULL, *new_node_ptr;
@@ -197,22 +356,22 @@ bitstr_t *get_requested_node_bitmap()
 	int i = 0;
 	node_info_t *node_ptr = NULL;
 
-	if(!params.hl)
+	if (!params.hl)
 		return NULL;
 
 	if (old_node_ptr) {
-		error_code =
-			slurm_load_node(old_node_ptr->last_update,
-					&new_node_ptr, SHOW_ALL);
+		error_code = slurm_load_node(old_node_ptr->last_update,
+					     &new_node_ptr, SHOW_ALL);
 		if (error_code == SLURM_SUCCESS)
 			slurm_free_node_info_msg(old_node_ptr);
 		else if (slurm_get_errno() == SLURM_NO_CHANGE_IN_DATA)
 			return bitmap;
-	} else
+	} else {
 		error_code = slurm_load_node((time_t) NULL, &new_node_ptr,
 					     SHOW_ALL);
+	}
 
-	if(bitmap)
+	if (bitmap)
 		FREE_NULL_BITMAP(bitmap);
 
 	if (error_code) {
@@ -223,9 +382,9 @@ bitstr_t *get_requested_node_bitmap()
 	old_node_ptr = new_node_ptr;
 
 	bitmap = bit_alloc(old_node_ptr->record_count);
-	for(i=0; i<old_node_ptr->record_count; i++) {
+	for (i = 0; i < old_node_ptr->record_count; i++) {
 		node_ptr = &(old_node_ptr->node_array[i]);
-		if(hostlist_find(params.hl, node_ptr->name) != -1)
+		if (hostlist_find(params.hl, node_ptr->name) != -1)
 			bit_set(bitmap, i);
 	}
 	return bitmap;

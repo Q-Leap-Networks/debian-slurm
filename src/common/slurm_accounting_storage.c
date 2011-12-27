@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -166,6 +166,9 @@ typedef struct slurm_acct_storage_ops {
 	int  (*cluster_cpus)      (void *db_conn, char *cluster_nodes,
 				   uint32_t cpus, time_t event_time);
 	int  (*register_ctld)      (void *db_conn, uint16_t port);
+	int  (*register_disconn_ctld)(void *db_conn, char *control_host);
+	int  (*fini_ctld)          (void *db_conn,
+				    slurmdb_cluster_rec_t *cluster_rec);
 	int  (*job_start)          (void *db_conn, struct job_record *job_ptr);
 	int  (*job_complete)       (void *db_conn,
 				    struct job_record *job_ptr);
@@ -263,6 +266,8 @@ static slurm_acct_storage_ops_t * _acct_storage_get_ops(
 		"clusteracct_storage_p_node_up",
 		"clusteracct_storage_p_cluster_cpus",
 		"clusteracct_storage_p_register_ctld",
+		"clusteracct_storage_p_register_disconn_ctld",
+		"clusteracct_storage_p_fini_ctld",
 		"jobacct_storage_p_job_start",
 		"jobacct_storage_p_job_complete",
 		"jobacct_storage_p_step_start",
@@ -817,19 +822,39 @@ extern int clusteracct_storage_g_node_up(void *db_conn,
 
 	/* on some systems we need to make sure we don't say something
 	   is completely up if there are cpus in an error state */
-	if(node_ptr->select_nodeinfo) {
+	if (node_ptr->select_nodeinfo) {
 		uint16_t err_cpus = 0;
+		static uint32_t node_scaling = 0;
+		static uint16_t cpu_cnt = 1;
+
+		if (!node_scaling) {
+			select_g_alter_node_cnt(SELECT_GET_NODE_SCALING,
+						&node_scaling);
+			select_g_alter_node_cnt(SELECT_GET_NODE_CPU_CNT,
+						&cpu_cnt);
+			if (!node_scaling)
+				node_scaling = 1;
+		}
+
 		select_g_select_nodeinfo_get(node_ptr->select_nodeinfo,
 					     SELECT_NODEDATA_SUBCNT,
 					     NODE_STATE_ERROR,
 					     &err_cpus);
-		if(err_cpus) {
+		if (err_cpus) {
 			char *reason = "Setting partial node down.";
 			struct node_record send_node;
 			struct config_record config_rec;
-			uint16_t cpu_cnt = 0;
-			select_g_alter_node_cnt(SELECT_GET_NODE_CPU_CNT,
-						&cpu_cnt);
+
+			if (!node_ptr->reason) {
+				if (err_cpus == node_scaling)
+					reason = "Setting node down.";
+				node_ptr->reason = xstrdup(reason);
+				node_ptr->reason_time = event_time;
+				node_ptr->reason_uid =
+					slurm_get_slurm_user_id();
+			} else
+				reason = node_ptr->reason;
+
 			err_cpus *= cpu_cnt;
 			memset(&send_node, 0, sizeof(struct node_record));
 			memset(&config_rec, 0, sizeof(struct config_record));
@@ -843,7 +868,15 @@ extern int clusteracct_storage_g_node_up(void *db_conn,
 			return (*(g_acct_storage_context->ops.node_down))
 				(db_conn, &send_node,
 				 event_time, reason, slurm_get_slurm_user_id());
+		} else {
+			xfree(node_ptr->reason);
+			node_ptr->reason_time = 0;
+			node_ptr->reason_uid = NO_VAL;
 		}
+	} else {
+		xfree(node_ptr->reason);
+		node_ptr->reason_time = 0;
+		node_ptr->reason_uid = NO_VAL;
 	}
 
  	return (*(g_acct_storage_context->ops.node_up))
@@ -867,16 +900,32 @@ extern int clusteracct_storage_g_register_ctld(void *db_conn, uint16_t port)
 {
 	if (slurm_acct_storage_init(NULL) < 0)
 		return SLURM_ERROR;
- 	return (*(g_acct_storage_context->ops.register_ctld))
-		(db_conn, port);
+ 	return (*(g_acct_storage_context->ops.register_ctld))(db_conn, port);
+}
+
+extern int clusteracct_storage_g_register_disconn_ctld(
+	void *db_conn, char *control_host)
+{
+	if (slurm_acct_storage_init(NULL) < 0)
+		return SLURM_ERROR;
+	return (*(g_acct_storage_context->ops.register_disconn_ctld))
+		(db_conn, control_host);
+}
+
+extern int clusteracct_storage_g_fini_ctld(void *db_conn,
+					   slurmdb_cluster_rec_t *cluster_rec)
+{
+	if (slurm_acct_storage_init(NULL) < 0)
+		return SLURM_ERROR;
+ 	return (*(g_acct_storage_context->ops.fini_ctld))(db_conn, cluster_rec);
 }
 
 /*
  * load into the storage information about a job,
  * typically when it begins execution, but possibly earlier
  */
-extern int jobacct_storage_g_job_start (void *db_conn,
-					struct job_record *job_ptr)
+extern int jobacct_storage_g_job_start(void *db_conn,
+				       struct job_record *job_ptr)
 {
 	if (slurm_acct_storage_init(NULL) < 0)
 		return SLURM_ERROR;
@@ -901,8 +950,8 @@ extern int jobacct_storage_g_job_start (void *db_conn,
 /*
  * load into the storage the end of a job
  */
-extern int jobacct_storage_g_job_complete  (void *db_conn,
-					    struct job_record *job_ptr)
+extern int jobacct_storage_g_job_complete(void *db_conn,
+					  struct job_record *job_ptr)
 {
 	if (slurm_acct_storage_init(NULL) < 0)
 		return SLURM_ERROR;
@@ -912,8 +961,8 @@ extern int jobacct_storage_g_job_complete  (void *db_conn,
 /*
  * load into the storage the start of a job step
  */
-extern int jobacct_storage_g_step_start (void *db_conn,
-					 struct step_record *step_ptr)
+extern int jobacct_storage_g_step_start(void *db_conn,
+					struct step_record *step_ptr)
 {
 	if (slurm_acct_storage_init(NULL) < 0)
 		return SLURM_ERROR;
@@ -923,8 +972,8 @@ extern int jobacct_storage_g_step_start (void *db_conn,
 /*
  * load into the storage the end of a job step
  */
-extern int jobacct_storage_g_step_complete (void *db_conn,
-					    struct step_record *step_ptr)
+extern int jobacct_storage_g_step_complete(void *db_conn,
+					   struct step_record *step_ptr)
 {
 	if (slurm_acct_storage_init(NULL) < 0)
 		return SLURM_ERROR;
@@ -935,8 +984,8 @@ extern int jobacct_storage_g_step_complete (void *db_conn,
 /*
  * load into the storage a suspention of a job
  */
-extern int jobacct_storage_g_job_suspend (void *db_conn,
-					  struct job_record *job_ptr)
+extern int jobacct_storage_g_job_suspend(void *db_conn,
+					 struct job_record *job_ptr)
 {
 	if (slurm_acct_storage_init(NULL) < 0)
 		return SLURM_ERROR;

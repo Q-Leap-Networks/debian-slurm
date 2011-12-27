@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -208,7 +208,11 @@ static void _opt_default()
 	opt.account	= NULL;
 	opt.batch	= false;
 	opt.clusters    = NULL;
+#ifdef HAVE_FRONT_END
+	opt.ctld	= true;
+#else
 	opt.ctld	= false;
+#endif
 	opt.interactive	= false;
 	opt.job_cnt	= 0;
 	opt.job_name	= NULL;
@@ -361,11 +365,14 @@ static void _opt_args(int argc, char **argv)
 			break;
 		case (int)'M':
 			opt.ctld = true;
-			if(opt.clusters)
+			if (opt.clusters)
 				list_destroy(opt.clusters);
-			if(!(opt.clusters =
-			     slurmdb_get_info_cluster(optarg))) {
-				error("'%s' invalid entry for --cluster",
+			opt.clusters = slurmdb_get_info_cluster(optarg);
+			if (!opt.clusters) {
+				error("'%s' can't be reached now, "
+				      "or it is an invalid entry for "
+				      "--cluster.  Use 'sacctmgr --list "
+				      "cluster' to see available clusters.",
 				      optarg);
 				exit(1);
 			}
