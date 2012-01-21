@@ -1,3 +1,10 @@
+slurm-llnl (2.3.2-2) unstable; urgency=low
+
+  * Enable hardened build flags through dpkg-buildflags, thanks to
+    Moritz Muehlenhoff (Closes: #656781)
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Sat, 21 Jan 2012 20:57:11 +0100
+
 slurm-llnl (2.3.2-1) unstable; urgency=low
 
   * New upstream release
