@@ -71,10 +71,12 @@
  * overwritten when linking with the slurmctld.
  */
 #if defined (__APPLE__)
+void *acct_db_conn  __attribute__((weak_import)) = NULL;
 uint32_t cluster_cpus __attribute__((weak_import)) = NO_VAL;
 List job_list  __attribute__((weak_import)) = NULL;
 time_t last_job_update __attribute__((weak_import));
 #else
+void *acct_db_conn = NULL;
 uint32_t cluster_cpus = NO_VAL;
 List job_list = NULL;
 time_t last_job_update;
@@ -1390,6 +1392,14 @@ extern List priority_p_get_priority_factors_list(
 				continue;
 
 			if (_filter_job(job_ptr, req_job_list, req_user_list))
+				continue;
+
+			if ((slurmctld_conf.private_data & PRIVATE_DATA_JOBS)
+			    && (job_ptr->user_id != req_msg->uid)
+			    && !validate_operator(req_msg->uid)
+			    && !assoc_mgr_is_user_acct_coord(
+				    acct_db_conn, req_msg->uid,
+				    job_ptr->account))
 				continue;
 
 			obj = xmalloc(sizeof(priority_factors_object_t));

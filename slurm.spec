@@ -88,14 +88,14 @@
 %endif
 
 Name:    slurm
-Version: 2.3.2
+Version: 2.3.3
 Release: 1%{?dist}
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL
 Group: System Environment/Base
-Source: slurm-2.3.2.tar.bz2
+Source: slurm-2.3.3.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: http://www.schedmd.com/slurmdocs/
 
@@ -379,7 +379,7 @@ Gives the ability for SLURM to use Berkeley Lab Checkpoint/Restart
 #############################################################################
 
 %prep
-%setup -n slurm-2.3.2
+%setup -n slurm-2.3.3
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \

@@ -92,6 +92,8 @@ static int _setup_qos_limits(slurmdb_qos_rec_t *qos,
 			qos->description = xstrdup("");
 		if (qos->flags & QOS_FLAG_NOTSET)
 			qos->flags = 0;
+		if (qos->grace_time == NO_VAL)
+			qos->grace_time = 0;
 		if (qos->grp_cpu_mins == (uint64_t)NO_VAL)
 			qos->grp_cpu_mins = (uint64_t)INFINITE;
 		if (qos->grp_cpu_run_mins == (uint64_t)NO_VAL)
@@ -125,9 +127,11 @@ static int _setup_qos_limits(slurmdb_qos_rec_t *qos,
 		if (qos->max_wall_pj == NO_VAL)
 			qos->max_wall_pj = INFINITE;
 		if (qos->preempt_mode == (uint16_t)NO_VAL)
-			qos->preempt_mode = (uint16_t)INFINITE;
+			qos->preempt_mode = 0;
+		if (qos->priority == NO_VAL)
+			qos->priority = 0;
 		if (fuzzy_equal(qos->usage_factor, NO_VAL))
-			qos->usage_factor = (double)INFINITE;
+			qos->usage_factor = 1;
 		if (fuzzy_equal(qos->usage_thres, NO_VAL))
 			qos->usage_thres = (double)INFINITE;
 	}
@@ -1113,8 +1117,6 @@ empty:
 
 		if (row[QOS_REQ_GRACE])
 			qos->grace_time = slurm_atoul(row[QOS_REQ_GRACE]);
-		else
-			qos->grace_time = (uint32_t)NO_VAL;
 
 		if (row[QOS_REQ_GCM])
 			qos->grp_cpu_mins = slurm_atoull(row[QOS_REQ_GCM]);

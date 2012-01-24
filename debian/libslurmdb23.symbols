@@ -158,6 +158,7 @@ libslurmdb.so.23 libslurmdb23 #MINVER#
  slurm_env_array_merge@Base 2.2.0
  slurm_env_array_overwrite@Base 2.2.0
  slurm_env_array_overwrite_fmt@Base 2.2.0
+ slurm_env_unset_environment@Base 2.3.3
  slurm_error@Base 2.2.0
  slurm_fatal@Base 2.2.0
  slurm_fatal_add_cleanup@Base 2.2.0

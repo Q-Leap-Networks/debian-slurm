@@ -1,3 +1,10 @@
+slurm-llnl (2.3.3-1) unstable; urgency=low
+
+  * New upstream release 
+  * New watch file pointing to schedmd website 
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Tue, 24 Jan 2012 23:02:15 +0100
+
 slurm-llnl (2.3.2-2) unstable; urgency=low
 
   * Enable hardened build flags through dpkg-buildflags, thanks to

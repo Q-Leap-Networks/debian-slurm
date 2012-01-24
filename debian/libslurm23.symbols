@@ -160,6 +160,7 @@ libslurm.so.23 libslurm23 #MINVER#
  slurm_env_array_merge@Base 1.3.8
  slurm_env_array_overwrite@Base 1.3.8
  slurm_env_array_overwrite_fmt@Base 1.3.8
+ slurm_env_unset_environment@Base 2.3.3
  slurm_error@Base 1.3.8
  slurm_fatal@Base 1.3.8
  slurm_fatal_add_cleanup@Base 1.3.8
