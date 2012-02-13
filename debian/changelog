@@ -1,3 +1,10 @@
+slurm-llnl (2.3.3-2) unstable; urgency=low
+
+  * Changed Build-Depends entry from postgresql-server-dev-8.4 to 9.1
+    (Closes: #639480)
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Mon, 13 Feb 2012 10:46:03 +0100
+
 slurm-llnl (2.3.3-1) unstable; urgency=low
 
   * New upstream release 
