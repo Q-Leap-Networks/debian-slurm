@@ -2854,10 +2854,9 @@ extern int job_allocate(job_desc_msg_t * job_specs, int immediate,
 
 	no_alloc = test_only || too_fragmented ||
 		(!top_prio) || (!independent);
-
 	if (!no_alloc && !avail_front_end()) {
-		debug("sched: schedule() returning, no front end nodes are "
-		       "available");
+		debug("sched: job_allocate() returning, no front end nodes "
+		       "are available");
 		error_code = ESLURM_NODES_BUSY;
 	} else
 		error_code = select_nodes(job_ptr, no_alloc, NULL);
@@ -5832,17 +5831,32 @@ static void _pack_default_job_details(struct job_record *job_ptr,
 	int i;
 	struct job_details *detail_ptr = job_ptr->details;
 	char *cmd_line = NULL;
+	char *tmp = NULL;
+	uint32_t len = 0;
 
 	if(protocol_version >= SLURM_2_2_PROTOCOL_VERSION) {
 		if (detail_ptr) {
 			packstr(detail_ptr->features,   buffer);
 			packstr(detail_ptr->work_dir,   buffer);
 			packstr(detail_ptr->dependency, buffer);
+
 			if (detail_ptr->argv) {
+				/* Determine size needed for a string
+				   containing all arguments */
 				for (i=0; detail_ptr->argv[i]; i++) {
-					if (cmd_line)
-						xstrcat(cmd_line, " ");
-					xstrcat(cmd_line, detail_ptr->argv[i]);
+					len += strlen(detail_ptr->argv[i]);
+				}
+				len += i;
+
+				cmd_line = xmalloc(len*sizeof(char));
+				tmp = cmd_line;
+				for (i=0; detail_ptr->argv[i]; i++) {
+					if (i != 0) {
+						*tmp = ' ';
+						tmp++;
+					}
+					strcpy(tmp,detail_ptr->argv[i]);
+					tmp += strlen(detail_ptr->argv[i]);
 				}
 				packstr(cmd_line, buffer);
 				xfree(cmd_line);
@@ -8589,14 +8603,15 @@ extern bool job_epilog_complete(uint32_t job_id, char *node_name,
 
 #ifdef HAVE_FRONT_END
 	xassert(job_ptr->batch_host);
-	if (return_code) {
-		error("Epilog error for job %u on %s, setting DOWN",
+	/* If there is a bad epilog error don't down the frontend
+	   node.  If needed (not on a bluegene) the nodes in use by
+	   the job will be downed below.
+	*/
+	if (return_code)
+		error("Epilog error for job %u on %s",
 		      job_ptr->job_id, job_ptr->batch_host);
-		if (job_ptr->front_end_ptr) {
-			set_front_end_down(job_ptr->front_end_ptr,
-					  "Epilog error");
-		}
-	} else if (job_ptr->front_end_ptr && IS_JOB_COMPLETING(job_ptr)) {
+
+	if (job_ptr->front_end_ptr && IS_JOB_COMPLETING(job_ptr)) {
 		front_end_record_t *front_end_ptr = job_ptr->front_end_ptr;
 		if (front_end_ptr->job_cnt_comp)
 			front_end_ptr->job_cnt_comp--;

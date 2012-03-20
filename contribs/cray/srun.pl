@@ -55,7 +55,6 @@ my (	$account,
 	$acctg_freq,
 	$alps,
 	$aprun_line_buf,
-	$aprun_quiet,
 	$begin_time,
 	$chdir,
 	$check_time,
@@ -147,7 +146,6 @@ my $srun   = "BINDIR/srun";
 
 my $have_job;
 $aprun_line_buf = 1;
-$aprun_quiet = 1;
 $have_job = 0;
 
 foreach (keys %ENV) {
@@ -347,6 +345,13 @@ if ($have_job == 0) {
 		}
 	}
 
+#	Set the job name to the program name. Break into tokens with
+#	'/' (octal 057) separator and use last token for the job name
+	if (!$job_name && $ARGV[0]) {
+		my @dirs = split(/\057/, $ARGV[0]);
+		$job_name = pop(@dirs);
+	}
+
 	$command = "$salloc";
 	$command .= " --account=$account"		if $account;
 	$command .= " --acctg-freq=$acctg_freq"		if $acctg_freq;
@@ -416,7 +421,7 @@ if ($have_job == 0) {
 		if (index($alps, "-m") >= 0)  { $memory_per_cpu = 0 };
 		if (index($alps, "-n") >= 0)  { $num_tasks = 0; $num_nodes = 0; }
 		if (index($alps, "-N") >= 0)  { $ntasks_per_node = 0; $num_nodes = 0; }
-		if (index($alps, "-q") >= 0)  { $aprun_quiet = 0 };
+		if (index($alps, "-q") >= 0)  { $quiet = 0 };
 		if (index($alps, "-S") >= 0)  { $ntasks_per_socket = 0 };
 		if (index($alps, "-sn") >= 0) { $sockets_per_node = 0 };
 		if (index($alps, "-ss") >= 0) { $memory_bind = 0 };
@@ -455,7 +460,7 @@ if ($have_job == 0) {
 		$command .= " -n $num_nodes";
 	}
 
-	$command .= " -q"					if $aprun_quiet;
+	$command .= " -q"					if $quiet;
 	# $command .= " -r"		no srun equivalent, core specialization
 	$command .= " -S $ntasks_per_socket" 			if $ntasks_per_socket;
 	# $command .= " -sl"		no srun equivalent, task placement on nodes
@@ -466,31 +471,6 @@ if ($have_job == 0) {
 	$command .= " -T"					if $aprun_line_buf;
 	$time_secs = get_seconds($time_limit)			if $time_limit;
 	$command .= " -t $time_secs"				if $time_secs;
-	$script = get_multi_prog($script)			if $multi_prog;
-
-	# Input and output file options are not supported by aprun, but can be handled by perl
-	$command .= " <$input_file"				if $input_file;
-	if ($error_file && ($error_file eq "none")) {
-		$error_file = "/dev/null"
-	}
-	if ($output_file && ($output_file eq "none")) {
-		$output_file = "/dev/null"
-	}
-	if ($open_mode && ($open_mode eq "a")) {
-		$command .= " >>$output_file"			if $output_file;
-		if ($error_file) {
-			$command .= " 2>>$error_file";
-		} elsif ($output_file) {
-			$command .= " 2>&1";
-		}
-	} else {
-		$command .= " >$output_file"			if $output_file;
-		if ($error_file) {
-			$command .= " 2>$error_file";
-		} elsif ($output_file) {
-			$command .= " 2>&1";
-		}
-	}
 
 	# Srun option which are not supported by aprun
 	#	$command .= " --disable-status"			if $disable_status;
@@ -515,7 +495,33 @@ if ($have_job == 0) {
 	#	$command .= " --test-only"			if $test_only;
 	#	$command .= " --unbuffered"			if $unbuffered;
 
+	$script = get_multi_prog($script)			if $multi_prog;
 	$command .= " $script";
+
+	# Input and output file options are not supported as aprun arguments,
+	# but forwarded
+	$command .= " <$input_file"				if $input_file;
+	if ($error_file && ($error_file eq "none")) {
+		$error_file = "/dev/null"
+	}
+	if ($output_file && ($output_file eq "none")) {
+		$output_file = "/dev/null"
+	}
+	if ($open_mode && ($open_mode eq "a")) {
+		$command .= " >>$output_file"			if $output_file;
+		if ($error_file) {
+			$command .= " 2>>$error_file";
+		} elsif ($output_file) {
+			$command .= " 2>&1";
+		}
+	} else {
+		$command .= " >$output_file"			if $output_file;
+		if ($error_file) {
+			$command .= " 2>$error_file";
+		} elsif ($output_file) {
+			$command .= " 2>&1";
+		}
+	}
 }
 
 # Print here for debugging
