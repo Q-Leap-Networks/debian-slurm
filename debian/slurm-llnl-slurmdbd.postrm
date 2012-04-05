@@ -27,7 +27,7 @@ case "$1" in
          rm -rf /var/log/slurm-llnl/slurmdbd*log*
 	 if [ ! -e /usr/sbin/slurmctld ] ; then 
            pkill -9 -u slurm || true
-	   deluser --quiet slurm
+	       deluser --quiet slurm || true
            rm -rf /var/run/slurm-llnl
 	 fi
         ;;

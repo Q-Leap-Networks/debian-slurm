@@ -1,3 +1,11 @@
+slurm-llnl (2.3.4-2) unstable; urgency=low
+
+  * Avoiding deluser to fail on purge (Closes: #667537) 
+  * Hardening flags added (Closes: #663878), thanks to Simon Ruderich
+    for the patch
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Thu, 05 Apr 2012 12:42:35 +0200
+
 slurm-llnl (2.3.4-1) unstable; urgency=low
 
   * New upstream release 

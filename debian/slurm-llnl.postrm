@@ -55,7 +55,7 @@ case "$1" in
 	 if [ ! -e /usr/sbin/slurmdbd ] ; then 
 	    # Killing all slurm owned process
             pkill -9 -u slurm || true
-	    deluser --quiet slurm
+	        deluser --quiet slurm || true
             rm -rf /var/run/slurm-llnl
 	 fi
          ;;
