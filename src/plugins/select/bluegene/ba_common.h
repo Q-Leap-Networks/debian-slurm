@@ -98,7 +98,7 @@ typedef struct ba_geo_table {
 typedef struct {
 	uint16_t dim_count;		/* Number of system dimensions */
 	int *dim_size;	        	/* System size in each dimension */
-	uint16_t total_size;		/* Total number of nodes in system */
+	uint32_t total_size;		/* Total number of nodes in system */
 
 	ba_geo_table_t **geo_table_ptr;	/* Pointers to possible geometries.
 					 * Index is request size */
@@ -148,13 +148,21 @@ typedef struct block_allocator_mp {
 	ba_switch_t alter_switch[HIGHEST_DIMENSIONS];
 	/* a switch for each dimensions */
 	ba_switch_t axis_switch[HIGHEST_DIMENSIONS];
+	/* index into the ba_main_grid_array (BGQ) used for easy look
+	 * up of the miplane in that system */
+	uint32_t ba_geo_index;
 	/* Bitmap of available cnodes */
 	bitstr_t *cnode_bitmap;
+	/* Bitmap of available cnodes in error (usually software) */
+	bitstr_t *cnode_err_bitmap;
+	/* Bitmap of available cnodes in the containing block */
+	bitstr_t *cnode_usable_bitmap;
 	/* coordinates of midplane */
 	uint16_t coord[HIGHEST_DIMENSIONS];
 	/* coordinates of midplane in str format */
 	char coord_str[HIGHEST_DIMENSIONS+1];
-	/* midplane index used for easy look up of the miplane */
+	/* index into the node_record_table_ptr used for easy look up
+	 * of the miplane in that system */
 	uint32_t index;
 	/* rack-midplane location. */
 	char *loc;
@@ -187,6 +195,7 @@ extern int cluster_base;
 extern bool ba_initialized;
 extern uint32_t ba_debug_flags;
 extern bitstr_t *ba_main_mp_bitmap;
+extern pthread_mutex_t ba_system_mutex;
 
 /*
  * Initialize internal structures by either reading previous block
@@ -208,6 +217,7 @@ extern void ba_fini(void);
 /* setup the wires for the system */
 extern void ba_setup_wires(void);
 
+extern void free_internal_ba_mp(ba_mp_t *ba_mp);
 extern void destroy_ba_mp(void *ptr);
 extern void pack_ba_mp(ba_mp_t *ba_mp, Buf buffer, uint16_t protocol_version);
 extern int unpack_ba_mp(ba_mp_t **ba_mp_pptr, Buf buffer,
@@ -254,9 +264,13 @@ extern void ba_print_geo_table(ba_geo_system_t *my_geo_system);
  *		Set dim_count and dim_size. Other fields should be NULL.
  *		This function will set total_size, geo_table_ptr, and
  *		geo_table_size.
+ * IN     avoid_three - used to get around a limitation in the IBM IO
+ *              system where a sub-block allocation can't reliably
+ *              have a dimension of 3 in in.
  * Release memory using ba_free_geo_table().
  */
-extern void ba_create_geo_table(ba_geo_system_t *my_geo_system);
+extern void ba_create_geo_table(ba_geo_system_t *my_geo_system,
+				bool avoid_three);
 
 /*
  * Free memory allocated by ba_create_geo_table().
@@ -284,7 +298,7 @@ extern void ba_node_map_free(bitstr_t *node_bitmap,
  * IN full_offset - N-dimension zero-origin offset to set
  * IN my_geo_system - system geometry specification
  */
-extern void ba_node_map_set(bitstr_t *node_bitmap, int *full_offset,
+extern void ba_node_map_set(bitstr_t *node_bitmap, uint16_t *full_offset,
 			    ba_geo_system_t *my_geo_system);
 
 /*
@@ -304,7 +318,7 @@ extern void ba_node_map_set_range(bitstr_t *node_bitmap,
  * IN full_offset - N-dimension zero-origin offset to test
  * IN my_geo_system - system geometry specification
  */
-extern int ba_node_map_test(bitstr_t *node_bitmap, int *full_offset,
+extern int ba_node_map_test(bitstr_t *node_bitmap, uint16_t *full_offset,
 			    ba_geo_system_t *my_geo_system);
 
 /*
@@ -385,6 +399,16 @@ extern int ba_geo_test_all(bitstr_t *node_bitmap,
 			   ba_geo_system_t *my_geo_system, uint16_t *deny_pass,
 			   uint16_t *start_pos, int *scan_offset,
 			   bool deny_wrap);
+
+/* Translate a multi-dimension coordinate (3-D, 4-D, 5-D, etc.) into a 1-D
+ * offset in the ba_geo_system_t bitmap
+ *
+ * IN full_offset - N-dimension zero-origin offset to test
+ * IN my_geo_system - system geometry specification
+ * RET - 1-D offset
+ */
+extern int ba_node_xlate_to_1d(uint16_t *full_offset,
+			       ba_geo_system_t *my_geo_system);
 
 /*
  * Used to set all midplanes in a special used state except the ones
@@ -520,14 +544,17 @@ extern int check_and_set_mp_list(List mps);
  * IN/OUT results - a list with a NULL destroyer filled in with
  *        midplanes and wires set to create the block with the api. If
  *        only interested in the hostlist NULL can be excepted also.
- * IN start - where to start the allocation.
- * IN geometry - the requested geometry of the block.
- * IN conn_type - mesh, torus, or small.
+ * IN ba_request - request for the block
+ *
+ * To be set in the ba_request
+ *    start - where to start the allocation. (optional)
+ *    geometry or size - the requested geometry of the block. (required)
+ *    conn_type - mesh, torus, or small. (required)
+ *
  * RET char * - hostlist of midplanes results represent must be
  *     xfreed.  NULL on failure
  */
-extern char *set_bg_block(List results, uint16_t *start,
-			  uint16_t *geometry, uint16_t *conn_type);
+extern char *set_bg_block(List results, select_ba_request_t* ba_request);
 
 /*
  * Set up the map for resolving
@@ -541,18 +568,27 @@ extern int load_block_wiring(char *bg_block_id);
 
 extern void ba_rotate_geo(uint16_t *req_geo, int rot_cnt);
 
-extern ba_mp_t *ba_pick_sub_block_cnodes(
+extern bool ba_sub_block_in_bitmap(select_jobinfo_t *jobinfo,
+				   bitstr_t *usable_bitmap, bool step);
+
+extern int ba_sub_block_in_bitmap_clear(select_jobinfo_t *jobinfo,
+					bitstr_t *usable_bitmap);
+
+extern ba_mp_t *ba_sub_block_in_record(
 	bg_record_t *bg_record, uint32_t *node_count,
 	select_jobinfo_t *jobinfo);
 
-extern int ba_clear_sub_block_cnodes(
+extern int ba_sub_block_in_record_clear(
 	bg_record_t *bg_record, struct step_record *step_ptr);
+
+extern void ba_sync_job_to_block(bg_record_t *bg_record,
+				 struct job_record *job_ptr);
 
 extern bitstr_t *ba_create_ba_mp_cnode_bitmap(bg_record_t *bg_record);
 
 /* set the ionode str based off the block allocator, either ionodes
  * or cnode coords */
-extern char *ba_set_ionode_str(bitstr_t *bitmap);
+extern void ba_set_ionode_str(bg_record_t *bg_record);
 
 /* Convert PASS_FOUND_* into equivalent string
  * Caller MUST xfree() the returned value */
@@ -560,4 +596,6 @@ extern char *ba_passthroughs_string(uint16_t passthrough);
 
 extern char *give_geo(uint16_t *int_geo, int dims, bool with_sep);
 
+extern struct job_record *ba_remove_job_in_block_job_list(
+	bg_record_t *bg_record, struct job_record *job_ptr);
 #endif

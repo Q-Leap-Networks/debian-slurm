@@ -46,6 +46,10 @@
 #  include <strings.h>
 #endif
 
+#ifndef __USE_ISOC99
+#define __USE_ISOC99
+#endif
+
 #ifdef HAVE_LIMITS_H
 #  include <limits.h>
 #endif
@@ -61,7 +65,7 @@
 #include <fcntl.h>
 #include <stdarg.h>		/* va_start   */
 #include <stdio.h>
-#include <stdlib.h>		/* getenv     */
+#include <stdlib.h>		/* getenv, strtoll */
 #include <pwd.h>		/* getpwuid   */
 #include <ctype.h>		/* isdigit    */
 #include <sys/param.h>		/* MAXPATHLEN */
@@ -360,8 +364,13 @@ bool verify_node_count(const char *arg, int *min_nodes, int *max_nodes)
 			return false;
 		}
 		xfree(min_str);
-		if (*min_nodes == 0)
+#ifdef HAVE_CRAY
+		if (*min_nodes < 0) {
+#else
+		if (*min_nodes == 0) {
+#endif
 			*min_nodes = 1;
+		}
 
 		max_str = xstrndup(ptr+1, strlen(arg)-((ptr+1)-arg));
 		*max_nodes = _str_to_nodes(max_str, &leftover);
@@ -377,7 +386,11 @@ bool verify_node_count(const char *arg, int *min_nodes, int *max_nodes)
 			error("\"%s\" is not a valid node count", arg);
 			return false;
 		}
+#ifdef HAVE_CRAY
+		if (*min_nodes < 0) {
+#else
 		if (*min_nodes == 0) {
+#endif
 			/* whitespace does not a valid node count make */
 			error("\"%s\" is not a valid node count", arg);
 			return false;
@@ -689,7 +702,7 @@ static List
 _create_path_list(void)
 {
 	List l = list_create(_freeF);
-	char *path = xstrdup(getenv("PATH"));
+	char *path;
 	char *c, *lc;
 
 	c = getenv("PATH");
@@ -870,4 +883,69 @@ int sig_name2num(char *signal_name)
 	}
 
 	return sig;
+}
+
+
+/*
+ * parse_uint32 - Convert anscii string to a 32 bit unsigned int.
+ * IN      aval - ascii string.
+ * IN/OUT  ival - 32 bit pointer. 
+ * RET     0 if no error, 1 otherwise.
+ */
+extern int parse_uint32(char *aval, uint32_t *ival)
+{
+	/*
+	 * First,  convert the ascii value it to a
+	 * long long int. If the result is greater
+	 * than or equal to 0 and less than NO_VAL
+	 * set the value and return. Otherwise return
+	 * an error.
+	 */
+	uint32_t max32uint = (uint32_t) NO_VAL;
+	long long tval;
+	char *p;
+
+	/*
+ 	 * Return error for invalid value.
+	 */
+	tval = strtoll(aval, &p, 10);
+	if (p[0] || (tval == LLONG_MIN) || (tval == LLONG_MAX) ||
+	    (tval < 0) || (tval >= max32uint))
+		return 1;
+
+	*ival = (uint32_t) tval;
+
+	return 0;
+}
+
+/*
+ * parse_uint16 - Convert anscii string to a 16 bit unsigned int.
+ * IN      aval - ascii string.
+ * IN/OUT  ival - 16 bit pointer. 
+ * RET     0 if no error, 1 otherwise.
+ */
+extern int parse_uint16(char *aval, uint16_t *ival)
+{
+	/*
+	 * First,  convert the ascii value it to a
+	 * long long int. If the result is greater then
+	 * or equal to 0 and less than (uint16_t) NO_VAL
+	 * set the value and return. Otherwise
+	 * return an error.
+	 */
+	uint16_t max16uint = (uint16_t) NO_VAL;
+	long long tval;
+	char *p;
+
+	/*
+ 	 * Return error for invalid value.
+	 */
+	tval = strtoll(aval, &p, 10);
+	if (p[0] || (tval == LLONG_MIN) || (tval == LLONG_MAX) ||
+	    (tval < 0) || (tval >= max16uint))
+		return 1;
+
+	*ival = (uint16_t) tval;
+
+	return 0;
 }

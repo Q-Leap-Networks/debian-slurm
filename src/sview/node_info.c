@@ -54,6 +54,7 @@ enum {
 	SORTID_NODE_HOSTNAME,
 	SORTID_MEMORY,	/* RealMemory */
 	SORTID_REASON,
+	SORTID_RACK_MP,
 	SORTID_SLURMD_START_TIME,
 	SORTID_SOCKETS,
 	SORTID_STATE,
@@ -75,35 +76,43 @@ typedef struct {
 
 /*these are the settings to apply for the user
  * on the first startup after a fresh slurm install.*/
-static char *_initial_page_opts = "Name,State,CPU_Count,Used_CPU_Count,"
-	"Error_CPU_Count,Cores,Sockets,Threads,Real_Memory,Tmp_Disk";
+static char *_initial_page_opts = "Name,RackMidplane,State,CPU_Count,"
+	"Used_CPU_Count,Error_CPU_Count,CoresPerSocket,Sockets,ThreadsPerCore,"
+	"Real_Memory,Tmp_Disk";
 
 static display_data_t display_data_node[] = {
 	{G_TYPE_INT, SORTID_POS, NULL, FALSE, EDIT_NONE, refresh_node,
 	 create_model_node, admin_edit_node},
 	{G_TYPE_STRING, SORTID_NAME, "Name", FALSE, EDIT_NONE, refresh_node,
 	 create_model_node, admin_edit_node},
+	{G_TYPE_STRING, SORTID_COLOR, NULL, TRUE, EDIT_COLOR, refresh_node,
+	 create_model_node, admin_edit_node},
+#ifdef HAVE_BG
+	{G_TYPE_STRING, SORTID_RACK_MP, "RackMidplane", FALSE, EDIT_NONE,
+	 refresh_node, create_model_node, admin_edit_node},
+#else
+	{G_TYPE_STRING, SORTID_RACK_MP, NULL, TRUE, EDIT_NONE, refresh_node,
+	 create_model_node, admin_edit_node},
+#endif
 	{G_TYPE_STRING, SORTID_NODE_ADDR, "NodeAddr", FALSE, EDIT_NONE,
 	 refresh_node, create_model_node, admin_edit_node},
 	{G_TYPE_STRING, SORTID_NODE_HOSTNAME, "NodeHostName", FALSE, EDIT_NONE,
 	 refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_STRING, SORTID_COLOR, NULL, TRUE, EDIT_COLOR, refresh_node,
-	 create_model_node, admin_edit_node},
 	{G_TYPE_STRING, SORTID_STATE, "State", FALSE, EDIT_MODEL, refresh_node,
 	 create_model_node, admin_edit_node},
 	{G_TYPE_INT, SORTID_STATE_NUM, NULL, FALSE, EDIT_NONE, refresh_node,
 	 create_model_node, admin_edit_node},
-	{G_TYPE_INT, SORTID_CPUS, "CPU Count", FALSE, EDIT_NONE, refresh_node,
-	 create_model_node, admin_edit_node},
+	{G_TYPE_STRING, SORTID_CPUS, "CPU Count", FALSE,
+	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
 	{G_TYPE_STRING, SORTID_USED_CPUS, "Used CPU Count", FALSE,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
 	{G_TYPE_STRING, SORTID_ERR_CPUS, "Error CPU Count", FALSE,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_INT, SORTID_CORES, "Cores", FALSE,
+	{G_TYPE_INT, SORTID_CORES, "CoresPerSocket", FALSE,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
 	{G_TYPE_INT, SORTID_SOCKETS, "Sockets", FALSE,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_INT, SORTID_THREADS, "Threads", FALSE,
+	{G_TYPE_INT, SORTID_THREADS, "ThreadsPerCore", FALSE,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
 	{G_TYPE_STRING, SORTID_MEMORY, "Real Memory", FALSE,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
@@ -132,11 +141,11 @@ static display_data_t options_data_node[] = {
 	{G_TYPE_INT, SORTID_POS, NULL, FALSE, EDIT_NONE},
 	{G_TYPE_STRING, INFO_PAGE, "Full Info", TRUE, NODE_PAGE},
 #ifdef HAVE_BG
-	{G_TYPE_STRING, NODE_PAGE, "Drain Base Partition", TRUE, ADMIN_PAGE},
-	{G_TYPE_STRING, NODE_PAGE, "Resume Base Partition", TRUE, ADMIN_PAGE},
-	{G_TYPE_STRING, NODE_PAGE, "Set Base Partition Down",
+	{G_TYPE_STRING, NODE_PAGE, "Drain Midplane", TRUE, ADMIN_PAGE},
+	{G_TYPE_STRING, NODE_PAGE, "Resume Midplane", TRUE, ADMIN_PAGE},
+	{G_TYPE_STRING, NODE_PAGE, "Set Midplane Down",
 	 TRUE, ADMIN_PAGE},
-	{G_TYPE_STRING, NODE_PAGE, "Make Base Partition Idle",
+	{G_TYPE_STRING, NODE_PAGE, "Make Midplane Idle",
 	 TRUE, ADMIN_PAGE},
 #else
 	{G_TYPE_STRING, NODE_PAGE, "Drain Node", TRUE, ADMIN_PAGE},
@@ -179,6 +188,12 @@ static void _layout_node_record(GtkTreeView *treeview,
 				   find_col_name(display_data_node,
 						 SORTID_NAME),
 				   node_ptr->name);
+
+	if (sview_node_info_ptr->rack_mp)
+		add_display_treestore_line(update, treestore, &iter,
+					   find_col_name(display_data_node,
+							 SORTID_RACK_MP),
+					   sview_node_info_ptr->rack_mp);
 
 	add_display_treestore_line(update, treestore, &iter,
 				   find_col_name(display_data_node,
@@ -309,12 +324,16 @@ static void _layout_node_record(GtkTreeView *treeview,
 }
 
 static void _update_node_record(sview_node_info_t *sview_node_info_ptr,
-				GtkTreeStore *treestore, GtkTreeIter *iter)
+				GtkTreeStore *treestore)
 {
 	uint16_t alloc_cpus = 0, err_cpus = 0, idle_cpus;
 	node_info_t *node_ptr = sview_node_info_ptr->node_ptr;
-	char tmp_disk[20], tmp_err_cpus[20], tmp_mem[20], tmp_used_cpus[20];
+	char tmp_disk[20], tmp_cpus[20], tmp_err_cpus[20],
+		tmp_mem[20], tmp_used_cpus[20];
 	char *tmp_state_lower, *tmp_state_upper;
+
+	convert_num_unit((float)node_ptr->cpus, tmp_cpus,
+			 sizeof(tmp_cpus), UNIT_NONE);
 
 	select_g_select_nodeinfo_get(node_ptr->select_nodeinfo,
 				     SELECT_NODEDATA_SUBCNT,
@@ -361,14 +380,14 @@ static void _update_node_record(sview_node_info_t *sview_node_info_ptr,
 
 
 	/* Combining these records provides a slight performance improvement */
-	gtk_tree_store_set(treestore, iter,
+	gtk_tree_store_set(treestore, &sview_node_info_ptr->iter_ptr,
 			   SORTID_ARCH,      node_ptr->arch,
 			   SORTID_BOOT_TIME, sview_node_info_ptr->boot_time,
 			   SORTID_COLOR,
 				sview_colors[sview_node_info_ptr->pos
 				% sview_colors_cnt],
-			   SORTID_CORES,     node_ptr->cpus,
-			   SORTID_CPUS,      node_ptr->cpus,
+			   SORTID_CORES,     node_ptr->cores,
+			   SORTID_CPUS,      tmp_cpus,
 			   SORTID_DISK,      tmp_disk,
 			   SORTID_ERR_CPUS,  tmp_err_cpus,
 			   SORTID_FEATURES,  node_ptr->features,
@@ -377,6 +396,7 @@ static void _update_node_record(sview_node_info_t *sview_node_info_ptr,
 			   SORTID_NAME,      node_ptr->name,
 			   SORTID_NODE_ADDR, node_ptr->node_addr,
 			   SORTID_NODE_HOSTNAME, node_ptr->node_hostname,
+			   SORTID_RACK_MP,   sview_node_info_ptr->rack_mp,
 			   SORTID_REASON,    sview_node_info_ptr->reason,
 			   SORTID_SLURMD_START_TIME,
 				sview_node_info_ptr->slurmd_start_time,
@@ -395,39 +415,34 @@ static void _update_node_record(sview_node_info_t *sview_node_info_ptr,
 }
 
 static void _append_node_record(sview_node_info_t *sview_node_info,
-				GtkTreeStore *treestore, GtkTreeIter *iter)
+				GtkTreeStore *treestore)
 {
-	gtk_tree_store_append(treestore, iter, NULL);
-	gtk_tree_store_set(treestore, iter, SORTID_POS,
+	gtk_tree_store_append(treestore, &sview_node_info->iter_ptr, NULL);
+	gtk_tree_store_set(treestore, &sview_node_info->iter_ptr, SORTID_POS,
 			   sview_node_info->pos, -1);
-	_update_node_record(sview_node_info, treestore, iter);
+	_update_node_record(sview_node_info, treestore);
 }
 
 static void _update_info_node(List info_list, GtkTreeView *tree_view)
 {
-	GtkTreePath *path = gtk_tree_path_new_first();
 	GtkTreeModel *model = gtk_tree_view_get_model(tree_view);
-	GtkTreeIter iter;
+	static GtkTreeModel *last_model = NULL;
 	node_info_t *node_ptr = NULL;
 	char *name;
 	ListIterator itr = NULL;
 	sview_node_info_t *sview_node_info = NULL;
 
-	/* get the iter, or find out the list is empty goto add */
-	if (gtk_tree_model_get_iter(model, &iter, path)) {
-		/* make sure all the partitions are still here */
-		while (1) {
-			gtk_tree_store_set(GTK_TREE_STORE(model), &iter,
-					   SORTID_UPDATED, 0, -1);
-			if (!gtk_tree_model_iter_next(model, &iter)) {
-				break;
-			}
-		}
-	}
+	set_for_update(model, SORTID_UPDATED);
 
 	itr = list_iterator_create(info_list);
 	while ((sview_node_info = (sview_node_info_t*) list_next(itr))) {
 		node_ptr = sview_node_info->node_ptr;
+
+		/* This means the tree_store changed (added new column
+		   or something). */
+		if (last_model != model)
+			sview_node_info->iter_set = false;
+
 		if (sview_node_info->iter_set) {
 			gtk_tree_model_get(model, &sview_node_info->iter_ptr,
 					   SORTID_NAME, &name, -1);
@@ -435,23 +450,55 @@ static void _update_info_node(List info_list, GtkTreeView *tree_view)
 				sview_node_info->iter_set = false;
 				//g_print("bad node iter pointer\n");
 			}
+			g_free(name);
 		}
 		if (sview_node_info->iter_set) {
 			_update_node_record(sview_node_info,
-					    GTK_TREE_STORE(model),
-					    &sview_node_info->iter_ptr);
+					    GTK_TREE_STORE(model));
 		} else {
-			_append_node_record(sview_node_info,
-					    GTK_TREE_STORE(model),
-					    &sview_node_info->iter_ptr);
-			sview_node_info->iter_set = true;
+			GtkTreePath *path = gtk_tree_path_new_first();
+
+			/* get the iter, or find out the list is empty
+			 * goto add */
+			if (gtk_tree_model_get_iter(
+				    model, &sview_node_info->iter_ptr, path)) {
+				do {
+					/* search for the jobid and
+					   check to see if it is in
+					   the list */
+					gtk_tree_model_get(
+						model,
+						&sview_node_info->iter_ptr,
+						SORTID_NAME,
+						&name, -1);
+					if (!strcmp(name, node_ptr->name)) {
+						/* update with new info */
+						g_free(name);
+						_update_node_record(
+							sview_node_info,
+							GTK_TREE_STORE(model));
+						sview_node_info->iter_set = 1;
+						break;
+					}
+					g_free(name);
+				} while (gtk_tree_model_iter_next(
+						 model,
+						 &sview_node_info->iter_ptr));
+			}
+
+			if (!sview_node_info->iter_set) {
+				_append_node_record(sview_node_info,
+						    GTK_TREE_STORE(model));
+				sview_node_info->iter_set = true;
+			}
+			gtk_tree_path_free(path);
 		}
 	}
 	list_iterator_destroy(itr);
 
-       	gtk_tree_path_free(path);
 	/* remove all old nodes */
 	remove_old(model, SORTID_UPDATED);
+	last_model = model;
 }
 
 static void _node_info_list_del(void *object)
@@ -461,6 +508,7 @@ static void _node_info_list_del(void *object)
 	if (sview_node_info) {
 		xfree(sview_node_info->slurmd_start_time);
 		xfree(sview_node_info->boot_time);
+		xfree(sview_node_info->rack_mp);
 		xfree(sview_node_info->reason);
 		xfree(sview_node_info);
 	}
@@ -512,7 +560,7 @@ need_refresh:
 			GtkTreeModel *model = NULL;
 
 			if (cluster_flags & CLUSTER_FLAG_BG)
-				temp = "BP NOT FOUND\n";
+				temp = "MIDPLANE NOT FOUND\n";
 			else
 				temp = "NODE NOT FOUND\n";
 			/* only time this will be run so no update */
@@ -584,18 +632,22 @@ extern void refresh_node(GtkAction *action, gpointer user_data)
 
 /* don't destroy the list from this function */
 extern List create_node_info_list(node_info_msg_t *node_info_ptr,
-				  int changed, bool by_partition)
+				  bool by_partition)
 {
 	static List info_list = NULL;
+	static node_info_msg_t *last_node_info_ptr = NULL;
 	int i = 0;
 	sview_node_info_t *sview_node_info_ptr = NULL;
 	node_info_t *node_ptr = NULL;
 	char user[32], time_str[32];
 
 	if (!by_partition) {
-		if (!node_info_ptr || (!changed && info_list))
+		if (!node_info_ptr
+		    || (info_list && (node_info_ptr == last_node_info_ptr)))
 			goto update_color;
 	}
+
+	last_node_info_ptr = node_info_ptr;
 
 	if (info_list)
 		list_flush(info_list);
@@ -607,6 +659,7 @@ extern List create_node_info_list(node_info_msg_t *node_info_ptr,
 	}
 
 	for (i=0; i<node_info_ptr->record_count; i++) {
+		char *select_reason_str = NULL;
 		node_ptr = &(node_info_ptr->node_array[i]);
 
 		if (!node_ptr->name || (node_ptr->name[0] == '\0'))
@@ -625,6 +678,10 @@ extern List create_node_info_list(node_info_msg_t *node_info_ptr,
 		sview_node_info_ptr->node_ptr = node_ptr;
 		sview_node_info_ptr->pos = i;
 
+		slurm_get_select_nodeinfo(node_ptr->select_nodeinfo,
+					  SELECT_NODEDATA_RACK_MP,
+					  0, &sview_node_info_ptr->rack_mp);
+
 		if (node_ptr->reason &&
 		    (node_ptr->reason_uid != NO_VAL) && node_ptr->reason_time) {
 			struct passwd *pw = NULL;
@@ -638,8 +695,24 @@ extern List create_node_info_list(node_info_msg_t *node_info_ptr,
 					    time_str, sizeof(time_str));
 			sview_node_info_ptr->reason = xstrdup_printf(
 				"%s [%s@%s]", node_ptr->reason, user, time_str);
-		} else
+		} else if (node_ptr->reason)
 			sview_node_info_ptr->reason = xstrdup(node_ptr->reason);
+
+		slurm_get_select_nodeinfo(node_ptr->select_nodeinfo,
+					  SELECT_NODEDATA_EXTRA_INFO,
+					  0, &select_reason_str);
+		if (select_reason_str && select_reason_str[0]) {
+			if (sview_node_info_ptr->reason)
+				xstrfmtcat(sview_node_info_ptr->reason, "\n%s",
+					   select_reason_str);
+			else {
+				sview_node_info_ptr->reason = select_reason_str;
+				select_reason_str = NULL;
+			}
+		}
+		xfree(select_reason_str);
+
+
 		if (node_ptr->boot_time) {
 			slurm_make_time_str(&node_ptr->boot_time,
 					    time_str, sizeof(time_str));
@@ -1166,7 +1239,6 @@ extern void get_info_node(GtkTable *table, display_data_t *display_data)
 	GtkTreeView *tree_view = NULL;
 	static GtkWidget *display_widget = NULL;
 	List info_list = NULL;
-	int changed = 1;
 	int i = 0, sort_key;
 	sview_node_info_t *sview_node_info_ptr = NULL;
 	ListIterator itr = NULL;
@@ -1202,7 +1274,6 @@ extern void get_info_node(GtkTable *table, display_data_t *display_data)
 	    == SLURM_NO_CHANGE_IN_DATA) {
 		if (!display_widget || view == ERROR_VIEW)
 			goto display_it;
-		changed = 0;
 	} else if (error_code != SLURM_SUCCESS) {
 		if (view == ERROR_VIEW)
 			goto end_it;
@@ -1219,7 +1290,7 @@ extern void get_info_node(GtkTable *table, display_data_t *display_data)
 	}
 
 display_it:
-	info_list = create_node_info_list(node_info_ptr, changed, FALSE);
+	info_list = create_node_info_list(node_info_ptr, FALSE);
 	if (!info_list)
 		goto reset_curs;
 	i = 0;
@@ -1309,7 +1380,6 @@ extern void specific_info_node(popup_info_t *popup_win)
 	List info_list = NULL;
 	List send_info_list = NULL;
 	ListIterator itr = NULL;
-	int changed = 1;
 	sview_node_info_t *sview_node_info_ptr = NULL;
 	node_info_t *node_ptr = NULL;
 	hostlist_t hostlist = NULL;
@@ -1331,7 +1401,6 @@ extern void specific_info_node(popup_info_t *popup_win)
 	    == SLURM_NO_CHANGE_IN_DATA) {
 		if (!spec_info->display_widget || spec_info->view == ERROR_VIEW)
 			goto display_it;
-		changed = 0;
 	} else if (error_code != SLURM_SUCCESS) {
 		if (spec_info->view == ERROR_VIEW)
 			goto end_it;
@@ -1350,7 +1419,7 @@ extern void specific_info_node(popup_info_t *popup_win)
 	}
 display_it:
 
-	info_list = create_node_info_list(node_info_ptr, changed, FALSE);
+	info_list = create_node_info_list(node_info_ptr, FALSE);
 
 	if (!info_list)
 		return;
@@ -1559,7 +1628,7 @@ extern void popup_all_node_name(char *name, int id)
 	char *node;
 
 	if (cluster_flags & CLUSTER_FLAG_BG)
-		node = "Base partition";
+		node = "Midplane";
 	else
 		node = "Node";
 
@@ -1694,7 +1763,7 @@ extern void admin_node_name(char *name, char *old_value, char *type)
 
 	if (!strcasecmp("Update Features", type)
 	    || !strcasecmp("Update Node Features", type)
-	    || !strcasecmp("Update Base Partition Features",
+	    || !strcasecmp("Update Midplane Features",
 			   type)) { /* update features */
 		update_features_node(GTK_DIALOG(popup), name, old_value);
 	} else if (!strcasecmp("Update Gres", type)) { /* update gres */
@@ -1709,7 +1778,26 @@ extern void admin_node_name(char *name, char *old_value, char *type)
 
 extern void cluster_change_node(void)
 {
-	display_data_t *display_data = options_data_node;
+	display_data_t *display_data = display_data_node;
+	while (display_data++) {
+		if (display_data->id == -1)
+			break;
+		if (cluster_flags & CLUSTER_FLAG_BG) {
+			switch(display_data->id) {
+			case SORTID_RACK_MP:
+				display_data->name = "RackMidplane";
+				break;
+			}
+		} else {
+			switch(display_data->id) {
+			case SORTID_RACK_MP:
+				display_data->name = NULL;
+				break;
+			}
+		}
+	}
+
+	display_data = options_data_node;
 	while (display_data++) {
 		if (display_data->id == -1)
 			break;
@@ -1722,14 +1810,14 @@ extern void cluster_change_node(void)
 
 			if (!display_data->name) {
 			} else if (!strcmp(display_data->name, "Drain Node"))
-				display_data->name = "Drain Base Partition";
+				display_data->name = "Drain Midplane";
 			else if (!strcmp(display_data->name, "Resume Node"))
-				display_data->name = "Resume Base Partition";
+				display_data->name = "Resume Midplane";
 			else if (!strcmp(display_data->name, "Put Node Down"))
-				display_data->name = "Put Base Partition Down";
+				display_data->name = "Put Midplane Down";
 			else if (!strcmp(display_data->name, "Make Node Idle"))
 				display_data->name =
-					"Make Base Partition Idle";
+					"Make Midplane Idle";
 		} else {
 			switch(display_data->id) {
 			case BLOCK_PAGE:
@@ -1739,17 +1827,18 @@ extern void cluster_change_node(void)
 
 			if (!display_data->name) {
 			} else if (!strcmp(display_data->name,
-					   "Drain Base Partitions"))
+					   "Drain Midplanes"))
 				display_data->name = "Drain Nodes";
 			else if (!strcmp(display_data->name,
-					 "Resume Base Partitions"))
+					 "Resume Midplanes"))
 				display_data->name = "Resume Nodes";
 			else if (!strcmp(display_data->name,
-					 "Put Base Partitions Down"))
+					 "Put Midplanes Down"))
 				display_data->name = "Put Nodes Down";
 			else if (!strcmp(display_data->name,
-					 "Make Base Partitions Idle"))
+					 "Make Midplanes Idle"))
 				display_data->name = "Make Nodes Idle";
 		}
 	}
+	get_info_node(NULL, NULL);
 }

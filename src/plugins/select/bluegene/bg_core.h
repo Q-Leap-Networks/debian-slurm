@@ -68,7 +68,9 @@
 /* extern int num_unused_cpus; */
 
 extern bool blocks_overlap(bg_record_t *rec_a, bg_record_t *rec_b);
-extern void bg_requeue_job(uint32_t job_id, bool wait_for_start);
+extern bool block_mp_passthrough(bg_record_t *bg_record, int mp_bit);
+extern void bg_requeue_job(uint32_t job_id, bool wait_for_start,
+			   bool slurmctld_locked);
 
 /* sort a list of bg_records by size (node count) */
 extern void sort_bg_record_inc_size(List records);

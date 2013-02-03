@@ -44,7 +44,7 @@ static int _split_block(List block_list, List new_blocks,
 
 static int _breakup_blocks(List block_list, List new_blocks,
 			   select_ba_request_t *request, List my_block_list,
-			   bool only_free, bool only_small);
+			   int cnodes, bool only_free, bool only_small);
 
 /*
  * create_dynamic_block - create new block(s) to be used for a new
@@ -65,13 +65,20 @@ extern List create_dynamic_block(List block_list,
 	bitstr_t *my_bitmap = NULL;
 	select_ba_request_t blockreq;
 	int cnodes = request->procs / bg_conf->cpu_ratio;
+	int orig_cnodes;
 	uint16_t start_geo[SYSTEM_DIMENSIONS];
 
-	if (cnodes < bg_conf->smallest_block) {
+	if (cnodes < bg_conf->smallest_block)
+		cnodes = bg_conf->smallest_block;
+	orig_cnodes = cnodes;
+
+	if (bg_conf->sub_blocks && (cnodes < bg_conf->mp_cnode_cnt)) {
+		cnodes = bg_conf->mp_cnode_cnt;
+		request->conn_type[0] = SELECT_TORUS;
+	} else if (cnodes < bg_conf->smallest_block) {
 		error("Can't create this size %d "
-		      "on this system ionodes_per_mp is %d",
-		      request->procs,
-		      bg_conf->ionodes_per_mp);
+		      "on this system the smallest block is %u",
+		      cnodes, bg_conf->smallest_block);
 		goto finished;
 	}
 	memset(&blockreq, 0, sizeof(select_ba_request_t));
@@ -204,6 +211,7 @@ extern List create_dynamic_block(List block_list,
 	if (request->avail_mp_bitmap)
 		ba_set_removable_mps(request->avail_mp_bitmap, 1);
 
+try_small_again:
 	if (request->size==1 && cnodes < bg_conf->mp_cnode_cnt) {
 		switch(cnodes) {
 #ifdef HAVE_BGL
@@ -255,21 +263,21 @@ extern List create_dynamic_block(List block_list,
 		/* check only blocks that are free and small */
 		if (_breakup_blocks(block_list, new_blocks,
 				    request, my_block_list,
-				    true, true)
+				    cnodes, true, true)
 		    == SLURM_SUCCESS)
 			goto finished;
 
 		/* check only blocks that are free and any size */
 		if (_breakup_blocks(block_list, new_blocks,
 				    request, my_block_list,
-				    true, false)
+				    cnodes, true, false)
 		    == SLURM_SUCCESS)
 			goto finished;
 
 		/* check usable blocks that are small with any state */
 		if (_breakup_blocks(block_list, new_blocks,
 				    request, my_block_list,
-				    false, true)
+				    cnodes, false, true)
 		    == SLURM_SUCCESS)
 			goto finished;
 
@@ -281,7 +289,7 @@ extern List create_dynamic_block(List block_list,
 		*/
 		/* if (_breakup_blocks(block_list, new_blocks, */
 		/* 		    request, my_block_list, */
-		/* 		    false, false) */
+		/* 		    cnodes, false, false) */
 		/*     == SLURM_SUCCESS) */
 		/* 	goto finished; */
 
@@ -292,9 +300,6 @@ extern List create_dynamic_block(List block_list,
 		if (bg_conf->slurm_debug_flags & DEBUG_FLAG_BG_PICK)
 			info("small block not able to be placed inside others");
 	}
-
-	if (request->conn_type[0] == SELECT_NAV)
-		request->conn_type[0] = SELECT_TORUS;
 
 	//debug("going to create %d", request->size);
 	if (!new_ba_request(request)) {
@@ -335,8 +340,7 @@ extern List create_dynamic_block(List block_list,
 	}
 
 	if (bg_conf->slurm_debug_flags & DEBUG_FLAG_BG_PICK)
-		info("allocate failure for size %d base "
-		     "partitions of free midplanes",
+		info("allocate failure for %d midplanes with free midplanes",
 		     request->size);
 	rc = SLURM_ERROR;
 
@@ -350,7 +354,9 @@ extern List create_dynamic_block(List block_list,
 		bool is_small = 0;
 		/* never check a block with a job running */
 		if (bg_record->free_cnt
-		    || bg_record->job_running != NO_JOB_RUNNING)
+		    || ((bg_record->job_running != NO_JOB_RUNNING)
+			|| (bg_record->job_list
+			    && list_count(bg_record->job_list))))
 			continue;
 
 		/* Here we are only looking for the first
@@ -372,8 +378,10 @@ extern List create_dynamic_block(List block_list,
 				   midplane it will automatically be
 				   -1. So just look for running jobs.
 				*/
-				if ((found_record->job_running
-				     != NO_JOB_RUNNING)
+				if (((found_record->job_running
+				      != NO_JOB_RUNNING)
+				     || (found_record->job_list
+					 && list_count(found_record->job_list)))
 				    && bit_overlap(bg_record->mp_bitmap,
 						   found_record->mp_bitmap)) {
 					found = 1;
@@ -431,6 +439,7 @@ setup_records:
 		blockreq.linuximage = request->linuximage;
 		blockreq.mloaderimage = request->mloaderimage;
 		blockreq.ramdiskimage = request->ramdiskimage;
+		memcpy(blockreq.start, request->start, sizeof(blockreq.start));
 		memcpy(blockreq.conn_type, request->conn_type,
 		       sizeof(blockreq.conn_type));
 
@@ -438,6 +447,11 @@ setup_records:
 	}
 
 finished:
+	if (!new_blocks && orig_cnodes != cnodes) {
+		cnodes = orig_cnodes;
+		goto try_small_again;
+	}
+
 	if (request->avail_mp_bitmap
 	    && (bit_ffc(request->avail_mp_bitmap) == -1))
 		ba_reset_all_removed_mps();
@@ -451,12 +465,15 @@ finished:
 	}
 	list_iterator_destroy(itr);
 
-
 	xfree(request->save_name);
 
-	if (results)
+	if (results) {
 		list_destroy(results);
+		results = NULL;
+	}
+
 	errno = rc;
+
 	return new_blocks;
 }
 
@@ -470,50 +487,11 @@ extern bg_record_t *create_small_record(bg_record_t *bg_record,
 	found_record = (bg_record_t*) xmalloc(sizeof(bg_record_t));
 	found_record->magic = BLOCK_MAGIC;
 
+	/* This will be a list containing jobs running on this
+	   block */
+	if (bg_conf->sub_blocks)
+		found_record->job_list = list_create(NULL);
 	found_record->job_running = NO_JOB_RUNNING;
-	found_record->user_name = xstrdup(bg_record->user_name);
-	found_record->user_uid = bg_record->user_uid;
-	found_record->ba_mp_list = list_create(destroy_ba_mp);
-	if (bg_record->ba_mp_list)
-		ba_mp = list_peek(bg_record->ba_mp_list);
-	if (!ba_mp) {
-		if (bg_record->mp_str) {
-			hostlist_t hl = hostlist_create(bg_record->mp_str);
-			char *host = hostlist_shift(hl);
-			hostlist_destroy(hl);
-			found_record->mp_str = xstrdup(host);
-			free(host);
-			error("you gave me a list with no ba_mps using %s",
-			      found_record->mp_str);
-		} else {
-			char tmp_char[SYSTEM_DIMENSIONS+1];
-			int dim;
-			for (dim=0; dim<SYSTEM_DIMENSIONS; dim++)
-				tmp_char[dim] =
-					alpha_num[found_record->start[dim]];
-			tmp_char[dim] = '\0';
-			found_record->mp_str = xstrdup_printf(
-				"%s%s",
-				bg_conf->slurm_node_prefix,
-				tmp_char);
-			error("you gave me a record with no ba_mps "
-			      "and no nodes either using %s",
-			      found_record->mp_str);
-		}
-	} else {
-		new_ba_mp = ba_copy_mp(ba_mp);
-		/* We need to have this node wrapped in Q to handle
-		   wires correctly when creating around the midplane.
-		*/
-		ba_setup_mp(new_ba_mp, false, true);
-
-		new_ba_mp->used = BA_MP_USED_TRUE;
-		list_append(found_record->ba_mp_list, new_ba_mp);
-		found_record->mp_count = 1;
-		found_record->mp_str = xstrdup_printf(
-			"%s%s",
-			bg_conf->slurm_node_prefix, new_ba_mp->coord_str);
-	}
 
 #ifdef HAVE_BGL
 	found_record->node_use = SELECT_COPROCESSOR_MODE;
@@ -525,8 +503,6 @@ extern bg_record_t *create_small_record(bg_record_t *bg_record,
 #endif
 	found_record->mloaderimage = xstrdup(bg_record->mloaderimage);
 
-	process_nodes(found_record, false);
-
 	if (bg_record->conn_type[0] >= SELECT_SMALL)
 		found_record->conn_type[0] = bg_record->conn_type[0];
 	else
@@ -537,13 +513,80 @@ extern bg_record_t *create_small_record(bg_record_t *bg_record,
 	found_record->cnode_cnt = size;
 
 	found_record->ionode_bitmap = bit_copy(ionodes);
-	found_record->ionode_str =
-		ba_set_ionode_str(found_record->ionode_bitmap);
-	found_record->mp_used_bitmap = bit_alloc(node_record_count);
+	ba_set_ionode_str(found_record);
+
+	found_record->ba_mp_list = list_create(destroy_ba_mp);
+
+	slurm_mutex_lock(&ba_system_mutex);
+	if (bg_record->ba_mp_list)
+		ba_mp = list_peek(bg_record->ba_mp_list);
+	if (!ba_mp) {
+		if (bg_record->mp_str) {
+			int j = 0, dim;
+			char *nodes = bg_record->mp_str;
+			uint16_t coords[SYSTEM_DIMENSIONS];
+			while (nodes[j] != '\0') {
+				if ((nodes[j] >= '0' && nodes[j] <= '9')
+				    || (nodes[j] >= 'A' && nodes[j] <= 'Z')) {
+					break;
+				}
+				j++;
+			}
+			if (nodes[j] && ((strlen(nodes)
+					  - (j + SYSTEM_DIMENSIONS)) >= 0)) {
+				for (dim = 0; dim < SYSTEM_DIMENSIONS;
+				     dim++, j++)
+					coords[dim] = select_char2coord(
+						nodes[j]);
+				ba_mp = coord2ba_mp(coords);
+			}
+			error("you gave me a list with no ba_mps using %s",
+			      ba_mp->coord_str);
+		} else {
+			ba_mp = coord2ba_mp(found_record->start);
+			error("you gave me a record with no ba_mps "
+			      "and no nodes either using %s",
+			      ba_mp->coord_str);
+		}
+	}
+
+	xassert(ba_mp);
+
+	new_ba_mp = ba_copy_mp(ba_mp);
+	slurm_mutex_unlock(&ba_system_mutex);
+	/* We need to have this node wrapped in Q to handle
+	   wires correctly when creating around the midplane.
+	*/
+	ba_setup_mp(new_ba_mp, false, true);
+
+	new_ba_mp->used = BA_MP_USED_TRUE;
+
+	/* Create these now so we can deal with error cnodes if/when
+	   they happen.  Since this is the easiest place to figure it
+	   out for blocks that don't use the entire block */
+	if ((new_ba_mp->cnode_bitmap =
+	     ba_create_ba_mp_cnode_bitmap(found_record))) {
+		new_ba_mp->cnode_err_bitmap = bit_alloc(bg_conf->mp_cnode_cnt);
+		new_ba_mp->cnode_usable_bitmap =
+			bit_copy(new_ba_mp->cnode_bitmap);
+	}
+
+	list_append(found_record->ba_mp_list, new_ba_mp);
+	found_record->mp_count = 1;
+	found_record->mp_str = xstrdup_printf(
+		"%s%s",
+		bg_conf->slurm_node_prefix, new_ba_mp->coord_str);
+
+	process_nodes(found_record, false);
+
+	/* Force small blocks to always be non-full system blocks.
+	 * This really only plays a part on sub-midplane systems. */
+	found_record->full_block = 0;
 
 	if (bg_conf->slurm_debug_flags & DEBUG_FLAG_BG_PICK)
 		info("made small block of %s[%s]",
 		     found_record->mp_str, found_record->ionode_str);
+
 	return found_record;
 }
 
@@ -740,7 +783,7 @@ finished:
 
 static int _breakup_blocks(List block_list, List new_blocks,
 			   select_ba_request_t *request, List my_block_list,
-			   bool only_free, bool only_small)
+			   int cnodes, bool only_free, bool only_small)
 {
 	int rc = SLURM_ERROR;
 	bg_record_t *bg_record = NULL;
@@ -748,7 +791,6 @@ static int _breakup_blocks(List block_list, List new_blocks,
 	int total_cnode_cnt=0;
 	char start_char[SYSTEM_DIMENSIONS+1];
 	bitstr_t *ionodes = bit_alloc(bg_conf->ionodes_per_mp);
-	int cnodes = request->procs / bg_conf->cpu_ratio;
 	int curr_mp_bit = -1;
 	int dim;
 
@@ -795,7 +837,8 @@ static int _breakup_blocks(List block_list, List new_blocks,
 			continue;
 		}
 		/* never look at a block if a job is running */
-		if (bg_record->job_running != NO_JOB_RUNNING)
+		if ((bg_record->job_running != NO_JOB_RUNNING)
+		    || (bg_record->job_list && list_count(bg_record->job_list)))
 			continue;
 		/* on the third time through look for just a block
 		 * that isn't used */

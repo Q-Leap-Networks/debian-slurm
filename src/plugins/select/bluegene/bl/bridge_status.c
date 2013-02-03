@@ -272,7 +272,7 @@ static int _test_nodecard_state(rm_nodecard_t *ncard, int nc_id,
 
 	/* we have to handle each nodecard separately to make
 	   sure we don't create holes in the system */
-	if (down_nodecard(node_name, io_start, slurmctld_locked)
+	if (down_nodecard(node_name, io_start, slurmctld_locked, NULL)
 	    == SLURM_SUCCESS) {
 		debug("nodecard %s on %s is in an error state",
 		      nc_name, node_name);
@@ -570,6 +570,7 @@ static int _do_block_poll(void)
 	if (!bg_lists->main)
 		return updated;
 
+	lock_slurmctld(job_read_lock);
 	slurm_mutex_lock(&block_state_mutex);
 	itr = list_iterator_create(bg_lists->main);
 	while ((bg_record = (bg_record_t *) list_next(itr)) != NULL) {
@@ -702,6 +703,7 @@ static int _do_block_poll(void)
 	}
 	list_iterator_destroy(itr);
 	slurm_mutex_unlock(&block_state_mutex);
+	unlock_slurmctld(job_read_lock);
 
 	bg_status_process_kill_job_list(kill_job_list);
 

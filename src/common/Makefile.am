@@ -8,7 +8,7 @@
 # only be 1 address per symbol.  If you link to the libcommon.la in
 # a plugin you will get 2 addresses for one symbol which could lead to problems.
 
-CPPFLAGS = -DGRES_CONFIG_FILE=\"$(sysconfdir)/gres.conf\"
+AM_CPPFLAGS = -DGRES_CONFIG_FILE=\"$(sysconfdir)/gres.conf\"
 AUTOMAKE_OPTIONS = foreign
 
 if HAVE_UNSETENV
@@ -19,7 +19,7 @@ build_unsetenv_src = unsetenv.c unsetenv.h
 extra_unsetenv_src =
 endif
 
-INCLUDES     = -I$(top_srcdir) $(BG_INCLUDES)
+INCLUDES     = -I$(top_srcdir) $(BG_INCLUDES) $(HWLOC_CPPFLAGS)
 
 noinst_PROGRAMS = libcommon.o libeio.o libspank.o
 # This is needed if compiling on windows
@@ -32,14 +32,15 @@ noinst_LTLIBRARIES = 			\
 	libspank.la
 
 libcommon_la_SOURCES = 			\
- 	xcgroup_read_config.c xcgroup_read_config.h		\
- 	xcgroup.c xcgroup.h 					\
- 	xcpuinfo.c xcpuinfo.h 					\
+	xcgroup_read_config.c xcgroup_read_config.h		\
+	xcgroup.c xcgroup.h 					\
+	xcpuinfo.c xcpuinfo.h 					\
 	assoc_mgr.c assoc_mgr.h 	\
 	xmalloc.c xmalloc.h 		\
 	xassert.c xassert.h		\
 	xstring.c xstring.h		\
 	xsignal.c xsignal.h		\
+	strnatcmp.c strnatcmp.h		\
 	forward.c forward.h     	\
 	strlcpy.c strlcpy.h		\
 	list.c list.h 			\
@@ -97,6 +98,7 @@ libcommon_la_SOURCES = 			\
 	getopt.h getopt.c getopt1.c     \
 	$(build_unsetenv_src)		\
 	slurm_selecttype_info.c 	\
+	slurm_selecttype_info.h		\
 	slurm_resource_info.c 		\
 	slurm_resource_info.h		\
 	hostlist.c hostlist.h		\

@@ -1,4 +1,4 @@
-.TH SINFO "1" "September 2011" "sinfo 2.3" "Slurm components"
+.TH SINFO "1" "April 2012" "sinfo 2.4" "Slurm components"
 
 .SH "NAME"
 sinfo \- view information about SLURM nodes and partitions.
@@ -96,10 +96,10 @@ when running with various options are
 "%N %.5D %9P %6t"
 .TP
 .I "\-\-long \-\-Node"
-"%N %.5D %9P %11T %.4c %.8z %.6m %.8d %.6w %8f %20R"
+"%N %.5D %9P %11T %.4c %.8z %.6m %.8d %.6w %8f %20E"
 .TP
 .I "\-\-list\-reasons"
-"%20R %9u %19H %N"
+"%20E %9u %19H %N"
 .TP
 .I "\-\-long \-\-list\-reasons"
 "%20R %12u %19H %6t %N"
@@ -181,15 +181,17 @@ List of node names
 \fB%o\fR
 List of node communication addresses
 .TP
+\fB%p\fR
+Partition scheduling priority
+.TP
 \fB%P\fR
-Partition name
+Partition name followed by "*" for the default partition, also see \fB%R\fR
 .TP
 \fB%r\fR
 Only user root may initiate jobs, "yes" or "no"
 .TP
 \fB%R\fR
-The reason a node is unavailable (down, drained, draining,
-fail or failing states)
+Partition name, also see \fB%P\fR
 .TP
 \fB%s\fR
 Maximum job size in nodes

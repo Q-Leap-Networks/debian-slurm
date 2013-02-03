@@ -71,21 +71,22 @@
 #include <unistd.h>
 #include <grp.h>
 
-
 #include "src/common/fd.h"
 #include "src/common/hostlist.h"
 #include "src/common/log.h"
+#include "src/common/mpi.h"
+#include "src/common/net.h"
+#include "src/common/plugstack.h"
+#include "src/common/read_config.h"
+#include "src/common/slurm_auth.h"
+#include "src/common/slurm_jobacct_gather.h"
 #include "src/common/slurm_protocol_api.h"
+#include "src/common/slurm_rlimits_info.h"
 #include "src/common/switch.h"
+#include "src/common/uid.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
-#include "src/common/net.h"
-#include "src/common/mpi.h"
-#include "src/common/slurm_rlimits_info.h"
-#include "src/common/plugstack.h"
-#include "src/common/read_config.h"
-#include "src/common/uid.h"
 
 #include "src/srun/allocate.h"
 #include "src/srun/srun_job.h"
@@ -96,7 +97,12 @@
 #include "src/srun/multi_prog.h"
 #include "src/srun/task_state.h"
 #include "src/api/pmi_server.h"
+#include "src/api/step_ctx.h"
 #include "src/api/step_launch.h"
+
+#if defined HAVE_BG_FILES && !defined HAVE_BG_L_P
+#include "src/srun/runjob_interface.h"
+#endif
 
 #if defined (HAVE_DECL_STRSIGNAL) && !HAVE_DECL_STRSIGNAL
 #  ifndef strsignal
@@ -149,20 +155,28 @@ static void  _pty_restore(void);
 static void  _run_srun_prolog (srun_job_t *job);
 static void  _run_srun_epilog (srun_job_t *job);
 static int   _run_srun_script (srun_job_t *job, char *script);
-static void  _set_cpu_env_var(resource_allocation_response_msg_t *resp);
+static void  _set_env_vars(resource_allocation_response_msg_t *resp);
 static void  _set_exit_code(void);
+static void  _set_node_alias(void);
 static void  _step_opt_exclusive(void);
 static void  _set_stdio_fds(srun_job_t *job, slurm_step_io_fds_t *cio_fds);
 static void  _set_submit_dir_env(void);
 static void  _set_prio_process_env(void);
 static int   _set_rlimit_env(void);
 static int   _set_umask_env(void);
+static void  _shepard_notify(int shepard_fd);
+static int   _shepard_spawn(srun_job_t *job, bool got_alloc);
 static int   _slurm_debug_env_val (void);
 static void *_srun_signal_mgr(void *no_data);
-static void  _task_start(launch_tasks_response_msg_t *msg);
-static void  _task_finish(task_exit_msg_t *msg);
 static char *_uint16_array_to_str(int count, const uint16_t *array);
 static int   _validate_relative(resource_allocation_response_msg_t *resp);
+#if defined HAVE_BG_FILES && !defined HAVE_BG_L_P
+static void  _send_step_complete_rpc(int step_rc);
+static pthread_t _spawn_msg_handler(void);
+#else
+static void  _task_start(launch_tasks_response_msg_t *msg);
+static void  _task_finish(task_exit_msg_t *msg);
+#endif
 
 /*
  * from libvirt-0.6.2 GPL2
@@ -190,11 +204,17 @@ int srun(int ac, char **av)
 	int debug_level;
 	env_t *env = xmalloc(sizeof(env_t));
 	log_options_t logopt = LOG_OPTS_STDERR_ONLY;
-	slurm_step_launch_params_t launch_params;
-	slurm_step_launch_callbacks_t callbacks;
 	pthread_attr_t thread_attr;
 	pthread_t signal_thread = (pthread_t) 0;
-	int got_alloc = 0;
+	bool got_alloc = false;
+	int shepard_fd = -1;
+#if !defined HAVE_BG_FILES || defined HAVE_BG_L_P
+	slurm_step_launch_params_t launch_params;
+	slurm_step_launch_callbacks_t callbacks;
+#else
+	slurm_step_io_fds_t cio_fds;
+	pthread_t msg_thread = (pthread_t) 0;
+#endif
 
 	env->stepid = -1;
 	env->procid = -1;
@@ -208,6 +228,9 @@ int srun(int ac, char **av)
 	logopt.stderr_level += debug_level;
 	log_init(xbasename(av[0]), logopt, 0, NULL);
 	_set_exit_code();
+
+	if (slurm_select_init(1) != SLURM_SUCCESS )
+		fatal( "failed to initialize node selection plugin" );
 
 	/* This must happen before we spawn any threads
 	 * which are not designed to handle them */
@@ -309,7 +332,7 @@ int srun(int ac, char **av)
 			opt.alloc_nodelist = xstrdup(resp->node_list);
 		if (opt.exclusive)
 			_step_opt_exclusive();
-		_set_cpu_env_var(resp);
+		_set_env_vars(resp);
 		if (_validate_relative(resp))
 			exit(error_exit);
 		job = job_step_create_allocation(resp);
@@ -323,7 +346,7 @@ int srun(int ac, char **av)
 			exit(error_exit);
 	} else {
 		/* Combined job allocation and job step launch */
-#if defined HAVE_FRONT_END && (!defined HAVE_BGQ || !defined HAVE_BG_FILES)
+#if defined HAVE_FRONT_END && (!defined HAVE_BG || defined HAVE_BG_L_P || !defined HAVE_BG_FILES)
 		uid_t my_uid = getuid();
 		if ((my_uid != 0) &&
 		    (my_uid != slurm_get_slurm_user_id())) {
@@ -343,9 +366,9 @@ int srun(int ac, char **av)
 
 		if ( !(resp = allocate_nodes()) )
 			exit(error_exit);
-		got_alloc = 1;
+		got_alloc = true;
 		_print_job_information(resp);
-		_set_cpu_env_var(resp);
+		_set_env_vars(resp);
 		if (_validate_relative(resp)) {
 			slurm_complete_job(resp->job_id, 1);
 			exit(error_exit);
@@ -354,6 +377,7 @@ int srun(int ac, char **av)
 
 		opt.exclusive = false;	/* not applicable for this step */
 		opt.time_limit = NO_VAL;/* not applicable for step, only job */
+		xfree(opt.constraints);	/* not applicable for this step */
 		if (!opt.job_name_set_cmd && opt.job_name_set_env) {
 			/* use SLURM_JOB_NAME env var */
 			opt.job_name_set_cmd = true;
@@ -378,6 +402,12 @@ int srun(int ac, char **av)
 	 */
 	if (_become_user () < 0)
 		info("Warning: Unable to assume uid=%u", opt.uid);
+
+	/*
+	 * Spawn process to insure clean-up of job and/or step on abnormal
+	 * termination
+	 */
+	shepard_fd = _shepard_spawn(job, got_alloc);
 
 	/*
 	 *  Enhance environment for job
@@ -439,16 +469,43 @@ int srun(int ac, char **av)
 	setup_env(env, opt.preserve_env);
 	xfree(env->task_count);
 	xfree(env);
+	_set_node_alias();
 
- re_launch:
-#if defined HAVE_BGQ
-//#if defined HAVE_BGQ && defined HAVE_BG_FILES
-	task_state = task_state_create(1);
+	if (!signal_thread) {
+		slurm_attr_init(&thread_attr);
+		while (pthread_create(&signal_thread, &thread_attr,
+				      _srun_signal_mgr, NULL)) {
+			error("pthread_create error %m");
+			sleep(1);
+		}
+		slurm_attr_destroy(&thread_attr);
+	}
+
+#if defined HAVE_BG_FILES && !defined HAVE_BG_L_P
+	_run_srun_prolog(job);
+	if (_call_spank_local_user (job) < 0) {
+		error("Failure in local plugin stack");
+		exit(error_exit);
+	}
+	memset(&cio_fds, 0, sizeof(slurm_step_io_fds_t));
+	_set_stdio_fds(job, &cio_fds);
+	msg_thread = _spawn_msg_handler();
+	global_rc = runjob_launch(opt.argc, opt.argv,
+				  cio_fds.in.fd,
+				  cio_fds.out.fd,
+				  cio_fds.err.fd);
+	_send_step_complete_rpc(global_rc);
+	if (msg_thread) {
+		srun_shutdown = true;
+		pthread_cancel(msg_thread);
+		pthread_join(msg_thread, NULL);
+	}
 #else
+ re_launch:
 	task_state = task_state_create(opt.ntasks);
-#endif
 	slurm_step_launch_params_t_init(&launch_params);
 	launch_params.gid = opt.gid;
+	launch_params.alias_list = job->alias_list;
 	launch_params.argc = opt.argc;
 	launch_params.argv = opt.argv;
 	launch_params.multi_prog = opt.multi_prog ? true : false;
@@ -479,16 +536,6 @@ int srun(int ac, char **av)
 	launch_params.preserve_env      = opt.preserve_env;
 	launch_params.spank_job_env     = opt.spank_job_env;
 	launch_params.spank_job_env_size = opt.spank_job_env_size;
-	/* job structure should now be filled in */
-	if (!signal_thread) {
-		slurm_attr_init(&thread_attr);
-		while (pthread_create(&signal_thread, &thread_attr,
-				      _srun_signal_mgr, NULL)) {
-			error("pthread_create error %m");
-			sleep(1);
-		}
-		slurm_attr_destroy(&thread_attr);
-	}
 
 	_set_stdio_fds(job, &launch_params.local_fds);
 
@@ -517,6 +564,7 @@ int srun(int ac, char **av)
 	    SLURM_SUCCESS) {
 		error("Application launch failed: %m");
 		global_rc = 1;
+		slurm_step_launch_abort(job->step_ctx);
 		slurm_step_launch_wait_finish(job->step_ctx);
 		goto cleanup;
 	}
@@ -542,7 +590,7 @@ int srun(int ac, char **av)
 	}
 
 	slurm_step_launch_wait_finish(job->step_ctx);
-	if ((MPIR_being_debugged == 0) && retry_step_begin && 
+	if ((MPIR_being_debugged == 0) && retry_step_begin &&
 	    (retry_step_cnt < MAX_STEP_RETRIES)) {
 		retry_step_begin = false;
 		slurm_step_ctx_destroy(job->step_ctx);
@@ -556,8 +604,9 @@ int srun(int ac, char **av)
 		task_state_destroy(task_state);
 		goto re_launch;
 	}
-
 cleanup:
+#endif
+
 	if (got_alloc) {
 		cleanup_allocation();
 
@@ -567,6 +616,7 @@ cleanup:
 		else
 			slurm_complete_job(job->jobid, global_rc);
 	}
+	_shepard_notify(shepard_fd);
 
 	if (signal_thread) {
 		srun_shutdown = true;
@@ -783,19 +833,30 @@ static void _set_exit_code(void)
 	}
 }
 
-static void _set_cpu_env_var(resource_allocation_response_msg_t *resp)
+static void _set_env_vars(resource_allocation_response_msg_t *resp)
 {
 	char *tmp;
 
-	if (getenv("SLURM_JOB_CPUS_PER_NODE"))
-		return;
+	if (!getenv("SLURM_JOB_CPUS_PER_NODE")) {
+		tmp = uint32_compressed_to_str(resp->num_cpu_groups,
+					       resp->cpus_per_node,
+					       resp->cpu_count_reps);
+		if (setenvf(NULL, "SLURM_JOB_CPUS_PER_NODE", "%s", tmp) < 0) {
+			error("unable to set SLURM_JOB_CPUS_PER_NODE in "
+			      "environment");
+		}
+		xfree(tmp);
+	}
 
-	tmp = uint32_compressed_to_str(resp->num_cpu_groups,
-				       resp->cpus_per_node,
-				       resp->cpu_count_reps);
-	if (setenvf(NULL, "SLURM_JOB_CPUS_PER_NODE", "%s", tmp) < 0)
-		error("unable to set SLURM_JOB_CPUS_PER_NODE in environment");
-	xfree(tmp);
+	if (resp->alias_list) {
+		if (setenv("SLURM_NODE_ALIASES", resp->alias_list, 1) < 0) {
+			error("unable to set SLURM_NODE_ALIASES in "
+			      "environment");
+		}
+	} else {
+		unsetenv("SLURM_NODE_ALIASES");
+	}
+
 	return;
 }
 
@@ -879,19 +940,48 @@ static int _set_rlimit_env(void)
 	return rc;
 }
 
+static void _set_node_alias(void)
+{
+	char *aliases, *save_ptr = NULL, *tmp;
+	char *addr, *hostname, *slurm_name;
+
+	tmp = getenv("SLURM_NODE_ALIASES");
+	if (!tmp)
+		return;
+	aliases = xstrdup(tmp);
+	slurm_name = strtok_r(aliases, ":", &save_ptr);
+	while (slurm_name) {
+		addr = strtok_r(NULL, ":", &save_ptr);
+		if (!addr)
+			break;
+		slurm_reset_alias(slurm_name, addr, addr);
+		hostname = strtok_r(NULL, ",", &save_ptr);
+		if (!hostname)
+			break;
+		slurm_name = strtok_r(NULL, ":", &save_ptr);
+	}
+	xfree(aliases);
+}
+
 static int _become_user (void)
 {
 	char *user = uid_to_string(opt.uid);
 	gid_t gid = gid_from_uid(opt.uid);
 
-	if (strcmp(user, "nobody") == 0)
+	if (strcmp(user, "nobody") == 0) {
+		xfree(user);
 		return (error ("Invalid user id %u: %m", opt.uid));
+	}
 
-	if (opt.uid == getuid ())
+	if (opt.uid == getuid ()) {
+		xfree(user);
 		return (0);
+	}
 
-	if ((opt.egid != (gid_t) -1) && (setgid (opt.egid) < 0))
+	if ((opt.egid != (gid_t) -1) && (setgid (opt.egid) < 0)) {
+		xfree(user);
 		return (error ("setgid: %m"));
+	}
 
 	initgroups (user, gid); /* Ignore errors */
 	xfree(user);
@@ -969,6 +1059,138 @@ static int _run_srun_script (srun_job_t *job, char *script)
 
 	/* NOTREACHED */
 }
+
+#if defined HAVE_BG_FILES && !defined HAVE_BG_L_P
+static void
+_send_step_complete_rpc(int step_rc)
+{
+	slurm_msg_t req;
+	step_complete_msg_t msg;
+	int rc;
+
+	memset(&msg, 0, sizeof(step_complete_msg_t));
+	msg.job_id = job->jobid;
+	msg.job_step_id = job->stepid;
+	msg.range_first = 0;
+	msg.range_last = 0;
+	msg.step_rc = step_rc;
+	msg.jobacct = jobacct_gather_g_create(NULL);
+
+	slurm_msg_t_init(&req);
+	req.msg_type = REQUEST_STEP_COMPLETE;
+	req.data = &msg;
+/*	req.address = step_complete.parent_addr; */
+
+	debug3("Sending step complete RPC to slurmctld");
+	if (slurm_send_recv_controller_rc_msg(&req, &rc) < 0)
+		error("Error sending step complete RPC to slurmctld");
+	jobacct_gather_g_destroy(msg.jobacct);
+}
+
+static void
+_handle_msg(slurm_msg_t *msg)
+{
+	static uint32_t slurm_uid = NO_VAL;
+	uid_t req_uid = g_slurm_auth_get_uid(msg->auth_cred, NULL);
+	uid_t uid = getuid();
+	job_step_kill_msg_t *ss;
+	srun_user_msg_t *um;
+
+	if (slurm_uid == NO_VAL)
+		slurm_uid = slurm_get_slurm_user_id();
+	if ((req_uid != slurm_uid) && (req_uid != 0) && (req_uid != uid)) {
+		error ("Security violation, slurm message from uid %u",
+		       (unsigned int) req_uid);
+ 		return;
+	}
+
+	switch (msg->msg_type) {
+	case SRUN_PING:
+		debug3("slurmctld ping received");
+		slurm_send_rc_msg(msg, SLURM_SUCCESS);
+		slurm_free_srun_ping_msg(msg->data);
+		break;
+	case SRUN_JOB_COMPLETE:
+		debug("received job step complete message");
+		slurm_free_srun_job_complete_msg(msg->data);
+		runjob_signal(SIGKILL);
+		break;
+	case SRUN_USER_MSG:
+		um = msg->data;
+		info("%s", um->msg);
+		slurm_free_srun_user_msg(msg->data);
+		break;
+	case SRUN_TIMEOUT:
+		um = msg->data;
+		debug("received job step timeout message");
+		runjob_signal(SIGKILL);
+		slurm_free_srun_timeout_msg(msg->data);
+		break;
+	case SRUN_STEP_SIGNAL:
+		ss = msg->data;
+		debug("received step signal %u RPC", ss->signal);
+		runjob_signal(ss->signal);
+		slurm_free_job_step_kill_msg(msg->data);
+		break;
+	default:
+		debug("received spurious message type: %u",
+		      msg->msg_type);
+		break;
+	}
+	return;
+}
+
+static void *_msg_thr_internal(void *arg)
+{
+	slurm_addr_t cli_addr;
+	slurm_fd_t newsockfd;
+	slurm_msg_t *msg;
+	int *slurmctld_fd_ptr = (int *)arg;
+
+	(void) pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+	(void) pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+
+	while (!srun_shutdown) {
+		newsockfd = slurm_accept_msg_conn(*slurmctld_fd_ptr, &cli_addr);
+		if (newsockfd == SLURM_SOCKET_ERROR) {
+			if (errno != EINTR)
+				error("slurm_accept_msg_conn: %m");
+			continue;
+		}
+		msg = xmalloc(sizeof(slurm_msg_t));
+		if (slurm_receive_msg(newsockfd, msg, 0) != 0) {
+			error("slurm_receive_msg: %m");
+			/* close the new socket */
+			slurm_close_accepted_conn(newsockfd);
+			continue;
+		}
+		_handle_msg(msg);
+		slurm_free_msg(msg);
+		slurm_close_accepted_conn(newsockfd);
+	}
+	return NULL;
+}
+
+static pthread_t
+_spawn_msg_handler(void)
+{
+	pthread_attr_t attr;
+	pthread_t msg_thread;
+	static int slurmctld_fd;
+
+	slurmctld_fd = job->step_ctx->launch_state->slurmctld_socket_fd;
+	if (slurmctld_fd < 0)
+		return (pthread_t) 0;
+	job->step_ctx->launch_state->slurmctld_socket_fd = -1;
+
+	slurm_attr_init(&attr);
+	if (pthread_create(&msg_thread, &attr, _msg_thr_internal,
+			   (void *) &slurmctld_fd))
+		error("pthread_create of message thread: %m");
+	slurm_attr_destroy(&attr);
+	return msg_thread;
+}
+#endif
 
 static int
 _is_local_file (fname_t *fname)
@@ -1105,13 +1327,29 @@ static void _step_opt_exclusive(void)
 }
 
 static void
+_terminate_job_step(slurm_step_ctx_t *step_ctx)
+{
+	uint32_t job_id, step_id;
+
+	slurm_step_ctx_get(step_ctx, SLURM_STEP_CTX_JOBID, &job_id);
+	slurm_step_ctx_get(step_ctx, SLURM_STEP_CTX_STEPID, &step_id);
+	info("Terminating job step %u.%u", job_id, step_id);
+#if defined HAVE_BG_FILES && !defined HAVE_BG_L_P
+	runjob_signal(SIGKILL);
+#else
+	slurm_kill_job_step(job_id, step_id, SIGKILL);
+#endif
+}
+
+#if !defined HAVE_BG_FILES || defined HAVE_BG_L_P
+static void
 _task_start(launch_tasks_response_msg_t *msg)
 {
 	MPIR_PROCDESC *table;
 	int taskid;
 	int i;
 
-	if(msg->count_of_pids)
+	if (msg->count_of_pids)
 		verbose("Node %s, %d tasks started",
 			msg->node_name, msg->count_of_pids);
 	else
@@ -1136,18 +1374,6 @@ _task_start(launch_tasks_response_msg_t *msg)
 		}
 	}
 
-}
-
-static void
-_terminate_job_step(slurm_step_ctx_t *step_ctx)
-{
-	uint32_t job_id, step_id;
-
-	slurm_step_ctx_get(step_ctx, SLURM_STEP_CTX_JOBID, &job_id);
-	slurm_step_ctx_get(step_ctx, SLURM_STEP_CTX_STEPID, &step_id);
-	info("Terminating job step %u.%u", job_id, step_id);
-	update_job_state(job, SRUN_JOB_CANCELLED);
-	slurm_kill_job_step(job_id, step_id, SIGKILL);
 }
 
 static char *
@@ -1360,18 +1586,36 @@ _task_finish(task_exit_msg_t *msg)
 	if (task_state_first_exit(task_state) && (opt.max_wait > 0))
 		_setup_max_wait_timer();
 }
+#endif
+
+/* Return the number of microseconds between tv1 and tv2 with a maximum
+ * a maximum value of 10,000,000 to prevent overflows */
+static long _diff_tv_str(struct timeval *tv1,struct timeval *tv2)
+{
+	long delta_t;
+
+	delta_t  = MIN((tv2->tv_sec - tv1->tv_sec), 10);
+	delta_t *= 1000000;
+	delta_t +=  tv2->tv_usec - tv1->tv_usec;
+	return delta_t;
+}
 
 static void _handle_intr(void)
 {
-	static time_t last_intr      = 0;
-	static time_t last_intr_sent = 0;
-	time_t now = time(NULL);
+	static struct timeval last_intr = { 0, 0 };
+	static struct timeval last_intr_sent = { 0, 0 };
+	struct timeval now;
 
-	if (!opt.quit_on_intr && ((now - last_intr) > 1)) {
+	gettimeofday(&now, NULL);
+	if (!opt.quit_on_intr && (_diff_tv_str(&last_intr, &now) > 1000000)) {
 		if  (opt.disable_status) {
 			info("sending Ctrl-C to job %u.%u",
 			     job->jobid, job->stepid);
+#if defined HAVE_BG_FILES && !defined HAVE_BG_L_P
+			runjob_signal(SIGINT);
+#else
 			slurm_step_launch_fwd_signal(job->step_ctx, SIGINT);
+#endif
 		} else if (job->state < SRUN_JOB_FORCETERM) {
 			info("interrupt (one more within 1 sec to abort)");
 			task_state_print(task_state, (log_f) info);
@@ -1379,29 +1623,40 @@ static void _handle_intr(void)
 			info("interrupt (abort already in progress)");
 			task_state_print(task_state, (log_f) info);
 		}
-		last_intr = time(NULL);
+		last_intr = now;
 	} else  { /* second Ctrl-C in half as many seconds */
 		update_job_state(job, SRUN_JOB_CANCELLED);
 		/* terminate job */
 		if (job->state < SRUN_JOB_FORCETERM) {
-			if ((now - last_intr_sent) < 1) {
+			if (_diff_tv_str(&last_intr_sent, &now) < 1000000) {
 				job_force_termination(job);
+#if defined HAVE_BG_FILES && !defined HAVE_BG_L_P
+				runjob_signal(SIGKILL);
+#else
 				slurm_step_launch_abort(job->step_ctx);
+#endif
 				return;
 			}
 
 			info("sending Ctrl-C to job %u.%u",
 			     job->jobid, job->stepid);
 			last_intr_sent = now;
+#if defined HAVE_BG_FILES && !defined HAVE_BG_L_P
+			runjob_signal(SIGKILL);
+#else
 			slurm_step_launch_fwd_signal(job->step_ctx, SIGINT);
 			slurm_step_launch_abort(job->step_ctx);
+#endif
 		} else {
 			job_force_termination(job);
+#if defined HAVE_BG_FILES && !defined HAVE_BG_L_P
+			runjob_signal(SIGKILL);
+#else
 			slurm_step_launch_abort(job->step_ctx);
+#endif
 		}
 	}
 }
-
 static void _default_sigaction(int sig)
 {
 	struct sigaction act;
@@ -1424,7 +1679,11 @@ static void _handle_pipe(void)
 	if (ending)
 		return;
 	ending = 1;
+#if defined HAVE_BG_FILES && !defined HAVE_BG_L_P
+	runjob_signal(SIGKILL);
+#else
 	slurm_step_launch_abort(job->step_ctx);
+#endif
 }
 
 /* _srun_signal_mgr - Process daemon-wide signals */
@@ -1456,7 +1715,11 @@ static void *_srun_signal_mgr(void *no_data)
 			 * are ending the job now and we don't need to update
 			 * the state. */
 			info("forcing job termination");
+#if defined HAVE_BG_FILES && !defined HAVE_BG_L_P
+			runjob_signal(SIGKILL);
+#else
 			slurm_step_launch_abort(job->step_ctx);
+#endif
 			break;
 		case SIGCONT:
 			info("got SIGCONT");
@@ -1472,9 +1735,72 @@ static void *_srun_signal_mgr(void *no_data)
 			}
 			break;
 		default:
+#if defined HAVE_BG_FILES && !defined HAVE_BG_L_P
+			runjob_signal(sig);
+#else
 			slurm_step_launch_fwd_signal(job->step_ctx, sig);
+#endif
 			break;
 		}
 	}
 	return NULL;
+}
+
+static void  _shepard_notify(int shepard_fd)
+{
+	int rc;
+
+	while (1) {
+		rc = write(shepard_fd, "", 1);
+		if (rc == -1) {
+			if ((errno == EAGAIN) || (errno == EINTR))
+				continue;
+			error("write(shepard): %m");
+		}
+		break;
+	}
+	close(shepard_fd);
+}
+
+static int _shepard_spawn(srun_job_t *job, bool got_alloc)
+{
+	int shepard_pipe[2], rc;
+	pid_t shepard_pid;
+	char buf[1];
+
+	if (pipe(shepard_pipe)) {
+		error("pipe: %m");
+		return -1;
+	}
+
+	shepard_pid = fork();
+	if (shepard_pid == -1) {
+		error("fork: %m");
+		return -1;
+	}
+	if (shepard_pid != 0) {
+		close(shepard_pipe[0]);
+		return shepard_pipe[1];
+	}
+
+	/* Wait for parent to notify of completion or I/O error on abort */
+	close(shepard_pipe[1]);
+	while (1) {
+		rc = read(shepard_pipe[0], buf, 1);
+		if (rc == 1) {
+			exit(0);
+		} else if (rc == 0) {
+			break;	/* EOF */
+		} else if (rc == -1) {
+			if ((errno == EAGAIN) || (errno == EINTR))
+				continue;
+			break;
+		}
+	}
+
+	(void) slurm_terminate_job_step(job->jobid, job->stepid);
+	if (got_alloc)
+		slurm_complete_job(job->jobid, NO_VAL);
+	exit(0);
+	return -1;
 }

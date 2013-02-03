@@ -833,6 +833,7 @@ static int _add_job_to_res(struct job_record *job_ptr, int action)
 	struct part_res_record *p_ptr;
 	List gres_list;
 	int i, n;
+	bitstr_t *core_bitmap;
 
 	if (!job || !job->core_bitmap) {
 		error("job %u has no select data", job_ptr->job_id);
@@ -856,10 +857,13 @@ static int _add_job_to_res(struct job_record *job_ptr, int action)
 				gres_list = select_node_usage[i].gres_list;
 			else
 				gres_list = node_ptr->gres_list;
+			core_bitmap = copy_job_resources_node(job, n);
 			gres_plugin_job_alloc(job_ptr->gres_list, gres_list,
 					      job->nhosts, n, job->cpus[n],
-					      job_ptr->job_id, node_ptr->name);
+					      job_ptr->job_id, node_ptr->name,
+					      core_bitmap);
 			gres_plugin_node_state_log(gres_list, node_ptr->name);
+			FREE_NULL_BITMAP(core_bitmap);
 		}
 
 		if (action != 2) {
@@ -1577,22 +1581,34 @@ top:	orig_map = bit_copy(save_bitmap);
 					 cr_type, job_node_req,
 					 select_node_cnt,
 					 future_part, future_usage);
-			tmp_job_ptr->details->usable_nodes =
-				 bit_overlap(bitmap, tmp_job_ptr->node_bitmap);
+			tmp_job_ptr->details->usable_nodes = 0;
 			/*
 			 * If successful, set the last job's usable count to a
 			 * large value so that it will be first after sorting.
+			 * usable_nodes count set to zero above to eliminate
+			 * values previously set to 9999.
 			 * Note: usable_count is only used for sorting purposes
 			 */
 			if (rc == SLURM_SUCCESS) {
-				if (pass_count++ ||
-				    (list_count(preemptee_candidates) == 1))
-					break;
 				tmp_job_ptr->details->usable_nodes = 9999;
+				list_iterator_reset(job_iterator);
+				while ((tmp_job_ptr = (struct job_record *)
+					list_next(job_iterator))) {
+					if (tmp_job_ptr->details->usable_nodes
+					    == 9999)
+						break;
+					tmp_job_ptr->details->usable_nodes =
+						bit_overlap(bitmap,
+							    tmp_job_ptr->
+							    node_bitmap);
+				}
 				while ((tmp_job_ptr = (struct job_record *)
 					list_next(job_iterator))) {
 					tmp_job_ptr->details->usable_nodes = 0;
 				}
+				if (pass_count++ ||
+				    (list_count(preemptee_candidates) == 1))
+					break;
 				list_sort(preemptee_candidates,
 					  (ListCmpF)_sort_usable_nodes_dec);
 				FREE_NULL_BITMAP(orig_map);
@@ -1621,9 +1637,6 @@ top:	orig_map = bit_copy(save_bitmap);
 				if ((mode != PREEMPT_MODE_REQUEUE)    &&
 				    (mode != PREEMPT_MODE_CHECKPOINT) &&
 				    (mode != PREEMPT_MODE_CANCEL))
-					continue;
-				if (bit_overlap(bitmap,
-						tmp_job_ptr->node_bitmap) == 0)
 					continue;
 				if (tmp_job_ptr->details->usable_nodes == 0)
 					continue;
@@ -2311,6 +2324,7 @@ extern int select_p_select_nodeinfo_get(select_nodeinfo_t *nodeinfo,
 {
 	int rc = SLURM_SUCCESS;
 	uint16_t *uint16 = (uint16_t *) data;
+	char **tmp_char = (char **) data;
 	select_nodeinfo_t **select_nodeinfo = (select_nodeinfo_t **) data;
 
 	if (nodeinfo == NULL) {
@@ -2335,6 +2349,10 @@ extern int select_p_select_nodeinfo_get(select_nodeinfo_t *nodeinfo,
 		break;
 	case SELECT_NODEDATA_PTR:
 		*select_nodeinfo = nodeinfo;
+		break;
+	case SELECT_NODEDATA_RACK_MP:
+	case SELECT_NODEDATA_EXTRA_INFO:
+		*tmp_char = NULL;
 		break;
 	default:
 		error("Unsupported option %d for get_nodeinfo.", dinfo);
@@ -2409,6 +2427,11 @@ extern int select_p_update_block (update_part_msg_t *part_desc_ptr)
 }
 
 extern int select_p_update_sub_node (update_part_msg_t *part_desc_ptr)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int select_p_fail_cnode(struct step_record *step_ptr)
 {
 	return SLURM_SUCCESS;
 }

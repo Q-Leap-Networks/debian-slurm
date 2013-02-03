@@ -72,6 +72,8 @@ function set_select_type(form)
     document.config.select_type[1].click()		// linear
   } else if (form.name == "bluegene_params") {
     document.config.select_type[2].click()		// bluegene
+  } else if (form.name == "cray_params") {
+    document.config.select_type[3].click()		// cray
   }
 }
 
@@ -85,6 +87,8 @@ function get_select_type_params()
   } else if (document.config.select_type[1].checked) {	// linear
     return "#SelectTypeParameters="
   } else if (document.config.select_type[2].checked) {	// bluegene
+    return "#SelectTypeParameters="
+  } else if (document.config.select_type[3].checked) {	// cray
     return "#SelectTypeParameters="
   }
 }
@@ -158,6 +162,7 @@ function displayfile()
    "#PropagatePrioProcess=0 <br>" +
    "#PropagateResourceLimits= <br>" +
    "#PropagateResourceLimitsExcept= <br>" +
+   "#RebootProgram= <br>" +
    "ReturnToService=" + get_radio_value(document.config.return_to_service) + "<br>" +
    "#SallocDefaultCommand= <br>" +
    "SlurmctldPidFile=" + document.config.slurmctld_pid_file.value + "<br>" +
@@ -309,6 +314,11 @@ function displayfile()
 <H1>SLURM Version @SLURM_MAJOR@.@SLURM_MINOR@ Configuration Tool</H1>
 <P>This form can be used to create a SLURM configuration file with
 you controlling many of the important configuration parameters.</P>
+
+<p>This is the full version of the SLURM configuration tool. This version
+has all the configuration options to create a SLURM configuration file. There
+is a simplified version of the SLURM configuration tool available at
+<a href="configurator.easy.html">configurator.easy.html</a>.</p>
 
 <P><B>This tool supports SLURM version @SLURM_MAJOR@.@SLURM_MINOR@ only.</B>
 Configuration files for other versions of SLURM should be built
@@ -490,10 +500,10 @@ The location of a directory where slurmd saves state should also be defined.
 This must be a unique directory on each compute server (local disk).
 The use of a highly reliable file system (e.g. RAID) is recommended.
 <P>
-<input type="text" name="state_save_location" value="/tmp"> <B>StateSaveLocation</B>:
+<input type="text" name="state_save_location" value="/var/spool"> <B>StateSaveLocation</B>:
 Slurmctld state save directory <B>Must be writable by both ControlMachine and BackupController</B>
 <P>
-<input type="text" name="slurmd_spool_dir" value="/tmp/slurmd"> <B>SlurmdSpoolDir</B>:
+<input type="text" name="slurmd_spool_dir" value="/var/spool/slurmd"> <B>SlurmdSpoolDir</B>:
 Slurmd state save directory
 <P>
 Define when a non-responding (DOWN) node is returned to service.<BR>
@@ -553,6 +563,8 @@ Select one value for <B>MpiDefault</B>:<BR>
 <input type="radio" name="mpi_default" value="mpich1_p4"> <B>MPICH1-P4</B><BR>
 <input type="radio" name="mpi_default" value="mpich1_shmem"> <B>MPICH1-SHMEM</B>:
 This also works for MVAPICH-SHMEM.<BR>
+<input type="radio" name="mpi_default" value="pmi2"> <B>MPI-PMI2</B>
+(For MPI2 and MVAPICH2)<BR>
 <input type="radio" name="mpi_default" value="mvapich"> <B>MVAPICH</B><BR>
 <input type="radio" name="mpi_default" value="none" checked> <B>None</B>:
 +This works for most other MPI types including MPICH2, LAM MPI and Open MPI.<BR>
@@ -632,6 +644,8 @@ Select one value for <B>SelectType</B>:<BR>
 resource allocation, does not manage individual processor allocation<BR>
 <input type="radio" name="select_type" value="bluegene">
 <B>BlueGene</B>: For IBM Blue Gene systems only<BR>
+<input type="radio" name="select_type" value="cray">
+<B>Cray</B>: Cray systems running ALPS only<BR>
 <P>
 
 <H2>Task Launch</H2>
@@ -756,10 +770,7 @@ Select one value for <B>AccountingStorageType</B>:<BR>
 <input type="radio" name="accounting_storage_type" value="none" checked> <B>None</B>:
 No job accounting storage<BR>
 <input type="radio" name="accounting_storage_type" value="filetxt"> <B>FileTxt</B>:
-Write job accounting to a text file<BR>
-<input type="radio" name="accounting_storage_type" value="gold"> <B>Gold</B>:
-Write completion status to Gold database daemon which can securely
-save the data from many Slurm managed clusters into a common database<BR>
+Write job accounting to a text file (records limited information)<BR>
 <input type="radio" name="accounting_storage_type" value="mysql"> <B>MySQL</B>:
 Write job accounting to a MySQL database<BR>
 <input type="radio" name="accounting_storage_type" value="pgsql"> <B>PGSQL</B>:
@@ -845,5 +856,5 @@ before terminating all remaining tasks. A value of zero indicates unlimited wait
 </FORM>
 <HR>
 <a href="disclaimer.html" target="_blank" class="privacy">Legal Notices</a><br>
-Last modified 8 August 2011</P>
+Last modified 3 April 2012</P>
 </BODY>

@@ -43,9 +43,7 @@
 #include "bg_defined_block.h"
 #include "src/slurmctld/locks.h"
 #include <fcntl.h>
-#ifdef HAVE_BG_L_P
-#include "bl/bridge_status.h"
-#endif
+
 #define MAX_FREE_RETRIES           200 /* max number of
 					* FREE_SLEEP_INTERVALS to wait
 					* before putting a
@@ -81,15 +79,14 @@ static int _post_block_free(bg_record_t *bg_record, bool restore)
 	}
 
 	bg_record->free_cnt--;
-
 	if (bg_record->free_cnt == -1) {
 		info("we got a negative 1 here for %s",
 		     bg_record->bg_block_id);
 		xassert(0);
 		return SLURM_SUCCESS;
 	} else if (bg_record->modifying) {
-		info("%d others are modifing this block %s",
-		     bg_record->free_cnt, bg_record->bg_block_id);
+		info("others are modifing this block %s, don't clear it up",
+		     bg_record->bg_block_id);
 		return SLURM_SUCCESS;
 	} else if (bg_record->free_cnt) {
 		if (bg_conf->slurm_debug_flags & DEBUG_FLAG_SELECT_TYPE)
@@ -98,8 +95,11 @@ static int _post_block_free(bg_record_t *bg_record, bool restore)
 		return SLURM_SUCCESS;
 	}
 
-	if (!(bg_record->state & BG_BLOCK_ERROR_FLAG)
-	    && (bg_record->state != BG_BLOCK_FREE)) {
+	/* Even if the block is already in error state we need to do this to
+	   avoid any overlapping blocks that may have been created due
+	   to bad hardware.
+	*/
+	if ((bg_record->state & (~BG_BLOCK_ERROR_FLAG)) != BG_BLOCK_FREE) {
 		/* Something isn't right, go mark this one in an error
 		   state. */
 		update_block_msg_t block_msg;
@@ -115,18 +115,30 @@ static int _post_block_free(bg_record_t *bg_record, bool restore)
 		slurm_mutex_unlock(&block_state_mutex);
 		select_g_update_block(&block_msg);
 		slurm_mutex_lock(&block_state_mutex);
+		if (block_ptr_exist_in_list(bg_lists->main, bg_record))
+			bg_record->destroy = 0;
 		return SLURM_SUCCESS;
 	}
+
+	/* If we are here we are done with the destroy so just reset it. */
+	bg_record->destroy = 0;
 
 	/* A bit of a sanity check to make sure blocks are being
 	   removed out of all the lists.
 	*/
 	remove_from_bg_list(bg_lists->booted, bg_record);
 	if (remove_from_bg_list(bg_lists->job_running, bg_record)
-	    == SLURM_SUCCESS)
+	    == SLURM_SUCCESS) {
+		debug2("_post_block_free: we are freeing block %s and "
+		       "it was in the job_running list.  This can happen if a "
+		       "block is removed while waiting for mmcs to finish "
+		       "removing the job from the block.",
+		       bg_record->bg_block_id);
 		num_unused_cpus += bg_record->cpu_cnt;
+	}
 
-	if (restore)
+	/* If we don't have any mp_counts force block removal */
+	if (restore && bg_record->mp_count)
 		return SLURM_SUCCESS;
 
 	if (remove_from_bg_list(bg_lists->main, bg_record) != SLURM_SUCCESS) {
@@ -181,10 +193,10 @@ static void *_track_freeing_blocks(void *args)
 	while (retry_cnt < MAX_FREE_RETRIES) {
 		free_cnt = 0;
 		slurm_mutex_lock(&block_state_mutex);
-#ifdef HAVE_BG_L_P
+
 		/* just to make sure state is updated */
 		bridge_status_update_block_list_state(track_list);
-#endif
+
 		list_iterator_reset(itr);
 		/* just incase this changes from the update function */
 		track_cnt = list_count(track_list);
@@ -224,7 +236,7 @@ static void *_track_freeing_blocks(void *args)
 	}
 	debug("_track_freeing_blocks: Freed them all for job %u", job_id);
 
-	if ((bg_conf->layout_mode == LAYOUT_DYNAMIC) || destroy)
+	if (destroy)
 		restore = false;
 
 	/* If there is a block in error state we need to keep all
@@ -287,8 +299,30 @@ extern bool blocks_overlap(bg_record_t *rec_a, bg_record_t *rec_b)
 	return true;
 }
 
+extern bool block_mp_passthrough(bg_record_t *bg_record, int mp_bit)
+{
+	bool has_pass = 0;
+	ba_mp_t *ba_mp = NULL;
+	ListIterator itr;
+
+	/* no passthrough */
+	if (bg_record->mp_count == list_count(bg_record->ba_mp_list))
+		return 0;
+
+	itr = list_iterator_create(bg_record->ba_mp_list);
+	while ((ba_mp = list_next(itr))) {
+		if (ba_mp->index == mp_bit && ba_mp->used == BA_MP_USED_FALSE) {
+			has_pass = 1;
+			break;
+		}
+	}
+	list_iterator_destroy(itr);
+	return has_pass;
+}
+
 /* block_state_mutex must be unlocked before calling this. */
-extern void bg_requeue_job(uint32_t job_id, bool wait_for_start)
+extern void bg_requeue_job(uint32_t job_id, bool wait_for_start,
+			   bool slurmctld_locked)
 {
 	int rc;
 	slurmctld_lock_t job_write_lock = {
@@ -300,13 +334,15 @@ extern void bg_requeue_job(uint32_t job_id, bool wait_for_start)
 	if (wait_for_start)
 		sleep(2);
 
-	lock_slurmctld(job_write_lock);
+	if (!slurmctld_locked)
+		lock_slurmctld(job_write_lock);
 	if ((rc = job_requeue(0, job_id, -1, (uint16_t)NO_VAL, false))) {
 		error("Couldn't requeue job %u, failing it: %s",
 		      job_id, slurm_strerror(rc));
 		job_fail(job_id);
 	}
-	unlock_slurmctld(job_write_lock);
+	if (!slurmctld_locked)
+		unlock_slurmctld(job_write_lock);
 }
 
 /* if SLURM_ERROR you will need to fail the job with
@@ -368,6 +404,15 @@ extern int bg_free_block(bg_record_t *bg_record, bool wait, bool locked)
 					      bg_record->bg_block_id);
 					bg_record->state = BG_BLOCK_FREE;
 					break;
+				} else if (rc == BG_ERROR_FREE) {
+					if (bg_conf->slurm_debug_flags
+					    & DEBUG_FLAG_SELECT_TYPE)
+						info("bridge_block_free"
+						     "(%s): %s State = %s",
+						     bg_record->bg_block_id,
+						     bg_err_str(rc),
+						     bg_block_state_string(
+							     bg_record->state));
 				} else if (rc == BG_ERROR_INVALID_STATE) {
 #ifndef HAVE_BGL
 					/* If the state is error and
@@ -383,10 +428,11 @@ extern int bg_free_block(bg_record_t *bg_record, bool wait, bool locked)
 					if (bg_conf->slurm_debug_flags
 					    & DEBUG_FLAG_SELECT_TYPE)
 						info("bridge_block_free"
-						     "(%s): %s State = %d",
+						     "(%s): %s State = %s",
 						     bg_record->bg_block_id,
 						     bg_err_str(rc),
-						     bg_record->state);
+						     bg_block_state_string(
+							     bg_record->state));
 #ifdef HAVE_BGQ
 					if (bg_record->state != BG_BLOCK_FREE
 					    && bg_record->state
@@ -395,10 +441,11 @@ extern int bg_free_block(bg_record_t *bg_record, bool wait, bool locked)
 #endif
 				} else {
 					error("bridge_block_free"
-					      "(%s): %s State = %d",
+					      "(%s): %s State = %s",
 					      bg_record->bg_block_id,
 					      bg_err_str(rc),
-					      bg_record->state);
+					      bg_block_state_string(
+						      bg_record->state));
 				}
 			}
 		}
@@ -472,6 +519,8 @@ extern int free_block_list(uint32_t job_id, List track_list,
 	bg_free_block_list_t *bg_free_list;
 	pthread_attr_t attr_agent;
 	pthread_t thread_agent;
+	List kill_job_list = NULL;
+	kill_job_struct_t *freeit;
 
 	if (!track_list || !list_count(track_list))
 		return SLURM_SUCCESS;
@@ -491,25 +540,58 @@ extern int free_block_list(uint32_t job_id, List track_list,
 		}
 		bg_record->free_cnt++;
 
+		/* just so we don't over write a different thread that
+		   wants this block destroyed */
+		if (destroy && !bg_record->destroy)
+			bg_record->destroy = destroy;
+
+		if (destroy && (bg_record->state & BG_BLOCK_ERROR_FLAG))
+			resume_block(bg_record);
+
 		if (bg_record->job_ptr
 		    && !IS_JOB_FINISHED(bg_record->job_ptr)) {
-			info("We are freeing a block (%s) that has job %u(%u).",
+			info("We are freeing a block (%s) that "
+			     "has job %u(%u).",
 			     bg_record->bg_block_id,
 			     bg_record->job_ptr->job_id,
 			     bg_record->job_running);
-			/* This is not thread safe if called from
-			   bg_job_place.c anywhere from within
-			   submit_job() or at startup. */
-			slurm_mutex_unlock(&block_state_mutex);
-			bg_requeue_job(bg_record->job_ptr->job_id, 0);
-			slurm_mutex_lock(&block_state_mutex);
+			if (!kill_job_list)
+				kill_job_list =
+					bg_status_create_kill_job_list();
+			freeit = xmalloc(sizeof(kill_job_struct_t));
+			freeit->jobid = bg_record->job_ptr->job_id;
+			list_push(kill_job_list, freeit);
+		} else if (bg_record->job_list
+			   && list_count(bg_record->job_list)) {
+			struct job_record *job_ptr;
+			ListIterator itr;
+
+			if (!kill_job_list)
+				kill_job_list =
+					bg_status_create_kill_job_list();
+			info("We are freeing a block (%s) that has at "
+			     "least 1 job.",
+			     bg_record->bg_block_id);
+			itr = list_iterator_create(bg_record->job_list);
+			while ((job_ptr = list_next(itr))) {
+				if ((job_ptr->magic != JOB_MAGIC)
+				    || IS_JOB_FINISHED(job_ptr))
+					continue;
+				freeit = xmalloc(sizeof(kill_job_struct_t));
+				freeit->jobid = job_ptr->job_id;
+				list_push(kill_job_list, freeit);
+			}
+			list_iterator_destroy(itr);
 		}
-		if (remove_from_bg_list(bg_lists->job_running, bg_record)
-		    == SLURM_SUCCESS)
-			num_unused_cpus += bg_record->cpu_cnt;
 	}
 	list_iterator_destroy(itr);
 	slurm_mutex_unlock(&block_state_mutex);
+
+	if (kill_job_list) {
+		bg_status_process_kill_job_list(kill_job_list, 0);
+		list_destroy(kill_job_list);
+		kill_job_list = NULL;
+	}
 
 	if (wait) {
 		/* Track_freeing_blocks waits until the list is done
@@ -569,6 +651,8 @@ extern const char *bg_err_str(int inx)
 		return "Slurm Success";
 	case SLURM_ERROR:
 		return "Slurm Error";
+	case BG_ERROR_INVALID_STATE:
+		return "Invalid State";
 	case BG_ERROR_BLOCK_NOT_FOUND:
 		return "Block not found";
 	case BG_ERROR_BOOT_ERROR:
@@ -593,12 +677,14 @@ extern const char *bg_err_str(int inx)
 		return "Inconsistent data";
 	case BG_ERROR_NO_IOBLOCK_CONNECTED:
 		return "No IO Block Connected";
+	case BG_ERROR_FREE:
+		return "BlockFreeError (Most likely the block has pending action, should clear up shortly, check bridgeapi.log for further info)";
 	}
 	/* I know this isn't the best way to handle this, but it only
 	   happens very rarely and usually in debugging, so it
 	   hopefully isn't really all that bad.
 	*/
-	snprintf(tmp_char, sizeof(tmp_char), "%u ?", inx);
+	snprintf(tmp_char, sizeof(tmp_char), "unknown %u?", inx);
 	return tmp_char;
 }
 

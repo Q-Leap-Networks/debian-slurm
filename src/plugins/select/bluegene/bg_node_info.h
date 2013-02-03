@@ -55,7 +55,15 @@ typedef struct {
 struct select_nodeinfo {
 	ba_mp_t *ba_mp;
 	uint16_t bitmap_size;
+	char *extra_info;       /* Currently used to tell if a cable
+				   is in an error state.
+				*/
+	char *failed_cnodes;   /* Currently used to any cnodes are in
+				   an SoftwareFailure state.
+				*/
 	uint16_t magic;		/* magic number */
+	char *rack_mp;          /* name of midplane in rack - midplane
+				   format */
 	List subgrp_list;
 };
 

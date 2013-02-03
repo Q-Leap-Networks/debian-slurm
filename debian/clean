@@ -1,3 +1,4 @@
+contribs/cray/opt_modulefiles_slurm
 contribs/sjobexit/Makefile
 contribs/pam/Makefile
 contribs/slurmdb-direct/Makefile

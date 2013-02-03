@@ -40,6 +40,9 @@
 #ifdef HAVE_CONFIG_H
 #  include "config.h"
 #endif
+#if HAVE_SYS_PRCTL_H
+#  include <sys/prctl.h>
+#endif
 #include <grp.h>
 #include <pthread.h>
 #include <signal.h>
@@ -96,9 +99,10 @@ static void  _parse_commandline(int argc, char *argv[]);
 static void  _request_registrations(void *db_conn);
 static void  _rollup_handler_cancel();
 static void *_rollup_handler(void *no_data);
-static int _send_slurmctld_register_req(slurmdb_cluster_rec_t *cluster_rec);
+static int   _send_slurmctld_register_req(slurmdb_cluster_rec_t *cluster_rec);
+static void  _set_work_dir(void);
 static void *_signal_handler(void *no_data);
-static void  _update_logging(void);
+static void  _update_logging(bool startup);
 static void  _update_nice(void);
 static void  _usage(char *prog_name);
 
@@ -115,7 +119,7 @@ int main(int argc, char *argv[])
 	if (read_slurmdbd_conf())
 		exit(1);
 	_parse_commandline(argc, argv);
-	_update_logging();
+	_update_logging(true);
 	_update_nice();
 
 	if (slurm_auth_init(NULL) != SLURM_SUCCESS) {
@@ -140,6 +144,8 @@ int main(int argc, char *argv[])
 	 */
 	_init_pidfile();
 	_become_slurm_user();
+	if (foreground == 0)
+		_set_work_dir();
 	log_config();
 
 #ifdef PR_SET_DUMPABLE
@@ -357,7 +363,7 @@ static void _usage(char *prog_name)
 }
 
 /* Reset slurmctld logging based upon configuration parameters */
-static void _update_logging(void)
+static void _update_logging(bool startup)
 {
 	/* Preserve execute line arguments (if any) */
 	if (debug_level) {
@@ -379,6 +385,19 @@ static void _update_logging(void)
 	}
 
 	log_alter(log_opts, SYSLOG_FACILITY_DAEMON, slurmdbd_conf->log_file);
+	if (startup && slurmdbd_conf->log_file) {
+		int rc;
+		gid_t slurm_user_gid;
+		slurm_user_gid = gid_from_uid(slurmdbd_conf->slurm_user_id);
+		rc = chown(slurmdbd_conf->log_file,
+			   slurmdbd_conf->slurm_user_id, slurm_user_gid);
+		if (rc) {
+			error("chown(%s, %d, %d): %m",
+			      slurmdbd_conf->log_file,
+			      (int) slurmdbd_conf->slurm_user_id,
+			      (int) slurm_user_gid);
+		}
+	}
 }
 
 /* Reset slurmd nice value */
@@ -444,6 +463,11 @@ static void _daemonize(void)
 	if (daemon(1, 1))
 		error("daemon(): %m");
 	log_alter(log_opts, LOG_DAEMON, slurmdbd_conf->log_file);
+}
+
+static void _set_work_dir(void)
+{
+	bool success = false;
 
 	if (slurmdbd_conf->log_file &&
 	    (slurmdbd_conf->log_file[0] == '/')) {
@@ -454,9 +478,19 @@ static void _daemonize(void)
 			work_dir[1] = '\0';
 		else
 			slash_ptr[0] = '\0';
-		if (chdir(work_dir) < 0)
-			fatal("chdir(%s): %m", work_dir);
+		if ((access(work_dir, W_OK) != 0) || (chdir(work_dir) < 0))
+			error("chdir(%s): %m", work_dir);
+		else
+			success = true;
 		xfree(work_dir);
+	}
+
+	if (!success) {
+		if ((access("/var/tmp", W_OK) != 0) ||
+		    (chdir("/var/tmp") < 0)) {
+			error("chdir(/var/tmp): %m");
+		} else
+			info("chdir to /var/tmp");
 	}
 }
 
@@ -607,7 +641,7 @@ static void *_signal_handler(void *no_data)
 			info("Reconfigure signal (SIGHUP) received");
 			read_slurmdbd_conf();
 			assoc_mgr_set_missing_uids();
-			_update_logging();
+			_update_logging(false);
 			break;
 		case SIGINT:	/* kill -2  or <CTRL-C> */
 		case SIGTERM:	/* kill -15 */

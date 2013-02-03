@@ -3,6 +3,8 @@
  *****************************************************************************
  *  Copyright (C) 2009 CEA/DAM/DIF
  *  Written by Matthieu Hautreux <matthieu.hautreux@cea.fr>
+ *  Portions copyright (C) 2012 Bull
+ *  Written by Martin Perry <martin.perry@bull.com>
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.schedmd.com/slurmdocs/>.
@@ -47,16 +49,48 @@
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 #include "src/slurmd/slurmd/slurmd.h"
 
+#include "src/common/bitstring.h"
 #include "src/common/xstring.h"
 #include "src/common/xcgroup_read_config.h"
 #include "src/common/xcgroup.h"
-#include "src/common/xcpuinfo.h"
 
 #include "task_cgroup.h"
 
 #ifdef HAVE_HWLOC
 #include <hwloc.h>
 #include <hwloc/glibc-sched.h>
+
+# if HWLOC_API_VERSION <= 0x00010000
+/* After this version the cpuset structure and all it's functions
+ * changed to bitmaps.  So to work with old hwloc's we just to the
+ * opposite to avoid having to put a bunch of ifdef's in the code we
+ * just do it here.
+ */
+typedef hwloc_cpuset_t hwloc_bitmap_t;
+
+static inline hwloc_bitmap_t hwloc_bitmap_alloc(void)
+{
+	return hwloc_cpuset_alloc();
+}
+
+static inline void hwloc_bitmap_free(hwloc_bitmap_t bitmap)
+{
+	hwloc_cpuset_free(bitmap);
+}
+
+static inline void hwloc_bitmap_or(
+	hwloc_bitmap_t res, hwloc_bitmap_t bitmap1, hwloc_bitmap_t bitmap2)
+{
+	hwloc_cpuset_or(res, bitmap1, bitmap2);
+}
+
+static inline int hwloc_bitmap_asprintf(char **str, hwloc_bitmap_t bitmap)
+{
+	return hwloc_cpuset_asprintf(str, bitmap);
+}
+
+# endif
+
 #endif
 
 #ifndef PATH_MAX
@@ -75,14 +109,288 @@ static xcgroup_t step_cpuset_cg;
 
 static int _xcgroup_cpuset_init(xcgroup_t* cg);
 
+/*
+ * convert abstract range into the machine one
+ */
+static int _abs_to_mac(char* lrange, char** prange)
+{
+	static int total_cores = -1, total_cpus = -1;
+	bitstr_t* absmap = NULL;
+	bitstr_t* macmap = NULL;
+	int icore, ithread;
+	int absid, macid;
+	int rc = SLURM_SUCCESS;
+
+	if (total_cores == -1) {
+		total_cores = conf->sockets * conf->cores;
+		total_cpus  = conf->block_map_size;
+	}
+
+	/* allocate bitmap */
+	absmap = bit_alloc(total_cores);
+	macmap = bit_alloc(total_cpus);
+
+	if (!absmap || !macmap) {
+		rc = SLURM_ERROR;
+		goto end_it;
+	}
+
+	/* string to bitmap conversion */
+	if (bit_unfmt(absmap, lrange)) {
+		rc = SLURM_ERROR;
+		goto end_it;
+	}
+
+	/* mapping abstract id to machine id using conf->block_map */
+	for (icore = 0; icore < total_cores; icore++) {
+		if (bit_test(absmap, icore)) {
+			for (ithread = 0; ithread<conf->threads; ithread++) {
+				absid  = icore*conf->threads + ithread;
+				absid %= total_cpus;
+
+				macid  = conf->block_map[absid];
+				macid %= total_cpus;
+
+				bit_set(macmap, macid);
+			}
+		}
+ 	}
+
+	/* convert machine cpu bitmap to range string */
+	*prange = (char*)xmalloc(total_cpus*6);
+	bit_fmt(*prange, total_cpus*6, macmap);
+
+	/* free unused bitmaps */
+end_it:
+	FREE_NULL_BITMAP(absmap);
+	FREE_NULL_BITMAP(macmap);
+
+	if (rc != SLURM_SUCCESS)
+		info("_abs_to_mac failed");
+
+	return rc;
+}
+
+/* when cgroups are configured with cpuset, at least
+ * cpuset.cpus and cpuset.mems must be set or the cgroup
+ * will not be available at all.
+ * we duplicate the ancestor configuration in the init step */
+static int _xcgroup_cpuset_init(xcgroup_t* cg)
+{
+	int fstatus,i;
+
+	char* cpuset_metafiles[] = {
+		"cpuset.cpus",
+		"cpuset.mems"
+	};
+	char* cpuset_meta;
+	char* cpuset_conf;
+	size_t csize;
+
+	xcgroup_t acg;
+	char* acg_name;
+	char* p;
+
+	fstatus = XCGROUP_ERROR;
+
+	/* load ancestor cg */
+	acg_name = (char*) xstrdup(cg->name);
+	p = rindex(acg_name,'/');
+	if (p == NULL) {
+		debug2("task/cgroup: unable to get ancestor path for "
+		       "cpuset cg '%s' : %m",cg->path);
+		return fstatus;
+	} else
+		*p = '\0';
+	if (xcgroup_load(cg->ns,&acg, acg_name) != XCGROUP_SUCCESS) {
+		debug2("task/cgroup: unable to load ancestor for "
+		       "cpuset cg '%s' : %m",cg->path);
+		return fstatus;
+	}
+
+	/* inherits ancestor params */
+	for (i = 0 ; i < 2 ; i++) {
+		cpuset_meta = cpuset_metafiles[i];
+		if (xcgroup_get_param(&acg,cpuset_meta,
+				      &cpuset_conf,&csize)
+		    != XCGROUP_SUCCESS) {
+			debug2("task/cgroup: assuming no cpuset cg "
+			       "support for '%s'",acg.path);
+			xcgroup_destroy(&acg);
+			return fstatus;
+		}
+		if (csize > 0)
+			cpuset_conf[csize-1]='\0';
+		if (xcgroup_set_param(cg,cpuset_meta,cpuset_conf)
+		    != XCGROUP_SUCCESS) {
+			debug2("task/cgroup: unable to write %s configuration "
+			       "(%s) for cpuset cg '%s'",cpuset_meta,
+			       cpuset_conf,cg->path);
+			xcgroup_destroy(&acg);
+			xfree(cpuset_conf);
+			return fstatus;
+		}
+		xfree(cpuset_conf);
+	}
+
+	xcgroup_destroy(&acg);
+	return XCGROUP_SUCCESS;
+}
+
+#ifdef HAVE_HWLOC
+
+/*
+ * Add cpuset for an object to the total cpuset for a task, using the
+ * appropriate ancestor object cpuset if necessary
+ *
+ * obj = object to add
+ * cpuset = cpuset for task
+ */
+static void _add_cpuset(
+	hwloc_obj_type_t hwtype, hwloc_obj_type_t req_hwtype,
+	hwloc_obj_t obj, uint32_t taskid,  int bind_verbose,
+	hwloc_bitmap_t cpuset)
+{
+	struct hwloc_obj *pobj;
+
+	/* if requested binding overlap the granularity */
+	/* use the ancestor cpuset instead of the object one */
+	if (hwloc_compare_types(hwtype,req_hwtype) > 0) {
+
+		/* Get the parent object of req_hwtype or the */
+		/* one just above if not found (meaning of >0)*/
+		/* (useful for ldoms binding with !NUMA nodes)*/
+		pobj = obj->parent;
+		while (pobj != NULL &&
+		       hwloc_compare_types(pobj->type, req_hwtype) > 0)
+			pobj = pobj->parent;
+
+		if (pobj != NULL) {
+			if (bind_verbose)
+				info("task/cgroup: task[%u] higher level %s "
+				     "found", taskid,
+				     hwloc_obj_type_string(pobj->type));
+			hwloc_bitmap_or(cpuset, cpuset, pobj->allowed_cpuset);
+		} else {
+			/* should not be executed */
+			if (bind_verbose)
+				info("task/cgroup: task[%u] no higher level "
+				     "found", taskid);
+			hwloc_bitmap_or(cpuset, cpuset, obj->allowed_cpuset);
+		}
+
+	} else
+		hwloc_bitmap_or(cpuset, cpuset, obj->allowed_cpuset);
+}
+
+/*
+ * Distribute cpus to the task using cyclic distribution across sockets
+ */
+static int _task_cgroup_cpuset_dist_cyclic(
+	hwloc_topology_t topology, hwloc_obj_type_t hwtype,
+	hwloc_obj_type_t req_hwtype, slurmd_job_t *job, int bind_verbose,
+	hwloc_bitmap_t cpuset)
+{
+	hwloc_obj_t obj;
+	uint32_t *obj_idx;
+	uint32_t i, sock_idx, npskip, npdist, nsockets;
+	uint32_t taskid = job->envtp->localid;
+
+	if (bind_verbose)
+		info("task/cgroup: task[%u] using cyclic distribution, "
+		     "task_dist %u", taskid, job->task_dist);
+	nsockets = (uint32_t) hwloc_get_nbobjs_by_type(topology,
+						       HWLOC_OBJ_SOCKET);
+	obj_idx = xmalloc(nsockets * sizeof(uint32_t));
+
+	if (hwloc_compare_types(hwtype,HWLOC_OBJ_CORE) >= 0) {
+		/* cores or threads granularity */
+		npskip = taskid * job->cpus_per_task;
+		npdist = job->cpus_per_task;
+	} else {
+		/* sockets or ldoms granularity */
+		npskip = taskid;
+		npdist = 1;
+	}
+
+	/* skip objs for lower taskids */
+	i = 0;
+	sock_idx = 0;
+	while (i < npskip) {
+		while ((sock_idx < nsockets) && (i < npskip)) {
+			obj = hwloc_get_obj_below_by_type(
+				topology, HWLOC_OBJ_SOCKET, sock_idx,
+				hwtype, obj_idx[sock_idx]);
+			if (obj != NULL) {
+				obj_idx[sock_idx]++;
+				i++;
+			}
+			sock_idx++;
+		}
+		if (i < npskip)
+			sock_idx = 0;
+	}
+
+	/* distribute objs cyclically across sockets */
+	i = npdist;
+	while (i > 0) {
+		while ((sock_idx < nsockets) && (i > 0)) {
+			obj = hwloc_get_obj_below_by_type(
+				topology, HWLOC_OBJ_SOCKET, sock_idx,
+				hwtype, obj_idx[sock_idx]);
+			if (obj != NULL) {
+				obj_idx[sock_idx]++;
+				_add_cpuset(hwtype, req_hwtype, obj, taskid,
+					    bind_verbose, cpuset);
+				i--;
+			}
+			sock_idx++;
+		}
+		sock_idx = 0;
+	}
+	xfree(obj_idx);
+	return XCGROUP_SUCCESS;
+}
+
+/*
+ * Distribute cpus to the task using block distribution
+ */
+static int _task_cgroup_cpuset_dist_block(
+	hwloc_topology_t topology, hwloc_obj_type_t hwtype,
+	hwloc_obj_type_t req_hwtype, uint32_t nobj,
+	slurmd_job_t *job, int bind_verbose, hwloc_bitmap_t cpuset)
+{
+	hwloc_obj_t obj;
+	uint32_t i, pfirst,plast;
+	uint32_t taskid = job->envtp->localid;
+	int hwdepth;
+
+	if (bind_verbose)
+		info("task/cgroup: task[%u] using block distribution, "
+		     "task_dist %u", taskid, job->task_dist);
+	if (hwloc_compare_types(hwtype,HWLOC_OBJ_CORE) >= 0) {
+		/* cores or threads granularity */
+		pfirst = taskid *  job->cpus_per_task ;
+		plast = pfirst + job->cpus_per_task - 1;
+	} else {
+		/* sockets or ldoms granularity */
+		pfirst = taskid;
+		plast = pfirst;
+	}
+	hwdepth = hwloc_get_type_depth(topology,hwtype);
+	for (i = pfirst; i <= plast && i < nobj ; i++) {
+		obj = hwloc_get_obj_by_depth(topology, hwdepth, (int)i);
+		_add_cpuset(hwtype, req_hwtype, obj, taskid, bind_verbose,
+			    cpuset);
+	}
+	return XCGROUP_SUCCESS;
+}
+
+#endif
+
 extern int task_cgroup_cpuset_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
 {
 	char release_agent_path[PATH_MAX];
-
-	/* initialize cpuinfo internal data */
-	if (xcpuinfo_init() != XCPUINFO_SUCCESS) {
-		return SLURM_ERROR;
-	}
 
 	/* initialize user/job/jobstep cgroup relative paths */
 	user_cgroup_path[0]='\0';
@@ -92,13 +400,13 @@ extern int task_cgroup_cpuset_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
 	/* initialize cpuset cgroup namespace */
 	release_agent_path[0]='\0';
 	if (snprintf(release_agent_path,PATH_MAX,"%s/release_cpuset",
-		      slurm_cgroup_conf->cgroup_release_agent) >= PATH_MAX) {
+		     slurm_cgroup_conf->cgroup_release_agent) >= PATH_MAX) {
 		error("task/cgroup: unable to build cpuset release agent path");
 		goto error;
 	}
 	if (xcgroup_ns_create(slurm_cgroup_conf, &cpuset_ns, "/cpuset", "",
-			       "cpuset",release_agent_path) !=
-	     XCGROUP_SUCCESS) {
+			      "cpuset",release_agent_path) !=
+	    XCGROUP_SUCCESS) {
 		error("task/cgroup: unable to create cpuset namespace");
 		goto error;
 	}
@@ -108,7 +416,7 @@ extern int task_cgroup_cpuset_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
 		if (slurm_cgroup_conf->cgroup_automount) {
 			if (xcgroup_ns_mount(&cpuset_ns)) {
 				error("task/cgroup: unable to mount cpuset "
-				      "namespace");
+				      "namespace: %s", slurm_strerror(errno));
 				goto clean;
 			}
 			info("task/cgroup: cpuset namespace is now mounted");
@@ -125,7 +433,6 @@ clean:
 	xcgroup_ns_destroy(&cpuset_ns);
 
 error:
-	xcpuinfo_fini();
 	return SLURM_ERROR;
 }
 
@@ -145,7 +452,6 @@ extern int task_cgroup_cpuset_fini(slurm_cgroup_conf_t *slurm_cgroup_conf)
 
 	xcgroup_ns_destroy(&cpuset_ns);
 
-	xcpuinfo_fini();
 	return SLURM_SUCCESS;
 }
 
@@ -210,7 +516,7 @@ extern int task_cgroup_cpuset_create(slurmd_job_t *job)
 	/* build job cgroup relative path if no set (should not be) */
 	if (*job_cgroup_path == '\0') {
 		if (snprintf(job_cgroup_path,PATH_MAX,"%s/job_%u",
-			      user_cgroup_path,jobid) >= PATH_MAX) {
+			     user_cgroup_path,jobid) >= PATH_MAX) {
 			error("task/cgroup: unable to build job %u cpuset "
 			      "cg relative path : %m",jobid);
 			return SLURM_ERROR;
@@ -229,7 +535,8 @@ extern int task_cgroup_cpuset_create(slurmd_job_t *job)
 				return SLURM_ERROR;
 			}
 		} else {
-			if (snprintf(jobstep_cgroup_path, PATH_MAX, "%s/step_%u",
+			if (snprintf(jobstep_cgroup_path,
+				     PATH_MAX, "%s/step_%u",
 				     job_cgroup_path, stepid) >= PATH_MAX) {
 				error("task/cgroup: unable to build job step"
 				      " %u.%u cpuset cg relative path: %m",
@@ -268,27 +575,27 @@ extern int task_cgroup_cpuset_create(slurmd_job_t *job)
 	      job->job_alloc_cores);
 	debug("task/cgroup: step abstract cores are '%s'",
 	      job->step_alloc_cores);
-	if (xcpuinfo_abs_to_mac(job->job_alloc_cores,
-				 &job_alloc_cores) != XCPUINFO_SUCCESS) {
+	if (_abs_to_mac(job->job_alloc_cores,
+			&job_alloc_cores) != SLURM_SUCCESS) {
 		error("task/cgroup: unable to build job physical cores");
 		goto error;
 	}
-	if (xcpuinfo_abs_to_mac(job->step_alloc_cores,
-				 &step_alloc_cores) != XCPUINFO_SUCCESS) {
+	if (_abs_to_mac(job->step_alloc_cores,
+			&step_alloc_cores) != SLURM_SUCCESS) {
 		error("task/cgroup: unable to build step physical cores");
 		goto error;
 	}
 	debug("task/cgroup: job physical cores are '%s'",
-	      job->job_alloc_cores);
+	      job_alloc_cores);
 	debug("task/cgroup: step physical cores are '%s'",
-	      job->step_alloc_cores);
+	      step_alloc_cores);
 
 	/*
 	 * create user cgroup in the cpuset ns (it could already exist)
 	 */
 	if (xcgroup_create(&cpuset_ns,&user_cpuset_cg,
-			    user_cgroup_path,
-			    getuid(),getgid()) != XCGROUP_SUCCESS) {
+			   user_cgroup_path,
+			   getuid(),getgid()) != XCGROUP_SUCCESS) {
 		goto error;
 	}
 	if (xcgroup_instanciate(&user_cpuset_cg) != XCGROUP_SUCCESS) {
@@ -303,7 +610,7 @@ extern int task_cgroup_cpuset_create(slurmd_job_t *job)
 	if (rc != XCGROUP_SUCCESS || cpus_size == 1) {
 		/* initialize the cpusets as it was inexistant */
 		if (_xcgroup_cpuset_init(&user_cpuset_cg) !=
-		     XCGROUP_SUCCESS) {
+		    XCGROUP_SUCCESS) {
 			xcgroup_delete(&user_cpuset_cg);
 			xcgroup_destroy(&user_cpuset_cg);
 			goto error;
@@ -322,8 +629,8 @@ extern int task_cgroup_cpuset_create(slurmd_job_t *job)
 	 * create job cgroup in the cpuset ns (it could already exist)
 	 */
 	if (xcgroup_create(&cpuset_ns,&job_cpuset_cg,
-			    job_cgroup_path,
-			    getuid(),getgid()) != XCGROUP_SUCCESS) {
+			   job_cgroup_path,
+			   getuid(),getgid()) != XCGROUP_SUCCESS) {
 		xcgroup_destroy(&user_cpuset_cg);
 		goto error;
 	}
@@ -345,8 +652,8 @@ extern int task_cgroup_cpuset_create(slurmd_job_t *job)
 	 * the user inside the step cgroup owned by root
 	 */
 	if (xcgroup_create(&cpuset_ns,&step_cpuset_cg,
-			    jobstep_cgroup_path,
-			    uid,gid) != XCGROUP_SUCCESS) {
+			   jobstep_cgroup_path,
+			   uid,gid) != XCGROUP_SUCCESS) {
 		/* do not delete user/job cgroup as */
 		/* they can exist for other steps */
 		xcgroup_destroy(&user_cpuset_cg);
@@ -412,33 +719,24 @@ extern int task_cgroup_cpuset_set_task_affinity(slurmd_job_t *job)
 	return fstatus;
 
 #else
-	uint32_t i;
+	hwloc_obj_type_t socket_or_node;
 	uint32_t nldoms;
 	uint32_t nsockets;
 	uint32_t ncores;
 	uint32_t npus;
 	uint32_t nobj;
-
-	uint32_t pfirst,plast;
 	uint32_t taskid = job->envtp->localid;
 	uint32_t jntasks = job->node_tasks;
 	uint32_t jnpus = jntasks * job->cpus_per_task;
 	pid_t    pid = job->envtp->task_pid;
 
 	cpu_bind_type_t bind_type;
-	int verbose;
+	int bind_verbose = 0;
 
 	hwloc_topology_t topology;
-#if HWLOC_API_VERSION <= 0x00010000
-	hwloc_cpuset_t cpuset,ct;
-#else
-	hwloc_bitmap_t cpuset,ct;
-#endif
-	hwloc_obj_t obj;
-	struct hwloc_obj *pobj;
+	hwloc_bitmap_t cpuset;
 	hwloc_obj_type_t hwtype;
 	hwloc_obj_type_t req_hwtype;
-	int hwdepth;
 
 	size_t tssize;
 	cpu_set_t ts;
@@ -446,47 +744,55 @@ extern int task_cgroup_cpuset_set_task_affinity(slurmd_job_t *job)
 	bind_type = job->cpu_bind_type ;
 	if (conf->task_plugin_param & CPU_BIND_VERBOSE ||
 	    bind_type & CPU_BIND_VERBOSE)
-		verbose = 1 ;
+		bind_verbose = 1 ;
+
+	/* Allocate and initialize hwloc objects */
+	hwloc_topology_init(&topology);
+
+	cpuset = hwloc_bitmap_alloc();
+
+	hwloc_topology_load(topology);
+	if ( hwloc_get_type_depth(topology, HWLOC_OBJ_NODE) >
+	     hwloc_get_type_depth(topology, HWLOC_OBJ_SOCKET) ) {
+		/* One socket contains multiple NUMA-nodes
+		 * like AMD Opteron 6000 series etc.
+		 * In such case, use NUMA-node instead of socket. */
+		socket_or_node = HWLOC_OBJ_NODE;
+	} else {
+		socket_or_node = HWLOC_OBJ_SOCKET;
+	}
 
 	if (bind_type & CPU_BIND_NONE) {
-		if (verbose)
+		if (bind_verbose)
 			info("task/cgroup: task[%u] is requesting no affinity",
 			     taskid);
 		return 0;
 	} else if (bind_type & CPU_BIND_TO_THREADS) {
-		if (verbose)
+		if (bind_verbose)
 			info("task/cgroup: task[%u] is requesting "
 			     "thread level binding",taskid);
 		req_hwtype = HWLOC_OBJ_PU;
 	} else if (bind_type & CPU_BIND_TO_CORES) {
-		if (verbose)
+		if (bind_verbose)
 			info("task/cgroup: task[%u] is requesting "
 			     "core level binding",taskid);
 		req_hwtype = HWLOC_OBJ_CORE;
 	} else if (bind_type & CPU_BIND_TO_SOCKETS) {
-		if (verbose)
+		if (bind_verbose)
 			info("task/cgroup: task[%u] is requesting "
 			     "socket level binding",taskid);
-		req_hwtype = HWLOC_OBJ_SOCKET;
+		req_hwtype = socket_or_node;
 	} else if (bind_type & CPU_BIND_TO_LDOMS) {
-		if (verbose)
+		if (bind_verbose)
 			info("task/cgroup: task[%u] is requesting "
 			     "ldom level binding",taskid);
 		req_hwtype = HWLOC_OBJ_NODE;
 	} else {
-		if (verbose)
+		if (bind_verbose)
 			info("task/cgroup: task[%u] using core level binding"
 			     " by default",taskid);
 		req_hwtype = HWLOC_OBJ_CORE;
 	}
-
-	/* Allocate and initialize hwloc objects */
-	hwloc_topology_init(&topology);
-#if HWLOC_API_VERSION <= 0x00010000
-	cpuset = hwloc_cpuset_alloc() ;
-#else
-	cpuset = hwloc_bitmap_alloc() ;
-#endif
 
 	/*
 	 * Perform the topology detection. It will only get allowed PUs.
@@ -504,15 +810,15 @@ extern int task_cgroup_cpuset_set_task_affinity(slurmd_job_t *job)
 	 * to dispatch the tasks across the sockets and then provide access
 	 * to each task to the cores of its socket.)
 	 */
-	hwloc_topology_load(topology);
 	npus = (uint32_t) hwloc_get_nbobjs_by_type(topology,
 						   HWLOC_OBJ_PU);
 	ncores = (uint32_t) hwloc_get_nbobjs_by_type(topology,
 						     HWLOC_OBJ_CORE);
 	nsockets = (uint32_t) hwloc_get_nbobjs_by_type(topology,
-						       HWLOC_OBJ_SOCKET);
+						       socket_or_node);
 	nldoms = (uint32_t) hwloc_get_nbobjs_by_type(topology,
 						     HWLOC_OBJ_NODE);
+
 	hwtype = HWLOC_OBJ_MACHINE;
 	nobj = 1;
 	if (npus >= jnpus || bind_type & CPU_BIND_TO_THREADS) {
@@ -524,8 +830,8 @@ extern int task_cgroup_cpuset_set_task_affinity(slurmd_job_t *job)
 		nobj = ncores;
 	}
 	if (nsockets >= jntasks &&
-	     bind_type & CPU_BIND_TO_SOCKETS) {
-		hwtype = HWLOC_OBJ_SOCKET;
+	    bind_type & CPU_BIND_TO_SOCKETS) {
+		hwtype = socket_or_node;
 		nobj = nsockets;
 	}
 	/*
@@ -536,15 +842,16 @@ extern int task_cgroup_cpuset_set_task_affinity(slurmd_job_t *job)
 	 * we have as many sockets as ldoms before moving to ldoms granularity
 	 */
 	if (nldoms >= jntasks &&
-	     nsockets >= nldoms &&
-	     bind_type & CPU_BIND_TO_LDOMS) {
+	    nsockets >= nldoms &&
+	    bind_type & CPU_BIND_TO_LDOMS) {
 		hwtype = HWLOC_OBJ_NODE;
 		nobj = nldoms;
 	}
 
 	/*
-	 * Perform a block binding on the detected object respecting the
-	 * granularity.
+	 * Bind the detected object to the taskid, respecting the
+	 * granularity, using the designated or default distribution
+	 * method (block or cyclic).
 	 * If not enough objects to do the job, revert to no affinity mode
 	 */
 	if (hwloc_compare_types(hwtype,HWLOC_OBJ_MACHINE) == 0) {
@@ -553,109 +860,80 @@ extern int task_cgroup_cpuset_set_task_affinity(slurmd_job_t *job)
 		     "granularity",taskid,hwloc_obj_type_string(hwtype));
 
 	} else if (hwloc_compare_types(hwtype,HWLOC_OBJ_CORE) >= 0 &&
-		    jnpus > nobj) {
+		   jnpus > nobj) {
 
 		info("task/cgroup: task[%u] not enough %s objects, disabling "
 		     "affinity",taskid,hwloc_obj_type_string(hwtype));
 
 	} else {
+		char *str;
 
-		if (verbose) {
+		if (bind_verbose) {
 			info("task/cgroup: task[%u] using %s granularity",
 			     taskid,hwloc_obj_type_string(hwtype));
 		}
-		if (hwloc_compare_types(hwtype,HWLOC_OBJ_CORE) >= 0) {
-			/* cores or threads granularity */
-			pfirst = taskid *  job->cpus_per_task ;
-			plast = pfirst + job->cpus_per_task - 1;
-		} else {
-			/* sockets or ldoms granularity */
-			pfirst = taskid;
-			plast = pfirst;
+
+		/* There are two "distributions,"  controlled by the
+		 * -m option of srun and friends. The first is the
+		 * distribution of tasks to nodes.  The second is the
+		 * distribution of allocated cpus to tasks for
+		 * binding.  This code is handling the second
+		 * distribution.  Here's how the values get set, based
+		 * on the value of -m
+		 *
+		 * SLURM_DIST_CYCLIC = srun -m cyclic
+		 * SLURM_DIST_BLOCK = srun -m block
+		 * SLURM_DIST_CYCLIC_CYCLIC = srun -m cyclic:cyclic
+		 * SLURM_DIST_BLOCK_CYCLIC = srun -m block:cyclic
+		 *
+		 * In the first two cases, the user only specified the
+		 * first distribution.  The second distribution
+		 * defaults to cyclic.  In the second two cases, the
+		 * user explicitly requested a second distribution of
+		 * cyclic.  So all these four cases correspond to a
+		 * second distribution of cyclic.   So we want to call
+		 * _task_cgroup_cpuset_dist_cyclic.
+		 *
+		 * If the user explicitly specifies a second
+		 * distribution of block, or if
+		 * CR_CORE_DEFAULT_DIST_BLOCK is configured and the
+		 * user does not explicitly specify a second
+		 * distribution of cyclic, the second distribution is
+		 * block, and we need to call
+		 * _task_cgroup_cpuset_dist_block. In these cases,
+		 * task_dist would be set to SLURM_DIST_CYCLIC_BLOCK
+		 * or SLURM_DIST_BLOCK_BLOCK.
+		 *
+		 * You can see the equivalent code for the
+		 * task/affinity plugin in
+		 * src/plugins/task/affinity/dist_tasks.c, around line 384.
+		 */
+		switch (job->task_dist) {
+		case SLURM_DIST_CYCLIC:
+		case SLURM_DIST_BLOCK:
+		case SLURM_DIST_CYCLIC_CYCLIC:
+		case SLURM_DIST_BLOCK_CYCLIC:
+			_task_cgroup_cpuset_dist_cyclic(
+				topology, hwtype, req_hwtype,
+				job, bind_verbose, cpuset);
+			break;
+		default:
+			_task_cgroup_cpuset_dist_block(
+				topology, hwtype, req_hwtype,
+				nobj, job, bind_verbose, cpuset);
 		}
 
-		hwdepth = hwloc_get_type_depth(topology,hwtype);
-		for (i = pfirst; i <= plast && i < nobj ; i++) {
-			obj = hwloc_get_obj_by_depth(topology,hwdepth,(int)i);
+		hwloc_bitmap_asprintf(&str, cpuset);
 
-			/* if requested binding overlap the granularity */
-			/* use the ancestor cpuset instead of the object one */
-			if (hwloc_compare_types(hwtype,req_hwtype) > 0) {
-
-				/* Get the parent object of req_hwtype or the */
-				/* one just above if not found (meaning of >0)*/
-				/* (useful for ldoms binding with !NUMA nodes)*/
-				pobj = obj->parent;
-				while (pobj != NULL &&
-					hwloc_compare_types(pobj->type,
-							    req_hwtype) > 0)
-					pobj = pobj->parent;
-
-				if (pobj != NULL) {
-					if (verbose)
-						info("task/cgroup: task[%u] "
-						     "higher level %s found",
-						     taskid,
-						     hwloc_obj_type_string(
-							     pobj->type));
-#if HWLOC_API_VERSION <= 0x00010000
-					ct = hwloc_cpuset_dup(pobj->
-							      allowed_cpuset);
-					hwloc_cpuset_or(cpuset,cpuset,ct);
-					hwloc_cpuset_free(ct);
-#else
-					ct = hwloc_bitmap_dup(pobj->
-							      allowed_cpuset);
-					hwloc_bitmap_or(cpuset,cpuset,ct);
-					hwloc_bitmap_free(ct);
-#endif
-				} else {
-					/* should not be executed */
-					if (verbose)
-						info("task/cgroup: task[%u] "
-						     "no higher level found",
-						     taskid);
-#if HWLOC_API_VERSION <= 0x00010000
-					ct = hwloc_cpuset_dup(obj->
-							      allowed_cpuset);
-					hwloc_cpuset_or(cpuset,cpuset,ct);
-					hwloc_cpuset_free(ct);
-#else
-					ct = hwloc_bitmap_dup(obj->
-							      allowed_cpuset);
-					hwloc_bitmap_or(cpuset,cpuset,ct);
-					hwloc_bitmap_free(ct);
-#endif
-				}
-
-			} else {
-#if HWLOC_API_VERSION <= 0x00010000
-				ct = hwloc_cpuset_dup(obj->allowed_cpuset);
-				hwloc_cpuset_or(cpuset,cpuset,ct);
-				hwloc_cpuset_free(ct);
-#else
-				ct = hwloc_bitmap_dup(obj->allowed_cpuset);
-				hwloc_bitmap_or(cpuset,cpuset,ct);
-				hwloc_bitmap_free(ct);
-#endif
-			}
-		}
-
-		char *str;
-#if HWLOC_API_VERSION <= 0x00010000
-		hwloc_cpuset_asprintf(&str,cpuset);
-#else
-		hwloc_bitmap_asprintf(&str,cpuset);
-#endif
 		tssize = sizeof(cpu_set_t);
 		if (hwloc_cpuset_to_glibc_sched_affinity(topology,cpuset,
-							  &ts,tssize) == 0) {
+							 &ts,tssize) == 0) {
 			fstatus = SLURM_SUCCESS;
 			if (sched_setaffinity(pid,tssize,&ts)) {
 				error("task/cgroup: task[%u] unable to set "
 				      "taskset '%s'",taskid,str);
 				fstatus = SLURM_ERROR;
-			} else if (verbose) {
+			} else if (bind_verbose) {
 				info("task/cgroup: task[%u] taskset '%s' is set"
 				     ,taskid,str);
 			}
@@ -665,85 +943,14 @@ extern int task_cgroup_cpuset_set_task_affinity(slurmd_job_t *job)
 			fstatus = SLURM_ERROR;
 		}
 		free(str);
-
 	}
 
 	/* Destroy hwloc objects */
-#if HWLOC_API_VERSION <= 0x00010000
-	hwloc_cpuset_free(cpuset);
-#else
 	hwloc_bitmap_free(cpuset);
-#endif
+
 	hwloc_topology_destroy(topology);
 
 	return fstatus;
 #endif
 
-}
-
-
-/* when cgroups are configured with cpuset, at least
- * cpuset.cpus and cpuset.mems must be set or the cgroup
- * will not be available at all.
- * we duplicate the ancestor configuration in the init step */
-static int _xcgroup_cpuset_init(xcgroup_t* cg)
-{
-	int fstatus,i;
-
-	char* cpuset_metafiles[] = {
-		"cpuset.cpus",
-		"cpuset.mems"
-	};
-	char* cpuset_meta;
-	char* cpuset_conf;
-	size_t csize;
-
-	xcgroup_t acg;
-	char* acg_name;
-	char* p;
-
-	fstatus = XCGROUP_ERROR;
-
-	/* load ancestor cg */
-	acg_name = (char*) xstrdup(cg->name);
-	p = rindex(acg_name,'/');
-	if (p == NULL) {
-		debug2("task/cgroup: unable to get ancestor path for "
-		       "cpuset cg '%s' : %m",cg->path);
-		return fstatus;
-	} else
-		*p = '\0';
-	if (xcgroup_load(cg->ns,&acg,acg_name) != XCGROUP_SUCCESS) {
-		debug2("task/cgroup: unable to load ancestor for "
-		       "cpuset cg '%s' : %m",cg->path);
-		return fstatus;
-	}
-
-	/* inherits ancestor params */
-	for (i = 0 ; i < 2 ; i++) {
-		cpuset_meta = cpuset_metafiles[i];
-		if (xcgroup_get_param(&acg,cpuset_meta,
-				       &cpuset_conf,&csize)
-		     != XCGROUP_SUCCESS) {
-			debug2("task/cgroup: assuming no cpuset cg "
-			       "support for '%s'",acg.path);
-			xcgroup_destroy(&acg);
-			return fstatus;
-		}
-		if (csize > 0)
-			cpuset_conf[csize-1]='\0';
-		if (xcgroup_set_param(cg,cpuset_meta,cpuset_conf)
-		     != XCGROUP_SUCCESS) {
-			debug2("task/cgroup: unable to write %s configuration "
-			       "(%s) for cpuset cg '%s'",cpuset_meta,
-			       cpuset_conf,cg->path);
-			xcgroup_destroy(&acg);
-			xfree(cpuset_conf);
-			return fstatus;
-		}
-		xfree(cpuset_conf);
-	}
-
-	xcgroup_destroy(&acg);
-	return XCGROUP_SUCCESS;
 }

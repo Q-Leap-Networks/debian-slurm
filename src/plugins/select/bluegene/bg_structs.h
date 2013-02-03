@@ -50,6 +50,7 @@
 #include "src/common/bitstring.h"
 
 typedef struct {
+	uint32_t actual_cnodes_per_mp; /* used only on sub_mp_systems */
 	List blrts_list;
 	char *bridge_api_file;
 	uint16_t bridge_api_verb;
@@ -59,12 +60,14 @@ typedef struct {
 	char *default_linuximage;
 	char *default_mloaderimage;
 	char *default_ramdiskimage;
+	uint16_t default_conn_type[SYSTEM_DIMENSIONS];
 	uint16_t deny_pass;
 	double io_ratio;
 	uint16_t ionode_cnode_cnt;
 	uint16_t ionodes_per_mp;
 	bg_layout_t layout_mode;
 	List linux_list;
+	uint16_t max_block_err;
 	List mloader_list;
 	uint16_t mp_cnode_cnt;
 	uint16_t mp_nodecard_cnt;
@@ -79,6 +82,8 @@ typedef struct {
 	char *slurm_node_prefix;
 	char *slurm_user_name;
 	uint32_t smallest_block;
+	uint16_t sub_blocks;
+	uint16_t sub_mp_sys;
 } bg_config_t;
 
 typedef struct {
@@ -92,6 +97,15 @@ typedef struct {
 } bg_lists_t;
 
 typedef struct bg_record {
+	uint16_t action;                /* Any action that might be on
+					   the block.  At the moment,
+					   don't pack. */
+	bool avail_set;                 /* Used in sorting, don't copy
+					   or pack. */
+	uint32_t avail_cnode_cnt;       /* Used in sorting, don't copy
+					   or pack. */
+	time_t avail_job_end;           /* Used in sorting, don't copy
+					   or pack. */
 	void *bg_block;                 /* needed for L/P systems */
 	char *bg_block_id;     	        /* ID returned from MMCS */
 	List ba_mp_list;                /* List of midplanes in block */
@@ -102,8 +116,14 @@ typedef struct bg_record {
 					   0 = not booting,
 					   1 = booting */
 	uint32_t cnode_cnt;             /* count of cnodes per block */
+	uint32_t cnode_err_cnt;         /* count of cnodes in error on
+					   block */
 	uint16_t conn_type[SYSTEM_DIMENSIONS];  /* MESH or Torus or NAV */
 	uint32_t cpu_cnt;               /* count of cpus per block */
+	int destroy;                    /* if the block is being destroyed */
+	uint16_t err_ratio;             /* ratio of how much of this
+					   block is in an error
+					   state. (doesn't apply to BGL/P) */
 	int free_cnt;                   /* How many are trying
 					   to free this block at the
 					   same time */
@@ -115,8 +135,8 @@ typedef struct bg_record {
 					   are on.  NULL if not a small block*/
 	char *ionode_str;               /* String of ionodes in block
 					 * NULL if not a small block*/
-	List job_list;                  /* List of jobs running on a
-					   small block */
+	List job_list;                  /* List of job records running on a
+					   block that allows multiple jobs */
 	struct job_record *job_ptr;	/* pointer to job running on
 					 * block or NULL if no job */
 	int job_running;                /* job id of job running of if
@@ -133,8 +153,6 @@ typedef struct bg_record {
 					   of block */
 	int mp_count;                   /* size */
 	char *mp_str;   		/* String of midplanes in block */
-	bitstr_t *mp_used_bitmap;       /* cnodes used in this bitmap */
-	char *mp_used_str;   		/* String of midplanes used in block */
 	uint16_t node_use;      	/* either COPROCESSOR or VIRTUAL */
 	struct bg_record *original;     /* if this is a copy this is a
 					   pointer to the original */
@@ -143,13 +161,14 @@ typedef struct bg_record {
 	char *reason;                   /* reason block is in error state */
 	uint16_t state;                 /* Current state of the block */
 	uint16_t start[SYSTEM_DIMENSIONS];  /* start node */
+	uint16_t start_small[HIGHEST_DIMENSIONS]; /* On a small block
+						   * what the starting
+						   * cnode is to
+						   * figure out the
+						   * relative position
+						   * of jobs */
 	uint32_t switch_count;          /* number of switches
 					 * used. On L/P */
-	char *target_name;		/* when a block is freed this
-					   is the name of the user we
-					   want on the block */
-	char *user_name;		/* user using the block */
-	uid_t user_uid;   		/* Owner of block uid	*/
 } bg_record_t;
 
 #endif

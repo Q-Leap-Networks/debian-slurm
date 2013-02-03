@@ -143,7 +143,7 @@ main (int argc, char *argv[])
 			all_flag = 1;
 			break;
 		case (int)'d':
-			detail_flag = 1;
+			detail_flag++;
 			break;
 		case (int)'h':
 			_usage ();
@@ -552,6 +552,41 @@ _print_aliases (char* node_hostname)
 }
 
 /*
+ * _reboot_nodes - issue RPC to have computing nodes reboot when idle
+ * RET 0 or a slurm error code
+ */
+static int _reboot_nodes(char *node_list)
+{
+	slurm_ctl_conf_t *conf;
+	int rc;
+	slurm_msg_t msg;
+	reboot_msg_t req;
+
+	conf = slurm_conf_lock();
+	if (conf->reboot_program == NULL) {
+		error("RebootProgram isn't defined");
+		slurm_conf_unlock();
+		slurm_seterrno(SLURM_ERROR);
+		return SLURM_ERROR;
+	}
+	slurm_conf_unlock();
+
+	slurm_msg_t_init(&msg);
+
+	req.node_list = node_list;
+	msg.msg_type = REQUEST_REBOOT_NODES;
+	msg.data = &req;
+
+	if (slurm_send_recv_controller_rc_msg(&msg, &rc) < 0)
+		return SLURM_ERROR;
+
+	if (rc)
+		slurm_seterrno_ret(rc);
+
+	return rc;
+}
+
+/*
  * _process_command - process the user's command
  * IN argc - count of arguments
  * IN argv - the arguments
@@ -671,6 +706,16 @@ _process_command (int argc, char *argv[])
 		}
 		detail_flag = 1;
 	}
+	else if (strncasecmp (tag, "script", MAX(tag_len, 3)) == 0) {
+		if (argc > 1) {
+			exit_code = 1;
+			fprintf (stderr,
+				 "too many arguments for keyword:%s\n",
+				 tag);
+			return 0;
+		}
+		detail_flag = 2;
+	}
 	else if (strncasecmp (tag, "exit", MAX(tag_len, 1)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
@@ -742,6 +787,22 @@ _process_command (int argc, char *argv[])
 				 tag);
 		}
 		exit_flag = 1;
+	}
+	else if (strncasecmp (tag, "reboot_nodes", MAX(tag_len, 3)) == 0) {
+		if (argc > 2) {
+			exit_code = 1;
+			fprintf (stderr,
+				 "too many arguments for keyword:%s\n",
+				 tag);
+		} else if (argc < 2) {
+			error_code = _reboot_nodes("ALL");
+		} else
+			error_code = _reboot_nodes(argv[1]);
+		if (error_code) {
+			exit_code = 1;
+			if (quiet_flag != 1)
+				slurm_perror ("scontrol_reboot_nodes error");
+		}
 	}
 	else if (strncasecmp (tag, "reconfigure", MAX(tag_len, 3)) == 0) {
 		if (argc > 2) {
@@ -988,7 +1049,7 @@ _process_command (int argc, char *argv[])
 			}
 		}
 	}
-	else if (strncasecmp (tag, "schedloglevel", MAX(tag_len, 2)) == 0) {
+	else if (strncasecmp (tag, "schedloglevel", MAX(tag_len, 3)) == 0) {
 		if (argc > 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
@@ -1405,7 +1466,8 @@ _update_it (int argc, char *argv[])
 			step_tag = 1;
 		} else if (!strncasecmp(tag, "BlockName", MAX(tag_len, 3))) {
 			block_tag = 1;
-		} else if (!strncasecmp(tag, "SubBPName", MAX(tag_len, 3))) {
+		} else if (!strncasecmp(tag, "SubBPName", MAX(tag_len, 3))
+			   || !strncasecmp(tag, "SubMPName", MAX(tag_len, 3))) {
 			sub_tag = 1;
 		} else if (!strncasecmp(tag, "FrontendName",
 					MAX(tag_len, 2))) {
@@ -1416,7 +1478,7 @@ _update_it (int argc, char *argv[])
 		} else if (!strncasecmp(tag, "SlurmctldDebug",
 					MAX(tag_len, 2))) {
 			debug_tag= 1;
-		} 
+		}
 	}
 
 	/* The order of tests matters here.  An update job request can include
@@ -1449,7 +1511,7 @@ _update_it (int argc, char *argv[])
 		fprintf(stderr, "No valid entity in update command\n");
 		fprintf(stderr, "Input line must include \"NodeName\", ");
 		if(cluster_flags & CLUSTER_FLAG_BG) {
-			fprintf(stderr, "\"BlockName\", \"SubBPName\" "
+			fprintf(stderr, "\"BlockName\", \"SubMPName\" "
 				"(i.e. bgl000[0-3]),");
 		}
 		fprintf(stderr, "\"PartitionName\", \"Reservation\", "
@@ -1582,12 +1644,13 @@ _update_bluegene_subbp (int argc, char *argv[])
 			vallen = strlen(val);
 		} else {
 			exit_code = 1;
-			error("Invalid input for BlueGene SubBPName update %s",
+			error("Invalid input for BlueGene SubMPName update %s",
 			      argv[i]);
 			return 0;
 		}
 
-		if (!strncasecmp(tag, "SubBPName", MAX(tag_len, 2)))
+		if (!strncasecmp(tag, "SubBPName", MAX(tag_len, 2))
+		    || !strncasecmp(tag, "SubMPName", MAX(tag_len, 2)))
 			block_msg.mp_str = val;
 		else if (!strncasecmp(tag, "State", MAX(tag_len, 2))) {
 			if (!strncasecmp(val, "ERROR", MAX(vallen, 1)))
@@ -1605,7 +1668,7 @@ _update_bluegene_subbp (int argc, char *argv[])
 			update_cnt++;
 		} else {
 			exit_code = 1;
-			error("Invalid input for BlueGene SubBPName update %s",
+			error("Invalid input for BlueGene SubMPName update %s",
 			      argv[i]);
 			return 0;
 		}
@@ -1707,6 +1770,8 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
      ping                     print status of slurmctld daemons.           \n\
      quiet                    print no messages other than error messages. \n\
      quit                     terminate this command.                      \n\
+     reboot_nodes [<nodelist>]  reboot the nodes when they become idle.    \n\
+                              By default all nodes are rebooted.           \n\
      reconfigure              re-read configuration files.                 \n\
      release <job_id>         permit specified job to start (see hold)     \n\
      requeue <job_id>         re-queue a batch job                         \n\

@@ -44,7 +44,7 @@ const char *basil_strerror(int rc)
  */
 void extract_attributes(const XML_Char **attr_list, char **reqv, int reqc)
 {
-	const XML_Char **attr, *val;
+	const XML_Char **attr, *val = NULL;
 
 	while (--reqc >= 0) {
 		for (attr = attr_list, val = NULL; *attr; attr += 2)
@@ -57,6 +57,7 @@ void extract_attributes(const XML_Char **attr_list, char **reqv, int reqc)
 		if (val == NULL)
 			fatal("unspecified '%s' attribute", reqv[reqc]);
 		reqv[reqc] = (XML_Char *)val;
+		val = NULL;
 	}
 }
 
@@ -487,7 +488,8 @@ static const struct element_handler *basil_tables[BV_MAX] = {
 	[BV_3_1] = basil_3_1_elements,
 	[BV_4_0] = basil_4_0_elements,
 	[BV_4_1] = basil_4_0_elements,
-	[BV_5_0] = basil_4_0_elements
+	[BV_5_0] = basil_4_0_elements,
+	[BV_5_1] = basil_4_0_elements
 };
 
 /**

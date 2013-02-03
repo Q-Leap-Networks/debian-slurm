@@ -281,7 +281,8 @@ static int _setup_cluster_rec(slurmdb_cluster_rec_t *cluster_rec)
 		i = len - cluster_rec->dimensions;
 		if (nodes[len-1] == ']')
 			i--;
-		if (i > cluster_rec->dimensions) {
+
+		if (i > 0) {
 			char *p = '\0';
 			number = xstrntol(nodes + i, &p,
 					  cluster_rec->dimensions, 36);
@@ -312,6 +313,9 @@ static uint32_t _str_2_qos_flags(char *flags)
 
 	if (slurm_strcasestr(flags, "PartitionTimeLimit"))
 		return QOS_FLAG_PART_TIME_LIMIT;
+
+	if (slurm_strcasestr(flags, "RequiresReservation"))
+		return QOS_FLAG_REQ_RESV;
 
 	if (slurm_strcasestr(flags, "NoReserve"))
 		return QOS_FLAG_NO_RESERVE;
@@ -651,6 +655,8 @@ extern void slurmdb_destroy_association_cond(void *object)
 			list_destroy(slurmdb_association->grp_cpus_list);
 		if(slurmdb_association->grp_jobs_list)
 			list_destroy(slurmdb_association->grp_jobs_list);
+		if(slurmdb_association->grp_mem_list)
+			list_destroy(slurmdb_association->grp_mem_list);
 		if(slurmdb_association->grp_nodes_list)
 			list_destroy(slurmdb_association->grp_nodes_list);
 		if(slurmdb_association->grp_submit_jobs_list)
@@ -725,6 +731,8 @@ extern void slurmdb_destroy_job_cond(void *object)
 			list_destroy(job_cond->cluster_list);
 		if(job_cond->groupid_list)
 			list_destroy(job_cond->groupid_list);
+		if(job_cond->jobname_list)
+			list_destroy(job_cond->jobname_list);
 		if(job_cond->partition_list)
 			list_destroy(job_cond->partition_list);
 		if(job_cond->qos_list)
@@ -1028,6 +1036,7 @@ extern void slurmdb_init_association_rec(slurmdb_association_rec_t *assoc,
 	assoc->grp_cpu_run_mins = (uint64_t)NO_VAL;
 	assoc->grp_cpus = NO_VAL;
 	assoc->grp_jobs = NO_VAL;
+	assoc->grp_mem = NO_VAL;
 	assoc->grp_nodes = NO_VAL;
 	assoc->grp_submit_jobs = NO_VAL;
 	assoc->grp_wall = NO_VAL;
@@ -1083,6 +1092,7 @@ extern void slurmdb_init_qos_rec(slurmdb_qos_rec_t *qos, bool free_it)
 	qos->grp_cpu_run_mins = (uint64_t)NO_VAL;
 	qos->grp_cpus = NO_VAL;
 	qos->grp_jobs = NO_VAL;
+	qos->grp_mem = NO_VAL;
 	qos->grp_nodes = NO_VAL;
 	qos->grp_submit_jobs = NO_VAL;
 	qos->grp_wall = NO_VAL;
@@ -1201,6 +1211,8 @@ extern char *slurmdb_qos_flags_str(uint32_t flags)
 		xstrcat(qos_flags, "PartitionMinNodes,");
 	if (flags & QOS_FLAG_PART_TIME_LIMIT)
 		xstrcat(qos_flags, "PartitionTimeLimit,");
+	if (flags & QOS_FLAG_REQ_RESV)
+		xstrcat(qos_flags, "RequiresReservation,");
 
 	if (qos_flags)
 		qos_flags[strlen(qos_flags)-1] = '\0';
@@ -1714,6 +1726,11 @@ extern void log_assoc_rec(slurmdb_association_rec_t *assoc_ptr,
 		debug2("  GrpJobs          : NONE");
 	else if(assoc_ptr->grp_jobs != NO_VAL)
 		debug2("  GrpJobs          : %u", assoc_ptr->grp_jobs);
+
+	if(assoc_ptr->grp_mem == INFINITE)
+		debug2("  GrpMemory        : NONE");
+	else if(assoc_ptr->grp_mem != NO_VAL)
+		debug2("  GrpMemory        : %u", assoc_ptr->grp_mem);
 
 	if(assoc_ptr->grp_nodes == INFINITE)
 		debug2("  GrpNodes         : NONE");

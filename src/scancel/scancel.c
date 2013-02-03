@@ -362,7 +362,6 @@ _cancel_jobs_by_state(uint16_t job_state)
 			for (j = 0; j < opt.job_cnt; j++ ) {
 				if (job_ptr[i].job_id != opt.job_id[j])
 					continue;
-
 				if (opt.interactive &&
 				    (_confirmation(i, opt.step_id[j]) == 0))
 					continue;
@@ -611,7 +610,6 @@ _confirmation (int i, uint32_t step_id)
 			        job_ptr[i].job_id, step_id, job_ptr[i].name,
 				job_ptr[i].partition);
 		}
-
 		if (fgets(in_line, sizeof(in_line), stdin) == NULL)
 			continue;
 		if ((in_line[0] == 'y') || (in_line[0] == 'Y'))

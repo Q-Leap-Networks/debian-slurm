@@ -39,6 +39,7 @@
 
 #include "src/smap/smap.h"
 #include "src/common/proc_args.h"
+#include "src/common/xstring.h"
 
 /* FUNCTIONS */
 static void _help(void);
@@ -201,44 +202,90 @@ extern void print_date(void)
 
 extern void clear_window(WINDOW *win)
 {
-	int x,y;
-	for(x=0; x<=win->_maxx; x++)
-		for(y=0; y<win->_maxy; y++) {
+	int x, y;
+	for (x = 0; x < getmaxx(win); x++)
+		for (y = 0; y < getmaxy(win); y++) {
 			mvwaddch(win, y, x, ' ');
 		}
 	wmove(win, 1, 1);
 	wnoutrefresh(win);
 }
 
-extern char *resolve_mp(char *desc)
+extern char *resolve_mp(char *desc, node_info_msg_t *node_info_ptr)
 {
 	char *ret_str = NULL;
 #if defined HAVE_BG_FILES
 	ba_mp_t *ba_mp = NULL;
-	int i;
+	int i, start_pos;
+	char *name;
 
 	if (!desc) {
 		ret_str = xstrdup("No Description given.\n");
 		goto fini;
 	}
 
-#ifdef HAVE_BG
-	bg_configure_ba_setup_wires();
-#endif
-	i = strlen(desc) - params.cluster_dims;
-	if (i < 0) {
+	start_pos = strlen(desc) - params.cluster_dims;
+	if (start_pos < 0) {
 		ret_str = xstrdup_printf("Must enter %d coords to resolve.\n",
 					 params.cluster_dims);
 		goto fini;
 	}
 
+	if (desc[0] != 'R')
+		name = desc+start_pos;
+	else
+		name = desc;
+
+	if (node_info_ptr) {
+		for (i=0; i<node_info_ptr->record_count; i++) {
+			char *rack_mid, *node_geo;
+			node_info_t *node_ptr = &(node_info_ptr->node_array[i]);
+
+			if (!node_ptr->name || (node_ptr->name[0] == '\0'))
+				continue;
+			start_pos = strlen(node_ptr->name)
+				- params.cluster_dims;
+			node_geo = node_ptr->name+start_pos;
+
+			slurm_get_select_nodeinfo(node_ptr->select_nodeinfo,
+						  SELECT_NODEDATA_RACK_MP,
+						  0, &rack_mid);
+			if (!rack_mid)
+				break;
+			if (desc[0] != 'R') {
+				if (!strcasecmp(name, node_geo))
+					ret_str = xstrdup_printf(
+						"%s resolves to %s\n",
+						node_geo, rack_mid);
+			} else if (!strcasecmp(name, rack_mid))
+				ret_str = xstrdup_printf(
+					"%s resolves to %s\n",
+					rack_mid, node_geo);
+
+			xfree(rack_mid);
+			if (ret_str)
+				return ret_str;
+		}
+		if (desc[0] != 'R')
+			ret_str = xstrdup_printf("%s has no resolve\n", name);
+		else
+			ret_str = xstrdup_printf("%s has no resolve.\n", desc);
+		return ret_str;
+	}
+
+	/* Quite any errors that could come our way here. */
+	ba_configure_set_ba_debug_flags(0);
+
+	bg_configure_ba_setup_wires();
+
 	if (desc[0] != 'R') {
-		ba_mp = bg_configure_str2ba_mp(desc+i);
+		ba_mp = bg_configure_str2ba_mp(name);
 		if (ba_mp)
 			ret_str = xstrdup_printf("%s resolves to %s\n",
 						 ba_mp->coord_str, ba_mp->loc);
 		else
-			ret_str = xstrdup_printf("%s has no resolve\n", desc+i);
+			ret_str = xstrdup_printf("%s has no resolve\n",
+						 name);
 	} else {
 		ba_mp = bg_configure_loc2ba_mp(desc);
 		if (ba_mp)

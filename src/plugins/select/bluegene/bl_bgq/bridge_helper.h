@@ -56,12 +56,20 @@ extern "C" {
 #include <bgsched/Block.h>
 #include <bgsched/core/core.h>
 
+#include <bgsched/realtime/ClientStateException.h>
+#include <bgsched/realtime/ConnectionException.h>
+#include <bgsched/realtime/InternalErrorException.h>
+#include <bgsched/realtime/ConfigurationException.h>
+#include <bgsched/realtime/FilterException.h>
+#include <bgsched/realtime/ProtocolException.h>
+
 #include <boost/foreach.hpp>
 
 using namespace std;
 using namespace bgsched;
 using namespace bgsched::core;
 
+/* core errors */
 extern int bridge_handle_database_errors(
 	const char *function, const uint32_t err);
 extern int bridge_handle_init_errors(
@@ -74,8 +82,39 @@ extern int bridge_handle_runtime_errors(const char *function,
 					const uint32_t err,
 					bg_record_t *bg_record);
 
+/* realtime errors */
+extern int bridge_handle_realtime_client_errors(const char *function,
+						const uint32_t err);
+extern int bridge_handle_realtime_configuration_errors(const char *function,
+						       const uint32_t err);
+extern int bridge_handle_realtime_connection_errors(const char *function,
+						    const uint32_t err);
+extern int bridge_handle_realtime_filter_errors(const char *function,
+						const uint32_t err);
+extern int bridge_handle_realtime_internal_errors(const char *function,
+						  const uint32_t err);
+extern int bridge_handle_realtime_protocol_errors(const char *function,
+						  const uint32_t err);
+
+/* traslate functions */
 extern uint16_t bridge_translate_status(bgsched::Block::Status state_in);
+#if defined HAVE_BG_GET_ACTION
+extern uint16_t bridge_translate_action(
+	bgsched::Block::Action::Value action_in);
+#endif
 extern uint16_t bridge_translate_switch_usage(bgsched::Switch::InUse usage_in);
+extern const char *bridge_hardware_state_string(const int state);
+
+/* helper functions */
+extern Block::Ptrs bridge_get_blocks(BlockFilter filter);
+extern Midplane::ConstPtr bridge_get_midplane(ComputeHardware::ConstPtr bgqsys,
+					      ba_mp_t *ba_mp);
+extern Node::ConstPtrs bridge_get_midplane_nodes(const std::string& loc);
+extern NodeBoard::ConstPtr bridge_get_nodeboard(Midplane::ConstPtr mp_ptr,
+						int nodeboard_num);
+extern NodeBoard::ConstPtrs bridge_get_nodeboards(const std::string& mp_loc);
+extern Switch::ConstPtr bridge_get_switch(Midplane::ConstPtr mp_ptr, int dim);
+extern ComputeHardware::ConstPtr bridge_get_compute_hardware();
 
 #endif
 

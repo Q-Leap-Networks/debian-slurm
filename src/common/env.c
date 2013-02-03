@@ -147,9 +147,10 @@ static int _setup_particulars(uint32_t cluster_flags,
 		if (resv_id) {
 			setenvf(dest, "BASIL_RESERVATION_ID", "%u", resv_id);
 		} else {
-			error("Can't set BASIL_RESERVATION_ID "
-			      "environment variable");
-			rc = SLURM_FAILURE;
+			/* This is not an error for a SLURM job allocation with
+			 * no compute nodes and no BASIL reservation */
+			verbose("Can't set BASIL_RESERVATION_ID "
+			        "environment variable");
 		}
 
 	} else if (cluster_flags & CLUSTER_FLAG_AIX) {
@@ -707,10 +708,16 @@ int setup_env(env_t *env, bool preserve_env)
 		rc = SLURM_FAILURE;
 	}
 
-	if (env->stepid >= 0
-	    && setenvf(&env->env, "SLURM_STEPID", "%d", env->stepid)) {
-		error("Unable to set SLURM_STEPID environment");
-		rc = SLURM_FAILURE;
+	if (env->stepid >= 0) {
+		if (setenvf(&env->env, "SLURM_STEP_ID", "%d", env->stepid)) {
+			error("Unable to set SLURM_STEP_ID environment");
+			rc = SLURM_FAILURE;
+		}
+		/* and for backwards compatability... */
+		if (setenvf(&env->env, "SLURM_STEPID", "%d", env->stepid)) {
+			error("Unable to set SLURM_STEPID environment");
+			rc = SLURM_FAILURE;
+		}
 	}
 
 	if (!preserve_env && env->nhosts
@@ -906,6 +913,7 @@ extern char *uint32_compressed_to_str(uint32_t array_len,
  *	SLURM_JOB_NUM_NODES
  *	SLURM_JOB_NODELIST
  *	SLURM_JOB_CPUS_PER_NODE
+ *	SLURM_NODE_ALIASES
  *	LOADLBATCH (AIX only)
  *	SLURM_BG_NUM_NODES, MPIRUN_PARTITION, MPIRUN_NOFREE, and
  *	MPIRUN_NOALLOCATE (BG only)
@@ -945,17 +953,19 @@ env_array_for_job(char ***dest, const resource_allocation_response_msg_t *alloc,
 	env_array_overwrite_fmt(dest, "SLURM_JOB_NUM_NODES", "%u", node_cnt);
 	env_array_overwrite_fmt(dest, "SLURM_JOB_NODELIST", "%s",
 				alloc->node_list);
+	env_array_overwrite_fmt(dest, "SLURM_NODE_ALIASES", "%s",
+				alloc->alias_list);
 
 	_set_distribution(desc->task_dist, &dist, &lllp_dist);
-	if(dist)
+	if (dist)
 		env_array_overwrite_fmt(dest, "SLURM_DISTRIBUTION", "%s",
 					dist);
 
-	if(desc->task_dist == SLURM_DIST_PLANE)
+	if (desc->task_dist == SLURM_DIST_PLANE)
 		env_array_overwrite_fmt(dest, "SLURM_DIST_PLANESIZE",
 					"%u", desc->plane_size);
 
-	if(lllp_dist)
+	if (lllp_dist)
 		env_array_overwrite_fmt(dest, "SLURM_DIST_LLLP", "%s",
 					lllp_dist);
 
@@ -1054,6 +1064,7 @@ env_array_for_job(char ***dest, const resource_allocation_response_msg_t *alloc,
  *	SLURM_JOB_NUM_NODES
  *	SLURM_JOB_NODELIST
  *	SLURM_JOB_CPUS_PER_NODE
+ *	SLURM_NODE_ALIASES
  *	ENVIRONMENT=BATCH
  *	HOSTNAME
  *	LOADLBATCH (AIX only)
@@ -1095,6 +1106,8 @@ env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch,
 					"%u", num_nodes);
 
 	env_array_overwrite_fmt(dest, "SLURM_JOB_NODELIST", "%s", batch->nodes);
+	env_array_overwrite_fmt(dest, "SLURM_NODE_ALIASES", "%s",
+				batch->alias_list);
 
 	tmp = uint32_compressed_to_str(batch->num_cpu_groups,
 				       batch->cpus_per_node,
@@ -1682,6 +1695,13 @@ char **env_array_from_file(const char *fname)
 		if (_env_array_entry_splitter(ptr, name, sizeof(name),
 					      value, ENV_BUFSIZE) &&
 		    (!_discard_env(name, value))) {
+			/*
+			 * Unset the SLURM_SUBMIT_DIR if it is defined so
+			 * that this new value does not get overwritten
+			 * in the subsequent call to env_array_merge().
+			 */
+			if (strcmp(name, "SLURM_SUBMIT_DIR") == 0)
+				unsetenv(name);
 			env_array_overwrite(&env, name, value);
 		}
 	}

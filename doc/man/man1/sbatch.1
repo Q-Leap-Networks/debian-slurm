@@ -1,4 +1,4 @@
-.TH "sbatch" "1" "SLURM 2.3" "August 2011" "SLURM Commands"
+.TH "sbatch" "1" "SLURM 2.4" "October 2011" "SLURM Commands"
 
 .SH "NAME"
 sbatch \- Submit a batch script to SLURM.
@@ -145,31 +145,53 @@ special characters.
 
 .TP
 \fB\-C\fR, \fB\-\-constraint\fR=<\fIlist\fR>
-Specify a list of constraints.
-The constraints are features that have been assigned to the nodes by
-the slurm administrator.
-The \fIlist\fR of constraints may include multiple features separated
-by ampersand (AND) and/or vertical bar (OR) operators.
-For example: \fB\-\-constraint="opteron&video"\fR or
-\fB\-\-constraint="fast|faster"\fR.
-In the first example, only nodes having both the feature "opteron" AND
-the feature "video" will be used.
-There is no mechanism to specify that you want one node with feature
-"opteron" and another node with feature "video" in case no
-node has both features.
+Nodes can have \fBfeatures\fR assigned to them by the SLURM administrator.
+Users can specify which of these \fBfeatures\fR are required by their job
+using the constraint option.
+Only nodes having features matching the job constraints will be used to
+satisfy the request.
+Multiple constraints may be specified with AND, OR, exclusive OR, 
+resource counts, etc.
+Supported \fbconstraint\fR options include:
+.PD 1
+.RS
+.TP
+\fBSingle Name\fR
+Only nodes which have the specified feature will be used.
+For example, \fB\-\-constraint="intel"\fR
+.TP
+\fBNode Count\fB
+A request can specify the number of nodes needed with some feature
+by appending an asterisk and count after the feature name.
+For example "\fB\-\-nodes=16 \-\-constraint=graphics*4 ..."\fR
+indicates that the job requires 16 nodes at that at least four of those
+nodes must have the feature "graphics."
+.TP
+\fBAND\fR
+If only nodes with all of specified features will be used.
+The ampersand is used for an AND operator.
+For example, \fB\-\-constraint="intel&gpu"\fR
+.TP
+\fBOR\fR
+If only nodes with at least one of specified features will be used.
+The vertical bar is used for an OR operator.
+For example, \fB\-\-constraint="intel|amd"\fR
+.TP
+\fBExclusive OR\fR
 If only one of a set of possible options should be used for all allocated
 nodes, then use the OR operator and enclose the options within square brackets.
 For example: "\fB\-\-constraint=[rack1|rack2|rack3|rack4]"\fR might
 be used to specify that all nodes must be allocated on a single rack of
 the cluster, but any of those four racks can be used.
-A request can also specify the number of nodes needed with some feature
-by appending an asterisk and count after the feature name.
-For example "\fBsbatch \-\-nodes=16 \-\-constraint=graphics*4 ..."\fR
-indicates that the job requires 16 nodes and that at least four of those
-nodes must have the feature "graphics."
-Constraints with node counts may only be combined with AND operators.
-If no nodes have the requested features, then the job will be rejected
-by the slurm job manager.
+.TP
+\fBMultiple Counts\fR
+Specific counts of multiple resources may be specified by using the AND
+operator and enclosing the options within square brackets.
+For example: "\fB\-\-constraint=[rack1*2&rack2*4]"\fR might
+be used to specify that two nodes must be allocated from nodes with the feature
+of "rack1" and four nodes must be allocated from nodes with the feature 
+"rack2".
+.RE
 
 .TP
 \fB\-\-contiguous\fR
@@ -473,6 +495,7 @@ The batch script will only be submitted to the controller if the resources
 necessary to grant its job allocation are immediately available.  If the
 job allocation will have to wait in a queue of pending jobs, the batch script
 will not be submitted.
+NOTE: There is limitted support for this option with batch jobs.
 
 .TP
 \fB\-i\fR, \fB\-\-input\fR=<\fIfilename pattern\fR>
@@ -488,12 +511,11 @@ The filename pattern may contain one or more replacement symbols, which are
 a percent sign "%" followed by a letter (e.g. %j).
 
 Supported replacement symbols are:
-.PD 0
-.RS 10
+.PD
+.RS
 .TP
 \fB%j\fR
 Job allocation number.
-.PD 0
 .TP
 \fB%N\fR
 Node name.  Only one file is created, so %N will be replaced by the name of the
@@ -609,8 +631,13 @@ Inside the hostfile must contain at minimum the number of hosts
 requested and be one per line or comma separated.  If specifying a
 task count (\fB\-n\fR, \fB\-\-ntasks\fR=<\fInumber\fR>), your tasks
 will be laid out on the nodes in the order of the file.
-.TP
+.br
+\fBNOTE:\fR The arbitrary distribution option on a job allocation only
+controls the nodes to be allocated to the job and not the allocation of
+CPUs on those nodes. This option is meant primarily to control a job step's
+task layout in an existing job allocation for the srun command.
 
+.TP
 Second distribution method:
 .TP
 .B block
@@ -645,6 +672,10 @@ This parameter would generally be used if whole nodes
 are allocated to jobs (\fBSelectType=select/linear\fR).
 Also see \fB\-\-mem\-per\-cpu\fR.
 \fB\-\-mem\fR and \fB\-\-mem\-per\-cpu\fR are mutually exclusive.
+NOTE: Enforcement of memory limits currently requires enabling of
+accounting, which samples memory use on a periodic basis (data need
+not be stored, just collected). A task may exceed the memory limit 
+until the next periodic accounting sample.
 
 .TP
 \fB\-\-mem\-per\-cpu\fR=<\fIMB\fR>
@@ -977,19 +1008,23 @@ task/affinity plugin is enabled.
 When a tree topology is used, this defines the maximum count of switches
 desired for the job allocation and optionally the maximum time to wait
 for that number of switches. If SLURM finds an allocation containing more
-switches than the count specified, the job remain pending until it either finds
-an allocation with desired switch count or the time limit expires. By default
-there is no switch count limit and there is no delay in starting the job.
+switches than the count specified, the job remains pending until it either finds
+an allocation with desired switch count or the time limit expires. 
+It there is no switch count limit, there is no delay in starting the job.
+Acceptable time formats include "minutes", "minutes:seconds",
+"hours:minutes:seconds", "days\-hours", "days\-hours:minutes" and
+"days\-hours:minutes:seconds".
 The job's maximum time delay may be limited by the system administrator using
 the \fBSchedulerParameters\fR configuration parameter with the
 \fBmax_switch_wait\fR parameter option.
+The default max\-time is the max_switch_wait SchedulerParameter.
 
 .TP
 \fB\-t\fR, \fB\-\-time\fR=<\fItime\fR>
 Set a limit on the total run time of the job allocation.  If the
 requested time limit exceeds the partition's time limit, the job will
 be left in a PENDING state (possibly indefinitely).  The default time
-limit is the partition's time limit.  When the time limit is reached,
+limit is the partition's default time limit.  When the time limit is reached,
 each task in each job step is sent SIGTERM followed by SIGKILL.  The
 interval between signals is specified by the SLURM configuration
 parameter \fBKillWait\fR.  A time limit of zero requests that no time
@@ -1103,23 +1138,28 @@ Default from \fIblugene.conf\fR if not set.
 
 .TP
 \fB\-\-conn\-type\fR=<\fItype\fR>
-Require the partition connection type to be of a certain type.
+Require the block connection type to be of a certain type.
 On Blue Gene the acceptable of \fItype\fR are MESH, TORUS and NAV.
-If NAV, or if not set, then SLURM will try to fit a TORUS else MESH.
+If NAV, or if not set, then SLURM will try to fit a what the
+DefaultConnType is set to in the bluegene.conf if that isn't set the
+default is TORUS.
 You should not normally set this option.
-SLURM will normally allocate a TORUS if possible for a given geometry.
 If running on a BGP system and wanting to run in HTC mode (only for 1
 midplane and below).  You can use HTC_S for SMP, HTC_D for Dual, HTC_V
 for virtual node mode, and HTC_L for Linux mode.
-A comma separated lists of connection types may be specified, one for each dimension.
+For systems that allow a different connection type per dimension you
+can supply a comma separated list of connection types may be specified, one for
+each dimension (i.e. M,T,T,T will give you a torus connection is all
+dimensions expect the first).
 
 .TP
 \fB\-g\fR, \fB\-\-geometry\fR=<\fIXxYxZ\fR>
 Specify the geometry requirements for the job. The three numbers
 represent the required geometry giving dimensions in the X, Y and
 Z directions. For example "\-\-geometry=2x3x4", specifies a block
-of nodes having 2 x 3 x 4 = 24 nodes (actually base partitions on
-Blue Gene).
+of nodes having 2 x 3 x 4 = 24 nodes (actually midplanes on
+Blue Gene).  On a BGQ system the dimensions are AxXxYxZ, and can not
+be used to allocation sub-blocks.
 
 .TP
 \fB\-\-ioload\-image\fR=<\fIpath\fR>
@@ -1294,6 +1334,12 @@ Do not allocate a block on Blue Gene systems only.
 .TP
 \fBMPIRUN_NOFREE\fR
 Do not free a block on Blue Gene systems only.
+.TP
+\fBSLURM_NODE_ALIASES\fR
+Sets of node name, communication address and hostname for nodes allocated to
+the job from the cloud. Each element in the set if colon separated and each
+set is comma separated. For example:
+SLURM_NODE_ALIASES=ec0:1.2.3.4:foo,ec1:1.2.3.5:bar
 .TP
 \fBSLURM_NTASKS_PER_CORE\fR
 Number of tasks requested per core.

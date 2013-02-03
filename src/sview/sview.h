@@ -303,14 +303,15 @@ typedef struct {
 } grid_button_t;
 
 typedef struct {
-	node_info_t *node_ptr;
-	char *color;
-	int pos;
 	char *boot_time;
-	char *reason;
-	char *slurmd_start_time;
-	bool iter_set;
+	char *color;
 	GtkTreeIter iter_ptr;
+	bool iter_set;
+	node_info_t *node_ptr;
+	int pos;
+	char *reason;
+	char *rack_mp;
+	char *slurmd_start_time;
 } sview_node_info_t;
 
 typedef struct {
@@ -512,7 +513,7 @@ extern void cluster_change_job(void);
 extern void refresh_node(GtkAction *action, gpointer user_data);
 /* don't destroy the list from this function */
 extern List create_node_info_list(node_info_msg_t *node_info_ptr,
-				  int changed, bool by_partition);
+				  bool by_partition);
 extern int update_features_node(GtkDialog *dialog, const char *nodelist,
 				const char *old_features);
 extern int update_state_node(GtkDialog *dialog,
@@ -625,6 +626,7 @@ extern void destroy_signal_params(void *arg);
 extern gboolean delete_popup(GtkWidget *widget, GtkWidget *event, char *title);
 extern gboolean delete_popups(void);
 extern void *popup_thr(popup_info_t *popup_win);
+extern void set_for_update(GtkTreeModel *model, int updated);
 extern void remove_old(GtkTreeModel *model, int updated);
 extern GtkWidget *create_pulldown_combo(display_data_t *display_data,
 					int count);

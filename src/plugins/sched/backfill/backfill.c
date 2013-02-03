@@ -94,6 +94,12 @@
 #define   BACKFILL_WINDOW		(24 * 60 * 60)
 #endif
 
+/* Length of uid/njobs arrays used for limiting the number of jobs
+ * per user considered in each backfill iteration */
+#ifndef BF_MAX_USERS
+#  define BF_MAX_USERS	1000
+#endif
+
 #define SLURMCTLD_THREAD_LIMIT	5
 
 typedef struct node_space_map {
@@ -102,7 +108,10 @@ typedef struct node_space_map {
 	bitstr_t *avail_bitmap;
 	int next;	/* next record, by time, zero termination */
 } node_space_map_t;
-int backfilled_jobs = 0;
+
+/* Diag statistics */
+extern diag_stats_t slurmctld_diag_stats;
+int bf_last_ints = 0;
 
 /*********************** local variables *********************/
 static bool stop_backfill = false;
@@ -115,6 +124,7 @@ static int backfill_interval = BACKFILL_INTERVAL;
 static int backfill_resolution = BACKFILL_RESOLUTION;
 static int backfill_window = BACKFILL_WINDOW;
 static int max_backfill_job_cnt = 50;
+static int max_backfill_job_per_user = 0;
 
 /*********************** local functions *********************/
 static void _add_reservation(uint32_t start_time, uint32_t end_reserve,
@@ -369,11 +379,21 @@ static void _load_config(void)
 		fatal("Invalid backfill scheduler max_job_bf: %d",
 		      max_backfill_job_cnt);
 	}
+	/* "bf_res=" is vestigial from version 2.3 and can be removed later.
+	 * Only "bf_resolution=" is documented. */
 	if (sched_params && (tmp_ptr=strstr(sched_params, "bf_res=")))
 		backfill_resolution = atoi(tmp_ptr + 7);
+	if (sched_params && (tmp_ptr=strstr(sched_params, "bf_resolution=")))
+		backfill_resolution = atoi(tmp_ptr + 14);
 	if (backfill_resolution < 1) {
 		fatal("Invalid backfill scheduler resolution: %d",
 		      backfill_resolution);
+	}
+	if (sched_params && (tmp_ptr=strstr(sched_params, "bf_max_job_user=")))
+		max_backfill_job_per_user = atoi(tmp_ptr + 16);
+	if (max_backfill_job_per_user < 0) {
+		fatal("Invalid backfill scheduler bf_max_job_user: %d",
+		      max_backfill_job_per_user);
 	}
 
 	xfree(sched_params);
@@ -384,6 +404,32 @@ extern void backfill_reconfig(void)
 {
 	config_flag = true;
 }
+
+static void _do_diag_stats(struct timeval *tv1, struct timeval *tv2)
+{
+	long delta_t;
+	long bf_interval_usecs = backfill_interval * 1000000;
+
+	delta_t  = (tv2->tv_sec  - tv1->tv_sec) * 1000000;
+	delta_t +=  tv2->tv_usec - tv1->tv_usec;
+
+	slurmctld_diag_stats.bf_cycle_counter++;
+	slurmctld_diag_stats.bf_cycle_sum += (delta_t -(bf_last_ints *
+							bf_interval_usecs));
+   	slurmctld_diag_stats.bf_cycle_last = delta_t - (bf_last_ints *
+							bf_interval_usecs);
+	slurmctld_diag_stats.bf_depth_sum += slurmctld_diag_stats.bf_last_depth;
+	slurmctld_diag_stats.bf_depth_try_sum += slurmctld_diag_stats.
+						 bf_last_depth_try;
+	if (slurmctld_diag_stats.bf_cycle_last >
+	    slurmctld_diag_stats.bf_cycle_max) {
+		slurmctld_diag_stats.bf_cycle_max = slurmctld_diag_stats.
+						    bf_cycle_last;
+	}
+
+	slurmctld_diag_stats.bf_active = 0;
+}
+
 
 /* backfill_agent - detached thread periodically attempts to backfill jobs */
 extern void *backfill_agent(void *args)
@@ -433,6 +479,7 @@ static int _yield_locks(int secs)
 	part_update = last_part_update;
 
 	unlock_slurmctld(all_locks);
+	bf_last_ints++;
 	_my_sleep(secs);
 	lock_slurmctld(all_locks);
 
@@ -461,9 +508,13 @@ static int _attempt_backfill(void)
 	bitstr_t *avail_bitmap = NULL, *resv_bitmap = NULL;
 	time_t now, sched_start, later_start, start_res;
 	node_space_map_t *node_space;
+	struct timeval bf_time1, bf_time2;
 	static int sched_timeout = 0;
 	int this_sched_timeout = 0, rc = 0;
 	int job_test_count = 0;
+	uint32_t *uid = NULL, nuser = 0;
+	uint16_t *njobs = NULL;
+	bool already_counted;
 
 #ifdef HAVE_CRAY
 	/*
@@ -500,11 +551,22 @@ static int _attempt_backfill(void)
 		filter_root = true;
 
 	job_queue = build_job_queue(true);
-	if (list_count(job_queue) <= 1) {
+	if (list_count(job_queue) == 0) {
 		debug("backfill: no jobs to backfill");
 		list_destroy(job_queue);
 		return 0;
 	}
+
+	gettimeofday(&bf_time1, NULL);
+
+	slurmctld_diag_stats.bf_queue_len = list_count(job_queue);
+	slurmctld_diag_stats.bf_queue_len_sum += slurmctld_diag_stats.
+						 bf_queue_len;
+	slurmctld_diag_stats.bf_last_depth = 0;
+	slurmctld_diag_stats.bf_last_depth_try = 0;
+	slurmctld_diag_stats.bf_when_last_cycle = now;
+	bf_last_ints = 0;
+	slurmctld_diag_stats.bf_active = 1;
 
 	node_space = xmalloc(sizeof(node_space_map_t) *
 			     (max_backfill_job_cnt + 3));
@@ -516,6 +578,10 @@ static int _attempt_backfill(void)
 	if (debug_flags & DEBUG_FLAG_BACKFILL)
 		_dump_node_space_table(node_space);
 
+	if (max_backfill_job_per_user) {
+		uid = xmalloc(BF_MAX_USERS * sizeof(uint32_t));
+		njobs = xmalloc(BF_MAX_USERS * sizeof(uint16_t));
+	}
 	while ((job_queue_rec = (job_queue_rec_t *)
 				list_pop_bottom(job_queue, sort_job_queue2))) {
 		job_test_count++;
@@ -529,20 +595,43 @@ static int _attempt_backfill(void)
 		if (debug_flags & DEBUG_FLAG_BACKFILL)
 			info("backfill test for job %u", job_ptr->job_id);
 
-		if ((job_ptr->state_reason == WAIT_ASSOC_JOB_LIMIT) ||
-		    (job_ptr->state_reason == WAIT_ASSOC_RESOURCE_LIMIT) ||
-		    (job_ptr->state_reason == WAIT_ASSOC_TIME_LIMIT) ||
-		    (job_ptr->state_reason == WAIT_QOS_JOB_LIMIT) ||
-		    (job_ptr->state_reason == WAIT_QOS_RESOURCE_LIMIT) ||
-		    (job_ptr->state_reason == WAIT_QOS_TIME_LIMIT) ||
-		    !acct_policy_job_runnable(job_ptr)) {
-			debug2("backfill: job %u is not allowed to run now. "
-			       "Skipping it. State=%s. Reason=%s. Priority=%u",
-			       job_ptr->job_id,
-			       job_state_string(job_ptr->job_state),
-			       job_reason_string(job_ptr->state_reason),
-			       job_ptr->priority);
-			continue;
+		slurmctld_diag_stats.bf_last_depth++;
+		already_counted = false;
+
+		if (max_backfill_job_per_user) {
+			for (j = 0; j < nuser; j++) {
+				if (job_ptr->user_id == uid[j]) {
+					njobs[j]++;
+					debug2("backfill: user %u: #jobs %u",
+					       uid[j], njobs[j]);
+					break;
+				}
+			}
+			if (j == nuser) { /* user not found */
+				if (nuser < BF_MAX_USERS) {
+					uid[j] = job_ptr->user_id;
+					njobs[j] = 1;
+					nuser++;
+				} else {
+					error("backfill: too many users in "
+					      "queue. Consider increasing "
+					      "BF_MAX_USERS");
+				}
+				debug2("backfill: found new user %u. "
+				       "Total #users now %u",
+				       job_ptr->user_id, nuser);
+			} else {
+				if (njobs[j] > max_backfill_job_per_user) {
+					/* skip job */
+					debug("backfill: have already checked "
+					      "%u jobs for user %u; skipping "
+					      "job %u",
+					      max_backfill_job_per_user,
+					      job_ptr->user_id,
+					      job_ptr->job_id);
+					continue;
+				}
+			}
 		}
 
 		if (((part_ptr->state_up & PARTITION_SCHED) == 0) ||
@@ -684,6 +773,12 @@ static int _attempt_backfill(void)
 		/* this is the time consuming operation */
 		debug2("backfill: entering _try_sched for job %u.",
 		       job_ptr->job_id);
+
+		if (!already_counted) {
+			slurmctld_diag_stats.bf_last_depth_try++;
+			already_counted = true;
+		}
+
 		j = _try_sched(job_ptr, &avail_bitmap,
 			       min_nodes, max_nodes, req_nodes);
 		debug2("backfill: finished _try_sched for job %u.",
@@ -772,6 +867,8 @@ static int _attempt_backfill(void)
 		if (debug_flags & DEBUG_FLAG_BACKFILL)
 			_dump_node_space_table(node_space);
 	}
+	xfree(uid);
+	xfree(njobs);
 	FREE_NULL_BITMAP(avail_bitmap);
 	FREE_NULL_BITMAP(resv_bitmap);
 
@@ -782,6 +879,8 @@ static int _attempt_backfill(void)
 	}
 	xfree(node_space);
 	list_destroy(job_queue);
+	gettimeofday(&bf_time2, NULL);
+	_do_diag_stats(&bf_time1, &bf_time2);
 	if (debug_flags & DEBUG_FLAG_BACKFILL) {
 		END_TIMER;
 		info("backfill: completed testing %d jobs, %s",
@@ -818,10 +917,11 @@ static int _start_job(struct job_record *job_ptr, bitstr_t *resv_bitmap)
 			srun_allocate(job_ptr->job_id);
 		else if (job_ptr->details->prolog_running == 0)
 			launch_job(job_ptr);
-		backfilled_jobs++;
+		slurmctld_diag_stats.backfilled_jobs++;
+		slurmctld_diag_stats.last_backfilled_jobs++;
 		if (debug_flags & DEBUG_FLAG_BACKFILL) {
-			info("backfill: Jobs backfilled since boot: %d",
-			     backfilled_jobs);
+			info("backfill: Jobs backfilled since boot: %u",
+			     slurmctld_diag_stats.backfilled_jobs);
 		}
 	} else if ((job_ptr->job_id != fail_jobid) &&
 		   (rc != ESLURM_ACCOUNTING_POLICY)) {

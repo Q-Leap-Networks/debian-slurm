@@ -35,6 +35,9 @@
 /* Collection of data for printing reports. Like data is combined here */
 typedef struct {
 	int color_inx;
+	GtkTreeIter iter_ptr;
+	bool iter_set;
+	int pos;
 	reserve_info_t *resv_ptr;
 } sview_resv_info_t;
 
@@ -90,7 +93,7 @@ static display_data_t display_data_resv[] = {
 	 refresh_resv, create_model_resv, admin_edit_resv},
 	{G_TYPE_STRING, SORTID_NODELIST,
 #ifdef HAVE_BG
-	 "BP List",
+	 "MidplaneList",
 #else
 	 "Node List",
 #endif
@@ -111,7 +114,7 @@ static display_data_t display_data_resv[] = {
 	 refresh_resv, create_model_resv, admin_edit_resv},
 	{G_TYPE_STRING, SORTID_FEATURES,   "Features", FALSE, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
-	{G_TYPE_STRING, SORTID_FLAGS,      "Flags", FALSE, EDIT_NONE,
+	{G_TYPE_STRING, SORTID_FLAGS,      "Flags", FALSE, EDIT_TEXTBOX,
 	 refresh_resv, create_model_resv, admin_edit_resv},
 	{G_TYPE_POINTER, SORTID_NODE_INX,  NULL, FALSE, EDIT_NONE,
 	 refresh_resv, create_model_resv, admin_edit_resv},
@@ -131,7 +134,7 @@ static display_data_t create_data_resv[] = {
 	 refresh_resv, create_model_resv, admin_edit_resv},
 	{G_TYPE_STRING, SORTID_NODELIST,
 #ifdef HAVE_BG
-	 "BP_List",
+	 "Midplane_List",
 #else
 	 "Node_List",
 #endif
@@ -166,7 +169,7 @@ static display_data_t options_data_resv[] = {
 	{G_TYPE_STRING, PART_PAGE, "Partitions", TRUE, RESV_PAGE},
 #ifdef HAVE_BG
 	{G_TYPE_STRING, BLOCK_PAGE, "Blocks", TRUE, RESV_PAGE},
-	{G_TYPE_STRING, NODE_PAGE, "Base Partitions", TRUE, RESV_PAGE},
+	{G_TYPE_STRING, NODE_PAGE, "Midplanes", TRUE, RESV_PAGE},
 #else
 	{G_TYPE_STRING, BLOCK_PAGE, NULL, TRUE, RESV_PAGE},
 	{G_TYPE_STRING, NODE_PAGE, "Nodes", TRUE, RESV_PAGE},
@@ -243,6 +246,13 @@ static uint32_t _parse_flags(const char *flagstr)
 				outflags |= RESERVE_FLAG_NO_LIC_ONLY;
 			else
 				outflags |= RESERVE_FLAG_LIC_ONLY;
+		} else if (strncasecmp(curr, "Static_Alloc", MAX(taglen,1))
+			   == 0) {
+			curr += taglen;
+			if (flip)
+				outflags |= RESERVE_FLAG_NO_STATIC;
+			else
+				outflags |= RESERVE_FLAG_STATIC;
 		} else {
 			char *temp = g_strdup_printf("Error parsing flags %s.",
 						     flagstr);
@@ -293,7 +303,8 @@ static const char *_set_resv_msg(resv_desc_msg_t *resv_msg,
 				 int column)
 {
 	char *type = "", *temp_str;
-	int temp_int = 0;
+	char *tmp_text, *last = NULL, *tok;
+	int block_inx, temp_int = 0;
 	uint32_t f;
 
 	/* need to clear global_edit_error here (just in case) */
@@ -345,16 +356,27 @@ static const char *_set_resv_msg(resv_desc_msg_t *resv_msg,
 		type = "name";
 		break;
 	case SORTID_NODE_CNT:
-		temp_int = strtol(new_text, &temp_str, 10);
-		if ((temp_str[0] == 'k') || (temp_str[0] == 'k'))
-			temp_int *= 1024;
-		if ((temp_str[0] == 'm') || (temp_str[0] == 'm'))
-			temp_int *= (1024 * 1024);
-
 		type = "Node Count";
-		if (temp_int <= 0)
-			goto return_error;
-		resv_msg->node_cnt = temp_int;
+		block_inx = 0;
+		tmp_text = xstrdup(new_text);
+		tok = strtok_r(tmp_text, ",", &last);
+		while (tok) {
+			temp_int = strtol(tok, &temp_str, 10);
+			if ((temp_str[0] == 'k') || (temp_str[0] == 'k'))
+				temp_int *= 1024;
+			if ((temp_str[0] == 'm') || (temp_str[0] == 'm'))
+				temp_int *= (1024 * 1024);
+			xrealloc(resv_msg->node_cnt,
+				 (sizeof(uint32_t) * (block_inx + 2)));
+			resv_msg->node_cnt[block_inx++] = temp_int;
+			if (temp_int <= 0) {
+				xfree(tmp_text);
+				xfree(resv_msg->node_cnt);
+				goto return_error;
+			}
+			tok = strtok_r(NULL, ",", &last);
+		}
+		xfree(tmp_text);
 		break;
 	case SORTID_NODELIST:
 		resv_msg->node_list = xstrdup(new_text);
@@ -537,6 +559,7 @@ static void _layout_resv_record(GtkTreeView *treeview,
 						 SORTID_LICENSES),
 				   resv_ptr->licenses);
 
+	/* NOTE: node_cnt in reservation info from slurmctld ONE number */
 	convert_num_unit((float)resv_ptr->node_cnt,
 			 time_buf, sizeof(time_buf), UNIT_NONE);
 	add_display_treestore_line(update, treestore, &iter,
@@ -574,8 +597,7 @@ static void _layout_resv_record(GtkTreeView *treeview,
 }
 
 static void _update_resv_record(sview_resv_info_t *sview_resv_info_ptr,
-				GtkTreeStore *treestore,
-				GtkTreeIter *iter)
+				GtkTreeStore *treestore)
 {
 	char tmp_duration[40], tmp_end[40], tmp_nodes[40], tmp_start[40];
 	char *tmp_flags;
@@ -597,7 +619,7 @@ static void _update_resv_record(sview_resv_info_t *sview_resv_info_ptr,
 			    sizeof(tmp_start));
 
 	/* Combining these records provides a slight performance improvement */
-	gtk_tree_store_set(treestore, iter,
+	gtk_tree_store_set(treestore, &sview_resv_info_ptr->iter_ptr,
 			   SORTID_ACCOUNTS,   resv_ptr->accounts,
 			   SORTID_COLOR,
 				sview_colors[sview_resv_info_ptr->color_inx],
@@ -614,7 +636,7 @@ static void _update_resv_record(sview_resv_info_t *sview_resv_info_ptr,
 			   SORTID_TIME_START, tmp_start,
 			   SORTID_TIME_END,   tmp_end,
 			   SORTID_UPDATED,    1,
-			   SORTID_USERS,      resv_ptr->users, 
+			   SORTID_USERS,      resv_ptr->users,
 			   -1);
 
 	xfree(tmp_flags);
@@ -623,80 +645,91 @@ static void _update_resv_record(sview_resv_info_t *sview_resv_info_ptr,
 }
 
 static void _append_resv_record(sview_resv_info_t *sview_resv_info_ptr,
-				GtkTreeStore *treestore, GtkTreeIter *iter,
-				int line)
+				GtkTreeStore *treestore)
 {
-	gtk_tree_store_append(treestore, iter, NULL);
-	gtk_tree_store_set(treestore, iter, SORTID_POS, line, -1);
-	_update_resv_record(sview_resv_info_ptr, treestore, iter);
+	gtk_tree_store_append(treestore, &sview_resv_info_ptr->iter_ptr, NULL);
+	gtk_tree_store_set(treestore, &sview_resv_info_ptr->iter_ptr,
+			   SORTID_POS, sview_resv_info_ptr->pos, -1);
+	_update_resv_record(sview_resv_info_ptr, treestore);
 }
 
 static void _update_info_resv(List info_list,
 			      GtkTreeView *tree_view)
 {
-	GtkTreePath *path = gtk_tree_path_new_first();
 	GtkTreeModel *model = gtk_tree_view_get_model(tree_view);
-	GtkTreeIter iter;
+	static GtkTreeModel *last_model = NULL;
 	reserve_info_t *resv_ptr = NULL;
-	int line = 0;
-	char *host = NULL, *resv_name = NULL;
+	char *name = NULL;
 	ListIterator itr = NULL;
 	sview_resv_info_t *sview_resv_info = NULL;
 
-	/* get the iter, or find out the list is empty goto add */
-	if (gtk_tree_model_get_iter(model, &iter, path)) {
-		/* make sure all the reserves are still here */
-		while (1) {
-			gtk_tree_store_set(GTK_TREE_STORE(model), &iter,
-					   SORTID_UPDATED, 0, -1);
-			if (!gtk_tree_model_iter_next(model, &iter)) {
-				break;
-			}
-		}
-	}
+	set_for_update(model, SORTID_UPDATED);
 
 	itr = list_iterator_create(info_list);
 	while ((sview_resv_info = (sview_resv_info_t*) list_next(itr))) {
 		resv_ptr = sview_resv_info->resv_ptr;
-		/* get the iter, or find out the list is empty goto add */
-		if (!gtk_tree_model_get_iter(model, &iter, path)) {
-			goto adding;
-		}
-		line = 0;
-		while (1) {
-			/* search for the jobid and check to see if
-			   it is in the list */
-			gtk_tree_model_get(model, &iter, SORTID_NAME,
-					   &resv_name, -1);
-			if (!strcmp(resv_name, resv_ptr->name)) {
-				/* update with new info */
-				g_free(resv_name);
-				_update_resv_record(sview_resv_info,
-						    GTK_TREE_STORE(model),
-						    &iter);
-				goto found;
-			}
-			g_free(resv_name);
 
-			line++;
-			if (!gtk_tree_model_iter_next(model, &iter)) {
-				break;
+		/* This means the tree_store changed (added new column
+		   or something). */
+		if (last_model != model)
+			sview_resv_info->iter_set = false;
+
+		if (sview_resv_info->iter_set) {
+			gtk_tree_model_get(model, &sview_resv_info->iter_ptr,
+					   SORTID_NAME, &name, -1);
+			if (strcmp(name, resv_ptr->name)) { /* Bad pointer */
+				sview_resv_info->iter_set = false;
+				//g_print("bad resv iter pointer\n");
 			}
+			g_free(name);
 		}
-	adding:
-		_append_resv_record(sview_resv_info, GTK_TREE_STORE(model),
-				    &iter, line);
-	found:
-		;
+		if (sview_resv_info->iter_set) {
+			_update_resv_record(sview_resv_info,
+					    GTK_TREE_STORE(model));
+		} else {
+			GtkTreePath *path = gtk_tree_path_new_first();
+
+			/* get the iter, or find out the list is empty
+			 * goto add */
+			if (gtk_tree_model_get_iter(
+				    model, &sview_resv_info->iter_ptr, path)) {
+				do {
+					/* search for the jobid and
+					   check to see if it is in
+					   the list */
+					gtk_tree_model_get(
+						model,
+						&sview_resv_info->iter_ptr,
+						SORTID_NAME,
+						&name, -1);
+					if (!strcmp(name, resv_ptr->name)) {
+						/* update with new info */
+						g_free(name);
+						_update_resv_record(
+							sview_resv_info,
+							GTK_TREE_STORE(model));
+						sview_resv_info->iter_set = 1;
+						break;
+					}
+					g_free(name);
+				} while (gtk_tree_model_iter_next(
+						 model,
+						 &sview_resv_info->iter_ptr));
+			}
+
+			if (!sview_resv_info->iter_set) {
+				_append_resv_record(sview_resv_info,
+						    GTK_TREE_STORE(model));
+				sview_resv_info->iter_set = true;
+			}
+			gtk_tree_path_free(path);
+		}
 	}
 	list_iterator_destroy(itr);
-	if (host)
-		free(host);
 
-	gtk_tree_path_free(path);
 	/* remove all old reservations */
 	remove_old(model, SORTID_UPDATED);
-	return;
+	last_model = model;
 }
 
 static int _sview_resv_sort_aval_dec(sview_resv_info_t* rec_a,
@@ -721,16 +754,18 @@ static int _sview_resv_sort_aval_dec(sview_resv_info_t* rec_a,
 	return 0;
 }
 
-static List _create_resv_info_list(reserve_info_msg_t *resv_info_ptr,
-				   int changed)
+static List _create_resv_info_list(reserve_info_msg_t *resv_info_ptr)
 {
 	static List info_list = NULL;
 	int i = 0;
+	static reserve_info_msg_t *last_resv_info_ptr = NULL;
 	sview_resv_info_t *sview_resv_info_ptr = NULL;
 	reserve_info_t *resv_ptr = NULL;
 
-	if (!changed && info_list)
+	if (info_list && (resv_info_ptr == last_resv_info_ptr))
 		goto update_color;
+
+	last_resv_info_ptr = resv_info_ptr;
 
 	if (info_list)
 		list_flush(info_list);
@@ -746,6 +781,7 @@ static List _create_resv_info_list(reserve_info_msg_t *resv_info_ptr,
 		resv_ptr = &(resv_info_ptr->reservation_array[i]);
 
 		sview_resv_info_ptr = xmalloc(sizeof(sview_resv_info_t));
+		sview_resv_info_ptr->pos = i;
 		sview_resv_info_ptr->resv_ptr = resv_ptr;
 		sview_resv_info_ptr->color_inx = i % sview_colors_cnt;
 		list_append(info_list, sview_resv_info_ptr);
@@ -1049,7 +1085,6 @@ extern void get_info_resv(GtkTable *table, display_data_t *display_data)
 	GtkTreeView *tree_view = NULL;
 	static GtkWidget *display_widget = NULL;
 	int j=0;
-	int changed = 1;
 	ListIterator itr = NULL;
 	sview_resv_info_t *sview_resv_info_ptr = NULL;
 	reserve_info_t *resv_ptr = NULL;
@@ -1085,7 +1120,6 @@ extern void get_info_resv(GtkTable *table, display_data_t *display_data)
 
 	error_code = get_new_info_resv(&resv_info_ptr, force_refresh);
 	if (error_code == SLURM_NO_CHANGE_IN_DATA) {
-		changed = 0;
 	} else if (error_code != SLURM_SUCCESS) {
 		if (view == ERROR_VIEW)
 			goto end_it;
@@ -1102,7 +1136,7 @@ extern void get_info_resv(GtkTable *table, display_data_t *display_data)
 	}
 
 display_it:
-	info_list = _create_resv_info_list(resv_info_ptr, changed);
+	info_list = _create_resv_info_list(resv_info_ptr);
 	if (!info_list)
 		goto reset_curs;
 	/* set up the grid */
@@ -1185,7 +1219,6 @@ extern void specific_info_resv(popup_info_t *popup_win)
 	GtkTreeView *tree_view = NULL;
 	List resv_list = NULL;
 	List send_resv_list = NULL;
-	int changed = 1;
 	sview_resv_info_t *sview_resv_info_ptr = NULL;
 	int j=0, i=-1;
 	hostset_t hostset = NULL;
@@ -1206,7 +1239,6 @@ extern void specific_info_resv(popup_info_t *popup_win)
 	    == SLURM_NO_CHANGE_IN_DATA) {
 		if (!spec_info->display_widget || spec_info->view == ERROR_VIEW)
 			goto display_it;
-		changed = 0;
 	} else if (resv_error_code != SLURM_SUCCESS) {
 		if (spec_info->view == ERROR_VIEW)
 			goto end_it;
@@ -1226,7 +1258,7 @@ extern void specific_info_resv(popup_info_t *popup_win)
 
 display_it:
 
-	resv_list = _create_resv_info_list(resv_info_ptr, changed);
+	resv_list = _create_resv_info_list(resv_info_ptr);
 
 	if (!resv_list)
 		return;
@@ -1393,7 +1425,7 @@ extern void popup_all_resv(GtkTreeModel *model, GtkTreeIter *iter, int id)
 	case NODE_PAGE:
 		if (cluster_flags & CLUSTER_FLAG_BG)
 			snprintf(title, 100,
-				 "Base partitions(s) in reservation %s",
+				 "Midplane(s) in reservation %s",
 				 name);
 		else
 			snprintf(title, 100, "Node(s) in reservation %s ",
@@ -1625,7 +1657,7 @@ extern void cluster_change_resv(void)
 		if (cluster_flags & CLUSTER_FLAG_BG) {
 			switch(display_data->id) {
 			case SORTID_NODELIST:
-				display_data->name = "BP List";
+				display_data->name = "MidplaneList";
 				break;
 			default:
 				break;
@@ -1651,7 +1683,7 @@ extern void cluster_change_resv(void)
 				display_data->name = "Blocks";
 				break;
 			case NODE_PAGE:
-				display_data->name = "Base Partitions";
+				display_data->name = "Midplanes";
 				break;
 			}
 		} else {

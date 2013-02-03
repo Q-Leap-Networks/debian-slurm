@@ -105,20 +105,18 @@ int main(int argc, char *argv[])
 		min_screen_width = 92;
 
 	/* no need for this if you are resolving */
-	if (!params.resolve) {
-		while (slurm_load_node((time_t) NULL,
-				       &new_node_ptr, SHOW_ALL)) {
-			error_code = slurm_get_errno();
-			printf("slurm_load_node: %s\n",
-			       slurm_strerror(error_code));
-			if (params.display == COMMANDS) {
-				new_node_ptr = NULL;
-				break;		/* just continue */
-			}
-			if (params.iterate == 0)
-				exit(1);
-			sleep(10);	/* keep trying to reconnect */
+	while (slurm_load_node((time_t) NULL,
+			       &new_node_ptr, SHOW_ALL)) {
+		if (params.resolve || (params.display == COMMANDS)) {
+			new_node_ptr = NULL;
+			break;		/* just continue */
 		}
+		error_code = slurm_get_errno();
+		printf("slurm_load_node: %s\n",
+		       slurm_strerror(error_code));
+		if (params.iterate == 0)
+			exit(1);
+		sleep(10);	/* keep trying to reconnect */
 	}
 
 	select_g_ba_init(new_node_ptr, 0);
@@ -131,7 +129,7 @@ int main(int argc, char *argv[])
 	_init_colors();
 
 	if (params.resolve) {
-		char *ret_str = resolve_mp(params.resolve);
+		char *ret_str = resolve_mp(params.resolve, new_node_ptr);
 		if (ret_str) {
 			printf("%s", ret_str);
 			xfree(ret_str);
@@ -141,10 +139,9 @@ int main(int argc, char *argv[])
 	if (!params.commandline) {
 		int check_width = min_screen_width;
 
-		init_grid(new_node_ptr);
-
-		signal(SIGWINCH, (void (*)(int))_resize_handler);
 		initscr();
+		init_grid(new_node_ptr, COLS);
+		signal(SIGWINCH, (void (*)(int))_resize_handler);
 
 		if (params.cluster_dims == 4) {
 			height = dim_size[2] * dim_size[3] + dim_size[2] + 3;
@@ -182,7 +179,7 @@ int main(int argc, char *argv[])
 		_set_pairs();
 
 		grid_win = newwin(height, width, starty, startx);
-		max_display = grid_win->_maxy * grid_win->_maxx;
+		max_display = (getmaxy(grid_win) - 1) * (getmaxx(grid_win) - 1);
 
 		if (params.cluster_dims == 4) {
 			startx = width;
@@ -445,7 +442,7 @@ static int _get_option(void)
 	case KEY_DOWN:
 		if (!(params.cluster_flags & CLUSTER_FLAG_BG)) {
 			grid_line_cnt++;
-			if ((((grid_line_cnt-2) * (grid_win->_maxx-1)) +
+			if ((((grid_line_cnt - 2) * (getmaxx(grid_win) - 2)) +
 			    max_display) > dim_size[0]) {
 				grid_line_cnt--;
 				return 0;
@@ -505,7 +502,7 @@ static void *_resize_handler(int sig)
 	}
 
 	grid_win = newwin(height, width, starty, startx);
-	max_display = grid_win->_maxy * grid_win->_maxx;
+	max_display = (getmaxy(grid_win) - 1) * (getmaxx(grid_win) - 1);
 
 	if (params.cluster_dims == 4) {
 		startx = width;

@@ -55,7 +55,6 @@
 
 extern "C" {
 #include "../ba_bgq/block_allocator.h"
-#include "../bg_record_functions.h"
 #include "src/common/parse_time.h"
 #include "src/common/uid.h"
 }
@@ -69,32 +68,64 @@ static bool initialized = false;
 
 #ifdef HAVE_BG_FILES
 
-static void _setup_ba_mp(ComputeHardware::ConstPtr bgq, ba_mp_t *ba_mp)
+// For future code
+//
+// static int _check_version(
+// 	const unsigned major, const unsigned minor, const unsigned micro)
+// {
+// 	if ((version::major > major)
+// 	    || (version::major == major
+// 		&& version::minor > minor)
+// 	    || (version::major == major
+// 		&& version::minor == minor
+// 		&& version::mod >= micro))
+// 		return true;
+
+// 	return false;
+// }
+
+/* ba_system_mutex needs to be locked before coming here */
+static void _setup_ba_mp(int level, uint16_t *coords,
+			 ComputeHardware::ConstPtr bgqsys)
 {
-	// int i;
-	Coordinates::Coordinates coords(ba_mp->coord[A], ba_mp->coord[X],
-					ba_mp->coord[Y], ba_mp->coord[Z]);
+	ba_mp_t *ba_mp;
 	Midplane::ConstPtr mp_ptr;
 	int i;
 
-	try {
-		mp_ptr = bgq->getMidplane(coords);
-	} catch (const bgsched::InputException& err) {
-		int rc = bridge_handle_input_errors(
-			"ComputeHardware::getMidplane",
-			err.getError().toValue(), NULL);
-		if (rc != SLURM_SUCCESS)
+	if (!bgqsys) {
+		if (bg_recover != NOT_FROM_CONTROLLER)
+			fatal("_setup_ba_mp: No ComputeHardware ptr");
+		else {
+			error("_setup_ba_mp: can't talk to the database");
 			return;
+		}
 	}
+	if (level > SYSTEM_DIMENSIONS)
+		return;
+
+	if (level < SYSTEM_DIMENSIONS) {
+		for (coords[level] = 0;
+		     coords[level] < DIM_SIZE[level];
+		     coords[level]++) {
+			/* handle the outter dims here */
+			_setup_ba_mp(level+1, coords, bgqsys);
+		}
+		return;
+	}
+
+	if (!(ba_mp = coord2ba_mp(coords))
+	    || !(mp_ptr = bridge_get_midplane(bgqsys, ba_mp)))
+		return;
 
 	ba_mp->loc = xstrdup(mp_ptr->getLocation().c_str());
 
 	ba_mp->nodecard_loc =
 		(char **)xmalloc(sizeof(char *) * bg_conf->mp_nodecard_cnt);
 	for (i=0; i<bg_conf->mp_nodecard_cnt; i++) {
-		NodeBoard::ConstPtr nodeboard = mp_ptr->getNodeBoard(i);
-		ba_mp->nodecard_loc[i] =
-			xstrdup(nodeboard->getLocation().c_str());
+		NodeBoard::ConstPtr nb_ptr = bridge_get_nodeboard(mp_ptr, i);
+		if (nb_ptr)
+			ba_mp->nodecard_loc[i] =
+				xstrdup(nb_ptr->getLocation().c_str());
 	}
 }
 
@@ -105,6 +136,7 @@ static bg_record_t * _translate_object_to_block(const Block::Ptr &block_ptr)
 	hostlist_t hostlist;
 	char *node_char = NULL;
 	char mp_str[256];
+	select_ba_request_t ba_request;
 
 	bg_record->magic = BLOCK_MAGIC;
 	bg_record->bg_block_id = xstrdup(block_ptr->getName().c_str());
@@ -133,16 +165,25 @@ static bg_record_t * _translate_object_to_block(const Block::Ptr &block_ptr)
 		bit_nset(bg_record->ionode_bitmap,
 			 io_start, io_start+io_cnt);
 		bit_fmt(bitstring, BITSIZE, bg_record->ionode_bitmap);
-		bg_record->ionode_str = xstrdup(bitstring);
-		debug3("%s uses ionodes %s",
+		ba_set_ionode_str(bg_record);
+		debug3("%s uses cnodes %s",
 		       bg_record->bg_block_id,
 		       bg_record->ionode_str);
 		bg_record->conn_type[0] = SELECT_SMALL;
 	} else {
 		for (Dimension dim=Dimension::A; dim<=Dimension::D; dim++) {
-			bg_record->conn_type[dim] =
-				block_ptr->isTorus(dim) ?
-				SELECT_TORUS : SELECT_MESH;
+			try {
+				bg_record->conn_type[dim] =
+					block_ptr->isTorus(dim) ?
+					SELECT_TORUS : SELECT_MESH;
+			} catch (const bgsched::InputException& err) {
+				bridge_handle_input_errors(
+					"Block::isTorus",
+					err.getError().toValue(),
+					NULL);
+			} catch (...) {
+				error("Unknown error from Block::isTorus.");
+			}
 		}
 		/* Set the bitmap blank here if it is a full
 		   node we don't want anything set we also
@@ -154,6 +195,7 @@ static bg_record_t * _translate_object_to_block(const Block::Ptr &block_ptr)
 
 	hostlist = hostlist_create(NULL);
 	midplane_vec = block_ptr->getMidplanes();
+	slurm_mutex_lock(&ba_system_mutex);
 	BOOST_FOREACH(const std::string midplane, midplane_vec) {
 		char temp[256];
 		ba_mp_t *curr_mp = loc2ba_mp((char *)midplane.c_str());
@@ -168,13 +210,14 @@ static bg_record_t * _translate_object_to_block(const Block::Ptr &block_ptr)
 
 		hostlist_push(hostlist, temp);
 	}
+	slurm_mutex_unlock(&ba_system_mutex);
 	bg_record->mp_str = hostlist_ranged_string_xmalloc(hostlist);
 	hostlist_destroy(hostlist);
 	debug3("got nodes of %s", bg_record->mp_str);
 
 	process_nodes(bg_record, true);
 
-	reset_ba_system(true);
+	reset_ba_system(false);
 	if (ba_set_removable_mps(bg_record->mp_bitmap, 1) != SLURM_SUCCESS)
 		fatal("It doesn't seem we have a bitmap for %s",
 		      bg_record->bg_block_id);
@@ -184,10 +227,12 @@ static bg_record_t * _translate_object_to_block(const Block::Ptr &block_ptr)
 	else
 		bg_record->ba_mp_list = list_create(destroy_ba_mp);
 
-	node_char = set_bg_block(bg_record->ba_mp_list,
-				 bg_record->start,
-				 bg_record->geo,
-				 bg_record->conn_type);
+	memset(&ba_request, 0, sizeof(ba_request));
+	memcpy(ba_request.geometry, bg_record->geo, sizeof(bg_record->geo));
+	memcpy(ba_request.conn_type, bg_record->conn_type,
+	       sizeof(bg_record->conn_type));
+	node_char = set_bg_block(bg_record->ba_mp_list, &ba_request);
+	memcpy(bg_record->start, ba_request.start, sizeof(bg_record->start));
 	ba_reset_all_removed_mps();
 	if (!node_char)
 		fatal("I was unable to make the requested block.");
@@ -209,12 +254,13 @@ static bg_record_t * _translate_object_to_block(const Block::Ptr &block_ptr)
 }
 #endif
 
-static int _block_wait_for_jobs(char *bg_block_id)
+static int _block_wait_for_jobs(char *bg_block_id, struct job_record *job_ptr)
 {
 #ifdef HAVE_BG_FILES
 	std::vector<Job::ConstPtr> job_vec;
 	JobFilter job_filter;
 	JobFilter::Statuses job_statuses;
+	uint32_t job_id = 0;
 #endif
 
 	if (!bridge_init(NULL))
@@ -225,6 +271,25 @@ static int _block_wait_for_jobs(char *bg_block_id)
 		return SLURM_ERROR;
 	}
 
+	/* This code can be used to simulate having a job hang in the
+	 * database.
+	 */
+	// if (job_ptr && (job_ptr->magic == JOB_MAGIC)) {
+	// 	uint32_t job_id = job_ptr->job_id;
+	// 	while (1) {
+	// 		debug("waiting on slurm job %u to "
+	// 		      "finish on block %s",
+	// 		      job_id, bg_block_id);
+	// 		sleep(3);
+	// 		if (job_ptr->magic != JOB_MAGIC) {
+	// 			info("bad magic");
+	// 			break;
+	// 		} else if (IS_JOB_COMPLETED(job_ptr)) {
+	// 			info("job completed");
+	// 			break;
+	// 		}
+	// 	}
+	// }
 #ifdef HAVE_BG_FILES
 
 	job_filter.setComputeBlockName(bg_block_id);
@@ -237,14 +302,39 @@ static int _block_wait_for_jobs(char *bg_block_id)
 	job_statuses.insert(Job::Cleanup);
 	job_filter.setStatuses(&job_statuses);
 
-	while (1) {
-		job_vec = getJobs(job_filter);
-		if (job_vec.empty())
-			return SLURM_SUCCESS;
+	if (job_ptr && (job_ptr->magic == JOB_MAGIC)) {
+		char tmp_char[16];
+		job_id = job_ptr->job_id;
+		snprintf(tmp_char, sizeof(tmp_char), "%u", job_id);
+		job_filter.setSchedulerData(tmp_char);
+	}
 
-		BOOST_FOREACH(const Job::ConstPtr& job_ptr, job_vec) {
-			debug("waiting on mmcs job %lu to finish on block %s",
-			      job_ptr->getId(), bg_block_id);
+	while (1) {
+		try {
+			job_vec = getJobs(job_filter);
+			if (job_vec.empty())
+				return SLURM_SUCCESS;
+
+			BOOST_FOREACH(const Job::ConstPtr& job, job_vec) {
+				if (job_id)
+					debug("waiting on mmcs job %lu "
+					      "in slurm job %u to "
+					      "finish on block %s",
+					      job->getId(), job_id,
+					      bg_block_id);
+				else
+					debug("waiting on mmcs job %lu to "
+					      "finish on block %s",
+					      job->getId(), bg_block_id);
+			}
+		} catch (const bgsched::DatabaseException& err) {
+			bridge_handle_database_errors("getJobs",
+						      err.getError().toValue());
+		} catch (const bgsched::InternalException& err) {
+			bridge_handle_internal_errors("getJobs",
+						      err.getError().toValue());
+		} catch (...) {
+			error("Unknown error from getJobs.");
 		}
 		sleep(POLL_INTERVAL);
 	}
@@ -252,40 +342,43 @@ static int _block_wait_for_jobs(char *bg_block_id)
 	return SLURM_SUCCESS;
 }
 
-static void _remove_jobs_on_block_and_reset(char *block_id)
+static void _remove_jobs_on_block_and_reset(char *block_id,
+					    struct job_record *job_ptr)
 {
+	char *mp_str = NULL;
 	bg_record_t *bg_record = NULL;
 	int job_remove_failed = 0;
+	slurmctld_lock_t job_read_lock =
+		{ NO_LOCK, READ_LOCK, NO_LOCK, NO_LOCK };
 
 	if (!block_id) {
 		error("_remove_jobs_on_block_and_reset: no block name given");
 		return;
 	}
 
-	if (_block_wait_for_jobs(block_id) != SLURM_SUCCESS)
+	if (_block_wait_for_jobs(block_id, job_ptr) != SLURM_SUCCESS)
 		job_remove_failed = 1;
 
 	/* remove the block's users */
+
+	/* Lock job read before block to avoid
+	 * issues where a step could complete after the job completion
+	 * has taken place (since we are on a thread here).
+	 */
+	if (job_ptr)
+		lock_slurmctld(job_read_lock);
 	slurm_mutex_lock(&block_state_mutex);
 	bg_record = find_bg_record_in_list(bg_lists->main, block_id);
 	if (bg_record) {
-		debug("got the record %s user is %s",
-		      bg_record->bg_block_id,
-		      bg_record->user_name);
-
 		if (job_remove_failed) {
 			if (bg_record->mp_str)
-				slurm_drain_nodes(
-					bg_record->mp_str,
-					(char *)
-					"_term_agent: Couldn't remove job",
-					slurm_get_slurm_user_id());
+				mp_str = xstrdup(bg_record->mp_str);
 			else
 				error("Block %s doesn't have a node list.",
 				      block_id);
 		}
 
-		bg_reset_block(bg_record);
+		bg_reset_block(bg_record, job_ptr);
 	} else if (bg_conf->layout_mode == LAYOUT_DYNAMIC) {
 		debug2("Hopefully we are destroying this block %s "
 		       "since it isn't in the bg_lists->main",
@@ -293,6 +386,25 @@ static void _remove_jobs_on_block_and_reset(char *block_id)
 	}
 
 	slurm_mutex_unlock(&block_state_mutex);
+	if (job_ptr) {
+		if (job_ptr->magic == JOB_MAGIC) {
+			/* This signals the job purger that the job
+			   actually finished in the system.
+			*/
+			select_jobinfo_t *jobinfo = (select_jobinfo_t *)
+				job_ptr->select_jobinfo->data;
+			jobinfo->bg_record = NULL;
+		}
+		unlock_slurmctld(job_read_lock);
+	}
+
+	/* avoid locking issues just do this afterwards. */
+	if (mp_str) {
+		slurm_drain_nodes(mp_str,
+				  (char *)"_term_agent: Couldn't remove job",
+				  slurm_get_slurm_user_id());
+		xfree(mp_str);
+	}
 
 }
 
@@ -301,15 +413,19 @@ extern int bridge_init(char *properties_file)
 	if (initialized)
 		return 1;
 
-	if (bg_recover == NOT_FROM_CONTROLLER)
-		return 0;
-
 #ifdef HAVE_BG_FILES
 	if (!properties_file)
 		properties_file = (char *)"";
-	bgsched::init(properties_file);
+	try {
+		bgsched::init(properties_file);
+	} catch (const bgsched::InitializationException& err) {
+		bridge_handle_init_errors("bgsched::init",
+					  err.getError().toValue());
+		fatal("can't init bridge");
+	} catch (...) {
+		fatal("Unknown error from bgsched::init, can't continue");
+	}
 #endif
-	bridge_status_init();
 	initialized = true;
 
 	return 1;
@@ -331,9 +447,16 @@ extern int bridge_get_size(int *size)
 #ifdef HAVE_BG_FILES
 	memset(size, 0, sizeof(int) * SYSTEM_DIMENSIONS);
 
-	Coordinates bgq_size = core::getMachineSize();
-	for (int dim=0; dim< SYSTEM_DIMENSIONS; dim++)
-		size[dim] = bgq_size[dim];
+	try {
+		Coordinates bgq_size = core::getMachineSize();
+		for (int dim=0; dim< SYSTEM_DIMENSIONS; dim++)
+			size[dim] = bgq_size[dim];
+	} catch (const bgsched::DatabaseException& err) {
+		bridge_handle_database_errors("core::getMachineSize",
+					      err.getError().toValue());
+	} catch (...) {
+		error("Unknown error from core::getMachineSize");
+	}
 #endif
 
 	return SLURM_SUCCESS;
@@ -350,16 +473,15 @@ extern int bridge_setup_system()
 		return SLURM_ERROR;
 
 	inited = true;
-#ifdef HAVE_BG_FILES
-	ComputeHardware::ConstPtr bgq = getComputeHardware();
 
-	for (int a = 0; a < DIM_SIZE[A]; a++)
-		for (int x = 0; x < DIM_SIZE[X]; x++)
-			for (int y = 0; y < DIM_SIZE[Y]; y++)
-				for (int z = 0; z < DIM_SIZE[Z]; z++)
-					_setup_ba_mp(
-						bgq, &ba_main_grid[a][x][y][z]);
+	slurm_mutex_lock(&ba_system_mutex);
+	assert(ba_main_grid);
+
+#ifdef HAVE_BG_FILES
+	uint16_t coords[SYSTEM_DIMENSIONS];
+	_setup_ba_mp(0, coords, bridge_get_compute_hardware());
 #endif
+	slurm_mutex_unlock(&ba_system_mutex);
 
 	return SLURM_SUCCESS;
 }
@@ -438,40 +560,68 @@ extern int bridge_block_create(bg_record_t *bg_record)
 		   copy of this pointer we need to go out a get the
 		   real one from the system and use it.
 		*/
+		slurm_mutex_lock(&ba_system_mutex);
 		ba_mp = coord2ba_mp(ba_mp->coord);
 		for (i=0; i<bg_conf->mp_nodecard_cnt; i++) {
 			if (use_nc[i] && ba_mp)
 				nodecards.push_back(ba_mp->nodecard_loc[i]);
 		}
+		slurm_mutex_unlock(&ba_system_mutex);
 
 		try {
 			block_ptr = Block::create(nodecards);
+			rc = SLURM_SUCCESS;
 		} catch (const bgsched::InputException& err) {
 			rc = bridge_handle_input_errors(
 				"Block::createSmallBlock",
 				err.getError().toValue(),
 				bg_record);
-			if (rc != SLURM_SUCCESS)
-				return rc;
+		} catch (const bgsched::RuntimeException& err) {
+			rc = bridge_handle_runtime_errors(
+				"Block::createSmallBlock",
+				err.getError().toValue(),
+				bg_record);
+		} catch (...) {
+			error("Unknown Error from Block::createSmallBlock");
+			rc = SLURM_ERROR;
 		}
+
 	} else {
-		ListIterator itr = list_iterator_create(bg_record->ba_mp_list);
+		ListIterator itr;
+		ba_mp_t *main_mp, *start_mp;
+
+		/* If we are dealing with meshes we always need to
+		   have the first midplane added as the start corner.
+		   If we don't the API doesn't know what to do.  Since
+		   we only need this here we only set it here. It
+		   never gets freed since it is just a copy.
+		*/
+		slurm_mutex_lock(&ba_system_mutex);
+		start_mp = coord2ba_mp(bg_record->start);
+		assert(start_mp);
+		assert(start_mp->loc);
+		midplanes.push_back(start_mp->loc);
+
+		itr = list_iterator_create(bg_record->ba_mp_list);
 		while ((ba_mp = (ba_mp_t *)list_next(itr))) {
 			/* Since the midplane locations aren't set up in the
 			   copy of this pointer we need to go out a get the
 			   real one from the system and use it.
 			*/
-			ba_mp_t *main_mp = coord2ba_mp(ba_mp->coord);
-			if (!main_mp)
+			main_mp = coord2ba_mp(ba_mp->coord);
+			/* don't add the start_mp again. */
+			if (!main_mp || (main_mp == start_mp))
 				continue;
-			info("got %s(%s) %d", main_mp->coord_str,
-			     main_mp->loc, ba_mp->used);
+
+			// info("got %s(%s) %d", main_mp->coord_str,
+			//      main_mp->loc, ba_mp->used);
 			if (ba_mp->used)
 				midplanes.push_back(main_mp->loc);
 			else
 				pt_midplanes.push_back(main_mp->loc);
 		}
 		list_iterator_destroy(itr);
+		slurm_mutex_unlock(&ba_system_mutex);
 
 		for (dim=Dimension::A; dim<=Dimension::D; dim++) {
 			switch (bg_record->conn_type[dim]) {
@@ -487,27 +637,64 @@ extern int bridge_block_create(bg_record_t *bg_record)
 		try {
 			block_ptr = Block::create(midplanes,
 						  pt_midplanes, conn_type);
+			rc = SLURM_SUCCESS;
 		} catch (const bgsched::InputException& err) {
 			rc = bridge_handle_input_errors(
 				"Block::create",
 				err.getError().toValue(),
 				bg_record);
-			if (rc != SLURM_SUCCESS) {
-				assert(0);
-				return rc;
-			}
+		} catch (...) {
+			error("Unknown Error from Block::createSmallBlock");
+			rc = SLURM_ERROR;
 		}
 	}
 
-	info("block created correctly");
-	block_ptr->setName(bg_record->bg_block_id);
-	block_ptr->setMicroLoaderImage(bg_record->mloaderimage);
+	if (rc != SLURM_SUCCESS) {
+		/* This is needed because sometimes we
+		   get a sub midplane system with not
+		   all the hardware there.  This way
+		   we can try to create blocks on all
+		   the hardware and the good ones will
+		   work and the bad ones will just be
+		   removed after everything is done
+		   being created.
+		*/
+		if (bg_conf->sub_mp_sys)
+			rc = SLURM_SUCCESS;
+		else if (bg_record->conn_type[0] != SELECT_SMALL)
+			assert(0);
+		return rc;
+	}
+
+	debug("block created correctly");
+	try {
+		block_ptr->setName(bg_record->bg_block_id);
+	} catch (const bgsched::InputException& err) {
+		rc = bridge_handle_input_errors("Block::setName",
+						err.getError().toValue(),
+						bg_record);
+		if (rc != SLURM_SUCCESS)
+			return rc;
+	} catch (...) {
+                error("Unknown error from Block::setName().");
+		rc = SLURM_ERROR;
+	}
+
+	try {
+		block_ptr->setMicroLoaderImage(bg_record->mloaderimage);
+	} catch (const bgsched::InputException& err) {
+		rc = bridge_handle_input_errors("Block::MicroLoaderImage",
+						err.getError().toValue(),
+						bg_record);
+		if (rc != SLURM_SUCCESS)
+			return rc;
+	} catch (...) {
+                error("Unknown error from Block::setMicroLoaderImage().");
+		rc = SLURM_ERROR;
+	}
 
 	try {
 		block_ptr->add("");
-		// block_ptr->addUser(bg_record->bg_block_id,
-		// 		   bg_record->user_name);
-		//info("got past add");
 	} catch (const bgsched::InputException& err) {
 		rc = bridge_handle_input_errors("Block::add",
 						err.getError().toValue(),
@@ -552,6 +739,7 @@ extern int bridge_block_boot(bg_record_t *bg_record)
 		return SLURM_ERROR;
 
 #ifdef HAVE_BG_FILES
+	char *function_name;
 	/* Lets see if we are connected to the IO. */
 	try {
 		uint32_t avail, unavail;
@@ -570,7 +758,7 @@ extern int bridge_block_boot(bg_record_t *bg_record)
 			return rc;
 	} catch (const bgsched::InternalException& err) {
 		rc = bridge_handle_internal_errors("Block::checkIOLinksSummary",
-						err.getError().toValue());
+						   err.getError().toValue());
 		if (rc != SLURM_SUCCESS)
 			return rc;
 	} catch (...) {
@@ -579,51 +767,81 @@ extern int bridge_block_boot(bg_record_t *bg_record)
 	}
 
 	try {
-		std::vector<std::string> mp_vec;
-		if (!Block::isIOConnected(bg_record->bg_block_id, &mp_vec)) {
-			error("block %s is not IOConnected, "
+		std::vector<std::string> res_vec;
+#ifdef HAVE_BG_NEW_IO_CHECK
+		std::vector<std::string> unconn_ionode_vec;
+
+		function_name = (char *)"Block::checkIO";
+		Block::checkIO(bg_record->bg_block_id,
+			       &unconn_ionode_vec,
+			       &res_vec);
+		if (!res_vec.empty()) {
+			error("Block %s is not IOConnected, "
 			      "contact your admin. Midplanes not "
-			      "connected are ...", bg_record->bg_block_id);
-			BOOST_FOREACH(const std::string& mp, mp_vec) {
-				error("%s", mp.c_str());
+			      "connected ...", bg_record->bg_block_id);
+			slurm_mutex_lock(&ba_system_mutex);
+			BOOST_FOREACH(const std::string& res, res_vec) {
+				ba_mp_t *ba_mp = loc2ba_mp(res.c_str());
+				if (ba_mp)
+					error("%s(%s)",
+					      res.c_str(), ba_mp->coord_str);
+				else
+					error("%s", res.c_str());
+			}
+			slurm_mutex_unlock(&ba_system_mutex);
+			return BG_ERROR_NO_IOBLOCK_CONNECTED;
+		}
+#else
+		function_name = (char *)"Block::isIOConnected";
+		if (!Block::isIOConnected(
+			    bg_record->bg_block_id, &res_vec)) {
+			error("Using old method, "
+			      "block %s is not IOConnected, "
+			      "contact your admin. Hardware not "
+			      "connected ...", bg_record->bg_block_id);
+			BOOST_FOREACH(const std::string& res, res_vec) {
+				error("%s", res.c_str());
 			}
 			return BG_ERROR_NO_IOBLOCK_CONNECTED;
 		}
+#endif
 	} catch (const bgsched::DatabaseException& err) {
-		rc = bridge_handle_database_errors("Block::isIOConnected",
+		rc = bridge_handle_database_errors(function_name,
 						   err.getError().toValue());
 		if (rc != SLURM_SUCCESS)
 			return rc;
 	} catch (const bgsched::InputException& err) {
-		rc = bridge_handle_input_errors("Block::isIOConnected",
+		rc = bridge_handle_input_errors(function_name,
 						err.getError().toValue(),
 						bg_record);
 		if (rc != SLURM_SUCCESS)
 			return rc;
 	} catch (const bgsched::InternalException& err) {
-		rc = bridge_handle_internal_errors("Block::isIOConnected",
+		rc = bridge_handle_internal_errors(function_name,
 						err.getError().toValue());
 		if (rc != SLURM_SUCCESS)
 			return rc;
 	} catch (...) {
-                error("isIOConnected request failed ... continuing.");
+                error("%s request failed ... continuing.", function_name);
 		rc = SLURM_ERROR;
 	}
 
-	if ((rc = bridge_block_remove_all_users(
-		     bg_record, bg_conf->slurm_user_name)) == REMOVE_USER_ERR) {
+	if ((rc = bridge_block_sync_users(bg_record)) != SLURM_SUCCESS) {
 		error("bridge_block_remove_all_users: Something "
 		      "happened removing users from block %s",
 		      bg_record->bg_block_id);
 		return SLURM_ERROR;
-	} else if (rc == REMOVE_USER_NONE && bg_conf->slurm_user_name)
-		rc = bridge_block_add_user(bg_record, bg_conf->slurm_user_name);
-
-	if (rc != SLURM_SUCCESS)
-		return SLURM_ERROR;
+	}
 
         try {
+		debug("booting block %s", bg_record->bg_block_id);
 		Block::initiateBoot(bg_record->bg_block_id);
+		/* Set this here just to make sure we know we
+		   are suppose to be booting.  Just incase the
+		   block goes free before we notice we are
+		   configuring.
+		*/
+		bg_record->boot_state = 1;
 	} catch (const bgsched::RuntimeException& err) {
 		rc = bridge_handle_runtime_errors("Block::initiateBoot",
 						err.getError().toValue(),
@@ -645,13 +863,8 @@ extern int bridge_block_boot(bg_record_t *bg_record)
                 error("Boot block request failed ... continuing.");
 		rc = SLURM_ERROR;
 	}
-	/* Set this here just to make sure we know we are suppose to
-	   be booting.  Just incase the block goes free before we
-	   notice we are configuring.
-	*/
-	bg_record->boot_state = BG_BLOCK_BOOTING;
 #else
-	info("block %s is ready", bg_record->bg_block_id);
+	debug("block %s is ready", bg_record->bg_block_id);
 	if (!block_ptr_exist_in_list(bg_lists->booted, bg_record))
 	 	list_push(bg_lists->booted, bg_record);
 	bg_record->state = BG_BLOCK_INITED;
@@ -669,7 +882,7 @@ extern int bridge_block_free(bg_record_t *bg_record)
 	if (!bg_record || !bg_record->bg_block_id)
 		return SLURM_ERROR;
 
-	info("freeing block %s", bg_record->bg_block_id);
+	debug("freeing block %s", bg_record->bg_block_id);
 
 #ifdef HAVE_BG_FILES
 	try {
@@ -697,6 +910,7 @@ extern int bridge_block_free(bg_record_t *bg_record)
 	}
 #else
 	bg_record->state = BG_BLOCK_FREE;
+	last_bg_update = time(NULL);
 #endif
 	return rc;
 }
@@ -710,7 +924,7 @@ extern int bridge_block_remove(bg_record_t *bg_record)
 	if (!bg_record || !bg_record->bg_block_id)
 		return SLURM_ERROR;
 
-	info("removing block %s %p", bg_record->bg_block_id, bg_record);
+	debug("removing block %s %p", bg_record->bg_block_id, bg_record);
 
 #ifdef HAVE_BG_FILES
 	try {
@@ -740,7 +954,7 @@ extern int bridge_block_remove(bg_record_t *bg_record)
 	return rc;
 }
 
-extern int bridge_block_add_user(bg_record_t *bg_record, char *user_name)
+extern int bridge_block_add_user(bg_record_t *bg_record, const char *user_name)
 {
 	int rc = SLURM_SUCCESS;
 	if (!bridge_init(NULL))
@@ -749,7 +963,32 @@ extern int bridge_block_add_user(bg_record_t *bg_record, char *user_name)
 	if (!bg_record || !bg_record->bg_block_id || !user_name)
 		return SLURM_ERROR;
 
-	info("adding user %s to block %s", user_name, bg_record->bg_block_id);
+#ifdef HAVE_BG_FILES
+	try {
+		if (Block::isAuthorized(bg_record->bg_block_id, user_name)) {
+			debug2("User %s is already able to run "
+			       "jobs on block %s",
+			       user_name, bg_record->bg_block_id);
+			return SLURM_SUCCESS;
+		}
+	} catch (const bgsched::InputException& err) {
+		rc = bridge_handle_input_errors("Block::isAuthorized",
+						err.getError().toValue(),
+						bg_record);
+		if (rc != SLURM_SUCCESS)
+			return rc;
+	} catch (const bgsched::RuntimeException& err) {
+		rc = bridge_handle_runtime_errors("Block::isAuthorized",
+						  err.getError().toValue(),
+						  bg_record);
+		if (rc != SLURM_SUCCESS)
+			return rc;
+	} catch(...) {
+                error("isAuthorized user request failed ... continuing.");
+		rc = SLURM_ERROR;
+	}
+#endif
+	debug("adding user %s to block %s", user_name, bg_record->bg_block_id);
 #ifdef HAVE_BG_FILES
         try {
 		Block::addUser(bg_record->bg_block_id, user_name);
@@ -773,7 +1012,8 @@ extern int bridge_block_add_user(bg_record_t *bg_record, char *user_name)
 	return rc;
 }
 
-extern int bridge_block_remove_user(bg_record_t *bg_record, char *user_name)
+extern int bridge_block_remove_user(bg_record_t *bg_record,
+				    const char *user_name)
 {
 	int rc = SLURM_SUCCESS;
 	if (!bridge_init(NULL))
@@ -782,8 +1022,8 @@ extern int bridge_block_remove_user(bg_record_t *bg_record, char *user_name)
 	if (!bg_record || !bg_record->bg_block_id || !user_name)
 		return SLURM_ERROR;
 
-	info("removing user %s from block %s",
-	     user_name, bg_record->bg_block_id);
+	debug("removing user %s from block %s",
+	      user_name, bg_record->bg_block_id);
 #ifdef HAVE_BG_FILES
         try {
 		Block::removeUser(bg_record->bg_block_id, user_name);
@@ -807,20 +1047,20 @@ extern int bridge_block_remove_user(bg_record_t *bg_record, char *user_name)
 	return rc;
 }
 
-extern int bridge_block_remove_all_users(bg_record_t *bg_record,
-					 char *user_name)
+extern int bridge_block_sync_users(bg_record_t *bg_record)
 {
 	int rc = SLURM_SUCCESS;
 #ifdef HAVE_BG_FILES
 	std::vector<std::string> vec;
 	vector<std::string>::iterator iter;
+	bool found = 0;
 #endif
 
 	if (!bridge_init(NULL))
-		return SLURM_ERROR;
+		return REMOVE_USER_ERR;
 
 	if (!bg_record || !bg_record->bg_block_id)
-		return SLURM_ERROR;
+		return REMOVE_USER_ERR;
 
 #ifdef HAVE_BG_FILES
 	try {
@@ -829,23 +1069,70 @@ extern int bridge_block_remove_all_users(bg_record_t *bg_record,
 		bridge_handle_input_errors(
 			"Block::getUsers",
 			err.getError().toValue(), bg_record);
-		return REMOVE_USER_NONE;
+		return REMOVE_USER_ERR;
 	} catch (const bgsched::RuntimeException& err) {
 		bridge_handle_runtime_errors(
 			"Block::getUsers",
 			err.getError().toValue(), bg_record);
-		return REMOVE_USER_NONE;
+		return REMOVE_USER_ERR;
 	}
 
-	if (vec.empty())
-		return REMOVE_USER_NONE;
+	if (bg_record->job_ptr && (bg_record->job_ptr->magic == JOB_MAGIC)) {
+		select_jobinfo_t *jobinfo = (select_jobinfo_t *)
+			bg_record->job_ptr->select_jobinfo->data;
+		BOOST_FOREACH(const std::string& user, vec) {
+			if (!user.compare(bg_conf->slurm_user_name))
+				continue;
+			if (!user.compare(jobinfo->user_name)) {
+				found = 1;
+				continue;
+			}
+			bridge_block_remove_user(bg_record, user.c_str());
+		}
+		if (!found)
+			bridge_block_add_user(bg_record,
+					      jobinfo->user_name);
+	} else if (bg_record->job_list && list_count(bg_record->job_list)) {
+		ListIterator itr = list_iterator_create(bg_record->job_list);
+		struct job_record *job_ptr = NULL;
 
-	BOOST_FOREACH(const std::string& user, vec) {
-		if (user_name && (user == user_name))
-			continue;
-		if ((rc = bridge_block_remove_user(bg_record, user_name)
-		     != SLURM_SUCCESS))
-			break;
+		/* First add all that need to be added removing the
+		 * name from the vector as we go.
+		 */
+		while ((job_ptr = (struct job_record *)list_next(itr))) {
+			select_jobinfo_t *jobinfo;
+
+			if (job_ptr->magic != JOB_MAGIC) {
+				error("bridge_block_sync_users: "
+				      "bad magic found when "
+				      "looking at block %s",
+				      bg_record->bg_block_id);
+				list_delete_item(itr);
+				continue;
+			}
+
+			jobinfo = (select_jobinfo_t *)
+				job_ptr->select_jobinfo->data;
+			iter = std::find(vec.begin(), vec.end(),
+					 jobinfo->user_name);
+			if (iter == vec.end())
+				bridge_block_add_user(bg_record,
+						      jobinfo->user_name);
+			else
+				vec.erase(iter);
+		}
+		list_iterator_destroy(itr);
+
+		/* Then remove all that is left */
+		BOOST_FOREACH(const std::string& user, vec) {
+			bridge_block_remove_user(bg_record, user.c_str());
+		}
+	} else {
+		BOOST_FOREACH(const std::string& user, vec) {
+			if (!user.compare(bg_conf->slurm_user_name))
+				continue;
+			bridge_block_remove_user(bg_record, user.c_str());
+		}
 	}
 
 #endif
@@ -858,7 +1145,6 @@ extern int bridge_blocks_load_curr(List curr_block_list)
 #ifdef HAVE_BG_FILES
 	Block::Ptrs vec;
 	BlockFilter filter;
-	uid_t my_uid;
 	bg_record_t *bg_record = NULL;
 
 	info("querying the system for existing blocks");
@@ -866,7 +1152,7 @@ extern int bridge_blocks_load_curr(List curr_block_list)
 	/* Get the midplane info */
 	filter.setExtendedInfo(true);
 
-	vec = getBlocks(filter, BlockSort::AnyOrder);
+	vec = bridge_get_blocks(filter);
 	if (vec.empty()) {
 		debug("No blocks in the current system");
 		return SLURM_SUCCESS;
@@ -889,7 +1175,13 @@ extern int bridge_blocks_load_curr(List curr_block_list)
 			bg_record = _translate_object_to_block(block_ptr);
 			slurm_list_append(curr_block_list, bg_record);
 		}
+
+		/* modifying will be ceared later in the
+		   _validate_config_blocks or _delete_old_blocks
+		   functions in select_bluegene.c
+		*/
 		bg_record->modifying = 1;
+
 		/* If we are in error we really just want to get the
 		   new state.
 		*/
@@ -913,31 +1205,9 @@ extern int bridge_blocks_load_curr(List curr_block_list)
 		if (!bg_recover)
 			continue;
 
+		xfree(bg_record->mloaderimage);
 		bg_record->mloaderimage =
 			xstrdup(block_ptr->getMicroLoaderImage().c_str());
-
-
-		/* If a user is on the block this will be filled in */
-		xfree(bg_record->user_name);
-		xfree(bg_record->target_name);
-		if (block_ptr->getUser() != "")
-			bg_record->user_name =
-				xstrdup(block_ptr->getUser().c_str());
-
-		if (!bg_record->user_name)
-			bg_record->user_name =
-				xstrdup(bg_conf->slurm_user_name);
-
-		if (!bg_record->boot_state)
-			bg_record->target_name =
-				xstrdup(bg_conf->slurm_user_name);
-		else
-			bg_record->target_name = xstrdup(bg_record->user_name);
-
-		if (uid_from_string(bg_record->user_name, &my_uid) < 0)
-			error("uid_from_string(%s): %m", bg_record->user_name);
-		else
-			bg_record->user_uid = my_uid;
 	}
 
 	slurm_mutex_unlock(&block_state_mutex);
@@ -946,26 +1216,54 @@ extern int bridge_blocks_load_curr(List curr_block_list)
 	return rc;
 }
 
-extern void bridge_reset_block_list(List block_list)
+extern void bridge_block_post_job(char *bg_block_id,
+				  struct job_record *job_ptr)
 {
-	ListIterator itr = NULL;
-	bg_record_t *bg_record = NULL;
-
-	if (!block_list)
-		return;
-
-	itr = list_iterator_create(block_list);
-	while ((bg_record = (bg_record_t *)list_next(itr))) {
-		info("Queue clearing of users of BG block %s",
-		     bg_record->bg_block_id);
-		_remove_jobs_on_block_and_reset(bg_record->bg_block_id);
-	}
-	list_iterator_destroy(itr);
+	_remove_jobs_on_block_and_reset(bg_block_id, job_ptr);
 }
 
-extern void bridge_block_post_job(char *bg_block_id)
+
+extern uint16_t bridge_block_get_action(char *bg_block_id)
 {
-	_remove_jobs_on_block_and_reset(bg_block_id);
+	uint16_t action = BG_BLOCK_ACTION_NONE;
+
+#if defined HAVE_BG_FILES && defined HAVE_BG_GET_ACTION
+	BlockFilter filter;
+	Block::Ptrs vec;
+
+	/* This block hasn't been created yet. */
+	if (!bg_block_id)
+		return action;
+
+	filter.setName(string(bg_block_id));
+
+	vec = bridge_get_blocks(filter);
+	if (vec.empty()) {
+		error("bridge_block_get_action: "
+		      "block %s not found, this should never happen",
+		      bg_block_id);
+		/* block is gone? */
+		return BG_BLOCK_ACTION_NAV;
+	}
+
+	const Block::Ptr &block_ptr = *(vec.begin());
+	action = bridge_translate_action(block_ptr->getAction().toValue());
+#endif
+	return action;
+}
+
+extern int bridge_check_nodeboards(char *mp_loc)
+{
+#ifdef HAVE_BG_FILES
+	NodeBoard::ConstPtrs vec = bridge_get_nodeboards(mp_loc);
+
+	BOOST_FOREACH(const NodeBoard::ConstPtr &nb_ptr, vec) {
+		if (!nb_ptr->isMetaState()
+		    && (nb_ptr->getState() != Hardware::Available))
+			return 1;
+	}
+#endif
+	return 0;
 }
 
 extern int bridge_set_log_params(char *api_file_name, unsigned int level)
@@ -1025,41 +1323,6 @@ extern int bridge_set_log_params(char *api_file_name, unsigned int level)
 	logger_ptr->setLevel(level_ptr);
 	// Add the appender to the ibm logger.
 	logger_ptr->addAppender(appender_ptr);
-
-	// for (int i=1; i<7; i++) {
-	// switch (i) {
-	// case 0:
-	// 	level_ptr = log4cxx::Level::getOff();
-	// 	break;
-	// case 1:
-	// 	level_ptr = log4cxx::Level::getFatal();
-	// 	break;
-	// case 2:
-	// 	level_ptr = log4cxx::Level::getError();
-	// 	break;
-	// case 3:
-	// 	level_ptr = log4cxx::Level::getWarn();
-	// 	break;
-	// case 4:
-	// 	level_ptr = log4cxx::Level::getInfo();
-	// 	break;
-	// case 5:
-	// 	level_ptr = log4cxx::Level::getDebug();
-	// 	break;
-	// case 6:
-	// 	level_ptr = log4cxx::Level::getTrace();
-	// 	break;
-	// case 7:
-	// 	level_ptr = log4cxx::Level::getAll();
-	// 	break;
-	// default:
-	// 	level_ptr = log4cxx::Level::getDebug();
-	// 	break;
-	// }
-	// if (logger_ptr->isEnabledFor(level_ptr))
-	// 	info("we are doing %d", i);
-	// }
-
 #endif
 	return SLURM_SUCCESS;
 }

@@ -135,6 +135,9 @@ node_info_msg_to_hv(node_info_msg_t *node_info_msg, HV *hv)
 	/* record_count implied in node_array */
 	av = newAV();
 	for(i = 0; i < node_info_msg->record_count; i ++) {
+		if (!node_info_msg->node_array[i].name)
+			continue;
+
 		hv_info =newHV();
 		if (node_info_to_hv(node_info_msg->node_array + i,
 				    node_info_msg->node_scaling, hv_info) < 0) {
@@ -196,6 +199,8 @@ hv_to_update_node_msg(HV *hv, update_node_msg_t *update_msg)
 {
 	slurm_init_update_node_msg(update_msg);
 
+	FETCH_FIELD(hv, update_msg, node_addr, charp, FALSE);
+	FETCH_FIELD(hv, update_msg, node_hostname, charp, FALSE);
 	FETCH_FIELD(hv, update_msg, node_names, charp, TRUE);
 	FETCH_FIELD(hv, update_msg, node_state, uint16_t, FALSE);
 	FETCH_FIELD(hv, update_msg, reason, charp, FALSE);

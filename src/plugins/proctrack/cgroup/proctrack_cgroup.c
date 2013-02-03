@@ -45,6 +45,11 @@
 #include <inttypes.h>
 #endif
 
+#if defined(__NetBSD__)
+#include <sys/types.h> /* for pid_t */
+#include <sys/signal.h> /* for SIGKILL */
+#endif
+
 #include "slurm/slurm.h"
 #include "slurm/slurm_errno.h"
 #include "src/common/log.h"
@@ -142,7 +147,8 @@ int _slurm_cgroup_init(void)
 		if (slurm_cgroup_conf.cgroup_automount) {
 			if (xcgroup_ns_mount(&freezer_ns)) {
 				error("unable to mount freezer cgroup"
-				      " namespace");
+				      " namespace: %s",
+				      slurm_strerror(errno));
 				return SLURM_ERROR;
 			}
 			info("cgroup namespace '%s' is now mounted", "freezer");

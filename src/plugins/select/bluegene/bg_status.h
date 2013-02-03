@@ -40,14 +40,23 @@
 
 #include "bg_core.h"
 
+typedef struct {
+	uint32_t jobid;
+} kill_job_struct_t;
+
 extern int bg_status_update_block_state(bg_record_t *bg_record,
 					uint16_t state,
 					List kill_job_list);
 extern List bg_status_create_kill_job_list(void);
-extern void bg_status_process_kill_job_list(List kill_job_list);
+extern void bg_status_process_kill_job_list(List kill_job_list,
+					    bool slurmctld_locked);
 
 /* defined in the various bridge_status' */
+extern int bridge_status_init(void);
+
 extern int bridge_block_check_mp_states(char *bg_block_id,
 					bool slurmctld_locked);
+/* This needs to have block_state_mutex locked before hand. */
+extern int bridge_status_update_block_list_state(List block_list);
 
 #endif

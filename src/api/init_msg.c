@@ -145,7 +145,6 @@ void slurm_init_resv_desc_msg (resv_desc_msg_t * resv_msg)
 	resv_msg->duration	= NO_VAL;
 	resv_msg->end_time	= (time_t) NO_VAL;
 	resv_msg->flags		= (uint16_t) NO_VAL;
-	resv_msg->node_cnt	= NO_VAL;
 	resv_msg->start_time	= (time_t) NO_VAL;
 }
 
@@ -179,7 +178,6 @@ void slurm_init_update_block_msg (update_block_msg_t *update_block_msg)
 {
 	memset(update_block_msg, 0, sizeof(update_block_msg_t));
 	update_block_msg->conn_type[0] = (uint16_t)NO_VAL;
-	update_block_msg->job_running = NO_VAL;
 	update_block_msg->cnode_cnt = NO_VAL;
 	update_block_msg->node_use = (uint16_t)NO_VAL;
 	update_block_msg->state = (uint16_t)NO_VAL;

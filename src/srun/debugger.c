@@ -42,6 +42,12 @@
 #  include "config.h"
 #endif
 
+#if defined HAVE_BG_FILES && !defined HAVE_BG_L_P
+/* Use symbols from the runjob.so library provided by IBM.
+ * Do NOT use debugger symbols local to the srun command */
+
+#else
+
 #include "src/common/log.h"
 
 #include "src/srun/debugger.h"
@@ -70,5 +76,4 @@ void MPIR_Breakpoint(srun_job_t *job)
 	debug("In MPIR_Breakpoint");
 	slurm_step_launch_fwd_signal(job->step_ctx, SIG_DEBUG_WAKE);
 }
-
-
+#endif

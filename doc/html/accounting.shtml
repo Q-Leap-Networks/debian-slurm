@@ -139,7 +139,7 @@ The pathname of local domain socket will be needed in the SLURM
 and SlurmDBD configuration files (slurm.conf and slurmdbd.conf
 respectively, more details are provided below).</p>
 
-<p?Whether you use any authentication module or not you will need to have
+<p>Whether you use any authentication module or not you will need to have
 a way for the SlurmDBD to get uid's for users and/or admin.  If using
 MUNGE, it is ideal for your users to have the same id on all your
 clusters.  If this is the case you should have a combination of every clusters
@@ -149,7 +149,7 @@ the passwd file the action will fail.  If not using MUNGE, you should
 add anyone you want to be an administrator or operator to the passwd file.
 If they plan on running sacctmgr or any of the accounting tools they
 should have the same uid, or they will not authentic correctly.  An
-LDAP server could also server as a way to gather this information.
+LDAP server could also server as a way to gather this information.</p>
 
 <h2>Slurm JobComp Configuration</h2>
 
@@ -193,7 +193,8 @@ a configuration.
 supported for job and step accounting only.</b> The infrastructure for
 PostgresSQL for use with associations is not yet supported, meaning
 sacctmgr will not work correctly.  If interested in adding this
-capability for PostgresSQL, please contact us at slurm-dev@lists.llnl.gov.
+capability for PostgresSQL, please contact us at
+<a href="mailto:slurm-dev@schedmd.com">slurm-dev@schedmd.com</a>.
 
 <p>To enable this database support
 one only needs to have the development package for the database they
@@ -266,7 +267,8 @@ SlurmDBD executes</li>
 
 <li><b>AccountingStoragePass</b>: If using SlurmDBD with a second MUNGE
 daemon, store the pathname of the named socket used by MUNGE to provide
-enterprise-wide. Otherwise the default MUNGE daemon will be used.</li>
+enterprise-wide authentication (i.e. /var/run/munge/moab.socket.2). Otherwise
+the default MUNGE daemon will be used. </li>
 
 <li><b>AccountingStoragePort</b>:
 The network port that SlurmDBD accepts communication on.</li>
@@ -634,9 +636,18 @@ options are available:
 privileges to this user. Valid options are
 <ul>
 <li>None</li>
-<li>Operator: can add, modify,and remove users, and add other operators)</li>
-<li>Admin: In addition to operator privileges these users can add, modify,
-and remove accounts and clusters</li>
+<li>Operator: can add, modify, and remove any database object (user,
+account, etc), and add other operators
+<br>On a SlurmDBD served slurmctld these users can<br>
+<ul>
+<li>View information that is blocked to regular uses by a PrivateData
+  flag</li>
+<li>Create/Alter/Delete Reservations</li>
+</ul>
+</li>
+<li>Admin: These users have the same level of privileges as an
+operator in the database.  They can also alter anything on a served
+slurmctld as if they were the slurm user or root.</li>
 </ul>
 
 <li><b>Cluster=</b> Only add to accounts on these clusters (default is all clusters)</li>
@@ -679,6 +690,13 @@ in the <a href="resource_limits.html">Resource Limits</a> document.</p>
   jobs will be allowed to run.
 </li>
 
+<li><b>GrpCPURunMins=</b> Maximum number of CPU minutes all jobs
+  running with this association and its children can run at the same
+  time.  This takes into consideration time limit of running jobs.  If
+  the limit is reached no new jobs are started until other jobs finish
+  to allow time to free up.
+</li>
+
 <li><b>GrpCPUs=</b> The total count of cpus able to be used at any given
   time from jobs running from this association and its children.  If
   this limit is reached new jobs will be queued but only allowed to
@@ -689,6 +707,12 @@ in the <a href="resource_limits.html">Resource Limits</a> document.</p>
   time from this association and its children.  If
   this limit is reached new jobs will be queued but only allowed to
   run after previous jobs complete from this group.
+</li>
+
+<li><b>GrpMemory=</b> The total amount of memory (MB) able to be used
+  at any given time from jobs running from this association and its
+  children.  If this limit is reached new jobs will be queued but only
+  allowed to run after resources have been relinquished from this group.
 </li>
 
 <li><b>GrpNodes=</b> The total count of nodes able to be used at any given
@@ -777,7 +801,7 @@ as deleted.
 If an entity has existed for less than 1 day, the entity will be removed
 completely. This is meant to clean up after typographic errors.</p>
 
-<p style="text-align: center;">Last modified 10 June 2010</p>
+<p style="text-align: center;">Last modified 3 February 2012</p>
 
 <!--#include virtual="footer.txt"-->
 

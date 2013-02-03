@@ -117,7 +117,7 @@ extern void slurm_msg_t_init(slurm_msg_t *msg)
  *	values from the "src" slurm_msg_t structure.
  * IN src - Pointer to the initialized message from which "dest" will
  *	be initialized.
- * OUT dest - Pointer to the slurm_msg_t which will be intialized.
+ * OUT dest - Pointer to the slurm_msg_t which will be initialized.
  * NOTE: the "dest" structure will contain pointers into the contents of "src".
  */
 extern void slurm_msg_t_copy(slurm_msg_t *dest, slurm_msg_t *src)
@@ -153,7 +153,7 @@ extern char *slurm_add_slash_to_quotes(char *str)
 	/* make a buffer 2 times the size just to be safe */
 	copy = dup = xmalloc((2 * len) + 1);
 	if (copy)
-		do if (*str == '\'' || *str == '"')
+		do if (*str == '\\' || *str == '\'' || *str == '"')
 			   *dup++ = '\\';
 		while ((*dup++ = *str++));
 
@@ -279,6 +279,14 @@ extern int slurm_sort_char_list_desc(char *name_a, char *name_b)
 extern void slurm_free_last_update_msg(last_update_msg_t * msg)
 {
 	xfree(msg);
+}
+
+extern void slurm_free_reboot_msg(reboot_msg_t * msg)
+{
+	if (msg) {
+		xfree(msg->node_list);
+		xfree(msg);
+	}
 }
 
 extern void slurm_free_shutdown_msg(shutdown_msg_t * msg)
@@ -408,6 +416,7 @@ extern void slurm_free_job_launch_msg(batch_job_launch_msg_t * msg)
 	int i;
 
 	if (msg) {
+		xfree(msg->alias_list);
 		xfree(msg->nodes);
 		xfree(msg->cpu_bind);
 		xfree(msg->cpus_per_node);
@@ -514,6 +523,8 @@ extern void slurm_free_update_node_msg(update_node_msg_t * msg)
 	if (msg) {
 		xfree(msg->features);
 		xfree(msg->gres);
+		xfree(msg->node_addr);
+		xfree(msg->node_hostname);
 		xfree(msg->node_names);
 		xfree(msg->reason);
 		xfree(msg);
@@ -543,6 +554,7 @@ extern void slurm_free_resv_desc_msg(resv_desc_msg_t * msg)
 		xfree(msg->features);
 		xfree(msg->licenses);
 		xfree(msg->name);
+		xfree(msg->node_cnt);
 		xfree(msg->node_list);
 		xfree(msg->partition);
 		xfree(msg->users);
@@ -654,6 +666,7 @@ extern void slurm_free_launch_tasks_request_msg(launch_tasks_request_msg_t * msg
 		}
 		xfree(msg->env);
 	}
+	xfree(msg->alias_list);
 	xfree(msg->cwd);
 	xfree(msg->cpu_bind);
 	xfree(msg->mem_bind);
@@ -843,6 +856,16 @@ extern void slurm_free_suspend_msg(suspend_msg_t *msg)
 	xfree(msg);
 }
 
+/*extern void slurm_free_stats_request_msg(stats_desc_msg_t *msg)
+{
+	xfree(msg);
+}*/
+
+extern void slurm_free_stats_response_msg(stats_info_response_msg_t *msg)
+{
+	xfree(msg);
+}
+
 extern void slurm_free_spank_env_request_msg(spank_env_request_msg_t *msg)
 {
 	xfree(msg);
@@ -949,6 +972,15 @@ extern void slurm_free_will_run_response_msg(will_run_response_msg_t *msg)
         }
 }
 
+inline void slurm_free_forward_data_msg(forward_data_msg_t *msg)
+{
+	if (msg) {
+		xfree(msg->address);
+		xfree(msg->data);
+		xfree(msg);
+	}
+}
+
 extern char *preempt_mode_string(uint16_t preempt_mode)
 {
 	char *gang_str;
@@ -1023,6 +1055,70 @@ extern uint16_t preempt_mode_num(const char *preempt_mode)
 	}
 
 	return mode_num;
+}
+
+/* Convert log level number to equivalent string */
+extern char *log_num2string(uint16_t inx)
+{
+	switch (inx) {
+	case 0:
+		return "quiet";
+	case 1:
+		return "fatal";
+	case 2:
+		return "error";
+	case 3:
+		return "info";
+	case 4:
+		return "verbose";
+	case 5:
+		return "debug";
+	case 6:
+		return "debug2";
+	case 7:
+		return "debug3";
+	case 8:
+		return "debug4";
+	case 9:
+		return "debug5";
+	default:
+		return "unknown";
+	}
+}
+
+/* Convert log level string to equivalent number */
+extern uint16_t log_string2num(char *name)
+{
+	if (name == NULL)
+		return (uint16_t) NO_VAL;
+
+	if ((name[0] >= '0') && (name[0] <= '9'))
+		return (uint16_t) atoi(name);
+
+	if (!strcasecmp(name, "quiet"))
+		return (uint16_t) 0;
+	if (!strcasecmp(name, "fatal"))
+		return (uint16_t) 1;
+	if (!strcasecmp(name, "error"))
+		return (uint16_t) 2;
+	if (!strcasecmp(name, "info"))
+		return (uint16_t) 3;
+	if (!strcasecmp(name, "verbose"))
+		return (uint16_t) 4;
+	if (!strcasecmp(name, "debug"))
+		return (uint16_t) 5;
+	if (!strcasecmp(name, "debug2"))
+		return (uint16_t) 6;
+	if (!strcasecmp(name, "debug3"))
+		return (uint16_t) 7;
+	if (!strcasecmp(name, "debug4"))
+		return (uint16_t) 8;
+	if (!strcasecmp(name, "debug5"))
+		return (uint16_t) 9;
+	if (!strcasecmp(name, "debug2"))
+		return (uint16_t) 6;
+
+	return (uint16_t) NO_VAL;
 }
 
 /* Convert SelectTypeParameter to equivalent string
@@ -1210,11 +1306,11 @@ extern char *trigger_type(uint32_t trig_type)
 	else if (trig_type == TRIGGER_TYPE_PRI_CTLD_ACCT_FULL)
 		return "primary_slurmctld_acct_buffer_full";
 	else if (trig_type == TRIGGER_TYPE_BU_CTLD_FAIL)
-		return "backup_ctld_failure";
+		return "backup_slurmctld_failure";
 	else if (trig_type == TRIGGER_TYPE_BU_CTLD_RES_OP)
-		return "backup_ctld_resumed_operation";
+		return "backup_slurmctld_resumed_operation";
 	else if (trig_type == TRIGGER_TYPE_BU_CTLD_AS_CTRL)
-		return "backup_ctld_assumed_control";
+		return "backup_slurmctld_assumed_control";
 	else if (trig_type == TRIGGER_TYPE_PRI_DBD_FAIL)
 		return "primary_slurmdbd_failure";
 	else if (trig_type == TRIGGER_TYPE_PRI_DBD_RES_OP)
@@ -1285,6 +1381,16 @@ extern char *reservation_flags_string(uint16_t flags)
 			xstrcat(flag_str, ",");
 		xstrcat(flag_str, "NO_LICENSE_ONLY");
 	}
+	if (flags & RESERVE_FLAG_STATIC) {
+		if (flag_str[0])
+			xstrcat(flag_str, ",");
+		xstrcat(flag_str, "STATIC");
+	}
+	if (flags & RESERVE_FLAG_NO_STATIC) {
+		if (flag_str[0])
+			xstrcat(flag_str, ",");
+		xstrcat(flag_str, "NO_STATIC");
+	}
 	return flag_str;
 }
 
@@ -1303,7 +1409,8 @@ extern char *node_state_string(uint16_t inx)
 	if (maint_flag) {
 		if (no_resp_flag)
 			return "MAINT*";
-		return "MAINT";
+		if (base != NODE_STATE_ALLOCATED)
+			return "MAINT";
 	}
 	if (drain_flag) {
 		if (comp_flag || (base == NODE_STATE_ALLOCATED)) {
@@ -1420,7 +1527,8 @@ extern char *node_state_string_compact(uint16_t inx)
 	if (maint_flag) {
 		if (no_resp_flag)
 			return "MAINT*";
-		return "MAINT";
+		if (inx != NODE_STATE_ALLOCATED)
+			return "MAINT";
 	}
 	if (drain_flag) {
 		if (comp_flag || (inx == NODE_STATE_ALLOCATED)) {
@@ -1726,6 +1834,7 @@ extern void slurm_free_resource_allocation_response_msg (
 	if (msg) {
 		select_g_select_jobinfo_free(msg->select_jobinfo);
 		msg->select_jobinfo = NULL;
+		xfree(msg->alias_list);
 		xfree(msg->node_list);
 		xfree(msg->cpus_per_node);
 		xfree(msg->cpu_count_reps);
@@ -2157,9 +2266,6 @@ extern void slurm_free_block_info_members(block_info_t *block_info)
 		xfree(block_info->mloaderimage);
 		xfree(block_info->mp_inx);
 		xfree(block_info->mp_str);
-		xfree(block_info->mp_used_inx);
-		xfree(block_info->mp_used_str);
-		xfree(block_info->owner_name);
 		xfree(block_info->ramdiskimage);
 		xfree(block_info->reason);
 	}
@@ -2192,6 +2298,7 @@ extern void slurm_free_block_info_request_msg(
 {
 	xfree(msg);
 }
+
 extern void slurm_free_trigger_msg(trigger_info_msg_t *msg)
 {
 	int i;
@@ -2246,6 +2353,13 @@ extern void slurm_free_shares_response_msg(shares_response_msg_t *msg)
 		xfree(msg);
 	}
 }
+
+
+inline void slurm_free_stats_info_request_msg(stats_info_request_msg_t *msg)
+{
+	xfree(msg);
+}
+
 
 extern void slurm_destroy_priority_factors_object(void *object)
 {
@@ -2471,6 +2585,9 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case ACCOUNTING_REGISTER_CTLD:
 	case REQUEST_TOPO_INFO:
 		/* No body to free */
+		break;
+	case REQUEST_REBOOT_NODES:
+		slurm_free_reboot_msg(data);
 		break;
 	case ACCOUNTING_UPDATE_MSG:
 		slurm_free_accounting_update_msg(data);

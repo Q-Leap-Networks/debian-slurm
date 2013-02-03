@@ -45,7 +45,17 @@
 
 global sacctmgr sacct salloc sattach sbatch sbcast scancel scontrol sinfo smap squeue sreport srun sstat strigger
 
-# Conditional set.  Only set variable if variable does not yet exist.
+################################################################
+#
+# Proc: cset
+#
+# Purpose: Conditional set.  Only set variable if variable does not yet exist.
+#
+# Input: name  -- name of the variable to set
+#	 value -- value to set to 'name'
+#
+################################################################
+
 proc cset {name value} {
 	if {![uplevel 1 info exists $name]} {
 		upvar $name tmp
@@ -78,6 +88,7 @@ cset sbatch      "${slurm_dir}/bin/sbatch"
 cset sbcast      "${slurm_dir}/bin/sbcast"
 cset scancel     "${slurm_dir}/bin/scancel"
 cset scontrol    "${slurm_dir}/bin/scontrol"
+cset sdiag       "${slurm_dir}/bin/sdiag"
 cset sinfo       "${slurm_dir}/bin/sinfo"
 cset smap        "${slurm_dir}/bin/smap"
 cset sprio       "${slurm_dir}/bin/sprio"
@@ -196,9 +207,10 @@ set alpha_numeric_under  "\[a-zA-Z0-9_\-\]+"
 set alpha_under          "\[A-Z_\]+"
 set digit                "\[0-9\]"
 set end_of_line          "\[\r\n\]"
+set float                "\[0-9\]+\\.?\[0-9\]*"
 set number               "\[0-9\]+"
 set number_with_suffix   "\[0-9\]+\[KM\]*"
-set float                "\[0-9\]+\\.?\[0-9\]+"
+set slash                "/"
 set whitespace		 "\[ \t\n\r\f\v\]+"
 set alpha_numeric_nodelist "$alpha_numeric_under\\\[?\[$alpha_numeric_comma\]?\\\]?"
 #
@@ -614,7 +626,7 @@ proc wait_for_step { step_id } {
 		if {[regexp {Nodes=} $line foo] == 1} {
 			return 0
 		}
-		if {[regexp {BP_List=} $line foo] == 1} {
+		if {[regexp {MidplaneList=} $line foo] == 1} {
 			return 0
 		}
 		if { $my_delay > $max_job_state_delay } {
@@ -630,6 +642,81 @@ proc wait_for_step { step_id } {
 			set sleep_time 10
 		}
 	}
+}
+
+################################################################
+#
+# Proc: wait_for_all_jobs
+#
+# Purpose:  Wait for previously submitted SLURM jobs to finish of a
+# certain name, if incr_sleep is set exponential back-off 1 to 10 seconds
+#
+# Returns: A non-zero return code indicates a failure.
+#
+# Input: job_name   -- The name of job to wait for.
+#        incr_sleep -- To exponentially back-off or not
+#
+#
+################################################################
+# Wait up to 900 seconds for all jobs to terminate
+# Return 0 if all jobs done, remainin job count otherwise
+proc wait_for_all_jobs { job_name incr_sleep } {
+	global scancel squeue bin_sleep
+
+	set matches 0
+	set sleep_time  1
+	set my_delay    0
+	set last_matches 0
+	set timeout 30
+	send_user "Waiting for all jobs to terminate\n"
+	for {set inx 0} {$inx < 600} {incr inx} {
+		log_user 0
+		set matches 0
+		spawn $squeue -o %j
+		expect {
+			-re "$job_name" {
+				incr matches
+				exp_continue
+			}
+			-re "error" {
+				set matches -1
+			}
+			timeout {
+				send_user "No response from squeue\n"
+				set matches -1
+			}
+			eof {
+				wait
+			}
+		}
+		log_user 1
+		if {$matches == 0} {
+			send_user "All jobs complete\n"
+			break
+		}
+		if {$matches > 0} {
+			send_user "  $matches jobs remaining\n"
+#			Moab can slow throughput down a lot,
+#			so don't return here
+#			if {$matches == $last_matches} {
+#				send_user "Running jobs hung\n"
+#				break
+#			}
+#			set last_matches $matches
+			exec sleep $sleep_time
+			set my_delay [expr $my_delay + $sleep_time]
+			if { $incr_sleep } {
+				set sleep_time  [expr $sleep_time * 2]
+				if { $sleep_time > 10 } {
+					set sleep_time 10
+				}
+			}
+		}
+	}
+	if {$matches != 0} {
+		exec $scancel -n $job_name
+	}
+	return $matches
 }
 
 
@@ -666,13 +753,11 @@ proc test_assoc_enforced { } {
 
 ################################################################
 #
-# Proc: test_assoc_enforced
+# Proc: test_limits_enforced
 #
-# Purpose: Determine if we need an association to run a job.
-# This is based upon
-# the value of AccountingStorageEnforce in the slurm.conf.
+# Purpose: Check if AccountingStorageEnforce limits is set
 #
-# Returns level of association enforcement, 0 if none
+# Returns 1 if limits is set, else 0
 #
 ################################################################
 proc test_limits_enforced { } {
@@ -1200,6 +1285,36 @@ proc test_cray { } {
 
 ################################################################
 #
+# Proc: test_serial
+#
+# Purpose: Determine if the system runs only serial jobs
+#
+# Returns 1 if the system is serial, 0 otherwise
+#
+################################################################
+
+proc test_serial { } {
+	global scontrol bin_bash bin_grep
+
+	log_user 0
+	set serial 0
+	spawn -noecho $bin_bash -c "exec $scontrol show config | $bin_grep SelectType"
+	expect {
+		"select/serial" {
+			set serial 1
+			exp_continue
+		}
+		eof {
+			wait
+		}
+	}
+	log_user 1
+
+	return $serial
+}
+
+################################################################
+#
 # Proc: test_emulated
 #
 # Purpose: Determine if the system is emulated (not running on
@@ -1404,10 +1519,20 @@ proc test_super_user { } {
 	return $super_user
 }
 
-# Create a 16 bit hex number from a signed decimal number
-# Replace all non-decimal characters
+################################################################
+#
+# Proc: dec2hex16
+#
+# Purpose: Create a 16 bit hex number from a signed decimal number
+#
+# Returns: 16 bit hex version of input 'value'
+#
+# Input: value -- decimal number to convert
+#
 # Courtesy of Chris Cornish
 # http://aspn.activestate.com/ASPN/Cookbook/Tcl/Recipe/415982
+################################################################
+# Replace all non-decimal characters
 proc dec2hex16 {value} {
 	regsub -all {[^0-x\.-]} $value {} newtemp
 	set value [string trim $newtemp]
@@ -1421,10 +1546,20 @@ proc dec2hex16 {value} {
 	}
 }
 
-# Create a 32 bit hex number from a signed decimal number
-# Replace all non-decimal characters
+################################################################
+#
+# Proc: dec2hex32
+#
+# Purpose: Create a 32 bit hex number from a signed decimal number
+#
+# Returns: 32 bit hex version of input 'value'
+#
+# Input: value -- decimal number to convert
+#
 # Courtesy of Chris Cornish
 # http://aspn.activestate.com/ASPN/Cookbook/Tcl/Recipe/415982
+################################################################
+# Replace all non-decimal characters
 proc dec2hex {value} {
 	regsub -all {[^0-x\.-]} $value {} newtemp
 	set value [string trim $newtemp]
@@ -1467,6 +1602,32 @@ proc available_nodes { partition } {
 	return $available
 }
 
+################################################################
+#
+# Proc: partition_shared
+#
+# Purpose: Determine the shared configuration of the specified
+#          partition
+#
+# Returns: Return the shared configuration of the specified
+#          partition
+#
+#
+# Input: partition - name of a partition
+#
+################################################################
+
+proc partition_shared { partition } {
+	global sinfo
+
+	set shared "No"
+	send_user "$sinfo --noheader --partition $partition --format %h\n"
+	set fd [open "|$sinfo --noheader --partition $partition --format %h"]
+	gets $fd line
+	catch {close $fd}
+	regexp {[a-zA-Z]+} $line shared
+	return $shared
+}
 
 ################################################################
 #
@@ -1559,7 +1720,15 @@ proc make_bash_script { script_name script_contents } {
 }
 
 ################################################################
-# Given a hostname, return it's numeric suffix
+#
+# Proc: get_suffix
+#
+# Purpose: Given a hostname, return it's numeric suffix
+#
+# Returns: numerical suffix for input 'hostname'
+#
+# Input: hostname -- hostname for which to return suffix
+#
 ################################################################
 proc get_suffix { hostname } {
 	set host_len [string length $hostname]
@@ -1587,9 +1756,13 @@ proc get_suffix { hostname } {
 }
 
 ################################################################
-# Check if we are user root or SlurmUser
 #
-# Return 1 if true, 0 if false
+# Proc: is_super_user
+#
+# Purpose: Check if we are user root or SlurmUser
+#
+# Returns: 1 if true, 0 if false
+#
 ################################################################
 
 proc is_super_user { } {
@@ -1629,7 +1802,11 @@ proc is_super_user { } {
 
 ################################################################
 #
+# Proc: check_acct_associations
 #
+# Purpose: Use sacctmgr to check associations
+#
+# Returns: 0 on any error
 #
 ################################################################
 proc check_acct_associations { } {
@@ -1703,7 +1880,11 @@ proc check_acct_associations { } {
 
 ################################################################
 #
+# Proc:check_accounting_admin_level
 #
+# Purpose: get the admin_level for the current user
+#
+# Returns: admin_level for the current user
 #
 ################################################################
 proc check_accounting_admin_level { } {
@@ -1755,7 +1936,11 @@ proc check_accounting_admin_level { } {
 
 ################################################################
 #
+# Proc: get_cluster_name
 #
+# Purpose: get the cluster name
+#
+# Returns: name of the cluster
 #
 ################################################################
 proc get_cluster_name { } {
@@ -1965,6 +2150,41 @@ proc get_bluegene_cnodes_per_mp { } {
 
 ################################################################
 #
+# Proc: get_bluegene_allow_sub_blocks
+#
+# Purpose: See if the BlueGene system allows sub blocks
+#
+# Returns 0 for no and 1 for yes.
+#
+################################################################
+
+proc get_bluegene_allow_sub_blocks { } {
+	global scontrol alpha
+
+	log_user 0
+	set type 0
+	set scon_pid [spawn -noecho $scontrol show config]
+	expect {
+		-re "AllowSubBlockAllocations" {
+			set type 1
+			exp_continue
+		}
+		timeout {
+			send_user "\nFAILURE: scontrol not responding\n"
+			slow_kill $scon_pid
+			set exit_code 1
+		}
+		eof {
+			wait
+		}
+	}
+	log_user 1
+
+	return $type
+}
+
+################################################################
+#
 # Proc: get_node_cnt
 #
 # Purpose: Determine how many nodes are on the system
@@ -1997,6 +2217,42 @@ proc get_node_cnt { } {
 
 	return $node_cnt
 }
+
+################################################################
+#
+# Proc: get_node_cnt_in_part
+#
+# Purpose: Determine how many nodes are in a given partition
+#
+# Returns count of nodes in a partition or 0 if unknown
+#
+################################################################
+
+proc get_node_cnt_in_part { partition } {
+	global scontrol number
+
+#	log_user 0
+	set node_cnt 0
+	set scon_pid [spawn -noecho $scontrol show partition $partition]
+	expect {
+		-re "not found" {
+			send_user "\nFAILURE: partition $partition doesn't exist\n"
+		}
+		-re "TotalNodes=($number)" {
+			set node_cnt $expect_out(1,string)
+			exp_continue
+		}
+		timeout {
+			send_user "\nFAILURE: scontrol not responding\n"
+		}
+		eof {
+		}
+	}
+#	log_user 1
+
+	return $node_cnt
+}
+
 
 ################################################################
 #

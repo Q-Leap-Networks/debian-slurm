@@ -165,7 +165,7 @@ slurm_sprint_job_step_info ( job_step_info_t * job_step_ptr,
 					    SELECT_JOBDATA_IONODES,
 					    &io_nodes);
 		snprintf(tmp_line, sizeof(tmp_line),
-			"Partition=%s BP_List=%s[%s] Gres=%s",
+			"Partition=%s MidplaneList=%s[%s] Gres=%s",
 			job_step_ptr->partition,
 			job_step_ptr->nodes, io_nodes,
 			job_step_ptr->gres);
@@ -316,9 +316,9 @@ extern int slurm_job_step_stat(uint32_t job_id, uint32_t step_id,
 
 	xassert(resp);
 
-	if(!node_list) {
-		if(!(step_layout =
-		     slurm_job_step_layout_get(job_id, step_id))) {
+	if (!node_list) {
+		if (!(step_layout =
+		      slurm_job_step_layout_get(job_id, step_id))) {
 			rc = errno;
 			error("slurm_job_step_stat: "
 			      "problem getting step_layout for %u.%u: %s",
@@ -328,7 +328,7 @@ extern int slurm_job_step_stat(uint32_t job_id, uint32_t step_id,
 		node_list = step_layout->node_list;
 	}
 
- 	if(!*resp) {
+ 	if (!*resp) {
 		resp_out = xmalloc(sizeof(job_step_stat_response_msg_t));
 		*resp = resp_out;
 		created = 1;
@@ -342,16 +342,16 @@ extern int slurm_job_step_stat(uint32_t job_id, uint32_t step_id,
 	slurm_msg_t_init(&req_msg);
 
 	memset(&req, 0, sizeof(job_step_id_msg_t));
-        resp_out->job_id = req.job_id = job_id;
+	resp_out->job_id = req.job_id = job_id;
 	resp_out->step_id = req.step_id = step_id;
 
 	req_msg.msg_type = REQUEST_JOB_STEP_STAT;
         req_msg.data = &req;
 
-        if(!(ret_list = slurm_send_recv_msgs(node_list, &req_msg, 0, false))) {
+        if (!(ret_list = slurm_send_recv_msgs(node_list, &req_msg, 0, false))) {
                 error("slurm_job_step_stat: got an error no list returned");
 		rc = SLURM_ERROR;
-		if(created) {
+		if (created) {
 			slurm_job_step_stat_response_msg_free(resp_out);
 			*resp = NULL;
 		}
@@ -359,10 +359,10 @@ extern int slurm_job_step_stat(uint32_t job_id, uint32_t step_id,
         }
 
 	itr = list_iterator_create(ret_list);
-	while((ret_data_info = list_next(itr))) {
+	while ((ret_data_info = list_next(itr))) {
 		switch (ret_data_info->type) {
 		case RESPONSE_JOB_STEP_STAT:
-			if(!resp_out->stats_list)
+			if (!resp_out->stats_list)
 				resp_out->stats_list = list_create(
 					slurm_free_job_step_stat);
 			list_push(resp_out->stats_list,
@@ -390,7 +390,7 @@ extern int slurm_job_step_stat(uint32_t job_id, uint32_t step_id,
 	list_iterator_destroy(itr);
 	list_destroy(ret_list);
 
-	if(resp_out->stats_list)
+	if (resp_out->stats_list)
 		list_sort(resp_out->stats_list, (ListCmpF)_sort_stats_by_name);
 cleanup:
 	slurm_step_layout_destroy(step_layout);

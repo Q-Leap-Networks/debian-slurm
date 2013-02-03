@@ -70,7 +70,8 @@
  * In slurm_protocol_util.c check_header_version(), and init_header()
  * need to be updated also when changes are added */
 #define SLURM_PROTOCOL_VERSION ((SLURM_API_MAJOR << 8) | SLURM_API_AGE)
-#define SLURM_2_3_PROTOCOL_VERSION SLURM_PROTOCOL_VERSION
+#define SLURM_2_4_PROTOCOL_VERSION SLURM_PROTOCOL_VERSION
+#define SLURM_2_3_PROTOCOL_VERSION ((23 << 8) | 0)
 #define SLURM_2_2_PROTOCOL_VERSION ((22 << 8) | 0)
 #define SLURM_2_1_PROTOCOL_VERSION ((21 << 8) | 0)
 #define SLURM_2_0_PROTOCOL_VERSION ((20 << 8) | 0)
@@ -80,10 +81,6 @@
 #define SLURM_PROTOCOL_NO_FLAGS 0
 #define SLURM_GLOBAL_AUTH_KEY   0x0001
 
-#if MONGO_IMPLEMENTATION
-#  include "src/common/slurm_protocol_mongo_common.h"
-#else
-#  include "src/common/slurm_protocol_socket_common.h"
-#endif
+#include "src/common/slurm_protocol_socket_common.h"
 
 #endif

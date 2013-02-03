@@ -39,10 +39,6 @@
 #ifndef _BRIDGE_STATUS_H_
 #define _BRIDGE_STATUS_H_
 
-extern int bridge_status_init(void);
 extern int bridge_status_fini(void);
-
-/* This needs to have block_state_mutex locked before hand. */
-extern int bridge_status_update_block_list_state(List block_list);
 
 #endif

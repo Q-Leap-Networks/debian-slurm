@@ -68,6 +68,9 @@ static xcgroup_t user_memory_cg;
 static xcgroup_t job_memory_cg;
 static xcgroup_t step_memory_cg;
 
+static bool constrain_ram_space;
+static bool constrain_swap_space;
+
 static float allowed_ram_space;   /* Allowed RAM in percent       */
 static float allowed_swap_space;  /* Allowed Swap percent         */
 
@@ -109,7 +112,7 @@ extern int task_cgroup_memory_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
 		if (slurm_cgroup_conf->cgroup_automount) {
 			if (xcgroup_ns_mount(&memory_ns)) {
 				error("task/cgroup: unable to mount memory "
-				      "namespace");
+				      "namespace: %s", slurm_strerror(errno));
 				goto clean;
 			}
 			info("task/cgroup: memory namespace is now mounted");
@@ -120,7 +123,21 @@ extern int task_cgroup_memory_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
 		}
 	}
 
-	allowed_ram_space = slurm_cgroup_conf->allowed_ram_space;
+	constrain_ram_space = slurm_cgroup_conf->constrain_ram_space;
+	constrain_swap_space = slurm_cgroup_conf->constrain_swap_space;
+
+	/* 
+	 * as the swap space threshold will be configured with a 
+	 * mem+swp parameter value, if RAM space is not monitored,
+	 * set allowed RAM space to 100% of the job requested memory.
+	 * It will help to construct the mem+swp value that will be
+	 * used for both mem and mem+swp limit during memcg creation.
+	 */
+	if ( constrain_ram_space )
+		allowed_ram_space = slurm_cgroup_conf->allowed_ram_space;
+	else
+		allowed_ram_space = 100.0;
+
 	allowed_swap_space = slurm_cgroup_conf->allowed_swap_space;
 
 	if ((totalram = (uint64_t) conf->real_memory_size) == 0)
@@ -131,17 +148,19 @@ extern int task_cgroup_memory_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
 	max_swap += max_ram;
 	min_ram_space = slurm_cgroup_conf->min_ram_space * 1024 * 1024;
 
-	debug ("task/cgroup/memory: total:%luM allowed:%.4g%%, swap:%.4g%%, "
-	      "max:%.4g%%(%luM) max+swap:%.4g%%(%luM) min:%uM",
-	      (unsigned long) totalram,
-	      allowed_ram_space,
-	      allowed_swap_space,
-	      slurm_cgroup_conf->max_ram_percent,
-	      (unsigned long) (max_ram/(1024*1024)),
-	      slurm_cgroup_conf->max_swap_percent,
-	      (unsigned long) (max_swap/(1024*1024)),
-	      (unsigned) slurm_cgroup_conf->min_ram_space);
-
+	debug ("task/cgroup/memory: total:%luM allowed:%.4g%%(%s), "
+	       "swap:%.4g%%(%s), max:%.4g%%(%luM) max+swap:%.4g%%(%luM) min:%uM",
+	       (unsigned long) totalram,
+	       allowed_ram_space,
+	       constrain_ram_space?"enforced":"permissive",
+	       allowed_swap_space,
+	       constrain_swap_space?"enforced":"permissive",
+	       slurm_cgroup_conf->max_ram_percent,
+	       (unsigned long) (max_ram/(1024*1024)),
+	       slurm_cgroup_conf->max_swap_percent,
+	       (unsigned long) (max_swap/(1024*1024)),
+	       (unsigned) slurm_cgroup_conf->min_ram_space);
+	
         /*
          *  Warning: OOM Killer must be disabled for slurmstepd
          *  or it would be destroyed if the application use
@@ -149,12 +168,12 @@ extern int task_cgroup_memory_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
          *
          *  If an env value is already set for slurmstepd
          *  OOM killer behavior, keep it, otherwise set the
-         *  -17 value, wich means do not let OOM killer kill it
+         *  -1000 value, wich means do not let OOM killer kill it
          *
-         *  FYI, setting "export SLURMSTEPD_OOM_ADJ=-17"
+         *  FYI, setting "export SLURMSTEPD_OOM_ADJ=-1000"
          *  in /etc/sysconfig/slurm would be the same
          */
-        setenv("SLURMSTEPD_OOM_ADJ","-17",0);
+        setenv("SLURMSTEPD_OOM_ADJ", "-1000", 0);
 
 	return SLURM_SUCCESS;
 
@@ -175,19 +194,22 @@ extern int task_cgroup_memory_fini(slurm_cgroup_conf_t *slurm_cgroup_conf)
 		return SLURM_SUCCESS;
 
 	/*
-	 * Move the slurmstepd back to the root memory cg and force empty
+	 * Move the slurmstepd back to the root memory cg and remove[*]
 	 * the step cgroup to move its allocated pages to its parent.
-	 * The release_agent will asynchroneously be called for the step
-	 * cgroup. It will do the necessary cleanup.
-	 * It should be good if this force_empty mech could be done directly
-	 * by the memcg implementation at the end of the last task managed
-	 * by a cgroup. It is too difficult and near impossible to handle
-	 * that cleanup correctly with current memcg.
+	 *
+	 * [*] Calling rmdir(2) on an empty cgroup moves all resident charged
+	 *  pages to the parent (i.e. the job cgroup). (If force_empty were
+	 *  used instead, only clean pages would be flushed). This keeps
+	 *  resident pagecache pages associated with the job. It is expected
+	 *  that the job epilog will then optionally force_empty the
+	 *  job cgroup (to flush pagecache), and then rmdir(2) the cgroup
+	 *  or wait for release notification from kernel.
 	 */
 	if (xcgroup_create(&memory_ns,&memory_cg,"",0,0) == XCGROUP_SUCCESS) {
-		xcgroup_set_uint32_param(&memory_cg,"tasks",getpid());
+		xcgroup_move_process(&memory_cg, getpid());
 		xcgroup_destroy(&memory_cg);
-		xcgroup_set_param(&step_memory_cg,"memory.force_empty","1");
+		if (xcgroup_delete(&step_memory_cg) != XCGROUP_SUCCESS)
+			error ("cgroup: rmdir step memcg failed: %m");
 	}
 
 	xcgroup_destroy(&user_memory_cg);
@@ -261,14 +283,29 @@ static int memcg_initialize (xcgroup_ns_t *ns, xcgroup_t *cg,
 	}
 
 	xcgroup_set_param (cg, "memory.use_hierarchy","1");
-	xcgroup_set_uint64_param (cg, "memory.limit_in_bytes", mlb);
-	xcgroup_set_uint64_param (cg, "memory.memsw.limit_in_bytes", mls);
 
-	info ("task/cgroup: %s: alloc=%luMB mem.limit=%luMB memsw.limit=%luMB",
-		path,
-		(unsigned long) mem_limit,
-		(unsigned long) mlb/(1024*1024),
-		(unsigned long) mls/(1024*1024));
+	/* when RAM space has not to be constrained and we are here, it
+	 * means that only Swap space has to be constrained. Thus set 
+	 * RAM space limit to the mem+swap limit too */
+	if ( ! constrain_ram_space )
+		mlb = mls;
+	xcgroup_set_uint64_param (cg, "memory.limit_in_bytes", mlb);
+
+	/* this limit has to be set only if ConstrainSwapSpace is set to yes */
+	if ( constrain_swap_space ) {
+		xcgroup_set_uint64_param (cg, "memory.memsw.limit_in_bytes",
+					  mls);
+		info ("task/cgroup: %s: alloc=%luMB mem.limit=%luMB "
+		      "memsw.limit=%luMB", path,
+		      (unsigned long) mem_limit,
+		      (unsigned long) mlb/(1024*1024),
+		      (unsigned long) mls/(1024*1024));
+	} else {
+		info ("task/cgroup: %s: alloc=%luMB mem.limit=%luMB "
+		      "memsw.limit=unlimited", path,
+		      (unsigned long) mem_limit,
+		      (unsigned long) mlb/(1024*1024));
+	}
 
 	return 0;
 }

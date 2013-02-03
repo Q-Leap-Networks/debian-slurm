@@ -297,10 +297,14 @@ static int _get_job_rec_field (lua_State *L)
 		lua_pushstring (L, job_ptr->partition);
 	} else if (!strcmp(name, "priority")) {
 		lua_pushnumber (L, job_ptr->priority);
+	} else if (!strcmp(name, "req_switch")) {
+		lua_pushnumber (L, job_ptr->req_switch);
 	} else if (!strcmp(name, "time_limit")) {
 		lua_pushnumber (L, job_ptr->time_limit);
 	} else if (!strcmp(name, "time_min")) {
 		lua_pushnumber (L, job_ptr->time_min);
+	} else if (!strcmp(name, "wait4switch")) {
+		lua_pushnumber (L, job_ptr->wait4switch);
 	} else if (!strcmp(name, "wckey")) {
 		lua_pushstring (L, job_ptr->wckey);
 	} else {
@@ -375,6 +379,8 @@ static int _get_job_req_field (lua_State *L)
 		lua_pushstring (L, job_desc->qos);
 	} else if (!strcmp(name, "req_nodes")) {
 		lua_pushstring (L, job_desc->req_nodes);
+	} else if (!strcmp(name, "req_switch")) {
+		lua_pushnumber (L, job_desc->req_switch);
 	} else if (!strcmp(name, "requeue")) {
 		lua_pushnumber (L, job_desc->requeue);
 	} else if (!strcmp(name, "reservation")) {
@@ -391,6 +397,8 @@ static int _get_job_req_field (lua_State *L)
 		lua_pushnumber (L, job_desc->time_min);
 	} else if (!strcmp(name, "user_id")) {
 		lua_pushnumber (L, job_desc->user_id);
+	} else if (!strcmp(name, "wait4switch")) {
+		lua_pushnumber (L, job_desc->wait4switch);
 	} else if (!strcmp(name, "wckey")) {
 		lua_pushstring (L, job_desc->wckey);
 	} else {
@@ -496,6 +504,8 @@ static int _set_job_req_field (lua_State *L)
 		xfree(job_desc->req_nodes);
 		if (strlen(value_str))
 			job_desc->req_nodes = xstrdup(value_str);
+	} else if (!strcmp(name, "req_switch")) {
+		job_desc->req_switch = luaL_checknumber(L, 3);
 	} else if (!strcmp(name, "requeue")) {
 		job_desc->requeue = luaL_checknumber(L, 3);
 	} else if (!strcmp(name, "reservation")) {
@@ -513,6 +523,8 @@ static int _set_job_req_field (lua_State *L)
 		job_desc->time_limit = luaL_checknumber(L, 3);
 	} else if (!strcmp(name, "time_min")) {
 		job_desc->time_min = luaL_checknumber(L, 3);
+	} else if (!strcmp(name, "wait4switch")) {
+		job_desc->wait4switch = luaL_checknumber(L, 3);
 	} else if (!strcmp(name, "wckey")) {
 		value_str = luaL_checkstring(L, 3);
 		xfree(job_desc->wckey);
@@ -765,8 +777,9 @@ extern int job_submit(struct job_descriptor *job_desc, uint32_t submit_uid)
 
 	_push_job_desc(job_desc);
 	_push_partition_list(job_desc->user_id, submit_uid);
+	lua_pushnumber (L, submit_uid);
 	_stack_dump("job_submit, before lua_pcall", L);
-	if (lua_pcall (L, 2, 1, 0) != 0) {
+	if (lua_pcall (L, 3, 1, 0) != 0) {
 		error("%s/lua: %s: %s",
 		      __func__, lua_script_path, lua_tostring (L, -1));
 	} else {
@@ -803,8 +816,9 @@ extern int job_modify(struct job_descriptor *job_desc,
 	_push_job_desc(job_desc);
 	_push_job_rec(job_ptr);
 	_push_partition_list(job_ptr->user_id, submit_uid);
+	lua_pushnumber (L, submit_uid);
 	_stack_dump("job_modify, before lua_pcall", L);
-	if (lua_pcall (L, 3, 1, 0) != 0) {
+	if (lua_pcall (L, 4, 1, 0) != 0) {
 		error("%s/lua: %s: %s",
 		      __func__, lua_script_path, lua_tostring (L, -1));
 	} else {

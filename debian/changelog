@@ -1,3 +1,11 @@
+slurm-llnl (2.4.5-1) unstable; urgency=low
+
+  * New upstream major release 
+  * Add lintian overrides for hardening-no-fortify-functions in the
+    slurm-llnl-basic-plugins package
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Sun, 03 Feb 2013 11:53:20 +0100
+
 slurm-llnl (2.3.4-2) unstable; urgency=low
 
   * Avoiding deluser to fail on purge (Closes: #667537) 

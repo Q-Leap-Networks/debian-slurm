@@ -88,12 +88,13 @@ slurmapi_src =           \
 	config_info.c    \
 	front_end_info.c \
 	init_msg.c       \
-	job_info.c job_info.h \
+	job_info.c       \
 	job_step_info.c  \
 	node_info.c      \
 	partition_info.c \
 	reservation_info.c \
 	signal.c         \
+	slurm_get_statistics.c \
 	slurm_hostlist.c \
 	slurm_pmi.c slurm_pmi.h	\
 	step_ctx.c step_ctx.h \
@@ -106,6 +107,7 @@ slurmapi_src =           \
 	triggers.c       \
 	reconfigure.c    \
 	update_config.c
+
 
 common_dir = $(top_builddir)/src/common
 
@@ -129,7 +131,7 @@ libslurm_la_LIBADD = $(convenience_libs)
 libslurm_la_LDFLAGS        = \
         $(LIB_LDFLAGS) \
         -version-info $(current):$(rev):$(age) \
-        $(OTHER_FLAGS)
+        $(OTHER_FLAGS) $(HWLOC_LDFLAGS) $(HWLOC_LIBS)
 
 #
 # The libpmi_la_LIBADD specification below causes libpmi.la to relink

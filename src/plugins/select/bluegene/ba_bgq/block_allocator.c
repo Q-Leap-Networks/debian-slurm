@@ -5,8 +5,9 @@
  *****************************************************************************
  *  Copyright (C) 2004-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2011 Lawrence Livermore National Security.
+ *  Copyright (C) 2011 SchedMD LLC.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  Written by Danny Auble <da@llnl.gov>
+ *  Written by Danny Auble <da@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.schedmd.com/slurmdocs/>.
@@ -49,6 +50,7 @@
 #include "src/common/uid.h"
 #include "src/common/timers.h"
 #include "src/common/slurmdb_defs.h"
+#include "../bg_list_functions.h"
 
 #define DEBUG_PA
 #define BEST_COUNT_INIT 20
@@ -64,27 +66,17 @@ typedef struct {
 /* _ba_system is the "current" system that the structures will work
  *  on */
 ba_mp_t ****ba_main_grid = NULL;
+ba_geo_system_t *ba_mp_geo_system = NULL;
 
 static ba_geo_system_t *ba_main_geo_system = NULL;
-static ba_geo_system_t *ba_mp_geo_system = NULL;
 static uint16_t *deny_pass = NULL;
 static ba_nc_coords_t g_nc_coords[16];
-
+static ba_mp_t **ba_main_grid_array = NULL;
 /* increment Y -> Z -> A -> X -> E
  * used for doing nodecard coords */
 static int ba_nc_dim_order[5] = {Y, Z, A, X, E};
 
 /** internal helper functions */
-/* */
-static int _check_for_options(select_ba_request_t* ba_request);
-
-/* */
-static int _fill_in_coords(List results, int level, ba_mp_t *start_mp,
-			   ba_mp_t **check_mp, int *block_start,
-			   int *block_end, int *coords);
-
-static int _finish_torus(List results, int level, int *block_start,
-			 int *block_end, uint16_t *conn_type, int *coords);
 
 /* */
 static char *_copy_from_main(List main_mps, List ret_list);
@@ -93,15 +85,12 @@ static char *_copy_from_main(List main_mps, List ret_list);
 static char *_reset_altered_mps(List main_mps, bool get_name);
 
 /* */
-static int _copy_ba_switch(ba_mp_t *ba_mp, ba_mp_t *orig_mp, int dim);
-
-/* */
 static int _check_deny_pass(int dim);
 
 /* */
-static int _find_path(List mps, ba_mp_t *start_mp, int dim,
-		      uint16_t geometry, uint16_t conn_type,
-		      int *block_start, int *block_end);
+static int _fill_in_wires(List mps, ba_mp_t *start_mp, int dim,
+			  uint16_t geometry, uint16_t conn_type,
+			  bool full_check);
 
 /* */
 static void _setup_next_mps(int level, uint16_t *coords);
@@ -115,6 +104,21 @@ static bool _mp_used(ba_mp_t* ba_mp, int dim);
 /** */
 static bool _mp_out_used(ba_mp_t* ba_mp, int dim);
 
+/** */
+static uint16_t _find_distance(uint16_t start, uint16_t end, int dim);
+
+static int _ba_set_ionode_str_internal(int level, int *coords,
+				       int *start_offset, int *end_offset,
+				       hostlist_t hl);
+
+static bitstr_t *_find_sub_block(ba_geo_table_t **geo_table,
+				 uint16_t *start_loc, bitstr_t *total_bitmap,
+				 uint32_t node_count);
+
+static ba_geo_table_t *_find_geo_table(uint32_t orig_node_count,
+				       uint32_t *node_count,
+				       uint32_t total_count);
+
 extern void ba_create_system()
 {
 	int a,x,y,z, i = 0, dim;
@@ -124,44 +128,7 @@ extern void ba_create_system()
 	if (ba_main_grid)
 		ba_destroy_system();
 
-	ba_main_grid = (ba_mp_t****)
-		xmalloc(sizeof(ba_mp_t***) * DIM_SIZE[A]);
-	for (a = 0; a < DIM_SIZE[A]; a++) {
-		ba_main_grid[a] = (ba_mp_t***)
-			xmalloc(sizeof(ba_mp_t**) * DIM_SIZE[X]);
-		for (x = 0; x < DIM_SIZE[X]; x++) {
-			ba_main_grid[a][x] = (ba_mp_t**)
-				xmalloc(sizeof(ba_mp_t*) * DIM_SIZE[Y]);
-			for (y = 0; y < DIM_SIZE[Y]; y++) {
-				ba_main_grid[a][x][y] = (ba_mp_t*)
-					xmalloc(sizeof(ba_mp_t) * DIM_SIZE[Z]);
-				for (z = 0; z < DIM_SIZE[Z]; z++) {
-					ba_mp_t *ba_mp = &ba_main_grid
-						[a][x][y][z];
-					ba_mp->coord[A] = a;
-					ba_mp->coord[X] = x;
-					ba_mp->coord[Y] = y;
-					ba_mp->coord[Z] = z;
-
-					snprintf(ba_mp->coord_str,
-						 sizeof(ba_mp->coord_str),
-						 "%c%c%c%c",
-						 alpha_num[ba_mp->coord[A]],
-						 alpha_num[ba_mp->coord[X]],
-						 alpha_num[ba_mp->coord[Y]],
-						 alpha_num[ba_mp->coord[Z]]);
-					ba_setup_mp(ba_mp, true, false);
-					ba_mp->state = NODE_STATE_IDLE;
-					/* This might get changed
-					   later, but just incase set
-					   it up here.
-					*/
-					ba_mp->index = i++;
-				}
-			}
-		}
-	}
-
+	slurm_mutex_lock(&ba_system_mutex);
 	/* build all the possible geos for the mid planes */
 	ba_main_geo_system =  xmalloc(sizeof(ba_geo_system_t));
 	ba_main_geo_system->dim_count = SYSTEM_DIMENSIONS;
@@ -171,7 +138,7 @@ extern void ba_create_system()
 	for (dim = 0; dim < SYSTEM_DIMENSIONS; dim++)
 		ba_main_geo_system->dim_size[dim] = DIM_SIZE[dim];
 
-	ba_create_geo_table(ba_main_geo_system);
+	ba_create_geo_table(ba_main_geo_system, 0);
 	//ba_print_geo_table(ba_main_geo_system);
 
 	/* build all the possible geos for a sub block inside a mid plane */
@@ -185,10 +152,24 @@ extern void ba_create_system()
 	ba_mp_geo_system->dim_size[2] = 4;
 	ba_mp_geo_system->dim_size[3] = 4;
 	ba_mp_geo_system->dim_size[4] = 2;
-	ba_create_geo_table(ba_mp_geo_system);
+	/* FIXME: We need to not create and geo with a dimension of 3 in it.
+	 * There apparently is a limitation in BGQ where you can't
+	 * make a sub-block with a dimension of 3.  If this ever goes
+	 * away just remove remove the extra parameter to the
+	 * ba_create_geo_table.
+	 *
+	 * FROM IBM:
+	 * We have recently encountered a problematic scenario with
+	 * sub-block jobs and how the system (used for I/O) and user
+	 * (used for MPI) torus class routes are configured. The
+	 * network device hardware has cutoff registers to prevent
+	 * packets from flowing outside of the
+	 * sub-block. Unfortunately, when the sub-block has a size 3,
+	 * the job can attempt to send user packets outside of its
+	 * sub-block. This causes it to be terminated by signal 36.
+	 */
+	ba_create_geo_table(ba_mp_geo_system, 1);
 	//ba_print_geo_table(ba_mp_geo_system);
-
-	_setup_next_mps(A, coords);
 
 	/* Now set it up to mark the corners of each nodecard.  This
 	   is used if running a sub-block job on a small block later.
@@ -244,18 +225,80 @@ extern void ba_create_system()
 		/*      alpha_num[g_nc_coords[i].end[E]]); */
 		_increment_nc_coords(0, mp_coords, ba_mp_geo_system->dim_size);
 	}
+
+	/* Set up a flat array to be used in conjunction with the
+	   ba_geo system.
+	*/
+	ba_main_grid_array = xmalloc(sizeof(ba_mp_t *) *
+				     ba_main_geo_system->total_size);
+	i = 0;
+	ba_main_grid = (ba_mp_t****)
+		xmalloc(sizeof(ba_mp_t***) * DIM_SIZE[A]);
+	for (a = 0; a < DIM_SIZE[A]; a++) {
+		ba_main_grid[a] = (ba_mp_t***)
+			xmalloc(sizeof(ba_mp_t**) * DIM_SIZE[X]);
+		for (x = 0; x < DIM_SIZE[X]; x++) {
+			ba_main_grid[a][x] = (ba_mp_t**)
+				xmalloc(sizeof(ba_mp_t*) * DIM_SIZE[Y]);
+			for (y = 0; y < DIM_SIZE[Y]; y++) {
+				ba_main_grid[a][x][y] = (ba_mp_t*)
+					xmalloc(sizeof(ba_mp_t) * DIM_SIZE[Z]);
+				for (z = 0; z < DIM_SIZE[Z]; z++) {
+					ba_mp_t *ba_mp = &ba_main_grid
+						[a][x][y][z];
+					ba_mp->coord[A] = a;
+					ba_mp->coord[X] = x;
+					ba_mp->coord[Y] = y;
+					ba_mp->coord[Z] = z;
+
+					snprintf(ba_mp->coord_str,
+						 sizeof(ba_mp->coord_str),
+						 "%c%c%c%c",
+						 alpha_num[ba_mp->coord[A]],
+						 alpha_num[ba_mp->coord[X]],
+						 alpha_num[ba_mp->coord[Y]],
+						 alpha_num[ba_mp->coord[Z]]);
+					ba_setup_mp(ba_mp, true, false);
+					ba_mp->state = NODE_STATE_IDLE;
+					/* This might get changed
+					   later, but just incase set
+					   it up here.
+					*/
+					ba_mp->index = i++;
+					ba_mp->ba_geo_index =
+						ba_node_xlate_to_1d(
+							ba_mp->coord,
+							ba_main_geo_system);
+					ba_main_grid_array[ba_mp->ba_geo_index]
+						= ba_mp;
+				}
+			}
+		}
+	}
+
+	_setup_next_mps(A, coords);
+	slurm_mutex_unlock(&ba_system_mutex);
 }
 
 /** */
 extern void ba_destroy_system(void)
 {
-	int a, x, y;
+	int a, x, y, z;
+
+	slurm_mutex_lock(&ba_system_mutex);
+	xfree(ba_main_grid_array);
 
 	if (ba_main_grid) {
 		for (a=0; a<DIM_SIZE[A]; a++) {
 			for (x = 0; x < DIM_SIZE[X]; x++) {
-				for (y = 0; y < DIM_SIZE[Y]; y++)
+				for (y = 0; y < DIM_SIZE[Y]; y++) {
+					for (z=0; z < DIM_SIZE[Z]; z++) {
+						free_internal_ba_mp(
+							&ba_main_grid
+							[a][x][y][z]);
+					}
 					xfree(ba_main_grid[a][x][y]);
+				}
 				xfree(ba_main_grid[a][x]);
 			}
 			xfree(ba_main_grid[a]);
@@ -277,6 +320,7 @@ extern void ba_destroy_system(void)
 	}
 
 	memset(DIM_SIZE, 0, sizeof(DIM_SIZE));
+	slurm_mutex_unlock(&ba_system_mutex);
 }
 
 /*
@@ -381,6 +425,7 @@ extern void print_ba_request(select_ba_request_t* ba_request)
 	debug("    elongate:\t%d", ba_request->elongate);
 }
 
+/* ba_system_mutex needs to be locked before calling this. */
 extern ba_mp_t *coord2ba_mp(const uint16_t *coord)
 {
 	if ((coord[A] >= DIM_SIZE[A]) || (coord[X] >= DIM_SIZE[X]) ||
@@ -405,12 +450,6 @@ extern ba_mp_t *coord2ba_mp(const uint16_t *coord)
  */
 extern int allocate_block(select_ba_request_t* ba_request, List results)
 {
-	uint16_t start[cluster_dims];
-	char *name=NULL;
-	int i, dim, startx;
-	ba_geo_table_t *ba_geo_table;
-	bool found = false;
-
 	if (!ba_initialized){
 		error("Error, configuration not initialized, "
 		      "calling ba_init(NULL, 1)");
@@ -425,113 +464,13 @@ extern int allocate_block(select_ba_request_t* ba_request, List results)
 	if (!(cluster_flags & CLUSTER_FLAG_BG))
 		return 0;
 
-	memset(start, 0, sizeof(start));
-	startx = (start[X]-1);
+	if ((ba_request->save_name = set_bg_block(results, ba_request)))
+		return 1;
 
-	if (startx == -1)
-		startx = DIM_SIZE[X]-1;
-	if (ba_request->start_req) {
-		for (dim = 0; dim < cluster_dims; dim++) {
-			if (ba_request->start[dim] >= DIM_SIZE[dim])
-				return 0;
-			start[dim] = ba_request->start[dim];
-		}
-	}
-
-	/* set up the geo_table */
-	if (ba_request->geometry[0] == (uint16_t)NO_VAL) {
-		if (!(ba_request->geo_table =
-		      ba_main_geo_system->geo_table_ptr[ba_request->size])) {
-			error("allocate_block: "
-			      "No geometries for %d midplanes",
-			      ba_request->size);
-			return 0;
-		}
-		ba_geo_table = (ba_geo_table_t *)ba_request->geo_table;
-		if (!ba_geo_table || !ba_geo_table->geometry) {
-			error("allocate_block: no geo table");
-			return 0;
-		}
-
-		memcpy(ba_request->geometry, ba_geo_table->geometry,
-		       sizeof(ba_request->geometry));
-	} else
-		ba_request->geo_table = NULL;
-
-start_again:
-	i = 0;
-	if (i == startx)
-		i = startx-1;
-	while (i != startx) {
-		i++;
-		if (ba_debug_flags & DEBUG_FLAG_BG_ALGO)
-			info("allocate_block: finding %c%c%c%c try %d",
-			     alpha_num[ba_request->geometry[A]],
-			     alpha_num[ba_request->geometry[X]],
-			     alpha_num[ba_request->geometry[Y]],
-			     alpha_num[ba_request->geometry[Z]],
-			     i);
-	new_mp:
-		if (ba_debug_flags & DEBUG_FLAG_BG_ALGO)
-			info("allocate_block: starting at %c%c%c%c",
-			     alpha_num[start[A]],
-			     alpha_num[start[X]],
-			     alpha_num[start[Y]],
-			     alpha_num[start[Z]]);
-
-		if ((name = set_bg_block(results, start,
-					 ba_request->geometry,
-					 ba_request->conn_type))) {
-			ba_request->save_name = name;
-			name = NULL;
-			return 1;
-		}
-
-		/* If there was an error set_bg_block resets the
-		   results list */
-		/* if (results && list_count(results)) { */
-		/* 	bool is_small = 0; */
-		/* 	if (ba_request->conn_type[0] == SELECT_SMALL) */
-		/* 		is_small = 1; */
-		/* 	remove_block(results, is_small); */
-		/* 	list_flush(results); */
-		/* } */
-
-		if (ba_request->start_req) {
-			info("start asked for ");
-			goto requested_end;
-		}
-		//exit(0);
-		debug2("allocate_block: trying something else");
-
-		found = false;
-		for (dim = cluster_dims-1; dim >= 0; dim--) {
-			start[dim]++;
-			if (start[dim] < DIM_SIZE[dim]) {
-				found = true;
-				break;
-			}
-			start[dim] = 0;
-		}
-		if (!found) {
-			if (ba_request->size == 1)
-				goto requested_end;
-			if (!_check_for_options(ba_request))
-				return 0;
-			else {
-				memset(start, 0, sizeof(start));
-				goto start_again;
-			}
-		}
-		goto new_mp;
-	}
-
-requested_end:
 	debug2("allocate_block: can't allocate");
 
 	return 0;
 }
-
 
 /*
  * Admin wants to remove a previous allocation.
@@ -544,30 +483,35 @@ extern int remove_block(List mps, bool is_small)
 	ba_mp_t* ba_mp = NULL;
 	ListIterator itr;
 
+	slurm_mutex_lock(&ba_system_mutex);
 	itr = list_iterator_create(mps);
 	while ((curr_ba_mp = (ba_mp_t*) list_next(itr))) {
 		/* since the list that comes in might not be pointers
 		   to the main list we need to point to that main list */
-		ba_mp = &ba_main_grid
-			[curr_ba_mp->coord[A]]
-			[curr_ba_mp->coord[X]]
-			[curr_ba_mp->coord[Y]]
-			[curr_ba_mp->coord[Z]];
+		ba_mp = coord2ba_mp(curr_ba_mp->coord);
 		if (curr_ba_mp->used) {
 			ba_mp->used &= (~BA_MP_USED_TRUE);
 			if (ba_mp->used == BA_MP_USED_FALSE)
-				bit_clear(ba_main_mp_bitmap, ba_mp->index);
+				bit_clear(ba_main_mp_bitmap,
+					  ba_mp->ba_geo_index);
 		}
 		ba_mp->used &= (~BA_MP_USED_ALTERED_PASS);
 
 		/* Small blocks don't use wires, and only have 1 mp,
 		   so just break. */
 		if (ba_debug_flags & DEBUG_FLAG_BG_ALGO)
-			info("remove_block: %s state now %d",
+			info("remove_block: midplane %s used state now %d",
 			     ba_mp->coord_str, ba_mp->used);
 
 		for (dim=0; dim<cluster_dims; dim++) {
+			/* House the altered usage here without any
+			   error so we don't take it from the original.
+			*/
+			uint16_t altered_usage;
+
 			if (curr_ba_mp == ba_mp) {
+				altered_usage = ba_mp->alter_switch[dim].usage
+					& (~BG_SWITCH_CABLE_ERROR_FULL);
 				/* Remove the usage that was altered */
 				/* info("remove_block: %s(%d) %s removing %s", */
 				/*      ba_mp->coord_str, dim, */
@@ -576,14 +520,22 @@ extern int remove_block(List mps, bool is_small)
 				/*      ba_switch_usage_str( */
 				/* 	     ba_mp->alter_switch[dim].usage)); */
 				ba_mp->axis_switch[dim].usage &=
-					(~ba_mp->alter_switch[dim].usage);
+					(~altered_usage);
 				/* info("remove_block: %s(%d) is now at %s", */
 				/*      ba_mp->coord_str, dim, */
 				/*      ba_switch_usage_str( */
 				/* 	     ba_mp->axis_switch[dim].usage)); */
-			} else if (curr_ba_mp->axis_switch[dim].usage
-				   != BG_SWITCH_NONE) {
-				if (ba_debug_flags & DEBUG_FLAG_BG_ALGO)
+				continue;
+			}
+
+			/* Set this after we know curr_ba_mp isn't
+			   the same as ba_mp so we don't mess up the
+			   original.
+			*/
+			altered_usage = curr_ba_mp->axis_switch[dim].usage
+				& (~BG_SWITCH_CABLE_ERROR_FULL);
+			if (altered_usage != BG_SWITCH_NONE) {
+				if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
 					info("remove_block: 2 %s(%d) %s %s "
 					     "removing %s",
 					     ba_mp->coord_str, dim,
@@ -592,12 +544,11 @@ extern int remove_block(List mps, bool is_small)
 						     ba_mp->axis_switch
 						     [dim].usage),
 					     ba_switch_usage_str(
-						     curr_ba_mp->axis_switch
-						     [dim].usage));
+						     altered_usage));
 				/* Just remove the usage set here */
 				ba_mp->axis_switch[dim].usage &=
-					(~curr_ba_mp->axis_switch[dim].usage);
-				if (ba_debug_flags & DEBUG_FLAG_BG_ALGO)
+					(~altered_usage);
+				if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
 					info("remove_block: 2 %s(%d) is "
 					     "now at %s",
 					     ba_mp->coord_str, dim,
@@ -609,6 +560,7 @@ extern int remove_block(List mps, bool is_small)
 		}
 	}
 	list_iterator_destroy(itr);
+	slurm_mutex_unlock(&ba_system_mutex);
 
 	return 1;
 }
@@ -637,18 +589,11 @@ extern int check_and_set_mp_list(List mps)
 	if (!mps)
 		return rc;
 
+	slurm_mutex_lock(&ba_system_mutex);
 	itr = list_iterator_create(mps);
 	while ((ba_mp = list_next(itr))) {
-		/* info("checking %c%c%c", */
-/* 		     ba_mp->coord[X],  */
-/* 		     ba_mp->coord[Y], */
-/* 		     ba_mp->coord[Z]); */
-
-		curr_ba_mp = &ba_main_grid
-			[ba_mp->coord[A]]
-			[ba_mp->coord[X]]
-			[ba_mp->coord[Y]]
-			[ba_mp->coord[Z]];
+		/* info("checking %s", ba_mp->coord_str);  */
+		curr_ba_mp = coord2ba_mp(ba_mp->coord);
 
 		if (ba_mp->used && curr_ba_mp->used) {
 			/* Only error if the midplane isn't already
@@ -675,8 +620,9 @@ extern int check_and_set_mp_list(List mps)
 
 		if (ba_mp->used) {
 			curr_ba_mp->used = ba_mp->used;
-			xassert(!bit_test(ba_main_mp_bitmap, ba_mp->index));
-			bit_set(ba_main_mp_bitmap, ba_mp->index);
+			xassert(!bit_test(ba_main_mp_bitmap,
+					  ba_mp->ba_geo_index));
+			bit_set(ba_main_mp_bitmap, ba_mp->ba_geo_index);
 		}
 
 		if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
@@ -691,6 +637,17 @@ extern int check_and_set_mp_list(List mps)
 
 			if (ba_switch->usage == BG_SWITCH_NONE)
 				continue;
+			else if (ba_switch->usage
+				 & BG_SWITCH_CABLE_ERROR_FULL) {
+				error("check_and_set_mp_list: Somehow we got "
+				      "a switch with an error set in it.  "
+				      "This should never happen except "
+				      "on a system with missing cables such "
+				      "as a half rack system. %u",
+				      ba_switch->usage);
+				continue;
+			}
+
 
 			if (ba_switch->usage & curr_ba_switch->usage) {
 				if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
@@ -706,6 +663,24 @@ extern int check_and_set_mp_list(List mps)
 				rc = SLURM_ERROR;
 				goto end_it;
 			}
+			/* Since we are only checking to see if this
+			   block is creatable we don't need to check
+			   hardware issues like bad cables.
+			*/
+			/* else if ((curr_ba_switch->usage */
+			/* 	    & BG_SWITCH_CABLE_ERROR_SET) */
+			/* 	   && (ba_switch->usage & BG_SWITCH_OUT_PASS)) { */
+			/* 	if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP) */
+			/* 		info("check_and_set_mp_list: " */
+			/* 		     "%s(%d)'s cable is not available " */
+			/* 		     "can't really make this block.  " */
+			/* 		     "We need %s and system is %s", */
+			/* 		     ba_mp->coord_str, i, */
+			/* 		     ba_switch_usage_str( */
+			/* 			     ba_switch->usage), */
+			/* 		     ba_switch_usage_str( */
+			/* 			     curr_ba_switch->usage)); */
+			/* } */
 
 			if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
 				info("check_and_set_mp_list: "
@@ -720,6 +695,7 @@ extern int check_and_set_mp_list(List mps)
 	rc = SLURM_SUCCESS;
 end_it:
 	list_iterator_destroy(itr);
+	slurm_mutex_unlock(&ba_system_mutex);
 	return rc;
 }
 
@@ -730,132 +706,208 @@ end_it:
  * IN/OUT results - a list with a NULL destroyer filled in with
  *        midplanes and wires set to create the block with the api. If
  *        only interested in the hostlist NULL can be excepted also.
- * IN start - where to start the allocation.
- * IN geometry - the requested geometry of the block.
- * IN conn_type - mesh, torus, or small.
+ * IN ba_request - request for the block
+ *
+ * To be set in the ba_request
+ *    start - where to start the allocation. (optional)
+ *    geometry or size - the requested geometry of the block. (required)
+ *    conn_type - mesh, torus, or small. (required)
  *
  * RET char * - hostlist of midplanes results represent must be
  *     xfreed.  NULL on failure
  */
-extern char *set_bg_block(List results, uint16_t *start,
-			  uint16_t *geometry, uint16_t *conn_type)
+extern char *set_bg_block(List results, select_ba_request_t* ba_request)
 {
 	List main_mps = NULL;
 	char *name = NULL;
 	ba_mp_t* ba_mp = NULL;
-	ba_mp_t *check_mp[cluster_dims];
-	int size = 1, dim;
-	int block_start[cluster_dims];
-	int block_end[cluster_dims];
-	int coords[cluster_dims];
+	int dim;
 	uint16_t local_deny_pass = ba_deny_pass;
+	ba_geo_table_t *ba_geo_table = NULL;
+	bitstr_t *success_bitmap = NULL;
+	uint16_t orig_conn_type[HIGHEST_DIMENSIONS];
 
-	if (!ba_initialized){
-		error("Error, configuration not initialized, "
-		      "calling ba_init(NULL, 1)");
-		ba_init(NULL, 1);
-	}
+	xassert(ba_initialized);
 
-	if (cluster_dims == 1) {
-		if (start[A] >= DIM_SIZE[A])
+	if (!ba_request->size) {
+		if (ba_request->geometry[0] == (uint16_t)NO_VAL) {
+			error("set_bg_block: No size or geometry given.");
 			return NULL;
-		size = geometry[X];
-		ba_mp = &ba_main_grid[start[A]][0][0][0];
-	} else {
-		for (dim=0; dim<cluster_dims; dim++) {
-			if (start[dim] >= DIM_SIZE[dim])
-				return NULL;
-			if (geometry[dim] <= 0) {
-				error("problem with geometry of %c in dim %d, "
-				      "needs to be at least 1",
-				      alpha_num[geometry[dim]], dim);
-				return NULL;
-			}
-			size *= geometry[dim];
 		}
 
-		ba_mp = &ba_main_grid[start[A]][start[X]][start[Y]][start[Z]];
-		/* info("looking at %s", ba_mp->coord_str); */
+		ba_request->size = 1;
+		for (dim=0; dim<cluster_dims; dim++)
+			ba_request->size *= ba_request->geometry[dim];
 	}
+		/* set up the geo_table */
 
-	if (!ba_mp)
-		goto end_it;
-
-	if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-		info("trying mp %s %c%c%c%c %d",
-		     ba_mp->coord_str,
-		     alpha_num[geometry[A]],
-		     alpha_num[geometry[X]],
-		     alpha_num[geometry[Y]],
-		     alpha_num[geometry[Z]],
-		     conn_type[A]);
-
-	/* check just the first dim to see if this node is used for
-	   anything just yet. */
-	if (_mp_used(ba_mp, 0))
-		goto end_it;
-
-	if (conn_type[A] >= SELECT_SMALL) {
-		/* adding the ba_mp and end, we could go through the
-		 * regular logic here, but this is just faster. */
-		if (results) {
-			ba_mp = ba_copy_mp(ba_mp);
-			/* We need to have this node wrapped in Q to handle
-			   wires correctly when creating around the midplane.
-			*/
-			ba_setup_mp(ba_mp, false, true);
-			ba_mp->used = BA_MP_USED_TRUE;
-			list_append(results, ba_mp);
-		}
-		name = xstrdup(ba_mp->coord_str);
-		goto end_it;
+	xassert(ba_request->size);
+	if (!(ba_geo_table =
+	      ba_main_geo_system->geo_table_ptr[ba_request->size])) {
+		error("set_bg_block: No geometries for %d midplanes",
+		      ba_request->size);
+		return NULL;
 	}
-
-	main_mps = list_create(NULL);
-
-	ba_mp->used |= BA_MP_USED_ALTERED;
-	list_append(main_mps, ba_mp);
-
 	if (!deny_pass)
 		deny_pass = &local_deny_pass;
 
-	/* set the end to the start and the _find_path will increase each dim.*/
-	for (dim=0; dim<cluster_dims; dim++) {
-		block_start[dim] = start[dim];
-		block_end[dim] = start[dim];
-		if (!_find_path(main_mps, ba_mp, dim, geometry[dim],
-				conn_type[dim], &block_start[dim],
-				&block_end[dim])) {
-			goto end_it;
+	memcpy(orig_conn_type, ba_request->conn_type,
+	       sizeof(ba_request->conn_type));
+
+	slurm_mutex_lock(&ba_system_mutex);
+	while (ba_geo_table) {
+		ListIterator itr;
+		int scan_offset = 0, cnt = 0, i=0;
+		uint16_t start_loc[ba_main_geo_system->dim_count];
+
+		if (ba_request->geometry[0] != (uint16_t)NO_VAL) {
+			/* if we are requesting a specific geo, go directly to
+			   that geo_table. */
+			if (memcmp(ba_request->geometry, ba_geo_table->geometry,
+				   sizeof(uint16_t) * cluster_dims)) {
+				ba_geo_table = ba_geo_table->next_ptr;
+				continue;
+			}
 		}
+
+	try_again:
+		if (success_bitmap)
+			FREE_NULL_BITMAP(success_bitmap);
+		if (main_mps && list_count(main_mps)) {
+			_reset_altered_mps(main_mps, 0);
+			list_flush(main_mps);
+		}
+
+		if (ba_geo_test_all(ba_main_mp_bitmap,
+				    &success_bitmap,
+				    ba_geo_table, &cnt,
+				    ba_main_geo_system, deny_pass,
+				    start_loc, &scan_offset, false)
+		    != SLURM_SUCCESS) {
+			if (ba_request->geometry[0] != (uint16_t)NO_VAL) {
+				ba_geo_table = NULL;
+				break;
+			}
+
+			ba_geo_table = ba_geo_table->next_ptr;
+			continue;
+		}
+
+		if (ba_request->start_req) {
+			/* if we are requesting a specific start make
+			   sure that is what is returned.  Else try
+			   again.  Since this only happens with smap
+			   or startup this handling it this way
+			   shouldn't be that big of a deal. */
+			if (memcmp(ba_request->start, start_loc,
+				   sizeof(uint16_t) * cluster_dims))
+				goto try_again;
+		}
+
+		main_mps = list_create(NULL);
+		for (i=0; i<ba_main_geo_system->total_size; i++) {
+			if (!bit_test(success_bitmap, i))
+				continue;
+			ba_mp = ba_main_grid_array[i];
+			xassert(ba_mp);
+
+			for (dim=0; dim<cluster_dims; dim++) {
+				if (_mp_used(ba_mp, dim))
+					goto try_again;
+
+				if (ba_geo_table->geometry[dim] == 1) {
+					/* Always check MESH here since we
+					 * only care about the IN/OUT ports.
+					 * all 1 dimensions need a TORUS */
+					ba_mp->alter_switch[dim].usage
+						|= BG_SWITCH_WRAPPED;
+					if (ba_debug_flags
+					    & DEBUG_FLAG_BG_ALGO_DEEP)
+						info("set_bg_block: "
+						     "using mp %s(%d) "
+						     "in 1 geo %s added %s",
+						     ba_mp->coord_str, dim,
+						     ba_switch_usage_str(
+							     ba_mp->
+							     axis_switch[dim].
+							     usage),
+						     ba_switch_usage_str(
+							     ba_mp->
+							     alter_switch[dim].
+							     usage));
+					continue;
+				}
+			}
+			ba_mp->used = BA_MP_USED_ALTERED;
+			list_append(main_mps, ba_mp);
+		}
+		/* If we are going to take up the entire dimension
+		   might as well force it to be TORUS.  Check against
+		   MESH here instead of !TORUS so we don't mess up
+		   small block allocations.
+		*/
+		for (dim=0; dim<cluster_dims; dim++) {
+			if (((ba_request->conn_type[dim] == SELECT_MESH)
+			      || (ba_request->conn_type[dim] == SELECT_NAV))
+			     && ((ba_geo_table->geometry[dim] == 1)
+				 || (ba_geo_table->geometry[dim]
+				     == DIM_SIZE[dim]))) {
+				/* On a Q all single midplane blocks
+				 * must be a TORUS.
+				 *
+				 * Also if we are using all midplanes
+				 * in a dimension might as well make
+				 * it a torus.
+				 */
+				ba_request->conn_type[dim] = SELECT_TORUS;
+			} else if (ba_request->conn_type[dim] == SELECT_NAV) {
+				/* Set everything else to the default */
+				ba_request->conn_type[dim] =
+					bg_conf->default_conn_type[dim];
+			}
+		}
+
+		itr = list_iterator_create(main_mps);
+		while ((ba_mp = list_next(itr))) {
+			if (ba_mp->used & BA_MP_USED_PASS_BIT)
+				continue;
+			for (dim=0; dim<cluster_dims; dim++) {
+				if ((ba_geo_table->geometry[dim] == 1)
+				    || (ba_mp->coord[dim] != start_loc[dim]))
+					continue;
+				if (!_fill_in_wires(
+					    main_mps, ba_mp, dim,
+					    ba_geo_table->geometry[dim],
+					    ba_request->conn_type[dim],
+					    ba_request->full_check)) {
+					list_iterator_destroy(itr);
+					memcpy(ba_request->conn_type,
+					       orig_conn_type,
+					       sizeof(ba_request->conn_type));
+					goto try_again;
+				}
+			}
+		}
+		list_iterator_destroy(itr);
+
+		/* fill in the start with the actual start of the
+		 * block since it isn't always easy to figure out and
+		 * is easily */
+		memcpy(ba_request->start, start_loc, sizeof(ba_request->start));
+
+		break;
 	}
 
-	if (ba_debug_flags & DEBUG_FLAG_BG_ALGO)
-		info("complete box is %c%c%c%c x %c%c%c%c",
-		     alpha_num[block_start[A]],
-		     alpha_num[block_start[X]],
-		     alpha_num[block_start[Y]],
-		     alpha_num[block_start[Z]],
-		     alpha_num[block_end[A]],
-		     alpha_num[block_end[X]],
-		     alpha_num[block_end[Y]],
-		     alpha_num[block_end[Z]]);
+	if (success_bitmap)
+		FREE_NULL_BITMAP(success_bitmap);
 
-	if (_fill_in_coords(main_mps, A, ba_mp, check_mp,
-			    block_start, block_end, coords) == -1)
-		goto end_it;
-
-	if (_finish_torus(main_mps, A, block_start,
-			  block_end, conn_type, coords) == -1)
-		goto end_it;
-
-	/* Success */
-	if (results)
-		name = _copy_from_main(main_mps, results);
-	else
-		name = _reset_altered_mps(main_mps, 1);
-
-end_it:
+	if (ba_geo_table) {
+		/* Success */
+		if (results)
+			name = _copy_from_main(main_mps, results);
+		else
+			name = _reset_altered_mps(main_mps, 1);
+	}
 
 	if (main_mps) {
 		/* handle failure */
@@ -864,6 +916,7 @@ end_it:
 		list_destroy(main_mps);
 		main_mps = NULL;
 	}
+	slurm_mutex_unlock(&ba_system_mutex);
 
 	if (name)
 		debug2("name = %s", name);
@@ -924,7 +977,142 @@ extern void ba_rotate_geo(uint16_t *req_geo, int rot_cnt)
 
 }
 
-extern ba_mp_t *ba_pick_sub_block_cnodes(
+extern bool ba_sub_block_in_bitmap(select_jobinfo_t *jobinfo,
+				   bitstr_t *usable_bitmap, bool step)
+{
+	bitstr_t *found_bits = NULL;
+	uint32_t node_count;
+	ba_geo_table_t *geo_table = NULL;
+	int clr_cnt, dim;
+	uint16_t start_loc[ba_mp_geo_system->dim_count];
+
+	xassert(jobinfo);
+	xassert(usable_bitmap);
+
+	node_count = jobinfo->cnode_cnt;
+	clr_cnt = bit_clear_count(usable_bitmap);
+
+	if (clr_cnt < node_count)
+		return false;
+
+	jobinfo->dim_cnt = ba_mp_geo_system->dim_count;
+
+try_again:
+	if (ba_debug_flags & DEBUG_FLAG_BG_ALGO) {
+		bit_not(usable_bitmap);
+		char *tmp_char = ba_node_map_ranged_hostlist(
+			usable_bitmap, ba_mp_geo_system);
+		bit_not(usable_bitmap);
+		info("ba_sub_block_in_bitmap: "
+		     "looking for %u in a field of %u (%s).",
+		     node_count, clr_cnt, tmp_char);
+		xfree(tmp_char);
+	}
+
+	if (!(geo_table = _find_geo_table(node_count, &node_count, clr_cnt)))
+		return false;
+
+	if (!(found_bits = _find_sub_block(
+		      &geo_table, start_loc, usable_bitmap, node_count))) {
+		/* This is to vet we have a good geo on this request.  So if a
+		   person asks for 12 and the only reason they can't get it is
+		   because they can't get that geo and if they would of asked
+		   for 16 then they could run we do that for them.
+		*/
+		node_count++;
+		if (clr_cnt > node_count) {
+			if (ba_debug_flags & DEBUG_FLAG_BG_ALGO)
+				info("trying with a larger size");
+			goto try_again;
+		}
+		return false;
+	}
+
+	if (jobinfo->units_avail)
+		FREE_NULL_BITMAP(jobinfo->units_avail);
+	if (jobinfo->units_used)
+		FREE_NULL_BITMAP(jobinfo->units_used);
+
+	jobinfo->units_avail = found_bits;
+	found_bits = NULL;
+	jobinfo->units_used = bit_copy(jobinfo->units_avail);
+	/* ba_sub_block_in_bitmap works for both job and step
+	   allocations.  It sets the units_used to the
+	   opposite of units_available by default.  If used for a step
+	   we want all units used to be that of the avail for easy
+	   clearing.
+	*/
+	if (!step)
+		bit_not(jobinfo->units_used);
+	xfree(jobinfo->ionode_str);
+
+	jobinfo->cnode_cnt = node_count;
+
+	for (dim = 0; dim < jobinfo->dim_cnt; dim++) {
+		jobinfo->geometry[dim] = geo_table->geometry[dim];
+		jobinfo->start_loc[dim] = start_loc[dim];
+	}
+
+	if (node_count < bg_conf->mp_cnode_cnt) {
+		jobinfo->ionode_str = ba_node_map_ranged_hostlist(
+			jobinfo->units_avail, ba_mp_geo_system);
+		if (ba_debug_flags & DEBUG_FLAG_BG_ALGO) {
+			char *tmp_char;
+			bitstr_t *total_bitmap = bit_copy(usable_bitmap);
+			bit_or(total_bitmap, jobinfo->units_avail);
+			bit_not(total_bitmap);
+			tmp_char = ba_node_map_ranged_hostlist(
+				total_bitmap, ba_mp_geo_system);
+			FREE_NULL_BITMAP(total_bitmap);
+			info("ba_sub_block_in_bitmap: "
+			     "can use cnodes %s leaving '%s' usable.",
+			     jobinfo->ionode_str, tmp_char);
+			xfree(tmp_char);
+		}
+	} else if (ba_debug_flags & DEBUG_FLAG_BG_ALGO) {
+		info("ba_sub_block_in_bitmap: "
+		     "can use all cnodes leaving none usable.");
+	}
+
+	return true;
+}
+
+extern int ba_sub_block_in_bitmap_clear(
+	select_jobinfo_t *jobinfo, bitstr_t *usable_bitmap)
+{
+	char *tmp_char = NULL, *tmp_char2 = NULL;
+
+	if (!jobinfo->units_avail) {
+		error("ba_sub_block_in_bitmap_clear: "
+		      "no units avail bitmap on the jobinfo");
+		return SLURM_ERROR;
+	}
+
+	/* use units_avail here instead of units_used so it works for
+	   both jobs and steps with no other code.
+	*/
+	bit_not(jobinfo->units_avail);
+	bit_and(usable_bitmap, jobinfo->units_avail);
+	bit_not(jobinfo->units_avail);
+
+	if (bg_conf->slurm_debug_flags & DEBUG_FLAG_BG_ALGO) {
+		tmp_char = ba_node_map_ranged_hostlist(
+			jobinfo->units_avail, ba_mp_geo_system);
+		bit_not(usable_bitmap);
+		tmp_char2 = ba_node_map_ranged_hostlist(
+			usable_bitmap, ba_mp_geo_system);
+		bit_not(usable_bitmap);
+		info("ba_sub_block_in_bitmap_clear: "
+		     "cleared cnodes %s making '%s' available.",
+		     tmp_char, tmp_char2);
+		xfree(tmp_char);
+		xfree(tmp_char2);
+	}
+
+	return SLURM_SUCCESS;
+}
+
+extern ba_mp_t *ba_sub_block_in_record(
 	bg_record_t *bg_record, uint32_t *node_count, select_jobinfo_t *jobinfo)
 {
 	ListIterator itr = NULL;
@@ -934,6 +1122,8 @@ extern ba_mp_t *ba_pick_sub_block_cnodes(
 	uint32_t orig_node_count = *node_count;
 	int dim;
 	uint32_t max_clear_cnt = 0, clear_cnt;
+	bitstr_t *total_bitmap = NULL;
+	uint16_t start_loc[ba_mp_geo_system->dim_count];
 
 	xassert(ba_mp_geo_system);
 	xassert(bg_record->ba_mp_list);
@@ -943,37 +1133,12 @@ extern ba_mp_t *ba_pick_sub_block_cnodes(
 	jobinfo->dim_cnt = ba_mp_geo_system->dim_count;
 
 try_again:
-	while (!(geo_table = ba_mp_geo_system->geo_table_ptr[*node_count])) {
-		debug2("ba_pick_sub_block_cnodes: No geometries of size %u ",
-		       *node_count);
-		(*node_count)++;
-		if (*node_count > bg_record->cnode_cnt)
-			break;
-	}
-	if (*node_count > bg_record->cnode_cnt) {
-		debug("ba_pick_sub_block_cnodes: requested sub-block larger "
-		      "than block");
+	if (!(geo_table = _find_geo_table(
+		      orig_node_count, node_count, bg_record->cnode_cnt)))
 		return NULL;
-	}
-
-	if (orig_node_count != *node_count)
-		debug("ba_pick_sub_block_cnodes: user requested %u nodes, "
-		      "but that can't make a block, giving them %d",
-		      orig_node_count, *node_count);
-
-	if (!geo_table) {
-		/* This should never happen */
-		error("ba_pick_sub_block_cnodes: "
-		      "Couldn't place this job size %u tried up to "
-		      "the full size of the block (%u)",
-		      orig_node_count, bg_record->cnode_cnt);
-		return NULL;
-	}
 
 	itr = list_iterator_create(bg_record->ba_mp_list);
 	while ((ba_mp = list_next(itr))) {
-		int cnt = 0;
-
 		if (!ba_mp->used)
 			continue;
 
@@ -984,93 +1149,27 @@ try_again:
 		if (!ba_mp->cnode_bitmap)
 			ba_mp->cnode_bitmap =
 				ba_create_ba_mp_cnode_bitmap(bg_record);
-		clear_cnt = bit_clear_count(ba_mp->cnode_bitmap);
-		if (clear_cnt < *node_count) {
-			if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-				info("ba_pick_sub_block_cnodes: "
-				     "only have %d avail in %s need %d",
-				     clear_cnt,
-				     ba_mp->coord_str, *node_count);
-			continue;
-		}
+		if (!ba_mp->cnode_err_bitmap)
+			ba_mp->cnode_err_bitmap =
+				bit_alloc(bg_conf->mp_cnode_cnt);
+		total_bitmap = bit_copy(ba_mp->cnode_bitmap);
+		bit_or(total_bitmap, ba_mp->cnode_err_bitmap);
 
-		while (geo_table) {
-			int scan_offset = 0;
-			uint16_t start_loc[ba_mp_geo_system->dim_count];
-
-			/* FIXME: In the current IBM API it doesn't
-			   allow wrapping inside the midplane.  In the
-			   future this will change.  When that happens
-			   there will need to be a flag that is sent
-			   here instead of always true.
-			*/
-			if (ba_geo_test_all(ba_mp->cnode_bitmap,
-					    &jobinfo->units_used,
-					    geo_table, &cnt,
-					    ba_mp_geo_system, NULL,
-					    start_loc, &scan_offset, true)
-			    != SLURM_SUCCESS) {
-				geo_table = geo_table->next_ptr;
-				continue;
-			}
-
-			if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP) {
-				info("scan_offset=%d", scan_offset);
-				for (dim = 0;
-				     dim < ba_mp_geo_system->dim_count;
-				     dim++) {
-					info("start_loc[%d]=%u geometry[%d]=%u",
-					     dim, start_loc[dim], dim,
-					     geo_table->geometry[dim]);
-				}
-			}
-
-			bit_or(ba_mp->cnode_bitmap, jobinfo->units_used);
-			jobinfo->ionode_str = ba_node_map_ranged_hostlist(
-				jobinfo->units_used, ba_mp_geo_system);
-			if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP) {
-				bit_not(ba_mp->cnode_bitmap);
-				tmp_char = ba_node_map_ranged_hostlist(
-					ba_mp->cnode_bitmap, ba_mp_geo_system);
-				bit_not(ba_mp->cnode_bitmap);
-				info("ba_pick_sub_block_cnodes: "
-				     "using cnodes %s on mp %s "
-				     "leaving '%s' usable in this block (%s)",
-				     jobinfo->ionode_str,
-				     ba_mp->coord_str, tmp_char,
-				     bg_record->bg_block_id);
-				xfree(tmp_char);
-			}
-			for (dim = 0; dim < jobinfo->dim_cnt; dim++) {
-				jobinfo->geometry[dim] =
-					geo_table->geometry[dim];
-				jobinfo->start_loc[dim] = start_loc[dim];
-			}
-			break;
-		}
-
-		if (geo_table)
+		if ((jobinfo->units_used = _find_sub_block(
+			     &geo_table, start_loc, total_bitmap, *node_count)))
 			break;
 
-		/* User asked for a bad CPU count or we can't place it
-		   here in this small allocation. */
-		if (jobinfo->cnode_cnt < bg_conf->mp_cnode_cnt) {
-			list_iterator_destroy(itr);
-			if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-				info("We couldn't place a sub block of %d",
-				     *node_count);
-			(*node_count)++;
-			goto try_again;
-		}
+		clear_cnt = bit_clear_count(total_bitmap);
+
+		FREE_NULL_BITMAP(total_bitmap);
 
 		/* Grab the most empty midplane to be used later if we
 		   can't find a spot.
 		*/
-		if (max_clear_cnt < clear_cnt) {
+		if (max_clear_cnt < clear_cnt)
 			max_clear_cnt = clear_cnt;
-		}
 
-		if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
+		if (ba_debug_flags & DEBUG_FLAG_BG_ALGO)
 			info("couldn't place it on %s", ba_mp->coord_str);
 		geo_table = ba_mp_geo_system->geo_table_ptr[*node_count];
 	}
@@ -1081,24 +1180,63 @@ try_again:
 	   because they can't get that geo and if they would of asked
 	   for 16 then they could run we do that for them.
 	*/
-	if (!ba_mp && (max_clear_cnt > (*node_count)+1)) {
-		if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-			info("trying with a larger size");
-		(*node_count)++;
-		goto try_again;
+	if (!ba_mp) {
+		if (max_clear_cnt > (*node_count)+1) {
+			if (ba_debug_flags & DEBUG_FLAG_BG_ALGO)
+				info("trying with a larger size");
+			(*node_count)++;
+			goto try_again;
+		}
+		return NULL;
 	}
+
+	/* SUCCESS! */
+
+	/* Since we use conn_type as the relative start point, if the
+	   block uses more than 1 midplane we need to give the
+	   relative start point a boost when we go to a different midplane.
+	*/
+	memset(jobinfo->conn_type, 0, sizeof(jobinfo->conn_type));
+	for (dim=0; dim<SYSTEM_DIMENSIONS; dim++)
+		jobinfo->conn_type[dim] = _find_distance(
+			bg_record->start[dim], ba_mp->coord[dim], dim);
+
+	bit_or(ba_mp->cnode_bitmap, jobinfo->units_used);
+	jobinfo->ionode_str = ba_node_map_ranged_hostlist(
+		jobinfo->units_used, ba_mp_geo_system);
+	if (ba_debug_flags & DEBUG_FLAG_BG_ALGO) {
+		bit_or(total_bitmap, jobinfo->units_used);
+		bit_not(total_bitmap);
+		tmp_char = ba_node_map_ranged_hostlist(
+			total_bitmap, ba_mp_geo_system);
+		info("ba_sub_block_in_record: "
+		     "using cnodes %s on mp %s "
+		     "leaving '%s' on this midplane "
+		     "usable in this block (%s)",
+		     jobinfo->ionode_str,
+		     ba_mp->coord_str, tmp_char,
+		     bg_record->bg_block_id);
+		xfree(tmp_char);
+	}
+
+	for (dim = 0; dim < jobinfo->dim_cnt; dim++) {
+		jobinfo->geometry[dim] =
+			geo_table->geometry[dim];
+		jobinfo->start_loc[dim] = start_loc[dim];
+	}
+	FREE_NULL_BITMAP(total_bitmap);
 
 	return ba_mp;
 }
 
-extern int ba_clear_sub_block_cnodes(
+extern int ba_sub_block_in_record_clear(
 	bg_record_t *bg_record, struct step_record *step_ptr)
 {
 	bitoff_t bit;
 	ListIterator itr = NULL;
 	ba_mp_t *ba_mp = NULL;
 	select_jobinfo_t *jobinfo = NULL;
-	char *tmp_char = NULL, *tmp_char2 = NULL;
+	char *tmp_char = NULL, *tmp_char2 = NULL, *tmp_char3 = NULL;
 
 	xassert(bg_record);
 	xassert(step_ptr);
@@ -1113,7 +1251,7 @@ extern int ba_clear_sub_block_cnodes(
 		return SLURM_SUCCESS;
 
 	if ((bit = bit_ffs(step_ptr->step_node_bitmap)) == -1) {
-		error("ba_clear_sub_block_cnodes: "
+		error("ba_sub_block_in_record_clear: "
 		      "we couldn't find any bits set");
 		return SLURM_ERROR;
 	}
@@ -1124,34 +1262,182 @@ extern int ba_clear_sub_block_cnodes(
 			continue;
 		if (!jobinfo->units_used) {
 			/* from older version of slurm */
-			error("ba_clear_sub_block_cnodes: "
+			error("ba_sub_block_in_record_clear: "
 			      "didn't have the units_used bitmap "
 			      "for some reason?");
-			continue;
+			break;
+		} else if (!ba_mp->cnode_bitmap) {
+			/* If the job allocation has already finished
+			   before processing the job step completion
+			   this could happen, but it should already be
+			   checked before it gets here so this should
+			   never happen, this is just for safely sake.
+			*/
+			error("ba_sub_block_in_record_clear: no cnode_bitmap? "
+			      "job %u(%p) is in state %s on block %s %u(%p). "
+			      "This should never happen.",
+			      step_ptr->job_ptr->job_id, step_ptr->job_ptr,
+			      job_state_string(step_ptr->job_ptr->job_state
+					       & (~JOB_CONFIGURING)),
+			      bg_record->bg_block_id, bg_record->job_running,
+			      bg_record->job_ptr);
+			break;
 		}
 
 		bit_not(jobinfo->units_used);
 		bit_and(ba_mp->cnode_bitmap, jobinfo->units_used);
-		if (bg_conf->slurm_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP) {
+		if (bg_conf->slurm_debug_flags & DEBUG_FLAG_BG_ALGO) {
+			bitstr_t *total_bitmap = bit_copy(ba_mp->cnode_bitmap);
+			if (ba_mp->cnode_err_bitmap) {
+				bit_or(total_bitmap, ba_mp->cnode_err_bitmap);
+				tmp_char3 = ba_node_map_ranged_hostlist(
+					ba_mp->cnode_err_bitmap,
+					ba_mp_geo_system);
+			}
+
 			bit_not(jobinfo->units_used);
 			tmp_char = ba_node_map_ranged_hostlist(
 				jobinfo->units_used, ba_mp_geo_system);
-			bit_not(ba_mp->cnode_bitmap);
+			bit_not(total_bitmap);
 			tmp_char2 = ba_node_map_ranged_hostlist(
-				ba_mp->cnode_bitmap, ba_mp_geo_system);
-			bit_not(ba_mp->cnode_bitmap);
-			info("ba_clear_sub_block_cnodes: "
-			     "cleared cnodes %s on mp %s, making '%s' usable "
-			     "in this block (%s)",
+				total_bitmap, ba_mp_geo_system);
+			info("ba_sub_block_in_record_clear: "
+			     "cleared cnodes %s on mp %s, making '%s' "
+			     "on this midplane usable in this block (%s), "
+			     "%s are in Software Failure",
 			     tmp_char, ba_mp->coord_str, tmp_char2,
-			     bg_record->bg_block_id);
+			     bg_record->bg_block_id, tmp_char3);
 			xfree(tmp_char);
 			xfree(tmp_char2);
+			xfree(tmp_char3);
+			FREE_NULL_BITMAP(total_bitmap);
 		}
+		break;
 	}
 	list_iterator_destroy(itr);
 
 	return SLURM_SUCCESS;
+}
+
+extern void ba_sync_job_to_block(bg_record_t *bg_record,
+				 struct job_record *job_ptr)
+{
+	struct step_record *step_ptr;
+	ListIterator itr;
+	ba_mp_t *ba_mp;
+	select_jobinfo_t *jobinfo, *step_jobinfo;
+
+	xassert(bg_record);
+	xassert(job_ptr);
+
+	if (bg_record->job_list) {
+		if (!find_job_in_bg_record(bg_record, job_ptr->job_id)) {
+			ba_mp = list_peek(bg_record->ba_mp_list);
+			list_append(bg_record->job_list, job_ptr);
+			jobinfo = job_ptr->select_jobinfo->data;
+			/* If you were switching from no sub-block
+			   allocations to allowing it, the units_avail
+			   wouldn't be around for any jobs, but no
+			   problem since they were always the size of
+			   the block.
+			*/
+			if (!jobinfo->units_avail) {
+				jobinfo->units_avail =
+					bit_copy(ba_mp->cnode_bitmap);
+				bit_not(jobinfo->units_avail);
+			}
+
+			/* Since we are syncing this information lets
+			   clear out the old stuff. (You need to use
+			   the jobinfo->units_avail here instead of
+			   ba_mp->cnode_bitmap because the above trick
+			   only works when coming from a system where
+			   no sub-block allocation was allowed.)
+			*/
+			FREE_NULL_BITMAP(jobinfo->units_used);
+			jobinfo->units_used = bit_copy(jobinfo->units_avail);
+			bit_not(jobinfo->units_used);
+			if (bit_overlap(ba_mp->cnode_bitmap,
+					jobinfo->units_avail)) {
+				error("we have an overlapping job allocation "
+				      "(%u) mp %s", job_ptr->job_id,
+				      ba_mp->coord_str);
+			}
+			bit_or(ba_mp->cnode_bitmap, jobinfo->units_avail);
+			/* info("%s now has %d left", ba_mp->coord_str, */
+			/*      bit_clear_count(ba_mp->cnode_bitmap)); */
+			itr = list_iterator_create(job_ptr->step_list);
+			while ((step_ptr = list_next(itr))) {
+				step_jobinfo = step_ptr->select_jobinfo->data;
+				if (bit_overlap(jobinfo->units_used,
+						step_jobinfo->units_avail)) {
+					error("we have an overlapping step "
+					      "(%u.%u) mp %s", job_ptr->job_id,
+					      step_ptr->step_id,
+					      ba_mp->coord_str);
+				}
+				bit_or(jobinfo->units_used,
+				       step_jobinfo->units_avail);
+				/* info("allocation %u now has %d left", */
+				/*      job_ptr->job_id, */
+				/*      bit_clear_count(jobinfo->units_used));*/
+			}
+			list_iterator_destroy(itr);
+		}
+	} else {
+		ListIterator ba_itr = NULL;
+
+		bg_record->job_running = job_ptr->job_id;
+		bg_record->job_ptr = job_ptr;
+
+		itr = list_iterator_create(job_ptr->step_list);
+		while ((step_ptr = list_next(itr))) {
+			struct node_record *node_ptr;
+			int node_inx;
+
+			jobinfo = step_ptr->select_jobinfo->data;
+			if (jobinfo->cnode_cnt == bg_record->cnode_cnt)
+				continue;
+
+			if (!ba_itr)
+				ba_itr = list_iterator_create(
+					bg_record->ba_mp_list);
+			else
+				list_iterator_reset(ba_itr);
+
+			if (!(node_ptr = find_node_record(
+				      step_ptr->step_layout->node_list))) {
+				error("can't find midplane %s",
+				      step_ptr->step_layout->node_list);
+				continue;
+			}
+			node_inx = node_ptr - node_record_table_ptr;
+			while ((ba_mp = list_next(ba_itr))) {
+				if (node_inx != ba_mp->index)
+					continue;
+				if (!ba_mp->cnode_bitmap)
+					ba_mp->cnode_bitmap =
+						ba_create_ba_mp_cnode_bitmap(
+							bg_record);
+				if (!ba_mp->cnode_err_bitmap)
+					ba_mp->cnode_err_bitmap = bit_alloc(
+						bg_conf->mp_cnode_cnt);
+				if (bit_overlap(ba_mp->cnode_bitmap,
+						jobinfo->units_used)) {
+					error("we have an overlapping step "
+					      "(%u.%u) mp %s", job_ptr->job_id,
+					      step_ptr->step_id,
+					      ba_mp->coord_str);
+				}
+				bit_or(ba_mp->cnode_bitmap,
+				       jobinfo->units_used);
+				break;
+			}
+		}
+		list_iterator_destroy(itr);
+		if (ba_itr)
+			list_iterator_destroy(ba_itr);
+	}
 }
 
 extern bitstr_t *ba_create_ba_mp_cnode_bitmap(bg_record_t *bg_record)
@@ -1197,362 +1483,252 @@ extern bitstr_t *ba_create_ba_mp_cnode_bitmap(bg_record_t *bg_record)
 	return cnode_bitmap;
 }
 
-
-static int _ba_set_ionode_str_internal(int level, int *coords,
-				       int *start_offset, int *end_offset,
-				       hostlist_t hl)
+extern void ba_set_ionode_str(bg_record_t *bg_record)
 {
-	char tmp_char[6];
+	int ionode_num, coords[5];
+	hostlist_t hl;
+	bool set_small = 0;
 
-	xassert(hl);
+	if (!bg_record->ionode_bitmap
+	    || bit_ffs(bg_record->ionode_bitmap) == -1)
+		return;
 
-	if (level > 5)
-		return -1;
+	hl = hostlist_create_dims("", 5);
 
-	if (level < 5) {
-		for (coords[level] = start_offset[level];
-		     coords[level] <= end_offset[level];
-		     coords[level]++) {
-			/* handle the outter dims here */
+	for (ionode_num = bit_ffs(bg_record->ionode_bitmap);
+	     ionode_num <= bit_fls(bg_record->ionode_bitmap);
+	     ionode_num++) {
+		int nc_num, nc_start, nc_end;
+
+		if (!bit_test(bg_record->ionode_bitmap, ionode_num))
+			continue;
+
+		nc_start = ionode_num * (int)bg_conf->nc_ratio;
+
+		if (!set_small) {
+			int dim;
+			set_small = 1;
+			for (dim = 0; dim<5; dim++)
+				bg_record->start_small[dim] =
+					g_nc_coords[nc_start].start[dim];
+		}
+
+		nc_end = nc_start + (int)bg_conf->nc_ratio;
+
+		for (nc_num = nc_start; nc_num < nc_end; nc_num++) {
 			if (_ba_set_ionode_str_internal(
-				    level+1, coords,
-				    start_offset, end_offset,
-				    hl) == -1)
-				return -1;
-		}
-		return 1;
-	}
-	snprintf(tmp_char, sizeof(tmp_char), "%c%c%c%c%c",
-		 alpha_num[coords[0]],
-		 alpha_num[coords[1]],
-		 alpha_num[coords[2]],
-		 alpha_num[coords[3]],
-		 alpha_num[coords[4]]);
-	hostlist_push_host_dims(hl, tmp_char, 5);
-	return 1;
-}
-
-extern char *ba_set_ionode_str(bitstr_t *ionode_bitmap)
-{
-	char *ionode_str = NULL;
-
-	if (ionode_bitmap) {
-		/* bit_fmt(bitstring, BITSIZE, ionode_bitmap); */
-		/* return xstrdup(bitstring); */
-		int ionode_num;
-		hostlist_t hl = hostlist_create_dims("", 5);
-		int coords[5];
-
-		for (ionode_num = bit_ffs(ionode_bitmap);
-		     ionode_num <= bit_fls(ionode_bitmap);
-		     ionode_num++) {
-			int nc_num, nc_start, nc_end;
-			if (!bit_test(ionode_bitmap, ionode_num))
-				continue;
-
-			nc_start = ionode_num * (int)bg_conf->nc_ratio;
-			nc_end = nc_start + (int)bg_conf->nc_ratio;
-
-			for (nc_num = nc_start; nc_num < nc_end; nc_num++) {
-				if (_ba_set_ionode_str_internal(
-					    0, coords,
-					    g_nc_coords[nc_num].start,
-					    g_nc_coords[nc_num].end,
-					    hl)
-				    == -1) {
-					hostlist_destroy(hl);
-					hl = NULL;
-					break;
-				}
+				    0, coords,
+				    g_nc_coords[nc_num].start,
+				    g_nc_coords[nc_num].end,
+				    hl)
+			    == -1) {
+				hostlist_destroy(hl);
+				hl = NULL;
+				return;
 			}
 		}
-		if (hl) {
-			ionode_str = hostlist_ranged_string_xmalloc_dims(
-				hl, 5, 0);
-			//info("iostring is %s", ionode_str);
-			hostlist_destroy(hl);
-			hl = NULL;
-		}
 	}
-	return ionode_str;
+
+	bg_record->ionode_str = hostlist_ranged_string_xmalloc_dims(hl, 5, 0);
+	//info("iostring is %s", bg_record->ionode_str);
+	hostlist_destroy(hl);
+	hl = NULL;
 }
 
-/*
- * This function is here to check options for rotating and elongating
- * and set up the request based on the count of each option
- */
-static int _check_for_options(select_ba_request_t* ba_request)
+/* Check to see if a job has been added to the bg_record NO_VAL
+ * returns the first one on the list. */
+extern struct job_record *ba_remove_job_in_block_job_list(
+	bg_record_t *bg_record, struct job_record *in_job_ptr)
 {
-	ba_geo_table_t *ba_geo_table;
+	ListIterator itr;
+	struct job_record *job_ptr = NULL;
+	select_jobinfo_t *jobinfo;
+	ba_mp_t *ba_mp;
+	char *tmp_char = NULL, *tmp_char2 = NULL, *tmp_char3 = NULL;
+	bool bad_magic = 0;
+	bitstr_t *used_cnodes = NULL;
 
-	if (ba_request->geo_table) {
-		ba_geo_table = ba_request->geo_table;
-		ba_request->geo_table =	ba_geo_table->next_ptr;
-	}
+	xassert(bg_record);
 
-	if (ba_request->geo_table) {
-		ba_geo_table = ba_request->geo_table;
-		memcpy(ba_request->geometry, ba_geo_table->geometry,
-		       sizeof(ba_geo_table->geometry));
-		/* info("now trying %c%c%c%c", */
-		/*      alpha_num[ba_request->geometry[A]], */
-		/*      alpha_num[ba_request->geometry[X]], */
-		/*      alpha_num[ba_request->geometry[Y]], */
-		/*      alpha_num[ba_request->geometry[Z]]); */
-		return 1;
-	}
-	return 0;
-}
+	if (!bg_record->job_list)
+		return NULL;
 
-/*
- * Fill in the paths and extra midplanes we need for the block.
- * Basically copy the starting coords sent in starting at block_start
- * ending with block_end in every midplane for the block.  This
- * function does not finish torus' (use _finish_torus for that).
- *
- * IN/OUT results - total list of midplanes after this function
- *        returns successfully.
- * IN level - which dimension we are on.  Since this is a recursive
- *        function calls to this function should always be 'A' when
- *        starting.
- * IN start_mp - starting location of the block, should be the ba_mp
- *        from the block_start.
- * IN block_start - starting point of the block.
- * IN block_end - ending point of the block.
- * IN coords - Where we are recursively. So this should just be an
- *        uninitialized int [SYSTEM_DIMENSIONS]
- *
- * RET: -1 on failure 1 on success
- */
-static int _fill_in_coords(List results, int level, ba_mp_t *start_mp,
-			   ba_mp_t **check_mp, int *block_start,
-			   int *block_end, int *coords)
-{
-	int dim;
-	int count_outside = 0;
-	uint16_t used = 0;
-	ba_mp_t *curr_mp;
+	ba_mp = list_peek(bg_record->ba_mp_list);
+	xassert(ba_mp);
 
-	if (level > cluster_dims)
-		return -1;
-
-	if (level < cluster_dims) {
-		check_mp[level] = start_mp;
-		coords[level] = start_mp->coord[level];
-		do {
-			/* handle the outter dims here */
-			if (_fill_in_coords(
-				    results, level+1, start_mp,
-				    check_mp, block_start, block_end,
-				    coords) == -1)
-				return -1;
-			if (check_mp[level]->alter_switch[level].usage
-			    & BG_SWITCH_OUT_PASS)
-				check_mp[level] =
-					check_mp[level]->next_mp[level];
-			else {
-				if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-					info("mp %s(%d) isn't connected "
-					     "anymore, we found the end.",
-					     check_mp[level]->coord_str, level);
-				return 0;
-			}
-			if (coords[level] < (DIM_SIZE[level]-1))
-				coords[level]++;
-			else
-				coords[level] = 0;
-		} while (coords[level] != start_mp->coord[level]);
-		return 1;
-	}
-
-	curr_mp = &ba_main_grid[coords[A]][coords[X]][coords[Y]][coords[Z]];
-
-	/* info("looking at %s", curr_mp->coord_str); */
-	for (dim=0; dim<cluster_dims; dim++) {
-		/* If this is only used for passthrough, skip since
-		   the _finish_torus code will catch things there.
+	if (in_job_ptr && in_job_ptr->magic != JOB_MAGIC) {
+		/* This can happen if the mmcs job hangs out in the system
+		 * forever, or at least gets cleared a after the SLURM
+		 * job is out of the controller.
+		 */
+		bad_magic = 1;
+		used_cnodes = bit_copy(ba_mp->cnode_bitmap);
+		/* Take out the part (if any) of the midplane that
+		   isn't part of the block.
 		*/
-		if (check_mp[dim]->used & BA_MP_USED_PASS_BIT) {
-			used = check_mp[dim]->used;
+		bit_not(ba_mp->cnode_usable_bitmap);
+		bit_and(used_cnodes, ba_mp->cnode_usable_bitmap);
+		bit_not(ba_mp->cnode_usable_bitmap);
+	}
+again:
+	itr = list_iterator_create(bg_record->job_list);
+	while ((job_ptr = list_next(itr))) {
+		if (job_ptr->magic != JOB_MAGIC) {
+			error("on block %s we found a job with bad magic",
+			      bg_record->bg_block_id);
+			list_delete_item(itr);
+			continue;
+		} else if (bad_magic) {
+			jobinfo = job_ptr->select_jobinfo->data;
+			if (!jobinfo->units_avail) {
+				error("ba_remove_job_in_block_job_list: "
+				      "no units avail bitmap on the jobinfo, "
+				      "continuing");
+				continue;
+			}
+			bit_not(jobinfo->units_avail);
+			bit_and(used_cnodes, jobinfo->units_avail);
+			bit_not(jobinfo->units_avail);
+
+			continue;
+		}
+
+		if (!in_job_ptr) {
+			/* if there is not an in_job_ptr it is because
+			   the jobs finished while the slurmctld
+			   wasn't running and somehow the state was
+			   messed up.  So the cpus were never added to
+			   the mix, so don't remove them. This should
+			   probably never happen.
+			*/
+			//num_unused_cpus += job_ptr->total_cpus;
+			list_delete_item(itr);
+			continue;
+		}
+
+		if (job_ptr == in_job_ptr) {
+			num_unused_cpus += job_ptr->total_cpus;
+			list_delete_item(itr);
 			break;
 		}
+	}
+	list_iterator_destroy(itr);
 
-		/* info("inside at %s %d %d %d", check_mp[dim]->coord_str, */
-		/*      dim, check_mp[dim]->used, used); */
-
-		/* If we get over 2 in any dim that we are
-		   greater here we are pass anything we need to
-		   passthrough, so break.
+	if (!in_job_ptr) {
+		if (ba_mp->cnode_usable_bitmap) {
+			FREE_NULL_BITMAP(ba_mp->cnode_bitmap);
+			ba_mp->cnode_bitmap =
+				bit_copy(ba_mp->cnode_usable_bitmap);
+		} else if (ba_mp->cnode_bitmap)
+			bit_nclear(ba_mp->cnode_bitmap, 0,
+				   bit_size(ba_mp->cnode_bitmap)-1);
+		return NULL;
+	} else if (!job_ptr && !bad_magic) {
+		/* If the job was not found reset the block with the
+		   running jobs and go from there.
 		*/
-
-		/* info("passthrough %d used %d %d %d %d", dim, used, */
-		/*      curr_mp->coord[dim], block_start[dim], */
-		/*      block_end[dim]); */
-		if ((curr_mp->coord[dim] < block_start[dim])
-		    || (curr_mp->coord[dim] > block_end[dim])) {
-			count_outside++;
-			/* info("yes under %d", count_outside); */
-			if (count_outside > 1)
-				break;
+		if (bg_conf->slurm_debug_flags & DEBUG_FLAG_SELECT_TYPE) {
+			error("ba_remove_job_in_block_job_list: "
+			      "Couldn't remove sub-block job %u from "
+			      "block %s",
+			      in_job_ptr->job_id, bg_record->bg_block_id);
 		}
+		bad_magic = 1;
+		used_cnodes = bit_copy(ba_mp->cnode_bitmap);
+		goto again;
 	}
 
-	/* info("got used of %d %d", used, count_outside); */
-	if (dim < cluster_dims) {
-		if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-			info("skipping non-used %s if needed for "
-			     "passthrough it should be handled in "
-			     "_finish_torus",
-			     curr_mp->coord_str);
-		return 1;
-	}
+	if (bad_magic) {
+		uint32_t current_cnode_cnt = bit_set_count(used_cnodes);
 
-	for (dim=0; dim<cluster_dims; dim++) {
-		int rc;
+		num_unused_cpus += current_cnode_cnt * bg_conf->cpu_ratio;
 
-		/* If we are passing though skip all except the
-		   actual passthrough dim.
-		*/
-		if ((used & BA_MP_USED_PASS_BIT)
-		    && (check_mp[dim]->used != used)) {
-			if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-				info("skipping here %s(%d)",
-				     curr_mp->coord_str, dim);
-			continue;
+		bit_not(used_cnodes);
+		bit_and(ba_mp->cnode_bitmap, used_cnodes);
+		bit_not(used_cnodes);
+		if (bg_conf->slurm_debug_flags & DEBUG_FLAG_SELECT_TYPE) {
+			debug("ba_remove_job_in_block_job_list: "
+			      "Removing old sub-block job using %d cnodes "
+			      "from block %s",
+			      current_cnode_cnt, bg_record->bg_block_id);
+		}
+	} else {
+		if (bg_conf->slurm_debug_flags & DEBUG_FLAG_SELECT_TYPE) {
+			debug("ba_remove_job_in_block_job_list: "
+			      "Removing sub-block job %u from block %s",
+			      job_ptr->job_id, bg_record->bg_block_id);
 		}
 
-		/* ba_mp_t *orig_mp = check_mp[dim]; */
-		/* ba_mp_t *ba_mp = curr_mp; */
-		/* info("looking to put " */
-		/*      "mp %s(%d) %s onto mp %s(%d) %s", */
-		/*      orig_mp->coord_str, dim, */
-		/*      ba_switch_usage_str(orig_mp->alter_switch[dim].usage),*/
-		/*      ba_mp->coord_str, dim, */
-		/*      ba_switch_usage_str(ba_mp->alter_switch[dim].usage)); */
+		jobinfo = job_ptr->select_jobinfo->data;
 
-		/* if 1 is returned we haven't visited this mp yet,
-		   and need to add it to the list
-		*/
-		if ((rc = _copy_ba_switch(curr_mp, check_mp[dim], dim)) == -1)
-			return rc;
-		else if (rc == 1)
-			list_append(results, curr_mp);
+		if (!jobinfo->units_avail) {
+			error("ba_remove_job_in_block_job_list: "
+			      "no units avail bitmap on the jobinfo");
+			return job_ptr;
+		}
+		used_cnodes = jobinfo->units_avail;
 	}
-	return 1;
+
+	bit_not(used_cnodes);
+	bit_and(ba_mp->cnode_bitmap, used_cnodes);
+	bit_not(used_cnodes);
+
+	if (bg_conf->slurm_debug_flags & DEBUG_FLAG_BG_ALGO) {
+		bitstr_t *total_bitmap = bit_copy(ba_mp->cnode_bitmap);
+		if (ba_mp->cnode_err_bitmap) {
+			bit_or(total_bitmap, ba_mp->cnode_err_bitmap);
+			tmp_char3 = ba_node_map_ranged_hostlist(
+				ba_mp->cnode_err_bitmap,
+				ba_mp_geo_system);
+		}
+
+		tmp_char = ba_node_map_ranged_hostlist(
+			used_cnodes, ba_mp_geo_system);
+		bit_not(total_bitmap);
+		tmp_char2 = ba_node_map_ranged_hostlist(
+			total_bitmap, ba_mp_geo_system);
+		info("ba_remove_job_in_block_job_list: "
+		     "cleared cnodes %s on mp %s, making '%s' "
+		     "on this midplane usable in this block (%s), "
+		     "%s are in Software Failure",
+		     tmp_char, ba_mp->coord_str, tmp_char2,
+		     bg_record->bg_block_id, tmp_char3);
+		xfree(tmp_char);
+		xfree(tmp_char2);
+		xfree(tmp_char3);
+		FREE_NULL_BITMAP(total_bitmap);
+	}
+
+	if (bad_magic)
+		FREE_NULL_BITMAP(used_cnodes);
+
+	return job_ptr;
 }
 
-/*
- * Finish wiring a block together given start and end points.  All
- * used nodes should be marked inside those points before this
- * function is called.
- *
- * IN/OUT results - total list of midplanes after this function
- *        returns successfully.
- * IN level - which dimension we are on.  Since this is a recursive
- *        function calls to this function should always be 'A' when
- *        starting.
- * IN block_start - starting point of the block.
- * IN block_end - ending point of the block.
- * IN conn_type - Mesh or Torus for each Dim.
- * IN coords - Where we are recursively. So this should just be an
- *        uninitialized int [SYSTEM_DIMENSIONS]
- *
- * RET: -1 on failure 1 on success
- */
-static int _finish_torus(List results, int level, int *block_start,
-			 int *block_end, uint16_t *conn_type, int *coords)
+extern int ba_translate_coord2nc(uint16_t *cnode_coords)
 {
-	int dim;
-	ba_mp_t *curr_mp, *start_mp;
-
-	if (level > cluster_dims)
-		return -1;
-
-	if (level < cluster_dims) {
-		for (coords[level] = block_start[level];
-		     coords[level] <= block_end[level];
-		     coords[level]++) {
-			/* handle the outter dims here */
-			if (_finish_torus(
-				    results, level+1,
-				    block_start, block_end,
-				    conn_type, coords) == -1)
-				return -1;
+	int nc_loc, dim, match;
+	/* need to figure out which nodeboard this cnode is in */
+	for (nc_loc=0; nc_loc<16; nc_loc++) {
+		match = 0;
+		for (dim = 0; dim < 5; dim++) {
+			if ((cnode_coords[dim]
+			     >= g_nc_coords[nc_loc].start[dim])
+			    && (cnode_coords[dim]
+				<= g_nc_coords[nc_loc].end[dim]))
+				match++;
 		}
-		return 1;
+		if (match == 5)
+			break;
 	}
+	xassert(nc_loc < 16);
+	return nc_loc;
+}
 
-	curr_mp = &ba_main_grid[coords[A]][coords[X]][coords[Y]][coords[Z]];
-	if (!(curr_mp->used & BA_MP_USED_ALTERED)) {
-		if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-			info("_finish_torus: skipping non-used %s",
-			     curr_mp->coord_str);
-		return 1;
-	}
-	start_mp = curr_mp;
-
-	/* info("_finish_torus: starting with %s", */
-	/*      curr_mp->coord_str); */
-
-	for (dim=0; dim<cluster_dims; dim++) {
-		if (conn_type[dim] != SELECT_TORUS)
-			continue;
-		if (!(start_mp->alter_switch[dim].usage & BG_SWITCH_OUT_PASS)) {
-			if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-				info("finish_torus: mp %s(%d) already "
-				     "terminated %s",
-				     curr_mp->coord_str, dim,
-				     ba_switch_usage_str(
-					     start_mp->alter_switch->usage));
-			continue;
-		}
-
-		curr_mp = start_mp->next_mp[dim];
-		while (curr_mp != start_mp) {
-			if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-				info("_finish_torus: looking at %s(%d)",
-				     curr_mp->coord_str, dim);
-			if (!(curr_mp->used & BA_MP_USED_ALTERED)) {
-				ba_switch_t *axis_switch =
-					&curr_mp->axis_switch[dim];
-				ba_switch_t *alter_switch =
-					&curr_mp->alter_switch[dim];
-				if (axis_switch->usage & BG_SWITCH_PASS_USED) {
-					info("_finish_torus: got a bad "
-					     "axis_switch at "
-					     "%s(%d) %s %s",
-					     curr_mp->coord_str, dim,
-					     ba_switch_usage_str(
-						     axis_switch->usage),
-					     ba_switch_usage_str(
-						     alter_switch->usage));
-					xassert(0);
-				}
-				alter_switch->usage |= BG_SWITCH_PASS;
-				curr_mp->used |= BA_MP_USED_ALTERED_PASS;
-				list_append(results, curr_mp);
-
-				if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-					info("_finish_torus: using mp %s(%d) "
-					     "to finish torus %s added %s",
-					     curr_mp->coord_str, dim,
-					     ba_switch_usage_str(
-						     axis_switch->usage),
-					     ba_switch_usage_str(
-						     alter_switch->usage));
-			} else if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-				info("_finish_torus: skipping already "
-				     "set %s(%d) %s",
-				     curr_mp->coord_str, dim,
-				     ba_switch_usage_str(
-					     curr_mp->alter_switch[dim].usage));
-			curr_mp = curr_mp->next_mp[dim];
-		}
-		/* info("_finish_torus: ended with %s(%d)", */
-		/*      curr_mp->coord_str, dim); */
-	}
-
-	return 1;
+/* ba_system_mutex needs to be locked before calling this. */
+extern ba_mp_t *ba_inx2ba_mp(int inx)
+{
+	return ba_main_grid_array[inx];
 }
 
 static char *_copy_from_main(List main_mps, List ret_list)
@@ -1682,92 +1858,6 @@ static char *_reset_altered_mps(List main_mps, bool get_name)
 	return name;
 }
 
-static int _copy_ba_switch(ba_mp_t *ba_mp, ba_mp_t *orig_mp, int dim)
-{
-	int rc = 0;
-	if (ba_mp->alter_switch[dim].usage != BG_SWITCH_NONE) {
-		if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-			info("_copy_ba_switch: "
-			     "switch already set %s(%d)",
-			     ba_mp->coord_str, dim);
-		return 0;
-	}
-
-	if (orig_mp->alter_switch[dim].usage == BG_SWITCH_NONE) {
-		if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-			info("_copy_ba_switch: "
-			     "switch not needed %s(%d)",
-			     ba_mp->coord_str, dim);
-		return 0;
-	}
-
-	if ((orig_mp->used & BA_MP_USED_PASS_BIT)
-	    || (ba_mp->used & BA_MP_USED_PASS_BIT)) {
-		if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-			info("_copy_ba_switch: "
-			     "pass bit set %d %d",
-			     orig_mp->alter_switch[dim].usage
-			     & BG_SWITCH_PASS_FLAG,
-			     ba_mp->alter_switch[dim].usage
-			     & BG_SWITCH_PASS_FLAG);
-		if (!(orig_mp->alter_switch[dim].usage & BG_SWITCH_PASS_FLAG)) {
-			if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-				info("_copy_ba_switch: "
-				     "skipping %s(%d)", ba_mp->coord_str, dim);
-			return 0;
-		}
-	} else if (_mp_used(ba_mp, dim)) {
-		if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-			info("_copy_ba_switch: "
-			     "%s is already used", ba_mp->coord_str);
-		return -1;
-	}
-
-	if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-		info("_copy_ba_switch: "
-		     "mapping %s(%d) %s to %s(%d) %s",
-		     orig_mp->coord_str, dim,
-		     ba_switch_usage_str(orig_mp->alter_switch[dim].usage),
-		     ba_mp->coord_str, dim,
-		     ba_switch_usage_str(ba_mp->alter_switch[dim].usage));
-
-	if (ba_mp->axis_switch[dim].usage & orig_mp->alter_switch[dim].usage) {
-		if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-			info("_copy_ba_switch: "
-			     "can't use %s(%d) switch %s "
-			     "overlapped with request %s",
-			     ba_mp->coord_str, dim,
-			     ba_switch_usage_str(
-				     ba_mp->axis_switch[dim].usage),
-			     ba_switch_usage_str(
-				     orig_mp->alter_switch[dim].usage));
-		return -1;
-	}
-
-	/* If we return 1 it means we haven't yet looked at this
-	 * midplane so add it to the list */
-	if (!(ba_mp->used & BA_MP_USED_ALTERED))
-		rc = 1;
-
-	/* set up the usage of the midplane */
-	if (orig_mp->used & BA_MP_USED_PASS_BIT)
-		ba_mp->used |= BA_MP_USED_ALTERED_PASS;
-	else
-		ba_mp->used |= BA_MP_USED_ALTERED;
-
-	if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-		info("_copy_ba_switch: "
-		     "mp %s(%d) adds %s to mp %s(%d) %s %d",
-		     orig_mp->coord_str, dim,
-		     ba_switch_usage_str(orig_mp->alter_switch[dim].usage),
-		     ba_mp->coord_str, dim,
-		     ba_switch_usage_str(ba_mp->alter_switch[dim].usage),
-		     ba_mp->used);
-	ba_mp->alter_switch[dim].usage |= orig_mp->alter_switch[dim].usage;
-
-	return rc;
-}
-
 static int _check_deny_pass(int dim)
 {
 	if (!deny_pass || !*deny_pass)
@@ -1810,9 +1900,9 @@ static int _check_deny_pass(int dim)
 	return 0;
 }
 
-static int _find_path(List mps, ba_mp_t *start_mp, int dim,
-		      uint16_t geometry, uint16_t conn_type,
-		      int *block_start, int *block_end)
+static int _fill_in_wires(List mps, ba_mp_t *start_mp, int dim,
+			  uint16_t geometry, uint16_t conn_type,
+			  bool full_check)
 {
 	ba_mp_t *curr_mp = start_mp->next_mp[dim];
 	ba_switch_t *axis_switch = NULL;
@@ -1821,33 +1911,18 @@ static int _find_path(List mps, ba_mp_t *start_mp, int dim,
 	int add = 0;
 
 	if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-		info("_find_path: at mp %s(%d) geo %d switches at %s and %s",
+		info("_fill_in_wires: at mp %s(%d) geo %d switches "
+		     "at %s and %s",
 		     start_mp->coord_str, dim, geometry,
 		     ba_switch_usage_str(start_mp->axis_switch[dim].usage),
 		     ba_switch_usage_str(start_mp->alter_switch[dim].usage));
 
-	if (_mp_used(start_mp, dim))
-		return 0;
-
 	axis_switch = &start_mp->axis_switch[dim];
 	alter_switch = &start_mp->alter_switch[dim];
-	if (geometry == 1) {
-		/* Always check MESH here since we only care about the
-		   IN/OUT ports.
-		*/
-		start_mp->used |= BA_MP_USED_ALTERED;
-		/* all 1 dimensions need a TORUS */
-		alter_switch->usage |= BG_SWITCH_WRAPPED;
-		if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-			info("_find_path: using mp %s(%d) in 1 geo %s added %s",
-			     start_mp->coord_str, dim,
-			     ba_switch_usage_str(axis_switch->usage),
-			     ba_switch_usage_str(alter_switch->usage));
-		return 1;
-	}
+
 	if (_mp_out_used(start_mp, dim))
 		return 0;
-	start_mp->used |= BA_MP_USED_ALTERED;
+
 	alter_switch->usage |= BG_SWITCH_OUT;
 	alter_switch->usage |= BG_SWITCH_OUT_PASS;
 
@@ -1860,14 +1935,16 @@ static int _find_path(List mps, ba_mp_t *start_mp, int dim,
 		/* This should never happen since we got here
 		   from an unused mp */
 		if (axis_switch->usage & BG_SWITCH_IN_PASS) {
-			info("_find_path: got a bad axis_switch at %s %d %s %s",
+			info("_fill_in_wires: got a bad axis_switch "
+			     "at %s %d %s %s",
 			     curr_mp->coord_str, dim,
 			     ba_switch_usage_str(axis_switch->usage),
 			     ba_switch_usage_str(alter_switch->usage));
 			xassert(0);
 		}
 
-		if ((count < geometry) && !_mp_used(curr_mp, dim)) {
+		if ((count < geometry)
+		    && (curr_mp->used & BA_MP_USED_ALTERED)) {
 			/* if (curr_mp->coord[dim] < start_mp->coord[dim]) { */
 			/* 	if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP) */
 			/* 		info("Available mp %s(%d) is less " */
@@ -1878,23 +1955,16 @@ static int _find_path(List mps, ba_mp_t *start_mp, int dim,
 			/* 		     start_mp->coord_str, dim); */
 			/* 	return 0; */
 			/* } */
-			if (curr_mp->coord[dim] < *block_start)
-				*block_start = curr_mp->coord[dim];
-
-			if (curr_mp->coord[dim] > *block_end)
-				*block_end = curr_mp->coord[dim];
 			count++;
-			if (!(curr_mp->used & BA_MP_USED_ALTERED)) {
-				add = 1;
-				curr_mp->used |= BA_MP_USED_ALTERED;
-			}
 			alter_switch->usage |= BG_SWITCH_IN_PASS;
 			alter_switch->usage |= BG_SWITCH_IN;
 			if ((count < geometry) || (conn_type == SELECT_TORUS)) {
+				if (_mp_out_used(curr_mp, dim))
+					return 0;
 				alter_switch->usage |= BG_SWITCH_OUT;
 				alter_switch->usage |= BG_SWITCH_OUT_PASS;
 				if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-					info("_find_path: using mp %s(%d) "
+					info("_fill_in_wires: using mp %s(%d) "
 					     "%d(%d) %s added %s",
 					     curr_mp->coord_str, dim,
 					     count, geometry,
@@ -1904,7 +1974,7 @@ static int _find_path(List mps, ba_mp_t *start_mp, int dim,
 						     alter_switch->usage));
 			} else if (conn_type == SELECT_MESH) {
 				if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-					info("_find_path: using mp %s(%d) "
+					info("_fill_in_wires: using mp %s(%d) "
 					     "%d(%d) %s added %s",
 					     curr_mp->coord_str, dim,
 					     count, geometry,
@@ -1912,29 +1982,42 @@ static int _find_path(List mps, ba_mp_t *start_mp, int dim,
 						     axis_switch->usage),
 					     ba_switch_usage_str(
 						     alter_switch->usage));
-				if (add)
-					list_append(mps, curr_mp);
 				return 1;
 			}
 		} else if (!_mp_out_used(curr_mp, dim)
 			   && !_check_deny_pass(dim)) {
+
+			if (!full_check
+			    && bridge_check_nodeboards(curr_mp->loc)) {
+				if (ba_debug_flags
+				    & DEBUG_FLAG_BG_ALGO_DEEP) {
+					info("_fill_in_wires: can't "
+					     "use mp %s(%d) "
+					     "as passthrough it has "
+					     "nodeboards not available",
+					     curr_mp->coord_str, dim);
+				}
+				return 0;
+			}
 			if (!(curr_mp->used & BA_MP_USED_ALTERED)) {
 				add = 1;
 				curr_mp->used |= BA_MP_USED_ALTERED_PASS;
+			} else {
+				error("WHAT? %s", curr_mp->coord_str);
 			}
 			alter_switch->usage |= BG_SWITCH_PASS;
 			if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP) {
 				if (count == geometry) {
-					info("_find_path: using mp %s(%d) to "
-					     "finish torus %s added %s",
+					info("_fill_in_wires: using mp %s(%d) "
+					     "to finish torus %s added %s",
 					     curr_mp->coord_str, dim,
 					     ba_switch_usage_str(
 						     axis_switch->usage),
 					     ba_switch_usage_str(
 						     alter_switch->usage));
 				} else {
-					info("_find_path: using mp %s(%d) as "
-					     "passthrough %s added %s",
+					info("_fill_in_wires: using mp %s(%d) "
+					     "as passthrough %s added %s",
 					     curr_mp->coord_str, dim,
 					     ba_switch_usage_str(
 						     axis_switch->usage),
@@ -1944,7 +2027,7 @@ static int _find_path(List mps, ba_mp_t *start_mp, int dim,
 			}
 		} else {
 			/* we can't use this so return with a nice 0 */
-			info("_find_path: we can't use this so return");
+			info("_fill_in_wires: we can't use this so return");
 			return 0;
 		}
 
@@ -1962,7 +2045,8 @@ static int _find_path(List mps, ba_mp_t *start_mp, int dim,
 		/* This should never happen since we got here
 		   from an unused mp */
 		if (axis_switch->usage & BG_SWITCH_IN_PASS) {
-			info("_find_path: 2 got a bad axis_switch at %s %d %s",
+			info("_fill_in_wires: 2 got a bad axis_switch "
+			     "at %s %d %s",
 			     curr_mp->coord_str, dim,
 			     ba_switch_usage_str(axis_switch->usage));
 			xassert(0);
@@ -2068,8 +2152,9 @@ static bool _mp_out_used(ba_mp_t* ba_mp, int dim)
 	xassert(ba_mp);
 
 	/* If the mp is already used just check the PASS_USED. */
-	if ((ba_mp->axis_switch[dim].usage & BG_SWITCH_PASS_USED)
-	    || (ba_mp->alter_switch[dim].usage & BG_SWITCH_PASS_USED)) {
+	if ((ba_mp->axis_switch[dim].usage & BG_SWITCH_CABLE_ERROR_SET)
+	    || (ba_mp->axis_switch[dim].usage & BG_SWITCH_OUT_PASS)
+	    || (ba_mp->alter_switch[dim].usage & BG_SWITCH_OUT_PASS)) {
 		if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
 			info("mp %s(%d) has passthroughs used (%s)",
 			     ba_mp->coord_str, dim, ba_switch_usage_str(
@@ -2078,5 +2163,135 @@ static bool _mp_out_used(ba_mp_t* ba_mp, int dim)
 	}
 
 	return false;
+}
+
+static uint16_t _find_distance(uint16_t start, uint16_t end, int dim)
+{
+	if (end < start)
+		return (((DIM_SIZE[dim]-1) - start) + end) * 4;
+	else
+		return (end - start) * 4;
+}
+
+static int _ba_set_ionode_str_internal(int level, int *coords,
+				       int *start_offset, int *end_offset,
+				       hostlist_t hl)
+{
+	char tmp_char[6];
+
+	xassert(hl);
+
+	if (level > 5)
+		return -1;
+
+	if (level < 5) {
+		for (coords[level] = start_offset[level];
+		     coords[level] <= end_offset[level];
+		     coords[level]++) {
+			/* handle the outter dims here */
+			if (_ba_set_ionode_str_internal(
+				    level+1, coords,
+				    start_offset, end_offset,
+				    hl) == -1)
+				return -1;
+		}
+		return 1;
+	}
+	snprintf(tmp_char, sizeof(tmp_char), "%c%c%c%c%c",
+		 alpha_num[coords[0]],
+		 alpha_num[coords[1]],
+		 alpha_num[coords[2]],
+		 alpha_num[coords[3]],
+		 alpha_num[coords[4]]);
+	hostlist_push_host_dims(hl, tmp_char, 5);
+	return 1;
+}
+
+static bitstr_t *_find_sub_block(ba_geo_table_t **in_geo_table,
+				 uint16_t *start_loc, bitstr_t *total_bitmap,
+				 uint32_t node_count)
+{
+	int cnt = 0;
+	bitstr_t *found_bits = NULL;
+	uint32_t clear_cnt = bit_clear_count(total_bitmap);
+	ba_geo_table_t *geo_table = *in_geo_table;
+
+	if (clear_cnt < node_count) {
+		if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
+			info("ba_pick_sub_block: only have %d avail need %d",
+			     clear_cnt, node_count);
+		return NULL;
+	}
+
+	while (geo_table) {
+		int scan_offset = 0;
+
+		/* FIXME: In the current IBM API it doesn't
+		   allow wrapping inside the midplane.  In the
+		   future this will change.  When that happens
+		   there will need to be a flag that is sent
+		   here instead of always true.
+		*/
+		if (ba_geo_test_all(total_bitmap,
+				    &found_bits,
+				    geo_table, &cnt,
+				    ba_mp_geo_system, NULL,
+				    start_loc, &scan_offset, true)
+		    == SLURM_SUCCESS) {
+			if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP) {
+				int dim;
+				info("scan_offset=%d", scan_offset);
+				for (dim = 0;
+				     dim < ba_mp_geo_system->dim_count;
+				     dim++) {
+					info("start_loc[%d]=%u geometry[%d]=%u",
+					     dim, start_loc[dim], dim,
+					     geo_table->geometry[dim]);
+				}
+			}
+			break;
+		}
+		geo_table = geo_table->next_ptr;
+	}
+
+	*in_geo_table = geo_table;
+
+	return found_bits;
+}
+
+static ba_geo_table_t *_find_geo_table(uint32_t orig_node_count,
+				       uint32_t *node_count,
+				       uint32_t total_count)
+{
+	ba_geo_table_t *geo_table = NULL;
+
+	while (!(geo_table = ba_mp_geo_system->geo_table_ptr[*node_count])) {
+		debug2("_find_geo_table: No geometries of size %u ",
+		       *node_count);
+		(*node_count)++;
+		if (*node_count > total_count)
+			break;
+	}
+	if (*node_count > total_count) {
+		debug("_find_geo_table: requested sub-block larger "
+		      "than block");
+		return NULL;
+	}
+
+	if (orig_node_count != *node_count)
+		debug("_find_geo_table: user requested %u nodes, "
+		      "but that can't make a block, giving them %d",
+		      orig_node_count, *node_count);
+
+	if (!geo_table) {
+		/* This should never happen */
+		error("_find_geo_table: "
+		      "Couldn't place this job size %u tried up to "
+		      "the full size of the block (%u)",
+		      orig_node_count, total_count);
+		return NULL;
+	}
+
+	return geo_table;
 }
 

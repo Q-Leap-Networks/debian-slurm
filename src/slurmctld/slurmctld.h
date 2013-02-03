@@ -169,6 +169,41 @@ typedef struct slurmctld_config {
 #endif
 } slurmctld_config_t;
 
+/* Job scheduling statistics */
+typedef struct diag_stats {
+	int proc_req_threads;
+	int proc_req_raw;
+
+	uint32_t schedule_cycle_max;
+	uint32_t schedule_cycle_last;
+	uint32_t schedule_cycle_sum;
+	uint32_t schedule_cycle_counter;
+	uint32_t schedule_cycle_depth;
+	uint32_t schedule_queue_len;
+
+	uint32_t jobs_submitted;
+	uint32_t jobs_started;
+	uint32_t jobs_completed;
+	uint32_t jobs_canceled;
+	uint32_t jobs_failed;
+
+	uint32_t backfilled_jobs;
+	uint32_t last_backfilled_jobs;
+	uint32_t bf_cycle_counter;
+	uint32_t bf_cycle_last;
+	uint32_t bf_cycle_max;
+	uint32_t bf_cycle_sum;
+	uint32_t bf_last_depth;
+	uint32_t bf_last_depth_try;
+	uint32_t bf_depth_sum;
+	uint32_t bf_depth_try_sum;
+	uint32_t bf_queue_len;
+	uint32_t bf_queue_len_sum;
+	time_t   bf_when_last_cycle;
+	uint32_t bf_active;
+} diag_stats_t;
+
+extern diag_stats_t slurmctld_diag_stats;
 extern slurmctld_config_t slurmctld_config;
 extern int   bg_recover;		/* state recovery mode */
 extern char *slurmctld_cluster_name;	/* name of cluster */
@@ -177,12 +212,14 @@ extern int   accounting_enforce;
 extern int   association_based_accounting;
 extern uint32_t   cluster_cpus;
 extern int   with_slurmdbd;
+extern bool  load_2_4_state;
 
 /*****************************************************************************\
  *  NODE parameters and data structures, mostly in src/common/node_conf.h
 \*****************************************************************************/
 extern uint32_t total_cpus;		/* count of CPUs in the entire cluster */
 extern bool ping_nodes_now;		/* if set, ping nodes immediately */
+extern bool want_nodes_reboot;		/* if set, check for idle nodes */
 
 /*****************************************************************************\
  *  NODE states and bitmaps
@@ -332,10 +369,11 @@ extern time_t last_job_update;	/* time of last update to job records */
 #define JOB_MAGIC	0xf0b7392c
 #define STEP_MAGIC	0xce593bc1
 
-#define FEATURE_OP_OR  0
-#define FEATURE_OP_AND 1
-#define FEATURE_OP_XOR 2
-#define FEATURE_OP_END 3		/* last entry lacks separator */
+#define FEATURE_OP_OR   0
+#define FEATURE_OP_AND  1
+#define FEATURE_OP_XOR  2
+#define FEATURE_OP_XAND 3
+#define FEATURE_OP_END  4		/* last entry lacks separator */
 struct feature_record {
 	char *name;			/* name of feature */
 	uint16_t count;			/* count of nodes with this feature */
@@ -421,6 +459,7 @@ struct job_details {
 
 struct job_record {
 	char    *account;		/* account number to charge */
+	char	*alias_list;		/* node name to address aliases */
 	char    *alloc_node;		/* local node making resource alloc */
 	uint16_t alloc_resp_port;	/* RESPONSE_RESOURCE_ALLOCATION port */
 	uint32_t alloc_sid;		/* local sid making resource alloc */
@@ -481,7 +520,11 @@ struct job_record {
 					 * a limit false if user set */
         uint16_t limit_set_min_nodes;	/* if max_nodes was set from
 					 * a limit false if user set */
+	uint16_t limit_set_pn_min_memory; /* if pn_min_memory was set from
+					 * a limit false if user set */
 	uint16_t limit_set_time;    	/* if time_limit was set from
+					 * a limit false if user set */
+	uint16_t limit_set_qos;    	/* if qos_limit was set from
 					 * a limit false if user set */
 	uint16_t mail_type;		/* see MAIL_JOB_* in slurm.h */
 	char *mail_user;		/* user to get e-mail notification */
@@ -934,20 +977,20 @@ extern int job_allocate(job_desc_msg_t * job_specs, int immediate,
 		int allocate, uid_t submit_uid, struct job_record **job_pptr);
 
 /*
- * job_cancel_by_assoc_id - Cancel all pending and running jobs with a given
+ * job_hold_by_assoc_id - Hold all pending jobs with a given
  *	association ID. This happens when an association is deleted (e.g. when
  *	a user is removed from the association database).
- * RET count of cancelled jobs
+ * RET count of held jobs
  */
-extern int job_cancel_by_assoc_id(uint32_t assoc_id);
+extern int job_hold_by_assoc_id(uint32_t assoc_id);
 
 /*
- * job_cancel_by_qos_id - Cancel all pending and running jobs with a given
+ * job_hold_by_qos_id - Hold all pending jobs with a given
  *	QOS ID. This happens when a QOS is deleted (e.g. when
  *	a QOS is removed from the association database).
- * RET count of cancelled jobs
+ * RET count of held jobs
  */
-extern int job_cancel_by_qos_id(uint32_t qos_id);
+extern int job_hold_by_qos_id(uint32_t qos_id);
 
 /* Perform checkpoint operation on a job */
 extern int job_checkpoint(checkpoint_msg_t *ckpt_ptr, uid_t uid,
@@ -1235,6 +1278,14 @@ extern int kill_step_on_node(struct job_record  *job_ptr,
 int list_compare_config (void *config_entry1, void *config_entry2);
 
 /*
+ * list_find_feature - find an entry in the feature list, see list.h for
+ *	documentation
+ * IN key - is feature name or NULL for all features
+ * RET 1 if found, 0 otherwise
+ */
+extern int list_find_feature(void *feature_entry, void *key);
+
+/*
  * list_find_part - find an entry in the partition list, see common/list.h
  *	for documentation
  * IN key - partition name or "universal_key" for all partitions
@@ -1312,6 +1363,13 @@ extern void make_node_comp(struct node_record *node_ptr,
 extern void make_node_idle(struct node_record *node_ptr,
 			   struct job_record *job_ptr);
 
+/*
+ * Determine of the specified job can execute right now or is currently
+ * blocked by a miscellaneous limit. This does not re-validate job state,
+ * but relies upon schedule() in src/slurmctld/job_scheduler.c to do so.
+ */
+extern bool misc_policy_job_runnable_state(struct job_record *job_ptr);
+
 /* msg_to_slurmd - send given msg_type every slurmd, no args */
 extern void msg_to_slurmd (slurm_msg_type_t msg_type);
 
@@ -1366,6 +1424,10 @@ extern void pack_all_jobs(char **buffer_ptr, int *buffer_size,
 extern void pack_all_node (char **buffer_ptr, int *buffer_size,
 			   uint16_t show_flags, uid_t uid,
 			   uint16_t protocol_version);
+
+/* Pack all scheduling statistics */
+extern void pack_all_stat(int resp, char **buffer_ptr, int *buffer_size,
+			  uint16_t protocol_version);
 
 /*
  * pack_ctld_job_step_info_response_msg - packs job step info
@@ -1453,6 +1515,13 @@ extern void part_filter_set(uid_t uid);
 extern void part_fini (void);
 
 /*
+ * Determine of the specified job can execute right now or is currently
+ * blocked by a partition state or limit. Execute job_limits_check() to
+ * re-validate job state.
+ */
+extern bool part_policy_job_runnable_state(struct job_record *job_ptr);
+
+/*
  * partition_in_use - determine whether a partition is in use by a RUNNING
  *	PENDING or SUSPENDED job
  * IN part_name - name of a partition
@@ -1495,9 +1564,9 @@ extern void reset_first_job_id(void);
  */
 extern void reset_job_bitmaps (void);
 
-/* After a node is returned to service, reset the priority of jobs
- * which may have been held due to that node being unavailable */
-extern void reset_job_priority(void);
+/* Reset all scheduling statistics
+ * level IN - clear backfilled_jobs count if set */
+extern void reset_stats(int level);
 
 /*
  * restore_node_features - Make node and config (from slurm.conf) fields
@@ -1533,6 +1602,15 @@ extern int send_jobs_to_accounting();
  * first registration
  */
 extern int send_nodes_to_accounting(time_t event_time);
+
+/* Set a job's alias_list string */
+extern void set_job_alias_list(struct job_record *job_ptr);
+
+/*
+ * set_job_prio - set a default job priority
+ * IN job_ptr - pointer to the job_record
+ */
+extern void set_job_prio(struct job_record *job_ptr);
 
 /*
  * set_node_down - make the specified node's state DOWN if possible

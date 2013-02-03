@@ -142,6 +142,7 @@ typedef enum {
 #define	QOS_FLAG_PART_TIME_LIMIT     0x00000004
 #define	QOS_FLAG_ENFORCE_USAGE_THRES 0x00000008
 #define	QOS_FLAG_NO_RESERVE          0x00000010
+#define	QOS_FLAG_REQ_RESV            0x00000020
 
 /* Archive / Purge time flags */
 #define SLURMDB_PURGE_BASE    0x0000ffff   /* Apply to get the number
@@ -206,6 +207,7 @@ typedef struct {
 	List grp_cpu_run_mins_list; /* list of char * */
 	List grp_cpus_list; /* list of char * */
 	List grp_jobs_list;	/* list of char * */
+	List grp_mem_list;	/* list of char * */
 	List grp_nodes_list; /* list of char * */
 	List grp_submit_jobs_list; /* list of char * */
 	List grp_wall_list; /* list of char * */
@@ -253,6 +255,7 @@ typedef struct {
 	uint16_t duplicates;    /* report duplicate job entries */
 	int32_t exitcode;       /* exit code of job */
 	List groupid_list;	/* list of char * */
+	List jobname_list;	/* list of char * */
 	uint32_t nodes_max;     /* number of nodes high range */
 	uint32_t nodes_min;     /* number of nodes low range */
 	List partition_list;	/* list of char * */
@@ -378,6 +381,9 @@ typedef struct {
 	uint32_t grp_jobs;	   /* max number of jobs the
 				    * underlying group of associations can run
 				    * at one time */
+	uint32_t grp_mem;          /* max amount of memory the
+				    * underlying group of
+				    * associations can allocate at once */
 	uint32_t grp_nodes;        /* max number of nodes the
 				    * underlying group of
 				    * associations can allocate at once */
@@ -582,6 +588,8 @@ typedef struct {
 			      can allocate at one time */
 	uint32_t grp_jobs;	/* max number of jobs this qos can run
 				 * at one time */
+	uint32_t grp_mem; /* max amount of memory this qos
+			     can allocate at one time */
 	uint32_t grp_nodes; /* max number of nodes this qos
 			       can allocate at once */
 	uint32_t grp_submit_jobs; /* max number of jobs this qos can submit at
@@ -592,7 +600,7 @@ typedef struct {
 				   * use with this qos */
 	uint64_t max_cpu_run_mins_pu; /* max number of cpu mins a user can
 				   * allocate at a given time when
-				   * using this qos */
+				   * using this qos (Not yet valid option) */
 	uint32_t max_cpus_pj; /* max number of cpus a job can
 			       * allocate with this qos */
 	uint32_t max_cpus_pu; /* max number of cpus a user can

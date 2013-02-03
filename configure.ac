@@ -86,7 +86,7 @@ case "$host" in
 		   LDFLAGS="$LDFLAGS -L/usr/sfw/lib"
 		   ;;
 esac
-AM_CONDITIONAL(WITH_CYGWIN, test x"$ac_have_cygwin" == x"yes")
+AM_CONDITIONAL(WITH_CYGWIN, test x"$ac_have_cygwin" = x"yes")
 
 dnl Checks for programs.
 dnl
@@ -118,6 +118,7 @@ AC_CHECK_HEADERS(mcheck.h values.h socket.h sys/socket.h  \
                  pty.h utmp.h \
 		 sys/syslog.h linux/sched.h \
 		 kstat.h paths.h limits.h sys/statfs.h sys/ptrace.h sys/termios.h \
+		 llapi.h nrt.h \
 		)
 AC_HEADER_SYS_WAIT
 AC_HEADER_TIME
@@ -274,7 +275,7 @@ X_AC_SLURM_PORTS([6817], [6818], [6819], [1])
 
 dnl add SLURM_PREFIX to config.h
 dnl
-if test "x$prefix" == "xNONE" ; then
+if test "x$prefix" = "xNONE" ; then
   AC_DEFINE_UNQUOTED(SLURM_PREFIX, "/usr/local", [Define Slurm installation prefix])
 else
   AC_DEFINE_UNQUOTED(SLURM_PREFIX, "$prefix", [Define Slurm installation prefix])
@@ -379,6 +380,21 @@ dnl Check to build native SLURM srun command or an aprun (Cray ALPS) wrapper.
 dnl
 X_AC_SRUN2APRUN
 
+dnl
+dnl Set some configuration based upon multiple configuration parameters
+dnl
+ac_build_smap="no"
+if test "x$ac_have_some_curses" = "xyes" ; then
+   ac_build_smap="yes"
+fi
+AM_CONDITIONAL(BUILD_SMAP, test "x$ac_build_smap" = "xyes")
+
+ac_build_sview="no"
+if test "x$ac_have_gtk" = "xyes" ; then
+   ac_build_sview="yes"
+fi
+AM_CONDITIONAL(BUILD_SVIEW, test "x$ac_build_sview" = "xyes")
+
 dnl All slurm Makefiles:
 
 AC_CONFIG_FILES([Makefile
@@ -387,6 +403,7 @@ AC_CONFIG_FILES([Makefile
 		 contribs/Makefile
 		 contribs/arrayrun/Makefile
 		 contribs/cray/Makefile
+		 contribs/cray/opt_modulefiles_slurm
 		 contribs/lua/Makefile
 		 contribs/pam/Makefile
 		 contribs/perlapi/Makefile
@@ -399,6 +416,17 @@ AC_CONFIG_FILES([Makefile
 		 contribs/phpext/slurm_php/config.m4
 		 contribs/sjobexit/Makefile
 		 contribs/slurmdb-direct/Makefile
+		 doc/Makefile
+		 doc/man/Makefile
+		 doc/man/man1/Makefile
+		 doc/man/man3/Makefile
+		 doc/man/man5/Makefile
+		 doc/man/man8/Makefile
+		 doc/html/Makefile
+		 doc/html/configurator.html
+		 doc/html/configurator.easy.html
+		 etc/init.d.slurm
+		 etc/init.d.slurmdbd
 		 src/Makefile
 		 src/api/Makefile
 		 src/common/Makefile
@@ -412,6 +440,7 @@ AC_CONFIG_FILES([Makefile
 		 src/salloc/Makefile
 		 src/sbatch/Makefile
 		 src/sattach/Makefile
+		 src/sdiag/Makefile
 		 src/sprio/Makefile
 		 src/srun/Makefile
 		 src/srun_cr/Makefile
@@ -457,6 +486,7 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/jobacct_gather/Makefile
 		 src/plugins/jobacct_gather/linux/Makefile
 		 src/plugins/jobacct_gather/aix/Makefile
+		 src/plugins/jobacct_gather/cgroup/Makefile
 		 src/plugins/jobacct_gather/none/Makefile
 		 src/plugins/jobcomp/Makefile
 		 src/plugins/jobcomp/filetxt/Makefile
@@ -516,6 +546,7 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/mpi/lam/Makefile
 		 src/plugins/mpi/none/Makefile
 		 src/plugins/mpi/openmpi/Makefile
+		 src/plugins/mpi/pmi2/Makefile
 		 src/plugins/task/Makefile
 		 src/plugins/task/affinity/Makefile
 		 src/plugins/task/cgroup/Makefile
@@ -525,10 +556,6 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/topology/node_rank/Makefile
 		 src/plugins/topology/none/Makefile
 		 src/plugins/topology/tree/Makefile
-		 doc/Makefile
-		 doc/man/Makefile
-		 doc/html/Makefile
-		 doc/html/configurator.html
 		 testsuite/Makefile
 		 testsuite/expect/Makefile
 		 testsuite/slurm_unit/Makefile

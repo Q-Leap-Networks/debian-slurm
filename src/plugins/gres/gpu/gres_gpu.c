@@ -105,9 +105,12 @@
  */
 const char	plugin_name[]		= "Gres GPU plugin";
 const char	plugin_type[]		= "gres/gpu";
-const uint32_t	plugin_version		= 100;
+const uint32_t	plugin_version		= 110;
 
 static char	gres_name[]		= "gpu";
+
+static int *gpu_devices = NULL;
+static int nb_available_files;
 
 /*
  * We could load gres state or validate it using various mechanisms here.
@@ -116,23 +119,62 @@ static char	gres_name[]		= "gpu";
  */
 extern int node_config_load(List gres_conf_list)
 {
-	int rc = SLURM_ERROR;
+	int i, rc = SLURM_ERROR;
 	ListIterator iter;
 	gres_slurmd_conf_t *gres_slurmd_conf;
+	int nb_gpu = 0;	/* Number of GPUs in the list */
+	int available_files_index = 0;
 
 	xassert(gres_conf_list);
 	iter = list_iterator_create(gres_conf_list);
 	if (iter == NULL)
 		fatal("list_iterator_create: malloc failure");
+
+	iter = list_iterator_create(gres_conf_list);
 	while ((gres_slurmd_conf = list_next(iter))) {
-		if (strcmp(gres_slurmd_conf->name, gres_name) == 0) {
-			rc = SLURM_SUCCESS;
+		if (strcmp(gres_slurmd_conf->name, gres_name))
+			continue;
+		rc = SLURM_SUCCESS;
+		if (gres_slurmd_conf->file)
+			nb_gpu++;
+	}
+	list_iterator_destroy(iter);
+	gpu_devices = NULL;
+	nb_available_files = -1;
+
+	/* (Re-)Allocate memory if number of files changed */
+	if (nb_gpu != nb_available_files) {
+		xfree(gpu_devices);	/* No-op if NULL */
+		gpu_devices = (int *) xmalloc(sizeof(int) * nb_gpu);
+		nb_available_files = nb_gpu;
+		for (i = 0; i < nb_available_files; i++)
+			gpu_devices[i] = -1;
+	}
+
+	iter = list_iterator_create(gres_conf_list);
+	while ((gres_slurmd_conf = list_next(iter))) {
+		if ((strcmp(gres_slurmd_conf->name, gres_name) == 0) &&
+		    gres_slurmd_conf->file) {
+			/* Populate gpu_devices array with number
+			 * at end of the file name */
+			for (i = 0; gres_slurmd_conf->file[i]; i++) {
+				if (!isdigit(gres_slurmd_conf->file[i]))
+					continue;
+				gpu_devices[available_files_index] =
+					atoi(gres_slurmd_conf->file + i);
+				break;
+			}
+			available_files_index++;
 		}
 	}
 	list_iterator_destroy(iter);
 
 	if (rc != SLURM_SUCCESS)
 		fatal("%s failed to load configuration", plugin_name);
+
+	for (i = 0; i < nb_available_files; i++)
+		info("gpu %d is device number %d", i, gpu_devices[i]);
+
 	return rc;
 }
 
@@ -158,7 +200,10 @@ extern void job_set_env(char ***job_env_ptr, void *gres_ptr)
 				dev_list = xmalloc(128);
 			else
 				xstrcat(dev_list, ",");
-			xstrfmtcat(dev_list, "%d", i);
+			if (gpu_devices && (gpu_devices[i] >= 0))
+				xstrfmtcat(dev_list, "%d", gpu_devices[i]);
+			else
+				xstrfmtcat(dev_list, "%d", i);
 		}
 	}
 	if (dev_list) {
@@ -195,7 +240,10 @@ extern void step_set_env(char ***job_env_ptr, void *gres_ptr)
 				dev_list = xmalloc(128);
 			else
 				xstrcat(dev_list, ",");
-			xstrfmtcat(dev_list, "%d", i);
+			if (gpu_devices && (gpu_devices[i] >= 0))
+				xstrfmtcat(dev_list, "%d", gpu_devices[i]);
+			else
+				xstrfmtcat(dev_list, "%d", i);
 		}
 	}
 	if (dev_list) {
@@ -208,4 +256,32 @@ extern void step_set_env(char ***job_env_ptr, void *gres_ptr)
 		error("gres/gpu unable to set CUDA_VISIBLE_DEVICES, "
 		      "no device files configured");
 	}
+}
+
+/* Send GRES information to slurmstepd on the specified file descriptor*/
+extern void send_stepd(int fd)
+{
+	int i;
+
+	safe_write(fd, &nb_available_files, sizeof(int));
+	for (i = 0; i < nb_available_files; i++)
+		safe_write(fd, &gpu_devices[i], sizeof(int));
+	return;
+
+rwfail:	error("gres_plugin_send_stepd failed");
+}
+
+/* Receive GRES information from slurmd on the specified file descriptor*/
+extern void recv_stepd(int fd)
+{
+	int i;
+
+	safe_read(fd, &nb_available_files, sizeof(int));
+	if (nb_available_files > 0)
+		gpu_devices = xmalloc(sizeof(int) * nb_available_files);
+	for (i = 0; i < nb_available_files; i++)
+		safe_read(fd, &gpu_devices[i], sizeof(int));
+	return;
+
+rwfail:	error("gres_plugin_recv_stepd failed");
 }

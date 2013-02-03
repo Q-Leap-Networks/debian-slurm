@@ -132,7 +132,7 @@ extern void get_reservation(void)
 		if (resv.node_inx[0] != -1) {
 			if (!params.commandline) {
 				if ((count >= text_line_cnt) &&
-				    (printed_resv  < (text_win->_maxy-3))) {
+				    (printed_resv  < (getmaxy(text_win) - 4))){
 					resv.flags = (int)letters[count%62];
 					wattron(text_win,
 						COLOR_PAIR(colors[count%6]));
@@ -184,8 +184,12 @@ static void _print_header_resv(void)
 			  main_xcord, "%30.30s  ",
 			  "ACCESS_CONTROL(Accounts,Users)");
 		main_xcord += 32;
-		mvwprintw(text_win, main_ycord,
-			  main_xcord, "%s",    "NODELIST");
+		if (params.cluster_flags & CLUSTER_FLAG_BG)
+			mvwprintw(text_win, main_ycord,
+				  main_xcord, "MIDPLANELIST");
+		else
+			mvwprintw(text_win, main_ycord,
+				  main_xcord, "%s",    "NODELIST");
 		main_xcord = 1;
 		main_ycord++;
 	} else {
@@ -194,7 +198,10 @@ static void _print_header_resv(void)
 		printf("%19.19s  ", "END_TIME");
 		printf("%5.5s  ",   "NODES");
 		printf("%30.30s  ", "ACCESS_CONTROL(Accounts,Users)");
-		printf("%s",        "NODELIST\n");
+		if (params.cluster_flags & CLUSTER_FLAG_BG)
+			printf("MIDPLANELIST\n");
+		else
+			printf("NODELIST\n");
 	}
 }
 

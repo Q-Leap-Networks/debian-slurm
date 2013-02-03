@@ -1345,7 +1345,7 @@ static int _job_test_topo(struct job_record *job_ptr, bitstr_t *bitmap,
 		switches_node_cnt[best_fit_location] = 0;
 		leaf_switch_count++;
 		if (job_ptr->req_switch > 0) {
-			if (time_waiting > job_ptr->wait4switch) {
+			if (time_waiting >= job_ptr->wait4switch) {
 				job_ptr->best_switch = true;
 				debug3("Job=%u Waited %ld sec for switches use=%d",
 					job_ptr->job_id, time_waiting,
@@ -1967,7 +1967,8 @@ static int _add_job_to_nodes(struct cr_record *cr_ptr,
 				gres_list = node_ptr->gres_list;
 			gres_plugin_job_alloc(job_ptr->gres_list, gres_list,
 					      node_cnt, node_offset, cpu_cnt,
-					      job_ptr->job_id, node_ptr->name);
+					      job_ptr->job_id, node_ptr->name,
+					      NULL);
 			gres_plugin_node_state_log(gres_list, node_ptr->name);
 		}
 
@@ -2234,7 +2235,8 @@ static void _init_node_cr(void)
 						      job_resrcs_ptr->
 						      cpus[node_offset],
 						      job_ptr->job_id,
-						      node_ptr->name);
+						      node_ptr->name,
+						      NULL);
 			}
 
 			part_cr_ptr = cr_ptr->nodes[i].parts;
@@ -2437,6 +2439,7 @@ top:	if ((rc != SLURM_SUCCESS) && preemptee_candidates &&
 					  (ListCmpF)_sort_usable_nodes_dec);
 				rc = EINVAL;
 				list_iterator_destroy(job_iterator);
+				_free_cr(exp_cr);
 				goto top;
 			}
 		}
@@ -3142,6 +3145,7 @@ extern int select_p_select_nodeinfo_get(select_nodeinfo_t *nodeinfo,
 {
 	int rc = SLURM_SUCCESS;
 	uint16_t *uint16 = (uint16_t *) data;
+	char **tmp_char = (char **) data;
 	select_nodeinfo_t **select_nodeinfo = (select_nodeinfo_t **) data;
 
 	if (nodeinfo == NULL) {
@@ -3166,6 +3170,10 @@ extern int select_p_select_nodeinfo_get(select_nodeinfo_t *nodeinfo,
 		break;
 	case SELECT_NODEDATA_PTR:
 		*select_nodeinfo = nodeinfo;
+		break;
+	case SELECT_NODEDATA_RACK_MP:
+	case SELECT_NODEDATA_EXTRA_INFO:
+		*tmp_char = NULL;
 		break;
 	default:
 		error("Unsupported option %d for get_nodeinfo.", dinfo);
@@ -3284,6 +3292,11 @@ extern int select_p_update_block (update_block_msg_t *block_desc_ptr)
 }
 
 extern int select_p_update_sub_node (update_block_msg_t *block_desc_ptr)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int select_p_fail_cnode(struct step_record *step_ptr)
 {
 	return SLURM_SUCCESS;
 }

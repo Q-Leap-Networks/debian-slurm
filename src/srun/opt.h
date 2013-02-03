@@ -225,6 +225,7 @@ typedef struct srun_options {
 	int spank_job_env_size;	/* size of spank_job_env	*/
 	int req_switch;		/* Minimum number of switches	*/
 	int wait4switch;	/* Maximum time to wait for minimum switches */
+	char *runjob_opts;	/* Runjob command options, BGQ only	*/
 } opt_t;
 
 extern opt_t opt;
@@ -263,5 +264,9 @@ extern int   spank_unset_job_env(const char *name);
 /* Initialize the spank_job_env based upon environment variables set
  *	via salloc or sbatch commands */
 extern void init_spank_env(void);
+
+#if defined HAVE_BG && !defined HAVE_BG_L_P
+extern void bg_figure_nodes_tasks(void);
+#endif
 
 #endif	/* _HAVE_OPT_H */

@@ -111,6 +111,13 @@ typedef enum {
         BG_JOB_ERROR        //!< Job is in error status.
 } bg_job_status_t;
 
+typedef enum {
+	BG_BLOCK_ACTION_NAV = 0,
+	BG_BLOCK_ACTION_NONE,
+	BG_BLOCK_ACTION_BOOT,
+	BG_BLOCK_ACTION_FREE
+} bg_block_action_t;
+
 #define BG_BLOCK_ERROR_FLAG    0x1000  // Block is in error
 
 
@@ -126,7 +133,22 @@ typedef enum {
 #define BG_SWITCH_PASS         0x001C /* just passthough used */
 #define BG_SWITCH_WRAPPED_PASS 0x001F /* all ports are in use, but no torus */
 #define BG_SWITCH_TORUS        0x000F /* all ports are in use in a torus */
-#define BG_SWITCH_START        0x0200 /* modified from the start list */
+
+#define BG_SWITCH_CABLE_ERROR      0x0100 /* Flag to notify cable is in a
+					   * error state.
+					   */
+#define BG_SWITCH_CABLE_ERROR_SET  0x0200 /* If a cable goes into an error
+					   * state we set the cable in
+					   * an error and the OUT_PASS
+					   * as well.
+					   * Currently SLURM only really
+					   * cares about the out port of a
+					   * switch.
+					   */
+#define BG_SWITCH_CABLE_ERROR_FULL 0x0300 /* Used to clear both
+					   * BG_SWITCH_CABLE_ERROR
+					   * && BG_SWITCH_CABLE_ERROR_SET
+					   */
 
 /*
  * Total time to boot a bglblock should not exceed
@@ -167,6 +189,7 @@ typedef enum {
 	BG_ERROR_INVALID_INPUT,
 	BG_ERROR_INCONSISTENT_DATA,
 	BG_ERROR_NO_IOBLOCK_CONNECTED,
+	BG_ERROR_FREE,
 } bg_errno_t;
 
 #endif	/* #ifndef ATTACH_BG_H */

@@ -57,6 +57,7 @@ enum basil_version {
 	BV_4_0,		/* Basil 1.2 CLE 4.x unconfirmed simulator version  */
 	BV_4_1,		/* Basil 1.2 CLE 4.x unconfirmed simulator version  */
 	BV_5_0,		/* Basil 1.2 CLE 5.x unconfirmed simulator version  */
+	BV_5_1,		/* Basil 1.2 CLE 5.x unconfirmed simulator version  */
 	BV_MAX
 };
 
@@ -544,7 +545,7 @@ struct nodespec {
 	struct nodespec *next;
 };
 
-extern int ns_add_node(struct nodespec **head, uint32_t node_id);
+extern int ns_add_node(struct nodespec **head, uint32_t node_id, bool sorted);
 extern char *ns_to_string(const struct nodespec *head);
 extern void free_nodespec(struct nodespec *head);
 

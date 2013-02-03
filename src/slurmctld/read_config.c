@@ -71,6 +71,7 @@
 #include "src/common/slurm_rlimits_info.h"
 #include "src/common/switch.h"
 #include "src/common/xstring.h"
+#include "src/common/strnatcmp.h"
 
 #include "src/slurmctld/acct_policy.h"
 #include "src/slurmctld/front_end.h"
@@ -121,11 +122,50 @@ static void _validate_node_proc_count(void);
 #endif
 
 /*
- * _reorder_node_record_table - order node table in ascending order of node_rank
+ * _reorder_nodes_by_name - order node table in ascending order of name
+ */
+static void _reorder_nodes_by_name(void)
+{
+	struct node_record *node_ptr, *node_ptr2;
+	int i, j, min_inx;
+
+	/* Now we need to sort the node records */
+	for (i = 0; i < node_record_count; i++) {
+		min_inx = i;
+		for (j = i + 1; j < node_record_count; j++) {
+			if (strnatcmp(node_record_table_ptr[j].name,
+				      node_record_table_ptr[min_inx].name) < 0)
+				min_inx = j;
+		}
+
+		if (min_inx != i) {	/* swap records */
+			struct node_record node_record_tmp;
+
+			j = sizeof(struct node_record);
+			node_ptr  = node_record_table_ptr + i;
+			node_ptr2 = node_record_table_ptr + min_inx;
+
+			memcpy(&node_record_tmp, node_ptr, j);
+			memcpy(node_ptr, node_ptr2, j);
+			memcpy(node_ptr2, &node_record_tmp, j);
+		}
+	}
+
+#if _DEBUG
+	/* Log the results */
+	for (i=0, node_ptr = node_record_table_ptr; i < node_record_count;
+	     i++, node_ptr++) {
+		info("node_rank[%d]: %s", i, node_ptr->name);
+	}
+#endif
+}
+
+/*
+ * _reorder_nodes_by_rank - order node table in ascending order of node_rank
  * This depends on the TopologyPlugin and/or SelectPlugin, which may generate
  * such a ranking.
  */
-static void _reorder_node_record_table(void)
+static void _reorder_nodes_by_rank(void)
 {
 	struct node_record *node_ptr, *node_ptr2;
 	int i, j, min_inx;
@@ -146,7 +186,7 @@ static void _reorder_node_record_table(void)
 			struct node_record node_record_tmp;
 
 			j = sizeof(struct node_record);
-			node_ptr =  node_record_table_ptr + i;
+			node_ptr  = node_record_table_ptr + i;
 			node_ptr2 = node_record_table_ptr + min_inx;
 
 			memcpy(&node_record_tmp, node_ptr, j);
@@ -159,7 +199,7 @@ static void _reorder_node_record_table(void)
 	/* Log the results */
 	for (i=0, node_ptr = node_record_table_ptr; i < node_record_count;
 	     i++, node_ptr++) {
-		info("%s: %u", node_ptr->name, node_ptr->node_rank);
+		info("node_rank[%u]: %s", node_ptr->node_rank, node_ptr->name);
 	}
 #endif
 }
@@ -494,8 +534,10 @@ static int _build_single_partitionline_info(slurm_conf_partition_t *part)
 		xfree(part_ptr->name);
 		part_ptr->name = xstrdup(part->name);
 	} else {
-		verbose("_parse_part_spec: duplicate entry for partition %s",
-			part->name);
+		/* FIXME - maybe should be fatal? */
+		error("_parse_part_spec: duplicate entry for partition %s, "
+		      "ignoring", part->name);
+		return EEXIST;
 	}
 
 	if (part->default_flag) {
@@ -514,7 +556,7 @@ static int _build_single_partitionline_info(slurm_conf_partition_t *part)
 	if (part->preempt_mode != (uint16_t) NO_VAL)
 		part_ptr->preempt_mode = part->preempt_mode;
 
-	if(part->disable_root_jobs == (uint16_t)NO_VAL) {
+	if (part->disable_root_jobs == (uint16_t)NO_VAL) {
 		if (slurmctld_conf.disable_root_jobs)
 			part_ptr->flags |= PART_FLAG_NO_ROOT;
 	} else if (part->disable_root_jobs) {
@@ -523,7 +565,7 @@ static int _build_single_partitionline_info(slurm_conf_partition_t *part)
 		part_ptr->flags &= (~PART_FLAG_NO_ROOT);
 	}
 
-	if(part_ptr->flags & PART_FLAG_NO_ROOT)
+	if (part_ptr->flags & PART_FLAG_NO_ROOT)
 		debug2("partition %s does not allow root jobs", part_ptr->name);
 
 	if ((part->default_time != NO_VAL) &&
@@ -537,6 +579,8 @@ static int _build_single_partitionline_info(slurm_conf_partition_t *part)
 		part_ptr->flags |= PART_FLAG_HIDDEN;
 	if (part->root_only_flag)
 		part_ptr->flags |= PART_FLAG_ROOT_ONLY;
+	if (part->req_resv_flag)
+		part_ptr->flags |= PART_FLAG_REQ_RESV;
 	part_ptr->max_time       = part->max_time;
 	part_ptr->def_mem_per_cpu = part->def_mem_per_cpu;
 	part_ptr->default_time   = part->default_time;
@@ -593,7 +637,7 @@ static int _build_single_partitionline_info(slurm_conf_partition_t *part)
 			cnt_uniq = hostlist_count(hl);
 			if (cnt_tot != cnt_uniq) {
 				fatal("Duplicate Nodes for Partition %s",
-					part->name);
+				      part->name);
 			}
 			xfree(part_ptr->nodes);
 			part_ptr->nodes = hostlist_ranged_string_xmalloc(hl);
@@ -767,7 +811,9 @@ int read_slurm_conf(int recover, bool reconfig)
 	do_reorder_nodes |= select_g_node_ranking(node_record_table_ptr,
 						  node_record_count);
 	if (do_reorder_nodes)
-		_reorder_node_record_table();
+		_reorder_nodes_by_rank();
+	else
+		_reorder_nodes_by_name();
 
 	rehash_node();
 	rehash_jobs();
@@ -780,7 +826,8 @@ int read_slurm_conf(int recover, bool reconfig)
 						 old_node_record_count);
 			error_code = MAX(error_code, rc);  /* not fatal */
 		}
-		if (old_part_list && (recover > 1)) {
+		if (old_part_list && ((recover > 1) ||
+		    (slurmctld_conf.reconfig_flags & RECONFIG_KEEP_PART_INFO))) {
 			info("restoring original partition state");
 			rc = _restore_part_state(old_part_list,
 						 old_def_part_name);
@@ -806,7 +853,6 @@ int read_slurm_conf(int recover, bool reconfig)
 		sync_job_priorities();
 	}
 
-	sync_front_end_state();
 	_sync_part_prio();
 	_build_bitmaps_pre_select();
 	if ((select_g_node_init(node_record_table_ptr, node_record_count)
@@ -971,16 +1017,35 @@ static int _restore_node_state(int recover,
 				hs = hostset_create(node_ptr->name);
 		}
 
+		if (IS_NODE_CLOUD(node_ptr) && !IS_NODE_POWER_SAVE(node_ptr)) {
+			/* Preserve NodeHostname + NodeAddr set by scontrol */
+			xfree(node_ptr->comm_name);
+			node_ptr->comm_name = old_node_ptr->comm_name;
+			old_node_ptr->comm_name = NULL;
+			xfree(node_ptr->node_hostname);
+			node_ptr->node_hostname = old_node_ptr->node_hostname;
+			old_node_ptr->node_hostname = NULL;
+			slurm_reset_alias(node_ptr->name, node_ptr->comm_name,
+					  node_ptr->node_hostname);
+		}
+
 		node_ptr->last_response = old_node_ptr->last_response;
+
+#ifndef HAVE_BG
+		/* If running on a BlueGene system the cpus never
+		   change so just skip this.
+		*/
 		if (old_node_ptr->port != node_ptr->config_ptr->cpus) {
 			rc = ESLURM_NEED_RESTART;
 			error("Configured cpu count change on %s (%u to %u)",
 			      node_ptr->name, old_node_ptr->port,
 			      node_ptr->config_ptr->cpus);
 		}
+#endif
 		node_ptr->boot_time     = old_node_ptr->boot_time; 
 		node_ptr->cpus          = old_node_ptr->cpus;
 		node_ptr->cores         = old_node_ptr->cores;
+		node_ptr->last_idle     = old_node_ptr->last_idle;
 		node_ptr->sockets       = old_node_ptr->sockets;
 		node_ptr->threads       = old_node_ptr->threads;
 		node_ptr->real_memory   = old_node_ptr->real_memory;
@@ -1150,6 +1215,15 @@ static int  _restore_part_state(List old_part_list, char *old_def_part_name)
 				else
 					part_ptr->flags &= (~PART_FLAG_ROOT_ONLY);
 			}
+			if ((part_ptr->flags & PART_FLAG_REQ_RESV) !=
+			    (old_part_ptr->flags & PART_FLAG_REQ_RESV)) {
+				error("Partition %s ReqResv differs from "
+				      "slurm.conf", part_ptr->name);
+				if (old_part_ptr->flags & PART_FLAG_REQ_RESV)
+					part_ptr->flags |= PART_FLAG_REQ_RESV;
+				else
+					part_ptr->flags &= (~PART_FLAG_REQ_RESV);
+			}
 			if (part_ptr->max_nodes_orig !=
 			    old_part_ptr->max_nodes_orig) {
 				error("Partition %s MaxNodes differs from "
@@ -1305,6 +1379,7 @@ static int _update_preempt(uint16_t old_preempt_mode)
 		return gs_fini();
 	}
 
+	error("Invalid gang scheduling mode change");
 	return EINVAL;
 }
 
@@ -1410,9 +1485,11 @@ static int _sync_nodes_to_jobs(void)
 	}
 	list_iterator_destroy(job_iterator);
 
-	if (update_cnt)
+	if (update_cnt) {
 		info("_sync_nodes_to_jobs updated state of %d nodes",
 		     update_cnt);
+	}
+	sync_front_end_state();
 	return update_cnt;
 }
 

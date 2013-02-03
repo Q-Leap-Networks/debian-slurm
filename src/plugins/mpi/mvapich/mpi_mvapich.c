@@ -49,6 +49,7 @@
 #include "slurm/slurm_errno.h"
 #include "src/common/slurm_xlator.h"
 #include "src/plugins/mpi/mvapich/mvapich.h"
+#include "src/slurmd/slurmstepd/slurmstepd_job.h"
 
 /*
  * These variables are required by the generic plugin interface.  If they
@@ -80,6 +81,12 @@
 const char plugin_name[]        = "mpi MVAPICH plugin";
 const char plugin_type[]        = "mpi/mvapich";
 const uint32_t plugin_version   = 100;
+
+int p_mpi_hook_slurmstepd_prefork(const slurmd_job_t *job, char ***env)
+{
+	debug("mpi/mvapich: slurmstepd prefork");
+	return SLURM_SUCCESS;
+}
 
 int p_mpi_hook_slurmstepd_task (const mpi_plugin_task_info_t *job,
 				char ***env)
@@ -127,7 +134,7 @@ p_mpi_hook_client_prelaunch(mpi_plugin_client_info_t *job, char ***env)
 	return (mpi_plugin_client_state_t *)mvapich_thr_create(job, env);
 }
 
-int p_mpi_hook_client_single_task_per_node()
+int p_mpi_hook_client_single_task_per_node(void)
 {
 	return false;
 }

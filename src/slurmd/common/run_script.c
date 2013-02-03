@@ -40,17 +40,64 @@
 #  include "config.h"
 #endif
 
+#if defined(__NetBSD__)
+#include <sys/types.h> /* for pid_t */
+#include <sys/signal.h> /* for SIGKILL */
+#endif
+#include <poll.h>
 #include <stdlib.h>
 #include <sys/wait.h>
 #include <sys/errno.h>
 #include <string.h>
+#include <glob.h>
 
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 #include "src/common/xassert.h"
+#include "src/common/list.h"
 
 #include "src/slurmd/common/run_script.h"
 
+/*
+ *  Same as waitpid(2) but kill process group for pid after timeout secs.
+ *   Returns 0 for valid status in pstatus, -1 on failure of waitpid(2).
+ */
+int waitpid_timeout (const char *name, pid_t pid, int *pstatus, int timeout)
+{
+	int timeout_ms = 1000 * timeout; /* timeout in ms                   */
+	int max_delay =  1000;           /* max delay between waitpid calls */
+	int delay = 10;                  /* initial delay                   */
+	int rc;
+	int options = WNOHANG;
+
+	if (timeout <= 0)
+		options = 0;
+
+	while ((rc = waitpid (pid, pstatus, options)) <= 0) {
+		if (rc < 0) {
+			if (errno == EINTR)
+				continue;
+			error("waidpid: %m");
+			return (-1);
+		}
+		else if (timeout_ms <= 0) {
+			info ("%s%stimeout after %ds: killing pgid %d",
+			      name != NULL ? name : "",
+			      name != NULL ? ": " : "",
+			      timeout, pid);
+			killpg(pid, SIGKILL);
+			options = 0;
+		}
+		else {
+			poll(NULL, 0, delay);
+			timeout_ms -= delay;
+			delay = MIN (timeout_ms, MIN(max_delay, delay*2));
+		}
+	}
+
+	killpg(pid, SIGKILL);  /* kill children too */
+	return (0);
+}
 
 /*
  * Run a prolog or epilog script (does NOT drop privileges)
@@ -62,11 +109,11 @@
  *	if NULL
  * RET 0 on success, -1 on failure.
  */
-int
-run_script(const char *name, const char *path, uint32_t jobid,
+static int
+run_one_script(const char *name, const char *path, uint32_t jobid,
 	   int max_wait, char **env)
 {
-	int status, rc, opt;
+	int status;
 	pid_t cpid;
 
 	xassert(env);
@@ -104,29 +151,88 @@ run_script(const char *name, const char *path, uint32_t jobid,
 		exit(127);
 	}
 
-	if (max_wait < 0)
-		opt = 0;
-	else
-		opt = WNOHANG;
+	if (waitpid_timeout(name, cpid, &status, max_wait) < 0)
+		return (-1);
+	return status;
+}
 
-	while (1) {
-		rc = waitpid(cpid, &status, opt);
-		if (rc < 0) {
-			if (errno == EINTR)
-				continue;
-			error("waidpid: %m");
-			return 0;
-		} else if (rc == 0) {
-			sleep(1);
-			if ((--max_wait) == 0) {
-				killpg(cpid, SIGKILL);
-				opt = 0;
-			}
-		} else  {
-			killpg(cpid, SIGKILL);	/* kill children too */
-			return status;
-		}
+static void _xfree_f (void *x)
+{
+	xfree (x);
+}
+
+
+static int _ef (const char *p, int errnum)
+{
+	return error ("run_script: glob: %s: %s", p, strerror (errno));
+}
+
+static List _script_list_create (const char *pattern)
+{
+	glob_t gl;
+	size_t i;
+	List l = NULL;
+
+	if (pattern == NULL)
+		return (NULL);
+
+	int rc = glob (pattern, GLOB_ERR, _ef, &gl);
+	switch (rc) {
+	case 0:
+		l = list_create ((ListDelF) _xfree_f);
+		if (l == NULL)
+			fatal("run_script: list_create: Out of memory");
+		for (i = 0; i < gl.gl_pathc; i++)
+			list_push (l, xstrdup (gl.gl_pathv[i]));
+		break;
+	case GLOB_NOMATCH:
+		break;
+	case GLOB_NOSPACE:
+		error ("run_script: glob(3): Out of memory");
+		break;
+	case GLOB_ABORTED:
+		error ("run_script: cannot read dir %s: %m", pattern);
+		break;
+	default:
+		error ("Unknown glob(3) return code = %d", rc);
+		break;
 	}
 
-	/* NOTREACHED */
+	globfree (&gl);
+
+	return l;
 }
+
+int run_script(const char *name, const char *pattern, uint32_t jobid,
+	   int max_wait, char **env)
+{
+	int rc = 0;
+	List l;
+	ListIterator i;
+	char *s;
+
+	if (pattern == NULL || pattern[0] == '\0')
+		return 0;
+
+	l = _script_list_create (pattern);
+	if (l == NULL)
+		return error ("Unable to run %s [%s]", name, pattern);
+
+	i = list_iterator_create (l);
+	if (i == NULL)
+		fatal ("run_script: list_iterator_create: Out of memory");
+
+	while ((s = list_next (i))) {
+		rc = run_one_script (name, s, jobid, max_wait, env);
+		if (rc) {
+			error ("%s: exited with status 0x%04x\n", s, rc);
+			break;
+		}
+
+	}
+	list_iterator_destroy (i);
+	list_destroy (l);
+
+	return rc;
+}
+

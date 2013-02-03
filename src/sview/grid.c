@@ -481,11 +481,11 @@ static void _each_highlight_selected(GtkTreeModel *model,
 }
 
 
-static int _block_in_node(int *bp_inx, int inx)
+static int _block_in_node(int *mp_inx, int inx)
 {
 	int j=0;
-	if (bp_inx[j] >= 0) {
-		if ((bp_inx[j] == inx) && (bp_inx[j+1] == inx))
+	if (mp_inx[j] >= 0) {
+		if ((mp_inx[j] == inx) && (mp_inx[j+1] == inx))
 			return 1;
 	}
 	return 0;
@@ -1363,7 +1363,7 @@ extern void add_extra_bluegene_buttons(List *button_list, int inx,
 		}
 		if (bg_info_ptr->state & BG_BLOCK_ERROR_FLAG)
 			grid_button->state = NODE_STATE_ERROR;
-		else if (bg_info_ptr->job_running > NO_JOB_RUNNING)
+		else if (list_count(bg_info_ptr->job_list))
 			grid_button->state = NODE_STATE_ALLOCATED;
 		else
 			grid_button->state = NODE_STATE_IDLE;
@@ -1583,18 +1583,15 @@ extern int get_system_stats(GtkTable *table)
 	int rc = SLURM_SUCCESS;
 	node_info_msg_t *node_info_ptr = NULL;
 	List node_list = NULL;
-	int changed = 1;
 
 	if ((rc = get_new_info_node(&node_info_ptr, force_refresh))
 	    == SLURM_NO_CHANGE_IN_DATA) {
-		changed = 0;
 	} else if (rc != SLURM_SUCCESS)
 		return SLURM_ERROR;
 
 	select_g_ba_init(node_info_ptr, 0);
 
-	node_list = create_node_info_list(node_info_ptr,
-					  changed, FALSE);
+	node_list = create_node_info_list(node_info_ptr, FALSE);
 	if (grid_button_list) {
 		rc = update_grid_table(main_grid_table, grid_button_list,
 				       node_list);

@@ -350,6 +350,13 @@ extern int slurm_send_slurmdbd_msg(uint16_t rpc_version, slurmdbd_msg_t *req)
 	Buf buffer;
 	int cnt, rc = SLURM_SUCCESS;
 	static time_t syslog_time = 0;
+	static int max_agent_queue = 0;
+
+	/* Whatever our max job count is times that by 2 or
+	 * MAX_AGENT_QUEUE which ever is bigger */
+	if (!max_agent_queue)
+		max_agent_queue =
+			MAX(MAX_AGENT_QUEUE, slurmctld_conf.max_job_cnt * 2);
 
 	buffer = pack_slurmdbd_msg(req, rpc_version);
 
@@ -363,7 +370,7 @@ extern int slurm_send_slurmdbd_msg(uint16_t rpc_version, slurmdbd_msg_t *req)
 		}
 	}
 	cnt = list_count(agent_list);
-	if ((cnt >= (MAX_AGENT_QUEUE / 2)) &&
+	if ((cnt >= (max_agent_queue / 2)) &&
 	    (difftime(time(NULL), syslog_time) > 120)) {
 		/* Record critical error every 120 seconds */
 		syslog_time = time(NULL);
@@ -372,9 +379,9 @@ extern int slurm_send_slurmdbd_msg(uint16_t rpc_version, slurmdbd_msg_t *req)
 		if (callbacks_requested)
 			(callback.dbd_fail)();
 	}
-	if (cnt == (MAX_AGENT_QUEUE - 1))
+	if (cnt == (max_agent_queue - 1))
 		cnt -= _purge_job_start_req();
-	if (cnt < MAX_AGENT_QUEUE) {
+	if (cnt < max_agent_queue) {
 		if (list_enqueue(agent_list, buffer) == NULL)
 			fatal("list_enqueue: memory allocation failure");
 	} else {
@@ -620,7 +627,8 @@ extern Buf pack_slurmdbd_msg(slurmdbd_msg_t *req, uint16_t rpc_version)
 			buffer);
 		break;
 	case DBD_GET_CONFIG:
-		/* No message to pack */
+		if (rpc_version >= 10)
+			packstr((char *)req->data, buffer);
 		break;
 	case DBD_GET_JOBS:
 		/* Defunct RPC */
@@ -2017,7 +2025,22 @@ static void *_agent(void *x)
 			info("slurmdbd: agent queue size %u", cnt);
 		/* Leave item on the queue until processing complete */
 		if (agent_list) {
-			if(list_count(agent_list) > 1) {
+			int handle_agent_count = 1000;
+			if (cnt > handle_agent_count) {
+				int agent_count = 0;
+				ListIterator agent_itr =
+					list_iterator_create(agent_list);
+				list_msg.my_list = list_create(NULL);
+				while ((buffer = list_next(agent_itr))) {
+					list_enqueue(list_msg.my_list, buffer);
+					agent_count++;
+					if (agent_count > handle_agent_count)
+						break;
+				}
+				list_iterator_destroy(agent_itr);
+				buffer = pack_slurmdbd_msg(&list_req,
+							   SLURMDBD_VERSION);
+			} else if (cnt > 1) {
 				list_msg.my_list = agent_list;
 				buffer = pack_slurmdbd_msg(&list_req,
 							   SLURMDBD_VERSION);
@@ -2047,7 +2070,7 @@ static void *_agent(void *x)
 				break;
 			}
 			error("slurmdbd: Failure sending message: %d: %m", rc);
-		} else if(list_msg.my_list) {
+		} else if (list_msg.my_list) {
 			rc = _handle_mult_rc_ret(SLURMDBD_VERSION,
 						 read_timeout);
 		} else {
@@ -2074,9 +2097,11 @@ static void *_agent(void *x)
 			   list_msg.my_list as NULL as that is the
 			   sign we sent a mult_msg.
 			*/
-			if(list_msg.my_list)
+			if (list_msg.my_list) {
+				if (list_msg.my_list != agent_list)
+					list_destroy(list_msg.my_list);
 				list_msg.my_list = NULL;
-			else
+			} else
 				buffer = (Buf) list_dequeue(agent_list);
 
 			free_buf(buffer);
@@ -2086,6 +2111,8 @@ static void *_agent(void *x)
 			   got a failure.
 			*/
 			if(list_msg.my_list) {
+				if (list_msg.my_list != agent_list)
+					list_destroy(list_msg.my_list);
 				list_msg.my_list = NULL;
 				free_buf(buffer);
 			}
@@ -2160,6 +2187,7 @@ static void _save_dbd_state(void)
 				free_buf(buffer);
 				continue;
 			}
+
 			rc = _save_dbd_rec(fd, buffer);
 			free_buf(buffer);
 			if (rc != SLURM_SUCCESS)
@@ -2393,7 +2421,8 @@ static int _purge_job_start_req(void)
 		unpack16(&msg_type, buffer);
 		set_buf_offset(buffer, offset);
 		if ((msg_type == DBD_JOB_START) ||
-		    (msg_type == DBD_STEP_START)) {
+		    (msg_type == DBD_STEP_START) ||
+		    (msg_type == DBD_STEP_COMPLETE)) {
 			list_remove(iter);
 			purged++;
 		}

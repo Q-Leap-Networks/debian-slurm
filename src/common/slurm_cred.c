@@ -78,8 +78,9 @@ typedef struct sbcast_cred sbcast_cred_t;		/* opaque data type */
  */
 #define DEFAULT_EXPIRATION_WINDOW 1200
 
+#define EXTREME_DEBUG   0
 #define MAX_TIME 0x7fffffff
-#define SBCAST_CACHE_SIZE 64
+#define SBCAST_CACHE_SIZE 256
 
 /*
  * slurm job credential state
@@ -409,6 +410,9 @@ static int _slurm_crypto_init(void)
 	char	*crypto_type = NULL;
 	int	retval = SLURM_SUCCESS;
 
+	if ( g_crypto_context )	/* mostly avoid locks for better speed */
+		return SLURM_SUCCESS;
+
 	slurm_mutex_lock( &g_crypto_context_lock );
 	if ( g_crypto_context )
 		goto done;
@@ -644,8 +648,12 @@ slurm_cred_create(slurm_cred_ctx_t ctx, slurm_cred_arg_t *arg)
 #ifndef HAVE_BG
 	{
 		int i, sock_recs = 0;
+#ifndef HAVE_CRAY
+		/* Zero compute node allocations allowed on a Cray for use
+		 * of front-end nodes */
 		xassert(arg->job_nhosts);
-		for (i=0; i<arg->job_nhosts; i++) {
+#endif
+		for (i = 0; i < arg->job_nhosts; i++) {
 			sock_recs += arg->sock_core_rep_count[i];
 			if (sock_recs >= arg->job_nhosts)
 				break;
@@ -1631,7 +1639,7 @@ _slurm_cred_alloc(void)
 }
 
 
-#ifdef EXTREME_DEBUG
+#if EXTREME_DEBUG
 static void
 _print_data(char *data, int datalen)
 {
@@ -1909,14 +1917,16 @@ _job_state_destroy(job_state_t *j)
 static void
 _clear_expired_job_states(slurm_cred_ctx_t ctx)
 {
-	char          t1[64], t2[64], t3[64];
 	time_t        now = time(NULL);
 	ListIterator  i   = NULL;
 	job_state_t  *j   = NULL;
 
 	i = list_iterator_create(ctx->job_list);
-
+	if (!i)
+		fatal("list_iterator_create: malloc failure");
 	while ((j = list_next(i))) {
+#if EXTREME_DEBUG
+		char t1[64], t2[64], t3[64];
 		if (j->revoked) {
 			strcpy(t2, " revoked:");
 			timestr(&j->revoked, (t2+9), (64-9));
@@ -1931,7 +1941,7 @@ _clear_expired_job_states(slurm_cred_ctx_t ctx)
 		}
 		debug3("state for jobid %u: ctime:%s%s%s",
 		       j->jobid, timestr(&j->ctime, t1, 64), t2, t3);
-
+#endif
 		if (j->revoked && (now > j->expiration)) {
 			list_delete_item(i);
 		}
@@ -2167,7 +2177,8 @@ static void _pack_sbcast_cred(sbcast_cred_t *sbcast_cred, Buf buffer)
  *	including digital signature.
  * RET the sbcast credential or NULL on error */
 sbcast_cred_t *create_sbcast_cred(slurm_cred_ctx_t ctx,
-				  uint32_t job_id, char *nodes)
+				  uint32_t job_id, char *nodes,
+				  time_t expiration)
 {
 	Buf buffer;
 	int rc;
@@ -2180,7 +2191,7 @@ sbcast_cred_t *create_sbcast_cred(slurm_cred_ctx_t ctx,
 
 	sbcast_cred = xmalloc(sizeof(struct sbcast_cred));
 	sbcast_cred->ctime      = now;
-	sbcast_cred->expiration = now + DEFAULT_EXPIRATION_WINDOW;
+	sbcast_cred->expiration = expiration;
 	sbcast_cred->jobid      = job_id;
 	sbcast_cred->nodes      = xstrdup(nodes);
 
@@ -2261,9 +2272,12 @@ int extract_sbcast_cred(slurm_cred_ctx_t ctx,
 		_pack_sbcast_cred(sbcast_cred, buffer);
 		/* NOTE: the verification checks that the credential was
 		 * created by SlurmUser or root */
-		rc = (*(g_crypto_context->ops.crypto_verify_sign))(ctx->key,
-								   get_buf_data(buffer), get_buf_offset(buffer),
-								   sbcast_cred->signature, sbcast_cred->siglen);
+		rc = (*(g_crypto_context->ops.crypto_verify_sign)) (
+						ctx->key,
+						get_buf_data(buffer),
+						get_buf_offset(buffer),
+						sbcast_cred->signature,
+						sbcast_cred->siglen);
 		free_buf(buffer);
 
 		if (rc) {
@@ -2276,7 +2290,7 @@ int extract_sbcast_cred(slurm_cred_ctx_t ctx,
 		 * and reduces the possibility of a duplicate value */
 		for (i=0; i<sbcast_cred->siglen; i+=2) {
 			sig_num += (sbcast_cred->signature[i] << 8) +
-				sbcast_cred->signature[i+1];
+				   sbcast_cred->signature[i+1];
 		}
 		/* add to cache */
 		for (i=0; i<SBCAST_CACHE_SIZE; i++) {
@@ -2297,13 +2311,13 @@ int extract_sbcast_cred(slurm_cred_ctx_t ctx,
 
 			/* overwrite the oldest */
 			cache_expire[oldest_cache_inx] = sbcast_cred->
-				expiration;
+							 expiration;
 			cache_value[oldest_cache_inx]  = sig_num;
 		}
 	} else {
 		for (i=0; i<sbcast_cred->siglen; i+=2) {
 			sig_num += (sbcast_cred->signature[i] << 8) +
-				sbcast_cred->signature[i+1];
+				   sbcast_cred->signature[i+1];
 		}
 		for (i=0; i<SBCAST_CACHE_SIZE; i++) {
 			if ((cache_expire[i] == sbcast_cred->expiration) &&
@@ -2361,4 +2375,5 @@ void  print_sbcast_cred(sbcast_cred_t *sbcast_cred)
 	info("Sbcast_cred: Jobid   %u", sbcast_cred->jobid         );
 	info("Sbcast_cred: Nodes   %s", sbcast_cred->nodes         );
 	info("Sbcast_cred: ctime   %s", ctime(&sbcast_cred->ctime) );
+	info("Sbcast_cred: Expire  %s", ctime(&sbcast_cred->expiration) );
 }

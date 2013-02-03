@@ -40,6 +40,7 @@
 #include "bg_core.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
+#include "src/common/uid.h"
 
 static char *_yes_no_string(uint16_t inx)
 {
@@ -68,10 +69,11 @@ extern select_jobinfo_t *alloc_select_jobinfo()
 	jobinfo->reboot = (uint16_t) NO_VAL;
 	jobinfo->rotate = (uint16_t) NO_VAL;
 	jobinfo->magic = JOBINFO_MAGIC;
-	jobinfo->block_cnode_cnt = NO_VAL;
-	jobinfo->cnode_cnt = NO_VAL;
+	jobinfo->block_cnode_cnt = 0;
+	jobinfo->cnode_cnt = 0;
 
 	/* This bitstr is created when used. */
+	//jobinfo->units_avail = bit_alloc(bg_conf->mp_cnode_cnt);
 	//jobinfo->units_used = bit_alloc(bg_conf->mp_cnode_cnt);
 
 	/* Remainder of structure is already NULL fulled */
@@ -100,7 +102,9 @@ extern int free_select_jobinfo(select_jobinfo_t *jobinfo)
 		xfree(jobinfo->linuximage);
 		xfree(jobinfo->mloaderimage);
 		xfree(jobinfo->ramdiskimage);
+		FREE_NULL_BITMAP(jobinfo->units_avail);
 		FREE_NULL_BITMAP(jobinfo->units_used);
+		xfree(jobinfo->user_name);
 		xfree(jobinfo);
 	}
 	return rc;
@@ -117,6 +121,7 @@ extern int set_select_jobinfo(select_jobinfo_t *jobinfo,
 	int i, rc = SLURM_SUCCESS;
 	uint16_t *uint16 = (uint16_t *) data;
 	uint32_t *uint32 = (uint32_t *) data;
+	uid_t *uid = (uid_t *)data;
 	char *tmp_char = (char *) data;
 	bg_record_t *bg_record = (bg_record_t *) data;
 	uint32_t new_size;
@@ -142,12 +147,15 @@ extern int set_select_jobinfo(select_jobinfo_t *jobinfo,
 		for (i=0; i<jobinfo->dim_cnt; i++) {
 			jobinfo->geometry[i] = uint16[i];
 			new_size *= uint16[i];
-
 			/* Make sure the conn type is correct with the
 			 * new count */
-			if ((new_size > 1)
-			    && (first_conn_type >= SELECT_SMALL))
-				jobinfo->conn_type[i] = SELECT_TORUS;
+			if (new_size > 1) {
+				if (first_conn_type != (uint16_t)NO_VAL)
+					jobinfo->conn_type[i] = SELECT_NAV;
+				else if (first_conn_type >= SELECT_SMALL)
+					jobinfo->conn_type[i] =
+						bg_conf->default_conn_type[i];
+			}
 		}
 
 		break;
@@ -204,13 +212,19 @@ extern int set_select_jobinfo(select_jobinfo_t *jobinfo,
 	case SELECT_JOBDATA_NODE_CNT:
 		jobinfo->cnode_cnt = *uint32;
 		/* Make sure the conn type is correct with the new count */
-		if ((bg_conf->mp_cnode_cnt == bg_conf->nodecard_cnode_cnt)
+		if (bg_conf->sub_mp_sys
 		    || (jobinfo->cnode_cnt < bg_conf->mp_cnode_cnt)) {
 			if (jobinfo->conn_type[0] < SELECT_SMALL)
 				jobinfo->conn_type[0] = SELECT_SMALL;
-		} else if (jobinfo->conn_type[0] >= SELECT_SMALL)
-			for (i=0; i<SYSTEM_DIMENSIONS; i++)
-				jobinfo->conn_type[i] = SELECT_TORUS;
+		} else if (jobinfo->conn_type[0] >= SELECT_SMALL) {
+			for (i=0; i<SYSTEM_DIMENSIONS; i++) {
+				if (jobinfo->conn_type[i] == (uint16_t)NO_VAL)
+					jobinfo->conn_type[i] = SELECT_NAV;
+				else
+					jobinfo->conn_type[i] =
+						bg_conf->default_conn_type[i];
+			}
+		}
 		break;
 	case SELECT_JOBDATA_ALTERED:
 		jobinfo->altered = *uint16;
@@ -238,6 +252,10 @@ extern int set_select_jobinfo(select_jobinfo_t *jobinfo,
 	case SELECT_JOBDATA_START_LOC:
 		for (i=0; i<jobinfo->dim_cnt; i++)
 			jobinfo->start_loc[i] = uint16[i];
+		break;
+	case SELECT_JOBDATA_USER_NAME:
+		xfree(jobinfo->user_name);
+		jobinfo->user_name = uid_to_string(*uid);
 		break;
 	default:
 		debug("set_select_jobinfo: data_type %d invalid",
@@ -357,6 +375,13 @@ extern int get_select_jobinfo(select_jobinfo_t *jobinfo,
 			uint16[i] = jobinfo->start_loc[i];
 		}
 		break;
+	case SELECT_JOBDATA_USER_NAME:
+		if ((jobinfo->user_name == NULL)
+		    ||  (jobinfo->user_name[0] == '\0'))
+			*tmp_char = NULL;
+		else
+			*tmp_char = xstrdup(jobinfo->user_name);
+		break;
 	default:
 		debug2("get_jobinfo data_type %d invalid",
 		       data_type);
@@ -400,8 +425,11 @@ extern select_jobinfo_t *copy_select_jobinfo(select_jobinfo_t *jobinfo)
 		rc->linuximage = xstrdup(jobinfo->linuximage);
 		rc->mloaderimage = xstrdup(jobinfo->mloaderimage);
 		rc->ramdiskimage = xstrdup(jobinfo->ramdiskimage);
+		if (jobinfo->units_avail)
+			rc->units_avail = bit_copy(jobinfo->units_avail);
 		if (jobinfo->units_used)
 			rc->units_used = bit_copy(jobinfo->units_used);
+		rc->user_name = xstrdup(jobinfo->user_name);
 	}
 
 	return rc;
@@ -420,7 +448,68 @@ extern int  pack_select_jobinfo(select_jobinfo_t *jobinfo, Buf buffer,
 	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
 	int dims = slurmdb_setup_cluster_dims();
 
-	if (protocol_version >= SLURM_2_3_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_2_4_PROTOCOL_VERSION) {
+		if (jobinfo) {
+			if (jobinfo->dim_cnt)
+				dims = jobinfo->dim_cnt;
+			else if (bg_recover != NOT_FROM_CONTROLLER)
+				xassert(0);
+
+			pack16(dims, buffer);
+			/* NOTE: If new elements are added here, make sure to
+			 * add equivalant pack of zeros below for NULL
+			 * pointer */
+			for (i=0; i<dims; i++) {
+				pack16(jobinfo->geometry[i], buffer);
+				pack16(jobinfo->conn_type[i], buffer);
+				pack16(jobinfo->start_loc[i], buffer);
+			}
+			pack16(jobinfo->reboot, buffer);
+			pack16(jobinfo->rotate, buffer);
+
+			pack32(jobinfo->block_cnode_cnt, buffer);
+			pack32(jobinfo->cnode_cnt, buffer);
+
+			packstr(jobinfo->bg_block_id, buffer);
+			packstr(jobinfo->mp_str, buffer);
+			packstr(jobinfo->ionode_str, buffer);
+
+			packstr(jobinfo->blrtsimage, buffer);
+			packstr(jobinfo->linuximage, buffer);
+			packstr(jobinfo->mloaderimage, buffer);
+			packstr(jobinfo->ramdiskimage, buffer);
+			if (bg_conf) {
+				pack16(bg_conf->mp_cnode_cnt, buffer);
+				pack_bit_fmt(jobinfo->units_avail, buffer);
+				pack_bit_fmt(jobinfo->units_used, buffer);
+			} else {
+				pack16(0, buffer);
+				packnull(buffer);
+				packnull(buffer);
+			}
+		} else {
+			pack16(dims, buffer);
+			/* pack space for 3 positions for geo
+			 * conn_type and start_loc and then, reboot, and rotate
+			 */
+			for (i=0; i<((dims*3)+2); i++) {
+				pack16((uint16_t) 0, buffer);
+			}
+			pack32((uint32_t) 0, buffer); //block_cnode_cnt
+			pack32((uint32_t) 0, buffer); //cnode_cnt
+			packnull(buffer); //bg_block_id
+			packnull(buffer); //nodes
+			packnull(buffer); //ionodes
+
+			packnull(buffer); //blrts
+			packnull(buffer); //linux
+			packnull(buffer); //mloader
+			packnull(buffer); //ramdisk
+			pack16((uint16_t) 0, buffer); //mp_cnode_cnt
+			packnull(buffer); //units_avail
+			packnull(buffer); //units_used
+		}
+	} else if (protocol_version >= SLURM_2_3_PROTOCOL_VERSION) {
 		if (jobinfo) {
 			if (jobinfo->dim_cnt)
 				dims = jobinfo->dim_cnt;
@@ -573,6 +662,7 @@ extern int unpack_select_jobinfo(select_jobinfo_t **jobinfo_pptr, Buf buffer,
 {
 	int i;
 	uint32_t uint32_tmp;
+	uint16_t mp_cnode_cnt;
 	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
 	int dims = slurmdb_setup_cluster_dims();
 	select_jobinfo_t *jobinfo = xmalloc(sizeof(struct select_jobinfo));
@@ -581,7 +671,52 @@ extern int unpack_select_jobinfo(select_jobinfo_t **jobinfo_pptr, Buf buffer,
 
 	jobinfo->magic = JOBINFO_MAGIC;
 
-	if (protocol_version >= SLURM_2_3_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_2_4_PROTOCOL_VERSION) {
+		safe_unpack16(&jobinfo->dim_cnt, buffer);
+
+		xassert(jobinfo->dim_cnt);
+		dims = jobinfo->dim_cnt;
+
+		for (i=0; i<dims; i++) {
+			safe_unpack16(&(jobinfo->geometry[i]), buffer);
+			safe_unpack16(&(jobinfo->conn_type[i]), buffer);
+			safe_unpack16(&(jobinfo->start_loc[i]), buffer);
+		}
+
+		safe_unpack16(&(jobinfo->reboot), buffer);
+		safe_unpack16(&(jobinfo->rotate), buffer);
+
+		safe_unpack32(&(jobinfo->block_cnode_cnt), buffer);
+		safe_unpack32(&(jobinfo->cnode_cnt), buffer);
+
+		safe_unpackstr_xmalloc(&(jobinfo->bg_block_id), &uint32_tmp,
+				       buffer);
+		safe_unpackstr_xmalloc(&(jobinfo->mp_str), &uint32_tmp, buffer);
+		safe_unpackstr_xmalloc(&(jobinfo->ionode_str), &uint32_tmp,
+				       buffer);
+
+		safe_unpackstr_xmalloc(&(jobinfo->blrtsimage),
+				       &uint32_tmp, buffer);
+		safe_unpackstr_xmalloc(&(jobinfo->linuximage), &uint32_tmp,
+				       buffer);
+		safe_unpackstr_xmalloc(&(jobinfo->mloaderimage), &uint32_tmp,
+				       buffer);
+		safe_unpackstr_xmalloc(&(jobinfo->ramdiskimage), &uint32_tmp,
+				       buffer);
+		safe_unpack16(&mp_cnode_cnt, buffer);
+		safe_unpackstr_xmalloc(&bit_char, &uint32_tmp, buffer);
+		if (bit_char) {
+			jobinfo->units_avail = bit_alloc(mp_cnode_cnt);
+			bit_unfmt(jobinfo->units_avail, bit_char);
+			xfree(bit_char);
+		}
+		safe_unpackstr_xmalloc(&bit_char, &uint32_tmp, buffer);
+		if (bit_char) {
+			jobinfo->units_used = bit_alloc(mp_cnode_cnt);
+			bit_unfmt(jobinfo->units_used, bit_char);
+			xfree(bit_char);
+		}
+	} else if (protocol_version >= SLURM_2_3_PROTOCOL_VERSION) {
 		safe_unpack16(&jobinfo->dim_cnt, buffer);
 
 		xassert(jobinfo->dim_cnt);
@@ -696,6 +831,7 @@ extern char *sprint_select_jobinfo(select_jobinfo_t *jobinfo,
 	char *tmp_image = "default";
 	char *header = "CONNECT REBOOT ROTATE GEOMETRY BLOCK_ID";
 	bool print_x = 1;
+	char *conn_type = NULL;
 
 	if (buf == NULL) {
 		error("sprint_jobinfo: buf is null");
@@ -728,8 +864,10 @@ extern char *sprint_select_jobinfo(select_jobinfo_t *jobinfo,
 			else
 				xstrcat(geo, "0");
 		}
-	} else if (mode != SELECT_PRINT_START_LOC)
+	} else if (mode != SELECT_PRINT_START_LOC) {
 		geo = give_geo(jobinfo->geometry, jobinfo->dim_cnt, print_x);
+		conn_type = conn_type_string_full(jobinfo->conn_type);
+	}
 
 	switch (mode) {
 	case SELECT_PRINT_HEAD:
@@ -738,7 +876,7 @@ extern char *sprint_select_jobinfo(select_jobinfo_t *jobinfo,
 	case SELECT_PRINT_DATA:
 		snprintf(buf, size,
 			 "%7.7s %6.6s %6.6s    %s %-16s",
-			 conn_type_string(jobinfo->conn_type[0]),
+			 conn_type,
 			 _yes_no_string(jobinfo->reboot),
 			 _yes_no_string(jobinfo->rotate),
 			 geo,
@@ -748,7 +886,7 @@ extern char *sprint_select_jobinfo(select_jobinfo_t *jobinfo,
 		snprintf(buf, size,
 			 "Connection=%s Reboot=%s Rotate=%s "
 			 "Geometry=%s",
-			 conn_type_string(jobinfo->conn_type[0]),
+			 conn_type,
 			 _yes_no_string(jobinfo->reboot),
 			 _yes_no_string(jobinfo->rotate),
 			 geo);
@@ -757,7 +895,7 @@ extern char *sprint_select_jobinfo(select_jobinfo_t *jobinfo,
 		snprintf(buf, size,
 			 "Connection=%s Reboot=%s Rotate=%s "
 			 "Geometry=%s Block_ID=%s",
-			 conn_type_string(jobinfo->conn_type[0]),
+			 conn_type,
 			 _yes_no_string(jobinfo->reboot),
 			 _yes_no_string(jobinfo->rotate),
 			 geo,
@@ -774,8 +912,7 @@ extern char *sprint_select_jobinfo(select_jobinfo_t *jobinfo,
 			snprintf(buf, size, "%s", jobinfo->mp_str);
 		break;
 	case SELECT_PRINT_CONNECTION:
-		snprintf(buf, size, "%s",
-			 conn_type_string(jobinfo->conn_type[0]));
+		snprintf(buf, size, "%s", conn_type);
 		break;
 	case SELECT_PRINT_REBOOT:
 		snprintf(buf, size, "%s",
@@ -819,6 +956,7 @@ extern char *sprint_select_jobinfo(select_jobinfo_t *jobinfo,
 			buf[0] = '\0';
 	}
 	xfree(geo);
+	xfree(conn_type);
 	return buf;
 }
 
@@ -835,6 +973,7 @@ extern char *xstrdup_select_jobinfo(select_jobinfo_t *jobinfo, int mode)
 	char *buf = NULL;
 	char *header = "CONNECT REBOOT ROTATE GEOMETRY BLOCK_ID";
 	bool print_x = 1;
+	char *conn_type = NULL;
 
 	if ((mode != SELECT_PRINT_DATA)
 	    && jobinfo && (jobinfo->magic != JOBINFO_MAGIC)) {
@@ -861,9 +1000,10 @@ extern char *xstrdup_select_jobinfo(select_jobinfo_t *jobinfo, int mode)
 			else
 				xstrcat(geo, "0");
 		}
-	} else if (mode != SELECT_PRINT_START_LOC)
+	} else if (mode != SELECT_PRINT_START_LOC) {
 		geo = give_geo(jobinfo->geometry, jobinfo->dim_cnt, print_x);
-
+		conn_type = conn_type_string_full(jobinfo->conn_type);
+	}
 	switch (mode) {
 	case SELECT_PRINT_HEAD:
 		xstrcat(buf, header);
@@ -871,7 +1011,7 @@ extern char *xstrdup_select_jobinfo(select_jobinfo_t *jobinfo, int mode)
 	case SELECT_PRINT_DATA:
 		xstrfmtcat(buf,
 			   "%7.7s %6.6s %6.6s    %s %-16s",
-			   conn_type_string(jobinfo->conn_type[0]),
+			   conn_type,
 			   _yes_no_string(jobinfo->reboot),
 			   _yes_no_string(jobinfo->rotate),
 			   geo,
@@ -881,7 +1021,7 @@ extern char *xstrdup_select_jobinfo(select_jobinfo_t *jobinfo, int mode)
 		xstrfmtcat(buf,
 			   "Connection=%s Reboot=%s Rotate=%s "
 			   "Geometry=%s Block_ID=%s",
-			   conn_type_string(jobinfo->conn_type[0]),
+			   conn_type,
 			   _yes_no_string(jobinfo->reboot),
 			   _yes_no_string(jobinfo->rotate),
 			   geo,
@@ -898,8 +1038,7 @@ extern char *xstrdup_select_jobinfo(select_jobinfo_t *jobinfo, int mode)
 			xstrfmtcat(buf, "%s", jobinfo->mp_str);
 		break;
 	case SELECT_PRINT_CONNECTION:
-		xstrfmtcat(buf, "%s",
-			   conn_type_string(jobinfo->conn_type[0]));
+		xstrfmtcat(buf, "%s", conn_type);
 		break;
 	case SELECT_PRINT_REBOOT:
 		xstrfmtcat(buf, "%s",
@@ -941,5 +1080,6 @@ extern char *xstrdup_select_jobinfo(select_jobinfo_t *jobinfo, int mode)
 		error("xstrdup_jobinfo: bad mode %d", mode);
 	}
 	xfree(geo);
+	xfree(conn_type);
 	return buf;
 }

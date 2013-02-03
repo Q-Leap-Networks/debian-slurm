@@ -42,6 +42,7 @@
 #  include "config.h"
 #endif
 
+#include <sys/resource.h> /* for struct rlimit */
 #include <dirent.h>
 #include <fcntl.h>
 #include <pwd.h>
@@ -361,7 +362,7 @@ int main(int argc, char *argv[])
 		}
 #else
 		if (!_wait_nodes_ready(alloc)) {
-			if(!allocation_interrupted)
+			if (!allocation_interrupted)
 				error("Something is wrong with the "
 				      "boot of the nodes.");
 			goto relinquish;
@@ -584,7 +585,6 @@ static void _set_submit_dir_env(void)
 /* Returns 0 on success, -1 on failure */
 static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 {
-	int i;
 #ifdef HAVE_REAL_CRAY
 	uint64_t pagg_id = job_getjid(getpid());
 	/*
@@ -621,7 +621,7 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 	desc->exc_nodes = opt.exc_nodes;
 	desc->partition = opt.partition;
 	desc->min_nodes = opt.min_nodes;
-	if (opt.max_nodes)
+	if (opt.nodes_set)
 		desc->max_nodes = opt.max_nodes;
 	desc->user_id = opt.uid;
 	desc->group_id = opt.gid;
@@ -670,15 +670,13 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->priority     = 0;
 #ifdef HAVE_BG
 	if (opt.geometry[0] > 0) {
-		for (i=0; i<SYSTEM_DIMENSIONS; i++)
+		int i;
+		for (i = 0; i < SYSTEM_DIMENSIONS; i++)
 			desc->geometry[i] = opt.geometry[i];
 	}
 #endif
-	for (i=0; i<HIGHEST_DIMENSIONS; i++) {
-		if (opt.conn_type[i] == (uint16_t)NO_VAL)
-			break;
-		desc->conn_type[i] = opt.conn_type[i];
-	}
+	memcpy(desc->conn_type, opt.conn_type, sizeof(desc->conn_type));
+
 	if (opt.reboot)
 		desc->reboot = 1;
 	if (opt.no_rotate)
@@ -815,7 +813,7 @@ static void _signal_while_allocating(int signo)
 {
 	allocation_interrupted = true;
 	if (pending_job_id != 0) {
-		slurm_complete_job(pending_job_id, 0);
+		slurm_complete_job(pending_job_id, NO_VAL);
 	}
 }
 
@@ -1075,13 +1073,17 @@ static int _wait_nodes_ready(resource_allocation_response_msg_t *alloc)
 
 	suspend_time = slurm_get_suspend_timeout();
 	resume_time  = slurm_get_resume_timeout();
-	if ((suspend_time == 0) || (resume_time == 0))
-		return 1;	/* Power save mode disabled */
-	max_delay = suspend_time + resume_time;
-	max_delay *= 5;		/* Allow for ResumeRate support */
+	if (suspend_time || resume_time) {
+		max_delay = suspend_time + resume_time;
+		max_delay *= 5;		/* Allow for ResumeRate support */
+	} else {
+		max_delay = 300;	/* Wait to 5 min for PrologSlurmctld */
+	}
 
 	pending_job_id = alloc->job_id;
 
+	if (alloc->alias_list && !strcmp(alloc->alias_list, "TBD"))
+		opt.wait_all_nodes = 1;	/* Wait for boot & addresses */
 	if (opt.wait_all_nodes == (uint16_t) NO_VAL)
 		opt.wait_all_nodes = DEFAULT_WAIT_ALL_NODES;
 
@@ -1095,20 +1097,15 @@ static int _wait_nodes_ready(resource_allocation_response_msg_t *alloc)
 			cur_delay += POLL_SLEEP;
 		}
 
-		if (opt.wait_all_nodes)
-			rc = slurm_job_node_ready(alloc->job_id);
-		else {
-			is_ready = 1;
-			break;
-		}
-
+		rc = slurm_job_node_ready(alloc->job_id);
 		if (rc == READY_JOB_FATAL)
 			break;				/* fatal error */
 		if ((rc == READY_JOB_ERROR) || (rc == EAGAIN))
 			continue;			/* retry */
 		if ((rc & READY_JOB_STATE) == 0)	/* job killed */
 			break;
-		if (rc & READY_NODE_STATE) {		/* job and node ready */
+		if ((rc & READY_JOB_STATE) && 
+		    ((rc & READY_NODE_STATE) || !opt.wait_all_nodes)) {
 			is_ready = 1;
 			break;
 		}
@@ -1116,8 +1113,18 @@ static int _wait_nodes_ready(resource_allocation_response_msg_t *alloc)
 			break;
 	}
 	if (is_ready) {
+		resource_allocation_response_msg_t *resp;
+		char *tmp_str;
 		if (i > 0)
-     			info ("Nodes %s are ready for job", alloc->node_list);
+     			info("Nodes %s are ready for job", alloc->node_list);
+		if (alloc->alias_list && !strcmp(alloc->alias_list, "TBD") &&
+		    (slurm_allocation_lookup_lite(pending_job_id, &resp)
+		     == SLURM_SUCCESS)) {
+			tmp_str = alloc->alias_list;
+			alloc->alias_list = resp->alias_list;
+			resp->alias_list = tmp_str;
+			slurm_free_resource_allocation_response_msg(resp);
+		}
 	} else if (!allocation_interrupted)
 		error("Nodes %s are still not ready", alloc->node_list);
 	else	/* allocation_interrupted or slurmctld not responing */

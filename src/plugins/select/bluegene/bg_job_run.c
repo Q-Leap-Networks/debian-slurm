@@ -67,7 +67,7 @@
 
 bool deleting_old_blocks_flag = 0;
 
-enum update_op {START_OP, TERM_OP, SYNC_OP};
+enum update_op {START_OP, TERM_OP};
 
 typedef struct {
 	char *bg_block_id;
@@ -85,14 +85,10 @@ typedef struct {
 } bg_action_t;
 
 static void	_destroy_bg_action(void *x);
-static int	_excise_block(List block_list,
-			      char *bg_block_id,
-			      char *nodes);
-static List	_get_all_allocated_blocks(void);
 static void *	_block_agent(void *args);
 static void	_block_op(bg_action_t *bg_action_ptr);
 static void	_start_agent(bg_action_t *bg_action_ptr);
-static void	_sync_agent(bg_action_t *bg_action_ptr);
+static void	_sync_agent(bg_action_t *bg_action_ptr, bg_record_t *bg_record);
 
 /* block_state_mutex should be locked before
  * calling this function.  This should only be called in _start_agent.
@@ -107,11 +103,13 @@ static int _make_sure_block_still_exists(bg_action_t *bg_action_ptr,
 	if ((bg_record->magic != BLOCK_MAGIC)
 	    || !block_ptr_exist_in_list(bg_lists->main, bg_record)) {
 		slurm_mutex_unlock(&block_state_mutex);
-		debug("The block %s disappeared while starting "
-		      "job %u requeueing if possible.",
-		      bg_action_ptr->bg_block_id,
-		      bg_action_ptr->job_ptr->job_id);
-		bg_requeue_job(bg_action_ptr->job_ptr->job_id, 1);
+		if (bg_action_ptr->job_ptr) {
+			debug("The block %s disappeared while starting "
+			      "job %u requeueing if possible.",
+			      bg_action_ptr->bg_block_id,
+			      bg_action_ptr->job_ptr->job_id);
+			bg_requeue_job(bg_action_ptr->job_ptr->job_id, 1, 0);
+		}
 		return 0;
 	}
 	return 1;
@@ -133,60 +131,47 @@ static void _destroy_bg_action(void *x)
 	}
 }
 
-/* Update block user and reboot as needed */
-static void _sync_agent(bg_action_t *bg_action_ptr)
+/* Update block user and reboot as needed block_state_mutex needs to
+ * be locked before coming in. */
+static void _sync_agent(bg_action_t *bg_action_ptr, bg_record_t *bg_record)
 {
-	bg_record_t * bg_record = NULL;
+	struct job_record *job_ptr = bg_action_ptr->job_ptr;
 
-	slurm_mutex_lock(&block_state_mutex);
-	bg_record = find_bg_record_in_list(bg_lists->main,
-					   bg_action_ptr->bg_block_id);
-	if (!bg_record) {
-		slurm_mutex_unlock(&block_state_mutex);
-		error("No block %s", bg_action_ptr->bg_block_id);
-		bg_requeue_job(bg_action_ptr->job_ptr->job_id, 1);
-		return;
-	}
+	debug3("Queue sync of job %u in BG block %s ending at %ld",
+	       job_ptr->job_id, bg_action_ptr->bg_block_id,
+	       job_ptr->end_time);
 
 	last_bg_update = time(NULL);
-	bg_action_ptr->job_ptr->total_cpus =
-		bg_action_ptr->job_ptr->details->min_cpus = bg_record->cpu_cnt;
-	bg_record->job_running = bg_action_ptr->job_ptr->job_id;
-	bg_record->job_ptr = bg_action_ptr->job_ptr;
-	set_select_jobinfo(bg_record->job_ptr->select_jobinfo->data,
+
+	ba_sync_job_to_block(bg_record, job_ptr);
+
+	set_select_jobinfo(job_ptr->select_jobinfo->data,
 			   SELECT_JOBDATA_BLOCK_PTR,
 			   bg_record);
 
-	if (!block_ptr_exist_in_list(bg_lists->job_running, bg_record)) {
+	num_unused_cpus -= job_ptr->total_cpus;
+
+	if (!block_ptr_exist_in_list(bg_lists->job_running, bg_record))
 		list_push(bg_lists->job_running, bg_record);
-		num_unused_cpus -= bg_record->cpu_cnt;
-	}
+
 	if (!block_ptr_exist_in_list(bg_lists->booted, bg_record))
 		list_push(bg_lists->booted, bg_record);
 
 	if (bg_record->state == BG_BLOCK_INITED) {
-		if (bg_record->job_ptr) {
-			bg_record->job_ptr->job_state &= (~JOB_CONFIGURING);
-			last_job_update = time(NULL);
+		int sync_user_rc;
+		job_ptr->job_state &= (~JOB_CONFIGURING);
+		last_job_update = time(NULL);
+		/* Just in case reset the boot flags */
+		bg_record->boot_state = 0;
+		bg_record->boot_count = 0;
+		sync_user_rc = bridge_block_sync_users(bg_record);
+
+		if (sync_user_rc == SLURM_ERROR) {
+			slurm_mutex_unlock(&block_state_mutex);
+			(void) slurm_fail_job(job_ptr->job_id);
+			slurm_mutex_lock(&block_state_mutex);
 		}
-		if (bg_record->user_uid != bg_action_ptr->job_ptr->user_id) {
-			int set_user_rc = SLURM_SUCCESS;
-
-			debug("User isn't correct for job %d on %s, "
-			      "fixing...",
-			      bg_action_ptr->job_ptr->job_id,
-			      bg_action_ptr->bg_block_id);
-			xfree(bg_record->target_name);
-			bg_record->target_name =
-				uid_to_string(bg_action_ptr->job_ptr->user_id);
-			set_user_rc = set_block_user(bg_record);
-			slurm_mutex_unlock(&block_state_mutex);
-
-			if (set_user_rc == SLURM_ERROR)
-				(void) slurm_fail_job(bg_record->job_running);
-		} else
-			slurm_mutex_unlock(&block_state_mutex);
-
+		_destroy_bg_action(bg_action_ptr);
 	} else {
 		if (bg_record->state != BG_BLOCK_BOOTING) {
 			error("Block %s isn't ready and isn't "
@@ -196,8 +181,9 @@ static void _sync_agent(bg_action_t *bg_action_ptr)
 			debug("Block %s is booting, job ok",
 			      bg_action_ptr->bg_block_id);
 		}
-		slurm_mutex_unlock(&block_state_mutex);
-		_start_agent(bg_action_ptr);
+		/* the function _block_op calls will destroy the
+		   bg_action_ptr */
+		_block_op(bg_action_ptr);
 	}
 }
 
@@ -210,29 +196,35 @@ static void _start_agent(bg_action_t *bg_action_ptr)
 	ListIterator itr;
 	List delete_list = NULL;
 	int requeue_job = 0;
+	uint32_t req_job_id = bg_action_ptr->job_ptr->job_id;
+	bool block_inited = 0;
+	bool delete_it = 0;
 
 	slurm_mutex_lock(&block_state_mutex);
 	bg_record = find_bg_record_in_list(bg_lists->main,
 					   bg_action_ptr->bg_block_id);
 
 	if (!bg_record) {
+		bg_record->modifying = 0;
 		slurm_mutex_unlock(&block_state_mutex);
 		error("block %s not found in bg_lists->main",
 		      bg_action_ptr->bg_block_id);
-		bg_requeue_job(bg_action_ptr->job_ptr->job_id, 1);
+		bg_requeue_job(req_job_id, 1, 0);
 		return;
 	}
 
-	if (bg_record->job_running <= NO_JOB_RUNNING) {
+	if ((bg_record->job_running <= NO_JOB_RUNNING)
+	    && !find_job_in_bg_record(bg_record, req_job_id)) {
+		bg_record->modifying = 0;
 		// bg_reset_block(bg_record); should already happened
 		slurm_mutex_unlock(&block_state_mutex);
 		debug("job %u finished during the queueing job "
 		      "(everything is ok)",
-		      bg_action_ptr->job_ptr->job_id);
+		      req_job_id);
 		return;
 	}
-	if (bg_record->state == BG_BLOCK_TERM) {
-		debug("Block is in Deallocating state, waiting for free.");
+
+	if ((bg_record->state == BG_BLOCK_TERM) || bg_record->free_cnt) {
 		/* It doesn't appear state of a small block
 		   (conn_type) is held on a BGP system so
 		   if we to reset it so, just set the reboot flag and
@@ -243,7 +235,7 @@ static void _start_agent(bg_action_t *bg_action_ptr)
 	delete_list = list_create(NULL);
 	itr = list_iterator_create(bg_lists->main);
 	while ((found_record = list_next(itr))) {
-		if ((!found_record) || (bg_record == found_record))
+		if (bg_record == found_record)
 			continue;
 
 		if (!blocks_overlap(bg_record, found_record)) {
@@ -253,16 +245,22 @@ static void _start_agent(bg_action_t *bg_action_ptr)
 			continue;
 		}
 
-		if (found_record->job_ptr) {
+		if (found_record->job_ptr
+		    || (found_record->job_list
+			&& list_count(found_record->job_list))) {
+			struct job_record *job_ptr = found_record->job_ptr;
+			if (!found_record->job_ptr)
+				job_ptr = find_job_in_bg_record(
+					found_record, NO_VAL);
 			error("Trying to start job %u on block %s, "
 			      "but there is a job %u running on an overlapping "
 			      "block %s it will not end until %ld.  "
 			      "This should never happen.",
-			      bg_action_ptr->job_ptr->job_id,
+			      req_job_id,
 			      bg_record->bg_block_id,
-			      found_record->job_ptr->job_id,
+			      job_ptr->job_id,
 			      found_record->bg_block_id,
-			      found_record->job_ptr->end_time);
+			      job_ptr->end_time);
 			requeue_job = 1;
 			break;
 		}
@@ -277,40 +275,85 @@ static void _start_agent(bg_action_t *bg_action_ptr)
 	if (requeue_job) {
 		list_destroy(delete_list);
 
-		bg_reset_block(bg_record);
+		bg_reset_block(bg_record, bg_action_ptr->job_ptr);
 
+		bg_record->modifying = 0;
 		slurm_mutex_unlock(&block_state_mutex);
-		bg_requeue_job(bg_action_ptr->job_ptr->job_id, 0);
+		bg_requeue_job(req_job_id, 0, 0);
 		return;
 	}
 
 	slurm_mutex_unlock(&block_state_mutex);
 
-	rc = free_block_list(bg_action_ptr->job_ptr->job_id, delete_list, 0, 1);
+	if (bg_conf->layout_mode == LAYOUT_DYNAMIC)
+		delete_it = 1;
+	rc = free_block_list(req_job_id, delete_list, delete_it, 1);
 	list_destroy(delete_list);
 	if (rc != SLURM_SUCCESS) {
 		error("Problem with deallocating blocks to run job %u "
-		      "on block %s", bg_action_ptr->job_ptr->job_id,
+		      "on block %s", req_job_id,
 		      bg_action_ptr->bg_block_id);
+		slurm_mutex_lock(&block_state_mutex);
+		/* Failure will unlock block_state_mutex so no need to
+		   unlock before return.  No need to reset modifying
+		   here if the block doesn't exist.
+		*/
+		if (_make_sure_block_still_exists(bg_action_ptr, bg_record)) {
+			bg_record->modifying = 0;
+			slurm_mutex_unlock(&block_state_mutex);
+		}
+
 		if (IS_JOB_CONFIGURING(bg_action_ptr->job_ptr))
-			bg_requeue_job(bg_action_ptr->job_ptr->job_id, 0);
+			bg_requeue_job(req_job_id, 0, 0);
 		return;
 	}
 
-	slurm_mutex_lock(&block_state_mutex);
-	/* Failure will unlock block_state_mutex so no need to unlock before
-	   return. Failure will unlock block_state_mutex so no need to unlock
-	   before return.
+	while (1) {
+		slurm_mutex_lock(&block_state_mutex);
+		/* Failure will unlock block_state_mutex so no need to
+		   unlock before return.  No need to reset modifying
+		   here if the block doesn't exist.
+		*/
+		if (!_make_sure_block_still_exists(bg_action_ptr, bg_record))
+			return;
+		/* If another thread is freeing this block we need to
+		   wait until it is done or we will get into a state
+		   where this job will be killed.
+		*/
+		if (!bg_record->free_cnt)
+			break;
+		debug("Waiting for block %s to free for job %u.  "
+		      "%d thread(s) trying to free it",
+		      bg_record->bg_block_id, req_job_id,
+		      bg_record->free_cnt);
+		slurm_mutex_unlock(&block_state_mutex);
+		sleep(1);
+	}
+	/* This was set in the start_job function to close the above
+	   window where a job could be mistakenly requeued if another
+	   thread is trying to free this block as we are trying to run
+	   on it, which is fine since we will reboot it later.
 	*/
-	if (!_make_sure_block_still_exists(bg_action_ptr, bg_record))
-		return;
+	bg_record->modifying = 0;
 
-	if (bg_record->job_running <= NO_JOB_RUNNING) {
+	if ((bg_record->job_running <= NO_JOB_RUNNING)
+	    && !find_job_in_bg_record(bg_record, req_job_id)) {
 		// bg_reset_block(bg_record); should already happened
 		slurm_mutex_unlock(&block_state_mutex);
 		debug("job %u already finished before boot",
-		      bg_action_ptr->job_ptr->job_id);
+		      req_job_id);
 		return;
+	}
+
+	if (bg_record->job_list
+	    && (bg_action_ptr->job_ptr->total_cpus != bg_record->cpu_cnt)
+	    && (list_count(bg_record->job_list) != 1)) {
+		/* We don't allow modification of a block or reboot of
+		   a block if we are running multiple jobs on the
+		   block.
+		*/
+		debug2("no reboot");
+		goto no_reboot;
 	}
 
 	rc = 0;
@@ -326,9 +369,16 @@ static void _start_agent(bg_action_t *bg_action_ptr)
 #elif defined HAVE_BGP
 	if ((bg_action_ptr->conn_type[0] >= SELECT_SMALL)
 	   && (bg_action_ptr->conn_type[0] != bg_record->conn_type[0])) {
-		debug3("changing small block mode from %s to %s",
-		       conn_type_string(bg_record->conn_type[0]),
-		       conn_type_string(bg_action_ptr->conn_type[0]));
+		if (bg_conf->slurm_debug_level >= LOG_LEVEL_DEBUG3) {
+			char *req_conn_type =
+				conn_type_string_full(bg_action_ptr->conn_type);
+			char *conn_type =
+				conn_type_string_full(bg_record->conn_type);
+			debug3("changing small block mode from %s to %s",
+			       conn_type, req_conn_type);
+			xfree(req_conn_type);
+			xfree(conn_type);
+		}
 		rc = 1;
 # ifndef HAVE_BG_FILES
 		/* since we don't check state on an emulated system we
@@ -465,6 +515,7 @@ static void _start_agent(bg_action_t *bg_action_ptr)
 		bg_record->modifying = 0;
 	}
 
+no_reboot:
 	if (bg_record->state == BG_BLOCK_FREE) {
 		if ((rc = bridge_block_boot(bg_record)) != SLURM_SUCCESS) {
 			char reason[200];
@@ -501,11 +552,12 @@ static void _start_agent(bg_action_t *bg_action_ptr)
 	}
 
 
-	if (bg_record->job_running <= NO_JOB_RUNNING) {
+	if ((bg_record->job_running <= NO_JOB_RUNNING)
+	    && !find_job_in_bg_record(bg_record, req_job_id)) {
 		slurm_mutex_unlock(&block_state_mutex);
 		debug("job %u finished during the start of the boot "
 		      "(everything is ok)",
-		      bg_action_ptr->job_ptr->job_id);
+		      req_job_id);
 		return;
 	}
 
@@ -513,20 +565,27 @@ static void _start_agent(bg_action_t *bg_action_ptr)
 	   changes, and needs to outlast a job allocation.
 	*/
 	/* bg_record->boot_count = 0; */
-	xfree(bg_record->target_name);
-	bg_record->target_name = uid_to_string(bg_action_ptr->job_ptr->user_id);
-	debug("setting the target_name for Block %s to %s",
-	      bg_record->bg_block_id, bg_record->target_name);
-
 	if (bg_record->state == BG_BLOCK_INITED) {
-		debug("block %s is ready.", bg_record->bg_block_id);
-		set_user_rc = set_block_user(bg_record);
-		if (bg_action_ptr->job_ptr) {
-			bg_action_ptr->job_ptr->job_state &= (~JOB_CONFIGURING);
-			last_job_update = time(NULL);
-		}
+		debug("block %s is already ready.", bg_record->bg_block_id);
+		/* Just in case reset the boot flags */
+		bg_record->boot_state = 0;
+		bg_record->boot_count = 0;
+		set_user_rc = bridge_block_sync_users(bg_record);
+		block_inited = 1;
 	}
 	slurm_mutex_unlock(&block_state_mutex);
+
+	/* This lock needs to happen after the block_state_mutex to
+	   avoid deadlock.
+	*/
+	if (block_inited && bg_action_ptr->job_ptr) {
+		slurmctld_lock_t job_write_lock = {
+			NO_LOCK, WRITE_LOCK, NO_LOCK, NO_LOCK };
+		lock_slurmctld(job_write_lock);
+		bg_action_ptr->job_ptr->job_state &= (~JOB_CONFIGURING);
+		last_job_update = time(NULL);
+		unlock_slurmctld(job_write_lock);
+	}
 
 	if (set_user_rc == SLURM_ERROR) {
 		sleep(2);
@@ -535,13 +594,7 @@ static void _start_agent(bg_action_t *bg_action_ptr)
 		   is a no-op if issued prior
 		   to the script initiation do clean up just
 		   incase the fail job isn't ran */
-		(void) slurm_fail_job(bg_record->job_running);
-		slurm_mutex_lock(&block_state_mutex);
-		if (remove_from_bg_list(bg_lists->job_running, bg_record)
-		    == SLURM_SUCCESS)
-			num_unused_cpus += bg_record->cpu_cnt;
-
-		slurm_mutex_unlock(&block_state_mutex);
+		(void) slurm_fail_job(req_job_id);
 	}
 }
 
@@ -552,9 +605,8 @@ static void *_block_agent(void *args)
 	if (bg_action_ptr->op == START_OP)
 		_start_agent(bg_action_ptr);
 	else if (bg_action_ptr->op == TERM_OP)
-		bridge_block_post_job(bg_action_ptr->bg_block_id);
-	else if (bg_action_ptr->op == SYNC_OP)
-		_sync_agent(bg_action_ptr);
+		bridge_block_post_job(bg_action_ptr->bg_block_id,
+				      bg_action_ptr->job_ptr);
 	_destroy_bg_action(bg_action_ptr);
 
 	return NULL;
@@ -582,77 +634,6 @@ static void _block_op(bg_action_t *bg_action_ptr)
 		usleep(1000);	/* sleep and retry */
 	}
 	slurm_attr_destroy(&attr_agent);
-}
-
-
-/* get a list of all BG blocks with users block_state_mutex must be
- * unlocked before entering here. */
-static List _get_all_allocated_blocks(void)
-{
-	List ret_list = list_create(destroy_bg_record);
-	ListIterator itr;
-	bg_record_t *bg_record = NULL;
-	bg_record_t *rm_record = NULL;
-
-	if (!ret_list)
-		fatal("malloc error");
-
-	xassert(bg_lists->main);
-	slurm_mutex_lock(&block_state_mutex);
-	itr = list_iterator_create(bg_lists->main);
-	while ((bg_record = list_next(itr))) {
-		if ((bg_record->magic != BLOCK_MAGIC) || bg_record->free_cnt
-		    || !bg_record->user_name || !bg_record->bg_block_id)
-			continue;
-		rm_record = xmalloc(sizeof(bg_record_t));
-		rm_record->magic = BLOCK_MAGIC;
-		rm_record->bg_block_id =
-			xstrdup(bg_record->bg_block_id);
-		rm_record->mp_str = xstrdup(bg_record->mp_str);
-		list_append(ret_list, rm_record);
-	}
-	list_iterator_destroy(itr);
-
-	slurm_mutex_unlock(&block_state_mutex);
-
-	return ret_list;
-}
-
-/* remove a BG block from the given list */
-static int _excise_block(List block_list, char *bg_block_id,
-			 char *nodes)
-{
-	int rc = SLURM_SUCCESS;
-	ListIterator iter;
-	bg_record_t *bg_record = NULL;
-
-	if (block_list) {
-		iter = list_iterator_create(block_list);
-		xassert(iter);
-		while ((bg_record = list_next(iter))) {
-			rc = SLURM_ERROR;
-			if (strcmp(bg_record->bg_block_id, bg_block_id))
-				continue;
-			if (strcmp(bg_record->mp_str, nodes)) {
-				/* changed bgblock */
-				error("bg_block_id:%s old_nodes:%s "
-				      "new_nodes:%s",
-				      bg_block_id, nodes, bg_record->mp_str);
-				break;
-			}
-
-			/* exact match of name and node list */
-			debug("synced Block %s", bg_block_id);
-			list_delete_item(iter);
-			rc = SLURM_SUCCESS;
-			break;
-		}
-		list_iterator_destroy(iter);
-	} else {
-		error("_excise_block: No block_list");
-		rc = SLURM_ERROR;
-	}
-	return rc;
 }
 
 /*
@@ -769,15 +750,26 @@ extern int start_job(struct job_record *job_ptr)
 	}
 
 	last_bg_update = time(NULL);
-	job_ptr->total_cpus = job_ptr->details->min_cpus = bg_record->cpu_cnt;
-	bg_record->job_running = bg_action_ptr->job_ptr->job_id;
-	bg_record->job_ptr = bg_action_ptr->job_ptr;
-	if (!block_ptr_exist_in_list(bg_lists->job_running, bg_record)) {
-		list_push(bg_lists->job_running, bg_record);
-		num_unused_cpus -= bg_record->cpu_cnt;
+
+	if (bg_record->job_list) {
+		if (!find_job_in_bg_record(bg_record, job_ptr->job_id))
+			list_append(bg_record->job_list, job_ptr);
+	} else {
+		bg_record->job_running = bg_action_ptr->job_ptr->job_id;
+		bg_record->job_ptr = bg_action_ptr->job_ptr;
 	}
+	num_unused_cpus -= job_ptr->total_cpus;
+
+	if (!block_ptr_exist_in_list(bg_lists->job_running, bg_record))
+		list_push(bg_lists->job_running, bg_record);
+
 	if (!block_ptr_exist_in_list(bg_lists->booted, bg_record))
 		list_push(bg_lists->booted, bg_record);
+	/* Just incase something happens to free this block before we
+	   start the job we will make it so this job doesn't get blown
+	   away.
+	*/
+	bg_record->modifying = 1;
 	slurm_mutex_unlock(&block_state_mutex);
 
 	info("Queue start of job %u in BG block %s",
@@ -822,11 +814,11 @@ int term_job(struct job_record *job_ptr)
  */
 extern int sync_jobs(List job_list)
 {
-	ListIterator job_iterator;
+	ListIterator itr;
 	struct job_record  *job_ptr = NULL;
-	bg_action_t *bg_action_ptr = NULL;
 	List block_list = NULL;
 	static bool run_already = false;
+	bg_record_t *bg_record = NULL;
 
 	/* Execute only on initial startup. We don't support bgblock
 	 * creation on demand today, so there is no need to re-sync data. */
@@ -838,16 +830,19 @@ extern int sync_jobs(List job_list)
 		error("sync_jobs: no job_list");
 		return SLURM_ERROR;
 	}
+	slurm_mutex_lock(&block_state_mutex);
 	/* Insure that all running jobs own the specified block */
-	block_list = _get_all_allocated_blocks();
-	job_iterator = list_iterator_create(job_list);
-	while ((job_ptr = list_next(job_iterator))) {
-		bool good_block = true;
-		if (!IS_JOB_RUNNING(job_ptr))
+	itr = list_iterator_create(job_list);
+	while ((job_ptr = list_next(itr))) {
+		bg_action_t *bg_action_ptr = NULL;
+		if (!IS_JOB_RUNNING(job_ptr) && !IS_JOB_COMPLETING(job_ptr))
 			continue;
 
 		bg_action_ptr = xmalloc(sizeof(bg_action_t));
-		bg_action_ptr->op = SYNC_OP;
+		if (IS_JOB_COMPLETING(job_ptr))
+			bg_action_ptr->op = TERM_OP;
+		else
+			bg_action_ptr->op = START_OP;
 		bg_action_ptr->job_ptr = job_ptr;
 
 		get_select_jobinfo(job_ptr->select_jobinfo->data,
@@ -877,42 +872,57 @@ extern int sync_jobs(List job_list)
 		if (bg_action_ptr->bg_block_id == NULL) {
 			error("Running job %u has bgblock==NULL",
 			      job_ptr->job_id);
-			good_block = false;
 		} else if (job_ptr->nodes == NULL) {
 			error("Running job %u has nodes==NULL",
 			      job_ptr->job_id);
-			good_block = false;
-		} else if (_excise_block(block_list,
-					 bg_action_ptr->bg_block_id,
-					 job_ptr->nodes)
-			   != SLURM_SUCCESS) {
+		} else if (!(bg_record = find_bg_record_in_list(
+				     bg_lists->main,
+				     bg_action_ptr->bg_block_id))) {
 			error("Kill job %u belongs to defunct "
 			      "bgblock %s",
 			      job_ptr->job_id,
 			      bg_action_ptr->bg_block_id);
-			good_block = false;
 		}
-		if (!good_block) {
-			job_ptr->job_state = JOB_FAILED
-				| JOB_COMPLETING;
-			job_ptr->end_time = time(NULL);
-			last_job_update = time(NULL);
+
+		if (!bg_record) {
+			/* Don't use slurm_fail_job, locks are already
+			   in place.
+			*/
+			job_fail(job_ptr->job_id);
 			_destroy_bg_action(bg_action_ptr);
 			continue;
 		}
-
-		debug3("Queue sync of job %u in BG block %s "
-		       "ending at %ld",
-		       job_ptr->job_id,
-		       bg_action_ptr->bg_block_id,
-		       job_ptr->end_time);
-		_block_op(bg_action_ptr);
+		/* _sync_agent will destroy the bg_action_ptr */
+		_sync_agent(bg_action_ptr, bg_record);
 	}
-	list_iterator_destroy(job_iterator);
+	list_iterator_destroy(itr);
+
+	block_list = list_create(destroy_bg_record);
+	itr = list_iterator_create(bg_lists->main);
+	while ((bg_record = list_next(itr))) {
+		bg_record_t *rm_record;
+		if (bg_record->job_ptr
+		    || (bg_record->job_list
+			&& list_count(bg_record->job_list)))
+			continue;
+		rm_record = xmalloc(sizeof(bg_record_t));
+		rm_record->magic = BLOCK_MAGIC;
+		rm_record->bg_block_id = xstrdup(bg_record->bg_block_id);
+		rm_record->mp_str = xstrdup(bg_record->mp_str);
+		list_append(block_list, rm_record);
+	}
+	list_iterator_destroy(itr);
+	slurm_mutex_unlock(&block_state_mutex);
 
 	/* Insure that all other blocks are free of users */
 	if (block_list) {
-		bridge_reset_block_list(block_list);
+		itr = list_iterator_create(block_list);
+		while ((bg_record = list_next(itr))) {
+			info("Queue clearing of users of BG block %s",
+			     bg_record->bg_block_id);
+			term_jobs_on_block(bg_record->bg_block_id);
+		}
+		list_iterator_destroy(itr);
 		list_destroy(block_list);
 	} else {
 		/* this should never happen,

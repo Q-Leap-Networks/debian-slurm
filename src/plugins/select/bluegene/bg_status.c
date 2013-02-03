@@ -43,10 +43,6 @@
 
 #define RETRY_BOOT_COUNT 3
 
-typedef struct {
-	int jobid;
-} kill_job_struct_t;
-
 static void _destroy_kill_struct(void *object);
 
 static void _destroy_kill_struct(void *object)
@@ -61,33 +57,16 @@ static void _destroy_kill_struct(void *object)
 static int _block_is_deallocating(bg_record_t *bg_record, List kill_job_list)
 {
 	int jobid = bg_record->job_running;
-	char *user_name = NULL;
 
 	if (bg_record->modifying)
 		return SLURM_SUCCESS;
 
-	user_name = xstrdup(bg_conf->slurm_user_name);
-	if (bridge_block_remove_all_users(bg_record, NULL) == REMOVE_USER_ERR) {
-		error("Something happened removing users from block %s",
-		      bg_record->bg_block_id);
-	}
-
-	if (!bg_record->target_name) {
-		error("Target Name was not set for block %s.",
-		      bg_record->bg_block_id);
-		bg_record->target_name = xstrdup(bg_record->user_name);
-	}
-
-	if (!bg_record->user_name) {
-		error("User Name was not set for block %s.",
-		      bg_record->bg_block_id);
-		bg_record->user_name = xstrdup(user_name);
-	}
-
 	if (bg_record->boot_state) {
 		error("State went to free on a boot for block %s.",
 		      bg_record->bg_block_id);
-	} else if (jobid > NO_JOB_RUNNING) {
+	} else if (bg_record->job_ptr && (jobid > NO_JOB_RUNNING)) {
+		select_jobinfo_t *jobinfo =
+			bg_record->job_ptr->select_jobinfo->data;
 		if (kill_job_list) {
 			kill_job_struct_t *freeit =
 				(kill_job_struct_t *)
@@ -95,25 +74,48 @@ static int _block_is_deallocating(bg_record_t *bg_record, List kill_job_list)
 			freeit->jobid = jobid;
 			list_push(kill_job_list, freeit);
 		}
-
 		error("Block %s was in a ready state "
 		      "for user %s but is being freed. "
 		      "Job %d was lost.",
 		      bg_record->bg_block_id,
-		      bg_record->user_name,
+		      jobinfo->user_name,
 		      jobid);
+	} else if (bg_record->job_list && list_count(bg_record->job_list)) {
+		struct job_record *job_ptr;
+		ListIterator itr = list_iterator_create(bg_record->job_list);
+		while ((job_ptr = list_next(itr))) {
+			select_jobinfo_t *jobinfo;
+
+			if (job_ptr->magic != JOB_MAGIC)
+				continue;
+
+			jobinfo = job_ptr->select_jobinfo->data;
+			if (kill_job_list) {
+				kill_job_struct_t *freeit =
+					(kill_job_struct_t *)
+					xmalloc(sizeof(freeit));
+				freeit->jobid = job_ptr->job_id;
+				list_push(kill_job_list, freeit);
+			}
+			error("Block %s was in a ready state "
+			      "for user %s but is being freed. "
+			      "Job %d was lost.",
+			      bg_record->bg_block_id,
+			      jobinfo->user_name,
+			      job_ptr->job_id);
+		}
+		list_iterator_destroy(itr);
 	} else {
 		debug("Block %s was in a ready state "
 		      "but is being freed. No job running.",
 		      bg_record->bg_block_id);
+		/* Make sure block is cleaned up.  If there are
+		 * running jobs on the block this happens when they
+		 * are cleaned off. */
+		bg_reset_block(bg_record, NULL);
 	}
 
-	if (remove_from_bg_list(bg_lists->job_running, bg_record)
-	    == SLURM_SUCCESS)
-		num_unused_cpus += bg_record->cpu_cnt;
 	remove_from_bg_list(bg_lists->booted, bg_record);
-
-	xfree(user_name);
 
 	return SLURM_SUCCESS;
 }
@@ -149,12 +151,8 @@ extern int bg_status_update_block_state(bg_record_t *bg_record,
 		   mpirun but we missed the state
 		   change */
 		debug("Block %s skipped rebooting, "
-		      "but it really is.  "
-		      "Setting target_name back to %s",
-		      bg_record->bg_block_id,
-		      bg_record->user_name);
-		xfree(bg_record->target_name);
-		bg_record->target_name = xstrdup(bg_record->user_name);
+		      "but it really is.",
+		      bg_record->bg_block_id);
 	} else if ((real_state == BG_BLOCK_TERM)
 		   && (state == BG_BLOCK_BOOTING))
 		/* This is a funky state IBM says
@@ -177,11 +175,14 @@ extern int bg_status_update_block_state(bg_record_t *bg_record,
 		debug("Setting bootflag for %s", bg_record->bg_block_id);
 		bg_record->boot_state = 1;
 	} else if (real_state == BG_BLOCK_FREE) {
-		if (remove_from_bg_list(bg_lists->job_running, bg_record)
-		    == SLURM_SUCCESS)
-			num_unused_cpus += bg_record->cpu_cnt;
-		remove_from_bg_list(bg_lists->booted,
-				    bg_record);
+		/* Make sure block is cleaned up.  If there are
+		 * running jobs on the block this happens when they
+		 * are cleaned off. */
+		if (bg_record->job_running == NO_JOB_RUNNING
+		    && (!bg_record->job_list
+			|| !list_count(bg_record->job_list)))
+			bg_reset_block(bg_record, NULL);
+		remove_from_bg_list(bg_lists->booted, bg_record);
 	} else if (real_state & BG_BLOCK_ERROR_FLAG) {
 		if (bg_record->boot_state)
 			error("Block %s in an error state while booting.",
@@ -196,6 +197,7 @@ extern int bg_status_update_block_state(bg_record_t *bg_record,
 			list_push(bg_lists->booted, bg_record);
 	}
 	updated = 1;
+	last_bg_update = time(NULL);
 nochange_state:
 
 	/* check the boot state */
@@ -216,15 +218,34 @@ nochange_state:
 
 		switch (real_state) {
 		case BG_BLOCK_BOOTING:
-			debug3("checking to make sure user %s "
-			       "is the user.",
-			       bg_record->target_name);
-
-			if (update_block_user(bg_record, 0) == 1)
-				last_bg_update = time(NULL);
-			if (bg_record->job_ptr) {
+			if (bg_record->job_ptr
+			    && !IS_JOB_CONFIGURING(bg_record->job_ptr)) {
+				debug3("Setting job %u on block %s "
+				       "to configuring",
+				       bg_record->job_ptr->job_id,
+				       bg_record->bg_block_id);
 				bg_record->job_ptr->job_state |=
 					JOB_CONFIGURING;
+				last_job_update = time(NULL);
+			} else if (bg_record->job_list
+				   && list_count(bg_record->job_list)) {
+				struct job_record *job_ptr;
+				ListIterator job_itr =
+					list_iterator_create(
+						bg_record->job_list);
+				while ((job_ptr = list_next(job_itr))) {
+					if (job_ptr->magic != JOB_MAGIC) {
+						error("bg_status_update_"
+						      "block_state: 1 "
+						      "bad magic found when "
+						      "looking at block %s",
+						      bg_record->bg_block_id);
+						list_delete_item(job_itr);
+						continue;
+					}
+					job_ptr->job_state |= JOB_CONFIGURING;
+				}
+				list_iterator_destroy(job_itr);
 				last_job_update = time(NULL);
 			}
 			break;
@@ -242,20 +263,23 @@ nochange_state:
 				char *reason = (char *)
 					"status_check: Boot fails ";
 
-				error("Couldn't boot Block %s for user %s",
-				      bg_record->bg_block_id,
-				      bg_record->target_name);
+				error("Couldn't boot Block %s",
+				      bg_record->bg_block_id);
 
+				/* We can't push on the kill_job_list
+				   here since we have to put this
+				   block in an error and that means
+				   the killing has to take place
+				   before the erroring of the block.
+				*/
 				slurm_mutex_unlock(&block_state_mutex);
+				unlock_slurmctld(job_read_lock);
 				requeue_and_error(bg_record, reason);
+				lock_slurmctld(job_read_lock);
 				slurm_mutex_lock(&block_state_mutex);
 
 				bg_record->boot_state = 0;
 				bg_record->boot_count = 0;
-				if (remove_from_bg_list(
-					    bg_lists->job_running, bg_record)
-				    == SLURM_SUCCESS)
-					num_unused_cpus += bg_record->cpu_cnt;
 
 				remove_from_bg_list(bg_lists->booted,
 						    bg_record);
@@ -264,14 +288,40 @@ nochange_state:
 		case BG_BLOCK_INITED:
 			debug("block %s is ready.",
 			      bg_record->bg_block_id);
-			if (bg_record->job_ptr) {
+			if (bg_record->job_ptr
+			    && IS_JOB_CONFIGURING(bg_record->job_ptr)) {
 				bg_record->job_ptr->job_state &=
 					(~JOB_CONFIGURING);
 				last_job_update = time(NULL);
+			} else if (bg_record->job_list
+				   && list_count(bg_record->job_list)) {
+				struct job_record *job_ptr;
+				ListIterator job_itr =
+					list_iterator_create(
+						bg_record->job_list);
+				while ((job_ptr = list_next(job_itr))) {
+					if (job_ptr->magic != JOB_MAGIC) {
+						error("bg_status_update_"
+						      "block_state: 2 "
+						      "bad magic found when "
+						      "looking at block %s",
+						      bg_record->bg_block_id);
+						list_delete_item(job_itr);
+						continue;
+					}
+					job_ptr->job_state &=
+						(~JOB_CONFIGURING);
+				}
+				list_iterator_destroy(job_itr);
+				last_job_update = time(NULL);
 			}
-			/* boot flags are reset here */
+
+			bg_record->boot_state = 0;
+			bg_record->boot_count = 0;
+
 			if (kill_job_list &&
-			    set_block_user(bg_record) == SLURM_ERROR) {
+			    bridge_block_sync_users(bg_record)
+			    == SLURM_ERROR) {
 				freeit = (kill_job_struct_t *)
 					xmalloc(sizeof(kill_job_struct_t));
 				freeit->jobid = bg_record->job_running;
@@ -306,7 +356,8 @@ extern List bg_status_create_kill_job_list(void)
 	return list_create(_destroy_kill_struct);
 }
 
-extern void bg_status_process_kill_job_list(List kill_job_list)
+extern void bg_status_process_kill_job_list(List kill_job_list,
+					    bool slurmctld_locked)
 {
 	kill_job_struct_t *freeit = NULL;
 
@@ -316,7 +367,7 @@ extern void bg_status_process_kill_job_list(List kill_job_list)
 	/* kill all the jobs from unexpectedly freed blocks */
 	while ((freeit = list_pop(kill_job_list))) {
 		debug2("Trying to requeue job %u", freeit->jobid);
-		bg_requeue_job(freeit->jobid, 0);
+		bg_requeue_job(freeit->jobid, 0, slurmctld_locked);
 		_destroy_kill_struct(freeit);
 	}
 }

@@ -109,10 +109,11 @@ extern char *default_plugstack;
 #define DEFAULT_PRIORITY_DECAY      604800 /* 7 days */
 #define DEFAULT_PRIORITY_CALC_PERIOD 300 /* in seconds */
 #define DEFAULT_PRIORITY_TYPE       "priority/basic"
+#define DEFAULT_RECONF_KEEP_PART_STATE 0
 #define DEFAULT_RETURN_TO_SERVICE   0
 #define DEFAULT_RESUME_RATE         300
 #define DEFAULT_RESUME_TIMEOUT      60
-#define DEFAULT_SAVE_STATE_LOC      "/tmp"
+#define DEFAULT_SAVE_STATE_LOC      "/var/spool"
 #define DEFAULT_SCHEDROOTFILTER     1
 #define DEFAULT_SCHEDULER_PORT      7321
 #define DEFAULT_SCHED_LOG_LEVEL     0
@@ -205,6 +206,8 @@ typedef struct slurm_conf_partition {
 	char 	*nodes;		/* comma delimited list names of nodes */
 	uint16_t preempt_mode;	/* See PREEMPT_MODE_* in slurm/slurm.h */
 	uint16_t priority;	/* scheduling priority for jobs */
+	bool     req_resv_flag; /* 1 if partition can only be used in a
+				 * reservation */
 	bool     root_only_flag;/* 1 if allocate/submit RPC can only be
 				   issued by user root */
 	uint16_t state_up;	/* for states see PARTITION_* in slurm.h */
@@ -270,7 +273,7 @@ extern void slurm_conf_mutex_init(void);
 /* slurm_conf_install_fork_handlers
  * installs what to do with a fork with the conf mutex
  */
-void slurm_conf_install_fork_handlers();
+void slurm_conf_install_fork_handlers(void);
 
 /*
  * NOTE: Caller must NOT be holding slurm_conf_lock().
@@ -313,6 +316,12 @@ extern int slurm_conf_partition_array(slurm_conf_partition_t **ptr_array[]);
  * Return value is the length of the array.
  */
 extern int slurm_conf_downnodes_array(slurm_conf_downnodes_t **ptr_array[]);
+
+/*
+ * slurm_reset_alias - Reset the address and hostname of a specific node name
+ */
+extern void slurm_reset_alias(char *node_name, char *node_addr,
+			      char *node_hostname);
 
 /*
  * slurm_conf_get_hostname - Return the NodeHostname for given NodeName
@@ -436,6 +445,18 @@ extern char *debug_flags2str(uint32_t debug_flags);
  * Returns NO_VAL if invalid
  */
 extern uint32_t debug_str2flags(char *debug_flags);
+
+/*
+ * reconfig_flags2str - convert a ReconfigFlags uint16_t to the equivalent string
+ * Returns an xmalloc()ed string which the caller must free with xfree().
+ */
+extern char *reconfig_flags2str(uint16_t reconfig_flags);
+
+/*
+ * reconfig_str2flags - Convert a ReconfigFlags string to the equivalent uint16_t
+ * Returns NO_VAL if invalid
+ */
+extern uint16_t reconfig_str2flags(char *reconfig_flags);
 
 extern void destroy_config_key_pair(void *object);
 extern void pack_config_key_pair(void *in, uint16_t rpc_version, Buf buffer);

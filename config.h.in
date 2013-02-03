@@ -60,8 +60,14 @@
 /* Define to 1 if have Blue Gene files */
 #undef HAVE_BG_FILES
 
+/* Define to 1 if using code where blocks have actions */
+#undef HAVE_BG_GET_ACTION
+
 /* Define to 1 if emulating or running on Blue Gene/L or P system */
 #undef HAVE_BG_L_P
+
+/* Define to 1 if using code with new iocheck */
+#undef HAVE_BG_NEW_IO_CHECK
 
 /* Define to 1 if you have the `cfmakeraw' function. */
 #undef HAVE_CFMAKERAW
@@ -157,6 +163,9 @@
 /* Define to 1 if you have the <linux/sched.h> header file. */
 #undef HAVE_LINUX_SCHED_H
 
+/* Define to 1 if you have the <llapi.h> header file. */
+#undef HAVE_LLAPI_H
+
 /* Define to 1 if your system has a GNU libc compatible `malloc' function, and
    to 0 otherwise. */
 #undef HAVE_MALLOC
@@ -178,6 +187,9 @@
 
 /* Define to 1 if you have the <netdb.h> header file. */
 #undef HAVE_NETDB_H
+
+/* Define to 1 if you have the <nrt.h> header file. */
+#undef HAVE_NRT_H
 
 /* define if numa library installed */
 #undef HAVE_NUMA

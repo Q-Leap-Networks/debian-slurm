@@ -90,7 +90,7 @@ AC_DEFUN([X_AC_BGL],
 
   	if test ! -z "$have_bg_files" ; then
       		BG_INCLUDES="$bg_includes"
-		CFLAGS="$CFLAGS -m64"
+		CFLAGS="$CFLAGS -m64 --std=gnu99"
 		CXXFLAGS="$CXXFLAGS $CFLAGS"
       		AC_DEFINE(HAVE_3D, 1, [Define to 1 if 3-dimensional architecture])
   		AC_DEFINE(SYSTEM_DIMENSIONS, 3, [3-dimensional architecture])
@@ -231,6 +231,7 @@ AC_DEFUN([X_AC_BGQ],
 
 	libname=bgsched
 	loglibname=log4cxx
+	runjoblibname=runjob_client
 
    	for bg_dir in $trydb2dir "" $bg_default_dirs; do
       	# Skip directories that don't exist
@@ -259,7 +260,18 @@ AC_DEFUN([X_AC_BGQ],
 			fi
 		fi
 
-      		# Search for headers in the directory
+		soloc=$bg_dir/hlcs/lib/lib$runjoblibname.so
+		# Search for required BG API libraries in the directory
+		if test -z "$have_bg_ar" -a -f "$soloc" ; then
+			have_bgq_ar=yes
+			if test "$ac_with_rpath" = "yes"; then
+				runjob_ldflags="$runjob_ldflags -Wl,-rpath -Wl,$bg_dir/hlcs/lib -L$bg_dir/hlcs/lib -l$runjoblibname"
+			else
+				runjob_ldflags="$runjob_ldflags -L$bg_dir/hlcs/lib -l$runjoblibname"
+			fi
+		fi
+
+		# Search for headers in the directory
       		if test -z "$have_bg_hdr" -a -f "$bg_dir/hlcs/include/bgsched/bgsched.h" ; then
 			have_bgq_hdr=yes
 			bg_includes="-I$bg_dir/hlcs/include"
@@ -283,12 +295,31 @@ AC_DEFUN([X_AC_BGQ],
  log4cxx::LoggerPtr logger_ptr(log4cxx::Logger::getLogger( "ibm" ));]])],
 			        [have_bgq_files=yes],
 				[AC_MSG_ERROR(There is a problem linking to the BG/Q api.)])
+		# In later versions of the driver IBM added a better function
+		# to see if blocks were IO connected or not.  Here is a check
+		# to not break backwards compatibility
+		AC_LINK_IFELSE([AC_LANG_PROGRAM(
+                                [[#include <bgsched/bgsched.h>
+				#include <bgsched/Block.h>]],
+				[[ bgsched::Block::checkIO("", NULL, NULL);]])],
+			        [have_bgq_new_io_check=yes],
+				[AC_MSG_RESULT(Using old iocheck.)])
+		# In later versions of the driver IBM added an "action" to a
+		# block.  Here is a check to not break backwards compatibility
+		AC_LINK_IFELSE([AC_LANG_PROGRAM(
+                                [[#include <bgsched/bgsched.h>
+				#include <bgsched/Block.h>]],
+				[[ bgsched::Block::Ptr block_ptr;
+				block_ptr->getAction();]])],
+			        [have_bgq_get_action=yes],
+				[AC_MSG_RESULT(Blocks do not have actions!)])
 		AC_LANG_POP(C++)
 		LDFLAGS="$saved_LDFLAGS"
    	fi
 
   	if test ! -z "$have_bgq_files" ; then
       		BG_LDFLAGS="$bg_ldflags"
+		RUNJOB_LDFLAGS="$runjob_ldflags"
       		BG_INCLUDES="$bg_includes"
 		CFLAGS="$CFLAGS -m64"
    		CXXFLAGS="$CXXFLAGS $CFLAGS"
@@ -299,6 +330,13 @@ AC_DEFUN([X_AC_BGQ],
       		AC_DEFINE(HAVE_FRONT_END, 1, [Define to 1 if running slurmd on front-end only])
 		AC_DEFINE(HAVE_BG_FILES, 1, [Define to 1 if have Blue Gene files])
 		#AC_DEFINE_UNQUOTED(BG_BRIDGE_SO, "$soloc", [Define the BG_BRIDGE_SO value])
+		if test ! -z "$have_bgq_new_io_check" ; then
+			AC_DEFINE(HAVE_BG_NEW_IO_CHECK, 1, [Define to 1 if using code with new iocheck])
+		fi
+
+		if test ! -z "$have_bgq_get_action" ; then
+			AC_DEFINE(HAVE_BG_GET_ACTION, 1, [Define to 1 if using code where blocks have actions])
+		fi
 
     		AC_MSG_NOTICE([Running on a legitimate BG/Q system])
 		# AC_MSG_CHECKING(for BG serial value)
@@ -314,4 +352,5 @@ AC_DEFUN([X_AC_BGQ],
 
    	AC_SUBST(BG_INCLUDES)
    	AC_SUBST(BG_LDFLAGS)
+	AC_SUBST(RUNJOB_LDFLAGS)
 ])

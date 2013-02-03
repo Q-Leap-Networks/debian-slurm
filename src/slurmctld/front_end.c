@@ -145,9 +145,10 @@ static void _pack_front_end(struct front_end_record *dump_front_end_ptr,
 
 /*
  * assign_front_end - assign a front end node for starting a job
- * RET pointer to the front end node to use or NULL if none available
+ * IN batch_host - previously set batch_host name
+ * RET pointer to the front end node to use or NULL if none found
  */
-extern front_end_record_t *assign_front_end(void)
+extern front_end_record_t *assign_front_end(char *batch_host)
 {
 #ifdef HAVE_FRONT_END
 	static int last_assigned = -1;
@@ -158,10 +159,15 @@ extern front_end_record_t *assign_front_end(void)
 	for (i = 0; i < front_end_node_cnt; i++) {
 		last_assigned = (last_assigned + 1) % front_end_node_cnt;
 		front_end_ptr = front_end_nodes + last_assigned;
-		if (IS_NODE_DOWN(front_end_ptr) ||
-		    IS_NODE_DRAIN(front_end_ptr) ||
-		    IS_NODE_NO_RESPOND(front_end_ptr))
-			continue;
+		if (batch_host) {	/* Find specific front-end node */
+			if (strcmp(batch_host, front_end_ptr->name))
+				continue;
+		} else {		/* Find some usable front-end node */
+			if (IS_NODE_DOWN(front_end_ptr) ||
+			    IS_NODE_DRAIN(front_end_ptr) ||
+			    IS_NODE_NO_RESPOND(front_end_ptr))
+				continue;
+		}
 		state_flags = front_end_nodes[last_assigned].node_state &
 			      NODE_STATE_FLAGS;
 		front_end_nodes[last_assigned].node_state =
@@ -169,7 +175,12 @@ extern front_end_record_t *assign_front_end(void)
 		front_end_nodes[last_assigned].job_cnt_run++;
 		return front_end_ptr;
 	}
-	fatal("assign_front_end: no available front end nodes found");
+	if (batch_host) {	/* Find specific front-end node */
+		error("assign_front_end: front end node %s not found",
+		      batch_host);
+	} else {		/* Find some usable front-end node */
+		error("assign_front_end: no available front end nodes found");
+	}
 #endif
 	return NULL;
 }
@@ -259,7 +270,7 @@ extern int update_front_end(update_front_end_msg_t *msg_ptr)
 		}
 		free(this_node_name);
 	}
-	hostlist_destroy(host_list);     
+	hostlist_destroy(host_list);
 
 	return rc;
 #else
@@ -793,7 +804,8 @@ extern void sync_front_end_state(void)
 
 	for (i = 0, front_end_ptr = front_end_nodes;
 	     i < front_end_node_cnt; i++, front_end_ptr++) {
-		if (IS_NODE_IDLE(front_end_ptr) &&
+		if ((IS_NODE_IDLE(front_end_ptr) ||
+		     IS_NODE_UNKNOWN(front_end_ptr)) &&
 		    (front_end_ptr->job_cnt_run != 0)) {
 			state_flags = front_end_ptr->node_state &
 				      NODE_STATE_FLAGS;

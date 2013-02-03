@@ -294,7 +294,8 @@ uint16_t _allocate_sockets(struct job_record *job_ptr, bitstr_t *core_map,
 	} else {
 		j = avail_cpus / cpus_per_task;
 		num_tasks = MIN(num_tasks, j);
-		avail_cpus = num_tasks * cpus_per_task;
+		if (job_ptr->details->ntasks_per_node)
+			avail_cpus = num_tasks * cpus_per_task;
 	}
 	if ((job_ptr->details->ntasks_per_node &&
 	     (num_tasks < job_ptr->details->ntasks_per_node)) ||
@@ -382,7 +383,7 @@ fini:
 uint16_t _allocate_cores(struct job_record *job_ptr, bitstr_t *core_map,
 			 const uint32_t node_i, bool cpu_type)
 {
-	uint16_t cpu_count = 0, avail_cpus = 0, num_tasks = 0;
+	uint16_t avail_cpus = 0, num_tasks = 0;
 	uint32_t core_begin    = cr_get_coremap_offset(node_i);
 	uint32_t core_end      = cr_get_coremap_offset(node_i+1);
 	uint32_t c;
@@ -521,8 +522,6 @@ uint16_t _allocate_cores(struct job_record *job_ptr, bitstr_t *core_map,
 	} else {
 		j = avail_cpus / cpus_per_task;
 		num_tasks = MIN(num_tasks, j);
-		if (job_ptr->details->ntasks_per_node)
-			avail_cpus = num_tasks * cpus_per_task;
 	}
 
 	if ((job_ptr->details->ntasks_per_node &&
@@ -544,21 +543,10 @@ uint16_t _allocate_cores(struct job_record *job_ptr, bitstr_t *core_map,
 			bit_clear(core_map, c);
 		else {
 			free_cores[i]--;
-			/* we have to ensure that cpu_count 
-			 * is not bigger than avail_cpus due to 
-			 * hyperthreading or this would break
-			 * the selection logic providing more
-			 * cpus than allowed after task-related data
-			 * processing of stage 3
-			 */
-			if (avail_cpus >= threads_per_core) {
+			if (avail_cpus >= threads_per_core)
 				avail_cpus -= threads_per_core;
-				cpu_count += threads_per_core;
-			}
-			else {
-				cpu_count += avail_cpus;
+			else
 				avail_cpus = 0;
-			}
 		}
 	}
 
@@ -569,10 +557,9 @@ uint16_t _allocate_cores(struct job_record *job_ptr, bitstr_t *core_map,
 fini:
 	if (!num_tasks) {
 		bit_nclear(core_map, core_begin, core_end-1);
-		cpu_count = 0;
 	}
 	xfree(free_cores);
-	return cpu_count;
+	return num_tasks * cpus_per_task;
 }
 
 
@@ -602,7 +589,7 @@ uint16_t _can_job_run_on_node(struct job_record *job_ptr, bitstr_t *core_map,
 {
 	uint16_t cpus;
 	uint32_t avail_mem, req_mem, gres_cpus;
-	int core_start_bit, core_end_bit;
+	int core_start_bit, core_end_bit, cpu_alloc_size;
 	struct node_record *node_ptr = node_record_table_ptr + node_i;
 	List gres_list;
 
@@ -612,13 +599,19 @@ uint16_t _can_job_run_on_node(struct job_record *job_ptr, bitstr_t *core_map,
 		return cpus;
 	}
 
-	if (cr_type & CR_CORE)
+	if (cr_type & CR_CORE) {
 		cpus = _allocate_cores(job_ptr, core_map, node_i, false);
-	else if (cr_type & CR_SOCKET)
+		/* cpu_alloc_size = CPUs per core */
+		cpu_alloc_size = select_node_record[node_i].vpus;
+	} else if (cr_type & CR_SOCKET) {
 		cpus = _allocate_sockets(job_ptr, core_map, node_i);
-	else
+		/* cpu_alloc_size = CPUs per socket */
+		cpu_alloc_size = select_node_record[node_i].cores *
+				 select_node_record[node_i].vpus;
+	} else {
 		cpus = _allocate_cores(job_ptr, core_map, node_i, true);
-
+		cpu_alloc_size = 1;
+	}
 	core_start_bit = cr_get_coremap_offset(node_i);
 	core_end_bit   = cr_get_coremap_offset(node_i+1) - 1;
 	node_ptr = select_node_record[node_i].node_ptr;
@@ -635,7 +628,7 @@ uint16_t _can_job_run_on_node(struct job_record *job_ptr, bitstr_t *core_map,
 		if (job_ptr->details->pn_min_memory & MEM_PER_CPU) {
 			/* memory is per-cpu */
 			while ((cpus > 0) && ((req_mem * cpus) > avail_mem))
-				cpus--;
+				cpus -= cpu_alloc_size;
 			if ((cpus < job_ptr->details->ntasks_per_node) ||
 			    ((job_ptr->details->cpus_per_task > 1) &&
 			     (cpus < job_ptr->details->cpus_per_task)))
@@ -661,8 +654,8 @@ uint16_t _can_job_run_on_node(struct job_record *job_ptr, bitstr_t *core_map,
 	    ((job_ptr->details->cpus_per_task > 1) &&
 	     (gres_cpus < job_ptr->details->cpus_per_task)))
 		gres_cpus = 0;
-	if (gres_cpus < cpus)
-		cpus = gres_cpus;
+	while (gres_cpus < cpus)
+		cpus -= cpu_alloc_size;
 
 	if (cpus == 0)
 		bit_nclear(core_map, core_start_bit, core_end_bit);
@@ -759,8 +752,12 @@ static int _verify_node_state(struct part_res_record *cr_part_ptr,
 		/* node-level memory check */
 		if ((job_ptr->details->pn_min_memory) &&
 		    (cr_type & CR_MEMORY)) {
-			free_mem  = select_node_record[i].real_memory;
-			free_mem -= node_usage[i].alloc_memory;
+			if (select_node_record[i].real_memory >
+			    node_usage[i].alloc_memory)
+				free_mem = select_node_record[i].real_memory -
+					   node_usage[i].alloc_memory;
+			else
+				free_mem = 0;
 			if (free_mem < min_mem) {
 				debug3("cons_res: _vns: node %s no mem %u < %u",
 					select_node_record[i].node_ptr->name,
@@ -969,7 +966,8 @@ static int _eval_nodes(struct job_record *job_ptr, bitstr_t *node_map,
 	int *consec_req;	/* are nodes from this set required
 				 * (in req_bitmap) */
 	int consec_index, consec_size, sufficient;
-	int rem_cpus, rem_nodes;	/* remaining resources desired */
+	int rem_cpus, rem_nodes; /* remaining resources desired */
+	int min_rem_nodes;	/* remaining resources desired */
 	int total_cpus = 0;	/* #CPUs allocated to job */
 	int best_fit_nodes, best_fit_cpus, best_fit_req;
 	int best_fit_sufficient, best_fit_index = 0;
@@ -1013,6 +1011,7 @@ static int _eval_nodes(struct job_record *job_ptr, bitstr_t *node_map,
 
 	rem_cpus = details_ptr->min_cpus;
 	rem_nodes = MAX(min_nodes, req_nodes);
+	min_rem_nodes = min_nodes;
 
 	for (i = 0, ll = -1; i < cr_node_cnt; i++) {
 		if (req_map)
@@ -1038,6 +1037,7 @@ static int _eval_nodes(struct job_record *job_ptr, bitstr_t *node_map,
 				total_cpus += avail_cpus;
 				rem_cpus   -= avail_cpus;
 				rem_nodes--;
+				min_rem_nodes--;
 				/* leaving bitmap set, decrement max limit */
 				max_nodes--;
 			} else {	/* node not selected (yet) */
@@ -1165,7 +1165,8 @@ static int _eval_nodes(struct job_record *job_ptr, bitstr_t *node_map,
 				 * requested nodes here we will still give
 				 * them and then the step layout will sort
 				 * things out. */
-				_cpus_to_use(&avail_cpus, rem_cpus, rem_nodes,
+				_cpus_to_use(&avail_cpus, rem_cpus,
+					     min_rem_nodes,
 					     details_ptr, &cpu_cnt[i]);
 				total_cpus += avail_cpus;
 				/* enforce the max_cpus limit */
@@ -1179,6 +1180,7 @@ static int _eval_nodes(struct job_record *job_ptr, bitstr_t *node_map,
 				}
 				bit_set(node_map, i);
 				rem_nodes--;
+				min_rem_nodes--;
 				max_nodes--;
 				rem_cpus -= avail_cpus;
 			}
@@ -1197,7 +1199,8 @@ static int _eval_nodes(struct job_record *job_ptr, bitstr_t *node_map,
 				 * requested nodes here we will still give
 				 * them and then the step layout will sort
 				 * things out. */
-				_cpus_to_use(&avail_cpus, rem_cpus, rem_nodes,
+				_cpus_to_use(&avail_cpus, rem_cpus,
+					     min_rem_nodes,
 					     details_ptr, &cpu_cnt[i]);
 				total_cpus += avail_cpus;
 				/* enforce the max_cpus limit */
@@ -1212,6 +1215,7 @@ static int _eval_nodes(struct job_record *job_ptr, bitstr_t *node_map,
 				rem_cpus -= avail_cpus;
 				bit_set(node_map, i);
 				rem_nodes--;
+				min_rem_nodes--;
 				max_nodes--;
 			}
 		} else {
@@ -1275,7 +1279,8 @@ static int _eval_nodes(struct job_record *job_ptr, bitstr_t *node_map,
 				 * requested nodes here we will still give
 				 * them and then the step layout will sort
 				 * things out. */
-				_cpus_to_use(&avail_cpus, rem_cpus, rem_nodes,
+				_cpus_to_use(&avail_cpus, rem_cpus,
+					     min_rem_nodes,
 					     details_ptr, &cpu_cnt[i]);
 				total_cpus += avail_cpus;
 				/* enforce the max_cpus limit */
@@ -1290,6 +1295,7 @@ static int _eval_nodes(struct job_record *job_ptr, bitstr_t *node_map,
 				rem_cpus -= avail_cpus;
 				bit_set(node_map, i);
 				rem_nodes--;
+				min_rem_nodes--;
 				max_nodes--;
 			}
 			xfree(cpus_array);
@@ -1335,6 +1341,7 @@ static int _eval_nodes_topo(struct job_record *job_ptr, bitstr_t *bitmap,
 	bitstr_t  *avail_nodes_bitmap = NULL;	/* nodes on any switch */
 	bitstr_t  *req_nodes_bitmap   = NULL;
 	int rem_cpus, rem_nodes;	/* remaining resources desired */
+	int min_rem_nodes;	/* remaining resources desired */
 	int avail_cpus;
 	int total_cpus = 0;	/* #CPUs allocated to job */
 	int i, j, rc = SLURM_SUCCESS;
@@ -1353,10 +1360,8 @@ static int _eval_nodes_topo(struct job_record *job_ptr, bitstr_t *bitmap,
 	}
 
 	rem_cpus = job_ptr->details->min_cpus;
-	if (req_nodes > min_nodes)
-		rem_nodes = req_nodes;
-	else
-		rem_nodes = min_nodes;
+	rem_nodes = MAX(min_nodes, req_nodes);
+	min_rem_nodes = min_nodes;
 
 	if (job_ptr->details->req_node_bitmap) {
 		req_nodes_bitmap = bit_copy(job_ptr->details->req_node_bitmap);
@@ -1451,9 +1456,10 @@ static int _eval_nodes_topo(struct job_record *job_ptr, bitstr_t *bitmap,
 			 * requested nodes here we will still give
 			 * them and then the step layout will sort
 			 * things out. */
-			_cpus_to_use(&avail_cpus, rem_cpus, rem_nodes,
+			_cpus_to_use(&avail_cpus, rem_cpus, min_rem_nodes,
 				     job_ptr->details, &cpu_cnt[i]);
 			rem_nodes--;
+			min_rem_nodes--;
 			max_nodes--;
 			total_cpus += avail_cpus;
 			rem_cpus   -= avail_cpus;
@@ -1570,6 +1576,12 @@ static int _eval_nodes_topo(struct job_record *job_ptr, bitstr_t *bitmap,
 		goto fini;
 	}
 	bit_and(avail_nodes_bitmap, switches_bitmap[best_fit_inx]);
+	if ((min_nodes <  req_nodes) &&
+	    (min_nodes <= switches_node_cnt[best_fit_inx])) {
+		/* If job specifies a range of node counts, then allocate
+		 * resources with a minimal switch configuration */
+		rem_nodes = switches_node_cnt[best_fit_inx];
+	}
 
 	/* Identify usable leafs (within higher switch having best fit) */
 	for (j=0; j<switch_record_cnt; j++) {
@@ -1652,7 +1664,7 @@ static int _eval_nodes_topo(struct job_record *job_ptr, bitstr_t *bitmap,
 		}
 
 		if (job_ptr->req_switch > 0) {
-			if (time_waiting > job_ptr->wait4switch) {
+			if (time_waiting >= job_ptr->wait4switch) {
 				job_ptr->best_switch = true;
 				debug3("Job=%u Waited %ld sec for switches use=%d",
 					job_ptr->job_id, time_waiting,
@@ -1718,7 +1730,7 @@ static int _eval_nodes_topo(struct job_record *job_ptr, bitstr_t *bitmap,
 			 * requested nodes here we will still give
 			 * them and then the step layout will sort
 			 * things out. */
-			_cpus_to_use(&bfsize, rem_cpus, rem_nodes,
+			_cpus_to_use(&bfsize, rem_cpus, min_rem_nodes,
 				     job_ptr->details, &cpu_cnt[bfloc]);
 
 			/* enforce the max_cpus limit */
@@ -1733,9 +1745,9 @@ static int _eval_nodes_topo(struct job_record *job_ptr, bitstr_t *bitmap,
 			bit_set(bitmap, bfloc);
 			total_cpus += bfsize;
 			rem_nodes--;
+			min_rem_nodes--;
 			max_nodes--;
 			rem_cpus -= bfsize;
-
 		}		
 
 		/* free best-switch nodes available cpus array */

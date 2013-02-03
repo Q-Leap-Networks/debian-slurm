@@ -112,8 +112,7 @@ scontrol_parse_part_options (int argc, char *argv[], int *update_cnt_ptr,
 		}
 		else if (strncasecmp(tag, "MinNodes", MAX(taglen, 2)) == 0) {
 			min = 1;
-			get_resource_arg_range(val,
-				"MinNodes", &min, &max, true);
+			verify_node_count(val, &min, &max);
 			part_msg_ptr->min_nodes = min;
 			(*update_cnt_ptr)++;
 		}
@@ -159,7 +158,7 @@ scontrol_parse_part_options (int argc, char *argv[], int *update_cnt_ptr,
 			}
 			(*update_cnt_ptr)++;
 		}
-		else if (strncasecmp(tag, "RootOnly", MAX(taglen, 1)) == 0) {
+		else if (strncasecmp(tag, "RootOnly", MAX(taglen, 3)) == 0) {
 			if (strncasecmp(val, "NO", MAX(vallen, 1)) == 0)
 				part_msg_ptr->flags |= PART_FLAG_ROOT_ONLY_CLR;
 			else if (strncasecmp(val, "YES", MAX(vallen, 1)) == 0)
@@ -168,6 +167,20 @@ scontrol_parse_part_options (int argc, char *argv[], int *update_cnt_ptr,
 				exit_code = 1;
 				error("Invalid input: %s", argv[i]);
 				error("Acceptable RootOnly values "
+					"are YES and NO");
+				return -1;
+			}
+			(*update_cnt_ptr)++;
+		}
+		else if (strncasecmp(tag, "ReqResv", MAX(taglen, 3)) == 0) {
+			if (strncasecmp(val, "NO", MAX(vallen, 1)) == 0)
+				part_msg_ptr->flags |= PART_FLAG_REQ_RESV_CLR;
+			else if (strncasecmp(val, "YES", MAX(vallen, 1)) == 0)
+				part_msg_ptr->flags |= PART_FLAG_REQ_RESV;
+			else {
+				exit_code = 1;
+				error("Invalid input: %s", argv[i]);
+				error("Acceptable ReqResv values "
 					"are YES and NO");
 				return -1;
 			}
@@ -226,8 +239,10 @@ scontrol_parse_part_options (int argc, char *argv[], int *update_cnt_ptr,
 			(*update_cnt_ptr)++;
 		}
 		else if (strncasecmp(tag, "Priority", MAX(taglen, 3)) == 0) {
-			part_msg_ptr->priority = (uint16_t) strtol(val,
-					(char **) NULL, 10);
+			if (parse_uint16(val, &part_msg_ptr->priority)) {
+				error ("Invalid Priority value: %s", val);
+				return -1;
+			}
 			(*update_cnt_ptr)++;
 		}
 		else if (strncasecmp(tag, "State", MAX(taglen, 2)) == 0) {
@@ -265,33 +280,44 @@ scontrol_parse_part_options (int argc, char *argv[], int *update_cnt_ptr,
 			(*update_cnt_ptr)++;
 		}
 		else if (strncasecmp(tag, "GraceTime", MAX(taglen, 5)) == 0) {
-			part_msg_ptr->grace_time = slurm_atoul(val);
+			if (parse_uint32(val, &part_msg_ptr->grace_time)) {
+				error ("Invalid GraceTime value: %s", val);
+				return -1;
+			}
 			(*update_cnt_ptr)++;
 		}
 		else if (strncasecmp(tag, "DefMemPerCPU",
 				     MAX(taglen, 10)) == 0) {
-			part_msg_ptr->def_mem_per_cpu = (uint32_t) strtol(val,
-							(char **) NULL, 10);
+			if (parse_uint32(val, &part_msg_ptr->def_mem_per_cpu)) {
+				error ("Invalid DefMemPerCPU value: %s", val);
+				return -1;
+			}
 			part_msg_ptr->def_mem_per_cpu |= MEM_PER_CPU;
 			(*update_cnt_ptr)++;
 		}
 		else if (strncasecmp(tag, "DefMemPerNode",
 				     MAX(taglen, 10)) == 0) {
-			part_msg_ptr->def_mem_per_cpu = (uint32_t) strtol(val,
-							(char **) NULL, 10);
+			if (parse_uint32(val, &part_msg_ptr->def_mem_per_cpu)) {
+				error ("Invalid DefMemPerNode value: %s", val);
+				return -1;
+			}
 			(*update_cnt_ptr)++;
 		}
 		else if (strncasecmp(tag, "MaxMemPerCPU",
 				     MAX(taglen, 10)) == 0) {
-			part_msg_ptr->max_mem_per_cpu = (uint32_t) strtol(val,
-							(char **) NULL, 10);
+			if (parse_uint32(val, &part_msg_ptr->max_mem_per_cpu)) {
+				error ("Invalid MaxMemPerCPU value: %s", val);
+				return -1;
+			}
 			part_msg_ptr->max_mem_per_cpu |= MEM_PER_CPU;
 			(*update_cnt_ptr)++;
 		}
 		else if (strncasecmp(tag, "MaxMemPerNode",
 				     MAX(taglen, 10)) == 0) {
-			part_msg_ptr->max_mem_per_cpu = (uint32_t) strtol(val,
-							(char **) NULL, 10);
+			if (parse_uint32(val, &part_msg_ptr->max_mem_per_cpu)) {
+				error ("Invalid MaxMemPerNode value: %s", val);
+				return -1;
+			}
 			(*update_cnt_ptr)++;
 		}
 		else {

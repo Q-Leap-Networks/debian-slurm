@@ -92,6 +92,7 @@ struct squeue_parameters {
 	uint32_t cluster_flags;
 	char* format;
 	char* jobs;
+	char* names;
 	hostset_t nodes;
 	char* partitions;
 	char* qoss;
@@ -104,6 +105,7 @@ struct squeue_parameters {
 	List  account_list;
 	List  format_list;
 	List  job_list;
+	List  name_list;
 	List  part_list;
 	List  qos_list;
 	List  state_list;

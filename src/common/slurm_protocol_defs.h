@@ -122,6 +122,8 @@
 	((_X->node_state & NODE_STATE_BASE) == NODE_STATE_FUTURE)
 
 /* Derived node states */
+#define IS_NODE_CLOUD(_X)		\
+	(_X->node_state & NODE_STATE_CLOUD)
 #define IS_NODE_DRAIN(_X)		\
 	(_X->node_state & NODE_STATE_DRAIN)
 #define IS_NODE_DRAINING(_X)		\
@@ -143,6 +145,8 @@
 	(_X->node_state & NODE_STATE_POWER_UP)
 #define IS_NODE_MAINT(_X)		\
 	(_X->node_state & NODE_STATE_MAINT)
+
+#define THIS_FILE ((strrchr(__FILE__, '/') ?: __FILE__ - 1) + 1)
 
 /* used to define flags of the launch_tasks_request_msg_t and
  * spawn task_request_msg_t task_flags
@@ -175,6 +179,7 @@ typedef enum {
 	REQUEST_TAKEOVER,
 	REQUEST_SET_SCHEDLOG_LEVEL,
 	REQUEST_SET_DEBUG_FLAGS,
+	REQUEST_REBOOT_NODES,
 
 	REQUEST_BUILD_INFO = 2001,
 	RESPONSE_BUILD_INFO,
@@ -210,6 +215,10 @@ typedef enum {
 	RESPONSE_FRONT_END_INFO,
 	REQUEST_SPANK_ENVIRONMENT,
 	RESPONCE_SPANK_ENVIRONMENT,
+	REQUEST_STATS_INFO,
+	RESPONSE_STATS_INFO,
+	REQUEST_STATS_RESET,
+	RESPONSE_STATS_RESET,
 
 	REQUEST_UPDATE_JOB = 3001,
 	REQUEST_UPDATE_NODE,
@@ -275,7 +284,8 @@ typedef enum {
 	RESPONSE_SLURMD_STATUS,
 	RESPONSE_SLURMCTLD_STATUS,
 	REQUEST_JOB_STEP_PIDS,
-        RESPONSE_JOB_STEP_PIDS,
+	RESPONSE_JOB_STEP_PIDS,
+	REQUEST_FORWARD_DATA,
 
 	REQUEST_LAUNCH_TASKS = 6001,
 	RESPONSE_LAUNCH_TASKS,
@@ -303,6 +313,7 @@ typedef enum {
 	SRUN_EXEC,
 	SRUN_STEP_MISSING,
 	SRUN_REQUEST_SUSPEND,
+	SRUN_STEP_SIGNAL,	/* BluegeneQ: srun forwards signal to runjob */
 
 	PMI_KVS_PUT_REQ = 7201,
 	PMI_KVS_PUT_RESP,
@@ -409,6 +420,10 @@ typedef struct association_shares_object {
 	uint32_t assoc_id;	/* association ID */
 
 	char *cluster;          /* cluster name */
+	uint64_t cpu_run_mins;	/* currently running cpu-minutes
+				 *  = grp_used_cpu_run_secs / 60 */
+	uint64_t grp_cpu_mins;	/* cpu-minute limit */
+
 	char *name;             /* name */
 	char *parent;           /* parent name */
 
@@ -449,7 +464,6 @@ typedef struct priority_factors_object {
 typedef struct priority_factors_request_msg {
 	List	 job_id_list;
 	List	 uid_list;
-	uid_t    uid; /* used as a stop gap to verify auth DO NOT PACK */
 } priority_factors_request_msg_t;
 
 typedef struct priority_factors_response_msg {
@@ -555,6 +569,10 @@ typedef struct epilog_complete_msg {
 	char    *node_name;
 	switch_node_info_t *switch_nodeinfo;
 } epilog_complete_msg_t;
+
+typedef struct reboot_msg {
+	char *node_list;
+} reboot_msg_t;
 
 typedef struct shutdown_msg {
 	uint16_t options;
@@ -682,6 +700,7 @@ typedef struct launch_tasks_request_msg {
 	char **spank_job_env;
 	uint32_t spank_job_env_size;
 	dynamic_plugin_data_t *select_jobinfo; /* select context, opaque data */
+	char *alias_list;	/* node name/address/hostnamne aliases */
 } launch_tasks_request_msg_t;
 
 typedef struct task_user_managed_io_msg {
@@ -765,6 +784,7 @@ typedef struct batch_job_launch_msg {
 	uint16_t *cpus_per_node;/* cpus per node */
 	uint32_t *cpu_count_reps;/* how many nodes have same cpu count */
 	uint16_t cpus_per_task;	/* number of CPUs requested per task */
+	char *alias_list;	/* node name/address/hostnamne aliases */
 	char *nodes;		/* list of nodes allocated to job_step */
 	char *script;		/* the actual job script, default NONE */
 	char *std_err;		/* pathname of stderr */
@@ -885,6 +905,12 @@ typedef struct will_run_response_msg {
 	time_t start_time;	/* time when job will start */
 } will_run_response_msg_t;
 
+typedef struct forward_data_msg {
+	char *address;
+	uint32_t len;
+	char *data;
+} forward_data_msg_t;
+
 /*****************************************************************************\
  * Slurm API Message Types
 \*****************************************************************************/
@@ -947,7 +973,7 @@ extern void slurm_msg_t_init (slurm_msg_t *msg);
  *	values from the "src" slurm_msg_t structure.
  * IN src - Pointer to the initialized message from which "dest" will
  *	be initialized.
- * OUT dest - Pointer to the slurm_msg_t which will be intialized.
+ * OUT dest - Pointer to the slurm_msg_t which will be initialized.
  * NOTE: the "dest" structure will contain pointers into the contents of "src".
  */
 extern void slurm_msg_t_copy(slurm_msg_t *dest, slurm_msg_t *src);
@@ -972,6 +998,8 @@ extern void slurm_free_front_end_info_request_msg(
 		front_end_info_request_msg_t *msg);
 extern void slurm_free_node_info_request_msg(node_info_request_msg_t *msg);
 extern void slurm_free_part_info_request_msg(part_info_request_msg_t *msg);
+extern void slurm_free_stats_info_request_msg(stats_info_request_msg_t *msg);
+extern void slurm_free_stats_response_msg(stats_info_response_msg_t *msg);
 extern void slurm_free_resv_info_request_msg(resv_info_request_msg_t *msg);
 extern void slurm_free_set_debug_flags_msg(set_debug_flags_msg_t *msg);
 extern void slurm_free_set_debug_level_msg(set_debug_level_msg_t *msg);
@@ -983,9 +1011,12 @@ extern void slurm_free_priority_factors_request_msg(
 	priority_factors_request_msg_t *msg);
 extern void slurm_free_priority_factors_response_msg(
 	priority_factors_response_msg_t *msg);
+extern void slurm_free_forward_data_msg(forward_data_msg_t *msg);
 
 #define	slurm_free_timelimit_msg(msg) \
 	slurm_free_kill_job_msg(msg)
+
+extern void slurm_free_reboot_msg(reboot_msg_t * msg);
 
 extern void slurm_free_shutdown_msg(shutdown_msg_t * msg);
 
@@ -1085,6 +1116,7 @@ extern void slurm_free_block_info(block_info_t *block_info);
 extern void slurm_free_block_info_msg(block_info_msg_t *block_info_msg);
 extern void slurm_free_block_info_request_msg(
 		block_info_request_msg_t *msg);
+
 extern void slurm_free_job_notify_msg(job_notify_msg_t * msg);
 
 extern void slurm_free_accounting_update_msg(accounting_update_msg_t *msg);
@@ -1096,6 +1128,9 @@ extern uint32_t slurm_get_return_code(slurm_msg_type_t type, void *data);
 
 extern char *preempt_mode_string(uint16_t preempt_mode);
 extern uint16_t preempt_mode_num(const char *preempt_mode);
+
+extern char *log_num2string(uint16_t inx);
+extern uint16_t log_string2num(char *name);
 
 extern char *sched_param_type_string(uint16_t select_type_param);
 extern char *job_reason_string(enum job_state_reason inx);
