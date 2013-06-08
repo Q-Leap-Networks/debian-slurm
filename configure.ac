@@ -9,6 +9,9 @@ AC_CONFIG_SRCDIR([configure.ac])
 AC_CONFIG_AUX_DIR([auxdir])
 AC_CANONICAL_TARGET([])
 
+dnl the is a generic flag to avoid building things
+AM_CONDITIONAL(DONT_BUILD, test "1" = "0")
+
 X_AC_GPL_LICENSED
 
 #
@@ -50,6 +53,12 @@ X_AC_BGQ
 dnl We need to know if this is a Q system
 AM_CONDITIONAL(BGQ_LOADED, test "x$ac_bgq_loaded" = "xyes")
 AC_SUBST(BGQ_LOADED)
+
+dnl ok now check if We are on a real L or P system, (test if to build srun
+dnl or not.  If we are emulating things we should build it.
+AM_CONDITIONAL(REAL_BGQ_LOADED, test "x$ac_real_bluegene_loaded" = "xyes")
+AC_SUBST(REAL_BGQ_LOADED)
+
 
 dnl ok now check if any bluegene was loaded.
 AM_CONDITIONAL(BLUEGENE_LOADED, test "x$ac_bluegene_loaded" = "xyes")
@@ -117,8 +126,8 @@ AC_CHECK_HEADERS(mcheck.h values.h socket.h sys/socket.h  \
                  pam/pam_appl.h security/pam_appl.h sys/sysctl.h \
                  pty.h utmp.h \
 		 sys/syslog.h linux/sched.h \
-		 kstat.h paths.h limits.h sys/statfs.h sys/ptrace.h sys/termios.h \
-		 llapi.h nrt.h \
+		 kstat.h paths.h limits.h sys/statfs.h sys/ptrace.h \
+		 sys/termios.h float.h
 		)
 AC_HEADER_SYS_WAIT
 AC_HEADER_TIME
@@ -152,6 +161,10 @@ X_AC_AFFINITY
 dnl
 dnl Check for PAM module support
 X_AC_PAM
+
+dnl
+dnl Check whether RFC 5424 time format should be used
+X_AC_RFC5424_TIME
 
 dnl
 dnl Check for ISO compliance
@@ -229,21 +242,26 @@ if test -d "/opt/gnome/lib64/pkgconfig"; then
     PKG_CONFIG_PATH="/opt/gnome/lib64/pkgconfig/:$PKG_CONFIG_PATH"
 fi
 
-AM_PATH_GTK_2_0([2.7.1], [ac_have_gtk="yes"], [ac_have_gtk="no"], [gthread])
-AM_CONDITIONAL(HAVE_GTK, test "x$ac_have_gtk" = "xyes")
+AM_PATH_GLIB_2_0([2.7.1], [ac_glib_test="yes"], [ac_glib_test="no"], [gthread])
 
-if test ${gtk_config_minor_version=0} -gt 10 ; then
+if test ${glib_config_minor_version=0} -ge 32 ; then
+       AC_DEFINE([GLIB_NEW_THREADS], 1, [Define to 1 if using glib-2.32.0 or higher])
+fi
+
+AM_PATH_GTK_2_0([2.7.1], [ac_gtk_test="yes"], [ac_gtk_test="no"], [gthread])
+if test ${gtk_config_minor_version=0} -ge 10 ; then
        AC_DEFINE([GTK2_USE_RADIO_SET], 1, [Define to 1 if using gtk+-2.10.0 or higher])
 fi
 
-if test ${gtk_config_minor_version=0} -gt 12 ; then
+if test ${gtk_config_minor_version=0} -ge 12 ; then
        AC_DEFINE([GTK2_USE_TOOLTIP], 1, [Define to 1 if using gtk+-2.12.0 or higher])
 fi
 
-if test ${gtk_config_minor_version=0} -gt 14 ; then
+if test ${gtk_config_minor_version=0} -ge 14 ; then
        AC_DEFINE([GTK2_USE_GET_FOCUS], 1, [Define to 1 if using gtk+-2.14.0 or higher])
 fi
 
+AM_CONDITIONAL(BUILD_SVIEW, [test "x$ac_glib_test" = "xyes"] && [test "x$ac_gtk_test" = "xyes"])
 
 X_AC_DATABASES
 
@@ -282,17 +300,9 @@ else
 fi
 AC_SUBST(SLURM_PREFIX)
 
-dnl check for whether to include Elan support
+dnl check for whether to include IBM NRT (Network Resource Table) support
 dnl
-X_AC_ELAN
-AM_CONDITIONAL(HAVE_ELAN, test "x$ac_have_elan" = "xyes")
-AC_SUBST(HAVE_ELAN)
-
-dnl check for whether to include Federation support
-dnl
-X_AC_FEDERATION
-AM_CONDITIONAL(HAVE_FEDERATION, test "x$ac_have_federation" = "xyes")
-AC_SUBST(HAVE_FEDERATION)
+X_AC_NRT
 
 dnl check for SGI job container support
 dnl
@@ -376,11 +386,6 @@ dnl
 X_AC_BLCR
 
 dnl
-dnl Check to build native SLURM srun command or an aprun (Cray ALPS) wrapper.
-dnl
-X_AC_SRUN2APRUN
-
-dnl
 dnl Set some configuration based upon multiple configuration parameters
 dnl
 ac_build_smap="no"
@@ -388,12 +393,6 @@ if test "x$ac_have_some_curses" = "xyes" ; then
    ac_build_smap="yes"
 fi
 AM_CONDITIONAL(BUILD_SMAP, test "x$ac_build_smap" = "xyes")
-
-ac_build_sview="no"
-if test "x$ac_have_gtk" = "xyes" ; then
-   ac_build_sview="yes"
-fi
-AM_CONDITIONAL(BUILD_SVIEW, test "x$ac_build_sview" = "xyes")
 
 dnl All slurm Makefiles:
 
@@ -443,6 +442,7 @@ AC_CONFIG_FILES([Makefile
 		 src/sdiag/Makefile
 		 src/sprio/Makefile
 		 src/srun/Makefile
+		 src/srun/libsrun/Makefile
 		 src/srun_cr/Makefile
 		 src/slurmd/Makefile
 		 src/slurmd/common/Makefile
@@ -472,22 +472,28 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/auth/none/Makefile
 		 src/plugins/checkpoint/Makefile
 		 src/plugins/checkpoint/aix/Makefile
-		 src/plugins/checkpoint/none/Makefile
-		 src/plugins/checkpoint/ompi/Makefile
 		 src/plugins/checkpoint/blcr/Makefile
 		 src/plugins/checkpoint/blcr/cr_checkpoint.sh
 		 src/plugins/checkpoint/blcr/cr_restart.sh
+		 src/plugins/checkpoint/none/Makefile
+		 src/plugins/checkpoint/ompi/Makefile
+		 src/plugins/checkpoint/poe/Makefile
 		 src/plugins/crypto/Makefile
 		 src/plugins/crypto/munge/Makefile
 		 src/plugins/crypto/openssl/Makefile
 		 src/plugins/gres/Makefile
 		 src/plugins/gres/gpu/Makefile
 		 src/plugins/gres/nic/Makefile
+		 src/plugins/gres/mic/Makefile
 		 src/plugins/jobacct_gather/Makefile
 		 src/plugins/jobacct_gather/linux/Makefile
 		 src/plugins/jobacct_gather/aix/Makefile
 		 src/plugins/jobacct_gather/cgroup/Makefile
 		 src/plugins/jobacct_gather/none/Makefile
+		 src/plugins/acct_gather_energy/Makefile
+		 src/plugins/acct_gather_energy/rapl/Makefile
+		 src/plugins/acct_gather_energy/ipmi/Makefile
+		 src/plugins/acct_gather_energy/none/Makefile
 		 src/plugins/jobcomp/Makefile
 		 src/plugins/jobcomp/filetxt/Makefile
 		 src/plugins/jobcomp/none/Makefile
@@ -495,11 +501,17 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/jobcomp/mysql/Makefile
 		 src/plugins/jobcomp/pgsql/Makefile
 		 src/plugins/job_submit/Makefile
+		 src/plugins/job_submit/all_partitions/Makefile
 		 src/plugins/job_submit/cnode/Makefile
 		 src/plugins/job_submit/defaults/Makefile
 		 src/plugins/job_submit/logging/Makefile
 		 src/plugins/job_submit/lua/Makefile
 		 src/plugins/job_submit/partition/Makefile
+		 src/plugins/launch/Makefile
+		 src/plugins/launch/aprun/Makefile
+		 src/plugins/launch/poe/Makefile
+		 src/plugins/launch/runjob/Makefile
+		 src/plugins/launch/slurm/Makefile
 		 src/plugins/preempt/Makefile
 		 src/plugins/preempt/none/Makefile
 		 src/plugins/preempt/partition_prio/Makefile
@@ -507,12 +519,12 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/priority/Makefile
 		 src/plugins/priority/basic/Makefile
 		 src/plugins/priority/multifactor/Makefile
+		 src/plugins/priority/multifactor2/Makefile
 		 src/plugins/proctrack/Makefile
 		 src/plugins/proctrack/aix/Makefile
 		 src/plugins/proctrack/cgroup/Makefile
 		 src/plugins/proctrack/pgid/Makefile
 		 src/plugins/proctrack/linuxproc/Makefile
-		 src/plugins/proctrack/rms/Makefile
 		 src/plugins/proctrack/sgi_job/Makefile
 		 src/plugins/proctrack/lua/Makefile
 		 src/plugins/sched/Makefile
@@ -533,10 +545,11 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/select/cray/libalps/Makefile
 		 src/plugins/select/cray/libemulate/Makefile
 		 src/plugins/select/linear/Makefile
+		 src/plugins/select/serial/Makefile
 		 src/plugins/switch/Makefile
-		 src/plugins/switch/elan/Makefile
 		 src/plugins/switch/none/Makefile
-		 src/plugins/switch/federation/Makefile
+		 src/plugins/switch/nrt/Makefile
+		 src/plugins/switch/nrt/libpermapi/Makefile
 		 src/plugins/mpi/Makefile
 		 src/plugins/mpi/mpich1_p4/Makefile
 		 src/plugins/mpi/mpich1_shmem/Makefile

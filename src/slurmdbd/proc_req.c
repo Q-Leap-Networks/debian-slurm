@@ -36,14 +36,16 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
+#include "src/common/gres.h"
 #include "src/common/macros.h"
 #include "src/common/pack.h"
 #include "src/common/slurmdbd_defs.h"
 #include "src/common/slurm_accounting_storage.h"
-#include "src/common/jobacct_common.h"
+#include "src/common/slurm_jobacct_gather.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_defs.h"
 #include "src/common/uid.h"
+#include "src/common/xstring.h"
 #include "src/slurmdbd/read_config.h"
 #include "src/slurmdbd/rpc_mgr.h"
 #include "src/slurmdbd/proc_req.h"
@@ -1731,6 +1733,7 @@ static int _init_conn(slurmdbd_conn_t *slurmdbd_conn,
 	debug("DBD_INIT: CLUSTER:%s VERSION:%u UID:%u IP:%s CONN:%u",
 	      init_msg->cluster_name, init_msg->version, init_msg->uid,
 	      slurmdbd_conn->ip, slurmdbd_conn->newsockfd);
+
 	slurmdbd_conn->cluster_name = xstrdup(init_msg->cluster_name);
 	slurmdbd_conn->db_conn = acct_storage_g_get_connection(
 		false, slurmdbd_conn->newsockfd, init_msg->rollback,
@@ -1789,7 +1792,7 @@ static int  _job_complete(slurmdbd_conn_t *slurmdbd_conn,
 	int rc = SLURM_SUCCESS;
 	char *comment = NULL;
 
-	if (*uid != slurmdbd_conf->slurm_user_id) {
+	if (*uid != slurmdbd_conf->slurm_user_id && *uid != 0) {
 		comment = "DBD_JOB_COMPLETE message from invalid uid";
 		error("CONN:%u %s %u",
 		      slurmdbd_conn->newsockfd, comment, *uid);
@@ -1859,7 +1862,7 @@ static int  _job_start(slurmdbd_conn_t *slurmdbd_conn,
 	dbd_id_rc_msg_t id_rc_msg;
 	char *comment = NULL;
 
-	if (*uid != slurmdbd_conf->slurm_user_id) {
+	if (*uid != slurmdbd_conf->slurm_user_id && *uid != 0) {
 		comment = "DBD_JOB_START message from invalid uid";
 		error("CONN:%u %s %u",
 		      slurmdbd_conn->newsockfd, comment, *uid);
@@ -1899,7 +1902,7 @@ static int  _job_suspend(slurmdbd_conn_t *slurmdbd_conn,
 	int rc = SLURM_SUCCESS;
 	char *comment = NULL;
 
-	if (*uid != slurmdbd_conf->slurm_user_id) {
+	if (*uid != slurmdbd_conf->slurm_user_id && *uid != 0) {
 		comment = "DBD_JOB_SUSPEND message from invalid uid";
 		error("CONN:%u %s %u",
 		      slurmdbd_conn->newsockfd, comment, *uid);
@@ -2528,7 +2531,7 @@ static int _node_state(slurmdbd_conn_t *slurmdbd_conn,
 	char *comment = NULL;
 
 
-	if (*uid != slurmdbd_conf->slurm_user_id) {
+	if (*uid != slurmdbd_conf->slurm_user_id && *uid != 0) {
 		comment = "DBD_NODE_STATE message from invalid uid";
 		error("CONN:%u %s %u",
 		      slurmdbd_conn->newsockfd, comment, *uid);
@@ -2634,6 +2637,9 @@ static void _process_job_start(slurmdbd_conn_t *slurmdbd_conn,
 	job.priority = job_start_msg->priority;
 	job.start_time = job_start_msg->start_time;
 	job.time_limit = job_start_msg->timelimit;
+	job.gres_alloc = job_start_msg->gres_alloc;
+	job.gres_req = job_start_msg->gres_req;
+	job.gres_used = job_start_msg->gres_used;
 	job.wckey = _replace_double_quotes(job_start_msg->wckey);
 	details.submit_time = job_start_msg->submit_time;
 
@@ -2680,7 +2686,7 @@ static int   _register_ctld(slurmdbd_conn_t *slurmdbd_conn,
 	slurmdb_cluster_rec_t cluster;
 	dbd_list_msg_t list_msg;
 
-	if (*uid != slurmdbd_conf->slurm_user_id) {
+	if ((*uid != slurmdbd_conf->slurm_user_id) && (*uid != 0)) {
 		comment = "DBD_REGISTER_CTLD message from invalid uid";
 		error("CONN:%u %s %u",
 		      slurmdbd_conn->newsockfd, comment, *uid);
@@ -2698,6 +2704,17 @@ static int   _register_ctld(slurmdbd_conn_t *slurmdbd_conn,
 	}
 	debug2("DBD_REGISTER_CTLD: called for %s(%u)",
 	       slurmdbd_conn->cluster_name, register_ctld_msg->port);
+
+	/* Just to make sure we don't allow a NULL cluster name to attempt
+	   to connect.  This should never happen, but here just for
+	   sanity check.
+	*/
+	if (!slurmdbd_conn->cluster_name) {
+		comment = "Must have a cluster name to register it";
+		error("CONN:%u %s", slurmdbd_conn->newsockfd, comment);
+		rc = ESLURM_BAD_NAME;
+		goto end_it;
+	}
 
 	debug2("slurmctld at ip:%s, port:%d",
 	       slurmdbd_conn->ip, register_ctld_msg->port);
@@ -3342,7 +3359,7 @@ static int   _send_mult_job_start(slurmdbd_conn_t *slurmdbd_conn,
 	dbd_job_start_msg_t *job_start_msg;
 	dbd_id_rc_msg_t *id_rc_msg;
 
-	if (*uid != slurmdbd_conf->slurm_user_id) {
+	if (*uid != slurmdbd_conf->slurm_user_id && *uid != 0) {
 		comment = "DBD_SEND_MULT_JOB_START message from invalid uid";
 		error("%s %u", comment, *uid);
 		*out_buffer = make_dbd_rc_msg(slurmdbd_conn->rpc_version,
@@ -3396,7 +3413,7 @@ static int   _send_mult_msg(slurmdbd_conn_t *slurmdbd_conn,
 	Buf req_buf = NULL, ret_buf = NULL;
 	int rc = SLURM_SUCCESS;
 
-	if (*uid != slurmdbd_conf->slurm_user_id) {
+	if (*uid != slurmdbd_conf->slurm_user_id && *uid != 0) {
 		comment = "DBD_SEND_MULT_MSG message from invalid uid";
 		error("%s %u", comment, *uid);
 		*out_buffer = make_dbd_rc_msg(slurmdbd_conn->rpc_version,
@@ -3452,7 +3469,7 @@ static int  _step_complete(slurmdbd_conn_t *slurmdbd_conn,
 	int rc = SLURM_SUCCESS;
 	char *comment = NULL;
 
-	if (*uid != slurmdbd_conf->slurm_user_id) {
+	if (*uid != slurmdbd_conf->slurm_user_id && *uid != 0) {
 		comment = "DBD_STEP_COMPLETE message from invalid uid";
 		error("%s %u", comment, *uid);
 		rc = ESLURM_ACCESS_DENIED;
@@ -3487,7 +3504,6 @@ static int  _step_complete(slurmdbd_conn_t *slurmdbd_conn,
 	job.start_time = step_comp_msg->start_time;
 	details.submit_time = step_comp_msg->job_submit_time;
 	step.step_id = step_comp_msg->step_id;
-	step.cpu_count = step_comp_msg->total_cpus;
 	details.num_tasks = step_comp_msg->total_tasks;
 
 	job.details = &details;
@@ -3525,7 +3541,7 @@ static int  _step_start(slurmdbd_conn_t *slurmdbd_conn,
 	int rc = SLURM_SUCCESS;
 	char *comment = NULL;
 
-	if (*uid != slurmdbd_conf->slurm_user_id) {
+	if (*uid != slurmdbd_conf->slurm_user_id && *uid != 0) {
 		comment = "DBD_STEP_START message from invalid uid";
 		error("%s %u", comment, *uid);
 		rc = ESLURM_ACCESS_DENIED;

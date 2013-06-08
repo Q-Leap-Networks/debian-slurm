@@ -188,6 +188,13 @@ proc sinfo_test_2 { node proc_cnt total_procs } {
 			}
 			exp_continue
 		}
+		-re "mix ($number)(K?) $node" {
+			set num_alloc $expect_out(1,string)
+			if {[string compare $expect_out(2,string) ""]} {
+				set num_alloc [expr $inode_procs * 1024]
+			}
+			exp_continue
+		}
 		-re $prompt {
 		}
 		timeout {
@@ -348,10 +355,10 @@ set inode_threads_per_core 0
 set fd [open "|$scontrol --oneliner show node $def_hostlist"]
 exp_internal 1
 while {[gets $fd line] != -1} {
-	if {[regexp {NodeName=(\w+).*CoresPerSocket=(\d+).*CPUTot=(\d+)(K?).*Sockets=(\d+) State=IDLE ThreadsPerCore=(\d+)} $line frag inode_name inode_cores_per_socket inode_procs units inode_sockets inode_threads_per_core] == 1} {
+	if {[regexp {NodeName=(\w+).*CoresPerSocket=(\d+).*CPUTot=(\d+)(K?).*Sockets=(\d+).*State=IDLE ThreadsPerCore=(\d+)} $line frag inode_name inode_cores_per_socket inode_procs units inode_sockets inode_threads_per_core] == 1} {
 		break
 	}
-	if {[regexp {NodeName=(\w+).*CoresPerSocket=(\d+).*CPUTot=(\d+)(K?).*Sockets=(\d+) State=IDLE.CLOUD ThreadsPerCore=(\d+)} $line frag inode_name inode_cores_per_socket inode_procs units inode_sockets inode_threads_per_core] == 1} {
+	if {[regexp {NodeName=(\w+).*CoresPerSocket=(\d+).*CPUTot=(\d+)(K?).*Sockets=(\d+).*State=IDLE.CLOUD ThreadsPerCore=(\d+)} $line frag inode_name inode_cores_per_socket inode_procs units inode_sockets inode_threads_per_core] == 1} {
 		break
 	}
 }

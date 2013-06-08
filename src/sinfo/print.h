@@ -68,6 +68,7 @@ int format_add_function(List list, int width, bool right_justify,
 void print_date(void);
 int  print_sinfo_entry(sinfo_data_t *sinfo_data);
 int  print_sinfo_list(List sinfo_list);
+void print_sinfo_reservation(reserve_info_msg_t *resv_ptr);
 
 #define format_add_avail(list,wid,right,suffix) \
 	format_add_function(list,wid,right,suffix,_print_avail)
@@ -143,6 +144,8 @@ int  print_sinfo_list(List sinfo_list);
 	format_add_function(list,wid,right,suffix,_print_alloc_nodes)
 #define format_add_invalid(list,wid,right,suffix) \
 	format_add_function(list,wid,right,suffix,_print_com_invalid)
+#define format_add_cpu_load(list,wid,right,suffix) \
+	format_add_function(list,wid,right,suffix,_print_cpu_load)
 
 /*****************************************************************************
  * Print Field Functions
@@ -222,5 +225,7 @@ int _print_alloc_nodes(sinfo_data_t * sinfo_data, int width,
 		       bool right_justify, char *suffix);
 int _print_com_invalid(sinfo_data_t * sinfo_data, int width,
 		       bool right_justify, char *suffix);
+int _print_cpu_load(sinfo_data_t * node_ptr, int width,
+		    bool right_justify, char *suffix);
 
 #endif

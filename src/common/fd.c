@@ -1,6 +1,4 @@
 /*****************************************************************************\
- *  $Id$
- *****************************************************************************
  *  Copyright (C) 2001-2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
@@ -45,6 +43,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <unistd.h>
 
 #include "src/common/macros.h"
@@ -275,4 +274,37 @@ ssize_t fd_read_line(int fd, void *buf, size_t maxlen)
 
 	*p = '\0';                          /* NUL-terminate, like fgets() */
 	return(n);
+}
+
+
+/* Wait for a file descriptor to be readable (up to time_limit seconds).
+ * Return 0 when readable or -1 on error */
+extern int wait_fd_readable(int fd, int time_limit)
+{
+	struct pollfd ufd;
+	time_t start;
+	int rc, time_left;
+
+	start = time(NULL);
+	time_left = time_limit;
+	ufd.fd = fd;
+	ufd.events = POLLIN;
+	ufd.revents = 0;
+	while (1) {
+		rc = poll(&ufd, 1, time_left * 1000);
+		if (rc > 0) {	/* activity on this fd */
+			if (ufd.revents & POLLIN)
+				return 0;
+			else	/* Exception */
+				return -1;
+		} else if (rc == 0) {
+			error("Timeout waiting for slurmstepd");
+			return -1;
+		} else if (errno != EINTR) {
+			error("poll(): %m");
+			return -1;
+		} else {
+			time_left = time_limit - (time(NULL) - start);
+		}
+	}
 }

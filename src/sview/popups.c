@@ -178,8 +178,7 @@ void _search_entry(sview_search_info_t *sview_search_info)
 	memcpy(popup_win->spec_info->search_info, sview_search_info,
 	       sizeof(sview_search_info_t));
 
-	if (!g_thread_create((gpointer)popup_thr, popup_win, FALSE, &error))
-	{
+	if (!sview_thread_new((gpointer)popup_thr, popup_win, FALSE, &error)) {
 		g_printerr ("Failed to create main popup thread: %s\n",
 			    error->message);
 		return;
@@ -551,7 +550,7 @@ extern void create_create_popup(GtkAction *action, gpointer user_data)
 			"Specify either Accounts or Users.\n\n"
 			"Supported Flags include: Maintenance, Overlap,\n"
 			"Ignore_Jobs, Daily and Weekly, License_Only\n"
-			"and Static_Alloc.\n"
+			"Part_Nodes and Static_Alloc.\n"
 			"All other fields are optional.");
 		resv_msg = xmalloc(sizeof(resv_desc_msg_t));
 		slurm_init_resv_desc_msg(resv_msg);
@@ -903,8 +902,8 @@ extern void change_refresh_popup(GtkAction *action, gpointer user_data)
 					      STATUS_REFRESH,
 					      temp);
 		g_free(temp);
-		if (!g_thread_create(_refresh_thr, GINT_TO_POINTER(response),
-				     FALSE, &error)) {
+		if (!sview_thread_new(_refresh_thr, GINT_TO_POINTER(response),
+				      FALSE, &error)) {
 			g_printerr ("Failed to create refresh thread: %s\n",
 				    error->message);
 		}
@@ -1031,8 +1030,8 @@ extern void change_grid_popup(GtkAction *action, gpointer user_data)
 					      STATUS_REFRESH,
 					      temp);
 		g_free(temp);
-		if (!g_thread_create(_refresh_thr, GINT_TO_POINTER(response),
-				     FALSE, &error)) {
+		if (!sview_thread_new(_refresh_thr, GINT_TO_POINTER(response),
+				      FALSE, &error)) {
 			g_printerr ("Failed to create refresh thread: %s\n",
 				    error->message);
 		}

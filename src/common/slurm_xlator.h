@@ -93,6 +93,7 @@
 #define	bit_not			slurm_bit_not
 #define	bit_or			slurm_bit_or
 #define	bit_set_count		slurm_bit_set_count
+#define	bit_set_count_range	slurm_bit_set_count_range
 #define	bit_clear_count		slurm_bit_clear_count
 #define	bit_nset_max_count	slurm_bit_nset_max_count
 #define	bit_and_set_count	slurm_bit_and_set_count
@@ -154,7 +155,7 @@
 #define	hostlist_remove		slurm_hostlist_remove
 #define	hostlist_shift		slurm_hostlist_shift
 #define	hostlist_shift_range	slurm_hostlist_shift_range
-#define	hostlist_sort		slurm_hostlist_soft
+#define	hostlist_sort		slurm_hostlist_sort
 #define	hostlist_uniq		slurm_hostlist_uniq
 #define	hostset_copy		slurm_hostset_copy
 #define	hostset_count		slurm_hostset_count
@@ -197,6 +198,7 @@
 #define	log_reinit		slurm_log_reinit
 #define	log_fini		slurm_log_fini
 #define	log_alter		slurm_log_alter
+#define	log_alter_with_fp	slurm_log_alter_with_fp
 #define	log_set_fpfx		slurm_log_set_fpfx
 #define	log_fp			slurm_log_fp
 #define	log_has_data		slurm_log_has_data
@@ -297,11 +299,14 @@
 
 /* xstring.[ch] functions */
 #define	_xstrcat		slurm_xstrcat
+#define	_xstrncat		slurm_xstrncat
 #define	_xstrcatchar		slurm_xstrcatchar
 #define	_xslurm_strerrorcat	slurm_xslurm_strerrorcat
 #define	_xstrftimecat		slurm_xstrftimecat
+#define	_xrfc5424timecat	slurm_xrfc5424timecat
 #define	_xstrfmtcat		slurm_xstrfmtcat
 #define	_xmemcat		slurm_xmemcat
+#define	_xstrsubstitute		slurm_xstrsubstitute
 #define	xstrdup			slurm_xstrdup
 #define	xstrdup_printf		slurm_xstrdup_printf
 #define	xbasename		slurm_xbasename
@@ -342,10 +347,10 @@
 #define plugrack_set_paranoia   slurm_plugrack_set_paranoia
 #define plugrack_use_by_type    slurm_plugrack_use_by_type
 
-#define jobacct_common_pack	slurm_jobacct_common_pack
-#define jobacct_common_unpack	slurm_jobacct_common_unpack
-#define jobacct_common_alloc_jobacct slurm_jobacct_common_alloc_jobacct
-#define jobacct_common_free_jobacct slurm_jobacct_common_free_jobacct
+#define jobacctinfo_pack	slurm_jobacctinfo_pack
+#define jobacctinfo_unpack	slurm_jobacctinfo_unpack
+#define jobacctinfo_create      slurm_jobacctinfo_create
+#define jobacctinfo_destroy     slurm_jobacctinfo_destroy
 
 /* node_select.[ch] functions */
 #define destroy_select_ba_request	slurm_destroy_select_ba_request
@@ -363,7 +368,7 @@
 #include "src/common/arg_desc.h"
 #include "src/common/bitstring.h"
 #include "src/common/hostlist.h"
-#include "src/common/jobacct_common.h"
+#include "src/common/slurm_jobacct_gather.h"
 #include "src/common/list.h"
 #include "src/common/log.h"
 #include "src/common/macros.h"

@@ -597,13 +597,8 @@ static int _cancel_step_id(uint32_t job_id, uint32_t step_id,
 	for (i = 0; i < MAX_CANCEL_RETRY; i++) {
 		/* NOTE: RPC always sent to slurmctld rather than directly
 		 * to slurmd daemons */
-		if (signal == SIGKILL) {
-			error_code = slurm_terminate_job_step(job_id, step_id);
+		error_code = slurm_kill_job_step(job_id, step_id, signal);
 
-		} else {
-			error_code = slurm_kill_job_step(job_id, step_id,
-							 signal);
-		}
 		if (error_code == 0
 		    || (errno != ESLURM_TRANSITION_STATE_NO_UPDATE
 			&& errno != ESLURM_JOB_PENDING))
@@ -2250,11 +2245,15 @@ static void _layout_step_record(GtkTreeView *treeview,
 		now_time -= step_ptr->start_time;
 		secs2time_str(now_time, tmp_time, sizeof(tmp_time));
 		_get_step_nodelist(step_ptr, tmp_nodes, sizeof(tmp_nodes));
-		if (cluster_flags & CLUSTER_FLAG_BGQ)
+		if (cluster_flags & CLUSTER_FLAG_BGQ) {
+			uint32_t nodes = 0;
+			select_g_select_jobinfo_get(step_ptr->select_jobinfo,
+						    SELECT_JOBDATA_NODE_CNT,
+						    &nodes);
 			convert_num_unit(
-				(float)step_ptr->num_tasks,
+				(float)nodes,
 				tmp_char, sizeof(tmp_char), UNIT_NONE);
-		else if (cluster_flags & CLUSTER_FLAG_BG)
+		} else if (cluster_flags & CLUSTER_FLAG_BG)
 			convert_num_unit(
 				(float)step_ptr->num_tasks / cpus_per_node,
 				tmp_char, sizeof(tmp_char), UNIT_NONE);
@@ -3174,7 +3173,7 @@ no_input:
 
 	gtk_tree_path_free (path);
 	g_free(old_text);
-	g_static_mutex_unlock(&sview_mutex);
+	g_mutex_unlock(sview_mutex);
 }
 
 extern void get_info_job(GtkTable *table, display_data_t *display_data)
@@ -3786,7 +3785,7 @@ extern void popup_all_job(GtkTreeModel *model, GtkTreeIter *iter, int id)
 	default:
 		g_print("jobs got %d\n", id);
 	}
-	if (!g_thread_create((gpointer)popup_thr, popup_win, FALSE, &error)) {
+	if (!sview_thread_new((gpointer)popup_thr, popup_win, FALSE, &error)) {
 		g_printerr ("Failed to create part popup thread: %s\n",
 			    error->message);
 		return;

@@ -65,25 +65,6 @@
 
 #include "src/slurmd/slurmd/slurmd.h"
 
-/*
- * node_res_record.node_state assists with the unique state of each node.
- * When a job is allocated, these flags provide protection for nodes in a
- * Shared=NO or Shared=EXCLUSIVE partition from other jobs.
- *
- * NOTES:
- * - If node is in use by Shared=NO part, some CPUs/memory may be available
- * - Caution with NODE_CR_AVAILABLE: a Sharing partition could be full.
- *
- * - these values are staggered so that they can be incremented as multiple
- * jobs are allocated to each node. This is needed to be able to support
- * preemption, which can override these protections.
- */
-enum node_cr_state {
-	NODE_CR_AVAILABLE = 0,  /* The node may be IDLE or IN USE (shared) */
-	NODE_CR_ONE_ROW = 1,    /* node is in use by Shared=NO part */
-	NODE_CR_RESERVED = 100, /* node is in use by Shared=EXCLUSIVE part */
-};
-
 /* a partition's per-row CPU allocation data */
 struct part_row_data {
 	bitstr_t *row_bitmap;		/* contains all jobs for this row */
@@ -104,6 +85,7 @@ struct part_res_record {
 struct node_res_record {
 	struct node_record *node_ptr;	/* ptr to the actual node */
 	uint16_t cpus;			/* count of processors configured */
+	uint16_t boards; 		/* count of boards configured */
 	uint16_t sockets;		/* count of sockets configured */
 	uint16_t cores;			/* count of cores configured */
 	uint16_t vpus;			/* count of virtual cpus (hyperthreads)

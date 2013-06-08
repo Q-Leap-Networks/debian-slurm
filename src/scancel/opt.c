@@ -211,7 +211,15 @@ static void _opt_default(void)
 #ifdef HAVE_FRONT_END
 	opt.ctld	= true;
 #else
-	opt.ctld	= false;
+{
+	char *launch_type = slurm_get_launch_type();
+	/* do this for all but slurm (poe, aprun, etc...) */
+	if (strcmp(launch_type, "launch/slurm"))
+		opt.ctld	= true;
+	else
+		opt.ctld	= false;
+	xfree(launch_type);
+}
 #endif
 	opt.interactive	= false;
 	opt.job_cnt	= 0;
@@ -369,11 +377,7 @@ static void _opt_args(int argc, char **argv)
 				list_destroy(opt.clusters);
 			opt.clusters = slurmdb_get_info_cluster(optarg);
 			if (!opt.clusters) {
-				error("'%s' can't be reached now, "
-				      "or it is an invalid entry for "
-				      "--cluster.  Use 'sacctmgr --list "
-				      "cluster' to see available clusters.",
-				      optarg);
+				print_db_notok(optarg, 0);
 				exit(1);
 			}
 			working_cluster_rec = list_peek(opt.clusters);

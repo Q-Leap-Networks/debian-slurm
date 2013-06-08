@@ -86,5 +86,3 @@ extern int set_oom_adj(int adj)
 
 	return 0;
 }
-
-

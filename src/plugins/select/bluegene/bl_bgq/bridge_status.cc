@@ -75,6 +75,8 @@ static bool initial_poll = true;
 static bool rt_running = false;
 static bool rt_waiting = false;
 
+static void *_before_rt_poll(void *no_data);
+
 /*
  * Handle compute block status changes as a result of a block allocate.
  */
@@ -150,6 +152,115 @@ static void _bridge_status_disconnect()
 	} catch (...) {
 		error("Unknown error from realtime::disconnect");
 	}
+}
+
+/* ba_system_mutex and block_state_mutex must be locked before this.
+ * If the state == Hardware::SoftwareFailure job lock must be locked
+ * as well. */
+static void _handle_soft_error_midplane(ba_mp_t *ba_mp,
+					EnumWrapper<Hardware::State> state,
+					List *delete_list, bool print_debug)
+{
+	ListIterator itr, itr2;
+	bg_record_t *bg_record;
+
+	if ((state != Hardware::Available)
+	    && (state != Hardware::SoftwareFailure)) {
+		error("_handle_soft_error_midplane: The state %s isn't "
+		      "handled here",
+		      bridge_hardware_state_string(state.toValue()));
+		return;
+	}
+
+	assert(ba_mp);
+
+	if (!ba_mp->cnode_err_bitmap)
+		ba_mp->cnode_err_bitmap = bit_alloc(bg_conf->mp_cnode_cnt);
+
+	if (state == Hardware::SoftwareFailure)
+		bit_nset(ba_mp->cnode_err_bitmap, 0,
+			 bit_size(ba_mp->cnode_err_bitmap)-1);
+	else {
+		if (bit_ffs(ba_mp->cnode_err_bitmap) == -1)
+			return;
+
+		bit_nclear(ba_mp->cnode_err_bitmap, 0,
+			   bit_size(ba_mp->cnode_err_bitmap)-1);
+	}
+
+	itr = list_iterator_create(bg_lists->main);
+	while ((bg_record = (bg_record_t *)list_next(itr))) {
+		float err_ratio;
+		ba_mp_t *found_ba_mp;
+
+		if (!bit_test(bg_record->mp_bitmap, ba_mp->index))
+			continue;
+
+		itr2 = list_iterator_create(bg_record->ba_mp_list);
+		while ((found_ba_mp = (ba_mp_t *)list_next(itr2))) {
+			int set_count;
+
+			if (!found_ba_mp->used
+			    || (found_ba_mp->index != ba_mp->index))
+				continue;
+
+			if (!found_ba_mp->cnode_err_bitmap)
+				found_ba_mp->cnode_err_bitmap =
+					bit_alloc(bg_conf->mp_cnode_cnt);
+
+			/* Check to make sure we haven't already got
+			   some of these or not through the cnode catch.
+			*/
+			set_count = bit_set_count(
+				found_ba_mp->cnode_err_bitmap);
+
+			if (state == Hardware::SoftwareFailure) {
+				bit_nset(found_ba_mp->cnode_err_bitmap, 0,
+					 bit_size(found_ba_mp->
+						  cnode_err_bitmap)-1);
+				if (bg_record->cnode_cnt
+				    < bg_conf->mp_cnode_cnt)
+					bg_record->cnode_err_cnt =
+						bg_record->cnode_cnt;
+				else
+					bg_record->cnode_err_cnt +=
+						(bg_conf->mp_cnode_cnt
+						 - set_count);
+				bg_status_remove_jobs_from_failed_block(
+					bg_record, ba_mp->index,
+					1, delete_list, &kill_job_list);
+			} else {
+				bit_nclear(found_ba_mp->cnode_err_bitmap, 0,
+					   bit_size(found_ba_mp->
+						    cnode_err_bitmap)-1);
+				if (bg_record->cnode_cnt
+				    < bg_conf->mp_cnode_cnt)
+					bg_record->cnode_err_cnt = 0;
+				else
+					bg_record->cnode_err_cnt -= set_count;
+			}
+			break;
+		}
+		list_iterator_destroy(itr2);
+
+		err_ratio = (float)bg_record->cnode_err_cnt
+			/ (float)bg_record->cnode_cnt;
+		bg_record->err_ratio = err_ratio * 100;
+
+		/* handle really small ratios (Shouldn't be needed
+		 * here but here just to be safe) */
+		if (!bg_record->err_ratio && bg_record->cnode_err_cnt)
+			bg_record->err_ratio = 1;
+
+		if (print_debug
+		    && !(bg_conf->slurm_debug_flags & DEBUG_FLAG_NO_REALTIME))
+			debug("_handle_soft_error_midplane: "
+			      "count in error for %s is %u with ratio at %u",
+			      bg_record->bg_block_id,
+			      bg_record->cnode_err_cnt,
+			      bg_record->err_ratio);
+	}
+	list_iterator_destroy(itr);
 }
 
 /* ba_system_mutex && block_state_mutex must be unlocked before this */
@@ -351,7 +462,7 @@ static void _handle_node_change(ba_mp_t *ba_mp, const std::string& cnode_loc,
 		snprintf(nc_name, sizeof(nc_name), "N%d", nc_loc);
 		snprintf(reason, sizeof(reason),
 			 "_handle_node_change: On midplane %s nodeboard %s "
-			 "had cnode %u%u%u%u%u(%s) got into an error state.",
+			 "had cnode %u%u%u%u%u(%s) go into an error state.",
 			 bg_down_node,
 			 nc_name,
 			 cnode_coords[0],
@@ -398,7 +509,6 @@ static void _handle_node_change(ba_mp_t *ba_mp, const std::string& cnode_loc,
 		itr2 = list_iterator_create(bg_record->ba_mp_list);
 		while ((found_ba_mp = (ba_mp_t *)list_next(itr2))) {
 			float err_ratio;
-			struct job_record *job_ptr = NULL;
 
 			if (found_ba_mp->index != ba_mp->index)
 				continue;
@@ -467,75 +577,15 @@ static void _handle_node_change(ba_mp_t *ba_mp, const std::string& cnode_loc,
 			if (state == Hardware::Available || bg_record->free_cnt)
 				break;
 
-			if (bg_record->job_ptr)
-				job_ptr = bg_record->job_ptr;
-			else if (bg_record->job_list
-				 && list_count(bg_record->job_list)) {
-				ListIterator job_itr = list_iterator_create(
-					bg_record->job_list);
-				while ((job_ptr = (struct job_record *)
-					list_next(job_itr))) {
-					select_jobinfo_t *jobinfo =
-						(select_jobinfo_t *)
-						job_ptr->select_jobinfo->data;
-					/* If no units_avail we are
-					   using the whole thing, else
-					   check the index.
-					*/
-					if (!jobinfo->units_avail
-					    || bit_test(jobinfo->units_avail,
-							inx))
-						break;
-				}
-				list_iterator_destroy(job_itr);
-			} else {
-				if (!*delete_list)
-					*delete_list = list_create(NULL);
-				/* If there are no jobs running just
-				   free the thing. (This rarely
-				   happens when a mmcs job goes into
-				   error right after it finishes.
-				   Weird, I know.)  Here we are going
-				   to just remove the block since else
-				   wise we could try to free this
-				   block over and over again, which
-				   only needs to happen once.
-				*/
-				if (!block_ptr_exist_in_list(
-					    *delete_list, bg_record)) {
-					debug("_handle_node_change: going to "
-					      "remove block %s, bad hardware "
-					      "and no jobs running",
-					      bg_record->bg_block_id);
-					list_push(*delete_list, bg_record);
-				}
-			}
-
-			/* block_state_mutex is locked so handle this later */
-			if (job_ptr && job_ptr->kill_on_node_fail) {
-				kill_job_struct_t *freeit = NULL;
-				ListIterator kill_job_itr =
-					list_iterator_create(kill_job_list);
-				/* Since lots of cnodes could fail at
-				   the same time effecting the same
-				   job make sure we only add it once
-				   since there is no reason to do the
-				   same process over and over again.
-				*/
-				while ((freeit = (kill_job_struct_t *)
-					list_next(kill_job_itr))) {
-					if (freeit->jobid == job_ptr->job_id)
-						break;
-				}
-				list_iterator_destroy(kill_job_itr);
-
-				if (!freeit) {
-					freeit = (kill_job_struct_t *)
-						xmalloc(sizeof(freeit));
-					freeit->jobid = job_ptr->job_id;
-					list_push(kill_job_list, freeit);
-				}
-			}
+			/* If the state is Hardware::Error send NULL
+			   since we do not want to free the block that
+			   we just put into an Error state above that
+			   might not be running a job anymore.
+			*/
+			bg_status_remove_jobs_from_failed_block(
+				bg_record, inx, 0,
+				(state != Hardware::Error) ? delete_list : NULL,
+				&kill_job_list);
 
 			break;
 		}
@@ -698,6 +748,13 @@ static void *_real_time(void *no_data)
 		}
 
 		if (rc == SLURM_SUCCESS) {
+			pthread_attr_t thread_attr;
+			slurm_attr_init(&thread_attr);
+			if (pthread_create(&before_rt_thread, &thread_attr,
+					   _before_rt_poll, NULL))
+				fatal("pthread_create error %m");
+			slurm_attr_destroy(&thread_attr);
+
 			/* receiveMessages will set this to false if
 			   all is well.  Otherwise we did fail.
 			*/
@@ -793,29 +850,82 @@ static void _do_block_poll(void)
 		last_bg_update = time(NULL);
 }
 
+#ifdef HAVE_BG_GET_ACTION
 static void _do_block_action_poll(void)
 {
 	bg_record_t *bg_record;
 	ListIterator itr;
+	BlockFilter filter;
+	BlockFilter::Statuses statuses;
+	Block::Ptrs vec;
 
 	if (!bg_lists->main)
 		return;
 
+	/* IBM says only asking for initialized blocks is much more
+	   efficient than asking for each block individually.
+	*/
+	statuses.insert(Block::Initialized);
+	filter.setStatuses(&statuses);
+	vec = bridge_get_blocks(filter);
+	if (vec.empty())
+		return;
+
 	slurm_mutex_lock(&block_state_mutex);
 	itr = list_iterator_create(bg_lists->main);
-	while ((bg_record = (bg_record_t *) list_next(itr))) {
-		if ((bg_record->magic != BLOCK_MAGIC)
-		    || !bg_record->bg_block_id)
-			continue;
+	BOOST_FOREACH(const Block::Ptr& block_ptr, vec) {
+		while ((bg_record = (bg_record_t *) list_next(itr))) {
+			if ((bg_record->magic != BLOCK_MAGIC)
+			    || !bg_record->bg_block_id
+			    || (bg_record->state != BG_BLOCK_INITED)
+			    || strcmp(bg_record->bg_block_id,
+				      block_ptr->getName().c_str()))
+				continue;
 
-		bg_record->action =
-			bridge_block_get_action(bg_record->bg_block_id);
+			bg_record->action = bridge_translate_action(
+				block_ptr->getAction().toValue());
 
+			if (!bg_record->reason
+			    && (bg_record->action == BG_BLOCK_ACTION_FREE)
+			    && (bg_record->state == BG_BLOCK_INITED)) {
+				/* Set the reason to something so
+				   admins know why things aren't working.
+				*/
+				bg_record->reason = xstrdup(
+					"Block can't be used, it has an "
+					"action item of 'D' on it.");
+				last_bg_update = time(NULL);
+			} else if (bg_record->reason
+				   && (bg_record->action
+				       != BG_BLOCK_ACTION_FREE)
+				   && !(bg_record->state
+					& BG_BLOCK_ERROR_FLAG)) {
+				xfree(bg_record->reason);
+				last_bg_update = time(NULL);
+			}
+
+			break;
+		}
 		if (slurmctld_config.shutdown_time)
 			break;
+		list_iterator_reset(itr);
 	}
+	list_iterator_destroy(itr);
 	slurm_mutex_unlock(&block_state_mutex);
 }
+
+static void *_block_action_poll(void *no_data)
+{
+	while (bridge_status_inited) {
+		//debug("polling for actions");
+		if (blocks_are_created)
+			_do_block_action_poll();
+		sleep(1);
+	}
+
+	return NULL;
+}
+#endif
 
 /* Even though ba_mp should be coming from the main list
  * ba_system_mutex && block_state_mutex must be unlocked before
@@ -841,11 +951,29 @@ static void _handle_midplane_update(ComputeHardware::ConstPtr bgq,
 		 bg_conf->slurm_node_prefix, ba_mp->coord_str);
 	slurm_mutex_unlock(&ba_system_mutex);
 
-	if (mp_ptr->getState() != Hardware::Available) {
+	if (mp_ptr->getState() == Hardware::SoftwareFailure) {
+		lock_slurmctld(job_read_lock);
+		slurm_mutex_lock(&block_state_mutex);
+		slurm_mutex_lock(&ba_system_mutex);
+		_handle_soft_error_midplane(
+			ba_mp, mp_ptr->getState(), delete_list, 0);
+		slurm_mutex_unlock(&ba_system_mutex);
+		slurm_mutex_unlock(&block_state_mutex);
+		unlock_slurmctld(job_read_lock);
+	} else if (mp_ptr->getState() != Hardware::Available) {
 		_handle_bad_midplane(bg_down_node, mp_ptr->getState(), 0);
 		/* no reason to continue */
 		return;
 	} else {
+		slurm_mutex_lock(&block_state_mutex);
+		slurm_mutex_lock(&ba_system_mutex);
+		if (ba_mp->cnode_err_bitmap
+		    && bit_ffs(ba_mp->cnode_err_bitmap) != -1)
+			_handle_soft_error_midplane(
+				ba_mp, mp_ptr->getState(), delete_list, 0);
+		slurm_mutex_unlock(&ba_system_mutex);
+		slurm_mutex_unlock(&block_state_mutex);
+
 		Node::ConstPtrs vec = bridge_get_midplane_nodes(
 			mp_ptr->getLocation());
 		if (!vec.empty()) {
@@ -969,9 +1097,10 @@ static void _do_hardware_poll(int level, uint16_t *coords,
 
 	if (delete_list) {
 		bool delete_it = 0;
-		if (bg_conf->layout_mode == LAYOUT_DYNAMIC)
+		if (initial_poll && bg_conf->sub_mp_sys)
 			delete_it = 1;
-		free_block_list(NO_VAL, delete_list, delete_it, 0);
+
+		free_block_list(NO_VAL, delete_list, 1, 0);
 		list_destroy(delete_list);
 	}
 }
@@ -1001,22 +1130,6 @@ static void *_poll(void *no_data)
 		}
 
 		slurm_mutex_unlock(&rt_mutex);
-		/* This means we are doing outside of the thread so
-		   break */
-		if (initial_poll)
-			break;
-		sleep(1);
-	}
-
-	return NULL;
-}
-
-static void *_block_action_poll(void *no_data)
-{
-	while (bridge_status_inited) {
-		//debug("polling for actions");
-		if (blocks_are_created)
-			_do_block_action_poll();
 		sleep(1);
 	}
 
@@ -1027,7 +1140,7 @@ static void *_before_rt_poll(void *no_data)
 {
 	uint16_t coords[SYSTEM_DIMENSIONS];
 	/* To make sure we don't have any missing state */
-	if (!rt_waiting && blocks_are_created)
+	if ((!rt_waiting || initial_poll) && blocks_are_created)
 		_do_block_poll();
 	/* Since the RealTime server could YoYo this could be called
 	   many, many times.  bridge_get_compute_hardware is a heavy
@@ -1035,10 +1148,14 @@ static void *_before_rt_poll(void *no_data)
 	   serialize things here.
 	*/
 	slurm_mutex_lock(&get_hardware_mutex);
-	if (!rt_waiting)
+	if (!rt_waiting || initial_poll)
 		_do_hardware_poll(0, coords, bridge_get_compute_hardware());
 	slurm_mutex_unlock(&get_hardware_mutex);
-
+	/* If this was the first time through set to false so we
+	   handle things differently on every other call.
+	*/
+	if (initial_poll)
+		initial_poll = false;
 	return NULL;
 }
 
@@ -1124,6 +1241,7 @@ void event_handler::handleMidplaneStateChangedRealtimeEvent(
 	ba_mp_t *ba_mp;
 	int dim;
 	char bg_down_node[128];
+	List delete_list = NULL;
 
 	if (event.getPreviousState() == event.getState()) {
 		debug("Switch previous state was same as current (%s - %s)",
@@ -1156,18 +1274,43 @@ void event_handler::handleMidplaneStateChangedRealtimeEvent(
 		     event.getLocation().c_str(),
 		     ba_mp->coord_str);
 		slurm_mutex_unlock(&ba_system_mutex);
-		return;
+		if (event.getPreviousState() == Hardware::SoftwareFailure) {
+			slurm_mutex_lock(&block_state_mutex);
+			slurm_mutex_lock(&ba_system_mutex);
+			_handle_soft_error_midplane(ba_mp, event.getState(),
+						    &delete_list, 1);
+			slurm_mutex_unlock(&ba_system_mutex);
+			slurm_mutex_unlock(&block_state_mutex);
+		}
+	} else if (event.getState() == Hardware::SoftwareFailure) {
+		info("Midplane %s(%s), went into %s state",
+		     event.getLocation().c_str(),
+		     ba_mp->coord_str,
+		     bridge_hardware_state_string(event.getState()));
+		slurm_mutex_unlock(&ba_system_mutex);
+		lock_slurmctld(job_read_lock);
+		slurm_mutex_lock(&block_state_mutex);
+		slurm_mutex_lock(&ba_system_mutex);
+		_handle_soft_error_midplane(ba_mp, event.getState(),
+					    &delete_list, 1);
+		slurm_mutex_unlock(&ba_system_mutex);
+		slurm_mutex_unlock(&block_state_mutex);
+		unlock_slurmctld(job_read_lock);
+		bg_status_process_kill_job_list(kill_job_list, 0);
+	} else {
+		/* Else mark the midplane down */
+		snprintf(bg_down_node, sizeof(bg_down_node), "%s%s",
+			 bg_conf->slurm_node_prefix, ba_mp->coord_str);
+		slurm_mutex_unlock(&ba_system_mutex);
+		_handle_bad_midplane(bg_down_node, event.getState(), 1);
 	}
 
-	/* Else mark the midplane down */
-	snprintf(bg_down_node, sizeof(bg_down_node), "%s%s",
-		 bg_conf->slurm_node_prefix, ba_mp->coord_str);
-	slurm_mutex_unlock(&ba_system_mutex);
-
-	_handle_bad_midplane(bg_down_node, event.getState(), 1);
+	if (delete_list) {
+		free_block_list(NO_VAL, delete_list, 0, 0);
+		list_destroy(delete_list);
+	}
 
 	return;
-
 }
 
 void event_handler::handleSwitchStateChangedRealtimeEvent(
@@ -1346,11 +1489,7 @@ void event_handler::handleNodeStateChangedRealtimeEvent(
 	bg_status_process_kill_job_list(kill_job_list, 0);
 
 	if (delete_list) {
-		/* The only reason blocks are added to this list is if
-		   there are missing cnodes on the block so remove
-		   them from the mix.
-		*/
-		free_block_list(NO_VAL, delete_list, 1, 0);
+		free_block_list(NO_VAL, delete_list, 0, 0);
 		list_destroy(delete_list);
 	}
 
@@ -1401,10 +1540,7 @@ void event_handler::handleTorusCableStateChangedRealtimeEvent(
 	slurm_mutex_unlock(&block_state_mutex);
 
 	if (delete_list) {
-		bool delete_it = 0;
-		if (bg_conf->layout_mode == LAYOUT_DYNAMIC)
-			delete_it = 1;
-		free_block_list(NO_VAL, delete_list, delete_it, 0);
+		free_block_list(NO_VAL, delete_list, 0, 0);
 		list_destroy(delete_list);
 	}
 	return;
@@ -1425,10 +1561,6 @@ extern int bridge_status_init(void)
 	if (!kill_job_list)
 		kill_job_list = bg_status_create_kill_job_list();
 
-	/* get initial state */
-	_poll(NULL);
-	initial_poll = false;
-
 	rt_client_ptr = new(bgsched::realtime::Client);
 
 	slurm_attr_init(&thread_attr);
@@ -1438,10 +1570,12 @@ extern int bridge_status_init(void)
 	if (pthread_create(&poll_thread, &thread_attr, _poll, NULL))
 		fatal("pthread_create error %m");
 	slurm_attr_init(&thread_attr);
+#ifdef HAVE_BG_GET_ACTION
 	if (pthread_create(&action_poll_thread, &thread_attr,
 			   _block_action_poll, NULL))
 		fatal("pthread_create error %m");
 	slurm_attr_destroy(&thread_attr);
+#endif
 #endif
 	return SLURM_SUCCESS;
 }

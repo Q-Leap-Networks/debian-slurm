@@ -87,9 +87,10 @@ void print_fields(slurmdb_step_rec_t *step)
 	char outbuf[FORMAT_STRING_SIZE];
 
 	list_iterator_reset(print_fields_itr);
-	while((field = list_next(print_fields_itr))) {
+	while ((field = list_next(print_fields_itr))) {
 		char *tmp_char = NULL;
 
+		memset(&outbuf, 0, sizeof(outbuf));
 		switch(field->type) {
 		case PRINT_AVECPU:
 
@@ -99,6 +100,27 @@ void print_fields(slurmdb_step_rec_t *step)
 					     tmp_char,
 					     (curr_inx == field_count));
 			xfree(tmp_char);
+			break;
+		case PRINT_ACT_CPUFREQ:
+
+			convert_num_unit((float)step->stats.act_cpufreq,
+					 outbuf, sizeof(outbuf),
+					 UNIT_NONE);
+
+			field->print_routine(field,
+					     outbuf,
+					     (curr_inx == field_count));
+			break;
+		case PRINT_CONSUMED_ENERGY:
+			if (!fuzzy_equal(step->stats.consumed_energy, NO_VAL)) {
+				convert_num_unit((float)
+						 step->stats.consumed_energy,
+						 outbuf, sizeof(outbuf),
+						 UNIT_NONE);
+			}
+			field->print_routine(field,
+					     outbuf,
+					     (curr_inx == field_count));
 			break;
 		case PRINT_AVEPAGES:
 			convert_num_unit((float)step->stats.pages_ave,

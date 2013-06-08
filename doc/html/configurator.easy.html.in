@@ -5,7 +5,7 @@ Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 Written by Morris Jette <jette1@llnl.gov> and Danny Auble <da@llnl.gov>
 
 This file is part of SLURM, a resource management program.
-For details, see <http://www.schedmd.com/slurmdocs/>.
+For details, see <http://slurm.schedmd.com/>.
 
 SLURM is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free
@@ -74,6 +74,8 @@ function set_select_type(form)
     document.config.select_type[2].click()		// bluegene
   } else if (form.name == "cray_params") {
     document.config.select_type[3].click()		// cray
+  } else if (form.name == "select_params") {
+    document.config.select_type[4].click()		// select
   }
 }
 
@@ -89,6 +91,8 @@ function get_select_type_params()
   } else if (document.config.select_type[2].checked) {	// bluegene
     return "#SelectTypeParameters="
   } else if (document.config.select_type[3].checked) {	// cray
+    return "#SelectTypeParameters="
+  } else if (document.config.select_type[4].checked) {	// select
     return "#SelectTypeParameters="
   }
 }
@@ -204,7 +208,7 @@ function displayfile()
 </HEAD>
 <BODY>
 <FORM name=config>
-<H1>SLURM Version @SLURM_MAJOR@.@SLURM_MINOR@ Configuration Tool</H1>
+<H1>SLURM Version @SLURM_MAJOR@.@SLURM_MINOR@ Configuration Tool - Easy Version</H1>
 <P>This form can be used to create a SLURM configuration file with
 you controlling many of the important configuration parameters.</P>
 
@@ -236,7 +240,7 @@ file. It will appear on your web browser. Save the file in text format
 as <I>slurm.conf</I> for use by SLURM.
 
 <P>For more information about SLURM, see
-<A HREF="http://www.schedmd.com/slurmdocs/slurm.html">http://www.schedmd.com/slurmdocs/slurm.html</A>
+<A HREF="http://slurm.schedmd.com/slurm.html">http://slurm.schedmd.com/slurm.html</A>
 
 <H2>Control Machines</H2>
 Define the hostname of the computer on which the SLURM controller and
@@ -366,11 +370,9 @@ processors left idle)
 <H2>Interconnect</H2>
 Define the node interconnect used.<BR>
 Select one value for <B>SwitchType</B>:<BR>
-<input type="radio" name="switch_type" value="elan"> <B>Elan</B>: Quadrics Elan3 or Elan4<BR>
-<input type="radio" name="switch_type" value="federation"> <B>Federation</B>: IBM
-Federation Switch<BR>
 <input type="radio" name="switch_type" value="none" checked> <B>None</B>: No special
 handling required (InfiniBand, Myrinet, Ethernet, etc.)<BR>
+<input type="radio" name="switch_type" value="nrt"> <B>NRT</B>: IBM Network Resource Table<BR>
 <P>
 
 <H2>Default MPI Type</H2>
@@ -458,13 +460,15 @@ Select one value for <B>SelectType</B>:<BR>
     Core and Memory as consumable resources.
 </DL>
 </DL>
-<input type="radio" name="select_type" value="linear" checked>
-<B>Linear</B>: Node-base
-resource allocation, does not manage individual processor allocation<BR>
 <input type="radio" name="select_type" value="bluegene">
 <B>BlueGene</B>: For IBM Blue Gene systems only<BR>
 <input type="radio" name="select_type" value="cray">
 <B>Cray</B>: Cray systems running ALPS only<BR>
+<input type="radio" name="select_type" value="linear" checked>
+<B>Linear</B>: Node-base
+resource allocation, does not manage individual processor allocation<BR>
+<input type="radio" name="select_type" value="serial">
+<B>Serial</B>: Execute single CPU jobs only<BR>
 <P>
 
 <H2>Task Launch</H2>
@@ -547,5 +551,5 @@ Specify a specify the fully qualified pathname for the file.
 </FORM>
 <HR>
 <a href="disclaimer.html" target="_blank" class="privacy">Legal Notices</a><br>
-Last modified 3 April 2012</P>
+Last modified 2 August 2012</P>
 </BODY>

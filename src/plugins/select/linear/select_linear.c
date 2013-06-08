@@ -452,7 +452,7 @@ static uint16_t _get_avail_cpus(struct job_record *job_ptr, int index)
 {
 	struct node_record *node_ptr;
 	uint16_t avail_cpus;
-	uint16_t cpus, sockets, cores, threads;
+	uint16_t cpus, boards, sockets, cores, threads;
 	uint16_t cpus_per_task = 1;
 	uint16_t ntasks_per_node = 0, ntasks_per_socket, ntasks_per_core;
 	uint16_t min_sockets, min_cores, min_threads;
@@ -482,19 +482,25 @@ static uint16_t _get_avail_cpus(struct job_record *job_ptr, int index)
 	node_ptr = select_node_ptr + index;
 	if (select_fast_schedule) { /* don't bother checking each node */
 		cpus    = node_ptr->config_ptr->cpus;
+		boards  = node_ptr->config_ptr->boards;
 		sockets = node_ptr->config_ptr->sockets;
 		cores   = node_ptr->config_ptr->cores;
 		threads = node_ptr->config_ptr->threads;
 	} else {
 		cpus    = node_ptr->cpus;
+		boards  = node_ptr->boards;
 		sockets = node_ptr->sockets;
 		cores   = node_ptr->cores;
 		threads = node_ptr->threads;
 	}
 
 #if SELECT_DEBUG
-	info("host %s HW_ cpus %u sockets %u cores %u threads %u ",
-	     node_ptr->name, cpus, sockets, cores, threads);
+	info("host %s HW_ cpus %u boards %u sockets %u cores %u threads %u ",
+	     node_ptr->name, cpus, boards, sockets, cores, threads);
+#else
+	/* Largely to avoid warning about unused variable "boards" */
+	debug2("host %s HW_ cpus %u boards %u sockets %u cores %u threads %u ",
+	       node_ptr->name, cpus, boards, sockets, cores, threads);
 #endif
 
 	avail_cpus = slurm_get_avail_procs(
@@ -629,7 +635,8 @@ static int _job_count_bitmap(struct cr_record *cr_ptr,
 	struct node_record *node_ptr;
 	uint32_t job_memory_cpu = 0, job_memory_node = 0;
 	uint32_t alloc_mem = 0, job_mem = 0, avail_mem = 0;
-	uint32_t cpu_cnt, gres_cpus;
+	uint32_t cpu_cnt, gres_cpus, gres_cores;
+	int core_start_bit, core_end_bit, cpus_per_core;
 	List gres_list;
 	bool use_total_gres = true;
 
@@ -669,11 +676,16 @@ static int _job_count_bitmap(struct cr_record *cr_ptr,
 			gres_list = cr_ptr->nodes[i].gres_list;
 		else
 			gres_list = node_ptr->gres_list;
-		gres_cpus = gres_plugin_job_test(job_ptr->gres_list,
-						 gres_list, use_total_gres,
-						 NULL, 0, 0, job_ptr->job_id,
-						 node_ptr->name);
+		core_start_bit = cr_get_coremap_offset(i);
+		core_end_bit   = cr_get_coremap_offset(i+1) - 1;
+		cpus_per_core  = cpu_cnt / (core_end_bit - core_start_bit + 1);
+		gres_cores = gres_plugin_job_test(job_ptr->gres_list,
+						  gres_list, use_total_gres,
+						  NULL, 0, 0, job_ptr->job_id,
+						  node_ptr->name);
+		gres_cpus = gres_cores;
 		if (gres_cpus != NO_VAL) {
+			gres_cpus *= cpus_per_core;
 			if ((gres_cpus < cpu_cnt) ||
 			    (gres_cpus < job_ptr->details->ntasks_per_node) ||
 			    ((job_ptr->details->cpus_per_task > 1) &&
@@ -1882,8 +1894,8 @@ static int _rm_job_from_one_node(struct job_record *job_ptr,
 		      pre_err, node_ptr->name);
 	}
 
-	if (cr_ptr->nodes[i].gres_list)
-		gres_list = cr_ptr->nodes[i].gres_list;
+	if (cr_ptr->nodes[node_inx].gres_list)
+		gres_list = cr_ptr->nodes[node_inx].gres_list;
 	else
 		gres_list = node_ptr->gres_list;
 	gres_plugin_job_dealloc(job_ptr->gres_list, gres_list, node_offset,
@@ -2210,6 +2222,8 @@ static void _init_node_cr(void)
 			if (!bit_test(job_resrcs_ptr->node_bitmap, i))
 				continue;
 			node_offset++;
+			if (!bit_test(job_ptr->node_bitmap, i)) 
+				continue; /* node already released */
 			node_ptr = node_record_table_ptr + i;
 			if (exclusive)
 				cr_ptr->nodes[i].exclusive_cnt++;
@@ -2559,8 +2573,12 @@ static int _will_run_test(struct job_record *job_ptr, bitstr_t *bitmap,
 		if (i >= min_nodes) {
 			rc = _job_test(job_ptr, bitmap, min_nodes, max_nodes,
 				       req_nodes);
-			if (rc == SLURM_SUCCESS)
-				job_ptr->start_time = now + 1;
+			if (rc == SLURM_SUCCESS) {
+				/* Actual start time will actually be later
+				 * than "now", but return "now" for backfill
+				 * scheduler to initiate preemption. */
+				job_ptr->start_time = now;
+			}
 		}
 	}
 
@@ -2623,7 +2641,7 @@ static int  _cr_job_list_sort(void *x, void *y)
 {
 	struct job_record *job1_ptr = (struct job_record *) x;
 	struct job_record *job2_ptr = (struct job_record *) y;
-	return (int) difftime(job1_ptr->end_time, job2_ptr->end_time);
+	return (int) SLURM_DIFFTIME(job1_ptr->end_time, job2_ptr->end_time);
 }
 
 /*
@@ -2637,6 +2655,9 @@ extern int init ( void )
 	rc = _init_status_pthread();
 #endif
 	cr_type = slurmctld_conf.select_type_param;
+	if (cr_type)
+		verbose("%s loaded with argument %u", plugin_name, cr_type);
+
 	return rc;
 }
 
@@ -2646,6 +2667,7 @@ extern int fini ( void )
 #ifdef HAVE_XCPU
 	rc = _fini_status_pthread();
 #endif
+	cr_fini_global_core_data();
 	slurm_mutex_lock(&cr_mutex);
 	_free_cr(cr_ptr);
 	cr_ptr = NULL;
@@ -2705,6 +2727,7 @@ extern int select_p_node_init(struct node_record *node_ptr, int node_cnt)
 	select_node_ptr = node_ptr;
 	select_node_cnt = node_cnt;
 	select_fast_schedule = slurm_get_fast_schedule();
+	cr_init_global_core_data(node_ptr, node_cnt, select_fast_schedule);
 
 	return SLURM_SUCCESS;
 }
@@ -2734,6 +2757,7 @@ extern int select_p_block_init(List block_list)
  * IN/OUT preemptee_job_list - Pointer to list of job pointers. These are the
  *		jobs to be preempted to initiate the pending job. Not set
  *		if mode=SELECT_MODE_TEST_ONLY or input pointer is NULL.
+ * IN exc_core_bitmap - bitmap of cores being reserved.
  * RET zero on success, EINVAL otherwise
  * globals (passed via select_p_node_init):
  *	node_record_count - count of nodes configured
@@ -2749,7 +2773,8 @@ extern int select_p_job_test(struct job_record *job_ptr, bitstr_t *bitmap,
 			     uint32_t min_nodes, uint32_t max_nodes,
 			     uint32_t req_nodes, uint16_t mode,
 			     List preemptee_candidates,
-			     List *preemptee_job_list)
+			     List *preemptee_job_list,
+			     bitstr_t *exc_core_bitmap)
 {
 	int max_share = 0, rc = EINVAL;
 
@@ -3079,7 +3104,7 @@ extern int select_p_select_nodeinfo_free(select_nodeinfo_t *nodeinfo)
 	return SLURM_SUCCESS;
 }
 
-extern int select_p_select_nodeinfo_set_all(time_t last_query_time)
+extern int select_p_select_nodeinfo_set_all(void)
 {
 	struct node_record *node_ptr = NULL;
 	int i=0;
@@ -3087,7 +3112,7 @@ extern int select_p_select_nodeinfo_set_all(time_t last_query_time)
 
 	/* only set this once when the last_node_update is newer than
 	 * the last time we set things up. */
-	if(last_set_all && (last_node_update < last_set_all)) {
+	if (last_set_all && (last_node_update < last_set_all)) {
 		debug2("Node select info for set all hasn't "
 		       "changed since %ld",
 		       (long)last_set_all);
@@ -3343,7 +3368,8 @@ extern int select_p_reconfigure(void)
  * IN node_cnt - count of required nodes
  * RET - nodes selected for use by the reservation
  */
-extern bitstr_t * select_p_resv_test(bitstr_t *avail_bitmap, uint32_t node_cnt)
+extern bitstr_t * select_p_resv_test(bitstr_t *avail_bitmap, uint32_t node_cnt,
+				     bitstr_t **core_bitmap)
 {
 	bitstr_t **switches_bitmap;		/* nodes on this switch */
 	int       *switches_cpu_cnt;		/* total CPUs on switch */

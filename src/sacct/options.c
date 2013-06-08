@@ -405,10 +405,8 @@ sacct [<OPTION>]                                                            \n\
 	           Use this comma separated list of accounts to select jobs \n\
                    to display.  By default, all accounts are selected.      \n\
      -b, --brief:                                                           \n\
-	           Equivalent to '--format=jobstep,state,error'. This option\n\
-	           has no effect if --dump is specified.                    \n\
+	           Equivalent to '--format=jobstep,state,error'.            \n\
      -c, --completion: Use job completion instead of accounting data.       \n\
-     -d, --dump:   Dump the raw data records                                \n\
      -D, --duplicates:                                                      \n\
 	           If SLURM job ids are reset, some job numbers will        \n\
 	           probably appear more than once refering to different jobs.\n\
@@ -455,7 +453,7 @@ sacct [<OPTION>]                                                            \n\
                              maxrsstask,averss,maxpages,maxpagesnode,       \n\
                              maxpagestask,avepages,mincpu,mincpunode,       \n\
                              mincputask,avecpu,ntasks,alloccpus,elapsed,    \n\
-	                     state,exitcode'                                \n\
+	                     state,exitcode,avecpufreq,consumedenergy'       \n\
      -L, --allclusters:                                                     \n\
 	           Display jobs ran on all clusters. By default, only jobs  \n\
                    ran on the cluster from where sacct is called are        \n\
@@ -464,8 +462,7 @@ sacct [<OPTION>]                                                            \n\
                    Only send data about these clusters. -1 for all clusters.\n\
      -n, --noheader:                                                        \n\
 	           No header will be added to the beginning of output.      \n\
-                   The default is to print a header; the option has no effect\n\
-                   if --dump is specified                                   \n\
+                   The default is to print a header.                        \n\
      -N, --nodelist:                                                        \n\
                    Display jobs that ran on any of these nodes,             \n\
                    can be one or more using a ranged string.                \n\
@@ -474,9 +471,6 @@ sacct [<OPTION>]                                                            \n\
      -o, --format:                                                          \n\
 	           Comma separated list of fields. (use \"--helpformat\"    \n\
                    for a list of available fields).                         \n\
-     -O, --formatted_dump:                                                  \n\
-	           Dump accounting records in an easy-to-read format,       \n\
-                   primarily for debugging.                                 \n\
      -p, --parsable: output will be '|' delimited with a '|' at the end     \n\
      -P, --parsable2: output will be '|' delimited without a '|' at the end \n\
      -q, --qos:                                                             \n\
@@ -491,7 +485,8 @@ sacct [<OPTION>]                                                            \n\
                    and node_fail (nf).                                      \n\
      -S, --starttime:                                                       \n\
                    Select jobs eligible after this time.  Default is        \n\
-                   midnight of current day.                                 \n\
+                   00:00:00 of the current day, unless '-s' is set then     \n\
+                   the default is 'now'.                                    \n\
      -T, --truncate:                                                        \n\
                    Truncate time.  So if a job started before --starttime   \n\
                    the start time would be truncated to --starttime.        \n\
@@ -585,6 +580,7 @@ int get_data(void)
 				step->sys_cpu_sec;
 			job->sys_cpu_usec +=
 				step->sys_cpu_usec;
+
 			/* get the max for all the sacct_t struct */
 			aggregate_stats(&job->stats, &step->stats);
 		}
@@ -604,6 +600,7 @@ void parse_command_line(int argc, char **argv)
 	ListIterator itr = NULL;
 	struct stat stat_buf;
 	char *dot = NULL;
+	char *env_val = NULL;
 	bool brief_output = FALSE, long_output = FALSE;
 	bool all_users = 0;
 	bool all_clusters = 0;
@@ -704,6 +701,8 @@ void parse_command_line(int argc, char **argv)
 			slurm_addto_char_list(job_cond->cluster_list, optarg);
 			break;
 		case 'd':
+			error("--dump has been depricated and will go away "
+			      "in future releases.");
 			params.opt_dump = 1;
 			break;
 		case 'D':
@@ -714,7 +713,7 @@ void parse_command_line(int argc, char **argv)
 			break;
 		case 'E':
 			job_cond->usage_end = parse_time(optarg, 1);
-			if (job_cond->usage_end == 0)
+			if (errno == ESLURM_INVALID_TIME_VALUE)
 				exit(1);
 			break;
 		case 'f':
@@ -811,6 +810,8 @@ void parse_command_line(int argc, char **argv)
 			xstrfmtcat(params.opt_field_list, "%s,", optarg);
 			break;
 		case 'O':
+			error("--formatted_dump has been depricated and "
+			      "will go away in future releases.");
 			params.opt_fdump = 1;
 			break;
 		case 'p':
@@ -856,7 +857,7 @@ void parse_command_line(int argc, char **argv)
 			break;
 		case 'S':
 			job_cond->usage_start = parse_time(optarg, 1);
-			if (job_cond->usage_start == 0)
+			if (errno == ESLURM_INVALID_TIME_VALUE)
 				exit(1);
 			break;
 		case 'T':
@@ -926,17 +927,22 @@ void parse_command_line(int argc, char **argv)
 	if(!job_cond->usage_start && !job_cond->step_list) {
 		struct tm start_tm;
 		job_cond->usage_start = time(NULL);
-
-		if (!localtime_r(&job_cond->usage_start, &start_tm)) {
-			error("Couldn't get localtime from %ld",
-			      (long)job_cond->usage_start);
-			return;
+		/* If we are looking for job states default to now.
+		   If not default to midnight of the current day.
+		*/
+		if (!job_cond->state_list
+		    || !list_count(job_cond->state_list)) {
+			if (!localtime_r(&job_cond->usage_start, &start_tm)) {
+				error("Couldn't get localtime from %ld",
+				      (long)job_cond->usage_start);
+				return;
+			}
+			start_tm.tm_sec = 0;
+			start_tm.tm_min = 0;
+			start_tm.tm_hour = 0;
+			start_tm.tm_isdst = -1;
+			job_cond->usage_start = mktime(&start_tm);
 		}
-		start_tm.tm_sec = 0;
-		start_tm.tm_min = 0;
-		start_tm.tm_hour = 0;
-		start_tm.tm_isdst = -1;
-		job_cond->usage_start = mktime(&start_tm);
 	}
 
 	if(verbosity > 0) {
@@ -958,16 +964,12 @@ void parse_command_line(int argc, char **argv)
 
 	debug("Options selected:\n"
 	      "\topt_completion=%d\n"
-	      "\topt_dump=%d\n"
 	      "\topt_dup=%d\n"
-	      "\topt_fdump=%d\n"
 	      "\topt_field_list=%s\n"
 	      "\topt_help=%d\n"
 	      "\topt_allocs=%d",
 	      params.opt_completion,
-	      params.opt_dump,
 	      params.opt_dup,
-	      params.opt_fdump,
 	      params.opt_field_list,
 	      params.opt_help,
 	      params.opt_allocs);
@@ -1164,6 +1166,8 @@ void parse_command_line(int argc, char **argv)
 			goto endopt;
 		if(params.opt_completion)
 			dot = DEFAULT_COMP_FIELDS;
+		else if ( ( env_val = getenv("SACCT_FORMAT") ) )
+			dot = xstrdup(env_val);
 		else
 			dot = DEFAULT_FIELDS;
 
@@ -1237,8 +1241,6 @@ void do_dump(void)
 
 	itr = list_iterator_create(jobs);
 	while((job = list_next(itr))) {
-		if(job->stats.cpu_min == NO_VAL)
-			job->stats.cpu_min = 0;
 
 		if(list_count(job->steps)) {
 			job->stats.cpu_ave /= list_count(job->steps);
@@ -1303,7 +1305,7 @@ void do_dump(void)
 			       step->ncpus,
 			       step->ncpus,
 			       step->elapsed);
-			printf("%d %d %d %d %d %d %d %d",
+			printf("%d %d %d %d %d %d %d %d ",
 			       step->tot_cpu_sec,
 			       step->tot_cpu_usec,
 			       (int)step->user_cpu_sec,
@@ -1361,7 +1363,7 @@ void do_dump(void)
 			       job->alloc_cpus,
 			       job->alloc_cpus,
 			       job->elapsed);
-			printf("%d %d %d %d %d %d %d %d",
+			printf("%d %d %d %d %d %d %d %d ",
 			       job->tot_cpu_sec,
 			       job->tot_cpu_usec,
 			       (int)job->user_cpu_sec,
@@ -1457,9 +1459,6 @@ void do_list(void)
 
 	itr = list_iterator_create(jobs);
 	while((job = list_next(itr))) {
-		if(job->stats.cpu_min == NO_VAL)
-			job->stats.cpu_min = 0;
-
 		if(list_count(job->steps)) {
 			int cnt = list_count(job->steps);
 			job->stats.cpu_ave /= (double)cnt;

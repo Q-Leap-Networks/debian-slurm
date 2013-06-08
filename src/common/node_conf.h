@@ -66,6 +66,7 @@
 struct config_record {
 	uint32_t magic;		/* magic cookie to test data integrity */
 	uint16_t cpus;		/* count of processors running on the node */
+	uint16_t boards;	/* count of boards configured */
 	uint16_t sockets;	/* number of sockets per node */
 	uint16_t cores;		/* number of cores per CPU */
 	uint16_t threads;	/* number of threads per core */
@@ -105,6 +106,7 @@ struct node_record {
 	time_t last_response;		/* last response from the node */
 	time_t last_idle;		/* time node last become idle */
 	uint16_t cpus;			/* count of processors on the node */
+	uint16_t boards; 		/* count of boards configured */
 	uint16_t sockets;		/* number of sockets per node */
 	uint16_t cores;			/* number of cores per CPU */
 	uint16_t threads;		/* number of threads per core */
@@ -151,16 +153,19 @@ struct node_record {
 					 * no need to save/restore */
 	time_t down_time;		/* When first set to DOWN state */
 #endif	/* HAVE_CRAY */
+	acct_gather_energy_t *energy;
 	dynamic_plugin_data_t *select_nodeinfo; /* opaque data structure,
 						 * use select_g_get_nodeinfo()
 						 * to access contents */
+	uint32_t cpu_load;		/* CPU load * 100 */
 
 };
 extern struct node_record *node_record_table_ptr;  /* ptr to node records */
 extern int node_record_count;		/* count in node_record_table_ptr */
 extern time_t last_node_update;		/* time of last node record update */
 
-
+extern uint16_t *cr_node_num_cores;
+extern uint32_t *cr_node_cores_offset;
 
 /*
  * bitmap2node_name_sortable - given a bitmap, build a list of comma
@@ -267,5 +272,14 @@ extern void rehash_node (void);
 
 /* Convert a node state string to it's equivalent enum value */
 extern int state_str2int(const char *state_str, char *node_name);
+
+/* (re)set cr_node_num_cores arrays */
+extern void cr_init_global_core_data(struct node_record *node_ptr,
+				     int node_cnt, uint16_t fast_schedule);
+
+extern void cr_fini_global_core_data(void);
+
+/*return the coremap index to the first core of the given node */
+extern uint32_t cr_get_coremap_offset(uint32_t node_index);
 
 #endif /* !_HAVE_NODE_CONF_H */

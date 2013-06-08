@@ -947,6 +947,9 @@ extern int create_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name)
 		{ "time_start", "int unsigned default 0 not null" },
 		{ "time_end", "int unsigned default 0 not null" },
 		{ "time_suspended", "int unsigned default 0 not null" },
+		{ "gres_req", "text not null default ''" },
+		{ "gres_alloc", "text not null default ''" },
+		{ "gres_used", "text not null default ''" },
 		{ "wckey", "tinytext not null default ''" },
 		{ "track_steps", "tinyint not null" },
 		{ NULL, NULL}
@@ -1010,6 +1013,8 @@ extern int create_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name)
 		{ "min_cpu_task", "smallint unsigned default 0 not null" },
 		{ "min_cpu_node", "int unsigned default 0 not null" },
 		{ "ave_cpu", "double unsigned default 0.0 not null" },
+		{ "act_cpufreq", "double unsigned default 0.0 not null" },
+		{ "consumed_energy", "double unsigned default 0.0 not null" },
 		{ NULL, NULL}
 	};
 

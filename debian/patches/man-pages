@@ -1,11 +1,40 @@
-Description: man page cosmetic
- This patch fixes some little problems in two upstream manual pages.
+Description: <short summary of the patch>
+ TODO: Put a short summary on the line above and replace this paragraph
+ with a longer explanation of this change. Complete the meta-information
+ with other relevant fields (see below for details). To make it easier, the
+ information below has been extracted from the changelog. Adjust it or drop
+ it.
+ .
+ slurm-llnl (2.5.6-1) unstable; urgency=low
+ .
+   * New upstream relase
 Author: Gennaro Oliva <oliva.g@na.icar.cnr.it>
-Forwarded: no
 
---- slurm-llnl-2.4.5.orig/doc/man/man1/srun.1
-+++ slurm-llnl-2.4.5/doc/man/man1/srun.1
-@@ -1777,7 +1777,9 @@ Total number of nodes in the job's resou
+---
+The information above should follow the Patch Tagging Guidelines, please
+checkout http://dep.debian.net/deps/dep3/ to learn about the format. Here
+are templates for supplementary fields that you might want to add:
+
+Origin: <vendor|upstream|other>, <url of original patch>
+Bug: <url in upstream bugtracker>
+Bug-Debian: http://bugs.debian.org/<bugnumber>
+Bug-Ubuntu: https://launchpad.net/bugs/<bugnumber>
+Forwarded: <no|not-needed|url proving that it has been forwarded>
+Reviewed-By: <name and email of someone who approved the patch>
+Last-Update: <YYYY-MM-DD>
+
+--- slurm-llnl-2.5.6.orig/doc/man/man1/srun.1
++++ slurm-llnl-2.5.6/doc/man/man1/srun.1
+@@ -924,7 +924,7 @@ order of preferences is IPONLY (which is
+ HFI, IB, HPCE, and KMUX.
+ .TP
+ \fBCAU\fR=<\fIcount\fR>
+-Number of Collecitve Accelleration Units (CAU) required.
++Number of Collecitve Acceleration Units (CAU) required.
+ Applies only to IBM Power7-IH processors.
+ Default value is zero.
+ Independent CAU will be allocated for each programming interface (MPI, LAPI, etc.)
+@@ -1991,7 +1991,9 @@ Total number of nodes in the job's resou
  Sets of node name, communication address and hostname for nodes allocated to
  the job from the cloud. Each element in the set if colon separated and each
  set is comma separated. For example:
@@ -16,16 +45,25 @@ Forwarded: no
  .TP
  \fBSLURM_NODEID\fR
  The relative node ID of the current node
---- slurm-llnl-2.4.5.orig/doc/man/man5/slurm.conf.5
-+++ slurm-llnl-2.4.5/doc/man/man5/slurm.conf.5
+@@ -2010,7 +2012,7 @@ This value is propagated to the spawned
+ The MPI rank (or relative process ID) of the current process
+ .TP
+ \fBSLURM_SRUN_COMM_HOST\fR
+-IP adress of srun communication host.
++IP address of srun communication host.
+ .TP
+ \fBSLURM_SRUN_COMM_PORT\fR
+ srun communication port.
+--- slurm-llnl-2.5.6.orig/doc/man/man5/slurm.conf.5
++++ slurm-llnl-2.5.6/doc/man/man5/slurm.conf.5
 @@ -1,4 +1,4 @@
--.TH "slurm.conf" "6" "April 2012" "slurm.conf 2.4" "Slurm configuration file"
-+.TH "slurm.conf" "5" "April 2012" "slurm.conf 2.4" "Slurm configuration file"
+-.TH "slurm.conf" "17" "December 2012" "slurm.conf 2.5" "Slurm configuration file"
++.TH "slurm.conf" "5" "December 2012" "slurm.conf 2.5" "Slurm configuration file"
  
  .SH "NAME"
  slurm.conf \- Slurm configuration file
---- slurm-llnl-2.4.5.orig/doc/man/man8/spank.8
-+++ slurm-llnl-2.4.5/doc/man/man8/spank.8
+--- slurm-llnl-2.5.6.orig/doc/man/man8/spank.8
++++ slurm-llnl-2.5.6/doc/man/man8/spank.8
 @@ -357,7 +357,7 @@ This function returns \fBESPANK_SUCCESS\
  struct spank_option \fIopt\fR has been used by the user. If \fIoptargp\fR
  is non-NULL then it is set to any option argument passed (if the option

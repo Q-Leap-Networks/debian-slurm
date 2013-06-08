@@ -69,6 +69,8 @@ typedef struct slurm_switch_context slurm_switch_context_t;
 /* initialize the switch plugin */
 extern int  switch_init   (void);
 
+extern int switch_g_reconfig(void);
+
 extern int switch_g_slurmd_init(void);
 
 /* terminate the switch plugin and free all memory */
@@ -124,8 +126,8 @@ extern int  switch_alloc_jobinfo (switch_jobinfo_t **jobinfo);
  * NOTE: storage must be freed using g_switch_free_jobinfo
  */
 extern int  switch_build_jobinfo (switch_jobinfo_t *jobinfo,
-		char *nodelist, uint16_t *tasks_per_node,
-		int cyclic_alloc, char *network);
+		char *nodelist, uint16_t *tasks_per_node, uint32_t **tids,
+		char *network);
 
 /* copy a switch job credential
  * IN jobinfo - the switch job credential to be copied
@@ -266,12 +268,72 @@ extern int interconnect_preinit(switch_jobinfo_t *jobinfo);
 
 /*
  * initialize interconnect on node for job. This function is run from the
- * 2nd slurmd process (some interconnect implementations may require
+ * slurmstepd process (some interconnect implementations may require
  * interconnect init functions to be executed from a separate process
  * than the process executing interconnect_fini() [e.g. QsNet])
  *
  */
-extern int interconnect_init(switch_jobinfo_t *jobinfo, uid_t uid);
+extern int interconnect_init(switch_jobinfo_t *jobinfo, uid_t uid,
+			     char *job_name);
+
+/*
+ * Determine if a job can be suspended
+ *
+ * IN jobinfo - switch information for a job step
+ * RET SLURM_SUCCESS or error code
+ */
+extern int interconnect_suspend_test(switch_jobinfo_t *jobinfo);
+
+/*
+ * Build data structure containing information needed to suspend or resume
+ * a job
+ *
+ * IN jobinfo - switch information for a job step
+ * RET data to be sent with job suspend/resume RPC
+ */
+extern void interconnect_suspend_info_get(switch_jobinfo_t *jobinfo,
+					  void **suspend_info);
+/*
+ * Pack data structure containing information needed to suspend or resume
+ * a job
+ *
+ * IN suspend_info - data to be sent with job suspend/resume RPC
+ * IN/OUT buffer to hold the data
+ */
+extern void interconnect_suspend_info_pack(void *suspend_info, Buf buffer);
+/*
+ * Unpack data structure containing information needed to suspend or resume
+ * a job
+ *
+ * IN suspend_info - data to be sent with job suspend/resume RPC
+ * IN/OUT buffer that holds the data
+ * RET SLURM_SUCCESS or error code
+ */
+extern int interconnect_suspend_info_unpack(void **suspend_info, Buf buffer);
+/*
+ * Free data structure containing information needed to suspend or resume
+ * a job
+ *
+ * IN suspend_info - data sent with job suspend/resume RPC
+ */
+extern void interconnect_suspend_info_free(void *suspend_info);
+
+/*
+ * Suspend a job's use of switch resources. This may reset MPI timeout values
+ * and/or release switch resources. See also interconnect_resume().
+ *
+ * IN max_wait - maximum number of seconds to wait for operation to complete
+ * RET SLURM_SUCCESS or error code
+ */
+extern int interconnect_suspend(void *suspend_info, int max_wait);
+
+/*
+ * Resume a job's use of switch resources. See also interconnect_suspend().
+ *
+ * IN max_wait - maximum number of seconds to wait for operation to complete
+ * RET SLURM_SUCCESS or error code
+ */
+extern int interconnect_resume(void *suspend_infoo, int max_wait);
 
 /*
  * This function is run from the same process as interconnect_init()

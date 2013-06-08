@@ -72,10 +72,11 @@
 #include "src/common/hostlist.h"
 #include "src/common/log.h"
 #include "src/common/macros.h"
-#include "src/common/xmalloc.h"
+#include "src/common/strnatcmp.h"
 #include "src/common/timers.h"
-#include "src/common/xassert.h"
 #include "src/common/working_cluster.h"
+#include "src/common/xassert.h"
+#include "src/common/xmalloc.h"
 
 /*
  * Define slurm-specific aliases for use by plugins, see slurm_xlator.h
@@ -123,7 +124,7 @@ strong_alias(hostlist_ranged_string_xmalloc,
 strong_alias(hostlist_remove,		slurm_hostlist_remove);
 strong_alias(hostlist_shift,		slurm_hostlist_shift);
 strong_alias(hostlist_shift_range,	slurm_hostlist_shift_range);
-strong_alias(hostlist_sort,		slurm_hostlist_soft);
+strong_alias(hostlist_sort,		slurm_hostlist_sort);
 strong_alias(hostlist_uniq,		slurm_hostlist_uniq);
 strong_alias(hostset_copy,		slurm_hostset_copy);
 strong_alias(hostset_count,		slurm_hostset_count);
@@ -298,7 +299,7 @@ char *alpha_num = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
  * the maximum sized array for each dimension.  This way we can be
  * prepared for any size coming in.
  */
-static bool grid[HIGHEST_BASE*HIGHEST_BASE*HIGHEST_BASE*HIGHEST_BASE*HIGHEST_BASE];
+static bool *grid = NULL;
 
 static int grid_start[HIGHEST_DIMENSIONS];
 static int grid_end[HIGHEST_DIMENSIONS];
@@ -901,7 +902,7 @@ static int hostrange_prefix_cmp(hostrange_t h1, hostrange_t h2)
 	if (h2 == NULL)
 		return -1;
 
-	retval = strcmp(h1->prefix, h2->prefix);
+	retval = strnatcmp(h1->prefix, h2->prefix);
 	return retval == 0 ? h2->singlehost - h1->singlehost : retval;
 }
 
@@ -2072,7 +2073,7 @@ int hostlist_push_list(hostlist_t h1, hostlist_t h2)
 char *hostlist_pop(hostlist_t hl)
 {
 	char *host = NULL;
-	if(!hl) {
+	if (!hl) {
 		error("hostlist_pop: no hostlist given");
 		return NULL;
 	}
@@ -3106,7 +3107,7 @@ ssize_t hostlist_ranged_string_dims(hostlist_t hl, size_t n,
 	bool box = false;
 	int hostlist_base;
 	static int last_dims = -1;
-
+	static int max_dims = 1;
 	DEF_TIMERS;
 
 	if (!dims)
@@ -3117,6 +3118,7 @@ ssize_t hostlist_ranged_string_dims(hostlist_t hl, size_t n,
 	LOCK_HOSTLIST(hl);
 
 	if (dims > 1 && hl->nranges) {	/* logic for block node description */
+		static uint64_t grid_size = 1;
 		slurm_mutex_lock(&multi_dim_lock);
 
 		/* compute things that only need to be calculated once
@@ -3125,6 +3127,7 @@ ssize_t hostlist_ranged_string_dims(hostlist_t hl, size_t n,
 		 */
 		if ((last_dims != dims) || (dim_grid_size == -1)) {
 			last_dims = dims;
+
 			dim_grid_size = sizeof(int) * dims;
 
 			/* the last one is always 1 */
@@ -3133,7 +3136,25 @@ ssize_t hostlist_ranged_string_dims(hostlist_t hl, size_t n,
 				offset[i] = offset[i+1] * hostlist_base;
 		}
 
-		memset(grid, 0, sizeof(grid));
+		/* This will leave an allocation when ending but it
+		   isn't overwriting and this makes it so we don't
+		   have to allocate it over and over again we fill
+		   this isn't too bad of an alternative.  We were
+		   defining this on the stack at first (we wanted to
+		   avoid that).
+		*/
+		if (!grid || (grid && (max_dims < dims))) {
+			grid_size = 1;
+			max_dims = dims;
+			xfree(grid);
+
+			for (i=0; i<dims; i++)
+				grid_size *= HIGHEST_BASE;
+			grid_size *= sizeof(bool);
+			grid = xmalloc(grid_size);
+		} else
+			memset(grid, 0, grid_size);
+
 		memset(grid_start, hostlist_base, dim_grid_size);
 		memset(grid_end, -1, dim_grid_size);
 

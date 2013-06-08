@@ -98,6 +98,8 @@ typedef struct {
 	uint32_t max_mem;
 	uint32_t min_weight;
 	uint32_t max_weight;
+	uint32_t min_cpu_load;
+	uint32_t max_cpu_load;
 
 	char *features;
 	char *gres;
@@ -145,6 +147,7 @@ struct sinfo_match_flags {
 	bool weight_flag;
 	bool reason_timestamp_flag;
 	bool reason_user_flag;
+	bool cpu_load_flag;
 };
 
 /* Input parameters */
@@ -160,6 +163,8 @@ struct sinfo_parameters {
 	bool no_header;
 	bool node_field_flag;
 	bool node_flag;
+	bool part_field_flag;
+	bool reservation_flag;
 	bool responding_nodes;
 	bool list_reasons;
 	bool summarize;
@@ -173,6 +178,7 @@ struct sinfo_parameters {
 
 	int iterate;
 	int node_field_size;
+	int part_field_size;
 	int verbose;
 
 	List  format_list;

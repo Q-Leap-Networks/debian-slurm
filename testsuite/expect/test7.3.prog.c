@@ -28,6 +28,8 @@
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
+#include <arpa/inet.h>
+#include <netdb.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,6 +52,7 @@ int main (int argc, char *argv[])
 	slurm_step_ctx_params_t step_params[1];
 	slurm_step_ctx_t *ctx = NULL;
 	slurm_step_launch_params_t launch[1];
+	uint32_t curr_task_num = 0;
 	char *task_argv[3];
 	int *fd_array = NULL;
 	int num_fd;
@@ -137,13 +140,11 @@ int main (int argc, char *argv[])
 		goto done;
 	}
 
-	/*
-	 * Hack to run one task per node, regardless of what we set up
-	 * when we created the job step context.
-	 */
-	if (slurm_step_ctx_daemon_per_node_hack(ctx) != SLURM_SUCCESS) {
+	rc = slurm_step_ctx_daemon_per_node_hack(ctx, job_resp->node_list,
+						 job_resp->node_cnt,
+						 &curr_task_num);
+	if (rc != SLURM_SUCCESS) {
 		slurm_perror("slurm_step_ctx_daemon_per_node_hack");
-		rc = 1;
 		goto done;
 	}
 

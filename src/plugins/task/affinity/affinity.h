@@ -81,6 +81,7 @@
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 
 #include "src/common/cbuf.h"
+#include "src/common/cpu_frequency.h"
 #include "src/common/hostlist.h"
 #include "src/common/log.h"
 #include "src/common/node_select.h"
@@ -100,6 +101,7 @@
 /*** from affinity.c ***/
 void	slurm_chkaffinity(cpu_set_t *mask, slurmd_job_t *job, int statval);
 int	get_cpuset(cpu_set_t *mask, slurmd_job_t *job);
+void	reset_cpuset(cpu_set_t *new_mask, cpu_set_t *cur_mask);
 int	slurm_setaffinity(pid_t pid, size_t size, const cpu_set_t *mask);
 int	slurm_getaffinity(pid_t pid, size_t size, cpu_set_t *mask);
 

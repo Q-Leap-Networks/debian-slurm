@@ -1,6 +1,5 @@
 html {
   min-height:100%;
-  margin-bottom: 1px;
 }
 
 body {
@@ -11,7 +10,7 @@ body {
   text-align:center;
 }
 
-h1 { font-size: 130%; font-weight:bold; text-align:left; color: #066cb2; }
+h1 { font-size: 150%; font-weight:bold; text-align:left; color: #066cb2; }
 h2 { font-size: 105%; font-weight:bold; text-align:left; color: #066cb2; }
 h3 { font-size: 100%; font-weight:bold; text-align:left; color: #066cb2; }
 p  { font-size: 90%; }
@@ -22,6 +21,24 @@ ul ul { font-size: 100%; }
 li li { font-size: 100%; }
 pre {font-size: 90%; font-family:"Courier New", Courier, monospace}
 
+#slurmh2 { font-size: 105%; font-weight:bold; text-align:left;
+	   padding-left: 5px; color: #066cb2; margin-bottom: -10px; }
+
+#slurmtd {
+    border:1px;
+    border-color:#066cb2;
+    border-style:solid;
+    padding:10px;
+    display:table-cell;
+}
+#slurmtable {
+    margin-left: auto;
+    margin-right: auto;
+    border:1px;
+    border-color:#066cb2;
+    border-style:solid;
+    display:table;
+}
 /* container wraps the entire web page; the margin left and */
 /* right and text align tags are needed for rendering in IE */
 #container {
@@ -35,31 +52,43 @@ pre {font-size: 90%; font-family:"Courier New", Courier, monospace}
   border-style:solid;
   background-color: #FFFFFF;
   line-height:130%;
+  display:table;
+  min-height:685px;
+  height:auto;
+  height:685px;
 }
 
-/* The Linux at Livermore banner graphic */
-#banner {
-  border:2px;
-  border-color:#066cb2;
-  border-style:solid;
-  background-color: #FFFFFF;
-  align: left;
+#row {
+    display: table-row;
+}
+
+IMG.displayed {
+    margin-top: 10px;
+    margin-bottom: 10px;
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+    border:0px;
 }
 
 /* The left-hand navigation links */
 #navigation {
   float: left;
   text-align:left;
-  margin-top: 20px;
-  width: 150px;
+  width: 175px;
   overflow: auto;
+  background-color: #d2cf82;
+  border:2px;
+  border-color:#066cb2;
+  border-style:solid;
+  display:table-cell;
 }
 
 /* The main text of the page */
 #content {
-  margin-left: 165px;
-  width: 75%;
-  padding: 1em;
+  float: right;
+  width: 605px;
+  display:table-cell;
 }
 
 #content h1 { margin: 0 0 .5em 0;
@@ -88,6 +117,7 @@ pre {font-size: 90%; font-family:"Courier New", Courier, monospace}
   width:400px;
   text-align: left;
   height: 22px;
+  display: table-cell;
 }
 
 #footer #right {
@@ -97,6 +127,7 @@ pre {font-size: 90%; font-family:"Courier New", Courier, monospace}
   background-color: #066cb2;
   text-align: right;
   height: 22px;
+  display: table-cell;
 }
 
 #footer2 #left2 {
@@ -130,6 +161,13 @@ pre {font-size: 90%; font-family:"Courier New", Courier, monospace}
   float: right;
   width: 300px;
   padding: 0px 5px 0px 10px;
+}
+
+#version {
+  text-align: center;
+  font-size: 150%;
+  font-weight:bold;
+  color: #066cb2;
 }
 
 .figcaption {
@@ -272,4 +310,3 @@ div.terminal {
   #navigation { display: none }
   #content { margin-left: 0px; border-left: 0px solid gray; }
   }
-}

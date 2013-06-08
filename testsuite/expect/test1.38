@@ -43,12 +43,15 @@ print_header $test_id
 if { [test_xcpu] } {
 	send_user "\nWARNING: This test is incompatible with XCPU systems\n"
 	exit 0
-}
-
-# This test just uses options not applicable to cray's aprun
-if {[test_cray]} {
+} elseif {[test_cray]} {
 	send_user "\nWARNING: This test is incompatible with Cray systems\n"
 	exit $exit_code
+}
+
+if {[test_launch_poe]} {
+	set step_id 1
+} else {
+	set step_id 0
 }
 
 #
@@ -81,19 +84,14 @@ expect {
 #	exec $bin_pkill -INT -n -u $uid srun
 #
 set timeout $max_job_delay
-set match_run  0
+set match_int  0
 set match_term 0
 set match_wait 0
 set job_id  0
-set srun_pid [spawn $srun -v -N1 -t1 --unbuffered $file_in]
+set srun_pid [spawn $srun -v -N1 -t1 --unbuffered ./$file_in]
 expect {
-	-re "launching ($number).0" {
+	-re "launching ($number).$step_id" {
 		set job_id $expect_out(1,string)
-		exp_continue
-	}
-	-re "srun: task 0: running" {
-		set match_run 1
-		cancel_job $job_id
 		exp_continue
 	}
 	-re "WAITING" {
@@ -101,6 +99,11 @@ expect {
 		# make sure the task gets started
 		sleep 1
 		exec $bin_kill -INT $srun_pid
+		exp_continue
+	}
+	-re "srun: interrupt" {
+		set match_int 1
+		cancel_job $job_id
 		exp_continue
 	}
 	-re "Force Terminated job" {
@@ -116,8 +119,9 @@ expect {
 		wait
 	}
 }
-if {[expr $match_run + $match_wait + $match_term] != 3} {
-	send_user "\nFAILURE: srun failed to properly process SIGINT matches was $match_run $match_wait $match_term\n"
+if {[expr $match_wait + $match_int + $match_term] != 3} {
+	send_user "\nFAILURE: srun failed to properly process SIGINT, "
+	send_user "($match_wait + $match_int + $match_term != 3)\n"
 	set exit_code 1
 }
 if {$exit_code == 0} {
@@ -131,13 +135,13 @@ if {$exit_code == 0} {
 # Note: For systems supporting proper pthreads, instead use
 #       exec $bin_kill -INT $srun_pid
 #
-set match_run  0
+set match_int  0
 set match_term 0
 set match_wait 0
 set job_id  0
-set srun_pid [spawn $srun -v -N1 -t1 --unbuffered --quit-on-interrupt $file_in]
+set srun_pid [spawn $srun -v -N1 -t1 --unbuffered --quit-on-interrupt ./$file_in]
 expect {
-	-re "launching ($number).0" {
+	-re "launching ($number).$step_id" {
 		set job_id $expect_out(1,string)
 		exp_continue
 	}
@@ -147,14 +151,14 @@ expect {
 		exp_continue
 	}
 	-re "srun: interrupt" {
-		set match_run 999
+		set match_int 1
 		exp_continue
 	}
-	-re "srun: task0: running" {
-		set match_run 999
+	-re "srun: task 0: running" {
+		set match_int 1
 		exp_continue
 	}
-	-re "Job step aborted" {
+	-re "srun: sending Ctrl-C" {
 		set match_term 1
 		exp_continue
 	}
@@ -168,8 +172,13 @@ expect {
 	}
 }
 cancel_job $job_id
-if {[expr $match_run + $match_wait + $match_term] != 2} {
-	send_user "\nFAILURE: srun failed to properly process SIGINT $match_run $match_wait $match_term\n"
+if {[expr $match_wait + $match_int + $match_term] != 2} {
+	send_user "\nFAILURE: srun failed to properly process SIGINT, "
+	send_user "($match_wait + $match_int + $match_term != 2)\n"
+	set exit_code 1
+} elseif {$match_int != 0} {
+	send_user "\nFAILURE: srun failed to properly process SIGINT, "
+	send_user "($match_int != 0)\n"
 	set exit_code 1
 }
 

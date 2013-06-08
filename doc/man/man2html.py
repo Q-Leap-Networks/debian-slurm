@@ -9,6 +9,9 @@ include_regex = re.compile(include_pat)
 url_pat = r'(\s+href\s*=\s*")([^"#]+)(#[^"]+)?(")'
 url_regex = re.compile(url_pat)
 
+version_pat = r'(@SLURM_VERSION@)'
+version_regex = re.compile(version_pat)
+
 dirname = ''
 
 # Instert tags for options
@@ -46,42 +49,42 @@ def llnl_references(line):
         lineFix = line.replace(manStr,htmlStr)
         if lineFix != line:
             return lineFix
-        manStr = '<A HREF="http://www.schedmd.com/slurmdocs/mc_support.html">http://www.schedmd.com/slurmdocs/mc_support.html</A>'
+        manStr = '<A HREF="http://slurm.schedmd.com/mc_support.html">http://slurm.schedmd.com/mc_support.html</A>'
         htmlStr = 'the <a href="mc_support.html">mc_support</a> document'
         lineFix = line.replace(manStr,htmlStr)
         if lineFix != line:
             return lineFix
-        manStr = '<A HREF="http://www.schedmd.com/slurmdocs/dist_plane.html.">http://www.schedmd.com/slurmdocs/dist_plane.html.</A>'
+        manStr = '<A HREF="http://slurm.schedmd.com/dist_plane.html.">http://slurm.schedmd.com/dist_plane.html.</A>'
         htmlStr = 'the <a href="dist_plane.html">dist_plane</a> document'
         lineFix = line.replace(manStr,htmlStr)
         if lineFix != line:
             return lineFix
-        manStr = '&lt;<A HREF="http://www.schedmd.com/slurmdocs/mpi_guide.html">http://www.schedmd.com/slurmdocs/mpi_guide.html</A>&gt;'
+        manStr = '&lt;<A HREF="http://slurm.schedmd.com/mpi_guide.html">http://slurm.schedmd.com/mpi_guide.html</A>&gt;'
         htmlStr = '<a href="mpi_guide.html">mpi_guide</a>'
         lineFix = line.replace(manStr,htmlStr)
         if lineFix != line:
             return lineFix
-        manStr = '(<A HREF="http://www.schedmd.com/slurmdocs/power_save.html).">http://www.schedmd.com/slurmdocs/power_save.html).</A>'
+        manStr = '(<A HREF="http://slurm.schedmd.com/power_save.html).">http://slurm.schedmd.com/power_save.html).</A>'
         htmlStr = '<a href="power_save.html">power_save</a>'
         lineFix = line.replace(manStr,htmlStr)
         if lineFix != line:
             return lineFix
-        manStr = '<A HREF="http://www.schedmd.com/slurmdocs/cons_res.html">http://www.schedmd.com/slurmdocs/cons_res.html</A>'
+        manStr = '<A HREF="http://slurm.schedmd.com/cons_res.html">http://slurm.schedmd.com/cons_res.html</A>'
         htmlStr = '<a href="cons_res.html">cons_res</a>'
         lineFix = line.replace(manStr,htmlStr)
         if lineFix != line:
             return lineFix
-        manStr = '<A HREF="http://www.schedmd.com/slurmdocs/cons_res_share.html">http://www.schedmd.com/slurmdocs/cons_res_share.html</A>'
+        manStr = '<A HREF="http://slurm.schedmd.com/cons_res_share.html">http://slurm.schedmd.com/cons_res_share.html</A>'
         htmlStr = '<a href="cons_res_share.html">cons_res_share</a>'
         lineFix = line.replace(manStr,htmlStr)
         if lineFix != line:
             return lineFix
-        manStr = '<A HREF="http://www.schedmd.com/slurmdocs/gang_scheduling.html">http://www.schedmd.com/slurmdocs/gang_scheduling.html</A>'
+        manStr = '<A HREF="http://slurm.schedmd.com/gang_scheduling.html">http://slurm.schedmd.com/gang_scheduling.html</A>'
         htmlStr = '<a href="gang_scheduling.html">gang_scheduling</a>'
         lineFix = line.replace(manStr,htmlStr)
         if lineFix != line:
             return lineFix
-        manStr = '<A HREF="http://www.schedmd.com/slurmdocs/preempt.html">http://www.schedmd.com/slurmdocs/preempt.html</A>'
+        manStr = '<A HREF="http://slurm.schedmd.com/preempt.html">http://slurm.schedmd.com/preempt.html</A>'
         htmlStr = '<a href="preempt.html">preempt</a>'
         lineFix = line.replace(manStr,htmlStr)
         if lineFix != line:
@@ -149,8 +152,13 @@ def url_rewrite(matchobj):
     else:
         return matchobj.group(0)
 
+def version_rewrite(matchobj):
+    global version
+    return version
+
 files = []
-for f in sys.argv[3:]:
+version = sys.argv[1]
+for f in sys.argv[4:]:
     posLastDot = f.rfind(".")
     mhtmlname = f[:posLastDot] + ".mhtml"
     cmd = "man2html " + f + "> " + mhtmlname
@@ -165,8 +173,9 @@ for filename in files:
     shtml = file(filename, 'r')
     html = file(newfilename, 'w')
 
-    lines = file(sys.argv[1], 'r').read()
+    lines = file(sys.argv[2], 'r').read()
     lines = lines.replace(".shtml",".html")
+    lines = version_regex.sub(version_rewrite, lines)
     html.write(lines)
 #    html.write(<!--#include virtual="header.txt"-->)
     for line in shtml.readlines():
@@ -191,7 +200,8 @@ for filename in files:
 
         line = url_regex.sub(url_rewrite, line)
         html.write(line)
-    lines = file(sys.argv[2], 'r').read()
+    lines = file(sys.argv[3], 'r').read()
+    lines = version_regex.sub(version_rewrite, lines)
     html.write(lines)
 #    html.write(<!--#include virtual="footer.txt"-->)
     html.close()

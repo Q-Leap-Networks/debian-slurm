@@ -44,6 +44,7 @@
 #include "src/common/slurm_xlator.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_defs.h"
+#include "src/common/slurm_acct_gather_energy.h"
 #include "src/slurmd/slurmd/slurmd.h"
 #include "src/common/xstring.h"
 #include "src/plugins/jobacct_gather/cgroup/jobacct_gather_cgroup.h"
@@ -56,19 +57,9 @@
  * overwritten when linking with the slurmd.
  */
 #if defined (__APPLE__)
-uint32_t jobacct_job_id __attribute__((weak_import));
-pthread_mutex_t jobacct_lock __attribute__((weak_import));
-uint32_t jobacct_mem_limit __attribute__((weak_import));
-uint32_t jobacct_step_id __attribute__((weak_import));
-uint32_t jobacct_vmem_limit __attribute__((weak_import));
 slurmd_conf_t *conf __attribute__((weak_import));
 int bg_recover __attribute__((weak_import)) = NOT_FROM_CONTROLLER;
 #else
-uint32_t jobacct_job_id;
-pthread_mutex_t jobacct_lock;
-uint32_t jobacct_mem_limit;
-uint32_t jobacct_step_id;
-uint32_t jobacct_vmem_limit;
 slurmd_conf_t *conf;
 int bg_recover = NOT_FROM_CONTROLLER;
 #endif
@@ -105,7 +96,7 @@ int bg_recover = NOT_FROM_CONTROLLER;
  */
 const char plugin_name[] = "Job accounting gather cgroup plugin";
 const char plugin_type[] = "jobacct_gather/cgroup";
-const uint32_t plugin_version = 100;
+const uint32_t plugin_version = 200;
 
 /* Other useful declarations */
 
@@ -117,44 +108,317 @@ typedef struct prec {	/* process record */
 	int	pages;	/* pages */
 	int	rss;	/* rss */
 	int	vsize;	/* virtual size */
-	int	cpu_cycles; /* cpu cycles */
-//	int	last_cpu;
+	int	act_cpufreq; /* actual average cpu frequency */
+	int	last_cpu;   /* last cpu */
 } prec_t;
 
-static int freq = 0;
+static int pagesize = 0;
 static DIR  *slash_proc = NULL;
 static pthread_mutex_t reading_mutex = PTHREAD_MUTEX_INITIALIZER;
-static bool jobacct_shutdown = 0;
-static bool jobacct_suspended = 0;
-static List task_list = NULL;
-static uint64_t cont_id = (uint64_t)NO_VAL;
-static bool pgid_plugin = false;
+static int cpunfo_frequency = 0;
 static slurm_cgroup_conf_t slurm_cgroup_conf;
 
 /* Finally, pre-define all local routines. */
 
-static void _acct_kill_step(void);
 static void _destroy_prec(void *object);
 static int  _is_a_lwp(uint32_t pid);
-static void _get_process_data(void);
 static int  _get_process_data_line(int in, prec_t *prec);
-static void *_watch_tasks(void *arg);
+static int _get_sys_interface_freq_line(uint32_t cpu, char *filename,
+					char *sbuf );
+static uint32_t _update_weighted_freq(struct jobacctinfo *jobacct,
+				      char * sbuf);
+
+
+/* return weighted frequency in mhz */
+static uint32_t _update_weighted_freq(struct jobacctinfo *jobacct,
+				      char * sbuf)
+{
+	bool return_frequency = false;
+	int thisfreq = 0;
+
+	if (cpunfo_frequency)
+		/* scaling not enabled */
+		thisfreq = cpunfo_frequency;
+	else
+		sscanf(sbuf, "%d", &thisfreq);
+
+	thisfreq /=1000;
+
+	jobacct->current_weighted_freq =
+			jobacct->current_weighted_freq +
+			jobacct->this_sampled_cputime * thisfreq;
+	if (return_frequency) {
+		if (jobacct->last_total_cputime)
+			/* return weighted frequency */
+			return jobacct->current_weighted_freq;
+		else
+			return thisfreq;
+	} else
+		/* return estimated frequency */
+		return jobacct->current_weighted_freq;
+}
+
+static char * skipdot (char *str)
+{
+	int pntr = 0;
+	while (str[pntr]) {
+		if (str[pntr] == '.') {
+			str[pntr] = '0';
+			break;
+		}
+		pntr++;
+	}
+	str[pntr+3] = '\0';
+	return str;
+}
+
+static int _get_sys_interface_freq_line(uint32_t cpu, char *filename,
+					char * sbuf )
+{
+	int num_read, fd;
+	FILE *sys_fp = NULL;
+	char freq_file[80];
+	char cpunfo_line [128];
+	char cpufreq_line [10];
+
+	if (cpunfo_frequency)
+		/* scaling not enabled,static freq obtaine d*/
+		return 1;
+
+	snprintf(freq_file, 79,
+		 "/sys/devices/system/cpu/cpu%d/cpufreq/%s",
+		 cpu, filename);
+	debug2("_get_sys_interface_freq_line: filename = %s ", freq_file);
+	if ((sys_fp = fopen(freq_file, "r"))!= NULL) {
+		/* frequency scaling enabled */
+		fd = fileno(sys_fp);
+		fcntl(fd, F_SETFD, FD_CLOEXEC);
+		num_read = read(fd, sbuf, (sizeof(sbuf) - 1));
+		if (num_read > 0) {
+			sbuf[num_read] = '\0';
+			debug2(" cpu %d freq= %s", cpu, sbuf);
+		}
+		fclose(sys_fp);
+	} else {
+		/* frequency scaling not enabled */
+		if (!cpunfo_frequency){
+			snprintf(freq_file, 14,
+					"/proc/cpuinfo");
+			debug2("_get_sys_interface_freq_line: "
+				"filename = %s ",
+				freq_file);
+			if ((sys_fp = fopen(freq_file, "r")) != NULL) {
+				while (fgets(cpunfo_line, sizeof cpunfo_line,
+					sys_fp ) != NULL) {
+					if (strstr(cpunfo_line, "cpu MHz") ||
+						strstr(cpunfo_line,"cpu GHz")){
+						break;
+					}
+				}
+				strncpy(cpufreq_line, cpunfo_line+11, 8);
+				skipdot(cpufreq_line);
+				sscanf(cpufreq_line, "%d", &cpunfo_frequency);
+				debug2("cpunfo_frequency=%d",cpunfo_frequency);
+				fclose(sys_fp);
+			}
+		}
+		return 1;
+	}
+	return 0;
+}
+
+static int _is_a_lwp(uint32_t pid) {
+
+	FILE		*status_fp = NULL;
+	char		proc_status_file[256];
+	uint32_t	tgid;
+	int		rc;
+
+	if (snprintf(proc_status_file, 256, "/proc/%d/status", pid) > 256) {
+ 		debug("jobacct_gather_cgroup: unable to build proc_status "
+		      "fpath");
+		return -1;
+	}
+	if (!(status_fp = fopen(proc_status_file, "r"))) {
+		debug3("jobacct_gather_cgroup: unable to open %s",
+		       proc_status_file);
+		return -1;
+	}
+
+
+	do {
+		rc = fscanf(status_fp,
+			    "Name:\t%*s\n%*[ \ta-zA-Z0-9:()]\nTgid:\t%d\n",
+			    &tgid);
+	} while (rc < 0 && errno == EINTR);
+	fclose(status_fp);
+
+	/* unable to read /proc/[pid]/status content */
+	if (rc != 1) {
+		debug3("jobacct_gather_cgroup: unable to read requested "
+		       "pattern in %s",proc_status_file);
+		return -1;
+	}
+
+	/* if tgid differs from pid, this is a LWP (Thread POSIX) */
+	if ((uint32_t) tgid != (uint32_t) pid) {
+		debug3("jobacct_gather_cgroup: pid=%d a lightweight process",
+		       tgid);
+		return 1;
+	} else
+		return 0;
+}
+
+/* _get_process_data_line() - get line of data from /proc/<pid>/stat
+ *
+ * IN:	in - input file descriptor
+ * OUT:	prec - the destination for the data
+ *
+ * RETVAL:	==0 - no valid data
+ * 		!=0 - data are valid
+ *
+ * Based upon stat2proc() from the ps command. It can handle arbitrary
+ * executable file basenames for `cmd', i.e. those with embedded
+ * whitespace or embedded ')'s. Such names confuse %s (see scanf(3)),
+ * so the string is split and %39c is used instead.
+ * (except for embedded ')' "(%[^)]c)" would work.
+ */
+static int _get_process_data_line(int in, prec_t *prec) {
+	char sbuf[256], *tmp;
+	int num_read, nvals;
+	char cmd[40], state[1];
+	int ppid, pgrp, session, tty_nr, tpgid;
+	long unsigned flags, minflt, cminflt, majflt, cmajflt;
+	long unsigned utime, stime, starttime, vsize;
+	long int cutime, cstime, priority, nice, timeout, itrealvalue, rss;
+	long int f1,f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12;
+	long int f13,f14, lastcpu;
+
+	num_read = read(in, sbuf, (sizeof(sbuf) - 1));
+	if (num_read <= 0)
+		return 0;
+	sbuf[num_read] = '\0';
+
+	tmp = strrchr(sbuf, ')'); /* split into "PID (cmd" and "<rest>" */
+	*tmp = '\0';		  /* replace trailing ')' with NUL */
+	/* parse these two strings separately, skipping the leading "(". */
+	nvals = sscanf(sbuf, "%d (%39c", &prec->pid, cmd);
+	if (nvals < 2)
+		return 0;
+
+	nvals = sscanf(tmp + 2,		/* skip space after ')' too */
+		       "%c %d %d %d %d %d "
+		       "%lu %lu %lu %lu %lu "
+		       "%lu %lu %ld %ld %ld %ld "
+		       "%ld %ld %lu %lu %ld "
+		       "%lu %lu %lu %lu %lu "
+		       "%lu %lu %lu %lu %lu "
+		       "%lu %lu %lu %ld %ld ",
+		       state, &ppid, &pgrp, &session, &tty_nr, &tpgid,
+		       &flags, &minflt, &cminflt, &majflt, &cmajflt,
+		       &utime, &stime, &cutime, &cstime, &priority, &nice,
+		       &timeout, &itrealvalue, &starttime, &vsize, &rss,
+		       &f1, &f2, &f3, &f4, &f5 ,&f6, &f7, &f8, &f9, &f10, &f11,
+		       &f12, &f13, &f14, &lastcpu);
+	/* There are some additional fields, which we do not scan or use */
+	if ((nvals < 37) || (rss < 0))
+		return 0;
+
+	/* If current pid corresponds to a Light Weight Process
+	 * (Thread POSIX) skip it, we will only account the original
+	 * process (pid==tgid)
+	 */
+	if (_is_a_lwp(prec->pid) > 0)
+  		return 0;
+
+	/* Copy the values that slurm records into our data structure */
+//	prec->last_cpu = lastcpu;
+	return 1;
+}
+
+static void _destroy_prec(void *object)
+{
+	prec_t *prec = (prec_t *)object;
+	xfree(prec);
+	return;
+}
 
 /*
- * _get_process_data() - Build a table of all current processes
+ * init() is called when the plugin is loaded, before any other functions
+ * are called.  Put global initialization here.
+ */
+extern int init (void)
+{
+	/* If running on the slurmctld don't do any of this since it
+	   isn't needed.
+	*/
+	if (bg_recover == NOT_FROM_CONTROLLER) {
+		pagesize = getpagesize();
+
+		/* read cgroup configuration */
+		if (read_slurm_cgroup_conf(&slurm_cgroup_conf))
+			return SLURM_ERROR;
+
+		/* initialize cpuinfo internal data */
+		if (xcpuinfo_init() != XCPUINFO_SUCCESS) {
+			free_slurm_cgroup_conf(&slurm_cgroup_conf);
+			return SLURM_ERROR;
+		}
+
+		/* enable cpuacct cgroup subsystem */
+		if (jobacct_gather_cgroup_cpuacct_init(&slurm_cgroup_conf) !=
+		    SLURM_SUCCESS) {
+			xcpuinfo_fini();
+			free_slurm_cgroup_conf(&slurm_cgroup_conf);
+			return SLURM_ERROR;
+		}
+
+		/* enable memory cgroup subsystem */
+		if (jobacct_gather_cgroup_memory_init(&slurm_cgroup_conf) !=
+		    SLURM_SUCCESS) {
+			xcpuinfo_fini();
+			free_slurm_cgroup_conf(&slurm_cgroup_conf);
+			return SLURM_ERROR;
+		}
+		info("WARNING: The %s plugin is experimental, and should "
+		     "not currently be used in production environments.",
+		     plugin_name);
+	}
+
+	verbose("%s loaded", plugin_name);
+	return SLURM_SUCCESS;
+}
+
+extern int fini (void)
+{
+	jobacct_gather_cgroup_cpuacct_fini(&slurm_cgroup_conf);
+	jobacct_gather_cgroup_memory_fini(&slurm_cgroup_conf);
+	acct_gather_energy_fini();
+
+	/* unload configuration */
+	free_slurm_cgroup_conf(&slurm_cgroup_conf);
+	return SLURM_SUCCESS;
+}
+
+/*
+ * jobacct_gather_p_poll_data() - Build a table of all current processes
  *
- * IN:	pid.
+ * IN/OUT: task_list - list containing current processes.
+ * IN: pgid_plugin - if we are running with the pgid plugin.
+ * IN: cont_id - container id of processes if not running with pgid.
  *
  * OUT:	none
  *
- * THREADSAFE! Only one thread ever gets here.
+ * THREADSAFE! Only one thread ever gets here.  It is locked in
+ * slurm_jobacct_gather.
  *
  * Assumption:
  *    Any file with a name of the form "/proc/[0-9]+/stat"
  *    is a Linux-style stat entry. We disregard the data if they look
  *    wrong.
  */
-static void _get_process_data(void)
+extern void jobacct_gather_p_poll_data(
+	List task_list, bool pgid_plugin, uint64_t cont_id)
 {
 	static	int slash_proc_open = 0;
 
@@ -173,11 +437,12 @@ static void _get_process_data(void)
 	struct jobacctinfo *jobacct = NULL;
 	static int processing = 0;
 	long	hertz;
+	char		sbuf[72];
 	char *cpu_time, *memory_stat, *ptr;
 	size_t cpu_time_size, memory_stat_size;
-	int utime, stime, total_rss, total_pgpgin, page_size;
+	int utime, stime, total_rss, total_pgpgin;
+	int energy_counted = 0;
 
-	page_size = getpagesize();
 	if (!pgid_plugin && cont_id == (uint64_t)NO_VAL) {
 		debug("cont_id hasn't been set yet not running poll");
 		return;
@@ -200,6 +465,16 @@ static void _get_process_data(void)
 		/* get only the processes in the proctrack container */
 		slurm_container_get_pids(cont_id, &pids, &npids);
 		if (!npids) {
+			/* update consumed energy even if pids do not exist
+			 * any more, by iterating thru jobacctinfo structs */
+			itr = list_iterator_create(task_list);
+			while ((jobacct = list_next(itr))) {
+				acct_gather_energy_g_get_data(
+					ENERGY_DATA_JOULES_TASK,
+					&jobacct->energy);
+			}
+			list_iterator_destroy(itr);
+
 			debug4("no pids in this container %"PRIu64"", cont_id);
 			goto finished;
 		}
@@ -239,7 +514,7 @@ static void _get_process_data(void)
 				ptr = strstr(memory_stat, "total_pgpgin");
 				sscanf(ptr, "total_pgpgin %u", &total_pgpgin);
 				prec->pages = total_pgpgin;
-				prec->rss = total_rss / page_size;
+				prec->rss = total_rss / pagesize;
 				list_append(prec_list, prec);
 			} else
 				xfree(prec);
@@ -322,7 +597,7 @@ static void _get_process_data(void)
 				ptr = strstr(memory_stat, "total_pgpgin");
 				sscanf(ptr, "total_pgpgin %u", &total_pgpgin);
 				prec->pages = total_pgpgin;
-				prec->rss = total_rss / page_size;
+				prec->rss = total_rss / pagesize;
 				list_append(prec_list, prec);
 			}
 			else
@@ -333,84 +608,71 @@ static void _get_process_data(void)
 
 	}
 
-	if (!list_count(prec_list)) {
+	if (!list_count(prec_list) || !task_list || !list_count(task_list))
 		goto finished;	/* We have no business being here! */
-	}
-
-	slurm_mutex_lock(&jobacct_lock);
-	if (!task_list || !list_count(task_list)) {
-		slurm_mutex_unlock(&jobacct_lock);
-		goto finished;
-	}
 
 	itr = list_iterator_create(task_list);
 	while ((jobacct = list_next(itr))) {
 		itr2 = list_iterator_create(prec_list);
 		while ((prec = list_next(itr2))) {
 			if (prec->pid == jobacct->pid) {
+				uint32_t cpu_calc =
+					(prec->ssec + prec->usec)/hertz;
 #if _DEBUG
 				info("pid:%u ppid:%u rss:%d KB",
 				     prec->pid, prec->ppid, prec->rss);
 #endif
 				/* tally their usage */
-				jobacct->max_rss = jobacct->tot_rss =
+				jobacct->max_rss =
 					MAX(jobacct->max_rss, prec->rss);
+				jobacct->tot_rss = prec->rss;
 				total_job_mem += prec->rss;
-				jobacct->max_vsize = jobacct->tot_vsize =
+				jobacct->max_vsize =
 					MAX(jobacct->max_vsize, prec->vsize);
+				jobacct->tot_vsize = prec->vsize;
 				total_job_vsize += prec->vsize;
-				jobacct->max_pages = jobacct->tot_pages =
+				jobacct->max_pages =
 					MAX(jobacct->max_pages, prec->pages);
-				jobacct->min_cpu = jobacct->tot_cpu =
-					MAX(jobacct->min_cpu,
-					    (prec->ssec / hertz +
-					     prec->usec / hertz));
+				jobacct->tot_pages = prec->pages;
+				jobacct->min_cpu =
+					MAX(jobacct->min_cpu, cpu_calc);
+				jobacct->last_total_cputime = jobacct->tot_cpu;
+				jobacct->tot_cpu = cpu_calc;
+
 				debug2("%d mem size %u %u time %u(%u+%u) ",
 				       jobacct->pid, jobacct->max_rss,
 				       jobacct->max_vsize, jobacct->tot_cpu,
 				       prec->usec, prec->ssec);
+				/* compute frequency */
+				jobacct->this_sampled_cputime =
+					cpu_calc - jobacct->last_total_cputime;
+				_get_sys_interface_freq_line(prec->last_cpu,
+						"cpuinfo_cur_freq", sbuf);
+				jobacct->act_cpufreq =
+					_update_weighted_freq(jobacct, sbuf);
+				debug2("Task average frequency = %u",
+				       jobacct->act_cpufreq);
+				debug2(" pid %d mem size %u %u time %u(%u+%u) ",
+				       jobacct->pid, jobacct->max_rss,
+				       jobacct->max_vsize, jobacct->tot_cpu,
+				       prec->usec, prec->ssec);
+				debug2("energycounted= %d", energy_counted);
+				if (energy_counted == 0) {
+					acct_gather_energy_g_get_data(
+						ENERGY_DATA_JOULES_TASK,
+						&jobacct->energy);
+					debug2("getjoules_task energy = %u",
+					       jobacct->energy.consumed_energy);
+					energy_counted = 1;
+				}
 				break;
 			}
 		}
 		list_iterator_destroy(itr2);
 	}
 	list_iterator_destroy(itr);
-	slurm_mutex_unlock(&jobacct_lock);
 
-	if (jobacct_mem_limit) {
-		if (jobacct_step_id == NO_VAL) {
-			debug("Job %u memory used:%u limit:%u KB",
-			      jobacct_job_id, total_job_mem, jobacct_mem_limit);
-		} else {
-			debug("Step %u.%u memory used:%u limit:%u KB",
-			      jobacct_job_id, jobacct_step_id,
-			      total_job_mem, jobacct_mem_limit);
-		}
-	}
-	if (jobacct_job_id && jobacct_mem_limit &&
-	    (total_job_mem > jobacct_mem_limit)) {
-		if (jobacct_step_id == NO_VAL) {
-			error("Job %u exceeded %u KB memory limit, being "
-			      "killed", jobacct_job_id, jobacct_mem_limit);
-		} else {
-			error("Step %u.%u exceeded %u KB memory limit, being "
-			      "killed", jobacct_job_id, jobacct_step_id,
-			      jobacct_mem_limit);
-		}
-		_acct_kill_step();
-	} else if (jobacct_job_id && jobacct_vmem_limit &&
-		   (total_job_vsize > jobacct_vmem_limit)) {
-		if (jobacct_step_id == NO_VAL) {
-			error("Job %u exceeded %u KB virtual memory limit, "
-			      "being killed", jobacct_job_id,
-			      jobacct_vmem_limit);
-		} else {
-			error("Step %u.%u exceeded %u KB virtual memory "
-			      "limit, being killed", jobacct_job_id,
-			      jobacct_step_id, jobacct_vmem_limit);
-		}
-		_acct_kill_step();
-	}
+	jobacct_gather_handle_mem_limit(total_job_mem, total_job_vsize);
 
 finished:
 	list_destroy(prec_list);
@@ -418,348 +680,8 @@ finished:
 	return;
 }
 
-/* _acct_kill_step() issue RPC to kill a slurm job step */
-static void _acct_kill_step(void)
+extern int jobacct_gather_p_endpoll(void)
 {
-	slurm_msg_t msg;
-	job_step_kill_msg_t req;
-	job_notify_msg_t notify_req;
-
-	slurm_msg_t_init(&msg);
-	notify_req.job_id	= jobacct_job_id;
-	notify_req.job_step_id	= jobacct_step_id;
-	notify_req.message	= "Exceeded job memory limit";
-	msg.msg_type		= REQUEST_JOB_NOTIFY;
-	msg.data		= &notify_req;
-	slurm_send_only_controller_msg(&msg);
-
-	/*
-	 * Request message:
-	 */
-	req.job_id	= jobacct_job_id;
-	req.job_step_id	= jobacct_step_id;
-	req.signal	= SIGKILL;
-	req.batch_flag	= 0;
-	msg.msg_type	= REQUEST_CANCEL_JOB_STEP;
-	msg.data	= &req;
-
-	slurm_send_only_controller_msg(&msg);
-}
-
-static int _is_a_lwp(uint32_t pid) {
-
-	FILE		*status_fp = NULL;
-	char		proc_status_file[256];
-	uint32_t	tgid;
-	int		rc;
-
-	if (snprintf(proc_status_file, 256, "/proc/%d/status", pid) > 256) {
- 		debug("jobacct_gather_cgroup: unable to build proc_status "
-		      "fpath");
-		return -1;
-	}
-	if (!(status_fp = fopen(proc_status_file, "r"))) {
-		debug3("jobacct_gather_cgroup: unable to open %s",
-		       proc_status_file);
-		return -1;
-	}
-
-
-	do {
-		rc = fscanf(status_fp,
-			    "Name:\t%*s\n%*[ \ta-zA-Z0-9:()]\nTgid:\t%d\n",
-			    &tgid);
-	} while (rc < 0 && errno == EINTR);
-	fclose(status_fp);
-
-	/* unable to read /proc/[pid]/status content */
-	if (rc != 1) {
-		debug3("jobacct_gather_cgroup: unable to read requested "
-		       "pattern in %s",proc_status_file);
-		return -1;
-	}
-
-	/* if tgid differs from pid, this is a LWP (Thread POSIX) */
-	if ((uint32_t) tgid != (uint32_t) pid) {
-		debug3("jobacct_gather_cgroup: pid=%d is a lightweight process",
-		       tgid);
-		return 1;
-	} else
-		return 0;
-}
-
-/* _get_process_data_line() - get line of data from /proc/<pid>/stat
- *
- * IN:	in - input file descriptor
- * OUT:	prec - the destination for the data
- *
- * RETVAL:	==0 - no valid data
- * 		!=0 - data are valid
- *
- * Based upon stat2proc() from the ps command. It can handle arbitrary
- * executable file basenames for `cmd', i.e. those with embedded
- * whitespace or embedded ')'s. Such names confuse %s (see scanf(3)),
- * so the string is split and %39c is used instead.
- * (except for embedded ')' "(%[^)]c)" would work.
- */
-static int _get_process_data_line(int in, prec_t *prec) {
-	char sbuf[256], *tmp;
-	int num_read, nvals;
-	char cmd[40], state[1];
-	int ppid, pgrp, session, tty_nr, tpgid;
-	long unsigned flags, minflt, cminflt, majflt, cmajflt;
-	long unsigned utime, stime, starttime, vsize;
-	long int cutime, cstime, priority, nice, timeout, itrealvalue, rss;
-	long int f1,f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12;
-	long int f13,f14, lastcpu;
-
-	num_read = read(in, sbuf, (sizeof(sbuf) - 1));
-	if (num_read <= 0)
-		return 0;
-	sbuf[num_read] = '\0';
-
-	tmp = strrchr(sbuf, ')'); /* split into "PID (cmd" and "<rest>" */
-	*tmp = '\0';		  /* replace trailing ')' with NUL */
-	/* parse these two strings separately, skipping the leading "(". */
-	nvals = sscanf(sbuf, "%d (%39c", &prec->pid, cmd);
-	if (nvals < 2)
-		return 0;
-
-	nvals = sscanf(tmp + 2,		/* skip space after ')' too */
-		       "%c %d %d %d %d %d "
-		       "%lu %lu %lu %lu %lu "
-		       "%lu %lu %ld %ld %ld %ld "
-		       "%ld %ld %lu %lu %ld "
-		       "%lu %lu %lu %lu %lu "
-		       "%lu %lu %lu %lu %lu "
-		       "%lu %lu %lu %ld %ld ",
-		       state, &ppid, &pgrp, &session, &tty_nr, &tpgid,
-		       &flags, &minflt, &cminflt, &majflt, &cmajflt,
-		       &utime, &stime, &cutime, &cstime, &priority, &nice,
-		       &timeout, &itrealvalue, &starttime, &vsize, &rss,
-		       &f1, &f2, &f3, &f4, &f5 ,&f6, &f7, &f8, &f9, &f10, &f11,
-		       &f12, &f13, &f14, &lastcpu);
-	/* There are some additional fields, which we do not scan or use */
-	if ((nvals < 37) || (rss < 0))
-		return 0;
-
-	/* If current pid corresponds to a Light Weight Process
-	 * (Thread POSIX) skip it, we will only account the original
-	 * process (pid==tgid)
-	 */
-	if (_is_a_lwp(prec->pid) > 0)
-  		return 0;
-
-	/* Copy the values that slurm records into our data structure */
-//	prec->last_cpu = lastcpu;
-	return 1;
-}
-
-static void _task_sleep(int rem)
-{
-	while (rem)
-		rem = sleep(rem);	/* subject to interupt */
-}
-
-/* _watch_tasks() -- monitor slurm jobs and track their memory usage
- *
- * IN, OUT:	Irrelevant; this is invoked by pthread_create()
- */
-
-static void *_watch_tasks(void *arg)
-{
-	/* Give chance for processes to spawn before starting
-	 * the polling. This should largely eliminate the
-	 * the chance of having /proc open when the tasks are
-	 * spawned, which would prevent a valid checkpoint/restart
-	 * with some systems */
-	_task_sleep(1);
-
-	while (!jobacct_shutdown) {  /* Do this until shutdown is requested */
-		if (!jobacct_suspended)
-			_get_process_data();	/* Update the data */
-		_task_sleep(freq);
-	}
-	return NULL;
-}
-
-
-static void _destroy_prec(void *object)
-{
-	prec_t *prec = (prec_t *)object;
-	xfree(prec);
-	return;
-}
-
-/*
- * init() is called when the plugin is loaded, before any other functions
- * are called.  Put global initialization here.
- */
-extern int init (void)
-{
-	char *temp;
-
-	/* If running on the slurmctld don't do any of this since it
-	   isn't needed.
-	*/
-	if (bg_recover == NOT_FROM_CONTROLLER) {
-		/* read cgroup configuration */
-		if (read_slurm_cgroup_conf(&slurm_cgroup_conf))
-			return SLURM_ERROR;
-
-		/* initialize cpuinfo internal data */
-		if (xcpuinfo_init() != XCPUINFO_SUCCESS) {
-			free_slurm_cgroup_conf(&slurm_cgroup_conf);
-			return SLURM_ERROR;
-		}
-
-		/* enable cpuacct cgroup subsystem */
-		if (jobacct_gather_cgroup_cpuacct_init(&slurm_cgroup_conf) !=
-		    SLURM_SUCCESS) {
-			xcpuinfo_fini();
-			free_slurm_cgroup_conf(&slurm_cgroup_conf);
-			return SLURM_ERROR;
-		}
-
-		/* enable memory cgroup subsystem */
-		if (jobacct_gather_cgroup_memory_init(&slurm_cgroup_conf) !=
-		    SLURM_SUCCESS) {
-			xcpuinfo_fini();
-			free_slurm_cgroup_conf(&slurm_cgroup_conf);
-			return SLURM_ERROR;
-		}
-		info("WARNING: The %s plugin is experimental, and should "
-		     "not currently be used in production environments.",
-		     plugin_name);
-	}
-
-	temp = slurm_get_proctrack_type();
-	if (!strcasecmp(temp, "proctrack/pgid")) {
-		info("WARNING: We will use a much slower algorithm with "
-		     "proctrack/pgid, use Proctracktype=proctrack/linuxproc "
-		     "or Proctracktype=proctrack/rms with %s",
-		     plugin_name);
-		pgid_plugin = true;
-	}
-
-	xfree(temp);
-	temp = slurm_get_accounting_storage_type();
-	if (!strcasecmp(temp, ACCOUNTING_STORAGE_TYPE_NONE)) {
-		error("WARNING: Even though we are collecting accounting "
-		      "information you have asked for it not to be stored "
-		      "(%s) if this is not what you have in mind you will "
-		      "need to change it.", ACCOUNTING_STORAGE_TYPE_NONE);
-	}
-	xfree(temp);
-
-	verbose("%s loaded", plugin_name);
-	return SLURM_SUCCESS;
-}
-
-extern int fini (void)
-{
-	jobacct_gather_cgroup_cpuacct_fini(&slurm_cgroup_conf);
-	jobacct_gather_cgroup_memory_fini(&slurm_cgroup_conf);
-
-	/* unload configuration */
-	free_slurm_cgroup_conf(&slurm_cgroup_conf);
-	return SLURM_SUCCESS;
-}
-
-extern struct jobacctinfo *jobacct_gather_p_create(jobacct_id_t *jobacct_id)
-{
-	return jobacct_common_alloc_jobacct(jobacct_id);
-}
-
-extern void jobacct_gather_p_destroy(struct jobacctinfo *jobacct)
-{
-	jobacct_common_free_jobacct(jobacct);
-}
-
-extern int jobacct_gather_p_setinfo(struct jobacctinfo *jobacct,
-				    enum jobacct_data_type type, void *data)
-{
-	return jobacct_common_setinfo(jobacct, type, data);
-}
-
-extern int jobacct_gather_p_getinfo(struct jobacctinfo *jobacct,
-				    enum jobacct_data_type type, void *data)
-{
-	return jobacct_common_getinfo(jobacct, type, data);
-}
-
-extern void jobacct_gather_p_pack(struct jobacctinfo *jobacct,
-				  uint16_t rpc_version,  Buf buffer)
-{
-	jobacct_common_pack(jobacct, rpc_version, buffer);
-}
-
-extern int jobacct_gather_p_unpack(struct jobacctinfo **jobacct,
-				   uint16_t rpc_version, Buf buffer)
-{
-	return jobacct_common_unpack(jobacct, rpc_version, buffer);
-}
-
-extern void jobacct_gather_p_aggregate(struct jobacctinfo *dest,
-				       struct jobacctinfo *from)
-{
-	jobacct_common_aggregate(dest, from);
-}
-
-/*
- * jobacct_startpoll() is called when the plugin is loaded by
- * slurmd, before any other functions are called.  Put global
- * initialization here.
- */
-
-extern int jobacct_gather_p_startpoll(uint16_t frequency)
-{
-	int rc = SLURM_SUCCESS;
-
-	pthread_attr_t attr;
-	pthread_t _watch_tasks_thread_id;
-
-	debug("%s loaded", plugin_name);
-
-	debug("jobacct-gather: frequency = %d", frequency);
-
-	jobacct_shutdown = false;
-
-	task_list = list_create(jobacct_common_free_jobacct);
-
-	if (frequency == 0) {	/* don't want dynamic monitoring? */
-		debug2("jobacct-gather cgroup dynamic logging disabled");
-		return rc;
-	}
-
-	freq = frequency;
-	/* create polling thread */
-	slurm_attr_init(&attr);
-	if (pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED))
-		error("pthread_attr_setdetachstate error %m");
-
-	if (pthread_create(&_watch_tasks_thread_id, &attr,
-			   &_watch_tasks, NULL)) {
-		debug("jobacct-gather failed to create _watch_tasks "
-		      "thread: %m");
-		frequency = 0;
-	}
-	else
-		debug3("jobacct-gather cgroup dynamic logging enabled");
-	slurm_attr_destroy(&attr);
-
-	return rc;
-}
-
-extern int jobacct_gather_p_endpoll()
-{
-	jobacct_shutdown = true;
-	slurm_mutex_lock(&jobacct_lock);
-	if (task_list)
-		list_destroy(task_list);
-	task_list = NULL;
-	slurm_mutex_unlock(&jobacct_lock);
-
 	if (slash_proc) {
 		slurm_mutex_lock(&reading_mutex);
 		(void) closedir(slash_proc);
@@ -770,75 +692,8 @@ extern int jobacct_gather_p_endpoll()
 	return SLURM_SUCCESS;
 }
 
-extern void jobacct_gather_p_change_poll(uint16_t frequency)
-{
-	if (freq == 0 && frequency != 0) {
-		pthread_attr_t attr;
-		pthread_t _watch_tasks_thread_id;
-		/* create polling thread */
-		slurm_attr_init(&attr);
-		if (pthread_attr_setdetachstate(&attr,
-						PTHREAD_CREATE_DETACHED))
-			error("pthread_attr_setdetachstate error %m");
-
-		if (pthread_create(&_watch_tasks_thread_id, &attr,
-				   &_watch_tasks, NULL)) {
-			debug("jobacct-gather failed to create _watch_tasks "
-			      "thread: %m");
-			frequency = 0;
-		} else
-			debug3("jobacct-gather cgroup dynamic logging "
-			       "enabled");
-		slurm_attr_destroy(&attr);
-		jobacct_shutdown = false;
-	}
-
-	freq = frequency;
-	debug("jobacct-gather: frequency changed = %d", frequency);
-	if (freq == 0)
-		jobacct_shutdown = true;
-	return;
-}
-
-extern void jobacct_gather_p_suspend_poll()
-{
-	jobacct_suspended = true;
-}
-
-extern void jobacct_gather_p_resume_poll()
-{
-	jobacct_suspended = false;
-}
-
-extern int jobacct_gather_p_set_proctrack_container_id(uint64_t id)
-{
-	if(pgid_plugin)
-		return SLURM_SUCCESS;
-
-	if (cont_id != (uint64_t)NO_VAL)
-		info("Warning: jobacct: set_proctrack_container_id: cont_id "
-		     "is already set to %"PRIu64" you are setting it to "
-		     "%"PRIu64"", cont_id, id);
-	if (id <= 0) {
-		error("jobacct: set_proctrack_container_id: "
-		      "I was given most likely an unset cont_id %"PRIu64"",
-		      id);
-		return SLURM_ERROR;
-	}
-	cont_id = id;
-	return SLURM_SUCCESS;
-}
-
 extern int jobacct_gather_p_add_task(pid_t pid, jobacct_id_t *jobacct_id)
 {
-	int rc;
-
-	if (jobacct_shutdown)
-		return SLURM_ERROR;
-	if ((rc = jobacct_common_add_task(pid, jobacct_id, task_list)) !=
-	    SLURM_SUCCESS)
-		return SLURM_ERROR;
-
 	if (jobacct_gather_cgroup_cpuacct_attach_task(pid, jobacct_id) !=
 	    SLURM_SUCCESS)
 		return SLURM_ERROR;
@@ -847,42 +702,7 @@ extern int jobacct_gather_p_add_task(pid_t pid, jobacct_id_t *jobacct_id)
 	    SLURM_SUCCESS)
 		return SLURM_ERROR;
 
-	return rc;
-}
-
-
-extern struct jobacctinfo *jobacct_gather_p_stat_task(pid_t pid)
-{
-	if (jobacct_shutdown)
-		return NULL;
-	else if(pid) {
-		_get_process_data();
-		return jobacct_common_stat_task(pid, task_list);
-	} else {
-		/* In this situation, we are just trying to get a
-		 * basis of information since we are not pollng.  So
-		 * we will give a chance for processes to spawn before we
-		 * gather information. This should largely eliminate the
-		 * the chance of having /proc open when the tasks are
-		 * spawned, which would prevent a valid checkpoint/restart
-		 * with some systems */
-		_task_sleep(1);
-		_get_process_data();
-		return NULL;
-	}
-}
-
-extern struct jobacctinfo *jobacct_gather_p_remove_task(pid_t pid)
-{
-	if (jobacct_shutdown)
-		return NULL;
-	return jobacct_common_remove_task(pid, task_list);
-}
-
-extern void jobacct_gather_p_2_stats(slurmdb_stats_t *stats,
-				     struct jobacctinfo *jobacct)
-{
-	jobacct_common_2_stats(stats, jobacct);
+	return SLURM_SUCCESS;
 }
 
 extern char* jobacct_cgroup_create_slurm_cg(xcgroup_ns_t* ns)

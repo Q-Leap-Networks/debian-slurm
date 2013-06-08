@@ -123,26 +123,11 @@ typedef struct {
 #define SCHEDLOG_OPTS_INITIALIZER	\
 	{ LOG_LEVEL_QUIET, LOG_LEVEL_QUIET, LOG_LEVEL_QUIET, 0, 1 }
 
-#define MAKE_TIMESTAMP(timestamp_buf, timestamp_fmt) {	\
-	time_t timestamp_t = time(NULL);           \
-	struct tm timestamp_tm;	                \
-	if (!localtime_r(&timestamp_t, &timestamp_tm))\
-		fprintf(stderr, "localtime_r() failed\n"); \
-	strftime(timestamp_buf, sizeof(timestamp_buf), \
-		 timestamp_fmt, &timestamp_tm); \
-}
 
+/* Functions for filling in a char buffer with a timestamp. */
+size_t rfc2822_timestamp(char *, size_t);
+size_t log_timestamp(char *, size_t);
 
-#define RFC822_TIMESTAMP(timestamp_buf) \
-	MAKE_TIMESTAMP(timestamp_buf, "%a %d %b %Y %H:%M:%S %z");
-
-#ifdef USE_ISO_8601
-#define LOG_TIMESTAMP(timestamp_buf)			\
-	MAKE_TIMESTAMP(timestamp_buf, "%Y-%m-%dT%T");
-#else
-#define LOG_TIMESTAMP(timestamp_buf)		\
-	MAKE_TIMESTAMP(timestamp_buf, "%b %d %T");
-#endif
 
 /*
  * initialize log module (called only once)
@@ -196,6 +181,13 @@ void sched_log_fini(void);
  */
 int log_alter(log_options_t opts, log_facility_t fac, char *logfile);
 
+/* Alter log facility, options are like log_alter() above, except that
+ * an the file pointer is sent in instead of a filename.
+ *
+ * This function may only be called once.
+ */
+int log_alter_with_fp(log_options_t opt, log_facility_t fac, FILE *fp_in);
+
 /* Sched alter log facility, options are like sched_log_init() above,
  * except that an argv0 argument is not passed.
  *
@@ -243,7 +235,7 @@ void log_flush(void);
  * ~~~~    ~~~~~~~~~~~
  * "%m" => strerror(errno)
  * "%t" => strftime "%x %X"  (locally preferred short date/time)
- * "%T" => strftime "%a %d %b %Y %H:%M:%S %z" (rfc822 date/time)
+ * "%T" => strftime "%a, %d %b %Y %H:%M:%S %z" (rfc2822 date/time)
  */
 
 /* fatal() aborts program unless NDEBUG defined

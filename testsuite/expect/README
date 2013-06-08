@@ -168,6 +168,7 @@ test1.61   Test of srun job step time limit
 test1.62   Test of gres/gpu plugin (if configured).
 test1.63   Test of srun --disbale-status/-X option, SIGINT to be sent to tasks.
 test1.64   Test interuption of srun while waiting for resource allocation.
+test1.65   Test of srun --mpi=list option.
 
 **NOTE**   The following tests attempt to utilize multiple CPUs or partitions,
            The test will print "WARNING" and terminate with an exit code of
@@ -194,6 +195,8 @@ test1.91   Test of CPU affinity for multi-core systems.
 test1.92   Test of task distribution support on multi-core systems.
 test1.93   Test of LAM-MPI functionality
 test1.94   Test of MPICH2 task spawn logic
+test1.95   Basic UPC (Unified Parallel C) test via srun.
+test1.96   Basic SHMEM test via srun.
 **NOTE**   The above tests for mutliple processor/partition systems only
 
 test2.#    Testing of scontrol options (to be run as unprivileged user).
@@ -204,7 +207,7 @@ test2.3    Validate scontrol ping command.
 test2.4    Validate scontrol exit, quit, and !! commands.
 test2.5    Validate scontrol show commands for configuation, daemons,
            nodes, frontends, and partitions.
-test2.6    Validate scontrol verbose and quite options.
+test2.6    Validate scontrol verbose and quiet options.
 test2.7    Validate scontrol pidinfo command.
 test2.8    Validate scontrol show commands for jobs and steps.
 test2.9    Validate scontrol completing command.
@@ -318,6 +321,8 @@ test7.13   Verify the correct setting of a job's ExitCode
 test7.14   Verify the ability to modify the Derived Exit Code/String fields
            of a job record in the database
 test7.15   Verify signal mask of tasks have no ignored signals.
+test7.16   Verify that auth/munge credential is properly validated.
+
 
 test8.#    Test of Blue Gene specific functionality.
 =================================================
@@ -329,7 +334,13 @@ test8.5    Test creation of all blocks 1 midplane and smaller.
 test8.6    Stress test Dynamic mode block creation.
 test8.7    Test of Blue Gene scheduling with sched/wik2 plugin.
 test8.8    Test result of marking smaller blocks in an error state.
-**NOTE**   The following tests are specificallly for Bluegene/Q systems
+test8.9    Bluegene/Q only: Test to make sure if a nodeboard goes unavailable
+	   while another block is using it for passthrough to make sure the
+	   job using the block with passthrough fails.
+test8.10   Bluegene/Q only: Test to make sure that the correct number of
+	   nodes and tasks in a job and a step.
+test8.11   Bluegene/Q only: Test that certain number of tasks will submit to
+           srun.
 test8.20   Bluegene/Q only: Test that job step allocations are a valid size
            and within the job's allocation
 test8.21   Bluegene/Q only: Test that multple job step allocations are
@@ -340,6 +351,7 @@ test8.23   Bluegene/Q only: Test that multple jobs allocations are properly
            packed within a midplane
 test8.24   Bluegene/Q only: Test advanced reservation creation with mutliple
            blocks.
+test8.25   Bluegene/P only: Confirm salloc can reserve the HTC partitons.
 
 
 test9.#    System stress testing. Exercises all commands and daemons.
@@ -352,7 +364,7 @@ test9.5    Stress test of per-task input files.
 test9.6    Stress test of per-task output files.
 test9.7    Stress test multiple simultaneous commands via multiple threads.
 test9.8    Stress test with maximum slurmctld message concurrency.
-test9.9    Throughput test for 2000 jobs for timing
+test9.9    Throughput test for 5000 jobs for timing
 
 
 test10.#   Testing of smap options.
@@ -374,8 +386,8 @@ test10.12  Test bg base partition XYZ to Rack Midplane and back
 test10.13  Test bluegene.conf file creation and validate it (-Dc option).
 
 
-test11.#   Testing of poe options. (AIX only)
-=============================================
+test11.#   Testing of poe options
+=================================
 test11.1   Test poe -proc and -nodes options
 test11.2   Test poe Network options (-euilib and -euidevice)
 test11.3   Test running of Network protocol option (-msg_api)
@@ -383,7 +395,8 @@ test11.4   Test mpi jobs (must run make in mpi-testscripts dir)
 test11.5   Test of checkpoint logic (direct with srun)
 test11.6   Test of checkpoint logic (with poe)
 test11.7   Test of hostfile logic (with poe)
-
+test11.8   Test of running different executables with different arguments
+           for each task (--multi-prog option with poe).
 
 test12.#   Testing of sacct command and options
 ===============================================
@@ -398,6 +411,7 @@ test12.5   Test sacct --helpformat option.
 test13.#   Testing of switch plugins
 ====================================
 test13.1   Test that we avoid re-using active switch contexts.
+test13.2   Test for switch/nrt's --network options.
 
 
 test14.#   Testing of sbcast options.
@@ -412,7 +426,7 @@ test14.6   Test sbcast logging (--verbose option).
 test14.7   Test sbcast security issues.
 test14.8   Test sbcast transmission buffer options (--size and
            --fanout options).
-
+test14.9   Verify that an sbcast credential is properly validated.
 
 test15.#   Testing of salloc options.
 =====================================
@@ -565,6 +579,7 @@ test21.26  sacctmgr +=, -= modify QoS test
 test21.27  sacctmgr problems test
 test21.28  sacctmgr abort delete
 test21.29  sacctmgr clear (modify) QoS values
+test21.30  sacctmgr test if the QoS values are enforced
 
 
 test22.#   Testing of sreport commands and options.

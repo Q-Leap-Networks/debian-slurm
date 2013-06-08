@@ -121,11 +121,7 @@ main (int argc, char *argv[])
 		all_flag= 1;
 	if ((env_val = getenv("SLURM_CLUSTERS"))) {
 		if (!(clusters = slurmdb_get_info_cluster(env_val))) {
-			error("'%s' can't be reached now, "
-			      "or it is an invalid entry for "
-			      "SLURM_CLUSTERS.  Use 'sacctmgr --list "
-			      "cluster' to see available clusters.",
-			      env_val);
+			print_db_notok(env_val, 1);
 			exit(1);
 		}
 		working_cluster_rec = list_peek(clusters);
@@ -160,11 +156,7 @@ main (int argc, char *argv[])
 				working_cluster_rec = NULL;
 			}
 			if (!(clusters = slurmdb_get_info_cluster(optarg))) {
-				error("'%s' can't be reached now, "
-				      "or it is an invalid entry for "
-				      "--cluster.  Use 'sacctmgr --list "
-				      "cluster' to see available clusters.",
-				      optarg);
+				print_db_notok(optarg, 0);
 				exit(1);
 			}
 			working_cluster_rec = list_peek(clusters);
@@ -222,6 +214,10 @@ main (int argc, char *argv[])
 		if (error_code || exit_flag)
 			break;
 		error_code = _get_command (&input_field_count, input_fields);
+		if (exit_flag) {	/* EOF */
+			putchar('\n');
+			break;
+		}
 	}
 	if (clusters)
 		list_destroy(clusters);
@@ -253,12 +249,13 @@ static char *_getline(const char *prompt)
 
 	printf("%s", prompt);
 
-	/* we only set this here to avoid a warning.  We throw it away
-	   later. */
+	/* Set "line" here to avoid a warning.  We throw it away later. */
 	line = fgets(buf, 4096, stdin);
 
 	len = strlen(buf);
-	if ((len > 0) && (buf[len-1] == '\n'))
+	if (len == 0)
+		return NULL;
+	if (buf[len-1] == '\n')
 		buf[len-1] = '\0';
 	else
 		len++;
@@ -287,9 +284,10 @@ _get_command (int *argc, char **argv)
 #else
 	in_line = _getline("scontrol: ");
 #endif
-	if (in_line == NULL)
+	if (in_line == NULL) {
+		exit_flag = true;
 		return 0;
-	else if (strcmp (in_line, "!!") == 0) {
+	} else if (strcmp (in_line, "!!") == 0) {
 		free (in_line);
 		in_line = last_in_line;
 		in_line_size = last_in_line_size;
@@ -646,11 +644,7 @@ _process_command (int argc, char *argv[])
 		}
 		if (argc >= 2) {
 			if (!(clusters = slurmdb_get_info_cluster(argv[1]))) {
-				error("'%s' can't be reached now, "
-				      "or it is an invalid entry for "
-				      "--cluster.  Use 'sacctmgr --list "
-				      "cluster' to see available clusters.",
-				      optarg);
+				print_db_notok(argv[1], 0);
 				exit(1);
 			}
 			working_cluster_rec = list_peek(clusters);
@@ -1400,7 +1394,14 @@ _show_it (int argc, char *argv[])
 			exit_code = 1;
 			fprintf(stderr, "invalid encode argument\n");
 			_usage();
-		} else if (scontrol_encode_hostlist(val))
+		} else if (scontrol_encode_hostlist(val, 0))
+			exit_code = 1;
+	} else if (strncasecmp (tag, "hostlistsorted", MAX(tag_len, 9)) == 0) {
+		if (!val) {
+			exit_code = 1;
+			fprintf(stderr, "invalid encode argument\n");
+			_usage();
+		} else if (scontrol_encode_hostlist(val, 1))
 			exit_code = 1;
 	} else if (strncasecmp (tag, "jobs", MAX(tag_len, 1)) == 0 ||
 		   strncasecmp (tag, "jobid", MAX(tag_len, 1)) == 0 ) {
@@ -1787,7 +1788,7 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
      takeover                 ask slurm backup controller to take over     \n\
      uhold <job_id>           place user hold on specified job (see release)\n\
      update <SPECIFICATIONS>  update job, node, partition, reservation,    \n\
-			      step or bluegene block/subbp configuration   \n\
+			      step or bluegene block/submp configuration   \n\
      verbose                  enable detailed logging.                     \n\
      version                  display tool version number.                 \n\
      wait_job <job_id>        wait until the nodes allocated to the job    \n\
@@ -1795,9 +1796,9 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
      !!                       Repeat the last command entered.             \n\
 									   \n\
   <ENTITY> may be \"aliases\", \"config\", \"daemons\", \"frontend\",      \n\
-       \"hostlist\", \"hostnames\", \"job\", \"node\", \"partition\",      \n\
-       \"reservation\", \"slurmd\", \"step\", or \"topology\"              \n\
-       (also for BlueGene only: \"block\" or \"subbp\").                   \n\
+       \"hostlist\", \"hostlistsorted\", \"hostnames\", \"job\", \"node\", \n\
+       \"partition\", \"reservation\", \"slurmd\", \"step\", or \"topology\"\n\
+       (also for BlueGene only: \"block\" or \"submp\").                   \n\
 									   \n\
   <ID> may be a configuration parameter name, job id, node name, partition \n\
        name, reservation name, job step id, or hostlist or pathname to a   \n\
@@ -1823,7 +1824,7 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
 									   \n\
   <SPECIFICATIONS> are specified in the same format as the configuration   \n\
   file. You may wish to use the \"show\" keyword then use its output as    \n\
-  input for the update keyword, editing as needed.  Bluegene blocks/subbps \n\
+  input for the update keyword, editing as needed.  Bluegene blocks/submps \n\
   are only able to be set to an error or free state.  You can also remove  \n\
   blocks by specifying 'remove' as the state.  The remove option is only   \n\
   valid on Dynamic layout systems.                                         \n\

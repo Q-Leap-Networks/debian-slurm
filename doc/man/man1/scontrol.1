@@ -1,4 +1,4 @@
-.TH SCONTROL "1" "August 2011" "scontrol 2.4" "Slurm components"
+.TH SCONTROL "1" "December 2012" "scontrol 2.5" "Slurm components"
 
 .SH "NAME"
 scontrol \- Used view and modify Slurm configuration and state.
@@ -237,22 +237,27 @@ Terminate the execution of scontrol.
 Reboot all nodes in the system when they become idle using the
 \fBRebootProgram\fP as configured in SLURM's slurm.conf file.
 Accepts an option list of nodes to reboot. By default all nodes are rebooted.
+NOTE: This command does not prevent additional jobs from being scheduled on
+these nodes, so many jobs can be executed on the nodes prior to them being
+rebooted. You can explicitly drain the nodes in order to reboot nodes as soon
+as possible, but the nodes must also explicitly be returned to service after
+being rebooted. You can alternately create an advanced reservation to
+prevent additional jobs from being initiated on nodes to be rebooted.
 
 .TP
 \fBreconfigure\fP
 Instruct all Slurm daemons to re\-read the configuration file.
 This command does not restart the daemons.
 This mechanism would be used to modify configuration parameters (Epilog,
-Prolog, SlurmctldLogFile, SlurmdLogFile, etc.) register the physical
-addition or removal of nodes from the cluster or recognize the change
-of a node's configuration, such as the addition of memory or processors.
+Prolog, SlurmctldLogFile, SlurmdLogFile, etc.).
 The Slurm controller (slurmctld) forwards the request all other daemons
 (slurmd daemon on each compute node). Running jobs continue execution.
 Most configuration parameters can be changed by just running this command,
 however, SLURM daemons should be shutdown and restarted if any of these
 parameters are to be changed: AuthType, BackupAddr, BackupController,
 ControlAddr, ControlMach, PluginDir, StateSaveLocation, SlurmctldPort
-or SlurmdPort.
+or SlurmdPort. The slurmctld daemon must be restarted if nodes are added to
+or removed from the cluster.
 
 .TP
 \fBrelease\fP \fIjob_id\fP
@@ -307,7 +312,8 @@ contents of the slurm.conf configuration file.
 Display the state of the specified entity with the specified identification.
 \fIENTITY\fP may be \fIaliases\fP, \fIconfig\fP, \fIdaemons\fP, \fIfrontend\fP,
 \fIjob\fP, \fInode\fP, \fIpartition\fP, \fIreservation\fP, \fIslurmd\fP,
-\fIstep\fP, \fItopology\fP, \fIhostlist\fP or \fIhostnames\fP
+\fIstep\fP, \fItopology\fP, \fIhostlist\fP, \fIhostlistsorted\fP or
+\fIhostnames\fP
 (also \fIblock\fP or \fIsubmp\fP on BlueGene systems).
 \fIID\fP can be used to identify a specific element of the identified
 entity: the configuration parameter name, job ID, node name, partition name,
@@ -340,6 +346,9 @@ element. The job step ID is of the form "job_id.step_id", (e.g. "1234.1").
 \fIslurmd\fP reports the current status of the slurmd daemon executing
 on the same node from which the scontrol command is executed (the
 local host). It can be useful to diagnose problems.
+By default \fIhostlist\fP does not sort the node list or make it
+unique (e.g. tux2,tux1,tux2 = tux[2,1-2]).  If you wanted a sorted
+list use \fIhostlistsorted\fP (e.g. tux2,tux1,tux2 = tux[1-2,2]).
 By default, all elements of the entity type specified are printed.
 For an \fIENTITY\fP of \fIjob\fP, if the job does not specify
 socket-per-node, cores-per-socket or threads-per-core then it
@@ -379,7 +388,7 @@ primary SLURM controller is scheduled down.
 Prevent a pending job from being started (sets it's priority to 0).
 Use the \fIrelease\fP command to permit the job to be scheduled.
 This command is designed for a system administrator to hold a job so that
-the job owner may release it rather than requiring the interventon of a
+the job owner may release it rather than requiring the intervention of a
 system administrator (also see the \fBhold\fP command).
 
 .TP
@@ -579,7 +588,10 @@ Set the job's priority to the specified value.
 Note that a job priority of zero prevents the job from ever being scheduled.
 By setting a job's priority to zero it is held.
 Set the priority to a non\-zero value to permit it to run.
-Explicitly setting a job's priority clears any previously set nice value.
+Explicitly setting a job's priority clears any previously set nice value and
+removes the priority/multifactor plugin's ability to manage a job's priority.
+In order to restore the priority/multifactor plugin's ability to manage a
+job's priority, hold and then release the job.
 .TP
 \fIQOS\fP=<name>
 Set the job's QOS (Quality Of Service) to the specified value.
@@ -668,9 +680,9 @@ days\-hours:minutes:seconds.
 Time resolution is one minute and second values are rounded up to
 the next minute.
 If changing the time limit of a job, either specify a new time limit value or
-preceed the time with a "+" or "\-" to increment or decrement the current
+precede the time with a "+" or "\-" to increment or decrement the current
 time limit (e.g. "TimeLimit=+30"). In order to increment or decrement the
-current time limit, the \fIJobId\fP specification must preceed the
+current time limit, the \fIJobId\fP specification must precede the
 \fITimeLimit\fP specification.
 
 .TP
@@ -733,7 +745,7 @@ Time the job ran prior to last suspend.
 The reason job is not running: e.g., waiting "Resources".
 .TP
 \fISubmitTime\fP
-The time  and  date stamp (in Universal Time Coordiated, UTC)
+The time  and  date stamp (in Universal Time Coordinated, UTC)
 the job was submitted.  The format of the output is identical
 to that of the EndTime field.
 
@@ -778,9 +790,9 @@ days\-hours:minutes:seconds.
 Time resolution is one minute and second values are rounded up to
 the next minute.
 If changing the time limit of a step, either specify a new time limit value or
-preceed the time with a "+" or "\-" to increment or decrement the current
+precede the time with a "+" or "\-" to increment or decrement the current
 time limit (e.g. "TimeLimit=+30"). In order to increment or decrement the
-current time limit, the \fIStepId\fP specification must preceed the
+current time limit, the \fIStepId\fP specification must precede the
 \fITimeLimit\fP specification.
 
 .TP
@@ -842,6 +854,11 @@ The "NoResp" state will only set the "NoResp" flag for a node without
 changing its underlying state.
 While all of the above states are valid, some of them are not valid new
 node states given their prior state.
+If the node state code printed is followed by "~", this indicates
+the node is presently in a power saving mode (typically
+running at reduced frequency).
+If the node state code is followed by "#", this indicates
+the node is presently being powered up or configured.
 Generally only "DRAIN", "FAIL" and "RESUME" should be used.
 NOTE: The scontrol command should not be used to change node state on Cray
 systems. Use Cray tools such as \fIxtprocadmin\fR instead.
@@ -1072,20 +1089,35 @@ For create, if you do not want to give a reservation name, use
 
 .TP
 \fIAccounts\fP=<account list>
-List of accounts permitted to use the reserved nodes.
-E.g.  Accounts=physcode1,physcode2.  A user in any of the accounts
-may use the reserved nodes.
-A new reservation must specify Users and/or Accounts.  You can add or
-remove individual accounts from an existing reservation by adding
-a '+' or '\-' sign before the '=' sign.
+List of accounts permitted to use the reserved nodes, for example
+"Accounts=physcode1,physcode2".
+A user in any of the accounts may use the reserved nodes.
+A new reservation must specify Users and/or Accounts.
+If both Users and Accounts are specified, a job must match both in order to
+use the reservation.
+Accounts can also be denied access to reservations by preceding all of the
+account names with '\-'. Alternately precede the equal sign with '\-'.
+For example, "Accounts=-physcode1,-physcode2" or "Accounts-=physcode1,physcode2"
+will permit any account except physcode1 and physcode2 to use the reservation.
+You can add or remove individual accounts from an existing reservation by
+using the update command and adding a '+' or '\-' sign before the '=' sign.
+If accounts are denied access to a reservation (account name preceded by a '\-'),
+then all other accounts are implicitly allowed to use the reservation and it is
+not possible to also explicitly specify allowed accounts.
+
+.TP
+\fICoreCnt\fP=<num>
+Identify number of cores to be reserved. This should only be used for
+reservations that are less than one node in size. Otherwise use the
+\fINodeCnt\fP option described below.
 
 .TP
 \fILicenses\fP=<license>
 Specification of licenses (or other resources available on all
 nodes of the cluster) which are to be reserved.
-License names can be followed by an asterisk and count
+License names can be followed by a colon and count
 (the default count is one).
-Multiple license names should be comma separated (e.g. "Licenses=foo*4,bar").
+Multiple license names should be comma separated (e.g. "Licenses=foo:4,bar").
 A new reservation must specify one or more resource to be included: NodeCnt,
 Nodes and/or Licenses.
 If a reservation includes Licenses, but no NodeCnt or Nodes, then the option
@@ -1111,7 +1143,10 @@ Identify the node(s) to be reserved. Multiple node names
 may be specified using simple node range expressions (e.g. "Nodes=lx[10\-20]").
 Specify a blank data value to remove all nodes from a reservation: "Nodes=".
 A new reservation must specify one or more resource to be included: NodeCnt,
-Nodes and/or Licenses. A specification of "ALL" will reserve all nodes.
+Nodes and/or Licenses. A specification of "ALL" will reserve all nodes. Set
+\fIFlags=PART_NODES\fP and \fIPartitionName=\fP in order for changes in the
+nodes associated with a partition to also be reflected in the nodes associated
+with a reservation.
 
 .TP
 \fIStartTime\fP=<time_spec>
@@ -1179,6 +1214,11 @@ Ignore currently running jobs when creating the reservation.
 This can be especially useful when reserving all nodes in the system
 for maintenance.
 .TP
+\fIPART_NODES\fR
+This flag can be used to reserve all nodes within the specified
+partition.  PartitionName and Nodes=ALL must be specified or
+this option is ignored.
+.TP
 \fIDAILY\fR
 Repeat the reservation at the same time every day
 .TP
@@ -1203,11 +1243,20 @@ Value may be cleared with blank data value, "Features=".
 
 .TP
 \fIUsers\fP=<user list>
-List of users permitted to use the reserved nodes.
-E.g.  Users=jones1,smith2.
-A new reservation must specify Users and/or Accounts.  You can add or
-remove individual users from an existing reservation by adding a '+'
-or '\-' sign before the '=' sign.
+List of users permitted to use the reserved nodes, for example
+"User=jones1,smith2".
+A new reservation must specify Users and/or Accounts.
+If both Users and Accounts are specified, a job must match both in order to
+use the reservation.
+Users can also be denied access to reservations by preceding all of the
+user names with '\-'. Alternately precede the equal sign with '\-'.
+For example, "User=-jones1,-smith2" or "User-=jones1,smith2"
+will permit any user except jones1 and smith2 to use the reservation.
+You can add or remove individual users from an existing reservation by
+using the update command and adding a '+' or '\-' sign before the '=' sign.
+If users are denied access to a reservation (user name preceded by a '\-'),
+then all other users are implicitly allowed to use the reservation and it is
+not possible to also explicitly specify allowed users.
 
 .TP
 \fBSPECIFICATIONS FOR UPDATE BLOCK/SUBMP \fR
@@ -1249,7 +1298,31 @@ Identify the bluegene ionodes to be updated (i.e. bg000[0\-3]). This
 specification is required.
 NOTE: Even on BGQ where node names are given in bg0000[00000] format
 this option takes an ionode name bg0000[0].
+
 .TP
+\fBDESCRIPTION FOR SHOW COMMAND, NODES\fR
+.TP
+The meaning of the energy information is as follows:
+
+.TP
+\fICurrentWatts\fP
+The instantaneous power consumption of the node at the time of the last node
+energy accounting sample, in watts.
+
+.TP
+\fILowestJoules\fP
+The energy consumed by the node between the last time it was powered on and
+the last time it was registered by slurmd, in joules.
+
+.TP
+\fIConsumedJoules\fP
+The energy consumed by the node between the last time it was registered by
+the slurmd daemon and the last node energy accounting sample, in joules.
+
+.PP
+If the reported value is "n/s" (not supported), the node does not support the
+configured \fBAcctGatherEnergyType\fR plugin. If the reported value is zero, energy
+accounting for nodes is disabled.
 
 .SH "ENVIRONMENT VARIABLES"
 .PP
@@ -1418,7 +1491,7 @@ Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 CODE\-OCEC\-09\-009. All rights reserved.
 .LP
 This file is part of SLURM, a resource management program.
-For details, see <http://www.schedmd.com/slurmdocs/>.
+For details, see <http://slurm.schedmd.com/>.
 .LP
 SLURM is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free

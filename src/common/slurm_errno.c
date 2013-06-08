@@ -228,7 +228,7 @@ static slurm_errtab_t slurm_errtab[] = {
 	  "The node configuration changes that were made require restart "
 	  "of the slurmctld daemon to take effect"},
 	{ ESLURM_ACCOUNTING_POLICY,
-	  "Job violates accounting policy (job submit limit, user's "
+	  "Job violates accounting/QOS policy (job submit limit, user's "
 	  "size and/or time limits)"},
 	{ ESLURM_INVALID_TIME_LIMIT,
 	  "Requested time limit is invalid (exceeds some limit)"},
@@ -282,6 +282,10 @@ static slurm_errtab_t slurm_errtab[] = {
 	  "Job is current suspended, requested operation disabled"	},
 	{ ESLURM_CAN_NOT_START_IMMEDIATELY,
 	  "Job can not start immediately"			},
+	{ ESLURM_INTERCONNECT_BUSY,
+	  "Switch resources currently not available"		},
+	{ ESLURM_RESERVATION_EMPTY,
+	  "Reservation request lacks users or accounts"		},
 
 	/* slurmd error codes */
 
@@ -440,7 +444,7 @@ char *slurm_strerror(int errnum)
 /*
  * Get errno
  */
-int slurm_get_errno()
+int slurm_get_errno(void)
 {
 	return errno;
 }

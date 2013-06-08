@@ -21,6 +21,9 @@
 /* Define to 1 for debugger partial task attach support. */
 #undef DEBUGGER_PARTIAL_ATTACH
 
+/* Define to 1 if using glib-2.32.0 or higher */
+#undef GLIB_NEW_THREADS
+
 /* Define to 1 if licensed under terms of the GNU General Public License. */
 #undef GPL_LICENSED
 
@@ -112,6 +115,9 @@
 /* Define to 1 if you have the `fdatasync' function. */
 #undef HAVE_FDATASYNC
 
+/* Define to 1 if you have the <float.h> header file. */
+#undef HAVE_FLOAT_H
+
 /* Define to 1 if running slurmd on front-end only */
 #undef HAVE_FRONT_END
 
@@ -139,32 +145,17 @@
 /* Define to 1 if you have the <kstat.h> header file. */
 #undef HAVE_KSTAT_H
 
-/* define if you have libelan3. */
-#undef HAVE_LIBELAN3
-
-/* define if you have libelanctrl. */
-#undef HAVE_LIBELANCTRL
-
-/* define if you have libelanhosts. */
-#undef HAVE_LIBELANHOSTS
-
 /* Define to 1 if you have the `expat' library (-lexpat). */
 #undef HAVE_LIBEXPAT
 
 /* Define to 1 if you have the `job' library (-ljob). */
 #undef HAVE_LIBJOB
 
-/* define if you have libntbl. */
-#undef HAVE_LIBNTBL
-
 /* Define to 1 if you have the <limits.h> header file. */
 #undef HAVE_LIMITS_H
 
 /* Define to 1 if you have the <linux/sched.h> header file. */
 #undef HAVE_LINUX_SCHED_H
-
-/* Define to 1 if you have the <llapi.h> header file. */
-#undef HAVE_LLAPI_H
 
 /* Define to 1 if your system has a GNU libc compatible `malloc' function, and
    to 0 otherwise. */
@@ -188,7 +179,7 @@
 /* Define to 1 if you have the <netdb.h> header file. */
 #undef HAVE_NETDB_H
 
-/* Define to 1 if you have the <nrt.h> header file. */
+/* define if you have nrt.h */
 #undef HAVE_NRT_H
 
 /* define if numa library installed */
@@ -205,6 +196,9 @@
 
 /* Define to 1 if you have the <paths.h> header file. */
 #undef HAVE_PATHS_H
+
+/* define if you have permapi_h */
+#undef HAVE_PERMAPI_H
 
 /* Define to 1 if using PostgreSQL libaries */
 #undef HAVE_PGSQL
@@ -363,6 +357,9 @@
    member named physmem. */
 #undef HAVE__SYSTEM_CONFIGURATION
 
+/* Define the libnrt.so location */
+#undef LIBNRT_SO
+
 /* Define to 1 for --get-user-env to load user environment without .login */
 #undef LOAD_ENV_NO_LOGIN
 
@@ -506,6 +503,9 @@
 /* define if using ISO 8601 time format */
 #undef USE_ISO_8601
 
+/* define if using RFC 5424 time format */
+#undef USE_RFC5424_TIME
+
 /* Version number of package */
 #undef VERSION
 
@@ -532,6 +532,11 @@
 
 /* Define location of XCPU directory */
 #undef XCPU_DIR
+
+/* Enable large inode numbers on Mac OS X 10.5.  */
+#ifndef _DARWIN_USE_64_BIT_INODE
+# define _DARWIN_USE_64_BIT_INODE 1
+#endif
 
 /* Number of bits in a file offset, on hosts where this is settable. */
 #undef _FILE_OFFSET_BITS

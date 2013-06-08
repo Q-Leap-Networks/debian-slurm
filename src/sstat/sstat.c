@@ -52,9 +52,11 @@ int _do_stat(uint32_t jobid, uint32_t stepid, char *nodelist);
 sstat_parameters_t params;
 print_field_t fields[] = {
 	{10, "AveCPU", print_fields_str, PRINT_AVECPU},
+	{10, "AveCPUFreq", print_fields_str, PRINT_ACT_CPUFREQ},
 	{10, "AvePages", print_fields_str, PRINT_AVEPAGES},
 	{10, "AveRSS", print_fields_str, PRINT_AVERSS},
 	{10, "AveVMSize", print_fields_str, PRINT_AVEVSIZE},
+	{14, "ConsumedEnergy", print_fields_str, PRINT_CONSUMED_ENERGY},
 	{-12, "JobID", print_fields_str, PRINT_JOBID},
 	{8, "MaxPages", print_fields_str, PRINT_MAXPAGES},
 	{12, "MaxPagesNode", print_fields_str, PRINT_MAXPAGESNODE},
@@ -92,10 +94,15 @@ int _do_stat(uint32_t jobid, uint32_t stepid, char *nodelist)
 	hostlist_t hl = NULL;
 
 	debug("requesting info for job %u.%u", jobid, stepid);
-	if((rc = slurm_job_step_stat(jobid, stepid, nodelist,
+	if ((rc = slurm_job_step_stat(jobid, stepid, nodelist,
 				     &step_stat_response)) != SLURM_SUCCESS) {
-		error("problem getting step_layout for %u.%u: %s",
-		      jobid, stepid, slurm_strerror(rc));
+		if (rc == ESLURM_INVALID_JOB_ID) {
+			debug("job step %u.%u has already completed",
+			      jobid, stepid);
+		} else {
+			error("problem getting step_layout for %u.%u: %s",
+			      jobid, stepid, slurm_strerror(rc));
+		}
 		return rc;
 	}
 
@@ -117,27 +124,26 @@ int _do_stat(uint32_t jobid, uint32_t stepid, char *nodelist)
 
 	hl = hostlist_create(NULL);
 	itr = list_iterator_create(step_stat_response->stats_list);
-	while((step_stat = list_next(itr))) {
-		if(!step_stat->step_pids || !step_stat->step_pids->node_name)
+	while ((step_stat = list_next(itr))) {
+		if (!step_stat->step_pids || !step_stat->step_pids->node_name)
 			continue;
 		if (step_stat->step_pids->pid_cnt > 0 ) {
 			int i;
 			for(i=0; i<step_stat->step_pids->pid_cnt; i++) {
-				if(step.pid_str)
+				if (step.pid_str)
 					xstrcat(step.pid_str, ",");
 				xstrfmtcat(step.pid_str, "%u",
 					   step_stat->step_pids->pid[i]);
 			}
 		}
 
-		if(params.pid_format) {
+		if (params.pid_format) {
 			step.nodes = step_stat->step_pids->node_name;
 			print_fields(&step);
 			xfree(step.pid_str);
 		} else {
 			hostlist_push(hl, step_stat->step_pids->node_name);
-			jobacct_gather_g_2_stats(&temp_stats,
-						 step_stat->jobacct);
+			jobacctinfo_2_stats(&temp_stats, step_stat->jobacct);
 			ntasks += step_stat->num_tasks;
 			aggregate_stats(&step.stats, &temp_stats);
 		}
@@ -153,11 +159,12 @@ int _do_stat(uint32_t jobid, uint32_t stepid, char *nodelist)
 	hostlist_destroy(hl);
 	tot_tasks += ntasks;
 
-	if(tot_tasks) {
+	if (tot_tasks) {
 		step.stats.cpu_ave /= (double)tot_tasks;
 		step.stats.rss_ave /= (double)tot_tasks;
 		step.stats.vsize_ave /= (double)tot_tasks;
 		step.stats.pages_ave /= (double)tot_tasks;
+		step.stats.act_cpufreq /= (double)tot_tasks;
 		step.ntasks = tot_tasks;
 	}
 
@@ -172,25 +179,35 @@ int main(int argc, char **argv)
 	uint32_t stepid = 0;
 	slurmdb_selected_step_t *selected_step = NULL;
 
+#ifdef HAVE_CRAY
+	error("The sstat command is not supported on Cray systems");
+	return 1;
+#endif
+#ifdef HAVE_BG
+	error("The sstat command is not supported on IBM BlueGene systems");
+	return 1;
+#endif
+
 	print_fields_list = list_create(NULL);
 	print_fields_itr = list_iterator_create(print_fields_list);
 
 	parse_command_line(argc, argv);
-	if(!params.opt_job_list || !list_count(params.opt_job_list)) {
+	if (!params.opt_job_list || !list_count(params.opt_job_list)) {
 		error("You didn't give me any jobs to stat.");
 		return 1;
 	}
 
 	print_fields_header(print_fields_list);
 	itr = list_iterator_create(params.opt_job_list);
-	while((selected_step = list_next(itr))) {
+	while ((selected_step = list_next(itr))) {
 		char *nodelist = NULL;
-		if(selected_step->stepid == INFINITE) {
+		bool free_nodelist = false;
+		if (selected_step->stepid == INFINITE) {
 			/* get the batch step info */
 			job_info_msg_t *job_ptr = NULL;
 			hostlist_t hl;
 
-			if(slurm_load_job(
+			if (slurm_load_job(
 				   &job_ptr, selected_step->jobid, SHOW_ALL)) {
 				error("couldn't get info for job %u",
 				      selected_step->jobid);
@@ -199,24 +216,23 @@ int main(int argc, char **argv)
 
 			stepid = NO_VAL;
 			hl = hostlist_create(job_ptr->job_array[0].nodes);
-			/* memory leak here, but it is so small we
-			   will ignore it.
-			*/
 			nodelist = hostlist_pop(hl);
+			free_nodelist = true;
 			hostlist_destroy(hl);
 			slurm_free_job_info_msg(job_ptr);
-		} else if(selected_step->stepid != NO_VAL)
+		} else if (selected_step->stepid != NO_VAL) {
 			stepid = selected_step->stepid;
-		else if(params.opt_all_steps) {
+		} else if (params.opt_all_steps) {
 			job_step_info_response_msg_t *step_ptr = NULL;
 			int i = 0;
-			if(slurm_get_job_steps(
+			if (slurm_get_job_steps(
 				   0, selected_step->jobid, NO_VAL,
 				   &step_ptr, SHOW_ALL)) {
 				error("couldn't get steps for job %u",
 				      selected_step->jobid);
 				continue;
 			}
+
 			for (i = 0; i < step_ptr->job_step_count; i++) {
 				_do_stat(selected_step->jobid,
 					 step_ptr->job_steps[i].step_id,
@@ -227,14 +243,14 @@ int main(int argc, char **argv)
 		} else {
 			/* get the first running step to query against. */
 			job_step_info_response_msg_t *step_ptr = NULL;
-			if(slurm_get_job_steps(
+			if (slurm_get_job_steps(
 				   0, selected_step->jobid, NO_VAL,
 				   &step_ptr, SHOW_ALL)) {
 				error("couldn't get steps for job %u",
 				      selected_step->jobid);
 				continue;
 			}
-			if(!step_ptr->job_step_count) {
+			if (!step_ptr->job_step_count) {
 				error("no steps running for job %u",
 				      selected_step->jobid);
 				continue;
@@ -243,16 +259,18 @@ int main(int argc, char **argv)
 			nodelist = step_ptr->job_steps[0].nodes;
 		}
 		_do_stat(selected_step->jobid, stepid, nodelist);
+		if (free_nodelist && nodelist)
+			free(nodelist);
 	}
 	list_iterator_destroy(itr);
 
 	xfree(params.opt_field_list);
-	if(params.opt_job_list)
+	if (params.opt_job_list)
 		list_destroy(params.opt_job_list);
 
-	if(print_fields_itr)
+	if (print_fields_itr)
 		list_iterator_destroy(print_fields_itr);
-	if(print_fields_list)
+	if (print_fields_list)
 		list_destroy(print_fields_list);
 
 	return 0;

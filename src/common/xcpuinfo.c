@@ -2,6 +2,7 @@
  *  xcpuinfo.c - cpuinfo related primitives
  *****************************************************************************
  *  Copyright (C) 2009 CEA/DAM/DIF
+ *  Portions (hwloc) copyright (C) 2012 Bull, <rod.schultz@bull.com>
  *  Written by Matthieu Hautreux <matthieu.hautreux@cea.fr>
  *
  *  This file is part of SLURM, a resource management program.
@@ -60,14 +61,20 @@
 #include "src/common/xstring.h"
 #include "src/slurmd/slurmd/get_mach_stat.h"
 
+#ifdef HAVE_HWLOC
+#include <hwloc.h>
+#endif
+
 #include "xcpuinfo.h"
 
+#if !defined(HAVE_HWLOC)
 static char* _cpuinfo_path = "/proc/cpuinfo";
 
 static int _compute_block_map(uint16_t numproc,
 			      uint16_t **block_map, uint16_t **block_map_inv);
 static int _chk_cpuinfo_str(char *buffer, char *keyword, char **valptr);
 static int _chk_cpuinfo_uint32(char *buffer, char *keyword, uint32_t *val);
+#endif
 
 static int _ranges_conv(char* lrange, char** prange, int mode);
 static int _range_to_map(char* range, uint16_t *map, uint16_t map_size,
@@ -75,7 +82,7 @@ static int _range_to_map(char* range, uint16_t *map, uint16_t map_size,
 static int _map_to_range(uint16_t *map, uint16_t map_size, char** prange);
 
 bool     initialized = false;
-uint16_t procs, sockets, cores, threads=1;
+uint16_t procs, boards, sockets, cores, threads=1;
 uint16_t block_map_size;
 uint16_t *block_map, *block_map_inv;
 
@@ -134,8 +141,9 @@ get_procs(uint16_t *procs)
 
 /*
  * get_cpuinfo - Return detailed cpuinfo on this system
- * Input:  numproc - number of processors on the system
- * Output: p_sockets - number of physical processor sockets
+ * Output: p_cpus - number of processors on the system
+ *         p_boards - number of baseboards (containing sockets)
+ *         p_sockets - number of physical processor sockets
  *         p_cores - total number of physical CPU cores
  *         p_threads - total number of hardware execution threads
  *         block_map - asbtract->physical block distribution map
@@ -143,6 +151,170 @@ get_procs(uint16_t *procs)
  *         return code - 0 if no error, otherwise errno
  * NOTE: User must xfree block_map and block_map_inv
  */
+#ifdef HAVE_HWLOC
+#if DEBUG_DETAIL
+static void hwloc_children(hwloc_topology_t topology, hwloc_obj_t obj,
+                           int depth)
+{
+	char string[128];
+	unsigned i;
+
+	hwloc_obj_snprintf(string, sizeof(string), topology, obj, "#", 0);
+	debug3("%*s%s", 2*depth, "", string);
+	for (i = 0; i < obj->arity; i++) {
+		hwloc_children(topology, obj->children[i], depth + 1);
+	}
+}
+#endif
+
+extern int
+get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
+	    uint16_t *p_sockets, uint16_t *p_cores, uint16_t *p_threads,
+	    uint16_t *p_block_map_size,
+	    uint16_t **p_block_map, uint16_t **p_block_map_inv)
+{
+	enum { SOCKET=0, CORE=1, PU=2, LAST_OBJ=3 };
+	hwloc_topology_t topology;
+	hwloc_obj_t obj;
+	hwloc_obj_type_t objtype[LAST_OBJ];
+	unsigned idx[LAST_OBJ];
+	int nobj[LAST_OBJ];
+	int actual_cpus;
+	int macid;
+	int absid;
+	int actual_boards = 1, depth;
+	int i;
+
+	debug2("hwloc_topology_init");
+	if (hwloc_topology_init(&topology)) {
+		/* error in initialize hwloc library */
+		debug("hwloc_topology_init() failed.");
+		return 1;
+	}
+
+	/* parse all system */
+	hwloc_topology_set_flags(topology, HWLOC_TOPOLOGY_FLAG_WHOLE_SYSTEM);
+
+	/* ignores cache, misc */
+	hwloc_topology_ignore_type (topology, HWLOC_OBJ_CACHE);
+	hwloc_topology_ignore_type (topology, HWLOC_OBJ_MISC);
+
+	/* load topology */
+	debug2("hwloc_topology_load");
+	if (hwloc_topology_load(topology)) {
+		/* error in load hardware topology */
+		debug("hwloc_topology_load() failed.");
+		hwloc_topology_destroy(topology);
+		return 2;
+	}
+
+	/* At least on a temporary basis, one could map AMD Bulldozer entities
+	 * onto the entities that Slurm does optimize placement for today (e.g.
+	 * map each Bulldozer core to a thread and each Bulldozer module to a
+	 * Slurm core, alternately map the Bulldozer module to a Slurm socket
+	 * and the Bulldozer socket to a Slurm board). Perhaps not ideal, but
+	 * it would achieve the desired locality. */
+
+	if ( hwloc_get_type_depth(topology, HWLOC_OBJ_NODE) >
+	     hwloc_get_type_depth(topology, HWLOC_OBJ_SOCKET) ) {
+		/* One socket contains multiple NUMA-nodes 
+		 * like AMD Opteron 6000 series etc.
+		 * In such case, use NUMA-node instead of socket. */
+		objtype[SOCKET] = HWLOC_OBJ_NODE;
+		objtype[CORE]   = HWLOC_OBJ_CORE;
+		objtype[PU]     = HWLOC_OBJ_PU;
+	} else {
+		objtype[SOCKET] = HWLOC_OBJ_SOCKET;
+		objtype[CORE]   = HWLOC_OBJ_CORE;
+		objtype[PU]     = HWLOC_OBJ_PU;
+	}
+
+	/* number of objects */
+	depth = hwloc_get_type_depth(topology, HWLOC_OBJ_GROUP);
+	if (depth != HWLOC_TYPE_DEPTH_UNKNOWN) {
+		actual_boards = MAX(hwloc_get_nbobjs_by_depth(topology, depth),
+				    1);
+	}
+	nobj[SOCKET] = hwloc_get_nbobjs_by_type(topology, objtype[SOCKET]);
+	nobj[CORE]   = hwloc_get_nbobjs_by_type(topology, objtype[CORE]);
+	actual_cpus  = hwloc_get_nbobjs_by_type(topology, objtype[PU]);
+	nobj[PU]     = actual_cpus/nobj[CORE];  /* threads per core */
+	nobj[CORE]  /= nobj[SOCKET];            /* cores per socket */
+
+	debug("CPUs:%d Boards:%u Sockets:%d CoresPerSocket:%d ThreadsPerCore:%d",
+	      actual_cpus, actual_boards, nobj[SOCKET], nobj[CORE], nobj[PU]);
+
+	/* allocate block_map */
+	*p_block_map_size = (uint16_t)actual_cpus;
+	if (p_block_map && p_block_map_inv) {
+		*p_block_map     = xmalloc(actual_cpus * sizeof(uint16_t));
+		*p_block_map_inv = xmalloc(actual_cpus * sizeof(uint16_t));
+
+		/* initialize default as linear mapping */
+		for (i = 0; i < actual_cpus; i++) {
+			(*p_block_map)[i]     = i;
+			(*p_block_map_inv)[i] = i;
+		}
+		
+		/* create map with hwloc */
+		for (idx[SOCKET]=0; idx[SOCKET]<nobj[SOCKET]; ++idx[SOCKET]) {
+			for (idx[CORE]=0; idx[CORE]<nobj[CORE]; ++idx[CORE]) {
+				for (idx[PU]=0; idx[PU]<nobj[PU]; ++idx[PU]) {
+					/* get hwloc_obj by indexes */
+					obj=hwloc_get_obj_below_array_by_type(
+					            topology, 3, objtype, idx);
+					if (!obj)
+						continue;
+					macid = obj->os_index;
+					absid = idx[SOCKET]*nobj[CORE]*nobj[PU]
+					      + idx[CORE]*nobj[PU]
+					      + idx[PU];
+
+					if ((macid >= actual_cpus) ||
+					    (absid >= actual_cpus)) {
+						/* physical or logical ID are
+						 * out of range */
+						continue;
+					}
+					debug4("CPU map[%d]=>%d", absid, macid);
+					(*p_block_map)[absid]     = macid;
+					(*p_block_map_inv)[macid] = absid;
+				}
+			 }
+		}
+	}
+
+	hwloc_topology_destroy(topology);
+
+	/* update output parameters */
+	*p_cpus    = actual_cpus;
+	*p_boards  = actual_boards;
+	*p_sockets = nobj[SOCKET];
+	*p_cores   = nobj[CORE];
+	*p_threads = nobj[PU];
+
+#if DEBUG_DETAIL
+	/*** Display raw data ***/
+	debug("CPUs:%u Boards:%u Sockets:%u CoresPerSocket:%u ThreadsPerCore:%u",
+	      *p_cpus, *p_boards, *p_sockets, *p_cores, *p_threads);
+
+	/* Display the mapping tables */
+	if (p_block_map && p_block_map_inv) {
+		debug("------");
+		debug("Abstract -> Machine logical CPU ID block mapping:");
+		debug("AbstractId PhysicalId Inverse");
+		for (i = 0; i < *p_cpus; i++) {
+			debug3("   %4d      %4u       %4u",
+				i, (*p_block_map)[i], (*p_block_map_inv)[i]);
+		}
+		debug("------");
+	}
+#endif
+	return 0;
+
+}
+#else
+
 typedef struct cpuinfo {
 	uint16_t seen;
 	uint32_t cpuid;
@@ -156,12 +328,14 @@ typedef struct cpuinfo {
 static cpuinfo_t *cpuinfo = NULL; /* array of CPU information for get_cpuinfo */
 				  /* Note: file static for qsort/_compare_cpus*/
 extern int
-get_cpuinfo(uint16_t numproc,
-		uint16_t *p_sockets, uint16_t *p_cores, uint16_t *p_threads,
-		uint16_t *block_map_size,
-		uint16_t **block_map, uint16_t **block_map_inv)
+get_cpuinfo(uint16_t *p_cpus, uint16_t *p_boards,
+	    uint16_t *p_sockets, uint16_t *p_cores, uint16_t *p_threads,
+	    uint16_t *p_block_map_size,
+	    uint16_t **p_block_map, uint16_t **p_block_map_inv)
 {
 	int retval;
+
+	uint16_t numproc;
 	uint16_t numcpu	   = 0;		/* number of cpus seen */
 	uint16_t numphys   = 0;		/* number of unique "physical id"s */
 	uint16_t numcores  = 0;		/* number of unique "cores id"s */
@@ -191,12 +365,15 @@ get_cpuinfo(uint16_t numproc,
 	uint16_t curcpu, sockets, cores, threads;
 #endif
 
-	*p_sockets = numproc;		/* initially all single core/thread */
+	get_procs(&numproc);
+	*p_cpus = numproc;
+	*p_boards = 1;		/* Boards not identified from /proc/cpuinfo */
+	*p_sockets = numproc;	/* initially all single core/thread */
 	*p_cores   = 1;
 	*p_threads = 1;
-	*block_map_size = 0;
-	*block_map      = NULL;
-	*block_map_inv  = NULL;
+	*p_block_map_size = 0;
+	*p_block_map      = NULL;
+	*p_block_map_inv  = NULL;
 
 #if defined (__sun)
 	kstat_ctl_t   *kc;
@@ -451,8 +628,9 @@ get_cpuinfo(uint16_t numproc,
 	debug3("Threads per core: %u", threads);
 #endif
 
-	*block_map_size = numcpu;
-	retval = _compute_block_map(*block_map_size, block_map, block_map_inv);
+	*p_block_map_size = numcpu;
+	retval = _compute_block_map(*p_block_map_size, p_block_map,
+				    p_block_map_inv);
 
 	xfree(cpuinfo);		/* done with raw cpuinfo data */
 
@@ -601,7 +779,6 @@ static int _compute_block_map(uint16_t numproc,
 			(*block_map_inv)[idx] = i;
 		}
 	}
-
 #if DEBUG_DETAIL
 	/* Display the mapping tables */
 
@@ -659,6 +836,7 @@ static int _compute_block_map(uint16_t numproc,
 #endif
 	return 0;
 }
+#endif
 
 int _ranges_conv(char* lrange,char** prange,int mode);
 
@@ -676,10 +854,7 @@ xcpuinfo_init(void)
 	if ( initialized )
 		return XCPUINFO_SUCCESS;
 
-	if ( get_procs(&procs) )
-		return XCPUINFO_ERROR;
-
-	if ( get_cpuinfo(procs,&sockets,&cores,&threads,
+	if ( get_cpuinfo(&procs,&boards,&sockets,&cores,&threads,
 			 &block_map_size,&block_map,&block_map_inv) )
 		return XCPUINFO_ERROR;
 

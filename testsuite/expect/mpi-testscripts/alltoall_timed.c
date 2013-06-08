@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include "mpi.h"
 
 #define ALLTOALL_COUNT 1000
@@ -42,7 +43,7 @@ int main(int argc, char **argv)
      printf("AFTER ALLTOALLS, START TIME = %f, END TIME = %f, DIFF (sec) = %f,\n",start,end,diff);
      printf("\t\tITERS = %d, AVG (usec) = %f, EXPECTED = %d\n",ALLTOALL_COUNT,avg_diff_usec, EXPECTED_AVG_uSEC);
      if (avg_diff_usec < EXPECTED_AVG_uSEC) {
-       printf ("Passed\n");
+       printf ("PASSED\n");
      }
      else if (avg_diff_usec < (2* EXPECTED_AVG_uSEC)) {
        printf ("Acceptable\n");

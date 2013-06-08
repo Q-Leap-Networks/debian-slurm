@@ -160,13 +160,14 @@ extern int other_alter_node_cnt(enum select_node_cnt type, void *data);
  *		jobs to be preempted to initiate the pending job. Not set
  *		if mode=SELECT_MODE_TEST_ONLY or input pointer is NULL.
  *		Existing list is appended to.
+ * IN exc_core_bitmap - bitmap of cores being reserved.
  * RET zero on success, EINVAL otherwise
  */
 extern int other_job_test(struct job_record *job_ptr, bitstr_t *bitmap,
 			  uint32_t min_nodes, uint32_t max_nodes,
 			  uint32_t req_nodes, uint16_t mode,
-			  List preemptee_candidates,
-			  List *preemptee_job_list);
+			  List preemptee_candidates, List *preemptee_job_list,
+			  bitstr_t *exc_core_bitmap);
 
 /*
  * Note initiation of job is about to begin. Called immediately
@@ -350,7 +351,7 @@ extern select_nodeinfo_t *other_select_nodeinfo_alloc(void);
 
 extern int other_select_nodeinfo_free(select_nodeinfo_t *nodeinfo);
 
-extern int other_select_nodeinfo_set_all(time_t last_query_time);
+extern int other_select_nodeinfo_set_all(void);
 
 extern int other_select_nodeinfo_set(struct job_record *job_ptr);
 
@@ -378,7 +379,8 @@ extern int other_pack_select_info(time_t last_query_time, uint16_t show_flags,
 /* Note reconfiguration or change in partition configuration */
 extern int other_reconfigure(void);
 
-extern bitstr_t * other_resv_test(bitstr_t *avail_bitmap, uint32_t node_cnt);
+extern bitstr_t * other_resv_test(bitstr_t *avail_bitmap, uint32_t node_cnt,
+				  uint32_t core_cnt, bitstr_t **core_bitmap);
 
 extern void other_ba_init(node_info_msg_t *node_info_ptr, bool sanity_check);
 extern void other_ba_fini(void);

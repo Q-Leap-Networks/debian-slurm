@@ -57,9 +57,11 @@
 #include "src/common/slurm_protocol_defs.h"
 #include "src/common/switch.h"
 #include "src/common/xmalloc.h"
+#include "src/common/xstring.h"
 #include "src/common/job_options.h"
 #include "src/common/forward.h"
 #include "src/common/slurm_jobacct_gather.h"
+#include "src/common/slurm_acct_gather_energy.h"
 #include "src/plugins/select/bluegene/bg_enums.h"
 
 /*
@@ -492,18 +494,31 @@ extern void slurm_free_job_info_members(job_info_t * job)
 	}
 }
 
+
+extern void slurm_free_acct_gather_node_resp_msg(
+	acct_gather_node_resp_msg_t *msg)
+{
+	if (msg) {
+		xfree(msg->node_name);
+		acct_gather_energy_destroy(msg->energy);
+		xfree(msg);
+	}
+}
+
 extern void slurm_free_node_registration_status_msg(
 	slurm_node_registration_status_msg_t * msg)
 {
 	if (msg) {
 		xfree(msg->arch);
+		if (msg->energy)
+			acct_gather_energy_destroy(msg->energy);
 		if (msg->gres_info)
 			free_buf(msg->gres_info);
 		xfree(msg->job_id);
 		xfree(msg->node_name);
 		xfree(msg->os);
 		xfree(msg->step_id);
-		if (msg->startup)
+		if (msg->switch_nodeinfo)
 			switch_g_free_node_info(&msg->switch_nodeinfo);
 		xfree(msg);
 	}
@@ -600,7 +615,7 @@ extern void slurm_free_complete_batch_script_msg(
 		complete_batch_script_msg_t * msg)
 {
 	if (msg) {
-		jobacct_gather_g_destroy(msg->jobacct);
+		jobacctinfo_destroy(msg->jobacct);
 		xfree(msg->node_name);
 		xfree(msg);
 	}
@@ -856,10 +871,13 @@ extern void slurm_free_suspend_msg(suspend_msg_t *msg)
 	xfree(msg);
 }
 
-/*extern void slurm_free_stats_request_msg(stats_desc_msg_t *msg)
+extern void slurm_free_suspend_int_msg(suspend_int_msg_t *msg)
 {
-	xfree(msg);
-}*/
+	if (msg) {
+		interconnect_suspend_info_free(msg->switch_info);
+		xfree(msg);
+	}
+}
 
 extern void slurm_free_stats_response_msg(stats_info_response_msg_t *msg)
 {
@@ -979,6 +997,11 @@ inline void slurm_free_forward_data_msg(forward_data_msg_t *msg)
 		xfree(msg->data);
 		xfree(msg);
 	}
+}
+
+extern void slurm_free_ping_slurmd_resp(ping_slurmd_resp_msg_t *msg)
+{
+	xfree(msg);
 }
 
 extern char *preempt_mode_string(uint16_t preempt_mode)
@@ -1391,6 +1414,16 @@ extern char *reservation_flags_string(uint16_t flags)
 			xstrcat(flag_str, ",");
 		xstrcat(flag_str, "NO_STATIC");
 	}
+	if (flags & RESERVE_FLAG_PART_NODES) {
+		if (flag_str[0])
+			xstrcat(flag_str, ",");
+		xstrcat(flag_str, "PART_NODES");
+	}
+	if (flags & RESERVE_FLAG_NO_PART_NODES) {
+		if (flag_str[0])
+			xstrcat(flag_str, ",");
+		xstrcat(flag_str, "NO_PART_NODES");
+	}
 	return flag_str;
 }
 
@@ -1407,9 +1440,12 @@ extern char *node_state_string(uint16_t inx)
 	bool power_up_flag   = (inx & NODE_STATE_POWER_UP);
 
 	if (maint_flag) {
-		if (no_resp_flag)
+		if ((base == NODE_STATE_ALLOCATED) ||
+		    (base == NODE_STATE_MIXED))
+			;
+		else if (no_resp_flag)
 			return "MAINT*";
-		if (base != NODE_STATE_ALLOCATED)
+		else
 			return "MAINT";
 	}
 	if (drain_flag) {
@@ -1525,9 +1561,11 @@ extern char *node_state_string_compact(uint16_t inx)
 	inx = (uint16_t) (inx & NODE_STATE_BASE);
 
 	if (maint_flag) {
-		if (no_resp_flag)
+		if ((inx == NODE_STATE_ALLOCATED) || (inx == NODE_STATE_MIXED))
+			;
+		else if (no_resp_flag)
 			return "MAINT*";
-		if (inx != NODE_STATE_ALLOCATED)
+		else
 			return "MAINT";
 	}
 	if (drain_flag) {
@@ -1698,12 +1736,17 @@ extern void accounting_enforce_string(uint16_t enforce, char *str, int str_len)
 			strcat(str, ",");
 		strcat(str, "qos"); //4 len
 	}
+	if (enforce & ACCOUNTING_ENFORCE_SAFE) {
+		if (str[0])
+			strcat(str, ",");
+		strcat(str, "safe"); //5 len
+	}
 	if (enforce & ACCOUNTING_ENFORCE_WCKEYS) {
 		if (str[0])
 			strcat(str, ",");
 		strcat(str, "wckeys"); //7 len
 	}
-	// total len 30
+	// total len 35
 
 	if (str[0] == '\0')
 		strcat(str, "none");
@@ -2218,7 +2261,7 @@ extern void slurm_free_file_bcast_msg(file_bcast_msg_t *msg)
 extern void slurm_free_step_complete_msg(step_complete_msg_t *msg)
 {
 	if (msg) {
-		jobacct_gather_g_destroy(msg->jobacct);
+		jobacctinfo_destroy(msg->jobacct);
 		xfree(msg);
 	}
 }
@@ -2227,7 +2270,7 @@ extern void slurm_free_job_step_stat(void *object)
 {
 	job_step_stat_t *msg = (job_step_stat_t *)object;
 	if (msg) {
-		jobacct_gather_g_destroy(msg->jobacct);
+		jobacctinfo_destroy(msg->jobacct);
 		slurm_free_job_step_pids(msg->step_pids);
 		xfree(msg);
 	}
@@ -2424,6 +2467,7 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case REQUEST_COMPLETE_JOB_ALLOCATION:
 		slurm_free_complete_job_allocation_msg(data);
 		break;
+	case REQUEST_COMPLETE_BATCH_JOB:
 	case REQUEST_COMPLETE_BATCH_SCRIPT:
 		slurm_free_complete_batch_script_msg(data);
 		break;
@@ -2441,6 +2485,9 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case REQUEST_SUBMIT_BATCH_JOB:
 	case REQUEST_UPDATE_JOB:
 		slurm_free_job_desc_msg(data);
+		break;
+	case RESPONSE_ACCT_GATHER_UPDATE:
+		slurm_free_acct_gather_node_resp_msg(data);
 		break;
 	case MESSAGE_NODE_REGISTRATION_STATUS:
 		slurm_free_node_registration_status_msg(data);
@@ -2494,6 +2541,9 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case REQUEST_SUSPEND:
 	case SRUN_REQUEST_SUSPEND:
 		slurm_free_suspend_msg(data);
+		break;
+	case REQUEST_SUSPEND_INT:
+		slurm_free_suspend_int_msg(data);
 		break;
 	case REQUEST_JOB_READY:
 	case REQUEST_JOB_REQUEUE:
@@ -2581,6 +2631,7 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case RESPONSE_FORWARD_FAILED:
 	case REQUEST_DAEMON_STATUS:
 	case REQUEST_HEALTH_CHECK:
+	case REQUEST_ACCT_GATHER_UPDATE:
 	case ACCOUNTING_FIRST_REG:
 	case ACCOUNTING_REGISTER_CTLD:
 	case REQUEST_TOPO_INFO:
@@ -2603,6 +2654,9 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 		break;
 	case RESPONCE_SPANK_ENVIRONMENT:
 		slurm_free_spank_env_responce_msg(data);
+		break;
+	case RESPONSE_PING_SLURMD:
+		slurm_free_ping_slurmd_resp(data);
 		break;
 	default:
 		error("invalid type trying to be freed %u", type);
@@ -2630,6 +2684,12 @@ extern uint32_t slurm_get_return_code(slurm_msg_type_t type, void *data)
 		break;
 	case RESPONSE_SLURM_RC:
 		rc = ((return_code_msg_t *)data)->return_code;
+		break;
+	case RESPONSE_PING_SLURMD:
+		rc = SLURM_SUCCESS;
+		break;
+	case RESPONSE_ACCT_GATHER_UPDATE:
+		rc = SLURM_SUCCESS;
 		break;
 	case RESPONSE_FORWARD_FAILED:
 		/* There may be other reasons for the failure, but

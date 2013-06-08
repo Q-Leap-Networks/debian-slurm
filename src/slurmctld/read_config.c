@@ -109,7 +109,8 @@ static int  _restore_job_dependencies(void);
 static int  _restore_node_state(int recover,
 				struct node_record *old_node_table_ptr,
 				int old_node_record_count);
-static int  _restore_part_state(List old_part_list, char *old_def_part_name);
+static int  _restore_part_state(List old_part_list, char *old_def_part_name,
+				uint16_t flags);
 static int  _strcmp(const char *s1, const char *s2);
 static int  _sync_nodes_to_comp_job(void);
 static int  _sync_nodes_to_jobs(void);
@@ -509,8 +510,6 @@ static int _build_all_nodeline_info(void)
 		info("WARNING: No node %s configured", node_000);
 	xfree(node_000);
 }
-#else	/* HAVE_BG */
-	slurm_topo_build_config();
 #endif	/* HAVE_BG */
 
 	return rc;
@@ -788,6 +787,11 @@ int read_slurm_conf(int recover, bool reconfig)
 	g_slurm_jobcomp_init(slurmctld_conf.job_comp_loc);
 	if (slurm_sched_init() != SLURM_SUCCESS)
 		fatal("Failed to initialize sched plugin");
+	if (!reconfig && (old_preempt_mode & PREEMPT_MODE_GANG) &&
+	    (gs_init() != SLURM_SUCCESS)) {
+		/* gs_init() must immediately follow slurm_sched_init() */
+		fatal("Failed to initialize gang scheduler");
+	}
 	if (switch_init() != SLURM_SUCCESS)
 		fatal("Failed to initialize switch plugin");
 
@@ -814,6 +818,7 @@ int read_slurm_conf(int recover, bool reconfig)
 		_reorder_nodes_by_rank();
 	else
 		_reorder_nodes_by_name();
+	slurm_topo_build_config();
 
 	rehash_node();
 	rehash_jobs();
@@ -830,7 +835,15 @@ int read_slurm_conf(int recover, bool reconfig)
 		    (slurmctld_conf.reconfig_flags & RECONFIG_KEEP_PART_INFO))) {
 			info("restoring original partition state");
 			rc = _restore_part_state(old_part_list,
-						 old_def_part_name);
+						 old_def_part_name,
+						 slurmctld_conf.reconfig_flags);
+			error_code = MAX(error_code, rc);  /* not fatal */
+		} else if (old_part_list && (slurmctld_conf.reconfig_flags &
+					     RECONFIG_KEEP_PART_STAT)) {
+			info("restoring original partition state only (up/down)");
+			rc = _restore_part_state(old_part_list,
+						 old_def_part_name,
+						 slurmctld_conf.reconfig_flags);
 			error_code = MAX(error_code, rc);  /* not fatal */
 		}
 		load_last_job_id();
@@ -924,6 +937,8 @@ int read_slurm_conf(int recover, bool reconfig)
 
 	/* Update plugin parameters as possible */
 	rc = job_submit_plugin_reconfig();
+	error_code = MAX(error_code, rc);	/* not fatal */
+	rc = switch_g_reconfig();
 	error_code = MAX(error_code, rc);	/* not fatal */
 	rc = _preserve_select_type_param(&slurmctld_conf, old_select_type_p);
 	error_code = MAX(error_code, rc);	/* not fatal */
@@ -1046,6 +1061,7 @@ static int _restore_node_state(int recover,
 		node_ptr->cpus          = old_node_ptr->cpus;
 		node_ptr->cores         = old_node_ptr->cores;
 		node_ptr->last_idle     = old_node_ptr->last_idle;
+		node_ptr->boards        = old_node_ptr->boards;
 		node_ptr->sockets       = old_node_ptr->sockets;
 		node_ptr->threads       = old_node_ptr->threads;
 		node_ptr->real_memory   = old_node_ptr->real_memory;
@@ -1145,7 +1161,8 @@ static int  _strcmp(const char *s1, const char *s2)
 }
 
 /* Restore partition information from saved records */
-static int  _restore_part_state(List old_part_list, char *old_def_part_name)
+static int  _restore_part_state(List old_part_list, char *old_def_part_name,
+				uint16_t flags)
 {
 	int rc = SLURM_SUCCESS;
 	ListIterator part_iterator;
@@ -1163,6 +1180,15 @@ static int  _restore_part_state(List old_part_list, char *old_def_part_name)
 		xassert(old_part_ptr->magic == PART_MAGIC);
 		part_ptr = find_part_record(old_part_ptr->name);
 		if (part_ptr) {
+			if ( !(flags & RECONFIG_KEEP_PART_INFO) &&
+			     (flags & RECONFIG_KEEP_PART_STAT)	) {
+				if (part_ptr->state_up != old_part_ptr->state_up) {
+					info("Partition %s State differs from "
+					     "slurm.conf", part_ptr->name);
+					part_ptr->state_up = old_part_ptr->state_up;
+				}
+				continue;
+			}	
 			/* Current partition found in slurm.conf,
 			 * report differences from slurm.conf configuration */
 			if (_strcmp(part_ptr->allow_groups,
@@ -1285,6 +1311,12 @@ static int  _restore_part_state(List old_part_list, char *old_def_part_name)
 				part_ptr->state_up = old_part_ptr->state_up;
 			}
 		} else {
+			if ( !(flags & RECONFIG_KEEP_PART_INFO) &&
+			     (flags & RECONFIG_KEEP_PART_STAT) ) {
+				info("Partition %s missing from slurm.conf, "
+				     "not restoring it", old_part_ptr->name);
+				continue;
+			}
 			error("Partition %s missing from slurm.conf, "
 			      "restoring it", old_part_ptr->name);
 			part_ptr = create_part_record();

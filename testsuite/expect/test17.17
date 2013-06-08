@@ -40,13 +40,18 @@ set file_err     "test$test_id.error"
 set file_in      "test$test_id.input"
 set file_out     "test$test_id.output"
 set job_id1      0
-set host_name    ""
 set nodelist_name ""
 
 print_header $test_id
 
 if {[test_cray]} {
 	send_user "\nWARNING: This test is incompatible with Cray systems\n"
+	exit $exit_code
+} elseif {[test_bluegene]} {
+	send_user "\nWARNING: This test is incompatible with BlueGene systems\n"
+	exit $exit_code
+} elseif {[test_serial]} {
+	send_user "\nWARNING: Test incompatible with select/serial\n"
 	exit $exit_code
 }
 
@@ -58,10 +63,6 @@ set srun_pid [spawn $srun -v -N1 -l -t1 $bin_printenv SLURMD_NODENAME]
 expect {
 	-re "on host ($alpha_numeric_under)," {
 		set nodelist_name $expect_out(1,string)
-		exp_continue
-	}
-	-re "0: ($alpha_numeric_under)" {
-		set host_name $expect_out(1,string)
 		exp_continue
 	}
 	timeout {
@@ -119,12 +120,12 @@ set waited 1
 set timeout [expr $max_job_delay + 5]
 set srun_pid [spawn $srun -N1 --nodelist=$nodelist_name -t1 --share $scontrol -o show job $job_id1]
 expect {
-	-re "Partition=($alpha_numeric_under)" {
-		set partition $expect_out(1,string)
-		exp_continue
-	}
 	-re "JobState=RUN" {
 		set waited 0
+		exp_continue
+	}
+	-re "Partition=($alpha_numeric_under)" {
+		set partition $expect_out(1,string)
 		exp_continue
 	}
 	timeout {

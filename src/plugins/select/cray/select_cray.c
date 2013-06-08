@@ -74,6 +74,7 @@ int switch_record_cnt __attribute__((weak_import));
 slurmdb_cluster_rec_t *working_cluster_rec  __attribute__((weak_import)) = NULL;
 void *acct_db_conn __attribute__((weak_import)) = NULL;
 bitstr_t *avail_node_bitmap __attribute__((weak_import)) = NULL;
+char *default_slurm_config_file __attribute__((weak_import)) = NULL;
 #else
 slurm_ctl_conf_t slurmctld_conf;
 struct node_record *node_record_table_ptr;
@@ -86,6 +87,21 @@ int switch_record_cnt;
 slurmdb_cluster_rec_t *working_cluster_rec = NULL;
 void *acct_db_conn = NULL;
 bitstr_t *avail_node_bitmap = NULL;
+char *default_slurm_config_file = NULL;
+
+int clusteracct_storage_g_node_down(void *db_conn, struct node_record *node_ptr,
+			time_t event_time, char *reason,
+			uint32_t reason_uid) { return 0; }
+int clusteracct_storage_g_node_up(void *db_conn, struct node_record *node_ptr,
+			time_t event_time) { return 0; }
+struct node_record *find_node_record (char *name) { return NULL; }
+uint32_t gres_plugin_get_job_value_by_type(List job_gres_list,
+			char *gres_name_type) { return 0; }
+void make_node_idle(struct node_record *node_ptr,
+			struct job_record *job_ptr) { ; }
+int select_char2coord(char coord) { return 0; }
+void set_node_down_ptr (struct node_record *node_ptr, char *reason) { ; }
+char *uid_to_string (uid_t uid) { return NULL; }
 #endif
 
 #if !defined (SIGRTMIN) && defined(__NetBSD__)
@@ -241,6 +257,7 @@ extern int select_p_block_init(List part_list)
  * IN/OUT preemptee_job_list - Pointer to list of job pointers. These are the
  *		jobs to be preempted to initiate the pending job. Not set
  *		if mode=SELECT_MODE_TEST_ONLY or input pointer is NULL.
+ * IN exc_core_bitmap - bitmap of cores being reserved.
  * RET zero on success, EINVAL otherwise
  * globals (passed via select_p_node_init):
  *	node_record_count - count of nodes configured
@@ -256,7 +273,8 @@ extern int select_p_job_test(struct job_record *job_ptr, bitstr_t *bitmap,
 			     uint32_t min_nodes, uint32_t max_nodes,
 			     uint32_t req_nodes, uint16_t mode,
 			     List preemptee_candidates,
-			     List *preemptee_job_list)
+			     List *preemptee_job_list,
+			     bitstr_t *exc_core_bitmap)
 {
 	if (min_nodes == 0) {
 		/* Allocate resources only on a front-end node */
@@ -265,7 +283,7 @@ extern int select_p_job_test(struct job_record *job_ptr, bitstr_t *bitmap,
 
 	return other_job_test(job_ptr, bitmap, min_nodes, max_nodes,
 			      req_nodes, mode, preemptee_candidates,
-			      preemptee_job_list);
+			      preemptee_job_list, exc_core_bitmap);
 }
 
 extern int select_p_job_begin(struct job_record *job_ptr)
@@ -334,13 +352,13 @@ extern int select_p_job_signal(struct job_record *job_ptr, int signal)
 	 * lines from being executed.
 	 */
 	switch (signal) {
+		case SIGCHLD:
 		case SIGCONT:
 		case SIGSTOP:
 		case SIGTSTP:
 		case SIGTTIN:
 		case SIGTTOU:
 		case SIGURG:
-		case SIGCHLD:
 		case SIGWINCH:
 			break;
 		default:
@@ -448,7 +466,7 @@ extern int select_p_select_nodeinfo_pack(select_nodeinfo_t *nodeinfo,
 					 Buf buffer, uint16_t protocol_version)
 {
 	int rc = SLURM_ERROR;
-	if (protocol_version >= SLURM_2_2_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_2_3_PROTOCOL_VERSION) {
 		rc = other_select_nodeinfo_pack(nodeinfo->other_nodeinfo,
 						buffer, protocol_version);
 	}
@@ -465,7 +483,7 @@ extern int select_p_select_nodeinfo_unpack(select_nodeinfo_t **nodeinfo_pptr,
 	*nodeinfo_pptr = nodeinfo;
 
 	nodeinfo->magic = NODEINFO_MAGIC;
-	if (protocol_version >= SLURM_2_2_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_2_3_PROTOCOL_VERSION) {
 		rc = other_select_nodeinfo_unpack(&nodeinfo->other_nodeinfo,
 						  buffer, protocol_version);
 	}
@@ -482,9 +500,9 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
-extern int select_p_select_nodeinfo_set_all(time_t last_query_time)
+extern int select_p_select_nodeinfo_set_all(void)
 {
-	return other_select_nodeinfo_set_all(last_query_time);
+	return other_select_nodeinfo_set_all();
 }
 
 extern int select_p_select_nodeinfo_set(struct job_record *job_ptr)
@@ -638,9 +656,22 @@ extern int select_p_select_jobinfo_pack(select_jobinfo_t *jobinfo, Buf buffer,
 {
 	int rc = SLURM_ERROR;
 
-	if (protocol_version >= SLURM_2_2_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_2_5_PROTOCOL_VERSION) {
+		if (!jobinfo) {
+			pack8(0, buffer);
+			pack32(0, buffer);
+			pack64(0, buffer);
+			return SLURM_SUCCESS;
+		}
+		pack8(jobinfo->confirmed, buffer);
+		pack32(jobinfo->reservation_id, buffer);
+		pack64(jobinfo->confirm_cookie, buffer);
+		rc = other_select_jobinfo_pack(jobinfo->other_jobinfo, buffer,
+					       protocol_version);
+	} else if (protocol_version >= SLURM_2_3_PROTOCOL_VERSION) {
 		if (!jobinfo) {
 			pack32(0, buffer);
+			pack64(0, buffer);
 			return SLURM_SUCCESS;
 		}
 		pack32(jobinfo->reservation_id, buffer);
@@ -660,7 +691,13 @@ extern int select_p_select_jobinfo_unpack(select_jobinfo_t **jobinfo_pptr,
 	*jobinfo_pptr = jobinfo;
 
 	jobinfo->magic = JOBINFO_MAGIC;
-	if (protocol_version >= SLURM_2_2_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_2_5_PROTOCOL_VERSION) {
+		safe_unpack8(&jobinfo->confirmed, buffer);
+		safe_unpack32(&jobinfo->reservation_id, buffer);
+		safe_unpack64(&jobinfo->confirm_cookie, buffer);
+		rc = other_select_jobinfo_unpack(&jobinfo->other_jobinfo,
+						 buffer, protocol_version);
+	} else if (protocol_version >= SLURM_2_3_PROTOCOL_VERSION) {
 		safe_unpack32(&jobinfo->reservation_id, buffer);
 		safe_unpack64(&jobinfo->confirm_cookie, buffer);
 		rc = other_select_jobinfo_unpack(&jobinfo->other_jobinfo,
@@ -826,9 +863,10 @@ extern int select_p_reconfigure(void)
 	return other_reconfigure();
 }
 
-extern bitstr_t * select_p_resv_test(bitstr_t *avail_bitmap, uint32_t node_cnt)
+extern bitstr_t * select_p_resv_test(bitstr_t *avail_bitmap, uint32_t node_cnt,
+				     uint32_t core_cnt, bitstr_t **core_bitmap)
 {
-	return other_resv_test(avail_bitmap, node_cnt);
+	return other_resv_test(avail_bitmap, node_cnt, core_cnt, core_bitmap);
 }
 
 extern void select_p_ba_init(node_info_msg_t *node_info_ptr, bool sanity_check)

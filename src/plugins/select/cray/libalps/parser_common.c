@@ -29,6 +29,8 @@ const char *nam_rsvn_mode[BRM_MAX];
 const char *nam_acceltype[BA_MAX];
 const char *nam_accelstate[BAS_MAX];
 
+bool node_rank_inv = 0;
+
 /*
  *	General-purpose routines
  */
@@ -260,6 +262,9 @@ void eh_proc(struct ud *ud, const XML_Char **attrs)
 		xassert(ud->ud_inventory->node_head);
 		xassert(ud->ud_inventory->node_head->seg_head);
 
+		if (node_rank_inv)
+			ud->ud_inventory->node_head->cpu_count++;
+
 		if (ud->ud_inventory->node_head->seg_head->proc_head)
 			new->next = ud->ud_inventory->node_head->
 				seg_head->proc_head;
@@ -317,6 +322,11 @@ void eh_mem(struct ud *ud, const XML_Char **attrs)
 		*new = memory;
 		xassert(ud->ud_inventory->node_head);
 		xassert(ud->ud_inventory->node_head->seg_head);
+
+		if (node_rank_inv)
+			ud->ud_inventory->node_head->mem_size +=
+				(memory.page_size_kb * memory.page_count)
+				/ 1024;
 
 		if (ud->ud_inventory->node_head->seg_head->mem_head)
 			new->next = ud->ud_inventory->node_head->
@@ -713,7 +723,10 @@ int parse_basil(struct basil_parse_data *bp, int fd)
 	case BE_NONE:		/* no error: bp->msg is empty */
 		break;
 	default:
-		error("%s", bp->msg);
+		if (is_transient_error(ud.error))
+			debug("%s", bp->msg);
+		else
+			error("%s", bp->msg);
 	}
 	return -ud.error;
 }

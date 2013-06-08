@@ -35,22 +35,18 @@
 source ./globals
 
 set test_id     "11.4"
-set env(SLURM_LL_API_DEBUG) "2"
 set exit_code   0
-set job_id      0
 set job_ran     0
 set job_count   5
 set script      "mpi-testscripts/script.slurm.sh"
 print_header $test_id
 
-if { ![file exists $poe] } {
-	send_user "WARNING: poe must be installed on the\
-	    system to run this test.\n"
+if { ![test_launch_poe] } {
+	send_user "\nWARNING: This test is only compatable with launch/poe systems\n"
 	exit $exit_code
 }
 if { ![file exists mpi-testscripts/allred] } {
-	send_user "ERROR: You must run a make in the mpi-testscripts\
-	    dir to run this test.\n"
+	send_user "ERROR: You must run a make in the mpi-testscripts directory to run this test.\n"
 	exit 1
 }
 
@@ -59,10 +55,10 @@ if { [string length $partition] == 0 } {
 }
 
 #
-# execute poe with a an mpi script
+# execute salloc with a script containing a collection of MPI programs
 #
-spawn $poe $script -rmpool $partition -nodes 2 -procs 2\
-    -euilib us -retry wait
+set timeout 120
+spawn $salloc -t2 -N2 -n2 --network=us ./$script
 expect {
 	-nocase "passed" {
 		incr job_ran
@@ -72,16 +68,12 @@ expect {
 		incr job_ran
 		exp_continue
 	}
-	-re "slurm job ($number)" {
-		set job_id $expect_out(1,string)
-		exp_continue
-	}
 	timeout {
-		send_user "\nFAILURE: poe not responding\n"
-		cancel_job $job_id
+		send_user "\nFAILURE: salloc/poe not responding\n"
 		set exit_code 1
 	}
 	eof {
+		wait
 	}
 }
 

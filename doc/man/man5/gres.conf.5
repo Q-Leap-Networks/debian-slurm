@@ -15,7 +15,6 @@ set by the gres plugin function node_config_load(), this file may be optional.
 Parameter names are case insensitive.
 Any text following a "#" in the configuration file is treated
 as a comment through the end of that line.
-The size of each line in the file is limited to 1024 characters.
 Changes to the configuration file take effect upon restart of
 SLURM daemons, daemon receipt of the SIGHUP signal, or execution
 of the command "scontrol reconfigure" unless otherwise noted.
@@ -27,10 +26,9 @@ The overall configuration parameters available include:
 Number of resources of this type available on this node.
 The default value is set to the number of \fBFile\fR values specified (if any),
 otherwise the default value is one. A suffix of "K", "M" or "G" may be used
-to mulitply the number by 1024, 1048576 or 1073741824 respectively.
+to multiply the number by 1024, 1048576 or 1073741824 respectively.
 Note that Count is a 32\-bit field and the maximum value is 4,294,967,295.
  
-
 .TP
 \fBCPUs\fR
 Specify the CPU index numbers for the specific CPUs which can
@@ -42,6 +40,12 @@ delimited list or a range may be specified using a "\-" separator
 If not specified, then any CPU can be used with the resources.
 If any CPU can be used with the resources, then do not specify the
 \fBCPUs\fR option for improved speed in the SLURM scheduling logic.
+Since SLURM must be able to perform resource management on heterogeneous
+clusters having various CPU ID numbering schemes, use the SLURM CPU index
+numbers here
+(CPU_ID = Board_ID x threads_per_board +
+Socket_ID x threads_per_socket +
+Core_ID x threads_per_core + Thread_ID).
 
 .TP
 \fBFile\fR
@@ -73,6 +77,9 @@ Graphics Processing Unit
 .TP
 \fBnic\fR
 Network Interface Card
+.TP
+\fBmic\fR
+Intel Many Integrated Core (MIC) processor
 .RE
 
 
@@ -103,7 +110,7 @@ Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 CODE\-OCEC\-09\-009. All rights reserved.
 .LP
 This file is part of SLURM, a resource management program.
-For details, see <http://www.schedmd.com/slurmdocs/>.
+For details, see <http://slurm.schedmd.com/>.
 .LP
 SLURM is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free

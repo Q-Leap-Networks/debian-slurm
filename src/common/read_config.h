@@ -57,6 +57,7 @@ extern char *default_plugstack;
 #define ACCOUNTING_ENFORCE_LIMITS 0x0002
 #define ACCOUNTING_ENFORCE_WCKEYS 0x0004
 #define ACCOUNTING_ENFORCE_QOS    0x0008
+#define ACCOUNTING_ENFORCE_SAFE   0x0010
 
 #define DEFAULT_ACCOUNTING_DB      "slurm_acct_db"
 #define DEFAULT_ACCOUNTING_ENFORCE  0
@@ -75,6 +76,7 @@ extern char *default_plugstack;
 #define DEFAULT_JOB_ACCT_GATHER_TYPE  "jobacct_gather/none"
 #define JOB_ACCT_GATHER_TYPE_NONE "jobacct_gather/none"
 #define DEFAULT_JOB_ACCT_GATHER_FREQ  30
+#define DEFAULT_ACCT_GATHER_ENERGY_TYPE "acct_gather_energy/none"
 #define ACCOUNTING_STORAGE_TYPE_NONE "accounting_storage/none"
 #define DEFAULT_DISABLE_ROOT_JOBS   0
 #define DEFAULT_ENFORCE_PART_LIMITS 0
@@ -85,6 +87,17 @@ extern char *default_plugstack;
 #define DEFAULT_KILL_ON_BAD_EXIT    0
 #define DEFAULT_KILL_TREE           0
 #define DEFAULT_KILL_WAIT           30
+
+#if defined HAVE_BG_FILES && !defined HAVE_BG_L_P
+#  define DEFAULT_LAUNCH_TYPE         "launch/runjob"
+#elif defined HAVE_LIBNRT
+#  define DEFAULT_LAUNCH_TYPE         "launch/poe"
+#elif defined HAVE_REAL_CRAY
+#  define DEFAULT_LAUNCH_TYPE         "launch/aprun"
+#else
+#  define DEFAULT_LAUNCH_TYPE         "launch/slurm"
+#endif
+
 #define DEFAULT_MAIL_PROG           "/bin/mail"
 #define DEFAULT_MAX_JOB_COUNT       10000
 #define DEFAULT_MAX_JOB_ID          0xffff0000
@@ -169,8 +182,9 @@ typedef struct slurm_conf_node {
 	char *addresses;
 	char *gres;		/* arbitrary list of node's generic resources */
 	char *feature;		/* arbitrary list of node's features */
-	uint16_t port;
+	char *port_str;
 	uint16_t cpus;		/* count of cpus running on the node */
+	uint16_t boards; 	/* number of boards per node */
 	uint16_t sockets;       /* number of sockets per node */
 	uint16_t cores;         /* number of cores per CPU */
 	uint16_t threads;       /* number of threads per core */
@@ -360,6 +374,14 @@ extern char *slurm_conf_get_aliases(const char *node_hostname);
 extern char *slurm_conf_get_nodeaddr(const char *node_hostname);
 
 /*
+ * slurm_conf_get_nodename_from_addr - Return the NodeName for given NodeAddr
+ *
+ * NOTE: Call xfree() to release returned value's memory.
+ * NOTE: Caller must NOT be holding slurm_conf_lock().
+ */
+extern char *slurm_conf_get_nodename_from_addr(const char *node_addr);
+
+/*
  * slurm_conf_get_aliased_nodename - Return the NodeName matching an alias
  * of the local hostname
  *
@@ -387,15 +409,17 @@ extern uint16_t slurm_conf_get_port(const char *node_name);
 extern int slurm_conf_get_addr(const char *node_name, slurm_addr_t *address);
 
 /*
- * slurm_conf_get_cpus_sct -
- * Return the cpus, sockets, cores, and threads configured for a given NodeName
+ * slurm_conf_get_cpus_bsct -
+ * Return the cpus, boards, sockets, cores, and threads configured for a
+ * given NodeName
  * Returns SLURM_SUCCESS on success, SLURM_FAILURE on failure.
  *
  * NOTE: Caller must NOT be holding slurm_conf_lock().
  */
-extern int slurm_conf_get_cpus_sct(const char *node_name,
-				   uint16_t *procs, uint16_t *sockets,
-				   uint16_t *cores, uint16_t *threads);
+extern int slurm_conf_get_cpus_bsct(const char *node_name,
+				    uint16_t *cpus, uint16_t *boards,
+				    uint16_t *sockets, uint16_t *cores,
+				    uint16_t *threads);
 
 /*
  * init_slurm_conf - initialize or re-initialize the slurm configuration

@@ -117,15 +117,19 @@ static void _destroy_runjob_job(void *object)
 static void _send_failed_cnodes(uint32_t job_id, uint32_t step_id, uint16_t sig)
 {
 	int rc;
+	int count = 0;
+	int max_tries = 30;
 
 	while ((rc = slurm_kill_job_step(job_id, step_id, sig))) {
 		rc = slurm_get_errno();
 
-		if (rc == ESLURM_ALREADY_DONE || rc == ESLURM_INVALID_JOB_ID)
+		if ((count > max_tries)
+		    || rc == ESLURM_ALREADY_DONE || rc == ESLURM_INVALID_JOB_ID)
 			break;
 		std::cerr << "Trying to fail cnodes, message from slurmctld: "
 			  << slurm_strerror(rc) << std::endl;
 		sleep (5);
+		count++;
 	}
 }
 
@@ -138,13 +142,13 @@ Plugin::Plugin() :
 
 	runjob_list = list_create(_destroy_runjob_job);
 
-	std::cout << "Slurm runjob plugin loaded version "
+	std::cerr << "Slurm runjob plugin loaded version "
 		  << SLURM_VERSION_STRING << std::endl;
 }
 
 Plugin::~Plugin()
 {
-	std::cout << "Slurm runjob plugin finished" << std::endl;
+	std::cerr << "Slurm runjob plugin finished" << std::endl;
 	slurm_mutex_lock(&runjob_list_lock);
 	list_destroy(runjob_list);
 	runjob_list = NULL;
@@ -404,10 +408,6 @@ void Plugin::execute(const bgsched::runjob::Terminated& data)
 
 	boost::lock_guard<boost::mutex> lock( _mutex );
 
-	// output failed nodes
-	const bgsched::runjob::Terminated::Nodes& nodes =
-		data.software_error_nodes();
-
 	slurm_mutex_lock(&runjob_list_lock);
 	if (runjob_list) {
 		itr = list_iterator_create(runjob_list);
@@ -438,23 +438,6 @@ void Plugin::execute(const bgsched::runjob::Terminated& data)
 		   send it.
 		*/
 		sig = SIG_NODE_FAIL;
-	} else if (!nodes.empty()) {
-		char tmp_char[6];
-
-		std::cerr << runjob_job->job_id << "." << runjob_job->step_id
-			  << " had " << nodes.size() << " nodes fail"
-			  << std::endl;
-		BOOST_FOREACH(const bgsched::runjob::Node& i, nodes) {
-			sprintf(tmp_char, "%u%u%u%u%u",
-				i.coordinates().a(),
-				i.coordinates().b(),
-				i.coordinates().c(),
-				i.coordinates().d(),
-				i.coordinates().e());
-			std::cerr << i.location() << ": "
-				  << i.coordinates()
-				  << tmp_char << std::endl;
-		}
 	} else if (!data.message().empty()) {
 		std::cerr << runjob_job->job_id << "." << runjob_job->step_id
 			  << " had a message of '" << data.message()

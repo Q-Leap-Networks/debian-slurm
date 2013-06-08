@@ -300,6 +300,7 @@ extern int task_slurmd_release_resources (uint32_t job_id)
 extern int task_pre_setuid (slurmd_job_t *job)
 {
 	char path[PATH_MAX];
+	int rc;
 
 	if (!(conf->task_plugin_param & CPU_BIND_CPUSETS))
 		return SLURM_SUCCESS;
@@ -319,7 +320,14 @@ extern int task_pre_setuid (slurmd_job_t *job)
 		return SLURM_ERROR;
 	}
 #endif
-	return slurm_build_cpuset(CPUSET_DIR, path, job->uid, job->gid);
+
+	rc = slurm_build_cpuset(CPUSET_DIR, path, job->uid, job->gid);
+
+	/* if cpuset was built ok, check for cpu frequency setting */
+	if ( !(rc) && (job->cpu_freq != NO_VAL))
+ 	     cpu_freq_cpuset_validate(job);
+
+	return rc;
 }
 
 /*
@@ -368,9 +376,9 @@ extern int task_pre_launch (slurmd_job_t *job)
 		pid_t mypid  = job->envtp->task_pid;
 
 		slurm_getaffinity(mypid, sizeof(cur_mask), &cur_mask);
-
 		if (get_cpuset(&new_mask, job) &&
 		    (!(job->cpu_bind_type & CPU_BIND_NONE))) {
+			reset_cpuset(&new_mask, &cur_mask);
 			if (conf->task_plugin_param & CPU_BIND_CPUSETS) {
 				rc = slurm_set_cpuset(base, path, mypid,
 						sizeof(new_mask),
@@ -428,6 +436,15 @@ extern int task_pre_launch (slurmd_job_t *job)
 	}
 #endif
 	return rc;
+}
+
+/*
+ * task_pre_launch_priv() is called prior to exec of application task.
+ * in privileged mode, just after slurm_spank_task_init_privileged
+ */
+extern int task_pre_launch_priv (slurmd_job_t *job)
+{
+	return SLURM_SUCCESS;
 }
 
 /*

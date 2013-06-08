@@ -111,7 +111,7 @@ proc check_output { file_name } {
 		set exit_code 1
 	}
 	if { $match2 == 0 } {
-		send_user "\nFAILURE: job failed to run to completioni\n"
+		send_user "\nFAILURE: job failed to run to completion\n"
 		set exit_code 1
 	}
 }
@@ -122,13 +122,13 @@ proc check_output { file_name } {
 file delete $file_prog $file_out1 $file_out2
 make_bash_script $file_prog_sh1 "$srun ./$file_prog"
 make_bash_script $file_prog_sh2 "./$file_prog"
-exec $bin_make -f /dev/null $file_prog
+exec $bin_cc -o $file_prog ${file_prog}.c
 exec $bin_chmod 700 $file_prog
 
 #
 # Submit two jobs to the same node
 #
-set srun_pid [spawn $sbatch -N1 -t1 --output=$file_out1 $file_prog_sh1]
+set srun_pid [spawn $sbatch -N1 -t2 --output=$file_out1 $file_prog_sh1]
 expect {
 	-re "Submitted batch job ($number)" {
 		set job_id1 $expect_out(1,string)
@@ -177,7 +177,8 @@ if {[string compare $host_name ""] == 0} {
 	exit 1
 }
 # Submit another job to that same node
-set srun_pid [spawn $sbatch -N1 -t1 --output=$file_out2 $file_prog_sh2]
+wait_for_job $job_id2 RUNNING
+set srun_pid [spawn $sbatch -N1 -t2 --output=$file_out2 $file_prog_sh2]
 expect {
 	-re "Submitted batch job ($number)" {
 		set job_id2 $expect_out(1,string)
@@ -204,8 +205,9 @@ if {$job_id2 == 0} {
 # Then resume job 2
 # The sleep commands are added so the program can recognize
 # that it has been suspended.
+# The long initial sleep is due to POE launching jobs slowly
 #
-sleep 5
+sleep 10
 suspend_job $job_id1 suspend
 if {$not_supported == 1} {
 	exec $bin_rm -f $file_out1 $file_out2 $file_prog $file_prog_sh1 $file_prog_sh2
@@ -238,8 +240,9 @@ if {[wait_for_job $job_id2 DONE] != 0} {
 }
 if {$not_supported == 0} {
 	wait_for_file $file_out1
-	check_output $file_out1
 	wait_for_file $file_out2
+
+	check_output $file_out1
 	check_output $file_out2
 }
 
@@ -247,6 +250,6 @@ if {$exit_code == 0} {
 	exec $bin_rm -f $file_out1 $file_out2 $file_prog $file_prog_sh1 $file_prog_sh2
 	send_user "\nSUCCESS\n"
 } else {
-	send_user "\nFAILURE: May be due to use of gang scheduler and race conditions\n"
+	send_user "\nFAILURE: May be due to use of gang scheduler, a race conditions, or the ProcTrack plugin not identifying the application as part of the job\n"
 }
 exit $exit_code

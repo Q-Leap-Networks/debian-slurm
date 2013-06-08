@@ -105,7 +105,7 @@ static void _my_sleep(int secs)
 
 static void _load_config(void)
 {
-	char *sched_params, *tmp_ptr;
+	char *sched_params, *select_type, *tmp_ptr;
 
 	sched_timeout = slurm_get_msg_timeout() / 2;
 	sched_timeout = MAX(sched_timeout, 1);
@@ -127,6 +127,15 @@ static void _load_config(void)
 		      max_backfill_job_cnt);
 	}
 	xfree(sched_params);
+
+	select_type = slurm_get_select_type();
+	if (!strcmp(select_type, "select/serial")) {
+		/* Do not spend time computing expected start time for
+		 * pending jobs */
+		max_backfill_job_cnt = 0;
+		stop_builtin_agent();
+	}
+	xfree(select_type);
 }
 
 static void _compute_start_times(void)
@@ -138,6 +147,7 @@ static void _compute_start_times(void)
 	struct job_record *job_ptr;
 	struct part_record *part_ptr;
 	bitstr_t *alloc_bitmap = NULL, *avail_bitmap = NULL;
+	bitstr_t *exc_core_bitmap = NULL;
 	uint32_t max_nodes, min_nodes, req_nodes, time_limit;
 	time_t now = time(NULL), sched_start, last_job_alloc;
 
@@ -184,14 +194,19 @@ static void _compute_start_times(void)
 			continue;
 		}
 
-		j = job_test_resv(job_ptr, &now, true, &avail_bitmap);
-		if (j != SLURM_SUCCESS)
+		j = job_test_resv(job_ptr, &now, true, &avail_bitmap,
+				  &exc_core_bitmap);
+		if (j != SLURM_SUCCESS) {
+			FREE_NULL_BITMAP(avail_bitmap);
+			FREE_NULL_BITMAP(exc_core_bitmap);
 			continue;
+		}
 
 		rc = select_g_job_test(job_ptr, avail_bitmap,
 				       min_nodes, max_nodes, req_nodes,
 				       SELECT_MODE_WILL_RUN,
-				       preemptee_candidates, NULL);
+				       preemptee_candidates, NULL,
+				       exc_core_bitmap);
 		if (rc == SLURM_SUCCESS) {
 			last_job_update = now;
 			if (job_ptr->time_limit == INFINITE)
@@ -211,6 +226,7 @@ static void _compute_start_times(void)
 			last_job_alloc = job_ptr->start_time + time_limit;
 		}
 		FREE_NULL_BITMAP(avail_bitmap);
+		FREE_NULL_BITMAP(exc_core_bitmap);
 
 		if ((time(NULL) - sched_start) >= sched_timeout) {
 			debug("backfill: loop taking to long, breaking out");
