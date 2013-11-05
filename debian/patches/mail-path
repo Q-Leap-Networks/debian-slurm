@@ -4,38 +4,16 @@ Description: mail command absolute pathname
 Author: Gennaro Oliva <oliva.g@na.icar.cnr.it>                    
 Bug-Debian: http://bugs.debian.org/588862
 Forwarded: no
-Last-Update: 2013-02-06
+Last-Update: 2013-09-17
 
---- slurm-llnl-2.5.3.orig/src/common/read_config.h
-+++ slurm-llnl-2.5.3/src/common/read_config.h
-@@ -98,7 +98,7 @@ extern char *default_plugstack;
- #  define DEFAULT_LAUNCH_TYPE         "launch/slurm"
- #endif
- 
--#define DEFAULT_MAIL_PROG           "/bin/mail"
-+#define DEFAULT_MAIL_PROG           "/usr/bin/mail"
- #define DEFAULT_MAX_JOB_COUNT       10000
- #define DEFAULT_MAX_JOB_ID          0xffff0000
- #define DEFAULT_MAX_STEP_COUNT      40000
---- slurm-llnl-2.5.3.orig/doc/man/man5/slurm.conf.5
-+++ slurm-llnl-2.5.3/doc/man/man5/slurm.conf.5
-@@ -824,7 +824,7 @@ not explicitly listed in the job submiss
- .TP
- \fBMailProg\fR
- Fully qualified pathname to the program used to send email per user request.
--The default value is "/bin/mail".
-+The default value is "/usr/bin/mail".
- 
- .TP
- \fBMaxJobCount\fR
---- slurm-llnl-2.5.3.orig/doc/man/man1/strigger.1
-+++ slurm-llnl-2.5.3/doc/man/man1/strigger.1
+--- slurm-llnl-2.6.2.orig/doc/man/man1/strigger.1
++++ slurm-llnl-2.6.2/doc/man/man1/strigger.1
 @@ -282,7 +282,7 @@ primary slurmctld fails.
  	strigger \-\-set \-\-primary_slurmctld_failure \\
  	         \-\-program=/usr/sbin/primary_slurmctld_failure
  	# Notify the administrator of the failure using by e\-mail
 -	/bin/mail slurm_admin@site.com \-s Primary_SLURMCTLD_FAILURE
-+    /usr/bin/mail slurm_admin@site.com \-s Primary_SLURMCTLD_FAILURE
++	/usr/bin/mail slurm_admin@site.com \-s Primary_SLURMCTLD_FAILURE
  
  	> strigger \-\-set \-\-primary_slurmctld_failure \\
  	           \-\-program=/usr/sbin/primary_slurmctld_failure
@@ -44,18 +22,29 @@ Last-Update: 2013-02-06
  	         \-\-program=/usr/sbin/slurm_admin_notify
  	# Notify administrator using by e\-mail
 -	/bin/mail slurm_admin@site.com \-s NodesDown:$*
-+    /usr/bin/mail slurm_admin@site.com \-s NodesDown:$*
++	/usr/bin/mail slurm_admin@site.com \-s NodesDown:$*
  
  	> strigger \-\-set \-\-node \-\-down \\
  	           \-\-program=/usr/sbin/slurm_admin_notify
---- slurm-llnl-2.5.3.orig/doc/html/configurator.html.in
-+++ slurm-llnl-2.5.3/doc/html/configurator.html.in
-@@ -152,7 +152,7 @@ function displayfile()
-    "#KillOnBadExit=0 <br>" +
-    "#LaunchType=launch/slurm <br>" +
-    "#Licenses=foo*4,bar <br>" +
--   "#MailProg=/bin/mail <br>" +
-+   "#MailProg=/usr/bin/mail <br>" +
-    "#MaxJobCount=5000 <br>" +
-    "#MaxStepCount=40000 <br>" +
-    "#MaxTasksPerNode=128 <br>" +
+--- slurm-llnl-2.6.2.orig/doc/man/man5/slurm.conf.5
++++ slurm-llnl-2.6.2/doc/man/man5/slurm.conf.5
+@@ -968,7 +968,7 @@ not explicitly listed in the job submiss
+ .TP
+ \fBMailProg\fR
+ Fully qualified pathname to the program used to send email per user request.
+-The default value is "/bin/mail".
++The default value is "/usr/bin/mail".
+ 
+ .TP
+ \fBMaxArraySize\fR
+--- slurm-llnl-2.6.2.orig/src/common/read_config.h
++++ slurm-llnl-2.6.2/src/common/read_config.h
+@@ -105,7 +105,7 @@ extern char *default_plugstack;
+ #  define DEFAULT_LAUNCH_TYPE         "launch/slurm"
+ #endif
+ 
+-#define DEFAULT_MAIL_PROG           "/bin/mail"
++#define DEFAULT_MAIL_PROG           "/usr/bin/mail"
+ #define DEFAULT_MAX_ARRAY_SIZE      1001
+ #define DEFAULT_MAX_JOB_COUNT       10000
+ #define DEFAULT_MAX_JOB_ID          0xffff0000

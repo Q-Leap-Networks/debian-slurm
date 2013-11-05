@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -137,7 +137,6 @@ void slurm_step_launch_params_t_init (slurm_step_launch_params_t *ptr)
 	ptr->buffered_stdio = true;
 	memcpy(&ptr->local_fds, &fds, sizeof(fds));
 	ptr->gid = getgid();
-	ptr->acctg_freq  = (uint16_t) NO_VAL;
 	ptr->cpu_freq = NO_VAL;
 }
 
@@ -247,6 +246,7 @@ int slurm_step_launch (slurm_step_ctx_t *ctx,
 	launch.ntasks		= ctx->step_resp->step_layout->task_cnt;
 	launch.slurmd_debug	= params->slurmd_debug;
 	launch.switch_job	= ctx->step_resp->switch_job;
+	launch.profile		= params->profile;
 	launch.task_prolog	= params->task_prolog;
 	launch.task_epilog	= params->task_epilog;
 	launch.cpu_bind_type	= params->cpu_bind_type;
@@ -420,6 +420,7 @@ int slurm_step_launch_add (slurm_step_ctx_t *ctx,
 	launch.ntasks		= ctx->step_resp->step_layout->task_cnt;
 	launch.slurmd_debug	= params->slurmd_debug;
 	launch.switch_job	= ctx->step_resp->switch_job;
+	launch.profile		= params->profile;
 	launch.task_prolog	= params->task_prolog;
 	launch.task_epilog	= params->task_epilog;
 	launch.cpu_bind_type	= params->cpu_bind_type;
@@ -1009,7 +1010,7 @@ static int _msg_thr_create(struct step_launch_state *sls, int num_nodes)
 	/* multiple jobs (easily induced via no_alloc) and highly
 	 * parallel jobs using PMI sometimes result in slow message
 	 * responses and timeouts. Raise the default timeout for srun. */
-	if(!message_socket_ops.timeout)
+	if (!message_socket_ops.timeout)
 		message_socket_ops.timeout = slurm_get_msg_timeout() * 8000;
 
 	for (i = 0; i < sls->num_resp_port; i++) {

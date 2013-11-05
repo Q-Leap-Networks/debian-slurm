@@ -201,7 +201,11 @@ void eh_node(struct ud *ud, const XML_Char **attrs)
 		ud->ud_inventory->node_head = new;
 	}
 
-	ud->counter[BT_SEGMARRAY]  = 0;
+	if ( ud->bp->version < BV_5_1 )
+		ud->counter[BT_SEGMARRAY]  = 0;
+	else
+		ud->counter[BT_SOCKARRAY]  = 0;
+
 	ud->counter[BT_ACCELARRAY] = 0;
 
 	/* Cover up Basil version differences by faking a segment. */
@@ -232,7 +236,11 @@ void eh_segment(struct ud *ud, const XML_Char **attrs)
 		ud->ud_inventory->node_head->seg_head = new;
 	}
 
-	ud->counter[BT_PROCARRAY]  = 0;
+	if ( ud->bp->version < BV_5_1 )
+		ud->counter[BT_PROCARRAY]  = 0;
+	else
+		ud->counter[BT_COMUARRAY]  = 0;
+
 	ud->counter[BT_MEMARRAY]   = 0;
 	ud->counter[BT_LABELARRAY] = 0;
 }
@@ -243,17 +251,22 @@ void eh_proc(struct ud *ud, const XML_Char **attrs)
 	struct basil_node_processor proc = {0};
 	char *attribs[] = { "ordinal", "architecture", "clock_mhz" };
 
-	extract_attributes(attrs, attribs, ARRAY_SIZE(attribs));
+	if ( ud->bp->version < BV_5_1 )
+		extract_attributes(attrs, attribs, ARRAY_SIZE(attribs));
+	else
+		extract_attributes(attrs, attribs, 1);
 
 	if (atou32(attribs[0], &proc.ordinal) < 0)
 		fatal("illegal ordinal = %s", attribs[0]);
 
-	for (proc.arch = BPT_X86_64; proc.arch < BPT_MAX; proc.arch++)
-		if (strcmp(attribs[1], nam_proc[proc.arch]) == 0)
-			break;
+	if ( ud->bp->version < BV_5_1 ) {
+		for (proc.arch = BPT_X86_64; proc.arch < BPT_MAX; proc.arch++)
+			if (strcmp(attribs[1], nam_proc[proc.arch]) == 0)
+				break;
 
-	if (atou32(attribs[2], &proc.clock_mhz) < 0)
-		fatal("illegal clock_mhz = %s", attribs[2]);
+		if (atou32(attribs[2], &proc.clock_mhz) < 0)
+			fatal("illegal clock_mhz = %s", attribs[2]);
+	}
 
 	if (ud->ud_inventory) {
 		struct basil_node_processor *new = xmalloc(sizeof(*new));
@@ -499,7 +512,7 @@ static const struct element_handler *basil_tables[BV_MAX] = {
 	[BV_4_0] = basil_4_0_elements,
 	[BV_4_1] = basil_4_0_elements,
 	[BV_5_0] = basil_4_0_elements,
-	[BV_5_1] = basil_4_0_elements
+	[BV_5_1] = basil_5_1_elements
 };
 
 /**
@@ -526,6 +539,12 @@ static enum basil_method _tag_to_method(const enum basil_element tag)
 		return BM_inventory;
 	case BT_SWITCH ... BT_SWITCHAPPARRAY:
 		return BM_switch;
+	case BT_SOCKARRAY:			/* INVENTORY, Basil >= 5.1.0/1.3 */
+	case BT_COMUARRAY:			/* INVENTORY, Basil >= 5.1.0/1.3 */
+		return BM_none;
+	case BT_SOCKET:				/* INVENTORY, Basil >= 5.1.0/1.3 */
+	case BT_COMPUNIT:			/* INVENTORY, Basil >= 5.1.0/1.3 */
+		return BM_inventory;
 	default:
 		return BM_UNKNOWN;
 	}
@@ -539,21 +558,22 @@ static void _start_handler(void *user_data,
 	enum basil_method method;
 	enum basil_element tag;
 
-	for (tag = BT_MESSAGE; table[tag].tag; tag++) {
+	for (tag = BT_MESSAGE; tag < BT_MAX; tag++) {
+		if ( table[tag].tag )
 		if (strcmp(table[tag].tag, el) == 0) {
 			/* since BM_inventory is returned for Arrays
 			   if the method is switch we need to "switch"
 			   it up here.
 			*/
 			if (ud->bp->method == BM_switch) {
-				if(!strcmp(table[tag].tag, "ReservationArray"))
+				if (!strcmp(table[tag].tag, "ReservationArray"))
 					tag = BT_SWITCHRESARRAY;
-				else if(!strcmp(table[tag].tag, "Reservation"))
+				else if (!strcmp(table[tag].tag, "Reservation"))
 					tag = BT_SWITCHRES;
-				else if(!strcmp(table[tag].tag,
+				else if (!strcmp(table[tag].tag,
 						"ApplicationArray"))
 					tag = BT_SWITCHAPPARRAY;
-				else if(!strcmp(table[tag].tag,	"Application"))
+				else if (!strcmp(table[tag].tag,	"Application"))
 					tag = BT_SWITCHAPP;
 			}
 			break;
@@ -600,23 +620,25 @@ static void _end_handler(void *user_data, const XML_Char *el)
 	enum basil_element end_tag;
 
 	--ud->depth;
-	for (end_tag = BT_MESSAGE; table[end_tag].tag; end_tag++)
+
+	for (end_tag = BT_MESSAGE; end_tag < BT_MAX; end_tag++)
+		if ( table[end_tag].tag )
 		if (strcmp(table[end_tag].tag, el) == 0) {
 			/* since BM_inventory is returned for Arrays
 			   if the method is switch we need to "switch"
 			   it up here.
 			*/
 			if (ud->bp->method == BM_switch) {
-				if(!strcmp(table[end_tag].tag,
+				if (!strcmp(table[end_tag].tag,
 					   "ReservationArray"))
 					end_tag = BT_SWITCHRESARRAY;
-				else if(!strcmp(table[end_tag].tag,
+				else if (!strcmp(table[end_tag].tag,
 						"Reservation"))
 					end_tag = BT_SWITCHRES;
-				else if(!strcmp(table[end_tag].tag,
+				else if (!strcmp(table[end_tag].tag,
 						"ApplicationArray"))
 					end_tag = BT_SWITCHAPPARRAY;
-				else if(!strcmp(table[end_tag].tag,
+				else if (!strcmp(table[end_tag].tag,
 						"Application"))
 					end_tag = BT_SWITCHAPP;
 			}
@@ -696,6 +718,7 @@ int parse_basil(struct basil_parse_data *bp, int fd)
 		len = read(fd, xmlbuf, sizeof(xmlbuf));
 		if (len == -1)
 			fatal("read error on stream: len=%d", len);
+
 		switch (XML_Parse(parser, xmlbuf, len, len == 0)) {
 		case XML_STATUS_ERROR:
 			xmlbuf[len] = '\0';

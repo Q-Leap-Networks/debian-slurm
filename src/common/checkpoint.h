@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -102,6 +102,9 @@ extern int  checkpoint_pack_jobinfo  (check_jobinfo_t jobinfo, Buf buffer,
 				      uint16_t protocol_version);
 extern int  checkpoint_unpack_jobinfo  (check_jobinfo_t jobinfo, Buf buffer,
 					uint16_t protocol_version);
+
+/* copy a job's checkpoint context */
+extern check_jobinfo_t checkpoint_copy_jobinfo(check_jobinfo_t jobinfo);
 
 /* create the necessary threads before forking the tasks */
 extern int checkpoint_stepd_prefork (void *slurmd_job);

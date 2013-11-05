@@ -9,7 +9,7 @@
  *  Largely re-written for NRT support by Morris Jette <jette@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -1332,10 +1332,8 @@ _allocate_window_single(char *adapter_name, slurm_nrt_jobinfo_t *jp,
 			}
 			continue;
 		}
-//		if ((network_id >= 0) && (adapter->network_id != network_id))
-//			continue;
 		if ((adapter_type != NRT_MAX_ADAPTER_TYPES) &&
-		    (adapter->adapter_type == adapter_type)) {
+		    (node->adapter_list[i].adapter_type == adapter_type)) {
 			adapter = &node->adapter_list[i];
 			break;
 		}
@@ -1573,8 +1571,6 @@ _print_adapter_status(nrt_cmd_status_adapter_t *status_adapter)
 	hostset_t hs;
 
 	hs = hostset_create("");
-	if (hs == NULL)
-		fatal("hostset_create malloc failure");
 	info("--Begin Adapter Status--");
 	info("  adapter_name: %s", status_adapter->adapter_name);
 	info("  adapter_type: %s",
@@ -1663,8 +1659,6 @@ _print_nodeinfo(slurm_nrt_nodeinfo_t *n)
 
 		info("    window_count: %hu", a->window_count);
 		hs = hostset_create("");
-		if (hs == NULL)
-			fatal("hostset_create malloc failure");
 		w = a->window_list;
 		for (j = 0; j < a->window_count; j++) {
 			if ((w[j].state == NRT_WIN_AVAILABLE) &&
@@ -3062,7 +3056,11 @@ nrt_build_jobinfo(slurm_nrt_jobinfo_t *jp, hostlist_t hl,
 	}
 	hostlist_iterator_reset(hi);
 
-	if (adapter_type == NRT_IPONLY) {
+	if (nnodes < 2) {
+		/* Without more than one node, high-speed network access is
+		 * unnecesary */
+		jp->tables_per_task = 0;
+	} else if (adapter_type == NRT_IPONLY) {
 		/* If tables_per_task != 0 for adapter_type == NRT_IPONLY
 		 * then the device's window count in NRT is incremented.
 		 * When we later read the adapter information, the adapter
@@ -3530,8 +3528,8 @@ nrt_free_jobinfo(slurm_nrt_jobinfo_t *jp)
 			tableinfo = &jp->tableinfo[i];
 			xfree(tableinfo->table);
 		}
-		xfree(jp->tableinfo);
 	}
+	xfree(jp->tableinfo);
 	if (jp->nodenames)
 		hostlist_destroy(jp->nodenames);
 
@@ -3615,6 +3613,7 @@ _wait_for_window_unloaded(char *adapter_name, nrt_adapter_t adapter_type,
 			_print_adapter_status(&status_adapter);
 		}
 		for (j = 0; j < window_count; j++) {
+			/* CLANG false positive here */
 			if (status_array[j].window_id == window_id)
 				break;
 		}
@@ -4361,8 +4360,6 @@ nrt_clear_node_state(void)
 				}
 
 				hs = hostset_create("");
-				if (hs == NULL)
-					fatal("hostset_create malloc failure");
 			}
 			for (k = 0; k < window_count; k++) {
 				if (debug_flags & DEBUG_FLAG_SWITCH) {

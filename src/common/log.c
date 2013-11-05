@@ -85,6 +85,7 @@
 #include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
+#include "src/common/slurm_protocol_api.h"
 
 #ifndef LINEBUFSIZE
 #  define LINEBUFSIZE 256
@@ -101,6 +102,8 @@ strong_alias(log_alter,		slurm_log_alter);
 strong_alias(log_alter_with_fp, slurm_log_alter_with_fp);
 strong_alias(log_set_fpfx,	slurm_log_set_fpfx);
 strong_alias(log_fp,		slurm_log_fp);
+strong_alias(log_fatal,		slurm_log_fatal);
+strong_alias(log_oom,		slurm_log_oom);
 strong_alias(log_has_data,	slurm_log_has_data);
 strong_alias(log_flush,		slurm_log_flush);
 strong_alias(dump_cleanup_list,	slurm_dump_cleanup_list);
@@ -131,7 +134,10 @@ typedef struct {
 	log_facility_t facility;
 	log_options_t opt;
 	unsigned initialized:1;
+	uint32_t debug_flags;
 }	log_t;
+
+char *slurm_prog_name = NULL;
 
 /* static variables */
 #ifdef WITH_PTHREADS
@@ -176,7 +182,7 @@ static void _log_flush(log_t *log);
 
 /* Write the current local time into the provided buffer. Returns the
  * number of characters written into the buffer. */
-static size_t _make_timestamp(char *timestamp_buf, size_t max, 
+static size_t _make_timestamp(char *timestamp_buf, size_t max,
 			      const char *timestamp_fmt)
 {
 	time_t timestamp_t = time(NULL);
@@ -296,6 +302,10 @@ _log_init(char *prog, log_options_t opt, log_facility_t fac, char *logfile )
 		log->argv0 = xstrdup(short_name);
 	}
 
+	/* Only take the first one here.  In some situations it can change. */
+	if (!slurm_prog_name)
+		slurm_prog_name = xstrdup(log->argv0);
+
 	if (!log->fpfx)
 		log->fpfx = xstrdup("");
 
@@ -361,7 +371,7 @@ _log_init(char *prog, log_options_t opt, log_facility_t fac, char *logfile )
  * logfile = logfile name if logfile level > LOG_QUIET
  */
 static int
-_sched_log_init(char *prog, log_options_t opt, log_facility_t fac, 
+_sched_log_init(char *prog, log_options_t opt, log_facility_t fac,
 		char *logfile)
 {
 	int rc = 0;
@@ -377,7 +387,7 @@ _sched_log_init(char *prog, log_options_t opt, log_facility_t fac,
 	} else if (!sched_log->argv0) {
 		const char *short_name;
 		short_name = strrchr((const char *) default_name, '/');
-		if (short_name) 
+		if (short_name)
 			short_name++;
 		else
 			short_name = default_name;
@@ -477,6 +487,7 @@ void log_fini(void)
 	if (log->logfp)
 		fclose(log->logfp);
 	xfree(log);
+	xfree(slurm_prog_name);
 	slurm_mutex_unlock(&log_lock);
 }
 
@@ -538,7 +549,21 @@ int log_alter(log_options_t opt, log_facility_t fac, char *logfile)
 	slurm_mutex_lock(&log_lock);
 	rc = _log_init(NULL, opt, fac, logfile);
 	slurm_mutex_unlock(&log_lock);
+	log_set_debug_flags();
 	return rc;
+}
+
+/* log_set_debug_flags()
+ * Set or reset the debug flags based on the configuration
+ * file or the scontrol command.
+ */
+void log_set_debug_flags(void)
+{
+	uint32_t debug_flags = slurm_get_debug_flags();
+
+	slurm_mutex_lock(&log_lock);
+	log->debug_flags = debug_flags;
+	slurm_mutex_unlock(&log_lock);
 }
 
 /* reinitialize log data structures. Like log_init, but do not init
@@ -577,18 +602,46 @@ int sched_log_alter(log_options_t opt, log_facility_t fac, char *logfile)
 	return rc;
 }
 
-/* return the FILE * of the current logfile (stderr if logging to stderr)
- */
+/* Return the FILE * of the current logfile (or stderr if not logging to
+ * a file, but NOT both). Also see log_fatal() and log_oom() below. */
 FILE *log_fp(void)
 {
 	FILE *fp;
 	slurm_mutex_lock(&log_lock);
-	if (log && log->logfp)
+	if (log && log->logfp) {
 		fp = log->logfp;
-	else
+	} else
 		fp = stderr;
 	slurm_mutex_unlock(&log_lock);
 	return fp;
+}
+
+/* Log fatal error without message buffering */
+void log_fatal(const char *file, int line, const char *msg, const char *err_str)
+{
+	if (log && log->logfp) {
+		fprintf(log->logfp, "ERROR: [%s:%d] %s: %s\n",
+			file, line, msg, err_str);
+		fflush(log->logfp);
+	}
+	if (!log || log->opt.stderr_level) {
+		fprintf(stderr, "ERROR: [%s:%d] %s: %s\n",
+			file, line, msg, err_str);
+		fflush(stderr);
+	}
+}
+
+/* Log out of memory without message buffering */
+void log_oom(const char *file, int line, const char *func)
+{
+	if (log && log->logfp) {
+		fprintf(log->logfp, "%s:%d: %s: malloc failed\n",
+			file, line, func);
+	}
+	if (!log || log->opt.stderr_level) {
+		fprintf(stderr, "%s:%d: %s: malloc failed\n",
+			file, line, func);
+	}
 }
 
 /* return a heap allocated string formed from fmt and ap arglist
@@ -651,12 +704,12 @@ static char *vxstrfmt(const char *fmt, va_list ap)
 				xstrcat(buf, tmp);
 				break;
 #elif defined USE_RFC5424_TIME
-			case 'M': /* "%M" => "yyyy-mm-ddThh:mm:ss(+/-)hh:mm" */
+			case 'M': /* "%M" => "yyyy-mm-ddThh:mm:ss.fff(+/-)hh:mm" */
 				xrfc5424timecat(buf);
 				break;
 #elif defined USE_ISO_8601
-			case 'M':       /* "%M" => "yyyy-mm-ddThh:mm:ss"     */
-				xstrftimecat(buf, "%Y-%m-%dT%T");
+			case 'M':       /* "%M" => "yyyy-mm-ddThh:mm:ss.fff"  */
+				xiso8601timecat(buf);
 				break;
 #else
 			case 'M':       /* "%M" => "Mon DD hh:mm:ss"         */
@@ -696,13 +749,13 @@ static char *vxstrfmt(const char *fmt, va_list ap)
 					xstrcat(buf, "%u");
 				break;
 			case 'l':
-				if((unprocessed == 0) && (*(p+1) == 'l')) {
+				if ((unprocessed == 0) && (*(p+1) == 'l')) {
 					long_long = 1;
 					p++;
 				}
 
 				if ((unprocessed == 0) && (*(p+1) == 'u')) {
-					if(long_long) {
+					if (long_long) {
 						snprintf(tmp, sizeof(tmp),
 							"%llu",
 							 va_arg(ap,
@@ -716,7 +769,7 @@ static char *vxstrfmt(const char *fmt, va_list ap)
 					xstrcat(buf, tmp);
 					p++;
 				} else if ((unprocessed==0) && (*(p+1)=='d')) {
-					if(long_long) {
+					if (long_long) {
 						snprintf(tmp, sizeof(tmp),
 							"%lld",
 							 va_arg(ap,
@@ -729,7 +782,7 @@ static char *vxstrfmt(const char *fmt, va_list ap)
 					xstrcat(buf, tmp);
 					p++;
 				} else if ((unprocessed==0) && (*(p+1)=='f')) {
-					if(long_long) {
+					if (long_long) {
 						xstrcat(buf, "%llf");
 						long_long = 0;
 					} else
@@ -739,7 +792,7 @@ static char *vxstrfmt(const char *fmt, va_list ap)
 					xstrcat(buf, tmp);
 					p++;
 				} else if ((unprocessed==0) && (*(p+1)=='x')) {
-					if(long_long) {
+					if (long_long) {
 						snprintf(tmp, sizeof(tmp),
 							 "%llx",
 							 va_arg(ap,
@@ -751,7 +804,7 @@ static char *vxstrfmt(const char *fmt, va_list ap)
 							 va_arg(ap, long int));
 					xstrcat(buf, tmp);
 					p++;
-				} else if(long_long) {
+				} else if (long_long) {
 					xstrcat(buf, "%ll");
 					long_long = 0;
 				} else
@@ -839,6 +892,25 @@ _log_printf(log_t *log, cbuf_t cb, FILE *stream, const char *fmt, ...)
 
 }
 
+#if defined(EXT_DEBUG)
+/* set_idbuf()
+ * Write in the input buffer the current time and milliseconds
+ * the process id and the current thread id.
+ */
+static void
+set_idbuf(char *idbuf)
+{
+	struct timeval now;
+
+	gettimeofday(&now, NULL);
+
+	sprintf(idbuf, "\
+%.15s.%-6d %5d %p", ctime(&now.tv_sec) + 4,
+	        (int)now.tv_usec, (int)getpid(), (void *)pthread_self());
+
+}
+#endif
+
 /*
  * log a message at the specified level to facilities that have been
  * configured to receive messages at that level
@@ -849,8 +921,16 @@ static void log_msg(log_level_t level, const char *fmt, va_list args)
 	char *buf = NULL;
 	char *msgbuf = NULL;
 	int priority = LOG_INFO;
+#if defined(EXT_DEBUG)
+	char idbuf[128];
+#endif
 
 	slurm_mutex_lock(&log_lock);
+
+#if defined(EXT_DEBUG)
+	set_idbuf(idbuf);
+#endif
+
 	if (!LOG_INITIALIZED) {
 		log_options_t opts = LOG_OPTS_STDERR_ONLY;
 		_log_init(NULL, opts, 0, NULL);
@@ -861,7 +941,7 @@ static void log_msg(log_level_t level, const char *fmt, va_list args)
 	    (strncmp(fmt, "sched: ", 7) == 0)) {
 		buf = vxstrfmt(fmt, args);
 		xlogfmtcat(&msgbuf, "[%M] %s%s%s", sched_log->fpfx, pfx, buf);
-		_log_printf(sched_log, sched_log->fbuf, sched_log->logfp, 
+		_log_printf(sched_log, sched_log->fbuf, sched_log->logfp,
 			    "%s\n", msgbuf);
 		fflush(sched_log->logfp);
 		xfree(msgbuf);
@@ -933,13 +1013,29 @@ static void log_msg(log_level_t level, const char *fmt, va_list args)
 
 	if (level <= log->opt.stderr_level) {
 		fflush(stdout);
-		_log_printf(log, log->buf, stderr, "%s: %s%s\n", 
-			    log->argv0, pfx, buf);
+#if defined(EXT_DEBUG)
+		_log_printf(log, log->buf, stderr, "%s ", idbuf);
+#endif
+		if (log->debug_flags & DEBUG_FLAG_THREADID)
+			_log_printf(log, log->buf, stderr, "%s: %p %s%s\n",
+				    log->argv0, (void *)pthread_self(),
+				    pfx, buf);
+		else
+			_log_printf(log, log->buf, stderr, "%s: %s%s\n",
+				    log->argv0, pfx, buf);
 		fflush(stderr);
 	}
 
 	if ((level <= log->opt.logfile_level) && (log->logfp != NULL)) {
-		xlogfmtcat(&msgbuf, "[%M] %s%s%s", log->fpfx, pfx, buf);
+
+#if defined(EXT_DEBUG)
+		_log_printf(log, log->buf, log->logfp, "%s ", idbuf);
+#endif
+		if (log->debug_flags & DEBUG_FLAG_THREADID)
+			xlogfmtcat(&msgbuf, "[%M] %p %s%s%s", log->fpfx,
+				   (void *)pthread_self(), pfx, buf);
+		else
+			xlogfmtcat(&msgbuf, "[%M] %s%s%s", log->fpfx, pfx, buf);
 		_log_printf(log, log->fbuf, log->logfp, "%s\n", msgbuf);
 		fflush(log->logfp);
 

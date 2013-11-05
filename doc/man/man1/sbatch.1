@@ -1,4 +1,4 @@
-.TH "sbatch" "1" "SLURM 2.5" "October 2012" "SLURM Commands"
+.TH "sbatch" "1" "SLURM 2.6" "January 2013" "SLURM Commands"
 
 .SH "NAME"
 sbatch \- Submit a batch script to SLURM.
@@ -34,6 +34,18 @@ http://slurm.schedmd.com/cpu_management.html
 .LP
 
 .TP
+\fB\-a\fR, \fB\-\-array\fR=<\fIindexes\fR>
+Submit a job array, multiple jobs to be executed with identical parameters.
+The \fIindexes\fR specification identifies what array index values should
+be used. Multiple values may be specified using a comma separated list and/or
+a range of values with a "\-" separator. For example, "\-\-array=0\-15" or
+"\-\-array=0,6,16\-32".
+A step function can also be specified with a suffix containing a colon and
+number. For example, "\-\-array=0\-15:4" is equivalent to "\-\-array=0,4,8,12".
+The minimum index value is 0.
+the maximum value is one less than the configuration parameter MaxArraySize.
+
+.TP
 \fB\-A\fR, \fB\-\-account\fR=<\fIaccount\fR>
 Charge resources used by this job to specified account.
 The \fIaccount\fR is an arbitrary string. The account name may
@@ -41,12 +53,56 @@ be changed after job submission using the \fBscontrol\fR
 command.
 
 .TP
-\fB\-\-acctg\-freq\fR=<\fIseconds\fR>
-Define the job accounting sampling interval.
+\fB\-\-acctg\-freq\fR
+Define the job accounting and profiling sampling intervals.
 This can be used to override the \fIJobAcctGatherFrequency\fR parameter in SLURM's
 configuration file, \fIslurm.conf\fR.
-A value of zero disables the periodic job sampling and provides accounting
-information only on job termination (reducing SLURM interference with the job).
+The supported format is as follows:
+.RS
+.TP 12
+\fB\-\-acctg\-freq=\fR\fI<datatype>\fR\fB=\fR\fI<interval>\fR
+where \fI<datatype>\fR=\fI<interval>\fR specifies the task sampling
+interval for the jobacct_gather plugin or a
+sampling interval for a profiling type by the
+acct_gather_profile plugin. Multiple,
+comma-separated \fI<datatype>\fR=\fI<interval>\fR intervals
+may be specified. Supported datatypes are as follows:
+.RS
+.TP
+\fBtask=\fI<interval>\fR
+where \fI<interval>\fR is the task sampling interval in seconds
+for the jobacct_gather plugins and for task
+profiling by the acct_gather_profile plugin.
+.TP
+\fBenergy=\fI<interval>\fR
+where \fI<interval>\fR is the sampling interval in seconds
+for energy profiling using the acct_gather_energy plugin
+.TP
+\fBnetwork=\fI<interval>\fR
+where \fI<interval>\fR is the sampling interval in seconds
+for infiniband profiling using the acct_gather_infiniband
+plugin.
+.TP
+\fBfilesystem=\fI<interval>\fR
+where \fI<interval>\fR is the sampling interval in seconds
+for filesystem profiling using the acct_gather_filesystem
+plugin.
+.TP
+.RE
+.RE
+.br
+The default value for the task sampling interval is 30.
+The default value for all other intervals is 0.
+An interval of 0 disables sampling of the specified type.
+If the task sampling interval is 0, accounting
+information is collected only at job termination (reducing SLURM
+interference with the job).
+.br
+.br
+Smaller (non\-zero) values have a greater impact upon job performance,
+but a value of 30 seconds is not likely to be noticeable for
+applications having less than 10,000 tasks.
+.RE
 
 .TP
 \fB\-B\fR \fB\-\-extra\-node\-info\fR=<\fIsockets\fR[:\fIcores\fR[:\fIthreads\fR]]>
@@ -371,9 +427,11 @@ it is executed.
 \fB\-e\fR, \fB\-\-error\fR=<\fIfilename pattern\fR>
 Instruct SLURM to connect the batch script's standard error directly to the
 file name specified in the "\fIfilename pattern\fR".
-By default both standard output and standard error are directed to a file of
-the name "slurm\-%j.out", where the "%j" is replaced with the job allocation
-number.
+By default both standard output and standard error are directed to the same file.
+For job arrays, the default file name is "slurm-%A_%a.out", "%A" is replaced
+by the job ID and "%a" with the array index.
+For other jobs, the default file name is "slurm-%j.out", where the "%j" is
+replaced by the job ID.
 See the \fB\-\-input\fR option for filename specification options.
 
 .TP
@@ -447,17 +505,15 @@ may be the group name or the numerical group ID.
 .TP
 \fB\-\-gres\fR=<\fIlist\fR>
 Specifies a comma delimited list of generic consumable resources.
-The format of each entry on the list is "name[:count[*cpu]]".
+The format of each entry on the list is "name[:count]".
 The name is that of the consumable resource.
 The count is the number of those resources with a default value of 1.
-The specified resources will be allocated to the job on each node
-allocated unless "*cpu" is appended, in which case the resources
-will be allocated on a per cpu basis.
+The specified resources will be allocated to the job on each node.
 The available generic consumable resources is configurable by the system
 administrator.
 A list of available generic consumable resources will be printed and the
 command will exit if the option argument is "help".
-Examples of use include "\-\-gres=gpus:2*cpu,disk=40G" and "\-\-gres=help".
+Examples of use include "\-\-gres=gpu:2,mic=1" and "\-\-gres=help".
 
 .TP
 \fB\-H, \-\-hold\fR
@@ -499,6 +555,10 @@ will not be submitted.
 NOTE: There is limited support for this option with batch jobs.
 
 .TP
+\fB\-\-ignore\-pbs\fR
+Ignore any "#PBS" options specified in the batch script.
+
+.TP
 \fB\-i\fR, \fB\-\-input\fR=<\fIfilename pattern\fR>
 Instruct SLURM to connect the batch script's standard input
 directly to the file name specified in the "\fIfilename pattern\fR".
@@ -515,12 +575,21 @@ Supported replacement symbols are:
 .PD
 .RS
 .TP
+\fB%A\fR
+Job array's master job allocation number.
+.TP
+\fB%a\fR
+Job array ID (index) number.
+.TP
 \fB%j\fR
 Job allocation number.
 .TP
 \fB%N\fR
 Node name.  Only one file is created, so %N will be replaced by the name of the
 first node in the job, which is the one that runs the script.
+.TP
+\fB%u\fR
+User name.
 .RE
 
 .TP
@@ -614,7 +683,9 @@ of tasks is no larger than the number of allocated nodes.
 The tasks are distributed in blocks of a specified size.  The options
 include a number representing the size of the task block.  This is
 followed by an optional specification of the task distribution scheme
-within a block of tasks and between the blocks of tasks.  For more
+within a block of tasks and between the blocks of tasks.  The number of tasks
+distributed to each node is the same as for cyclic distribution, but the
+taskids assigned to each node depend on the plane size.  For more
 details (including examples and diagrams), please see
 .br
 http://slurm.schedmd.com/mc_support.html
@@ -977,9 +1048,11 @@ allowing more than one task per processor.  However no more than
 \fB\-o\fR, \fB\-\-output\fR=<\fIfilename pattern\fR>
 Instruct SLURM to connect the batch script's standard output directly to the
 file name specified in the "\fIfilename pattern\fR".
-By default both standard output and standard error are directed to a file of
-the name "slurm\-%j.out", where the "%j" is replaced with the job allocation
-number.
+By default both standard output and standard error are directed to the same file.
+For job arrays, the default file name is "slurm-%A_%a.out", "%A" is replaced
+by the job ID and "%a" with the array index.
+For other jobs, the default file name is "slurm-%j.out", where the "%j" is
+replaced by the job ID.
 See the \fB\-\-input\fR option for filename specification options.
 
 .TP
@@ -995,6 +1068,39 @@ the default behavior is to allow the slurm controller to select the default
 partition as designated by the system administrator. If the job can use more
 than one partition, specify their names in a comma separate list and the one
 offering earliest initiation will be used.
+
+.TP
+\fB\-\-profile\fR=<all|none|[energy[,|task[,|lustre[,|network]]]]>
+enables detailed data collection by the acct_gather_profile plugin.
+Detailed data are typically time-series that are stored in an HDF5 file for
+the job.
+
+.RS
+.TP 10
+\fBAll\fR
+All data types are collected. (Cannot be combined with other values.)
+
+.TP
+\fBNone\fR
+No data types are collected. This is the default.
+ (Cannot be combined with other values.)
+
+.TP
+\fBEnergy\fR
+Energy data is collected.
+
+.TP
+\fBTask\fR
+Task (I/O, Memory, ...) data is collected.
+
+.TP
+\fBLustre\fR
+Lustre data is collected.
+
+.TP
+\fBNetwork\fR
+Network (InfiniBand) data is collected.
+.RE
 
 .TP
 \fB\-\-propagate\fR[=\fIrlimitfR]
@@ -1299,6 +1405,9 @@ Same as \fB\-A, \-\-account\fR
 \fBSBATCH_ACCTG_FREQ\fR
 Same as \fB\-\-acctg\-freq\fR
 .TP
+\fBSBATCH_ARRAY_INX\fR
+Same as \fB\-a, \-\-array\fR
+.TP
 \fBSBATCH_BLRTS_IMAGE\fR
 Same as \fB\-\-blrts\-image\fR
 .TP
@@ -1344,6 +1453,9 @@ Same as \fB\-g, \-\-geometry\fR
 \fBSBATCH_GET_USER_ENV\fR
 Same as \fB\-\-get\-user\-env\fR
 .TP
+\fBSBATCH_IGNORE_PBS\fR
+Same as \fB\-\-ignore\-pbs\fR
+.TP
 \fBSBATCH_IMMEDIATE\fR
 Same as \fB\-I, \-\-immediate\fR
 .TP
@@ -1383,6 +1495,9 @@ Same as \fB\-O, \-\-overcommit\fR
 \fBSBATCH_PARTITION\fR
 Same as \fB\-p, \-\-partition\fR
 .TP
+\fBSBATCH_PROFILE\fR
+Same as \fB\-\-profile\fR
+.TP
 \fBSBATCH_QOS\fR
 Same as \fB\-\-qos\fR
 .TP
@@ -1414,6 +1529,10 @@ Max time waiting for requested switches. See \fB\-\-switches\fR
 .TP
 \fBSBATCH_WCKEY\fR
 Same as \fB\-\-wckey\fR
+.TP
+\fBSLURM_STEP_KILLED_MSG_NODE_ID\fR=ID
+If set, only the specified node will log when the job or step are killed
+by a signal.
 
 .SH "OUTPUT ENVIRONMENT VARIABLES"
 .PP
@@ -1432,6 +1551,11 @@ Do not free a block on Blue Gene L/P systems only.
 \fBMPIRUN_PARTITION\fR
 The block name on Blue Gene systems only.
 .TP
+\fBSLURM_ARRAY_TASK_ID\fR
+Job array ID (index) number.
+.TP
+\fBSLURM_ARRAY_JOB_ID\fR
+Job array's master job ID number.
 \fBSLURM_CHECKPOINT_IMAGE_DIR\fR
 Directory into which checkpoint images should  be written if specified
 on the execute line.
@@ -1447,6 +1571,9 @@ Core_ID x threads_per_core + Thread_ID).
 .TP
 \fBSLURM_CPUS_ON_NODE\fR
 Number of CPUS on the allocated node.
+.TP
+\fBSLURM_DISTRIBUTION\fR
+Same as \fB\-m, \-\-distribution\fR
 .TP
 \fBSLURM_GTIDS\fR
 Global task IDs running on this node.  Zero  origin and comma separated.
@@ -1514,6 +1641,9 @@ This value is  propagated  to the spawned processes.
 \fBSLURM_PROCID\fR
 The MPI rank (or relative process ID) of the current process
 .TP
+\fBSLURM_PROFILE\fR
+Same as \fB\-\-profile\fR
+.TP
 \fBSLURM_RESTART_COUNT\fR
 If the job has been restarted due to system failure or has been
 explicitly requeued, this will be sent to the number of times
@@ -1521,6 +1651,9 @@ the job has been restarted.
 .TP
 \fBSLURM_SUBMIT_DIR\fR
 The directory from which \fBsbatch\fR was invoked.
+.TP
+\fBSLURM_SUBMIT_HOST\fR
+The hostname of the computer from which \fBsbatch\fR was invoked.
 .TP
 \fBSLURM_TASKS_PER_NODE\fR
 Number of tasks to be initiated on each node. Values are
@@ -1606,9 +1739,11 @@ host4
 
 .SH "COPYING"
 Copyright (C) 2006\-2007 The Regents of the University of California.
-Copyright (C) 2008\-2010 Lawrence Livermore National Security.
 Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
-CODE\-OCEC\-09\-009. All rights reserved.
+.br
+Copyright (C) 2008\-2010 Lawrence Livermore National Security.
+.br
+Copyright (C) 2010\-2013 SchedMD LLC.
 .LP
 This file is part of SLURM, a resource management program.
 For details, see <http://slurm.schedmd.com/>.

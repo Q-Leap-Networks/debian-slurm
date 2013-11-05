@@ -1,5 +1,5 @@
 /*****************************************************************************\
- *  test9.9.prog.c - link and test algo of the multifactor plugin.
+ *  test9.9.prog.c - Timing test for 5000 jobs.
  *
  *  Usage: test9.9.prog <sbatch_path> <exec_prog> <prog_name> <iterations>
  *
@@ -11,7 +11,7 @@
  *  Written by Morris Jette <jette@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under

@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -51,7 +51,7 @@ char *_elapsed_time(long secs, long usecs)
 	long    subsec = 0;
 	char *str = NULL;
 
-	if(secs < 0 || secs == NO_VAL)
+	if ((secs < 0) || (secs == NO_VAL))
 		return NULL;
 
 
@@ -59,7 +59,7 @@ char *_elapsed_time(long secs, long usecs)
 		secs++;
 		usecs -= 1E6;
 	}
-	if(usecs > 0) {
+	if (usecs > 0) {
 		/* give me 3 significant digits to tack onto the sec */
 		subsec = (usecs/1000);
 	}
@@ -78,6 +78,20 @@ char *_elapsed_time(long secs, long usecs)
 		str = xstrdup_printf("%2.2ld:%2.2ld.%3.3ld",
 				     minutes, seconds, subsec);
 	return str;
+}
+
+static void _print_small_double(
+	char *outbuf, int buf_size, double dub, int units)
+{
+	if (fuzzy_equal(dub, NO_VAL))
+		return;
+
+	if (dub > 1)
+		convert_num_unit((float)dub, outbuf, buf_size, units);
+	else if (dub > 0)
+		snprintf(outbuf, buf_size, "%.2fM", dub);
+	else
+		snprintf(outbuf, buf_size, "0");
 }
 
 void print_fields(slurmdb_step_rec_t *step)
@@ -103,9 +117,9 @@ void print_fields(slurmdb_step_rec_t *step)
 			break;
 		case PRINT_ACT_CPUFREQ:
 
-			convert_num_unit((float)step->stats.act_cpufreq,
-					 outbuf, sizeof(outbuf),
-					 UNIT_NONE);
+			convert_num_unit2((float)step->stats.act_cpufreq,
+					  outbuf, sizeof(outbuf),
+					  UNIT_KILO, 1000, false);
 
 			field->print_routine(field,
 					     outbuf,
@@ -113,11 +127,34 @@ void print_fields(slurmdb_step_rec_t *step)
 			break;
 		case PRINT_CONSUMED_ENERGY:
 			if (!fuzzy_equal(step->stats.consumed_energy, NO_VAL)) {
-				convert_num_unit((float)
-						 step->stats.consumed_energy,
-						 outbuf, sizeof(outbuf),
-						 UNIT_NONE);
+				convert_num_unit2((float)
+						  step->stats.consumed_energy,
+						  outbuf, sizeof(outbuf),
+						  UNIT_NONE, 1000, false);
 			}
+			field->print_routine(field,
+					     outbuf,
+					     (curr_inx == field_count));
+			break;
+		case PRINT_CONSUMED_ENERGY_RAW:
+			field->print_routine(field,
+					     step->stats.consumed_energy,
+					     (curr_inx == field_count));
+			break;
+		case PRINT_AVEDISKREAD:
+			_print_small_double(outbuf, sizeof(outbuf),
+					    step->stats.disk_read_ave,
+					    UNIT_MEGA);
+
+			field->print_routine(field,
+					     outbuf,
+					     (curr_inx == field_count));
+			break;
+		case PRINT_AVEDISKWRITE:
+			_print_small_double(outbuf, sizeof(outbuf),
+					    step->stats.disk_write_ave,
+					    UNIT_MEGA);
+
 			field->print_routine(field,
 					     outbuf,
 					     (curr_inx == field_count));
@@ -160,6 +197,52 @@ void print_fields(slurmdb_step_rec_t *step)
 
 			field->print_routine(field,
 					     outbuf,
+					     (curr_inx == field_count));
+			break;
+		case PRINT_MAXDISKREAD:
+			_print_small_double(outbuf, sizeof(outbuf),
+					    step->stats.disk_read_max,
+					    UNIT_MEGA);
+
+			field->print_routine(field,
+					     outbuf,
+					     (curr_inx == field_count));
+			break;
+		case PRINT_MAXDISKREADNODE:
+			tmp_char = find_hostname(
+					step->stats.disk_read_max_nodeid,
+					step->nodes);
+			field->print_routine(field,
+					     tmp_char,
+					     (curr_inx == field_count));
+			xfree(tmp_char);
+			break;
+		case PRINT_MAXDISKREADTASK:
+			field->print_routine(field,
+					     step->stats.disk_read_max_taskid,
+					     (curr_inx == field_count));
+			break;
+		case PRINT_MAXDISKWRITE:
+			_print_small_double(outbuf, sizeof(outbuf),
+					    step->stats.disk_write_max,
+					    UNIT_MEGA);
+
+			field->print_routine(field,
+					     outbuf,
+					     (curr_inx == field_count));
+			break;
+		case PRINT_MAXDISKWRITENODE:
+			tmp_char = find_hostname(
+					step->stats.disk_write_max_nodeid,
+					step->nodes);
+			field->print_routine(field,
+					     tmp_char,
+					     (curr_inx == field_count));
+			xfree(tmp_char);
+			break;
+		case PRINT_MAXDISKWRITETASK:
+			field->print_routine(field,
+					     step->stats.disk_write_max_taskid,
 					     (curr_inx == field_count));
 			break;
 		case PRINT_MAXPAGES:
@@ -268,6 +351,21 @@ void print_fields(slurmdb_step_rec_t *step)
                                              step->pid_str,
                                              (curr_inx == field_count));
                         break;
+		case PRINT_REQ_CPUFREQ:
+			if (step->req_cpufreq == CPU_FREQ_LOW)
+				snprintf(outbuf, sizeof(outbuf), "Low");
+			else if (step->req_cpufreq == CPU_FREQ_MEDIUM)
+				snprintf(outbuf, sizeof(outbuf), "Medium");
+			else if (step->req_cpufreq == CPU_FREQ_HIGH)
+				snprintf(outbuf, sizeof(outbuf), "High");
+			else if (!fuzzy_equal(step->req_cpufreq, NO_VAL))
+				convert_num_unit2((float)step->req_cpufreq,
+						  outbuf, sizeof(outbuf),
+						  UNIT_KILO, 1000, false);
+			field->print_routine(field,
+					     outbuf,
+					     (curr_inx == field_count));
+			break;
 		default:
 			break;
 		}

@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -173,6 +173,7 @@ typedef struct srun_options {
 	bool parallel_debug;	/* srun controlled by debugger	*/
 	bool debugger_test;	/* --debugger-test		*/
 	bool test_only;		/* --test-only			*/
+	uint32_t profile;	/* --profile=[all | none}       */
 	char *propagate;	/* --propagate[=RLIMIT_CORE,...]*/
 	char *task_epilog;	/* --task-epilog=		*/
 	char *task_prolog;	/* --task-prolog=		*/
@@ -219,7 +220,8 @@ typedef struct srun_options {
 	uint16_t mail_type;	/* --mail-type			*/
 	char *mail_user;	/* --mail-user			*/
 	uint8_t open_mode;	/* --open-mode=append|truncate	*/
-	int acctg_freq;		/* --acctg-freq=secs		*/
+	char *acctg_freq;	/* --acctg-freq=<type1>=<freq1>,*/
+				/* 	<type2>=<freq2>,...	*/
 	uint32_t cpu_freq;     	/* --cpu_freq=kilohertz		*/
 	bool pty;		/* --pty			*/
 	char *restart_dir;	/* --restart                    */

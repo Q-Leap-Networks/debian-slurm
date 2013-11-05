@@ -6,7 +6,7 @@
  *  All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -61,6 +61,7 @@
 #include "setup.h"
 #include "kvs.h"
 #include "agent.h"
+#include "nameserv.h"
 
 /* client command handlers */
 static int _handle_get_maxes(int fd, int lrank, client_req_t *req);
@@ -118,7 +119,7 @@ _handle_get_maxes(int fd, int lrank, client_req_t *req)
 			   KVSNAMEMAX_KEY"=%d " KEYLENMAX_KEY"=%d "
 			   VALLENMAX_KEY"=%d\n",
 			   rc, MAXKVSNAME, MAXKEYLEN, MAXVALLEN);
-	rc = client_resp_send(resp, fd);
+	(void) client_resp_send(resp, fd);
 	client_resp_free(resp);
 
 	debug3("mpi/pmi2: out _handle_get_maxes");
@@ -137,7 +138,7 @@ _handle_get_universe_size(int fd, int lrank, client_req_t *req)
 	client_resp_append(resp, CMD_KEY"="UNIVSIZE_CMD" " RC_KEY"=%d "
 			   SIZE_KEY"=%d\n",
 			   rc, job_info.ntasks);
-	rc = client_resp_send(resp, fd);
+	(void) client_resp_send(resp, fd);
 	client_resp_free(resp);
 
 	debug3("mpi/pmi2: out _handle_get_universe_size");
@@ -161,7 +162,7 @@ _handle_get_appnum(int fd, int lrank, client_req_t *req)
 	 */
 	client_resp_append(resp, CMD_KEY"="APPNUM_CMD" " RC_KEY"=%d "
 			   APPNUM_KEY"=-1\n", rc);
-	rc = client_resp_send(resp, fd);
+	(void) client_resp_send(resp, fd);
 	client_resp_free(resp);
 
 	debug3("mpi/pmi2: out _handle_get_appnum");
@@ -184,6 +185,18 @@ _handle_barrier_in(int fd, int lrank, client_req_t *req)
 	/* mutex protection is not required */
 	if (tasks_to_wait == 0 && children_to_wait == 0) {
 		rc = temp_kvs_send();
+		if (rc != SLURM_SUCCESS) {
+			error("mpi/pmi2: failed to send temp kvs to %s", 
+			      tree_info.parent_node ?: "srun");
+			send_kvs_fence_resp_to_clients(
+				rc,
+				"mpi/pmi2: failed to send temp kvs");
+			/* cancel the step to avoid tasks hang */
+			slurm_kill_job_step(job_info.jobid, job_info.stepid,
+					    SIGKILL);
+		} else {
+			waiting_kvs_resp = 1;
+		}
 	}
 	debug3("mpi/pmi2: out _handle_barrier_in, tasks_to_wait=%d, "
 	       "children_to_wait=%d", tasks_to_wait, children_to_wait);
@@ -267,9 +280,12 @@ _handle_put(int fd, int lrank, client_req_t *req)
 	client_req_get_str(req, KVSNAME_KEY, &kvsname); /* not used */
 	client_req_get_str(req, KEY_KEY, &key);
 	client_req_get_str(req, VALUE_KEY, &val);
-
+	xfree(kvsname);
+	
 	/* no need to add k-v to hash. just get it ready to be up-forward */
 	rc = temp_kvs_add(key, val);
+	xfree(key);
+	xfree(val);
 	if (rc == SLURM_SUCCESS)
 		rc = 0;
 	else
@@ -296,9 +312,11 @@ _handle_get(int fd, int lrank, client_req_t *req)
 	client_req_parse_body(req);
 	client_req_get_str(req, KVSNAME_KEY, &kvsname); /* not used */
 	client_req_get_str(req, KEY_KEY, &key);
-
+	xfree(kvsname);
+	
 	val = kvs_get(key);
-
+	xfree(key);
+	
 	resp = client_resp_new();
 	if (val != NULL) {
 		client_resp_append(resp, CMD_KEY"="GETRESULT_CMD" "
@@ -320,28 +338,98 @@ _handle_getbyidx(int fd, int lrank, client_req_t *req)
 {
 	/* not used in MPICH2 */
 	error("mpi/pmi2: PMI1 request of '" GETBYIDX_CMD "' not supported");
+	
 	return SLURM_ERROR;
 }
 
 static int
 _handle_publish_name(int fd, int lrank, client_req_t *req)
 {
-	error("mpi/pmi2: PMI1 request of '" PUBLISHNAME_CMD "' not supported");
-	return SLURM_ERROR;
+	int rc;
+	client_resp_t *resp;
+	char *service = NULL, *port = NULL;
+
+	debug3("mpi/pmi2: in _handle_publish_name");
+
+	client_req_parse_body(req);
+	client_req_get_str(req, SERVICE_KEY, &service);
+	client_req_get_str(req, PORT_KEY, &port);
+	
+	rc = name_publish_up(service, port);
+	xfree(service);
+	xfree(port);
+
+	resp = client_resp_new();
+	client_resp_append(resp, CMD_KEY"="PUBLISHRESULT_CMD" "
+			   INFO_KEY"=%s\n",
+			   rc == SLURM_SUCCESS ? "ok" : "fail");
+	rc = client_resp_send(resp, fd);
+	client_resp_free(resp);
+
+	debug3("mpi/pmi2: out _handle_publish_name");
+	return rc;
 }
 
 static int
 _handle_unpublish_name(int fd, int lrank, client_req_t *req)
 {
-	error("mpi/pmi2: PMI1 request of '" UNPUBLISHNAME_CMD "' not supported");
-	return SLURM_ERROR;
+	int rc;
+	client_resp_t *resp;
+	char *service = NULL;
+
+	debug3("mpi/pmi2: in _handle_unpublish_name");
+
+	client_req_parse_body(req);
+	client_req_get_str(req, SERVICE_KEY, &service);
+	
+	rc = name_unpublish_up(service);
+	xfree(service);
+
+	resp = client_resp_new();
+	client_resp_append(resp, CMD_KEY"="UNPUBLISHRESULT_CMD" "
+			   INFO_KEY"=%s\n",
+			   rc == SLURM_SUCCESS ? "ok" : "fail");
+	rc = client_resp_send(resp, fd);
+	client_resp_free(resp);
+
+	debug3("mpi/pmi2: out _handle_unpublish_name");
+	return rc;
 }
 
+/*
+ * this design is not scalable: each task that calls MPI_Lookup_name()
+ * will generate a RPC to srun.
+ */
 static int
 _handle_lookup_name(int fd, int lrank, client_req_t *req)
 {
-	error("mpi/pmi2: PMI1 request of '" LOOKUPNAME_CMD "' not supported");
-	return SLURM_ERROR;
+	int rc;
+	client_resp_t *resp;
+	char *service = NULL, *port = NULL;
+
+	debug3("mpi/pmi2: in _handle_lookup_name");
+
+	client_req_parse_body(req);
+	client_req_get_str(req, SERVICE_KEY, &service);
+
+	port = name_lookup_up(service);
+
+	resp = client_resp_new();
+	client_resp_append(resp, CMD_KEY"="LOOKUPRESULT_CMD" ");
+	if (port == NULL) {
+		client_resp_append(resp, INFO_KEY"=fail\n");
+	} else {
+		client_resp_append(resp, INFO_KEY"=ok "PORT_KEY"=%s\n",
+				   port);
+	}
+	rc = client_resp_send(resp, fd);
+	client_resp_free(resp);
+
+	xfree(service);
+	xfree(port);
+
+	debug3("mpi/pmi2: out _handle_lookup_name");
+	return rc;
 }
 
 static int
@@ -494,8 +582,10 @@ _handle_pmi1_mcmd_buf(int fd, int lrank, int buf_size, int buf_len, char **pbuf)
 	tmp_ptr = NULL;
 	while (tmp_buf[0] != '\0') {
 		tmp_ptr = strstr(tmp_buf, ENDCMD_KEY"\n");
-		if ( tmp_ptr == NULL) {
+		if (tmp_ptr == NULL) {
 			error("mpi/pmi2: this is impossible");
+			rc = SLURM_ERROR;
+			break;
 		}
 		*tmp_ptr = '\0';
 		n = tmp_ptr - tmp_buf;

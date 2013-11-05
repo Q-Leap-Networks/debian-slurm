@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -262,7 +262,7 @@ int init (void)
 	 */
 	rc = (int) lua_tonumber (L, -1);
 	lua_pop (L, 1);
-	if(rc != SLURM_SUCCESS)
+	if (rc != SLURM_SUCCESS)
 		return rc;
 
 	/*

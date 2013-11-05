@@ -8,7 +8,7 @@
  *  Written by Danny Auble <da@llnl.gov>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -1975,8 +1975,8 @@ static int _cluster_get_assocs(mysql_conn_t *mysql_conn,
 	 */
 	if (!is_admin && (private_data & PRIVATE_DATA_USERS)) {
 		int set = 0;
-		query = xstrdup_printf("select lft from %s where user='%s'",
-				       assoc_table, user->name);
+		query = xstrdup_printf("select lft from %s_%s where user='%s'",
+				       cluster_name, assoc_table, user->name);
 		if (user->coord_accts) {
 			slurmdb_coord_rec_t *coord = NULL;
 			itr = list_iterator_create(user->coord_accts);
@@ -2008,9 +2008,19 @@ static int _cluster_get_assocs(mysql_conn_t *mysql_conn,
 					   row[0]);
 			}
 		}
-		if (set)
-			xstrcat(extra,")");
+
 		mysql_free_result(result);
+
+		if (set)
+			xstrcat(extra, ")");
+		else {
+			xfree(extra);
+			debug("User %s has no assocations, and is not admin, "
+			      "so not returning any.", user->name);
+			/* This user has no valid associations, so
+			 * end. */
+			return SLURM_SUCCESS;
+		}
 	}
 
 	qos_extra = _setup_association_cond_qos(assoc_cond, cluster_name);
@@ -3012,8 +3022,10 @@ extern List as_mysql_modify_assocs(mysql_conn_t *mysql_conn, uint32_t uid,
 
 	if (!(is_admin = is_user_min_admin_level(
 		      mysql_conn, uid, SLURMDB_ADMIN_OPERATOR))) {
-		if (assoc_cond->user_list
-		    && (list_count(assoc_cond->user_list) == 1)) {
+		if (is_user_any_coord(mysql_conn, &user)) {
+			goto is_same_user;
+		} else if (assoc_cond->user_list
+			   && (list_count(assoc_cond->user_list) == 1)) {
 			uid_t pw_uid;
 			char *name;
 			name = list_peek(assoc_cond->user_list);
@@ -3037,12 +3049,9 @@ extern List as_mysql_modify_assocs(mysql_conn_t *mysql_conn, uint32_t uid,
 			}
 		}
 
-		if (!is_user_any_coord(mysql_conn, &user)) {
-			error("Only admins/coordinators can "
-			      "modify associations");
-			errno = ESLURM_ACCESS_DENIED;
-			return NULL;
-		}
+		error("Only admins/coordinators can modify associations");
+		errno = ESLURM_ACCESS_DENIED;
+		return NULL;
 	}
 is_same_user:
 
@@ -3135,6 +3144,7 @@ is_same_user:
 
 	if (!ret_list) {
 		reset_mysql_conn(mysql_conn);
+		errno = rc;
 		return NULL;
 	} else if (!list_count(ret_list)) {
 		reset_mysql_conn(mysql_conn);
@@ -3329,6 +3339,11 @@ extern List as_mysql_get_assocs(mysql_conn_t *mysql_conn, uid_t uid,
 			*/
 			assoc_mgr_fill_in_user(
 				mysql_conn, &user, 1, NULL);
+		}
+		if (!is_admin && !user.name) {
+			debug("User %u has no assocations, and is not admin, "
+			      "so not returning any.", user.uid);
+			return NULL;
 		}
 	}
 

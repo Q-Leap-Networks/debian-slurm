@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -127,8 +127,13 @@ main (int argc, char *argv[])
 		working_cluster_rec = list_peek(clusters);
 	}
 
-	while((opt_char = getopt_long(argc, argv, "adhM:oQvV",
-			long_options, &option_index)) != -1) {
+	while (1) {
+		if ((optind < argc) &&
+		    !strncasecmp(argv[optind], "setdebugflags", 8))
+			break;	/* avoid parsing "-<flagname>" as option */
+		if ((opt_char = getopt_long(argc, argv, "adhM:oQvV",
+					    long_options, &option_index)) == -1)
+			break;
 		switch (opt_char) {
 		case (int)'?':
 			fprintf(stderr, "Try \"scontrol --help\" for "
@@ -249,17 +254,20 @@ static char *_getline(const char *prompt)
 
 	printf("%s", prompt);
 
-	/* Set "line" here to avoid a warning.  We throw it away later. */
+	/* Set "line" here to avoid a warning, discard later */
 	line = fgets(buf, 4096, stdin);
-
+	if (line == NULL)
+		return NULL;
 	len = strlen(buf);
-	if (len == 0)
+	if ((len == 0) || (len >= 4096))
 		return NULL;
 	if (buf[len-1] == '\n')
 		buf[len-1] = '\0';
 	else
 		len++;
-	line = malloc (len * sizeof(char));
+	line = malloc(len * sizeof(char));
+	if (!line)
+		return NULL;
 	return strncpy(line, buf, len);
 }
 #endif
@@ -602,7 +610,7 @@ _process_command (int argc, char *argv[])
 		if (quiet_flag == -1)
 			fprintf(stderr, "no input");
 		return 0;
-	} else if(tag)
+	} else if (tag)
 		tag_len = strlen(tag);
 	else {
 		if (quiet_flag == -1)
@@ -668,17 +676,17 @@ _process_command (int argc, char *argv[])
 		old_res_info_ptr = NULL;
 		slurm_free_ctl_conf(old_slurm_ctl_conf_ptr);
 		old_slurm_ctl_conf_ptr = NULL;
-		/* if(old_block_info_ptr) */
+		/* if (old_block_info_ptr) */
 		/* 	old_block_info_ptr->last_update = 0; */
-		/* if(old_job_info_ptr) */
+		/* if (old_job_info_ptr) */
 		/* 	old_job_info_ptr->last_update = 0; */
-		/* if(old_node_info_ptr) */
+		/* if (old_node_info_ptr) */
 		/* 	old_node_info_ptr->last_update = 0; */
-		/* if(old_part_info_ptr) */
+		/* if (old_part_info_ptr) */
 		/* 	old_part_info_ptr->last_update = 0; */
-		/* if(old_res_info_ptr) */
+		/* if (old_res_info_ptr) */
 		/* 	old_res_info_ptr->last_update = 0; */
-		/* if(old_slurm_ctl_conf_ptr) */
+		/* if (old_slurm_ctl_conf_ptr) */
 		/* 	old_slurm_ctl_conf_ptr->last_update = 0; */
 	}
 	else if (strncasecmp (tag, "create", MAX(tag_len, 2)) == 0) {
@@ -1302,7 +1310,7 @@ _delete_it (int argc, char *argv[])
 			slurm_perror(errmsg);
 		}
 	} else if (strncasecmp (tag, "BlockName", MAX(tag_len, 3)) == 0) {
-		if(cluster_flags & CLUSTER_FLAG_BG) {
+		if (cluster_flags & CLUSTER_FLAG_BG) {
 			update_block_msg_t   block_msg;
 			slurm_init_update_block_msg ( &block_msg );
 			block_msg.bg_block_id = val;
@@ -1511,7 +1519,7 @@ _update_it (int argc, char *argv[])
 		exit_code = 1;
 		fprintf(stderr, "No valid entity in update command\n");
 		fprintf(stderr, "Input line must include \"NodeName\", ");
-		if(cluster_flags & CLUSTER_FLAG_BG) {
+		if (cluster_flags & CLUSTER_FLAG_BG) {
 			fprintf(stderr, "\"BlockName\", \"SubMPName\" "
 				"(i.e. bgl000[0-3]),");
 		}
@@ -1539,7 +1547,7 @@ _update_bluegene_block (int argc, char *argv[])
 	int i, update_cnt = 0;
 	update_block_msg_t block_msg;
 
-	if(!(cluster_flags & CLUSTER_FLAG_BG)) {
+	if (!(cluster_flags & CLUSTER_FLAG_BG)) {
 		exit_code = 1;
 		fprintf(stderr, "This only works on a bluegene system.\n");
 		return 0;
@@ -1596,7 +1604,7 @@ _update_bluegene_block (int argc, char *argv[])
 		}
 	}
 
-	if(!block_msg.bg_block_id) {
+	if (!block_msg.bg_block_id) {
 		error("You didn't supply a block name.");
 		return 0;
 	} else if (block_msg.state == (uint16_t)NO_VAL) {
@@ -1626,7 +1634,7 @@ _update_bluegene_subbp (int argc, char *argv[])
 	int i, update_cnt = 0;
 	update_block_msg_t block_msg;
 
-	if(!(cluster_flags & CLUSTER_FLAG_BG)) {
+	if (!(cluster_flags & CLUSTER_FLAG_BG)) {
 		exit_code = 1;
 		fprintf(stderr, "This only works on a bluegene system.\n");
 		return 0;
@@ -1675,7 +1683,7 @@ _update_bluegene_subbp (int argc, char *argv[])
 		}
 	}
 
-	if(!block_msg.mp_str) {
+	if (!block_msg.mp_str) {
 		error("You didn't supply an ionode list.");
 		return 0;
 	} else if (block_msg.state == (uint16_t)NO_VAL) {
@@ -1699,11 +1707,14 @@ _update_bluegene_subbp (int argc, char *argv[])
  */
 static int _update_slurmctld_debug(char *val)
 {
-	char *endptr;
+	char *endptr = NULL;
 	int error_code = SLURM_SUCCESS;
-	uint32_t level = (uint32_t)strtoul(val, &endptr, 10);
+	uint32_t level;
 
-	if (*endptr != '\0' || level > 9) {
+	if (val)
+		level = (uint32_t)strtoul(val, &endptr, 10);
+
+	if ((val == NULL) || (*endptr != '\0') || (level > 9)) {
 		error_code = 1;
 		if (quiet_flag != 1)
 			fprintf(stderr, "invalid debug level: %s\n",

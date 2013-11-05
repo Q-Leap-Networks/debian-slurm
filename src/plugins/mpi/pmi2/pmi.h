@@ -6,7 +6,7 @@
  *  All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -160,6 +160,9 @@
 #define PUBLISHNAME_CMD        "publish_name"
 #define UNPUBLISHNAME_CMD      "unpublish_name"
 #define LOOKUPNAME_CMD         "lookup_name"
+#define PUBLISHRESULT_CMD      "publish_result"
+#define UNPUBLISHRESULT_CMD    "unpublish_result"
+#define LOOKUPRESULT_CMD       "lookup_result"
 #define MCMD_CMD               "mcmd"
 
 
@@ -203,6 +206,8 @@
 #define ARGV_KEY          "argv"
 #define INFOKEYCOUNT_KEY  "infokeycount"
 #define ERRCODES_KEY      "errcodes"
+#define SERVICE_KEY       "service"
+#define INFO_KEY          "info"
 
 #define TRUE_VAL          "TRUE"
 #define FALSE_VAL         "FALSE"

@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -114,8 +114,10 @@ typedef struct slurmd_job {
 	slurmstepd_state_t state;
 	uint32_t       jobid;  /* Current SLURM job id                      */
 	uint32_t       stepid; /* Current step id (or NO_VAL)               */
+	uint32_t       array_job_id;  /* job array master job ID            */
+	uint16_t       array_task_id; /* job array ID                       */
 	uint32_t       nnodes; /* number of nodes in current job            */
-	uint32_t       ntasks; /* total number of tasks in current job  */
+	uint32_t       ntasks; /* total number of tasks in current job      */
 	uint32_t       nodeid; /* relative position of this node in job     */
 	uint32_t       node_tasks; /* number of tasks on *this* node        */
 	uint32_t       cpus_per_task;	/* number of cpus desired per task  */
@@ -145,6 +147,7 @@ typedef struct slurmd_job {
 	bool           run_prolog; /* true if need to run prolog            */
 	bool           user_managed_io;
 	time_t         timelimit;  /* time at which job must stop           */
+	uint32_t       profile;	   /* Level of acct_gather_profile          */
 	char          *task_prolog; /* per-task prolog                      */
 	char          *task_epilog; /* per-task epilog                      */
 	struct passwd *pwd;   /* saved passwd struct for user job           */

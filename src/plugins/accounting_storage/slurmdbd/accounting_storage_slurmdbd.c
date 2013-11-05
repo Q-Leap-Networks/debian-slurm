@@ -7,7 +7,7 @@
  *  Written by Danny Auble <da@llnl.gov>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -194,8 +194,10 @@ static int _setup_job_start_msg(dbd_job_start_msg_t *req,
 	}
 	req->alloc_cpus    = job_ptr->total_cpus;
 	req->partition     = xstrdup(job_ptr->partition);
-	if (job_ptr->details)
+	if (job_ptr->details) {
 		req->req_cpus = job_ptr->details->min_cpus;
+		req->req_mem = job_ptr->details->pn_min_memory;
+	}
 	req->resv_id       = job_ptr->resv_id;
 	req->priority      = job_ptr->priority;
 	req->timelimit     = job_ptr->time_limit;
@@ -399,7 +401,8 @@ extern int init ( void )
 		verbose("%s loaded with AuthInfo=%s",
 			plugin_name, slurmdbd_auth_info);
 
-		if (job_list) {
+		if (job_list && !(slurm_get_accounting_storage_enforce() &
+				  ACCOUNTING_ENFORCE_NO_JOBS)) {
 			/* only do this when job_list is defined
 			 * (in the slurmctld) */
 			pthread_attr_t thread_attr;
@@ -2217,7 +2220,6 @@ extern int jobacct_storage_p_step_start(void *db_conn,
 				       step_ptr->step_node_bitmap);
 	}
 	req.node_cnt    = nodes;
-
 	if (step_ptr->start_time > step_ptr->job_ptr->resize_time)
 		req.start_time = step_ptr->start_time;
 	else
@@ -2233,6 +2235,7 @@ extern int jobacct_storage_p_step_start(void *db_conn,
 	req.task_dist   = task_dist;
 	req.total_cpus = cpus;
 	req.total_tasks = tasks;
+	req.req_cpufreq = step_ptr->cpu_freq;
 
 	msg.msg_type    = DBD_STEP_START;
 	msg.data        = &req;

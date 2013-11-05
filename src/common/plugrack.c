@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -653,8 +653,6 @@ plugrack_print_all_plugin(plugrack_t rack)
 
 	xassert(rack->entries);
 	itr = list_iterator_create(rack->entries);
-	if (!itr)
-		fatal("list_iterator_create: malloc failure");
 	info("MPI types are...");
 	while ((e = list_next(itr)) != NULL ) {
 		info("%s", e->full_type);

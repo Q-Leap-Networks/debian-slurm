@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -61,5 +61,7 @@ int net_accept_stream(int fd);
  */
 int net_set_low_water(int sock, size_t size);
 
+/* set keep alive time on socket */
+extern int net_set_keep_alive(int sock);
 
 #endif /* !_NET_H */

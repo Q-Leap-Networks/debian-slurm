@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -54,10 +54,10 @@ void _help_fields_msg(void)
 
 	for (i = 0; fields[i].name; i++) {
 		if (i & 3)
-			printf("  ");
+			printf(" ");
 		else if (i)
 			printf("\n");
-		printf("%-13s", fields[i].name);
+		printf("%-17s", fields[i].name);
 	}
 	printf("\n");
 	return;
@@ -189,7 +189,8 @@ static int _addto_job_list(List job_list, char *names)
 							selected_step->stepid =
 								atoi(dot);
 					}
-					selected_step->jobid = atoi(name);
+					selected_step->jobid =
+						slurm_xlate_job_id(name);
 					xfree(name);
 
 					while ((curr_step = list_next(itr))) {
@@ -233,7 +234,7 @@ static int _addto_job_list(List job_list, char *names)
 				else
 					selected_step->stepid = atoi(dot);
 			}
-			selected_step->jobid = atoi(name);
+			selected_step->jobid = slurm_xlate_job_id(name);
 			xfree(name);
 
 			while ((curr_step = list_next(itr))) {
@@ -456,13 +457,6 @@ void parse_command_line(int argc, char **argv)
 	}
 	field_count = list_count(print_fields_list);
 
-	if (optind < argc) {
-		debug2("Error: Unknown arguments:");
-		for (i=optind; i<argc; i++)
-			debug2(" %s", argv[i]);
-		debug2("\n");
-		exit(1);
-	}
 
 	return;
 }

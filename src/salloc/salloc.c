@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -312,8 +312,8 @@ int main(int argc, char *argv[])
 	before = time(NULL);
 	while ((alloc = slurm_allocate_resources_blocking(&desc, opt.immediate,
 					_pending_callback)) == NULL) {
-		if ((errno != ESLURM_ERROR_ON_DESC_TO_RECORD_COPY) ||
-		    (retries >= MAX_RETRIES))
+		if (((errno != ESLURM_ERROR_ON_DESC_TO_RECORD_COPY) &&
+		     (errno != EAGAIN)) || (retries >= MAX_RETRIES))
 			break;
 		if (retries == 0)
 			error("%s", msg);
@@ -407,8 +407,8 @@ int main(int argc, char *argv[])
 		env_array_append_fmt(&env, "SLURM_OVERCOMMIT", "%d",
 			opt.overcommit);
 	}
-	if (opt.acctg_freq >= 0) {
-		env_array_append_fmt(&env, "SLURM_ACCTG_FREQ", "%d",
+	if (opt.acctg_freq) {
+		env_array_append_fmt(&env, "SLURM_ACCTG_FREQ", "%s",
 			opt.acctg_freq);
 	}
 	if (opt.network)
@@ -567,19 +567,22 @@ static void _set_spank_env(void)
 	}
 }
 
-/* Set SLURM_SUBMIT_DIR environment variable with current state */
+/* Set SLURM_SUBMIT_DIR and SLURM_SUBMIT_HOST environment variables within
+ * current state */
 static void _set_submit_dir_env(void)
 {
-	work_dir = xmalloc(MAXPATHLEN + 1);
-	if ((getcwd(work_dir, MAXPATHLEN)) == NULL) {
-		error("getcwd failed: %m");
-		exit(error_exit);
-	}
+	char host[256];
 
-	if (setenvf(NULL, "SLURM_SUBMIT_DIR", "%s", work_dir) < 0) {
+	work_dir = xmalloc(MAXPATHLEN + 1);
+	if ((getcwd(work_dir, MAXPATHLEN)) == NULL)
+		error("getcwd failed: %m");
+	else if (setenvf(NULL, "SLURM_SUBMIT_DIR", "%s", work_dir) < 0)
 		error("unable to set SLURM_SUBMIT_DIR in environment");
-		return;
-	}
+
+	if ((gethostname(host, sizeof(host))))
+		error("gethostname_short failed: %m");
+	else if (setenvf(NULL, "SLURM_SUBMIT_HOST", "%s", host) < 0)
+		error("unable to set SLURM_SUBMIT_HOST in environment");
 }
 
 /* Returns 0 on success, -1 on failure */
@@ -611,6 +614,7 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->immediate = 1;
 	desc->name = xstrdup(opt.job_name);
 	desc->reservation = xstrdup(opt.reservation);
+	desc->profile  = opt.profile;
 	desc->wckey  = xstrdup(opt.wckey);
 	if (opt.req_switch >= 0)
 		desc->req_switch = opt.req_switch;
@@ -654,8 +658,8 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->begin_time = opt.begin;
 	if (opt.account)
 		desc->account = xstrdup(opt.account);
-	if (opt.acctg_freq >= 0)
-		desc->acctg_freq = opt.acctg_freq;
+	if (opt.acctg_freq)
+		desc->acctg_freq = xstrdup(opt.acctg_freq);
 	if (opt.comment)
 		desc->comment = xstrdup(opt.comment);
 	if (opt.qos)
@@ -1055,7 +1059,7 @@ static int _blocks_dealloc(void)
 		return -1;
 	}
 	for (i=0; i<new_bg_ptr->record_count; i++) {
-		if(new_bg_ptr->block_array[i].state == BG_BLOCK_TERM) {
+		if (new_bg_ptr->block_array[i].state == BG_BLOCK_TERM) {
 			rc = 1;
 			break;
 		}

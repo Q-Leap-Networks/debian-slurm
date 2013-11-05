@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -77,6 +77,7 @@
 #include "src/common/working_cluster.h"
 #include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
+#include "src/common/bitstring.h"
 
 /*
  * Define slurm-specific aliases for use by plugins, see slurm_xlator.h
@@ -146,11 +147,10 @@ strong_alias(hostset_nth,		slurm_hostset_nth);
 extern void lsd_fatal_error(char *file, int line, char *mesg);
 #else /* !WITH_LSD_FATAL_ERROR_FUNC */
 #  ifndef lsd_fatal_error
-#    define lsd_fatal_error(file, line, mesg)			\
-	do {							\
-		fprintf(stderr, "ERROR: [%s:%d] %s: %s\n",	\
-			file, line, mesg, strerror(errno));	\
-	} while (0)
+	static void lsd_fatal_error(char *file, int line, char *mesg)
+	{
+		log_fatal(file, line, mesg, strerror(errno));
+	}
 #  endif /* !lsd_fatal_error */
 #endif /* !WITH_LSD_FATAL_ERROR_FUNC */
 
@@ -162,7 +162,12 @@ extern void lsd_fatal_error(char *file, int line, char *mesg);
 extern void * lsd_nomem_error(char *file, int line, char *mesg);
 #else /* !WITH_LSD_NOMEM_ERROR_FUNC */
 #  ifndef lsd_nomem_error
-#    define lsd_nomem_error(file, line, mesg) (NULL)
+	static void * lsd_nomem_error(char *file, int line, char *mesg)
+	{
+		log_oom(file, line, mesg);
+		abort();
+		return NULL;
+	}
 #  endif /* !lsd_nomem_error */
 #endif /* !WITH_LSD_NOMEM_ERROR_FUNC */
 
@@ -173,7 +178,6 @@ extern void * lsd_nomem_error(char *file, int line, char *mesg);
  */
 #define out_of_memory(mesg)						\
 	do {								\
-		fatal("malloc failure");				\
 		errno = ENOMEM;						\
 		return(lsd_nomem_error(__FILE__, __LINE__, mesg));	\
 	} while (0)
@@ -189,7 +193,7 @@ extern void * lsd_nomem_error(char *file, int line, char *mesg);
 #define MAX_RANGE    (64*1024)    /* 64K Hosts */
 
 /* max number of ranges that will be processed between brackets */
-#define MAX_RANGES   (12*1024)    /* 12K Ranges */
+#define MAX_RANGES   (64*1024)    /* 64K Hosts */
 
 /* size of internal hostname buffer (+ some slop), hostnames will probably
  * be truncated if longer than MAXHOSTNAMELEN */
@@ -293,18 +297,13 @@ struct _range {
 char *alpha_num = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
 /* logic for block node description */
-
-/* to speed things up we will do some calculations once to avoid
- * having to do it multiple times.  We need to calculate the size of
- * the maximum sized array for each dimension.  This way we can be
- * prepared for any size coming in.
- */
-static bool *grid = NULL;
+static bitstr_t *bit_grid = NULL;
 
 static int grid_start[HIGHEST_DIMENSIONS];
 static int grid_end[HIGHEST_DIMENSIONS];
 static int offset[HIGHEST_DIMENSIONS];
 static int dim_grid_size  = -1;
+static uint64_t grid_size = 1;
 
 /* used to protect the above grid, grid_start, and grid_end. */
 static pthread_mutex_t multi_dim_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -664,7 +663,7 @@ static hostname_t hostname_create_dims(const char *hostname, int dims)
 
 	hn->suffix = hn->hostname + idx + 1;
 
-	if((dims > 1) && (strlen(hn->suffix) != dims))
+	if ((dims > 1) && (strlen(hn->suffix) != dims))
 		hostlist_base = 10;
 
 	hn->num = strtoul(hn->suffix, &p, hostlist_base);
@@ -1091,8 +1090,8 @@ static hostrange_t hostrange_intersect(hostrange_t h1, hostrange_t h2)
 
 	assert(hostrange_cmp(h1, h2) <= 0);
 
-	if ((hostrange_prefix_cmp(h1, h2) == 0)
-	    && (h1->hi > h2->lo)
+	if ((h1->hi > h2->lo)
+	    && (hostrange_prefix_cmp(h1, h2) == 0)
 	    && (hostrange_width_combine(h1, h2))) {
 
 		if (!(new = hostrange_copy(h1)))
@@ -1409,8 +1408,8 @@ static int hostlist_push_range(hostlist_t hl, hostrange_t hr)
 		goto error;
 
 	if (hl->nranges > 0
-	    && hostrange_prefix_cmp(tail, hr) == 0
 	    && tail->hi == hr->lo - 1
+	    && hostrange_prefix_cmp(tail, hr) == 0
 	    && hostrange_width_combine(tail, hr)) {
 		tail->hi = hr->hi;
 	} else {
@@ -1653,7 +1652,7 @@ hostlist_t _hostlist_create(const char *hostlist, char *sep, char *r_op,
 	}
 
 done:
-	if(orig)
+	if (orig)
 		free(orig);
 
 	return new;
@@ -1680,7 +1679,7 @@ static int _parse_box_range(char *str, struct _range *ranges,
 	char coord2[dims+1];
 	int i, a;
 
-	if(dims <= 1)
+	if (dims <= 1)
 		fatal("Unsupported dimensions count %d", dims);
 
 	if ((str[dims] != 'x') ||
@@ -1740,12 +1739,12 @@ static int _parse_single_range(const char *str, struct _range *range, int dims)
 
 	range->width = strlen(str);
 
-	if(dims > 1) {
+	if (dims > 1) {
 		/* If we get something here where the width is not
 		   SYSTEM_DIMENSIONS we need to treat it as a regular number
 		   since that is how it will be treated in the future.
 		*/
-		if(range->width != dims)
+		if (range->width != dims)
 			hostlist_base = 10;
 	}
 	range->lo = strtoul(str, &q, hostlist_base);
@@ -1829,21 +1828,25 @@ _push_range_list(hostlist_t hl, char *prefix, struct _range *range,
 	strncpy(tmp_prefix, prefix, sizeof(tmp_prefix));
 	if (((p = strrchr(tmp_prefix, '[')) != NULL) &&
 	    ((q = strrchr(p, ']')) != NULL)) {
-		struct _range prefix_range[MAX_RANGES];
+		struct _range *prefix_range;
 		struct _range *saved_range = range, *pre_range = prefix_range;
 		unsigned long j, prefix_cnt = 0;
 		*p++ = '\0';
 		*q++ = '\0';
 		if (strrchr(tmp_prefix, '[') != NULL)
 			return -1;	/* third range is illegal */
+		prefix_range = xmalloc(sizeof(struct _range) * MAX_RANGES);
 		nr = _parse_range_list(p, prefix_range, MAX_RANGES, dims);
-		if (nr < 0)
+		if (nr < 0) {
+			xfree(prefix_range);
 			return -1;	/* bad numeric expression */
+		}
 		for (i = 0; i < nr; i++) {
 			prefix_cnt += pre_range->hi - pre_range->lo + 1;
 			if (prefix_cnt > MAX_PREFIX_CNT) {
 				/* Prevent overflow of memory with user input
 				 * of something like "a[0-999999999].b[0-9]" */
+				xfree(prefix_range);
 				return -1;
 			}
 			for (j = pre_range->lo; j <= pre_range->hi; j++) {
@@ -1860,6 +1863,7 @@ _push_range_list(hostlist_t hl, char *prefix, struct _range *range,
 			}
 			pre_range++;
 		}
+		xfree(prefix_range);
 		return 0;
 	}
 
@@ -1880,7 +1884,7 @@ _hostlist_create_bracketed(const char *hostlist, char *sep,
 			   char *r_op, int dims)
 {
 	hostlist_t new = hostlist_new();
-	struct _range ranges[MAX_RANGES];
+	struct _range *ranges;
 	int nr, err;
 	char *p, *tok, *str, *orig;
 	char cur_tok[1024];
@@ -1893,6 +1897,7 @@ _hostlist_create_bracketed(const char *hostlist, char *sep,
 		return NULL;
 	}
 
+	ranges = xmalloc(sizeof(struct _range) * MAX_RANGES);
 	while ((tok = _next_tok(sep, &str)) != NULL) {
 		strncpy(cur_tok, tok, 1024);
 		if ((p = strrchr(tok, '[')) != NULL) {
@@ -1917,7 +1922,7 @@ _hostlist_create_bracketed(const char *hostlist, char *sep,
 				 * wanted. We will just tack one on
 				 * the end. */
 				strcat(cur_tok, "]");
-				if(prefix && prefix[0])
+				if (prefix && prefix[0])
 					hostlist_push_host_dims(
 						new, cur_tok, dims);
 				else
@@ -1928,6 +1933,7 @@ _hostlist_create_bracketed(const char *hostlist, char *sep,
 		} else
 			hostlist_push_host_dims(new, cur_tok, dims);
 	}
+	xfree(ranges);
 
 	free(orig);
 	return new;
@@ -2098,7 +2104,7 @@ static void
 hostlist_shift_iterators(hostlist_t hl, int idx, int depth, int n)
 {
 	hostlist_iterator_t i;
-	if(!hl) {
+	if (!hl) {
 		error("hostlist_shift_iterators: no hostlist given");
 		return;
 	}
@@ -2121,7 +2127,7 @@ char *hostlist_shift(hostlist_t hl)
 {
 	char *host = NULL;
 
-	if(!hl){
+	if (!hl){
 		error("hostlist_shift: no hostlist given");
 		return NULL;
 	}
@@ -2153,7 +2159,7 @@ char *hostlist_pop_range(hostlist_t hl)
 	hostlist_t hltmp;
 	hostrange_t tail;
 
-	if(!hl)
+	if (!hl)
 		return NULL;
 	LOCK_HOSTLIST(hl);
 	if (hl->nranges < 1 || !(hltmp = hostlist_new())) {
@@ -2228,7 +2234,7 @@ int hostlist_delete(hostlist_t hl, const char *hosts)
 	int n = 0;
 	char *hostname = NULL;
 	hostlist_t hltmp;
-	if(!hl)
+	if (!hl)
 		return -1;
 
 	if (!(hltmp = hostlist_create(hosts)))
@@ -2249,7 +2255,7 @@ int hostlist_delete_host(hostlist_t hl, const char *hostname)
 {
 	int n;
 
-	if(!hl)
+	if (!hl)
 		return -1;
 	n = hostlist_find(hl, hostname);
 
@@ -2296,7 +2302,7 @@ char * hostlist_nth(hostlist_t hl, int n)
 	char *host = NULL;
 	int   i, count;
 
-	if(!hl)
+	if (!hl)
 		return NULL;
 	LOCK_HOSTLIST(hl);
 	count = 0;
@@ -2320,7 +2326,7 @@ int hostlist_delete_nth(hostlist_t hl, int n)
 {
 	int i, count;
 
-	if(!hl)
+	if (!hl)
 		return -1;
 	LOCK_HOSTLIST(hl);
 	assert(n >= 0 && n <= hl->nhosts);
@@ -2358,7 +2364,7 @@ done:
 int hostlist_count(hostlist_t hl)
 {
 	int retval;
-	if(!hl)
+	if (!hl)
 		return -1;
 
 	LOCK_HOSTLIST(hl);
@@ -2442,8 +2448,8 @@ static void hostlist_collapse(hostlist_t hl)
 		hostrange_t hprev = hl->hr[i - 1];
 		hostrange_t hnext = hl->hr[i];
 
-		if (hostrange_prefix_cmp(hprev, hnext) == 0 &&
-		    hprev->hi == hnext->lo - 1 &&
+		if (hprev->hi == hnext->lo - 1 &&
+		    hostrange_prefix_cmp(hprev, hnext) == 0 &&
 		    hostrange_width_combine(hprev, hnext)) {
 			hprev->hi = hnext->hi;
 			hostlist_delete_range(hl, i);
@@ -2555,6 +2561,8 @@ char *hostlist_deranged_string_malloc(hostlist_t hl)
 		buf_size *= 2;
 		buf = realloc(buf, buf_size);
 	}
+	if (buf == NULL)
+		out_of_memory("hostlist_deranged_string_malloc");
 	return buf;
 }
 
@@ -2705,15 +2713,15 @@ static int _tell_if_used(int dim, int curr,
 
 	for (last[dim]=start[dim]; last[dim]<=grid_end[dim]; last[dim]++) {
 		curr = start_curr + (last[dim] * offset[dim]);
-		if(dim == (dims-1)) {
-			if (!grid[curr]) {
+		if (dim == (dims-1)) {
+			if (!bit_test(bit_grid, curr)) {
 /* 				for(i = 0; i<dims; i++) { */
 /* 					coord[i] = alpha_num[last[i]]; */
 /* 				} */
 /* 				info("%s not used", coord); */
-				if((*found) == -1)
+				if ((*found) == -1)
 					continue;
-				else if(end[dim] < grid_end[dim]) {
+				else if (end[dim] < grid_end[dim]) {
 					/* try to get a box out of
 					   this slice. */
 					grid_end[dim] = end[dim];
@@ -2725,7 +2733,7 @@ static int _tell_if_used(int dim, int curr,
 /* 				coord[i] = alpha_num[last[i]]; */
 /* 			} */
 /* 			info("%s used", coord); */
-			if((*found) == -1) {
+			if ((*found) == -1) {
 /* 				for(i = 0; i<dims; i++) { */
 /* 					coord[i] = alpha_num[last[i]]; */
 /* 				} */
@@ -2733,7 +2741,7 @@ static int _tell_if_used(int dim, int curr,
 				memcpy(start, last, dim_grid_size);
 				memcpy(end, last, dim_grid_size);
 				(*found) = dims;
-			} else if((*found) >= dim) {
+			} else if ((*found) >= dim) {
 /* 				for(i = 0; i<dims; i++) { */
 /* 					coord[i] = alpha_num[last[i]]; */
 /* 				} */
@@ -2742,19 +2750,19 @@ static int _tell_if_used(int dim, int curr,
 				(*found) = dim;
 			}
 		} else {
-			if((rc = _tell_if_used(dim+1, curr,
+			if ((rc = _tell_if_used(dim+1, curr,
 					       start, end,
 					       last, found, dims)) != 1) {
 				return rc;
 			}
-			if((*found) >= dim) {
+			if ((*found) >= dim) {
 /* 				for(i = 0; i<dims; i++) { */
 /* 					coord[i] = alpha_num[last[i]]; */
 /* 				} */
 /* 				info("%d here %s", dim, coord); */
 				memcpy(end, last, dim_grid_size);
 				(*found) = dim;
-			} else if((*found) == -1)
+			} else if ((*found) == -1)
 				start[dim] = grid_start[dim];
 		}
 	}
@@ -2782,7 +2790,7 @@ static int _get_next_box(int *start, int *end, int dims)
 	/* memset(coord2, 0, sizeof(coord2)); */
 
 again:
-	if(start[0] == -1) {
+	if (start[0] == -1) {
 		memcpy(start, grid_start, dim_grid_size);
 		/* We need to keep track of this to make sure we get
 		   all the nodes marked since this could change based
@@ -2819,7 +2827,7 @@ again:
 	_set_min_max_of_grid(0, 0, grid_start, orig_grid_end,
 			     new_min, new_max, pos, dims);
 
-	if(new_max[0] != -1) {
+	if (new_max[0] != -1) {
 		/* for(i = 0; i<dims; i++) { */
 		/* 	coord[i] = alpha_num[new_min[i]]; */
 		/* 	coord2[i] = alpha_num[new_max[i]]; */
@@ -2832,7 +2840,7 @@ again:
 		/* for(i = 0; i<dims; i++) */
 		/* 	coord[i] = alpha_num[last[i]]; */
 		/* info("next start %s", coord); */
-		if(found == -1) {
+		if (found == -1) {
 			/* There are still nodes set in the grid, so we need
 			   to go through them again to make sure we got all
 			   the nodes that weren't included in the boxes of
@@ -2841,7 +2849,7 @@ again:
 		}
 	}
 
-	if(found != -1)
+	if (found != -1)
 		rc = 1;
 
 	return rc;
@@ -2870,7 +2878,7 @@ _get_boxes(char *buf, int max_len, int dims, int brackets)
 	curr_min[0] = -1;
 
 /* 	for(i=0; i<HOSTLIST_BASE*HOSTLIST_BASE*HOSTLIST_BASE*HOSTLIST_BASE; i++) { */
-/* 		if(grid[i]) */
+/* 		if (grid[i]) */
 /* 			info("got one at %d", i); */
 /* 	} */
 
@@ -2880,30 +2888,30 @@ _get_boxes(char *buf, int max_len, int dims, int brackets)
 /* 			coord2[i] = alpha_num[curr_max[i]]; */
 /* 		} */
 /* 		info("%sx%s is a box", coord, coord2); */
-		if(!memcmp(curr_min, curr_max, dim_grid_size)) {
+		if (!memcmp(curr_min, curr_max, dim_grid_size)) {
 			for(i = 0; i<dims; i++) {
-				if(len >= max_len)
+				if (len >= max_len)
 					goto end_it;
 				buf[len++] = alpha_num[curr_min[i]];
 			}
-			if(len >= max_len)
+			if (len >= max_len)
 				goto end_it;
 			buf[len++] = ',';
 		} else {
 			for(i = 0; i<dims; i++) {
-				if(len >= max_len)
+				if (len >= max_len)
 					goto end_it;
 				buf[len++] = alpha_num[curr_min[i]];
 			}
-			if(len >= max_len)
+			if (len >= max_len)
 				goto end_it;
 			buf[len++] = 'x';
 			for(i = 0; i<dims; i++) {
-				if(len >= max_len)
+				if (len >= max_len)
 					goto end_it;
 				buf[len++] = alpha_num[curr_max[i]];
 			}
-			if(len >= max_len)
+			if (len >= max_len)
 				goto end_it;
 			buf[len++] = ',';
 		}
@@ -2929,9 +2937,12 @@ _set_box_in_grid(int dim, int curr, int *start,
 
 	for (i=start[dim]; i<=end[dim]; i++) {
 		curr = start_curr + (i * offset[dim]);
-		if(dim == (dims-1))
-			grid[curr] = value;
-		else
+		if (dim == (dims-1)) {
+			if (value)
+				bit_set(bit_grid, curr);
+			else
+				bit_clear(bit_grid, curr);
+		} else
 			_set_box_in_grid(dim+1, curr, start, end, value, dims);
 
 	}
@@ -2949,7 +2960,7 @@ static int _add_box_ranges(int dim,  int curr,
 
 	for (pos[dim]=start[dim]; pos[dim]<=end[dim]; pos[dim]++) {
 		curr = start_curr + (pos[dim] * offset[dim]);
-		if(dim == (dims-2)) {
+		if (dim == (dims-2)) {
 			char new_str[(dims*2)+2];
 			memset(new_str, 0, sizeof(new_str));
 
@@ -2975,7 +2986,7 @@ static int _add_box_ranges(int dim,  int curr,
 				return 0;
 			(*count)++;
 		} else
-			if(!_add_box_ranges(dim+1, curr, start, end, pos,
+			if (!_add_box_ranges(dim+1, curr, start, end, pos,
 					    ranges, len, count, dims))
 				return 0;
 	}
@@ -2995,8 +3006,8 @@ static void _set_min_max_of_grid(int dim, int curr,
 
 	for (pos[dim]=start[dim]; pos[dim]<=end[dim]; pos[dim]++) {
 		curr = start_curr + (pos[dim] * offset[dim]);
-		if(dim == (dims-1)) {
-			if(!grid[curr])
+		if (dim == (dims-1)) {
+			if (!bit_test(bit_grid, curr))
 				continue;
 			for(i = 0; i<dims; i++) {
 				min[i] = MIN(min[i], pos[i]);
@@ -3041,11 +3052,11 @@ _test_box_in_grid(int dim, int curr,
 
 	for (i=start[dim]; i<=end[dim]; i++) {
 		curr = start_curr + (i * offset[dim]);
-		if(dim == (dims-1)) {
-			if(!grid[curr])
+		if (dim == (dims-1)) {
+			if (!bit_test(bit_grid, curr))
 				return false;
 		} else {
-			if(!_test_box_in_grid(dim+1, curr, start, end, dims))
+			if (!_test_box_in_grid(dim+1, curr, start, end, dims))
 				return false;
 		}
 	}
@@ -3076,6 +3087,8 @@ char *hostlist_ranged_string_malloc(hostlist_t hl)
 		buf_size *= 2;
 		buf = realloc(buf, buf_size);
 	}
+	if (buf == NULL)
+		out_of_memory("hostlist_ranged_string_malloc");
 	return buf;
 }
 
@@ -3108,17 +3121,16 @@ ssize_t hostlist_ranged_string_dims(hostlist_t hl, size_t n,
 	int hostlist_base;
 	static int last_dims = -1;
 	static int max_dims = 1;
-	DEF_TIMERS;
+//	DEF_TIMERS;
 
 	if (!dims)
 		dims = slurmdb_setup_cluster_name_dims();
 	hostlist_base = hostlist_get_base(dims);
 
-	START_TIMER;
+//	START_TIMER;
 	LOCK_HOSTLIST(hl);
 
 	if (dims > 1 && hl->nranges) {	/* logic for block node description */
-		static uint64_t grid_size = 1;
 		slurm_mutex_lock(&multi_dim_lock);
 
 		/* compute things that only need to be calculated once
@@ -3136,24 +3148,20 @@ ssize_t hostlist_ranged_string_dims(hostlist_t hl, size_t n,
 				offset[i] = offset[i+1] * hostlist_base;
 		}
 
-		/* This will leave an allocation when ending but it
-		   isn't overwriting and this makes it so we don't
-		   have to allocate it over and over again we fill
-		   this isn't too bad of an alternative.  We were
-		   defining this on the stack at first (we wanted to
-		   avoid that).
+		/* Set this bitmap up once and clear it when everytime
+		   instead of reallocing.  Turns out to be about 5
+		   times faster doing it this way.  It does leak the
+		   last alloc, but that shouldn't be a big deal.
 		*/
-		if (!grid || (grid && (max_dims < dims))) {
+		if (max_dims < dims) {
 			grid_size = 1;
 			max_dims = dims;
-			xfree(grid);
-
 			for (i=0; i<dims; i++)
 				grid_size *= HIGHEST_BASE;
-			grid_size *= sizeof(bool);
-			grid = xmalloc(grid_size);
+			FREE_NULL_BITMAP(bit_grid);
+			bit_grid = bit_alloc(grid_size);
 		} else
-			memset(grid, 0, grid_size);
+			bit_nclear(bit_grid, 0, grid_size - 1);
 
 		memset(grid_start, hostlist_base, dim_grid_size);
 		memset(grid_end, -1, dim_grid_size);
@@ -3241,7 +3249,7 @@ notbox:
 	} else
 		buf[len] = '\0';
 
-	END_TIMER;
+//	END_TIMER;
 
 //	info("time was %s", TIME_STR);
 	return truncated ? -1 : len;
@@ -3260,7 +3268,7 @@ static hostlist_iterator_t hostlist_iterator_new(void)
 {
 	hostlist_iterator_t i = (hostlist_iterator_t) malloc(sizeof(*i));
 	if (!i)
-		return NULL;
+		out_of_memory("hostlist_iterator_new");
 	i->hl = NULL;
 	i->hr = NULL;
 	i->idx = 0;
@@ -3433,7 +3441,8 @@ char *hostlist_next_range(hostlist_iterator_t i)
 		buf_size *= 2;
 		buf = realloc(buf, buf_size);
 	}
-
+	if (!buf)
+		out_of_memory("hostlist_iterator_create");
 	UNLOCK_HOSTLIST(i->hl);
 
 	return buf;
@@ -3470,19 +3479,18 @@ hostset_t hostset_create(const char *hostlist)
 {
 	hostset_t new;
 
-	if (!(new = (hostset_t) malloc(sizeof(*new))))
-		goto error1;
+	if (!(new = (hostset_t) malloc(sizeof(*new)))) {
+		out_of_memory("hostset_create");
+		return NULL;
+	}
 
-	if (!(new->hl = hostlist_create(hostlist)))
-		goto error2;
+	if (!(new->hl = hostlist_create(hostlist))) {
+		free(new);
+		return NULL;
+	}
 
 	hostlist_uniq(new->hl);
 	return new;
-
-error2:
-	free(new);
-error1:
-	return NULL;
 }
 
 hostset_t hostset_copy(const hostset_t set)
@@ -3498,6 +3506,7 @@ hostset_t hostset_copy(const hostset_t set)
 error2:
 	free(new);
 error1:
+	out_of_memory("hostset_copy");
 	return NULL;
 }
 
@@ -3612,9 +3621,6 @@ int hostset_intersects(hostset_t set, const char *hosts)
 	assert(set->hl->magic == HOSTLIST_MAGIC);
 
 	hl = hostlist_create(hosts);
-	if (!hl)    /* malloc failure */
-		return retval;
-
 	while ((hostname = hostlist_pop(hl)) != NULL) {
 		retval += hostset_find_host(set, hostname);
 		free(hostname);

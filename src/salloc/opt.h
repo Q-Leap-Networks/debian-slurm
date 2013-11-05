@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -94,6 +94,7 @@ typedef struct salloc_options {
 	int  time_min;		/* --min-time 	(int minutes)	*/
 	char *time_min_str;	/* --min-time (string)		*/
 	char *partition;	/* --partition=n,   -p n   	*/
+	uint32_t profile;	/* --profile=[all | none}       */
 	enum task_dist_states
 		distribution;	/* --distribution=, -m dist	*/
         uint32_t plane_size;    /* lllp distribution -> plane_size for
@@ -112,7 +113,8 @@ typedef struct salloc_options {
 
 	bool hold;		/* --hold, -H			*/
 	bool no_kill;		/* --no-kill, -k		*/
-	int	acctg_freq;	/* --acctg-freq=secs		*/
+	char *acctg_freq;	/* --acctg-freq=<type1>=<freq1>,*/
+				/* 	<type2>=<freq2>,...	*/
 	char *licenses;		/* --licenses, -L		*/
 	bool overcommit;	/* --overcommit -O		*/
 	int kill_command_signal;/* --kill-command, -K           */

@@ -7,7 +7,7 @@
  *  from existing SLURM source code, particularly src/srun/opt.c
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -100,6 +100,48 @@ void print_gres_help(void)
 		printf("No gres help is available\n");
 }
 
+void set_distribution(task_dist_states_t distribution,
+		      char **dist, char **lllp_dist)
+{
+	if (((int)distribution >= 0)
+	    && (distribution != SLURM_DIST_UNKNOWN)) {
+		switch (distribution) {
+		case SLURM_DIST_CYCLIC:
+			*dist      = "cyclic";
+			break;
+		case SLURM_DIST_BLOCK:
+			*dist      = "block";
+			break;
+		case SLURM_DIST_PLANE:
+			*dist      = "plane";
+			*lllp_dist = "plane";
+			break;
+		case SLURM_DIST_ARBITRARY:
+			*dist      = "arbitrary";
+			break;
+		case SLURM_DIST_CYCLIC_CYCLIC:
+			*dist      = "cyclic:cyclic";
+			*lllp_dist = "cyclic";
+			break;
+		case SLURM_DIST_CYCLIC_BLOCK:
+			*dist      = "cyclic:block";
+			*lllp_dist = "block";
+			break;
+		case SLURM_DIST_BLOCK_CYCLIC:
+			*dist      = "block:cyclic";
+			*lllp_dist = "cyclic";
+			break;
+		case SLURM_DIST_BLOCK_BLOCK:
+			*dist      = "block:block";
+			*lllp_dist = "block";
+			break;
+		default:
+			error("unknown dist, type %d", distribution);
+			break;
+		}
+	}
+}
+
 /*
  * verify that a distribution type in arg is of a known form
  * returns the task_dist_states, or -1 if state is unknown
@@ -118,7 +160,7 @@ task_dist_states_t verify_dist_type(const char *arg, uint32_t *plane_size)
 	} else {
 		/* -m plane=<plane_size> */
 		dist_str = strchr(arg,'=');
-		if(dist_str != NULL) {
+		if (dist_str != NULL) {
 			*plane_size=atoi(dist_str+1);
 			len = dist_str-arg;
 			plane_dist = true;
@@ -426,7 +468,7 @@ bool verify_node_list(char **node_list_pptr, enum task_dist_states dist,
 	/* If we are using Arbitrary grab count out of the hostfile
 	   using them exactly the way we read it in since we are
 	   saying, lay it out this way! */
-	if(dist == SLURM_DIST_ARBITRARY)
+	if (dist == SLURM_DIST_ARBITRARY)
 		nodelist = slurm_read_hostfile(*node_list_pptr, task_count);
 	else
 		nodelist = slurm_read_hostfile(*node_list_pptr, NO_VAL);
@@ -470,7 +512,7 @@ bool get_resource_arg_range(const char *arg, const char *what, int* min,
 	if (*p == 'k' || *p == 'K') {
 		result *= 1024;
 		p++;
-	} else if(*p == 'm' || *p == 'M') {
+	} else if (*p == 'm' || *p == 'M') {
 		result *= 1048576;
 		p++;
 	}
@@ -498,7 +540,7 @@ bool get_resource_arg_range(const char *arg, const char *what, int* min,
 	if ((*p == 'k') || (*p == 'K')) {
 		result *= 1024;
 		p++;
-	} else if(*p == 'm' || *p == 'M') {
+	} else if (*p == 'm' || *p == 'M') {
 		result *= 1048576;
 		p++;
 	}
@@ -532,7 +574,7 @@ bool verify_socket_core_thread_count(const char *arg, int *min_sockets,
 {
 	bool tmp_val,ret_val;
 	int i,j;
-	int max_sockets, max_cores, max_threads;
+	int max_sockets = 0, max_cores, max_threads;
 	const char *cur_ptr = arg;
 	char buf[3][48]; /* each can hold INT64_MAX - INT64_MAX */
 	buf[0][0] = '\0';
@@ -792,8 +834,8 @@ char *print_geometry(const uint16_t *geometry)
 	char buf[32], *rc = NULL;
 	int dims = slurmdb_setup_cluster_dims();
 
-	if ((dims == 0)
-	||  (geometry[0] == (uint16_t)NO_VAL))
+	if ((dims == 0) || !geometry[0]
+	    ||  (geometry[0] == (uint16_t)NO_VAL))
 		return NULL;
 
 	for (i=0; i<dims; i++) {

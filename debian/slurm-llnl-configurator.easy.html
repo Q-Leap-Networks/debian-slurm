@@ -208,7 +208,7 @@ function displayfile()
 </HEAD>
 <BODY>
 <FORM name=config>
-<H1>SLURM Version 2.5 Configuration Tool - Easy Version</H1>
+<H1>SLURM Version 2.6 Configuration Tool - Easy Version</H1>
 <P>This form can be used to create a SLURM configuration file with
 you controlling many of the important configuration parameters.</P>
 
@@ -217,7 +217,7 @@ has fewer  options for creating a SLURM configuration file. The full version
 of the SLURM configuration tool is available at
 <a href="configurator.html">configurator.html</a>.</p>
 
-<P><B>This tool supports SLURM version 2.5 only.</B>
+<P><B>This tool supports SLURM version 2.6 only.</B>
 Configuration files for other versions of SLURM should be built
 using the tool distributed with it in <i>doc/html/configurator.html</i>.
 Some parameters will be set to default values, but you can
@@ -349,10 +349,10 @@ Select one value for <B>ReturnToService</B>:<BR>
 <H2>Scheduling</H2>
 Define the mechanism to be used for controlling job ordering.<BR>
 Select one value for <B>SchedulerType</B>:<BR>
-<input type="radio" name="sched_type" value="builtin">  <B>Builtin</B>: First-In
-First-Out (FIFO)<BR>
 <input type="radio" name="sched_type" value="backfill" checked> <B>Backfill</B>:
 FIFO with backfill<BR>
+<input type="radio" name="sched_type" value="builtin">  <B>Builtin</B>: First-In
+First-Out (FIFO)<BR>
 <P>
 Define what node configuration (sockets, cores, memory, etc.) should be used.
 Using values defined in the configuration file will provide faster scheduling.<BR>

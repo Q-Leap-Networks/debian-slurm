@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -50,6 +50,7 @@
 #include "src/common/cpu_frequency.h"
 #include "src/common/gres.h"
 #include "src/common/slurm_jobacct_gather.h"
+#include "src/common/slurm_acct_gather_profile.h"
 #include "src/common/slurm_rlimits_info.h"
 #include "src/common/stepd_api.h"
 #include "src/common/switch.h"
@@ -162,7 +163,10 @@ main (int argc, char *argv[])
 
 ending:
 #ifdef MEMORY_LEAK_DEBUG
+	acct_gather_conf_destroy();
 	_step_cleanup(job, msg, rc);
+
+	fini_setproctitle();
 
 	xfree(cli);
 	xfree(self);
@@ -187,6 +191,7 @@ static slurmd_conf_t * read_slurmd_conf_lite (int fd)
 	int len;
 	Buf buffer;
 	slurmd_conf_t *confl;
+	int tmp_int = 0;
 
 	/*  First check to see if we've already initialized the
 	 *   global slurmd_conf_t in 'conf'. Allocate memory if not.
@@ -220,6 +225,13 @@ static slurmd_conf_t * read_slurmd_conf_lite (int fd)
 			confl->log_opts.syslog_level = LOG_LEVEL_QUIET;
 	} else
 		confl->log_opts.syslog_level  = LOG_LEVEL_QUIET;
+
+	confl->acct_freq_task = (uint16_t)NO_VAL;
+	tmp_int = acct_gather_parse_freq(PROFILE_TASK,
+				       confl->job_acct_gather_freq);
+	if (tmp_int != -1)
+		confl->acct_freq_task = tmp_int;
+
 
 	return (confl);
 rwfail:
@@ -279,8 +291,7 @@ static int handle_spank_mode (int argc, char *argv[])
 		log_alter (conf->log_opts, 0, conf->logfile);
 	close (STDIN_FILENO);
 
-	if (slurm_conf_init(NULL) != SLURM_SUCCESS)
-		return error ("Failed to read slurm config");
+	slurm_conf_init(NULL);
 
 	if (get_jobid_uid_from_env (&jobid, &uid) < 0)
 		return error ("spank environment invalid");
@@ -324,11 +335,16 @@ static int process_cmdline (int argc, char *argv[])
 static void
 _send_ok_to_slurmd(int sock)
 {
+	/* If running under memcheck stdout doesn't work correctly so
+	 * just skip it.
+	 */
+#ifndef SLURMSTEPD_MEMCHECK
 	int ok = SLURM_SUCCESS;
 	safe_write(sock, &ok, sizeof(int));
 	return;
 rwfail:
 	error("Unable to send \"ok\" to slurmd");
+#endif
 }
 
 static void
@@ -391,8 +407,6 @@ _init_from_slurmd(int sock, char **argv,
 	log_alter(conf->log_opts, 0, conf->logfile);
 
 	debug2("debug level is %d.", conf->debug_level);
-	/* acct info */
-	jobacct_gather_startpoll(conf->job_acct_gather_freq);
 
 	switch_g_slurmd_step_init();
 
@@ -406,7 +420,7 @@ _init_from_slurmd(int sock, char **argv,
 	safe_read(sock, incoming_buffer, len);
 	buffer = create_buf(incoming_buffer,len);
 	cli = xmalloc(sizeof(slurm_addr_t));
-	if(slurm_unpack_slurm_addr_no_alloc(cli, buffer) == SLURM_ERROR)
+	if (slurm_unpack_slurm_addr_no_alloc(cli, buffer) == SLURM_ERROR)
 		fatal("slurmstepd: problem with unpack of slurmd_conf");
 	free_buf(buffer);
 
@@ -453,7 +467,7 @@ _init_from_slurmd(int sock, char **argv,
 		fatal("Unrecognized launch RPC");
 		break;
 	}
-	if(unpack_msg(msg, buffer) == SLURM_ERROR)
+	if (unpack_msg(msg, buffer) == SLURM_ERROR)
 		fatal("slurmstepd: we didn't unpack the request correctly");
 	free_buf(buffer);
 

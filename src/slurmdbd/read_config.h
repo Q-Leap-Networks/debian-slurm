@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -91,6 +91,7 @@ typedef struct slurm_dbd_conf {
 	uint32_t        purge_event;    /* purge events older than
 					 * this in months or days 	*/
 	uint32_t	purge_job;	/* purge time for job info	*/
+	uint32_t	purge_resv;	/* purge time for reservation info */
 	uint32_t	purge_step;	/* purge time for step info	*/
 	uint32_t        purge_suspend;  /* purge suspend data older
 					 * than this in months or days	*/

@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -48,6 +48,7 @@
 
 #include <grp.h>
 #include <signal.h>
+#include <stdlib.h>
 #include <sys/types.h>
 
 #include "src/common/eio.h"
@@ -56,6 +57,7 @@
 #include "src/common/log.h"
 #include "src/common/node_select.h"
 #include "src/common/slurm_jobacct_gather.h"
+#include "src/common/slurm_acct_gather_profile.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
@@ -73,6 +75,30 @@ static void _srun_info_destructor(void *arg);
 static void _job_init_task_info(slurmd_job_t *job, uint32_t *gtid,
 				char *ifname, char *ofname, char *efname);
 static void _task_info_destroy(slurmd_task_info_t *t, uint16_t multi_prog);
+
+static int _check_acct_freq_task(uint32_t job_mem_lim, char *acctg_freq)
+{
+	int task_freq;
+
+	if (!job_mem_lim || !conf->acct_freq_task)
+		return 0;
+
+	task_freq = acct_gather_parse_freq(PROFILE_TASK, acctg_freq);
+
+	if (task_freq == -1)
+		return 0;
+
+	if ((task_freq == 0) || (task_freq > conf->acct_freq_task)) {
+		error("Can't set frequency to %d, it is higher than %u.  "
+		      "We need it to be at least at this level to "
+		      "monitor memory usage.",
+		      task_freq, conf->acct_freq_task);
+		slurm_seterrno (ESLURMD_INVALID_ACCT_FREQ);
+		return 1;
+	}
+
+	return 0;
+}
 
 static struct passwd *
 _pwd_create(uid_t uid)
@@ -162,7 +188,7 @@ job_create(launch_tasks_request_msg_t *msg)
 	srun_info_t   *srun = NULL;
 	slurm_addr_t     resp_addr;
 	slurm_addr_t     io_addr;
-	int            nodeid = NO_VAL;
+	int            i, nodeid = NO_VAL;
 
 	xassert(msg != NULL);
 	xassert(msg->complete_nodelist != NULL);
@@ -178,13 +204,7 @@ job_create(launch_tasks_request_msg_t *msg)
 		return NULL;
 	}
 
-	if (msg->job_mem_lim && (msg->acctg_freq != (uint16_t) NO_VAL)
-	   && (msg->acctg_freq > conf->job_acct_gather_freq)) {
-		error("Can't set frequency to %u, it is higher than %u.  "
-		      "We need it to be at least at this level to "
-		      "monitor memory usage.",
-		      msg->acctg_freq, conf->job_acct_gather_freq);
-		slurm_seterrno (ESLURMD_INVALID_ACCT_FREQ);
+	if (_check_acct_freq_task(msg->job_mem_lim, msg->acctg_freq)) {
 		_pwd_destroy(pwd);
 		return NULL;
 	}
@@ -197,7 +217,7 @@ job_create(launch_tasks_request_msg_t *msg)
 	nodeid = 0;
 	job->node_name = xstrdup(msg->complete_nodelist);
 #endif
-	if(nodeid < 0) {
+	if (nodeid < 0) {
 		error("couldn't find node %s in %s",
 		      job->node_name, msg->complete_nodelist);
 		job_destroy(job);
@@ -226,6 +246,17 @@ job_create(launch_tasks_request_msg_t *msg)
 	job->cpus_per_task = msg->cpus_per_task;
 
 	job->env     = _array_copy(msg->envc, msg->env);
+	job->array_job_id  = msg->job_id;
+	job->array_task_id = (uint16_t) NO_VAL;
+	for (i = 0; i < msg->envc; i++) {
+		/*                         1234567890123456789 */
+		if (!strncmp(msg->env[i], "SLURM_ARRAY_JOB_ID=", 19))
+			job->array_job_id = atoi(msg->env[i] + 19);
+		/*                         12345678901234567890 */
+		if (!strncmp(msg->env[i], "SLURM_ARRAY_TASK_ID=", 20))
+			job->array_task_id = atoi(msg->env[i] + 20);
+	}
+
 	job->eio     = eio_handle_create();
 	job->sruns   = list_create((ListDelF) _srun_info_destructor);
 	job->clients = list_create(NULL); /* FIXME! Needs destructor */
@@ -269,6 +300,7 @@ job_create(launch_tasks_request_msg_t *msg)
 	job->buffered_stdio = msg->buffered_stdio;
 	job->labelio = msg->labelio;
 
+	job->profile     = msg->profile;
 	job->task_prolog = xstrdup(msg->task_prolog);
 	job->task_epilog = xstrdup(msg->task_epilog);
 
@@ -279,8 +311,15 @@ job_create(launch_tasks_request_msg_t *msg)
 	job->nodeid  = nodeid;
 	job->debug   = msg->slurmd_debug;
 	job->cpus    = msg->cpus_allocated[nodeid];
-	if (msg->acctg_freq != (uint16_t) NO_VAL)
-		jobacct_gather_change_poll(msg->acctg_freq);
+
+	/* This needs to happen before acct_gather_profile_startpoll
+	   and only really looks at the profile in the job.
+	*/
+	acct_gather_profile_g_node_step_start(job);
+
+	acct_gather_profile_startpoll(msg->acctg_freq,
+				      conf->job_acct_gather_freq);
+
 	job->multi_prog  = msg->multi_prog;
 	job->timelimit   = (time_t) -1;
 	job->task_flags  = msg->task_flags;
@@ -288,7 +327,7 @@ job_create(launch_tasks_request_msg_t *msg)
 	job->pty         = msg->pty;
 	job->open_mode   = msg->open_mode;
 	job->options     = msg->options;
-	format_core_allocs(msg->cred, conf->node_name,
+	format_core_allocs(msg->cred, conf->node_name, conf->cpus,
 			   &job->job_alloc_cores, &job->step_alloc_cores,
 			   &job->job_mem, &job->step_mem);
 	if (job->step_mem) {
@@ -327,9 +366,12 @@ job_create(launch_tasks_request_msg_t *msg)
 static char *
 _batchfilename(slurmd_job_t *job, const char *name)
 {
-	if (name == NULL)
-		return fname_create(job, "slurm-%J.out", 0);
-	else
+	if (name == NULL) {
+		if (job->array_task_id == (uint16_t) NO_VAL)
+			return fname_create(job, "slurm-%J.out", 0);
+		else
+			return fname_create(job, "slurm-%A_%a.out", 0);
+	} else
 		return fname_create(job, name, 0);
 }
 
@@ -355,13 +397,8 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 		_pwd_destroy(pwd);
 		return NULL;
 	}
-	if(msg->job_mem && (msg->acctg_freq != (uint16_t) NO_VAL)
-	   && (msg->acctg_freq > conf->job_acct_gather_freq)) {
-		error("Can't set frequency to %u, it is higher than %u.  "
-		      "We need it to be at least at this level to "
-		      "monitor memory usage.",
-		      msg->acctg_freq, conf->job_acct_gather_freq);
-		slurm_seterrno (ESLURMD_INVALID_ACCT_FREQ);
+
+	if (_check_acct_freq_task(msg->job_mem, msg->acctg_freq)) {
 		_pwd_destroy(pwd);
 		return NULL;
 	}
@@ -376,10 +413,18 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 	job->ntasks  = msg->ntasks;
 	job->jobid   = msg->job_id;
 	job->stepid  = msg->step_id;
+	job->array_job_id  = msg->array_job_id;
+	job->array_task_id = msg->array_task_id;
 
 	job->batch   = true;
-	if (msg->acctg_freq != (uint16_t) NO_VAL)
-		jobacct_gather_change_poll(msg->acctg_freq);
+	/* This needs to happen before acct_gather_profile_startpoll
+	   and only really looks at the profile in the job.
+	*/
+	acct_gather_profile_g_node_step_start(job);
+	/* needed for the jobacct_gather plugin to start */
+	acct_gather_profile_startpoll(msg->acctg_freq,
+				      conf->job_acct_gather_freq);
+
 	job->multi_prog = 0;
 	job->open_mode  = msg->open_mode;
 	job->overcommit = (bool) msg->overcommit;
@@ -412,7 +457,7 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 
 	if (msg->cpus_per_node)
 		job->cpus    = msg->cpus_per_node[0];
-	format_core_allocs(msg->cred, conf->node_name,
+	format_core_allocs(msg->cred, conf->node_name, conf->cpus,
 			   &job->job_alloc_cores, &job->step_alloc_cores,
 			   &job->job_mem, &job->step_mem);
 	if (job->step_mem)

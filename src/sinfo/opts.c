@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -188,7 +188,7 @@ extern void parse_command_line(int argc, char *argv[])
 			break;
 		case (int) 'n':
 			xfree(params.nodes);
-			params.nodes= xstrdup(optarg);
+			params.nodes = xstrdup(optarg);
 			/*
 			 * confirm valid nodelist entry
 			 */
@@ -198,6 +198,12 @@ extern void parse_command_line(int argc, char *argv[])
 				      optarg);
 				exit(1);
 			}
+			if (hostlist_count(host_list) == 1) {
+				params.node_name_single = true;
+				xfree(params.nodes);
+				params.nodes = hostlist_deranged_string_xmalloc(host_list);
+			} else
+				params.node_name_single = false;
 			hostlist_destroy(host_list);
 			break;
 		case (int) 'N':
@@ -508,7 +514,13 @@ _parse_format( char* format )
 			format_add_nodes_ai( params.format_list,
 					field_size,
 					right_justify,
-					suffix );
+					     suffix );
+		} else if (field[0] == 'B') {
+			params.match_flags.max_cpus_per_node_flag = true;
+			format_add_max_cpus_per_node( params.format_list,
+					     field_size,
+					     right_justify,
+					     suffix );
 		} else if (field[0] == 'c') {
 			params.match_flags.cpus_flag = true;
 			format_add_cpus( params.format_list,

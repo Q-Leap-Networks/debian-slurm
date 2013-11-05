@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -215,7 +215,7 @@ _run_script_and_set_env(const char *name, const char *path, slurmd_job_t *job)
 		argv[0] = xstrdup(path);
 		argv[1] = NULL;
 		close(1);
-		if(dup(pfd[1]) == -1)
+		if (dup(pfd[1]) == -1)
 			error("couldn't do the dup: %m");
 		close(2);
 		close(0);
@@ -534,7 +534,7 @@ static char *_uint32_array_to_str(int array_len, const uint32_t *array)
 	char *sep = ",";  /* seperator */
 	char *str = xstrdup("");
 
-	if(array == NULL)
+	if (array == NULL)
 		return str;
 
 	for (i = 0; i < array_len; i++) {

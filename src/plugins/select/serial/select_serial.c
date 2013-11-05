@@ -3,7 +3,7 @@
  *  job allocations.
  *****************************************************************************
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -356,9 +356,6 @@ static void _create_part_data(void)
 	this_ptr = select_part_record;
 
 	part_iterator = list_iterator_create(part_list);
-	if (part_iterator == NULL)
-		fatal ("memory allocation failure");
-
 	while ((p_ptr = (struct part_record *) list_next(part_iterator))) {
 		this_ptr->part_ptr = p_ptr;
 		this_ptr->num_rows = p_ptr->max_share;
@@ -517,11 +514,20 @@ static void _build_row_bitmaps(struct part_res_record *p_ptr,
 				bit_nclear(this_row->row_bitmap, 0, size-1);
 			}
 		} else {
-			xassert(job_ptr);
-			xassert(job_ptr->job_resrcs);
-			remove_job_from_cores(job_ptr->job_resrcs,
-					      &this_row->row_bitmap,
-					      cr_node_num_cores);
+			if (job_ptr) { /* just remove the job */
+				xassert(job_ptr->job_resrcs);
+				remove_job_from_cores(job_ptr->job_resrcs,
+						      &(this_row->row_bitmap),
+						      cr_node_num_cores);
+			} else { /* totally rebuild the bitmap */
+				size = bit_size(this_row->row_bitmap);
+				bit_nclear(this_row->row_bitmap, 0, size-1);
+				for (j = 0; j < this_row->num_jobs; j++) {
+					add_job_to_cores(this_row->job_list[j],
+							 &(this_row->row_bitmap),
+							 cr_node_num_cores);
+				}
+			}
 		}
 		return;
 	}
@@ -1083,8 +1089,6 @@ static int _run_now(struct job_record *job_ptr, bitstr_t *bitmap,
 
 	save_bitmap = bit_copy(bitmap);
 top:	orig_map = bit_copy(save_bitmap);
-	if (!orig_map)
-		fatal("bit_copy: malloc failure");
 
 	rc = cr_job_test(job_ptr, bitmap,
 			 SELECT_MODE_RUN_NOW, cr_type, job_node_share,
@@ -1108,8 +1112,6 @@ top:	orig_map = bit_copy(save_bitmap);
 		}
 
 		job_iterator = list_iterator_create(preemptee_candidates);
-		if (job_iterator == NULL)
-			fatal ("memory allocation failure");
 		while ((tmp_job_ptr = (struct job_record *)
 			list_next(job_iterator))) {
 			if (!IS_JOB_RUNNING(tmp_job_ptr) &&
@@ -1172,13 +1174,9 @@ top:	orig_map = bit_copy(save_bitmap);
 			 * actually used */
 			if (*preemptee_job_list == NULL) {
 				*preemptee_job_list = list_create(NULL);
-				if (*preemptee_job_list == NULL)
-					fatal("list_create malloc failure");
 			}
 			preemptee_iterator = list_iterator_create(
 				preemptee_candidates);
-			if (preemptee_iterator == NULL)
-				fatal ("memory allocation failure");
 			while ((tmp_job_ptr = (struct job_record *)
 				list_next(preemptee_iterator))) {
 				mode = slurm_job_preempt_mode(tmp_job_ptr);
@@ -1225,8 +1223,6 @@ static int _will_run_test(struct job_record *job_ptr, bitstr_t *bitmap,
 	time_t now = time(NULL);
 
 	orig_map = bit_copy(bitmap);
-	if (!orig_map)
-		fatal("bit_copy: malloc failure");
 
 	/* Try to run with currently available nodes */
 	rc = cr_job_test(job_ptr, bitmap,
@@ -1258,8 +1254,6 @@ static int _will_run_test(struct job_record *job_ptr, bitstr_t *bitmap,
 	if (!cr_job_list)
 		fatal("list_create: memory allocation error");
 	job_iterator = list_iterator_create(job_list);
-	if (job_iterator == NULL)
-		fatal ("memory allocation failure");
 	while ((tmp_job_ptr = (struct job_record *) list_next(job_iterator))) {
 		if (!IS_JOB_RUNNING(tmp_job_ptr) &&
 		    !IS_JOB_SUSPENDED(tmp_job_ptr))
@@ -1304,8 +1298,6 @@ static int _will_run_test(struct job_record *job_ptr, bitstr_t *bitmap,
 	if (rc != SLURM_SUCCESS) {
 		list_sort(cr_job_list, _cr_job_list_sort);
 		job_iterator = list_iterator_create(cr_job_list);
-		if (job_iterator == NULL)
-			fatal ("memory allocation failure");
 		while ((tmp_job_ptr = list_next(job_iterator))) {
 		        int ovrlap;
 			bit_or(bitmap, orig_map);
@@ -1339,12 +1331,8 @@ static int _will_run_test(struct job_record *job_ptr, bitstr_t *bitmap,
 		 * in selected plugin, but by Moab or something else. */
 		if (*preemptee_job_list == NULL) {
 			*preemptee_job_list = list_create(NULL);
-			if (*preemptee_job_list == NULL)
-				fatal("list_create malloc failure");
 		}
 		preemptee_iterator =list_iterator_create(preemptee_candidates);
-		if (preemptee_iterator == NULL)
-			fatal ("memory allocation failure");
 		while ((tmp_job_ptr = (struct job_record *)
 			list_next(preemptee_iterator))) {
 			if (bit_overlap(bitmap,
@@ -1882,7 +1870,7 @@ extern int select_p_select_nodeinfo_set_all(void)
 						tmp++;
 				}
 				/* get the row with the largest cpu
-				   count on it. */
+				 * count on it. */
 				if (tmp > tmp_16)
 					tmp_16 = tmp;
 			}
@@ -1921,6 +1909,7 @@ extern int select_p_select_nodeinfo_get(select_nodeinfo_t *nodeinfo,
 {
 	int rc = SLURM_SUCCESS;
 	uint16_t *uint16 = (uint16_t *) data;
+	uint32_t *uint32 = (uint32_t *) data;
 	char **tmp_char = (char **) data;
 	select_nodeinfo_t **select_nodeinfo = (select_nodeinfo_t **) data;
 
@@ -1950,6 +1939,9 @@ extern int select_p_select_nodeinfo_get(select_nodeinfo_t *nodeinfo,
 	case SELECT_NODEDATA_RACK_MP:
 	case SELECT_NODEDATA_EXTRA_INFO:
 		*tmp_char = NULL;
+		break;
+	case SELECT_NODEDATA_MEM_ALLOC:
+		*uint32 = 0;
 		break;
 	default:
 		error("Unsupported option %d for get_nodeinfo.", dinfo);
@@ -2105,8 +2097,6 @@ extern int select_p_reconfigure(void)
 
 	/* reload job data */
 	job_iterator = list_iterator_create(job_list);
-	if (job_iterator == NULL)
-		fatal ("memory allocation failure");
 	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
 		if (IS_JOB_RUNNING(job_ptr)) {
 			/* add the job */

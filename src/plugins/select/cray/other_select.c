@@ -16,7 +16,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -743,7 +743,7 @@ extern int other_reconfigure (void)
  * RET - nodes selected for use by the reservation
  */
 extern bitstr_t * other_resv_test(bitstr_t *avail_bitmap, uint32_t node_cnt,
-				  uint32_t core_cnt, bitstr_t **core_bitmap)
+				  uint32_t *core_cnt, bitstr_t **core_bitmap)
 {
 	if (other_select_init() < 0)
 		return NULL;

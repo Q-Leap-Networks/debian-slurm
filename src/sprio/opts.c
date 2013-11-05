@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -138,9 +138,9 @@ parse_command_line( int argc, char* argv[] )
 			params.long_list = true;
 			break;
 		case (int) 'M':
-			if(params.clusters)
+			if (params.clusters)
 				list_destroy(params.clusters);
-			if(!(params.clusters =
+			if (!(params.clusters =
 			     slurmdb_get_info_cluster(optarg))) {
 				print_db_notok(optarg, 0);
 				exit(1);
@@ -431,9 +431,8 @@ _build_job_list( char* str )
 	my_list = list_create( NULL );
 	my_job_list = xstrdup( str );
 	job = strtok_r( my_job_list, ",", &tmp_char );
-	while (job)
-	{
-		i = strtol( job, (char **) NULL, 10 );
+	while (job) {
+		i = slurm_xlate_job_id(job);
 		if (i <= 0) {
 			error( "Invalid job id: %s", job );
 			exit( 1 );

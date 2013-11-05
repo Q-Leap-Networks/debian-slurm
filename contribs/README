@@ -7,12 +7,6 @@ Subdirectories contain the source-code for the various contributations for
 SLURM as their documentation. A quick description of the subdirectories
 of the SLURM contribs distribution follows:
 
-  arrayrun            [Adds support for array jobs]
-     README                - Description of the arrayrun tool and its use
-     arrayrun              - Command used to submit job arrays
-     arrayrun_worker       - Back-end to the arrayrun command responsible for
-			     spawning the jobs in the array
-
   cray                [Tools for use on Cray systems]
      etc_init_d_munge      - /etc/init.d/munge script for use with Munge
      etc_sysconfig_slurm   - /etc/sysconfig/slurm for Cray XT/XE systems
@@ -73,6 +67,8 @@ of the SLURM contribs distribution follows:
      existing SLURM allocation. Outside of a SLURM allocation, make's behavior
      will be unchanged. Designed for GNU make-3.81.
 
+  mic                [Tools for use on Intel MIC processors]
+
   mpich1.slurm.patch [ Patch to mpich1/p4 library for SLURM job task launch ]
      For SLURM based job initiations (from srun command), get the parameters
      from environment variables as needed. This allows for a truly parallel
@@ -90,6 +86,10 @@ of the SLURM contribs distribution follows:
   phpext    	     [ PHP API to SLURM source ]
      API to SLURM using php.  Not a complete API, but offers quite a few
      interfaces to existing SLURM proper APIs.
+
+  pmi2               [ PMI2 client library ]
+     User applications can link with this library to use Slurm's mpi/pmi2
+     plugin.
 
   ptrace.patch       [ Linux Kernel patch required to for TotalView use ]
      0. This has been fixed on most recent Linux kernels. Older versions of
@@ -136,3 +136,4 @@ of the SLURM contribs distribution follows:
   torque/            [ Wrapper Scripts for Torque migration to SLURM ]
      Helpful scripts to make transition to SLURM easier from PBS or Torque.
      These scripts are easily updatable if there is functionality missing.
+     NOTE: For the showq command, see https://github.com/pedmon/slurm_showq

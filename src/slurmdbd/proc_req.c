@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -907,6 +907,8 @@ static int _archive_dump(slurmdbd_conn_t *slurmdbd_conn,
 		arch_cond->purge_event = slurmdbd_conf->purge_event;
 	if (arch_cond->purge_job == NO_VAL)
 		arch_cond->purge_job = slurmdbd_conf->purge_job;
+	if (arch_cond->purge_resv == NO_VAL)
+		arch_cond->purge_resv = slurmdbd_conf->purge_resv;
 	if (arch_cond->purge_step == NO_VAL)
 		arch_cond->purge_step = slurmdbd_conf->purge_step;
 	if (arch_cond->purge_suspend == NO_VAL)
@@ -2165,18 +2167,6 @@ static int   _modify_job(slurmdbd_conn_t *slurmdbd_conn,
 
 	debug2("DBD_MODIFY_JOB: called");
 
-	if ((*uid != slurmdbd_conf->slurm_user_id && *uid != 0)
-	    && assoc_mgr_get_admin_level(slurmdbd_conn->db_conn, *uid)
-	    < SLURMDB_ADMIN_SUPER_USER) {
-		comment = "Your user doesn't have privilege to preform this action";
-		error("CONN:%u %s", slurmdbd_conn->newsockfd, comment);
-		*out_buffer = make_dbd_rc_msg(slurmdbd_conn->rpc_version,
-					      ESLURM_ACCESS_DENIED,
-					      comment, DBD_MODIFY_JOB);
-
-		return ESLURM_ACCESS_DENIED;
-	}
-
 	if (slurmdbd_unpack_modify_msg(&get_msg, slurmdbd_conn->rpc_version,
 				       DBD_MODIFY_JOB,
 				       in_buffer) != SLURM_SUCCESS) {
@@ -2375,9 +2365,15 @@ is_same_user:
 
 	if ((user_rec->admin_level != SLURMDB_ADMIN_NOTSET)
 	    && (*uid != slurmdbd_conf->slurm_user_id && *uid != 0)
-	    && (admin_level < user_rec->admin_level)) {
-		comment = "You have to be the same or higher admin level to change another persons";
-		user_rec->admin_level = SLURMDB_ADMIN_NOTSET;
+	    && (admin_level < SLURMDB_ADMIN_SUPER_USER)) {
+		comment = "You must be a super user to modify a users admin level";
+		error("CONN:%u %s", slurmdbd_conn->newsockfd, comment);
+		*out_buffer = make_dbd_rc_msg(slurmdbd_conn->
+					      rpc_version,
+					      ESLURM_ACCESS_DENIED,
+					      comment,
+					      DBD_MODIFY_USERS);
+		return ESLURM_ACCESS_DENIED;
 	}
 
 	if (!(list_msg.my_list = acct_storage_g_modify_users(
@@ -2632,6 +2628,7 @@ static void _process_job_start(slurmdbd_conn_t *slurmdbd_conn,
 	job.network = job_start_msg->node_inx;
 	job.partition = job_start_msg->partition;
 	details.min_cpus = job_start_msg->req_cpus;
+	details.pn_min_memory = job_start_msg->req_mem;
 	job.qos_id = job_start_msg->qos_id;
 	job.resv_id = job_start_msg->resv_id;
 	job.priority = job_start_msg->priority;
@@ -3578,6 +3575,7 @@ static int  _step_start(slurmdbd_conn_t *slurmdbd_conn,
 	step.step_id = step_start_msg->step_id;
 	step.cpu_count = step_start_msg->total_cpus;
 	details.num_tasks = step_start_msg->total_tasks;
+	step.cpu_freq = step_start_msg->req_cpufreq;
 
 	layout.node_cnt = step_start_msg->node_cnt;
 	layout.task_dist = step_start_msg->task_dist;

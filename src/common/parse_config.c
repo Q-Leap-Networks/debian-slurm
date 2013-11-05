@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -71,7 +71,7 @@ strong_alias(s_p_parse_file,		slurm_s_p_parse_file);
 
 #define BUFFER_SIZE 4096
 
-#define CONF_HASH_LEN 26
+#define CONF_HASH_LEN 173
 
 static regex_t keyvalue_re;
 static char *keyvalue_pattern =
@@ -100,16 +100,12 @@ struct s_p_values {
  */
 static int _conf_hashtbl_index(const char *key)
 {
-	int i;
-	int idx = 0;
+	unsigned int hashval;
 
 	xassert(key);
-	for (i = 0; i < 10; i++) {
-		if (key[i] == '\0')
-			break;
-		idx += tolower((int)key[i]);
-	}
-	return idx % CONF_HASH_LEN;
+	for (hashval = 0; *key != 0; key++)
+		hashval = tolower(*key) + 31 * hashval;
+	return hashval % CONF_HASH_LEN;
 }
 
 static void _conf_hashtbl_insert(s_p_hashtbl_t *hashtbl,
@@ -222,6 +218,9 @@ void s_p_hashtbl_destroy(s_p_hashtbl_t *hashtbl) {
 	int i;
 	s_p_values_t *p, *next;
 
+	if (!hashtbl)
+		return;
+
 	for (i = 0; i < CONF_HASH_LEN; i++) {
 		for (p = hashtbl[i]; p != NULL; p = next) {
 			next = p->next;
@@ -290,17 +289,20 @@ static int _strip_continuation(char *buf, int len)
 	char *ptr;
 	int bs = 0;
 
+	if (len == 0)
+		return len;	/* Empty line */
+
 	for (ptr = buf+len-1; ptr >= buf; ptr--) {
 		if (*ptr == '\\')
 			bs++;
-		else if (isspace((int)*ptr) && bs == 0)
+		else if (isspace((int)*ptr) && (bs == 0))
 			continue;
 		else
 			break;
 	}
 	/* Check for an odd number of contiguous backslashes at
-	   the end of the line */
-	if (bs % 2 == 1) {
+	 * the end of the line */
+	if ((bs % 2) == 1) {
 		ptr = ptr + bs;
 		*ptr = '\0';
 		return (ptr - buf);
@@ -372,7 +374,7 @@ static void _compute_hash_val(uint32_t *hash_val, char *line)
 {
 	int idx, i, len;
 
-	if(!hash_val)
+	if (!hash_val)
 		return;
 
 	len = strlen(line);
@@ -899,10 +901,11 @@ int s_p_parse_file(s_p_hashtbl_t *hashtbl, uint32_t *hash_val, char *filename,
 		return SLURM_ERROR;
 	}
 
-	line = xmalloc(sizeof(char) * stat_buf.st_size);
+	/* Buffer needs one extra byte for trailing '\0' */
+	line = xmalloc(sizeof(char) * stat_buf.st_size + 1);
 	line_number = 1;
 	while ((merged_lines = _get_next_line(
-			line, stat_buf.st_size, hash_val, f)) > 0) {
+			line, stat_buf.st_size + 1, hash_val, f)) > 0) {
 		/* skip empty lines */
 		if (line[0] == '\0') {
 			line_number += merged_lines;
@@ -945,7 +948,7 @@ int s_p_parse_file(s_p_hashtbl_t *hashtbl, uint32_t *hash_val, char *filename,
 
 /*
  * s_p_hashtbl_merge
- * 
+ *
  * Merge the contents of two s_p_hashtbl_t data structures. Anything in
  * from_hashtbl that does not also appear in to_hashtbl is transfered to it.
  * This is intended primary to support multiple lines of DEFAULT configuration
@@ -1383,4 +1386,23 @@ void s_p_dump_values(const s_p_hashtbl_t *hashtbl,
 			break;
 		}
 	}
+}
+
+extern void transfer_s_p_options(s_p_options_t **full_options,
+				 s_p_options_t *options,
+				 int *full_options_cnt)
+{
+	s_p_options_t *op = NULL;
+	s_p_options_t *full_options_ptr;
+	int cnt = *full_options_cnt;
+
+	xassert(full_options);
+
+	for (op = options; op->key != NULL; op++, cnt++) {
+		xrealloc(*full_options, ((cnt + 1) * sizeof(s_p_options_t)));
+		full_options_ptr = &(*full_options)[cnt];
+		full_options_ptr->key = xstrdup(op->key);
+		full_options_ptr->type = op->type;
+	}
+	*full_options_cnt = cnt;
 }

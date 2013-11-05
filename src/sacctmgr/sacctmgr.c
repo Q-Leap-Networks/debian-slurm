@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -178,7 +178,7 @@ main (int argc, char *argv[])
 
 	/* Check to see if we are running a supported accounting plugin */
 	temp = slurm_get_accounting_storage_type();
-	if(strcasecmp(temp, "accounting_storage/slurmdbd")
+	if (strcasecmp(temp, "accounting_storage/slurmdbd")
 	   && strcasecmp(temp, "accounting_storage/mysql")) {
 		fprintf (stderr, "You are not running a supported "
 			 "accounting_storage plugin\n(%s).\n"
@@ -192,20 +192,20 @@ main (int argc, char *argv[])
 
 	errno = 0;
 	db_conn = slurmdb_connection_get();
-	if(errno != SLURM_SUCCESS) {
+	if (errno != SLURM_SUCCESS) {
 		int tmp_errno = errno;
-		if((input_field_count == 2) &&
+		if ((input_field_count == 2) &&
 		   (!strncasecmp(argv[2], "Configuration", strlen(argv[1]))) &&
 		   ((!strncasecmp(argv[1], "list", strlen(argv[0]))) ||
 		    (!strncasecmp(argv[1], "show", strlen(argv[0]))))) {
-			if(tmp_errno == ESLURM_DB_CONNECTION) {
+			if (tmp_errno == ESLURM_DB_CONNECTION) {
 				tmp_errno = 0;
 				sacctmgr_list_config(true);
 			} else
 				sacctmgr_list_config(false);
 		}
 		errno = tmp_errno;
-		if(errno)
+		if (errno)
 			error("Problem talking to the database: %m");
 		exit(1);
 	}
@@ -225,7 +225,7 @@ main (int argc, char *argv[])
 		 * them to fix it and let the process happen since there
 		 * are checks for global exit_code we need to reset it.
 		 */
-		if(exit_code) {
+		if (exit_code) {
 			local_exit_code = exit_code;
 			exit_code = 0;
 		}
@@ -236,11 +236,11 @@ main (int argc, char *argv[])
 	 */
 	if (exit_flag == 2)
 		putchar('\n');
-	if(local_exit_code)
+	if (local_exit_code)
 		exit_code = local_exit_code;
 	acct_storage_g_close_connection(&db_conn);
 	slurm_acct_storage_fini();
-	if(g_qos_list)
+	if (g_qos_list)
 		list_destroy(g_qos_list);
 	exit(exit_code);
 }
@@ -254,18 +254,23 @@ static char *_getline(const char *prompt)
 	char buf[4096];
 	char *line;
 	int len;
+
 	printf("%s", prompt);
 
-	/* Set "line" here to avoid a warning and discard it later. */
+	/* Set "line" here to avoid a warning, discard later */
 	line = fgets(buf, 4096, stdin);
 	if (line == NULL)
 		return NULL;
 	len = strlen(buf);
-	if ((len > 0) && (buf[len-1] == '\n'))
+	if ((len == 0) || (len >= 4096))
+		return NULL;
+	if (buf[len-1] == '\n')
 		buf[len-1] = '\0';
 	else
 		len++;
-	line = malloc (len * sizeof(char));
+	line = malloc(len * sizeof(char));
+	if (!line)
+		return NULL;
 	return strncpy(line, buf, len);
 }
 #endif
@@ -467,16 +472,16 @@ _process_command (int argc, char *argv[])
 				 argv[0]);
 		}
 
-		if(argc > 1)
+		if (argc > 1)
 			my_start = parse_time(argv[1], 1);
-		if(argc > 2)
+		if (argc > 2)
 			my_end = parse_time(argv[2], 1);
-		if(argc > 3)
+		if (argc > 3)
 			archive_data = atoi(argv[3]);
-		if(acct_storage_g_roll_usage(db_conn, my_start,
+		if (acct_storage_g_roll_usage(db_conn, my_start,
 					     my_end, archive_data)
 		   == SLURM_SUCCESS) {
-			if(commit_check("Would you like to commit rollup?")) {
+			if (commit_check("Would you like to commit rollup?")) {
 				acct_storage_g_commit(db_conn, 1);
 			} else {
 				printf(" Rollup Discarded\n");
@@ -509,13 +514,13 @@ static void _add_it (int argc, char *argv[])
 	int error_code = SLURM_SUCCESS;
 	int command_len = 0;
 
-	if(readonly_flag) {
+	if (readonly_flag) {
 		exit_code = 1;
 		fprintf(stderr, "Can't run this command in readonly mode.\n");
 		return;
 	}
 
-	if(!argv[0])
+	if (!argv[0])
 		goto helpme;
 
 	command_len = strlen(argv[0]);
@@ -544,7 +549,7 @@ static void _add_it (int argc, char *argv[])
 		fprintf(stderr, "\"QOS\", or \"User\"\n");
 	}
 
-	if (error_code == SLURM_ERROR) {
+	if (error_code != SLURM_SUCCESS) {
 		exit_code = 1;
 	}
 }
@@ -559,13 +564,13 @@ static void _archive_it (int argc, char *argv[])
 	int error_code = SLURM_SUCCESS;
 	int command_len = 0;
 
-	if(readonly_flag) {
+	if (readonly_flag) {
 		exit_code = 1;
 		fprintf(stderr, "Can't run this command in readonly mode.\n");
 		return;
 	}
 
-	if(!argv[0])
+	if (!argv[0])
 		goto helpme;
 
 	command_len = strlen(argv[0]);
@@ -585,7 +590,7 @@ static void _archive_it (int argc, char *argv[])
 		fprintf(stderr, "\"Dump\", or \"load\"\n");
 	}
 
-	if (error_code == SLURM_ERROR) {
+	if (error_code != SLURM_SUCCESS) {
 		exit_code = 1;
 	}
 }
@@ -602,7 +607,7 @@ static void _show_it (int argc, char *argv[])
 	int error_code = SLURM_SUCCESS;
 	int command_len = 0;
 
-	if(!argv[0])
+	if (!argv[0])
 		goto helpme;
 
 	command_len = strlen(argv[0]);
@@ -648,7 +653,7 @@ static void _show_it (int argc, char *argv[])
 			"\"QOS\", \"Transaction\", \"User\", or \"WCKey\"\n");
 	}
 
-	if (error_code == SLURM_ERROR) {
+	if (error_code != SLURM_SUCCESS) {
 		exit_code = 1;
 	}
 }
@@ -664,13 +669,13 @@ static void _modify_it (int argc, char *argv[])
 	int error_code = SLURM_SUCCESS;
 	int command_len = 0;
 
-	if(readonly_flag) {
+	if (readonly_flag) {
 		exit_code = 1;
 		fprintf(stderr, "Can't run this command in readonly mode.\n");
 		return;
 	}
 
-	if(!argv[0])
+	if (!argv[0])
 		goto helpme;
 
 	command_len = strlen(argv[0]);
@@ -699,7 +704,7 @@ static void _modify_it (int argc, char *argv[])
 			"or \"User\"\n");
 	}
 
-	if (error_code == SLURM_ERROR) {
+	if (error_code != SLURM_SUCCESS) {
 		exit_code = 1;
 	}
 }
@@ -714,13 +719,13 @@ static void _delete_it (int argc, char *argv[])
 	int error_code = SLURM_SUCCESS;
 	int command_len = 0;
 
-	if(readonly_flag) {
+	if (readonly_flag) {
 		exit_code = 1;
 		fprintf(stderr, "Can't run this command in readonly mode.\n");
 		return;
 	}
 
-	if(!argv[0])
+	if (!argv[0])
 		goto helpme;
 
 	command_len = strlen(argv[0]);
@@ -750,7 +755,7 @@ static void _delete_it (int argc, char *argv[])
 		fprintf(stderr, "\"QOS\", or \"User\"\n");
 	}
 
-	if (error_code == SLURM_ERROR) {
+	if (error_code != SLURM_SUCCESS) {
 		exit_code = 1;
 	}
 }

@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -201,6 +201,52 @@ int main(int argc, char *argv[])
 	return 0;
 }
 
+static char *_find_quote_token(char *tmp, char *sep, char **last)
+{
+	char *start, *quote_single = 0, *quote_double = 0;
+	int i;
+
+	xassert(last);
+	if (*last)
+		start = *last;
+	else
+		start = tmp;
+	if (start[0] == '\0')
+		return NULL;
+	for (i = 0; ; i++) {
+		if (start[i] == '\'') {
+			if (quote_single)
+				quote_single--;
+			else
+				quote_single++;
+		} else if (start[i] == '\"') {
+			if (quote_double)
+				quote_double--;
+			else
+				quote_double++;
+		} else if (((start[i] == sep[0]) || (start[i] == '\0')) &&
+			   (quote_single == 0) && (quote_double == 0)) {
+			if (((start[0] == '\'') && (start[i-1] == '\'')) ||
+			    ((start[0] == '\"') && (start[i-1] == '\"'))) {
+				start++;
+				i -= 2;
+			}
+			if (start[i] == '\0')
+				*last = &start[i];
+			else
+				*last = &start[i] + 1;
+			start[i] = '\0';
+			return start;
+		} else if (start[i] == '\0') {
+			error("Improperly formed environment variable (%s)",
+			      start);
+			*last = &start[i];
+			return start;
+		}
+		
+	}
+}
+
 /* Propagate select user environment variables to the job */
 static void _env_merge_filter(job_desc_msg_t *desc)
 {
@@ -209,7 +255,7 @@ static void _env_merge_filter(job_desc_msg_t *desc)
 	char *save_env[2] = { NULL, NULL }, *tmp, *tok, *last = NULL;
 
 	tmp = xstrdup(opt.export_env);
-	tok = strtok_r(tmp, ",", &last);
+	tok = _find_quote_token(tmp, ",", &last);
 	while (tok) {
 		if (strchr(tok, '=')) {
 			save_env[0] = tok;
@@ -227,7 +273,7 @@ static void _env_merge_filter(job_desc_msg_t *desc)
 				break;
 			}
 		}
-		tok = strtok_r(NULL, ",", &last);
+		tok = _find_quote_token(NULL, ",", &last);
 	}
 	xfree(tmp);
 
@@ -287,6 +333,7 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 	desc->req_nodes = opt.nodelist;
 	desc->exc_nodes = opt.exc_nodes;
 	desc->partition = opt.partition;
+	desc->profile = opt.profile;
 	if (opt.licenses)
 		desc->licenses = xstrdup(opt.licenses);
 	if (opt.nodes_set) {
@@ -302,6 +349,8 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 	if (opt.dependency)
 		desc->dependency = xstrdup(opt.dependency);
 
+	if (opt.array_inx)
+		desc->array_inx = xstrdup(opt.array_inx);
 	if (opt.cpu_bind)
 		desc->cpu_bind       = opt.cpu_bind;
 	if (opt.cpu_bind_type)
@@ -443,8 +492,8 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->requeue = opt.requeue;
 	if (opt.open_mode)
 		desc->open_mode = opt.open_mode;
-	if (opt.acctg_freq >= 0)
-		desc->acctg_freq = opt.acctg_freq;
+	if (opt.acctg_freq)
+		desc->acctg_freq = xstrdup(opt.acctg_freq);
 
 	desc->ckpt_dir = opt.ckpt_dir;
 	desc->ckpt_interval = (uint16_t)opt.ckpt_interval;
@@ -489,24 +538,21 @@ static void _set_spank_env(void)
 	}
 }
 
-/* Set SLURM_SUBMIT_DIR environment variable with current state */
+/* Set SLURM_SUBMIT_DIR and SLURM_SUBMIT_HOST environment variables within
+ * current state */
 static void _set_submit_dir_env(void)
 {
-	char buf[MAXPATHLEN + 1];
+	char buf[MAXPATHLEN + 1], host[256];
 
-	if (getenv("SLURM_SUBMIT_DIR"))	/* use this value */
-		return;
-
-	if ((getcwd(buf, MAXPATHLEN)) == NULL) {
+	if ((getcwd(buf, MAXPATHLEN)) == NULL)
 		error("getcwd failed: %m");
-		exit(error_exit);
-	}
-
-	if (setenvf(NULL, "SLURM_SUBMIT_DIR", "%s", buf) < 0) {
+	else if (setenvf(NULL, "SLURM_SUBMIT_DIR", "%s", buf) < 0)
 		error("unable to set SLURM_SUBMIT_DIR in environment");
-		return;
-	}
-	debug("propagating SUBMIT_DIR=%s", buf);
+
+	if ((gethostname(host, sizeof(host))))
+		error("gethostname_short failed: %m");
+	else if (setenvf(NULL, "SLURM_SUBMIT_HOST", "%s", host) < 0)
+		error("unable to set SLURM_SUBMIT_HOST in environment");
 }
 
 /* Set SLURM_UMASK environment variable with current state */
@@ -518,8 +564,12 @@ static int _set_umask_env(void)
 	if (getenv("SLURM_UMASK"))	/* use this value */
 		return SLURM_SUCCESS;
 
-	mask = (int)umask(0);
-	umask(mask);
+	if (opt.umask >= 0) {
+		mask = opt.umask;
+	} else {
+		mask = (int)umask(0);
+		umask(mask);
+	}
 
 	sprintf(mask_char, "0%d%d%d",
 		((mask>>6)&07), ((mask>>3)&07), mask&07);

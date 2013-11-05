@@ -7,6 +7,3 @@ SUBDIRS = common api db_api database \
 if !REAL_BG_L_P_LOADED
 SUBDIRS += srun
 endif
-
-
-

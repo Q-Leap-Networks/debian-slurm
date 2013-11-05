@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -86,6 +86,7 @@
 #include "src/slurmctld/reservation.h"
 #include "src/slurmctld/sched_plugin.h"
 #include "src/slurmctld/slurmctld.h"
+#include "src/slurmctld/slurmctld_plugstack.h"
 
 #define MAX_FEATURES  32	/* max exclusive features "[fs1|fs2]"=2 */
 #define MAX_RETRIES   10
@@ -128,6 +129,19 @@ static bitstr_t *_valid_features(struct job_details *detail_ptr,
 				 struct config_record *config_ptr);
 
 static int _fill_in_gres_fields(struct job_record *job_ptr);
+
+/*
+ * _get_ntasks_per_core - Retrieve the value of ntasks_per_core from
+ *	the given job_details record.  If it wasn't set, return 0xffff.
+ *	Intended for use with the adjust_cpus_nppcu function.
+ */
+static uint16_t _get_ntasks_per_core(struct job_details *details) {
+
+	if (details->mc_ptr)
+		return details->mc_ptr->ntasks_per_core;
+	else
+		return 0xffff;
+}
 
 /*
  * _build_gres_alloc_string - Fill in the gres_alloc string field for a
@@ -397,8 +411,6 @@ extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
 		agent_args->msg_type = REQUEST_TERMINATE_JOB;
 	agent_args->retry = 0;	/* re_kill_job() resends as needed */
 	agent_args->hostlist = hostlist_create("");
-	if (agent_args->hostlist == NULL)
-		fatal("hostlist_create: malloc failure");
 	kill_job = xmalloc(sizeof(kill_job_msg_t));
 	last_node_update    = time(NULL);
 	kill_job->job_id    = job_ptr->job_id;
@@ -467,9 +479,11 @@ extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
 		agent_args->node_count++;
 	}
 #else
+	if (!job_ptr->node_bitmap_cg)
+		build_cg_bitmap(job_ptr);
 	for (i = 0, node_ptr = node_record_table_ptr;
 	     i < node_record_count; i++, node_ptr++) {
-		if (!bit_test(job_ptr->node_bitmap, i))
+		if (!bit_test(job_ptr->node_bitmap_cg, i))
 			continue;
 		if (IS_NODE_DOWN(node_ptr)) {
 			/* Issue the KILL RPC, but don't verify response */
@@ -942,8 +956,6 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 	if ((job_ptr->details->min_nodes == 0) &&
 	    (job_ptr->details->max_nodes == 0)) {
 		avail_bitmap = bit_alloc(node_record_count);
-		if (!avail_bitmap)
-			fatal("bit_alloc: malloc failure");
 		pick_code = select_g_job_test(job_ptr,
 					      avail_bitmap,
 					      0, 0, 0,
@@ -1068,8 +1080,6 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 				} else {
 					avail_bitmap = bit_copy(node_set_ptr[i].
 								my_bitmap);
-					if (avail_bitmap == NULL)
-						fatal("bit_copy malloc failure");
 				}
 			}
 			if (!bit_super_set(job_ptr->details->req_node_bitmap,
@@ -1081,8 +1091,6 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 			FREE_NULL_BITMAP(avail_bitmap);
 			avail_bitmap = bit_copy(job_ptr->details->
 						req_node_bitmap);
-			if (avail_bitmap == NULL)
-				fatal("bit_copy malloc failure");
 		}
 		for (i = 0; i < node_set_size; i++) {
 			int count1 = 0, count2 = 0;
@@ -1096,8 +1104,6 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 			} else {
 				total_bitmap = bit_copy(
 						node_set_ptr[i].my_bitmap);
-				if (total_bitmap == NULL)
-					fatal("bit_copy malloc failure");
 			}
 
 			bit_and(node_set_ptr[i].my_bitmap, avail_node_bitmap);
@@ -1140,8 +1146,6 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 			} else {
 				avail_bitmap = bit_copy(node_set_ptr[i].
 							my_bitmap);
-				if (avail_bitmap == NULL)
-					fatal("bit_copy malloc failure");
 			}
 			avail_nodes = bit_set_count(avail_bitmap);
 			tried_sched = false;	/* need to test these nodes */
@@ -1256,8 +1260,6 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 			if (!runable_avail && (avail_nodes >= min_nodes)) {
 				FREE_NULL_BITMAP(avail_bitmap);
 				avail_bitmap = bit_copy(total_bitmap);
-				if (avail_bitmap == NULL)
-					fatal("bit_copy malloc failure");
 				bit_and(avail_bitmap, avail_node_bitmap);
 				pick_code = select_g_job_test(job_ptr,
 						avail_bitmap,
@@ -1319,20 +1321,22 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 	return error_code;
 }
 
-static void _preempt_jobs(List preemptee_job_list, int *error_code)
+static void _preempt_jobs(List preemptee_job_list, bool kill_pending,
+			  int *error_code)
 {
 	ListIterator iter;
 	struct job_record *job_ptr;
 	uint16_t mode;
 	int job_cnt = 0, rc = SLURM_SUCCESS;
+	checkpoint_msg_t ckpt_msg;
 
 	iter = list_iterator_create(preemptee_job_list);
-	if (!iter)
-		fatal("list_iterator_create: malloc failure");
 	while ((job_ptr = (struct job_record *) list_next(iter))) {
 		mode = slurm_job_preempt_mode(job_ptr);
 		if (mode == PREEMPT_MODE_CANCEL) {
 			job_cnt++;
+			if (!kill_pending)
+				continue;
 			if (slurm_job_check_grace(job_ptr) == SLURM_SUCCESS)
 				continue;
 			rc = job_signal(job_ptr->job_id, SIGKILL, 0, 0, true);
@@ -1341,7 +1345,9 @@ static void _preempt_jobs(List preemptee_job_list, int *error_code)
 				     job_ptr->job_id);
 			}
 		} else if (mode == PREEMPT_MODE_CHECKPOINT) {
-			checkpoint_msg_t ckpt_msg;
+			job_cnt++;
+			if (!kill_pending)
+				continue;
 			memset(&ckpt_msg, 0, sizeof(checkpoint_msg_t));
 			ckpt_msg.op	   = CHECK_REQUEUE;
 			ckpt_msg.job_id    = job_ptr->job_id;
@@ -1358,15 +1364,16 @@ static void _preempt_jobs(List preemptee_job_list, int *error_code)
 				info("preempted job %u has been checkpointed",
 				     job_ptr->job_id);
 			}
-			job_cnt++;
 		} else if (mode == PREEMPT_MODE_REQUEUE) {
+			job_cnt++;
+			if (!kill_pending)
+				continue;
 			rc = job_requeue(0, job_ptr->job_id, -1,
 					 (uint16_t)NO_VAL, true);
 			if (rc == SLURM_SUCCESS) {
 				info("preempted job %u has been requeued",
 				     job_ptr->job_id);
 			}
-			job_cnt++;
 		} else if ((mode == PREEMPT_MODE_SUSPEND) &&
 			   (slurm_get_preempt_mode() & PREEMPT_MODE_GANG)) {
 			debug("preempted job %u suspended by gang scheduler",
@@ -1529,19 +1536,19 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 	if (!test_only && preemptee_job_list && (error_code == SLURM_SUCCESS)){
 		struct job_details *detail_ptr = job_ptr->details;
 		time_t now = time(NULL);
+		bool kill_pending = true;
 		if ((detail_ptr->preempt_start_time != 0) &&
 		    (detail_ptr->preempt_start_time >
 		     (now - slurmctld_conf.kill_wait -
 		      slurmctld_conf.msg_timeout))) {
 			/* Job preemption may still be in progress,
-			 * do not preempt any more jobs yet */
-			error_code = ESLURM_NODES_BUSY;
-		} else {
-			_preempt_jobs(preemptee_job_list, &error_code);
-			if ((error_code == ESLURM_NODES_BUSY) &&
-			    (detail_ptr->preempt_start_time == 0)) {
-  				detail_ptr->preempt_start_time = now;
-			}
+			 * do not cancel or requeue any more jobs yet */
+			kill_pending = false;
+		}
+		_preempt_jobs(preemptee_job_list, kill_pending, &error_code);
+		if ((error_code == ESLURM_NODES_BUSY) &&
+		    (detail_ptr->preempt_start_time == 0)) {
+  			detail_ptr->preempt_start_time = now;
 		}
 	}
 	if (error_code) {
@@ -1638,6 +1645,9 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 	configuring = IS_JOB_CONFIGURING(job_ptr);
 
 	job_ptr->job_state = JOB_RUNNING;
+	if (nonstop_ops.job_begin)
+		(nonstop_ops.job_begin)(job_ptr);
+
 	if (configuring
 	    || bit_overlap(job_ptr->node_bitmap, power_node_bitmap))
 		job_ptr->job_state |= JOB_CONFIGURING;
@@ -1650,6 +1660,16 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 
 	slurmctld_diag_stats.jobs_started++;
 	acct_policy_job_begin(job_ptr);
+
+	/* Update the job_record's gres and gres_alloc fields with
+	 * strings representing the amount of each GRES type requested
+	 *  and allocated. */
+	_fill_in_gres_fields(job_ptr);
+	if (slurm_get_debug_flags() & DEBUG_FLAG_GRES)
+		debug("(%s:%d) job id: %u -- job_record->gres: (%s), "
+		      "job_record->gres_alloc: (%s)",
+		      THIS_FILE, __LINE__, job_ptr->job_id,
+		      job_ptr->gres, job_ptr->gres_alloc);
 
 	/* If ran with slurmdbd this is handled out of band in the
 	 * job if happening right away.  If the job has already
@@ -1676,16 +1696,6 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 		}
 		xfree(node_set_ptr);
 	}
-
-	/* Update the job_record's gres and gres_alloc fields with
-	 * strings representing the amount of each GRES type requested
-	 *  and allocated. */
-	_fill_in_gres_fields(job_ptr);
-	if (slurm_get_debug_flags() & DEBUG_FLAG_GRES)
-		debug("(%s:%d) job id: %u -- job_record->gres: (%s), "
-		      "job_record->gres_alloc: (%s)",
-		      THIS_FILE, __LINE__, job_ptr->job_id,
-		      job_ptr->gres, job_ptr->gres_alloc);
 
 	return error_code;
 }
@@ -1718,13 +1728,13 @@ static int _fill_in_gres_fields(struct job_record *job_ptr)
 			      "was requested",
 			      THIS_FILE, __LINE__, job_ptr->job_id);
 
-		xfree(job_ptr->gres_req);
-		xstrcat(job_ptr->gres_req, "");
-	} else if ( job_ptr->node_cnt > 0 ) {
+		if (job_ptr->gres_req == NULL)
+			xstrcat(job_ptr->gres_req, "");
+
+	} else if (job_ptr->node_cnt > 0
+	           && job_ptr->gres_req == NULL) {
 		/* job_ptr->gres_req is rebuilt/replaced here */
 		tmp_str = xstrdup(req_config);
-		xfree(job_ptr->gres_req);
-		job_ptr->gres_req = xstrdup("");
 
 		tok = strtok_r(tmp_str, ",", &last);
 		while (tok) {
@@ -1835,11 +1845,7 @@ static bool _valid_feature_counts(struct job_details *detail_ptr,
 		return rc;
 
 	feature_bitmap = bit_copy(node_bitmap);
-	if (feature_bitmap == NULL)
-		fatal("bit_copy malloc error");
 	job_feat_iter = list_iterator_create(detail_ptr->feature_list);
-	if (job_feat_iter == NULL)
-		fatal("list_iterator_create malloc error");
 	while ((job_feat_ptr = (struct feature_record *)
 			list_next(job_feat_iter))) {
 		feat_ptr = list_find_first(feature_list, list_find_feature,
@@ -1868,8 +1874,6 @@ static bool _valid_feature_counts(struct job_details *detail_ptr,
 	if (have_count) {
 		job_feat_iter = list_iterator_create(detail_ptr->
 						     feature_list);
-		if (job_feat_iter == NULL)
-			fatal("list_iterator_create malloc error");
 		while ((job_feat_ptr = (struct feature_record *)
 				list_next(job_feat_iter))) {
 			if (job_feat_ptr->count == 0)
@@ -1882,8 +1886,6 @@ static bool _valid_feature_counts(struct job_details *detail_ptr,
 				break;
 			}
 			tmp_bitmap = bit_copy(feature_bitmap);
-			if (tmp_bitmap == NULL)
-				fatal("bit_copy malloc error");
 			bit_and(tmp_bitmap, feat_ptr->node_bitmap);
 			if (bit_set_count(tmp_bitmap) < job_feat_ptr->count)
 				rc = false;
@@ -2002,7 +2004,7 @@ static int _build_node_list(struct job_record *job_ptr,
 			    struct node_set **node_set_pptr,
 			    int *node_set_size)
 {
-	int i, node_set_inx, power_cnt, rc;
+	int adj_cpus, i, node_set_inx, power_cnt, rc;
 	struct node_set *node_set_ptr;
 	struct config_record *config_ptr;
 	struct part_record *part_ptr = job_ptr->part_ptr;
@@ -2061,14 +2063,10 @@ static int _build_node_list(struct job_record *job_ptr,
 		} else {
 			usable_node_mask =
 				bit_copy(detail_ptr->exc_node_bitmap);
-			if (usable_node_mask == NULL)
-				fatal("bit_copy malloc failure");
 			bit_not(usable_node_mask);
 		}
 	} else if (usable_node_mask == NULL) {
 		usable_node_mask = bit_alloc(node_record_count);
-		if (usable_node_mask == NULL)
-			fatal("bit_alloc malloc failure");
 		bit_nset(usable_node_mask, 0, (node_record_count - 1));
 	}
 
@@ -2080,14 +2078,14 @@ static int _build_node_list(struct job_record *job_ptr,
 	}
 
 	config_iterator = list_iterator_create(config_list);
-	if (config_iterator == NULL)
-		fatal("list_iterator_create malloc failure");
 
 	while ((config_ptr = (struct config_record *)
 			list_next(config_iterator))) {
-
 		config_filter = 0;
-		if ((detail_ptr->pn_min_cpus     > config_ptr->cpus       ) ||
+		adj_cpus = adjust_cpus_nppcu(_get_ntasks_per_core(detail_ptr),
+					     config_ptr->threads,
+					     config_ptr->cpus);
+		if ((detail_ptr->pn_min_cpus     >  adj_cpus) ||
 		    ((detail_ptr->pn_min_memory & (~MEM_PER_CPU)) >
 		      config_ptr->real_memory)                               ||
 		    (detail_ptr->pn_min_tmp_disk > config_ptr->tmp_disk))
@@ -2115,8 +2113,6 @@ static int _build_node_list(struct job_record *job_ptr,
 
 		node_set_ptr[node_set_inx].my_bitmap =
 			bit_copy(config_ptr->node_bitmap);
-		if (node_set_ptr[node_set_inx].my_bitmap == NULL)
-			fatal("bit_copy malloc failure");
 		bit_and(node_set_ptr[node_set_inx].my_bitmap,
 			part_ptr->node_bitmap);
 		if (usable_node_mask) {
@@ -2239,7 +2235,7 @@ static int _build_node_list(struct job_record *job_ptr,
 static void _filter_nodes_in_set(struct node_set *node_set_ptr,
 				 struct job_details *job_con)
 {
-	int i;
+	int adj_cpus, i;
 	multi_core_data_t *mc_ptr = job_con->mc_ptr;
 
 	if (slurmctld_conf.fast_schedule) {	/* test config records */
@@ -2248,9 +2244,11 @@ static void _filter_nodes_in_set(struct node_set *node_set_ptr,
 			int job_ok = 0, job_mc_ptr_ok = 0;
 			if (bit_test(node_set_ptr->my_bitmap, i) == 0)
 				continue;
-
 			node_con = node_record_table_ptr[i].config_ptr;
-			if ((job_con->pn_min_cpus     <= node_con->cpus)    &&
+			adj_cpus = adjust_cpus_nppcu(_get_ntasks_per_core(job_con),
+						     node_con->threads,
+						     node_con->cpus);
+			if ((job_con->pn_min_cpus     <= adj_cpus)           &&
 			    ((job_con->pn_min_memory & (~MEM_PER_CPU)) <=
 			      node_con->real_memory)                         &&
 			    (job_con->pn_min_tmp_disk <= node_con->tmp_disk))
@@ -2279,9 +2277,12 @@ static void _filter_nodes_in_set(struct node_set *node_set_ptr,
 				continue;
 
 			node_ptr = &node_record_table_ptr[i];
-			if ((job_con->pn_min_cpus     <= node_ptr->cpus)    &&
+			adj_cpus = adjust_cpus_nppcu(_get_ntasks_per_core(job_con),
+						     node_ptr->threads,
+						     node_ptr->cpus);
+			if ((job_con->pn_min_cpus     <= adj_cpus)            &&
 			    ((job_con->pn_min_memory & (~MEM_PER_CPU)) <=
-			      node_ptr->real_memory)                         &&
+			      node_ptr->real_memory)                          &&
 			    (job_con->pn_min_tmp_disk <= node_ptr->tmp_disk))
 				job_ok = 1;
 			if (mc_ptr &&
@@ -2323,8 +2324,6 @@ static int _nodes_in_sets(bitstr_t *req_bitmap,
 		else {
 			scratch_bitmap =
 			    bit_copy(node_set_ptr[i].my_bitmap);
-			if (scratch_bitmap == NULL)
-				fatal("bit_copy malloc failure");
 		}
 	}
 
@@ -2366,14 +2365,14 @@ extern void build_node_details(struct job_record *job_ptr, bool new_alloc)
 	if (new_alloc) {
 		/* Find available front-end node and assign it to this job */
 		xfree(job_ptr->batch_host);
-		job_ptr->front_end_ptr = assign_front_end(NULL);
+		job_ptr->front_end_ptr = assign_front_end(job_ptr);
 		if (job_ptr->front_end_ptr) {
 			job_ptr->batch_host = xstrdup(job_ptr->
 						      front_end_ptr->name);
 		}
 	} else if (job_ptr->batch_host) {
 		/* Reset pointer to this job's front-end node */
-		job_ptr->front_end_ptr = assign_front_end(job_ptr->batch_host);
+		job_ptr->front_end_ptr = assign_front_end(job_ptr);
 		if (!job_ptr->front_end_ptr)
 			xfree(job_ptr->batch_host);
 	}
@@ -2423,16 +2422,12 @@ static bitstr_t *_valid_features(struct job_details *details_ptr,
 	int last_op = FEATURE_OP_AND, position = 0;
 
 	result_bits = bit_alloc(MAX_FEATURES);
-	if (result_bits == NULL)
-		fatal("bit_alloc malloc failure");
 	if (details_ptr->feature_list == NULL) {	/* no constraints */
 		bit_set(result_bits, 0);
 		return result_bits;
 	}
 
 	feat_iter = list_iterator_create(details_ptr->feature_list);
-	if (feat_iter == NULL)
-		fatal("list_iterator_create malloc failure");
 	while ((job_feat_ptr = (struct feature_record *)
 			list_next(feat_iter))) {
 		if ((job_feat_ptr->op_code == FEATURE_OP_XAND) ||
@@ -2480,14 +2475,10 @@ extern void re_kill_job(struct job_record *job_ptr)
 	xassert(job_ptr->details);
 
 	kill_hostlist = hostlist_create("");
-	if (kill_hostlist == NULL)
-		fatal("hostlist_create: malloc failure");
 
 	agent_args = xmalloc(sizeof(agent_arg_t));
 	agent_args->msg_type = REQUEST_TERMINATE_JOB;
 	agent_args->hostlist = hostlist_create("");
-	if (agent_args->hostlist == NULL)
-		fatal("hostlist_create: malloc failure");
 	agent_args->retry = 0;
 	kill_job = xmalloc(sizeof(kill_job_msg_t));
 	kill_job->job_id    = job_ptr->job_id;

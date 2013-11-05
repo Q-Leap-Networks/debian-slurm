@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -438,7 +438,7 @@ int _print_cpus_aiot(sinfo_data_t * sinfo_data, int width,
 	char tmpo[8];
 	char tmpt[8];
 	if (sinfo_data) {
-		if(params.cluster_flags & CLUSTER_FLAG_BG) {
+		if (params.cluster_flags & CLUSTER_FLAG_BG) {
 			convert_num_unit((float)sinfo_data->cpus_alloc,
 					 tmpa, sizeof(tmpa), UNIT_NONE);
 			convert_num_unit((float)sinfo_data->cpus_idle,
@@ -687,7 +687,7 @@ int _print_node_list(sinfo_data_t * sinfo_data, int width,
 		xfree(tmp);
 	} else {
 		char *title = "NODELIST";
-		if(params.cluster_flags & CLUSTER_FLAG_BG)
+		if (params.cluster_flags & CLUSTER_FLAG_BG)
 			title = "MIDPLANELIST";
 
 		_print_str(title, width, right_justify, false);
@@ -726,7 +726,7 @@ int _print_nodes_t(sinfo_data_t * sinfo_data, int width,
 	char id[FORMAT_STRING_SIZE];
 	char tmp[8];
 	if (sinfo_data) {
-		if(params.cluster_flags & CLUSTER_FLAG_BG)
+		if (params.cluster_flags & CLUSTER_FLAG_BG)
 			convert_num_unit((float)sinfo_data->nodes_total,
 					 tmp, sizeof(tmp), UNIT_NONE);
 		else
@@ -749,7 +749,7 @@ int _print_nodes_ai(sinfo_data_t * sinfo_data, int width,
 	char tmpa[8];
 	char tmpi[8];
 	if (sinfo_data) {
-		if(params.cluster_flags & CLUSTER_FLAG_BG) {
+		if (params.cluster_flags & CLUSTER_FLAG_BG) {
 			convert_num_unit((float)sinfo_data->nodes_alloc,
 					 tmpa, sizeof(tmpa), UNIT_NONE);
 			convert_num_unit((float)sinfo_data->nodes_idle,
@@ -780,7 +780,7 @@ int _print_nodes_aiot(sinfo_data_t * sinfo_data, int width,
 	char tmpo[8];
 	char tmpt[8];
 	if (sinfo_data) {
-		if(params.cluster_flags & CLUSTER_FLAG_BG) {
+		if (params.cluster_flags & CLUSTER_FLAG_BG) {
 			convert_num_unit((float)sinfo_data->nodes_alloc,
 					 tmpa, sizeof(tmpa), UNIT_NONE);
 			convert_num_unit((float)sinfo_data->nodes_idle,
@@ -1135,7 +1135,7 @@ int _print_default_time(sinfo_data_t * sinfo_data, int width,
 			_print_str("infinite", width, right_justify, true);
 		else
 			_print_secs((sinfo_data->part_info->default_time * 60L),
-					width, right_justify, true);
+				    width, right_justify, true);
 	} else
 		_print_str("DEFAULTTIME", width, right_justify, true);
 
@@ -1145,14 +1145,14 @@ int _print_default_time(sinfo_data_t * sinfo_data, int width,
 }
 
 int _print_weight(sinfo_data_t * sinfo_data, int width,
-			bool right_justify, char *suffix)
+		  bool right_justify, char *suffix)
 {
 	char id[FORMAT_STRING_SIZE];
 	if (sinfo_data) {
 		_build_min_max_32_string(id, FORMAT_STRING_SIZE,
-				      sinfo_data->min_weight,
-				      sinfo_data->max_weight,
-				      false, false);
+					 sinfo_data->min_weight,
+					 sinfo_data->max_weight,
+					 false, false);
 		_print_str(id, width, right_justify, true);
 	} else
 		_print_str("WEIGHT", width, right_justify, true);
@@ -1188,5 +1188,22 @@ int _print_cpu_load(sinfo_data_t * sinfo_data, int width,
 	if (suffix)
 		printf("%s", suffix);
 	return SLURM_SUCCESS;
+}
 
+int _print_max_cpus_per_node(sinfo_data_t * sinfo_data, int width,
+			     bool right_justify, char *suffix)
+{
+	char tmp_line[32];
+	if (sinfo_data) {
+		if (sinfo_data->part_info->max_cpus_per_node == INFINITE)
+			sprintf(tmp_line, "UNLIMITED");
+		else
+			sprintf(tmp_line, "%u", sinfo_data->max_cpus_per_node);
+		_print_str(tmp_line, width, right_justify, true);
+
+	} else {
+		_print_str("MAX_CPUS_PER_NODE", width, right_justify, true);
+	}
+
+	return SLURM_SUCCESS;
 }

@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -83,6 +83,7 @@
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_resource_info.h"
 #include "src/common/slurm_rlimits_info.h"
+#include "src/common/slurm_acct_gather_profile.h"
 #include "src/common/uid.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
@@ -114,6 +115,7 @@
 #define OPT_SIGNAL      0x15
 #define OPT_KILL_CMD    0x16
 #define OPT_TIME_VAL	0x17
+#define OPT_PROFILE     0x18
 
 /* generic getopt_long flags, integers and *not* valid characters */
 #define LONG_OPT_CPU_BIND    0x101
@@ -163,6 +165,7 @@
 #define LONG_OPT_GRES            0x141
 #define LONG_OPT_WAIT_ALL_NODES  0x142
 #define LONG_OPT_REQ_SWITCH      0x143
+#define LONG_OPT_PROFILE         0x144
 
 /*---- global variables, defined in opt.h ----*/
 opt_t opt;
@@ -229,12 +232,12 @@ static bool _valid_node_list(char **node_list_pptr)
 	   procs to use then we need exactly this many since we are
 	   saying, lay it out this way!  Same for max and min nodes.
 	   Other than that just read in as many in the hostfile */
-	if(opt.ntasks_set)
+	if (opt.ntasks_set)
 		count = opt.ntasks;
-	else if(opt.nodes_set) {
-		if(opt.max_nodes)
+	else if (opt.nodes_set) {
+		if (opt.max_nodes)
 			count = opt.max_nodes;
-		else if(opt.min_nodes)
+		else if (opt.min_nodes)
 			count = opt.min_nodes;
 	}
 
@@ -304,6 +307,7 @@ static void _opt_default()
 	opt.time_min = NO_VAL;
 	opt.time_min_str = NULL;
 	opt.partition = NULL;
+	opt.profile   = ACCT_GATHER_PROFILE_NOT_SET;
 
 	opt.job_name = NULL;
 	opt.jobid = NO_VAL;
@@ -343,7 +347,7 @@ static void _opt_default()
 
 	for (i=0; i<HIGHEST_DIMENSIONS; i++) {
 		opt.conn_type[i]    = (uint16_t) NO_VAL;
-		opt.geometry[i]	    = (uint16_t) NO_VAL;
+		opt.geometry[i]	    = 0;
 	}
 	opt.reboot          = false;
 	opt.no_rotate	    = false;
@@ -352,7 +356,7 @@ static void _opt_default()
 	opt.egid	    = (gid_t) -1;
 
 	opt.bell            = BELL_AFTER_DELAY;
-	opt.acctg_freq      = -1;
+	opt.acctg_freq      = NULL;
 	opt.no_shell	    = false;
 	opt.get_user_env_time = -1;
 	opt.get_user_env_mode = -1;
@@ -383,7 +387,7 @@ struct env_vars {
 
 env_vars_t env_vars[] = {
   {"SALLOC_ACCOUNT",       OPT_STRING,     &opt.account,       NULL          },
-  {"SALLOC_ACCTG_FREQ",    OPT_INT,        &opt.acctg_freq,    NULL          },
+  {"SALLOC_ACCTG_FREQ",    OPT_STRING,     &opt.acctg_freq,    NULL          },
   {"SALLOC_BELL",          OPT_BELL,       NULL,               NULL          },
   {"SALLOC_CONN_TYPE",     OPT_CONN_TYPE,  NULL,               NULL          },
   {"SALLOC_CPU_BIND",      OPT_CPU_BIND,   NULL,               NULL          },
@@ -399,6 +403,7 @@ env_vars_t env_vars[] = {
   {"SALLOC_NO_ROTATE",     OPT_NO_ROTATE,  NULL,               NULL          },
   {"SALLOC_OVERCOMMIT",    OPT_OVERCOMMIT, NULL,               NULL          },
   {"SALLOC_PARTITION",     OPT_STRING,     &opt.partition,     NULL          },
+  {"SALLOC_PROFILE",       OPT_PROFILE,    NULL,               NULL          },
   {"SALLOC_QOS",           OPT_STRING,     &opt.qos,           NULL          },
   {"SALLOC_RESERVATION",   OPT_STRING,     &opt.reservation,   NULL          },
   {"SALLOC_SIGNAL",        OPT_SIGNAL,     NULL,               NULL          },
@@ -564,7 +569,9 @@ _process_env_var(env_vars_t *e, const char *val)
 	case OPT_TIME_VAL:
 		opt.wait4switch = time_str2secs(val);
 		break;
-
+	case OPT_PROFILE:
+		opt.profile = acct_gather_profile_from_string((char *)val);
+		break;
 	default:
 		/* do nothing */
 		break;
@@ -667,6 +674,7 @@ void set_options(const int argc, char **argv)
 		{"ntasks-per-node",  required_argument, 0, LONG_OPT_NTASKSPERNODE},
 		{"ntasks-per-socket",required_argument, 0, LONG_OPT_NTASKSPERSOCKET},
 		{"qos",		  required_argument, 0, LONG_OPT_QOS},
+		{"profile",       required_argument, 0, LONG_OPT_PROFILE},
 		{"ramdisk-image", required_argument, 0, LONG_OPT_RAMDISK_IMAGE},
 		{"reboot",	  no_argument,       0, LONG_OPT_REBOOT},
 		{"reservation",   required_argument, 0, LONG_OPT_RESERVATION},
@@ -1008,6 +1016,9 @@ void set_options(const int argc, char **argv)
 		case LONG_OPT_JOBID:
 			opt.jobid = _get_int(optarg, "jobid");
 			break;
+		case LONG_OPT_PROFILE:
+			opt.profile = acct_gather_profile_from_string(optarg);
+			break;
 		case LONG_OPT_COMMENT:
 			xfree(opt.comment);
 			opt.comment = xstrdup(optarg);
@@ -1093,7 +1104,8 @@ void set_options(const int argc, char **argv)
 			opt.ramdiskimage = xstrdup(optarg);
 			break;
 		case LONG_OPT_ACCTG_FREQ:
-			opt.acctg_freq = _get_int(optarg, "acctg-freq");
+			xfree(opt.acctg_freq);
+			opt.acctg_freq = xstrdup(optarg);
 			break;
 		case LONG_OPT_NOSHELL:
 			opt.no_shell = true;
@@ -1398,7 +1410,7 @@ static bool _opt_verify(void)
 	if (opt.distribution == SLURM_DIST_PLANE && opt.plane_size) {
 		if ((opt.ntasks/opt.plane_size) < opt.min_nodes) {
 			if (((opt.min_nodes-1)*opt.plane_size) >= opt.ntasks) {
-#if(0)
+#if (0)
 				info("Too few processes ((n/plane_size) %d < N %d) "
 				     "and ((N-1)*(plane_size) %d >= n %d)) ",
 				     opt.ntasks/opt.plane_size, opt.min_nodes,
@@ -1474,12 +1486,12 @@ static bool _opt_verify(void)
 
 	} /* else if (opt.ntasks_set && !opt.nodes_set) */
 
-	if(!opt.nodelist) {
-		if((opt.nodelist = xstrdup(getenv("SLURM_HOSTFILE")))) {
+	if (!opt.nodelist) {
+		if ((opt.nodelist = xstrdup(getenv("SLURM_HOSTFILE")))) {
 			/* make sure the file being read in has a / in
 			   it to make sure it is a file in the
 			   valid_node_list function */
-			if(!strstr(opt.nodelist, "/")) {
+			if (!strstr(opt.nodelist, "/")) {
 				char *add_slash = xstrdup("./");
 				xstrcat(add_slash, opt.nodelist);
 				xfree(opt.nodelist);
@@ -1502,14 +1514,14 @@ static bool _opt_verify(void)
 
 	/* set up the proc and node counts based on the arbitrary list
 	   of nodes */
-	if((opt.distribution == SLURM_DIST_ARBITRARY)
+	if ((opt.distribution == SLURM_DIST_ARBITRARY)
 	   && (!opt.nodes_set || !opt.ntasks_set)) {
 		hostlist_t hl = hostlist_create(opt.nodelist);
-		if(!opt.ntasks_set) {
+		if (!opt.ntasks_set) {
 			opt.ntasks_set = 1;
 			opt.ntasks = hostlist_count(hl);
 		}
-		if(!opt.nodes_set) {
+		if (!opt.nodes_set) {
 			opt.nodes_set = 1;
 			hostlist_uniq(hl);
 			opt.min_nodes = opt.max_nodes = hostlist_count(hl);
@@ -1569,6 +1581,10 @@ static bool _opt_verify(void)
 		setenvf(NULL, "SLURM_NTASKS_PER_NODE", "%d",
 			opt.ntasks_per_node);
 	}
+
+	if (opt.profile)
+		setenvfs("SLURM_PROFILE=%s",
+			 acct_gather_profile_to_string(opt.profile));
 
 	return verified;
 }
@@ -1704,7 +1720,6 @@ static char *print_constraints()
 
 static void _opt_list(void)
 {
-	int i;
 	char *str;
 
 	info("defined options for program `%s'", opt.progname);
@@ -1731,7 +1746,7 @@ static void _opt_list(void)
 	if (opt.jobid != NO_VAL)
 		info("jobid          : %u", opt.jobid);
 	info("distribution   : %s", format_task_dist_states(opt.distribution));
-	if(opt.distribution == SLURM_DIST_PLANE)
+	if (opt.distribution == SLURM_DIST_PLANE)
 		info("plane size   : %u", opt.plane_size);
 	info("verbose        : %d", opt.verbose);
 	if (opt.immediate <= 1)
@@ -1753,14 +1768,16 @@ static void _opt_list(void)
 	if (opt.gres != NULL)
 		info("gres           : %s", opt.gres);
 	info("network        : %s", opt.network);
+	info("profile        : `%s'",
+	     acct_gather_profile_to_string(opt.profile));
 	info("qos            : %s", opt.qos);
 	str = print_constraints();
 	info("constraints    : %s", str);
 	xfree(str);
-	for (i = 0; i < HIGHEST_DIMENSIONS; i++) {
-		if (opt.conn_type[i] == (uint16_t) NO_VAL)
-			break;
-		info("conn_type[%d]   : %u", i, opt.conn_type[i]);
+	if (opt.conn_type[0] != (uint16_t) NO_VAL) {
+		str = conn_type_string_full(opt.conn_type);
+		info("conn_type      : %s", str);
+		xfree(str);
 	}
 	str = print_geometry(opt.geometry);
 	info("geometry       : %s", str);
@@ -1842,7 +1859,7 @@ static void _usage(void)
 "              [--nodefile=file] [--nodelist=hosts] [--exclude=hosts]\n"
 "              [--network=type] [--mem-per-cpu=MB] [--qos=qos]\n"
 "              [--cpu_bind=...] [--mem_bind=...] [--reservation=name]\n"
-"              [--time-min=minutes] [--gres=list]\n"
+"              [--time-min=minutes] [--gres=list] [--profile=...]\n"
 "              [--switches=max-switches[@max-time-to-wait]]\n"
 "              [executable [args...]]\n");
 }
@@ -1883,6 +1900,9 @@ static void _help(void)
 "      --ntasks-per-node=n     number of tasks to invoke on each node\n"
 "  -N, --nodes=N               number of nodes on which to run (N = min[-max])\n"
 "  -O, --overcommit            overcommit resources\n"
+"      --profile=value         enable acct_gather_profile for detailed data\n"
+"                              value is all or none or any combination of\n"
+"                              energy, lustre, network or task\n"
 "  -p, --partition=partition   partition requested\n"
 "      --qos=qos               quality of service\n"
 "  -Q, --quiet                 quiet mode (suppress informational messages)\n"

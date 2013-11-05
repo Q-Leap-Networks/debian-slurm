@@ -8,7 +8,7 @@
  *  Written by Danny Auble <da@llnl.gov>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -66,6 +66,7 @@ extern List copy_bg_list(List in_list);
 extern void copy_bg_record(bg_record_t *fir_record, bg_record_t *sec_record);
 extern int bg_record_cmpf_inc(bg_record_t *rec_a, bg_record_t *rec_b);
 extern int bg_record_sort_aval_inc(bg_record_t* rec_a, bg_record_t* rec_b);
+extern void setup_subblock_structs(bg_record_t *bg_record);
 
 /* change username of a block bg_record_t target_name needs to be
    updated before call of function.

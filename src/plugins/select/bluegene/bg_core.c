@@ -9,7 +9,7 @@
  *  Written by Danny Auble <auble1@llnl.gov> et. al.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -655,8 +655,7 @@ extern void free_block_list(uint32_t job_id, List track_list,
 			      bg_free_list)) {
 		error("pthread_create error %m");
 		if (++retries > MAX_PTHREAD_RETRIES)
-			fatal("Can't create "
-			      "pthread");
+			fatal("Can't create pthread");
 		/* sleep and retry */
 		usleep(1000);
 	}

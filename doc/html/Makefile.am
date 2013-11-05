@@ -1,10 +1,12 @@
 
-htmldir = ${prefix}/share/doc/@PACKAGE@-@VERSION@/html
+htmldir = ${datadir}/doc/@PACKAGE@-@VERSION@/html
 
 generated_html = \
 	accounting.html \
 	accounting_storageplugins.html \
 	acct_gather_energy_plugins.html \
+	acct_gather_profile_plugins.html \
+	add.html \
 	api.html \
 	authplugins.html \
 	big_sys.html \
@@ -22,17 +24,21 @@ generated_html = \
 	dist_plane.html \
 	documentation.html \
 	download.html \
+	dynalloc.html \
 	elastic_computing.html \
+	ext_sensorsplugins.html \
 	faq.html \
 	gang_scheduling.html \
 	gres.html \
 	gres_design.html \
 	gres_plugins.html \
 	help.html \
+	hdf5_profile_user_guide.html \
 	high_throughput.html \
 	ibm.html \
 	ibm-pe.html \
 	jobacct_gatherplugins.html \
+	job_array.html \
 	job_exit_code.html \
 	job_launch.html \
 	job_submit_plugins.html \
@@ -71,6 +77,7 @@ generated_html = \
 	select_design.html \
 	selectplugins.html \
 	slurm.html \
+	slurmctld_plugstack.html \
 	slurm_ug_agenda.html \
 	slurm_ug_cfp.html \
 	slurm_ug_registration.html \
@@ -94,6 +101,8 @@ html_DATA = \
 	configurator.easy.html \
 	entities.gif \
 	example_usage.gif \
+	hdf5_task_attr.png \
+	hdf5_job_outline.png \
 	ibm_pe_fig1.png \
 	ibm_pe_fig2.png \
 	linuxstyles.css \
@@ -106,7 +115,6 @@ html_DATA = \
 	plane_ex5.gif \
 	plane_ex6.gif \
 	plane_ex7.gif \
-	rosetta.gif \
 	slurm_logo.png \
 	schedmd.png \
 	slurm_design.pdf \

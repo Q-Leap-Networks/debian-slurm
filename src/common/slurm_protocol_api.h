@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -220,6 +220,13 @@ char *slurm_get_gres_plugins(void);
  */
 char *slurm_get_job_submit_plugins(void);
 
+/* slurm_get_slurmctld_plugstack
+ * get slurmctld_plugstack from slurmctld_conf object from
+ * slurmctld_conf object
+ * RET char *   - slurmctld_plugstack, MUST be xfreed by caller
+ */
+char *slurm_get_slurmctld_plugstack(void);
+
 /* slurm_get_plugin_dir
  * get plugin directory from slurmctld_conf object from slurmctld_conf object
  * RET char *   - plugin directory, MUST be xfreed by caller
@@ -406,7 +413,7 @@ int slurm_set_accounting_storage_host(char *host);
 /* slurm_get_accounting_storage_enforce
  * returns what level to enforce associations at
  */
-int slurm_get_accounting_storage_enforce(void);
+uint16_t slurm_get_accounting_storage_enforce(void);
 
 /* slurm_get_is_association_based_accounting
  * returns if we are doing accounting by associations
@@ -471,7 +478,7 @@ char *slurm_get_jobacct_gather_type(void);
  * returns the job accounting poll frequency from the slurmctld_conf object
  * RET int    - job accounting frequency
  */
-uint16_t slurm_get_jobacct_gather_freq(void);
+char *slurm_get_jobacct_gather_freq(void);
 
 /* slurm_get_jobcomp_type
  * returns the job completion logger type from slurmctld_conf object
@@ -515,6 +522,12 @@ uint32_t slurm_get_jobcomp_port(void);
  */
 int slurm_set_jobcomp_port(uint32_t port);
 
+/* slurm_get_keep_alive_time
+ * returns keep_alive_time slurmctld_conf object
+ * RET uint16_t        - keep_alive_time
+ */
+uint16_t slurm_get_keep_alive_time(void);
+
 /* slurm_get_kill_wait
  * returns kill_wait from slurmctld_conf object
  * RET uint16_t        - kill_wait
@@ -544,12 +557,44 @@ char *slurm_get_proctrack_type(void);
  */
 char *slurm_get_acct_gather_energy_type(void);
 
+/* slurm_get_acct_gather_profile_type
+ * get ProfileAccountingType from slurmctld_conf object
+ * RET char *   - acct_gather_profile_type, MUST be xfreed by caller
+ */
+char *slurm_get_acct_gather_profile_type(void);
+
+/* slurm_get_acct_infiniband_profile_type
+ * get InfinibandAccountingType from slurmctld_conf object
+ * RET char *   - acct_gather_infiniband_type, MUST be xfreed by caller
+ */
+char *slurm_get_acct_gather_infiniband_type(void);
+
+/* slurm_get_acct_filesystem_profile_type
+ * get FilesystemAccountingType from slurmctld_conf object
+ * RET char *   - acct_gather_filesystem_type, MUST be xfreed by caller
+ */
+char *slurm_get_acct_gather_filesystem_type(void);
+
+
 /* slurm_get_acct_gather_node_freq
  * returns the accounting poll frequency for requesting info from a
  * node from the slurmctld_conf object
  * RET int    - accounting node frequency
  */
 extern uint16_t slurm_get_acct_gather_node_freq(void);
+
+/* slurm_get_ext_sensors_type
+ * get ExtSensorsType from slurmctld_conf object
+ * RET char *   - ext_sensors type, MUST be xfreed by caller
+ */
+char *slurm_get_ext_sensors_type(void);
+
+/* slurm_get_ext_sensors_freq
+ * returns the external sensors sampling frequency from the slurmctld_conf
+ * object for requesting info from a hardware component (node, switch, etc.)
+ * RET int    - external sensors sampling frequency
+ */
+extern uint16_t slurm_get_ext_sensors_freq(void);
 
 /* slurm_get_root_filter
  * RET uint16_t  - Value of SchedulerRootFilter */
@@ -1098,6 +1143,8 @@ extern void slurm_free_msg(slurm_msg_t * msg);
 /* must free this memory with free not xfree */
 extern char *nodelist_nth_host(const char *nodelist, int inx);
 extern int nodelist_find(const char *nodelist, const char *name);
+extern void convert_num_unit2(float num, char *buf, int buf_size, int orig_type,
+			      int divisor, bool exact);
 extern void convert_num_unit(float num, char *buf, int buf_size, int orig_type);
 extern int revert_num_unit(const char *buf);
 extern void parse_int_to_array(int in, int *out);

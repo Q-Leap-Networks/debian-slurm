@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -120,9 +120,6 @@ extern int build_job_resources(job_resources_t *job_resrcs,
 #ifndef HAVE_BG
 	job_resrcs->core_bitmap      = bit_alloc(core_cnt);
 	job_resrcs->core_bitmap_used = bit_alloc(core_cnt);
-	if ((job_resrcs->core_bitmap == NULL) ||
-	    (job_resrcs->core_bitmap_used == NULL))
-		fatal("bit_alloc malloc failure");
 #endif
 	return SLURM_SUCCESS;
 }
@@ -1180,8 +1177,6 @@ extern bitstr_t * copy_job_resources_node(job_resources_t *job_resrcs_ptr,
 	}
 
 	core_bitmap = bit_alloc(core_cnt);
-	if (!core_bitmap)
-		fatal("copy_job_resources_node: bit_alloc(%d): %m", core_cnt);
 	for (i = 0; i < core_cnt; i++) {
 		if (bit_test(job_resrcs_ptr->core_bitmap, bit_inx++))
 			bit_set(core_bitmap, i);
@@ -1230,13 +1225,16 @@ extern int job_fits_into_cores(job_resources_t *job_resrcs_ptr,
 			       const uint16_t *bits_per_node)
 {
 	int full_node_inx = 0, full_bit_inx  = 0, job_bit_inx  = 0, i;
+	int job_node_cnt;
 
 	if (!full_bitmap)
 		return 1;
 
-	for (full_node_inx = 0; full_node_inx < node_record_count;
-	     full_node_inx++) {
+	job_node_cnt = bit_set_count(job_resrcs_ptr->node_bitmap);
+	for (full_node_inx = bit_ffs(job_resrcs_ptr->node_bitmap);
+	     job_node_cnt > 0; full_node_inx++) {
 		if (bit_test(job_resrcs_ptr->node_bitmap, full_node_inx)) {
+			full_bit_inx = cr_node_cores_offset[full_node_inx];
 			for (i = 0; i < bits_per_node[full_node_inx]; i++) {
 				if (bit_test(full_bitmap, full_bit_inx + i) &&
 				    bit_test(job_resrcs_ptr->core_bitmap,
@@ -1245,8 +1243,8 @@ extern int job_fits_into_cores(job_resources_t *job_resrcs_ptr,
 				}
 			}
 			job_bit_inx += bits_per_node[full_node_inx];
+			job_node_cnt --;
 		}
-		full_bit_inx += bits_per_node[full_node_inx];
 	}
 	return 1;
 }
@@ -1262,7 +1260,7 @@ extern void add_job_to_cores(job_resources_t *job_resrcs_ptr,
 			     bitstr_t **full_core_bitmap,
 			     const uint16_t *bits_per_node)
 {
-	int full_node_inx = 0;
+	int full_node_inx = 0, job_node_cnt;
 	int job_bit_inx  = 0, full_bit_inx  = 0, i;
 
 	if (!job_resrcs_ptr->core_bitmap)
@@ -1274,13 +1272,13 @@ extern void add_job_to_cores(job_resources_t *job_resrcs_ptr,
 		for (i = 0; i < node_record_count; i++)
 			size += bits_per_node[i];
 		*full_core_bitmap = bit_alloc(size);
-		if (!*full_core_bitmap)
-			fatal("add_job_to_cores: bitmap memory error");
 	}
 
-	for (full_node_inx = 0; full_node_inx < node_record_count;
-	     full_node_inx++) {
+	job_node_cnt = bit_set_count(job_resrcs_ptr->node_bitmap);
+	for (full_node_inx = bit_ffs(job_resrcs_ptr->node_bitmap);
+	     job_node_cnt > 0; full_node_inx++) {
 		if (bit_test(job_resrcs_ptr->node_bitmap, full_node_inx)) {
+			full_bit_inx = cr_node_cores_offset[full_node_inx];
 			for (i = 0; i < bits_per_node[full_node_inx]; i++) {
 				if (!bit_test(job_resrcs_ptr->core_bitmap,
 					      job_bit_inx + i))
@@ -1288,8 +1286,8 @@ extern void add_job_to_cores(job_resources_t *job_resrcs_ptr,
 				bit_set(*full_core_bitmap, full_bit_inx + i);
 			}
 			job_bit_inx += bits_per_node[full_node_inx];
+			job_node_cnt --;
 		}
-		full_bit_inx += bits_per_node[full_node_inx];
 	}
 }
 
@@ -1304,7 +1302,7 @@ extern void remove_job_from_cores(job_resources_t *job_resrcs_ptr,
 			     bitstr_t **full_core_bitmap,
 			     const uint16_t *bits_per_node)
 {
-	int full_node_inx = 0;
+	int full_node_inx = 0, job_node_cnt;
 	int job_bit_inx  = 0, full_bit_inx  = 0, i;
 
 	if (!job_resrcs_ptr->core_bitmap)
@@ -1316,13 +1314,13 @@ extern void remove_job_from_cores(job_resources_t *job_resrcs_ptr,
 		for (i = 0; i < node_record_count; i++)
 			size += bits_per_node[i];
 		*full_core_bitmap = bit_alloc(size);
-		if (!*full_core_bitmap)
-			fatal("add_job_to_cores: bitmap memory error");
 	}
 
-	for (full_node_inx = 0; full_node_inx < node_record_count;
-	     full_node_inx++) {
+	job_node_cnt = bit_set_count(job_resrcs_ptr->node_bitmap);
+	for (full_node_inx = bit_ffs(job_resrcs_ptr->node_bitmap);
+	     job_node_cnt > 0; full_node_inx++) {
 		if (bit_test(job_resrcs_ptr->node_bitmap, full_node_inx)) {
+			full_bit_inx = cr_node_cores_offset[full_node_inx];
 			for (i = 0; i < bits_per_node[full_node_inx]; i++) {
 				if (!bit_test(job_resrcs_ptr->core_bitmap,
 					      job_bit_inx + i))
@@ -1330,8 +1328,8 @@ extern void remove_job_from_cores(job_resources_t *job_resrcs_ptr,
 				bit_clear(*full_core_bitmap, full_bit_inx + i);
 			}
 			job_bit_inx += bits_per_node[full_node_inx];
+			job_node_cnt --;
 		}
-		full_bit_inx += bits_per_node[full_node_inx];
 	}
 }
 

@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -111,6 +111,7 @@ static int  _restore_node_state(int recover,
 				int old_node_record_count);
 static int  _restore_part_state(List old_part_list, char *old_def_part_name,
 				uint16_t flags);
+static void _stat_slurm_dirs(void);
 static int  _strcmp(const char *s1, const char *s2);
 static int  _sync_nodes_to_comp_job(void);
 static int  _sync_nodes_to_jobs(void);
@@ -121,6 +122,38 @@ static int  _update_preempt(uint16_t old_enable_preempt);
 #ifdef 	HAVE_ELAN
 static void _validate_node_proc_count(void);
 #endif
+
+/* Verify that Slurm directories are secure, not world writable */
+static void _stat_slurm_dirs(void)
+{
+	struct stat stat_buf;
+	char *problem_dir = NULL;
+
+	if ((stat(slurmctld_conf.plugindir, &stat_buf) == 0) &&
+	    (stat_buf.st_mode & S_IWOTH)) {
+		problem_dir = "PluginDir";
+	}
+	if ((stat(slurmctld_conf.plugstack, &stat_buf) == 0) &&
+	    (stat_buf.st_mode & S_IWOTH)) {
+		problem_dir = "PlugStack";
+	}
+	if ((stat(slurmctld_conf.slurmd_spooldir, &stat_buf) == 0) &&
+	    (stat_buf.st_mode & S_IWOTH)) {
+		problem_dir = "SlurmdSpoolDir";
+	}
+	if ((stat(slurmctld_conf.state_save_location, &stat_buf) == 0) &&
+	    (stat_buf.st_mode & S_IWOTH)) {
+		problem_dir = "StateSaveLocation";
+	}
+
+	if (problem_dir) {
+		error("################################################");
+		error("###       SEVERE SECURITY VULERABILTY        ###");
+		error("### %s DIRECTORY IS WORLD WRITABLE ###", problem_dir);
+		error("###         CORRECT FILE PERMISSIONS         ###");
+		error("################################################");
+	}
+}
 
 /*
  * _reorder_nodes_by_name - order node table in ascending order of name
@@ -219,9 +252,6 @@ static void _build_bitmaps_pre_select(void)
 
 	/* scan partition table and identify nodes in each */
 	part_iterator = list_iterator_create(part_list);
-	if (part_iterator == NULL)
-		fatal ("memory allocation failure");
-
 	while ((part_ptr = (struct part_record *) list_next(part_iterator))) {
 		FREE_NULL_BITMAP(part_ptr->node_bitmap);
 
@@ -292,25 +322,14 @@ static int _build_bitmaps(void)
 	power_node_bitmap = (bitstr_t *) bit_alloc(node_record_count);
 	share_node_bitmap = (bitstr_t *) bit_alloc(node_record_count);
 	up_node_bitmap    = (bitstr_t *) bit_alloc(node_record_count);
-	if ((avail_node_bitmap    == NULL) ||
-	    (cg_node_bitmap       == NULL) ||
-	    (idle_node_bitmap     == NULL) ||
-	    (power_node_bitmap    == NULL) ||
-	    (share_node_bitmap    == NULL) ||
-	    (up_node_bitmap       == NULL))
-		fatal ("bit_alloc malloc failure");
 
 	/* initialize the configuration bitmaps */
 	config_iterator = list_iterator_create(config_list);
-	if (config_iterator == NULL)
-		fatal ("memory allocation failure");
 	while ((config_ptr = (struct config_record *)
 				      list_next(config_iterator))) {
 		FREE_NULL_BITMAP(config_ptr->node_bitmap);
 		config_ptr->node_bitmap =
 		    (bitstr_t *) bit_alloc(node_record_count);
-		if (config_ptr->node_bitmap == NULL)
-			fatal ("bit_alloc malloc failure");
 	}
 	list_iterator_destroy(config_iterator);
 
@@ -327,8 +346,6 @@ static int _build_bitmaps(void)
 		    (job_ptr->details->shared != 0))
 			continue;
 		tmp_bits = bit_copy(job_ptr->node_bitmap);
-		if (tmp_bits == NULL)
-			fatal ("bit_copy malloc failure");
 		bit_not(tmp_bits);
 		bit_and(share_node_bitmap, tmp_bits);
 		FREE_NULL_BITMAP(tmp_bits);
@@ -365,8 +382,6 @@ static int _build_bitmaps(void)
 	}
 
 	config_iterator = list_iterator_create(config_list);
-	if (config_iterator == NULL)
-		fatal ("memory allocation failure");
 	while ((config_ptr = (struct config_record *)
 				      list_next(config_iterator))) {
 		build_config_feature_list(config_ptr);
@@ -583,6 +598,7 @@ static int _build_single_partitionline_info(slurm_conf_partition_t *part)
 	part_ptr->max_time       = part->max_time;
 	part_ptr->def_mem_per_cpu = part->def_mem_per_cpu;
 	part_ptr->default_time   = part->default_time;
+	part_ptr->max_cpus_per_node = part->max_cpus_per_node;
 	part_ptr->max_share      = part->max_share;
 	part_ptr->max_mem_per_cpu = part->max_mem_per_cpu;
 	part_ptr->max_nodes      = part->max_nodes;
@@ -593,6 +609,7 @@ static int _build_single_partitionline_info(slurm_conf_partition_t *part)
 	part_ptr->priority       = part->priority;
 	part_ptr->state_up       = part->state_up;
 	part_ptr->grace_time     = part->grace_time;
+	part_ptr->cr_type        = part->cr_type;
 
 	if (part->allow_groups) {
 		xfree(part_ptr->allow_groups);
@@ -681,8 +698,6 @@ static void _sync_part_prio(void)
 
 	part_max_priority = 0;
 	itr = list_iterator_create(part_list);
-	if (itr == NULL)
-		fatal("list_iterator_create malloc failure");
 	while ((part_ptr = list_next(itr))) {
 		if (part_ptr->priority > part_max_priority)
 			part_max_priority = part_ptr->priority;
@@ -691,8 +706,6 @@ static void _sync_part_prio(void)
 
 	if (part_max_priority) {
 		itr = list_iterator_create(part_list);
-		if (itr == NULL)
-			fatal("list_iterator_create malloc failure");
 		while ((part_ptr = list_next(itr))) {
 			part_ptr->norm_priority = (double)part_ptr->priority /
 						  (double)part_max_priority;
@@ -742,7 +755,7 @@ int read_slurm_conf(int recover, bool reconfig)
 
 	if (reconfig) {
 		/* in order to re-use job state information,
-		 * update nodes_completing string (based on node_bitmap) */
+		 * update nodes_completing string (based on node bitmaps) */
 		update_job_nodes_completing();
 
 		/* save node and partition states for reconfig RPC */
@@ -824,6 +837,7 @@ int read_slurm_conf(int recover, bool reconfig)
 	rehash_jobs();
 	set_slurmd_addr();
 
+	_stat_slurm_dirs();
 	if (reconfig) {		/* Preserve state from memory */
 		if (old_node_table_ptr) {
 			info("restoring original state of nodes");
@@ -909,7 +923,7 @@ int read_slurm_conf(int recover, bool reconfig)
 	} else {
 		load_all_resv_state(recover);
 		if (recover >= 1) {
-			(void) trigger_state_restore();
+			trigger_state_restore();
 			(void) slurm_sched_reconfig();
 		}
 	}
@@ -1057,7 +1071,7 @@ static int _restore_node_state(int recover,
 			      node_ptr->config_ptr->cpus);
 		}
 #endif
-		node_ptr->boot_time     = old_node_ptr->boot_time; 
+		node_ptr->boot_time     = old_node_ptr->boot_time;
 		node_ptr->cpus          = old_node_ptr->cpus;
 		node_ptr->cores         = old_node_ptr->cores;
 		node_ptr->last_idle     = old_node_ptr->last_idle;
@@ -1065,7 +1079,7 @@ static int _restore_node_state(int recover,
 		node_ptr->sockets       = old_node_ptr->sockets;
 		node_ptr->threads       = old_node_ptr->threads;
 		node_ptr->real_memory   = old_node_ptr->real_memory;
-		node_ptr->slurmd_start_time = old_node_ptr->slurmd_start_time; 
+		node_ptr->slurmd_start_time = old_node_ptr->slurmd_start_time;
 		node_ptr->tmp_disk      = old_node_ptr->tmp_disk;
 		node_ptr->weight        = old_node_ptr->weight;
 
@@ -1173,8 +1187,6 @@ static int  _restore_part_state(List old_part_list, char *old_def_part_name,
 
 	/* For each part in list, find and update recs */
 	part_iterator = list_iterator_create(old_part_list);
-	if (!part_iterator)
-		fatal("list_iterator_create malloc");
 	while ((old_part_ptr = (struct part_record *)
 			       list_next(part_iterator))) {
 		xassert(old_part_ptr->magic == PART_MAGIC);
@@ -1188,7 +1200,7 @@ static int  _restore_part_state(List old_part_list, char *old_def_part_name,
 					part_ptr->state_up = old_part_ptr->state_up;
 				}
 				continue;
-			}	
+			}
 			/* Current partition found in slurm.conf,
 			 * report differences from slurm.conf configuration */
 			if (_strcmp(part_ptr->allow_groups,
@@ -1204,8 +1216,9 @@ static int  _restore_part_state(List old_part_list, char *old_def_part_name,
 				error("Partition %s AllowNodes differs from "
 				      "slurm.conf", part_ptr->name);
 				xfree(part_ptr->allow_alloc_nodes);
-				part_ptr->allow_groups = xstrdup(old_part_ptr->
-							 allow_alloc_nodes);
+				part_ptr->allow_alloc_nodes =
+					xstrdup(old_part_ptr->
+						allow_alloc_nodes);
 			}
 			if (part_ptr->default_time !=
 			    old_part_ptr->default_time) {
@@ -1537,6 +1550,13 @@ static int _sync_nodes_to_comp_job(void)
 	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
 		if ((job_ptr->node_bitmap) && IS_JOB_COMPLETING(job_ptr)) {
 			update_cnt++;
+			/* This needs to be set up for the priority
+			   plugin and this happens before it is
+			   normally set up so do it now.
+			*/
+			if (!cluster_cpus)
+				set_cluster_cpus();
+
 			info("Job %u in completing state", job_ptr->job_id);
 			if (!job_ptr->node_bitmap_cg)
 				build_cg_bitmap(job_ptr);
@@ -1560,9 +1580,15 @@ static int _sync_nodes_to_active_job(struct job_record *job_ptr)
 	uint16_t node_flags;
 	struct node_record *node_ptr = node_record_table_ptr;
 
-	job_ptr->node_cnt = bit_set_count(job_ptr->node_bitmap);
+	if (job_ptr->node_bitmap_cg) /* job completing */
+		job_ptr->node_cnt = bit_set_count(job_ptr->node_bitmap_cg);
+	else
+		job_ptr->node_cnt = bit_set_count(job_ptr->node_bitmap);
 	for (i = 0; i < node_record_count; i++, node_ptr++) {
-		if (bit_test(job_ptr->node_bitmap, i) == 0)
+		if (job_ptr->node_bitmap_cg) { /* job completing */
+			if (bit_test(job_ptr->node_bitmap_cg, i) == 0)
+				continue;
+		} else if (bit_test(job_ptr->node_bitmap, i) == 0)
 			continue;
 
 		node_flags = node_ptr->node_state & NODE_STATE_FLAGS;

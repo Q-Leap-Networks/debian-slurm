@@ -1,6 +1,5 @@
 /****************************************************************************\
  *  step_io.c - process stdin, stdout, and stderr for parallel jobs.
- *  $Id$
  *****************************************************************************
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -8,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -1373,10 +1372,3 @@ done:
 	pthread_mutex_unlock(&cio->ioservers_lock);
 	return rc;
 }
-
-
-
-
-
-
-

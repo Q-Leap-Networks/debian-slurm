@@ -6,7 +6,7 @@
  *  Written by Danny Auble <da@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -387,7 +387,8 @@ static void _handle_msg(slurm_msg_t *msg)
 	case SRUN_STEP_SIGNAL:
 		ss = msg->data;
 		debug("received step signal %u RPC", ss->signal);
-		launch_p_fwd_signal(ss->signal);
+		if (ss->signal)
+			launch_p_fwd_signal(ss->signal);
 		slurm_free_job_step_kill_msg(msg->data);
 		break;
 	default:
@@ -581,7 +582,7 @@ extern int launch_p_setup_srun_opt(char **rest)
 			"%u", opt.sockets_per_node);
 	}
 
-	if (opt.mem_bind && strstr(opt.mem_bind, "local")) {
+	if (opt.mem_bind_type & MEM_BIND_LOCAL) {
 		opt.argc += 1;
 		xrealloc(opt.argv, opt.argc * sizeof(char *));
 		opt.argv[command_pos++] = xstrdup("-ss");

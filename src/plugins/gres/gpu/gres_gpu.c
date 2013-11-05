@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -113,6 +113,19 @@ static char	gres_name[]		= "gpu";
 static int *gpu_devices = NULL;
 static int nb_available_files;
 
+extern int init(void)
+{
+	debug("%s: %s loaded", __func__, plugin_name);
+
+	return SLURM_SUCCESS;
+}
+extern int fini(void)
+{
+	debug("%s: unloading %s", __func__, plugin_name);
+	xfree(gpu_devices);
+
+	return SLURM_SUCCESS;
+}
 /*
  * We could load gres state or validate it using various mechanisms here.
  * This only validates that the configuration was specified in gres.conf.
@@ -120,7 +133,7 @@ static int nb_available_files;
  */
 extern int node_config_load(List gres_conf_list)
 {
-	int i, rc = SLURM_ERROR;
+	int i, rc = SLURM_SUCCESS;
 	ListIterator iter;
 	gres_slurmd_conf_t *gres_slurmd_conf;
 	int nb_gpu = 0;	/* Number of GPUs in the list */
@@ -128,21 +141,17 @@ extern int node_config_load(List gres_conf_list)
 
 	xassert(gres_conf_list);
 	iter = list_iterator_create(gres_conf_list);
-	if (iter == NULL)
-		fatal("list_iterator_create: malloc failure");
 	while ((gres_slurmd_conf = list_next(iter))) {
 		if (strcmp(gres_slurmd_conf->name, gres_name))
 			continue;
-		rc = SLURM_SUCCESS;
 		if (gres_slurmd_conf->file)
 			nb_gpu++;
 	}
 	list_iterator_destroy(iter);
 	gpu_devices = NULL;
 	nb_available_files = -1;
-
 	/* (Re-)Allocate memory if number of files changed */
-	if (nb_gpu != nb_available_files) {
+	if (nb_gpu > nb_available_files) {
 		xfree(gpu_devices);	/* No-op if NULL */
 		gpu_devices = (int *) xmalloc(sizeof(int) * nb_gpu);
 		nb_available_files = nb_gpu;
@@ -151,21 +160,43 @@ extern int node_config_load(List gres_conf_list)
 	}
 
 	iter = list_iterator_create(gres_conf_list);
-	if (iter == NULL)
-		fatal("list_iterator_create: malloc failure");
 	while ((gres_slurmd_conf = list_next(iter))) {
 		if ((strcmp(gres_slurmd_conf->name, gres_name) == 0) &&
 		    gres_slurmd_conf->file) {
 			/* Populate gpu_devices array with number
 			 * at end of the file name */
-			for (i = 0; gres_slurmd_conf->file[i]; i++) {
-				if (!isdigit(gres_slurmd_conf->file[i]))
-					continue;
-				gpu_devices[available_files_index] =
-					atoi(gres_slurmd_conf->file + i);
+			char *bracket, *fname, *tmp_name;
+			hostlist_t hl;
+			bracket = strrchr(gres_slurmd_conf->file, '[');
+			if (bracket)
+				tmp_name = xstrdup(bracket);
+			else
+				tmp_name = xstrdup(gres_slurmd_conf->file);
+			hl = hostlist_create(tmp_name);
+			xfree(tmp_name);
+			if (!hl) {
+				rc = EINVAL;
 				break;
 			}
-			available_files_index++;
+			while ((fname = hostlist_shift(hl))) {
+				if (available_files_index ==
+				    nb_available_files) {
+					nb_available_files++;
+					xrealloc(gpu_devices, sizeof(int) *
+						 nb_available_files);
+					gpu_devices[available_files_index] = -1;
+				}
+				for (i = 0; fname[i]; i++) {
+					if (!isdigit(fname[i]))
+						continue;
+					gpu_devices[available_files_index] =
+						atoi(fname + i);
+					break;
+				}
+				available_files_index++;
+				free(fname);
+			}
+			hostlist_destroy(hl);
 		}
 	}
 	list_iterator_destroy(iter);
@@ -265,7 +296,7 @@ extern void step_set_env(char ***job_env_ptr, void *gres_ptr)
 	}
 }
 
-/* Send GRES information to slurmstepd on the specified file descriptor*/
+/* Send GRES information to slurmstepd on the specified file descriptor */
 extern void send_stepd(int fd)
 {
 	int i;
@@ -278,7 +309,7 @@ extern void send_stepd(int fd)
 rwfail:	error("gres_plugin_send_stepd failed");
 }
 
-/* Receive GRES information from slurmd on the specified file descriptor*/
+/* Receive GRES information from slurmd on the specified file descriptor */
 extern void recv_stepd(int fd)
 {
 	int i;

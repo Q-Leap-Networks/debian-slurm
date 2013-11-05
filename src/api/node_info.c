@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -58,8 +58,10 @@
 #include "slurm/slurm.h"
 
 #include "src/common/parse_time.h"
-#include "src/common/slurm_protocol_api.h"
+#include "src/common/slurm_auth.h"
 #include "src/common/slurm_acct_gather_energy.h"
+#include "src/common/slurm_ext_sensors.h"
+#include "src/common/slurm_protocol_api.h"
 #include "src/common/uid.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
@@ -131,6 +133,7 @@ slurm_sprint_node_table (node_info_t * node_ptr,
 	int cpus_per_node = 1;
 	int total_used = node_ptr->cpus;
 	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
+	uint32_t alloc_memory;
 
 	if (node_scaling)
 		cpus_per_node = node_ptr->cpus / node_scaling;
@@ -146,6 +149,10 @@ slurm_sprint_node_table (node_info_t * node_ptr,
 	if (my_state & NODE_STATE_DRAIN) {
 		my_state &= (~NODE_STATE_DRAIN);
 		drain_str = "+DRAIN";
+	}
+	if (my_state & NODE_STATE_FAIL) {
+		my_state &= (~NODE_STATE_FAIL);
+		drain_str = "+FAIL";
 	}
 	if (my_state & NODE_STATE_POWER_SAVE) {
 		my_state &= (~NODE_STATE_POWER_SAVE);
@@ -235,7 +242,7 @@ slurm_sprint_node_table (node_info_t * node_ptr,
 		snprintf(tmp_line, sizeof(tmp_line),
 			 "NodeAddr=%s NodeHostName=%s",
 			 node_ptr->node_addr, node_ptr->node_hostname);
-		xstrcat(out, tmp_line);	
+		xstrcat(out, tmp_line);
 		if (one_liner)
 			xstrcat(out, " ");
 		else
@@ -247,9 +254,14 @@ slurm_sprint_node_table (node_info_t * node_ptr,
 		snprintf(tmp_line, sizeof(tmp_line), "OS=%s ", node_ptr->os);
 		xstrcat(out, tmp_line);
 	}
+	slurm_get_select_nodeinfo(node_ptr->select_nodeinfo,
+				  SELECT_NODEDATA_MEM_ALLOC,
+				  NODE_STATE_ALLOCATED,
+				  &alloc_memory);
 	snprintf(tmp_line, sizeof(tmp_line),
-		 "RealMemory=%u Sockets=%u Boards=%u",
-		 node_ptr->real_memory, node_ptr->sockets, node_ptr->boards);
+		 "RealMemory=%u AllocMem=%u Sockets=%u Boards=%u",
+		 node_ptr->real_memory, alloc_memory,
+		 node_ptr->sockets, node_ptr->boards);
 	xstrcat(out, tmp_line);
 	if (one_liner)
 		xstrcat(out, " ");
@@ -301,7 +313,31 @@ slurm_sprint_node_table (node_info_t * node_ptr,
 				"LowestJoules=%u ConsumedJoules=%u",
 				node_ptr->energy->current_watts,
 				node_ptr->energy->base_watts,
-		 node_ptr->energy->consumed_energy);
+				node_ptr->energy->consumed_energy);
+	xstrcat(out, tmp_line);
+	if (one_liner)
+		xstrcat(out, " ");
+	else
+		xstrcat(out, "\n   ");
+
+	/****** external sensors Line ******/
+	if (node_ptr->ext_sensors->consumed_energy == NO_VAL)
+		snprintf(tmp_line, sizeof(tmp_line), "ExtSensorsJoules=n/s ");
+	else
+		snprintf(tmp_line, sizeof(tmp_line), "ExtSensorsJoules=%u ",
+			 node_ptr->ext_sensors->consumed_energy);
+	xstrcat(out, tmp_line);
+	if (node_ptr->ext_sensors->current_watts == NO_VAL)
+		snprintf(tmp_line, sizeof(tmp_line), "ExtSensorsWatts=n/s ");
+	else
+		snprintf(tmp_line, sizeof(tmp_line), "ExtSensorsWatts=%u ",
+			 node_ptr->ext_sensors->current_watts);
+	xstrcat(out, tmp_line);
+	if (node_ptr->ext_sensors->temperature == NO_VAL)
+		snprintf(tmp_line, sizeof(tmp_line), "ExtSensorsTemp=n/s");
+	else
+		snprintf(tmp_line, sizeof(tmp_line), "ExtSensorsTemp=%u",
+			 node_ptr->ext_sensors->temperature);
 	xstrcat(out, tmp_line);
 
 	if (one_liner)
@@ -362,7 +398,7 @@ slurm_sprint_node_table (node_info_t * node_ptr,
  * slurm_load_node - issue RPC to get slurm all node configuration information
  *	if changed since update_time
  * IN update_time - time of current configuration data
- * IN node_info_msg_pptr - place to store a node configuration pointer
+ * OUT resp - place to store a node configuration pointer
  * IN show_flags - node filtering options
  * RET 0 or a slurm error code
  * NOTE: free the response using slurm_free_node_info_msg
@@ -395,6 +431,134 @@ extern int slurm_load_node (time_t update_time,
 		if (rc)
 			slurm_seterrno_ret(rc);
 		*resp = NULL;
+		break;
+	default:
+		slurm_seterrno_ret(SLURM_UNEXPECTED_MSG_ERROR);
+		break;
+	}
+
+	return SLURM_PROTOCOL_SUCCESS;
+}
+
+/*
+ * slurm_load_node_single - issue RPC to get slurm configuration information
+ *	for a specific node
+ * OUT resp - place to store a node configuration pointer
+ * IN node_name - name of the node for which information is requested
+ * IN show_flags - node filtering options
+ * RET 0 or a slurm error code
+ * NOTE: free the response using slurm_free_node_info_msg
+ */
+extern int slurm_load_node_single (node_info_msg_t **resp,
+				   char *node_name, uint16_t show_flags)
+{
+	int rc;
+	slurm_msg_t req_msg;
+	slurm_msg_t resp_msg;
+	node_info_single_msg_t req;
+
+	slurm_msg_t_init(&req_msg);
+	slurm_msg_t_init(&resp_msg);
+	req.node_name    = node_name;
+	req.show_flags   = show_flags;
+	req_msg.msg_type = REQUEST_NODE_INFO_SINGLE;
+	req_msg.data     = &req;
+
+	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg) < 0)
+		return SLURM_ERROR;
+
+	switch (resp_msg.msg_type) {
+	case RESPONSE_NODE_INFO:
+		*resp = (node_info_msg_t *) resp_msg.data;
+		break;
+	case RESPONSE_SLURM_RC:
+		rc = ((return_code_msg_t *) resp_msg.data)->return_code;
+		slurm_free_return_code_msg(resp_msg.data);
+		if (rc)
+			slurm_seterrno_ret(rc);
+		*resp = NULL;
+		break;
+	default:
+		slurm_seterrno_ret(SLURM_UNEXPECTED_MSG_ERROR);
+		break;
+	}
+
+	return SLURM_PROTOCOL_SUCCESS;
+}
+
+/*
+ * slurm_node_energy - issue RPC to get the energy data on this machine
+ * IN  host  - name of node to query, NULL if localhost
+ * IN  delta - Use cache if data is newer than this in seconds
+ * OUT acct_gather_energy_t structure on success or NULL other wise
+ * RET 0 or a slurm error code
+ * NOTE: free the response using slurm_acct_gather_energy_destroy
+ */
+extern int slurm_get_node_energy(char *host, uint16_t delta,
+				 acct_gather_energy_t **acct_gather_energy)
+{
+	int rc;
+	slurm_msg_t req_msg;
+	slurm_msg_t resp_msg;
+	acct_gather_energy_req_msg_t req;
+	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
+	char *this_addr;
+
+	slurm_msg_t_init(&req_msg);
+	slurm_msg_t_init(&resp_msg);
+
+	if (host)
+		slurm_conf_get_addr(host, &req_msg.address);
+	else if (cluster_flags & CLUSTER_FLAG_MULTSD) {
+		if ((this_addr = getenv("SLURMD_NODENAME"))) {
+			slurm_conf_get_addr(this_addr, &req_msg.address);
+		} else {
+			this_addr = "localhost";
+			slurm_set_addr(&req_msg.address,
+				       (uint16_t)slurm_get_slurmd_port(),
+				       this_addr);
+		}
+	} else {
+		char this_host[256];
+		/*
+		 *  Set request message address to slurmd on localhost
+		 */
+		gethostname_short(this_host, sizeof(this_host));
+		this_addr = slurm_conf_get_nodeaddr(this_host);
+		if (this_addr == NULL)
+			this_addr = xstrdup("localhost");
+		slurm_set_addr(&req_msg.address,
+			       (uint16_t)slurm_get_slurmd_port(),
+			       this_addr);
+		xfree(this_addr);
+	}
+
+	req.delta        = delta;
+	req_msg.msg_type = REQUEST_ACCT_GATHER_ENERGY;
+	req_msg.data     = &req;
+
+	rc = slurm_send_recv_node_msg(&req_msg, &resp_msg, 0);
+
+	if (rc != 0 || !resp_msg.auth_cred) {
+		error("slurm_get_node_energy: %m");
+		if (resp_msg.auth_cred)
+			g_slurm_auth_destroy(resp_msg.auth_cred);
+		return SLURM_ERROR;
+	}
+	if (resp_msg.auth_cred)
+		g_slurm_auth_destroy(resp_msg.auth_cred);
+	switch (resp_msg.msg_type) {
+	case RESPONSE_ACCT_GATHER_ENERGY:
+		*acct_gather_energy = ((acct_gather_node_resp_msg_t *)
+				       resp_msg.data)->energy;
+		((acct_gather_node_resp_msg_t *) resp_msg.data)->energy = NULL;
+		slurm_free_acct_gather_node_resp_msg(resp_msg.data);
+		break;
+	case RESPONSE_SLURM_RC:
+	        rc = ((return_code_msg_t *) resp_msg.data)->return_code;
+		slurm_free_return_code_msg(resp_msg.data);
+		if (rc)
+			slurm_seterrno_ret(rc);
 		break;
 	default:
 		slurm_seterrno_ret(SLURM_UNEXPECTED_MSG_ERROR);

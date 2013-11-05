@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -128,6 +128,12 @@ static int _process_purge(mysql_conn_t *mysql_conn,
 		arch_cond.purge_job = slurmdbd_conf->purge_job;
 	else
 		arch_cond.purge_job = NO_VAL;
+
+	if (purge_period & slurmdbd_conf->purge_resv)
+		arch_cond.purge_resv = slurmdbd_conf->purge_resv;
+	else
+		arch_cond.purge_resv = NO_VAL;
+
 	if (purge_period & slurmdbd_conf->purge_step)
 		arch_cond.purge_step = slurmdbd_conf->purge_step;
 	else
@@ -979,15 +985,18 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 		}
 
 		/* now apply the down time from the slurmctld disconnects */
-		list_iterator_reset(c_itr);
-		while ((loc_c_usage = list_next(c_itr)))
-			c_usage->d_cpu += loc_c_usage->total_time;
+		if (c_usage) {
+			list_iterator_reset(c_itr);
+			while ((loc_c_usage = list_next(c_itr)))
+				c_usage->d_cpu += loc_c_usage->total_time;
 
-		if ((rc = _process_cluster_usage(
-			     mysql_conn, cluster_name, curr_start,
-			     curr_end, now, c_usage)) != SLURM_SUCCESS) {
-			_destroy_local_cluster_usage(c_usage);
-			goto end_it;
+			if ((rc = _process_cluster_usage(
+				     mysql_conn, cluster_name, curr_start,
+				     curr_end, now, c_usage))
+			    != SLURM_SUCCESS) {
+				_destroy_local_cluster_usage(c_usage);
+				goto end_it;
+			}
 		}
 
 		list_iterator_reset(a_itr);

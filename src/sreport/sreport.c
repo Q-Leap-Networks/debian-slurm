@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -105,7 +105,7 @@ main (int argc, char *argv[])
 
 	/* Check to see if we are running a supported accounting plugin */
 	temp = slurm_get_accounting_storage_type();
-	if(strcasecmp(temp, "accounting_storage/slurmdbd")
+	if (strcasecmp(temp, "accounting_storage/slurmdbd")
 	   && strcasecmp(temp, "accounting_storage/mysql")) {
 		fprintf (stderr, "You are not running a supported "
 			 "accounting_storage plugin\n(%s).\n"
@@ -180,7 +180,7 @@ main (int argc, char *argv[])
 
 	db_conn = slurmdb_connection_get();
 
-	if(errno) {
+	if (errno) {
 		error("Problem talking to the database: %m");
 		exit(1);
 	}
@@ -213,18 +213,23 @@ static char *_getline(const char *prompt)
 	char buf[4096];
 	char *line;
 	int len;
+
 	printf("%s", prompt);
 
-	/* Set "line" here to avoid a warning and discard it later. */
+	/* Set "line" here to avoid a warning, discard later */
 	line = fgets(buf, 4096, stdin);
 	if (line == NULL)
 		return NULL;
 	len = strlen(buf);
-	if ((len > 0) && (buf[len-1] == '\n'))
+	if ((len == 0) || (len >= 4096))
+		return NULL;
+	if (buf[len-1] == '\n')
 		buf[len-1] = '\0';
 	else
 		len++;
-	line = malloc (len * sizeof(char));
+	line = malloc(len * sizeof(char));
+	if (!line)
+		return NULL;
 	return strncpy(line, buf, len);
 }
 #endif

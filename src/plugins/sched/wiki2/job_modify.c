@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -332,7 +332,7 @@ host_fini:	if (rc) {
 						&cpus_per_node);
 		}
 #endif
-		if(!IS_JOB_PENDING(job_ptr) || !job_ptr->details) {
+		if (!IS_JOB_PENDING(job_ptr) || !job_ptr->details) {
 			error("wiki: MODIFYJOB node count of non-pending "
 			      "job %u", jobid);
 			return ESLURM_DISABLED;

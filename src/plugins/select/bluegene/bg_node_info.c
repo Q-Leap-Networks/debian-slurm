@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -461,6 +461,7 @@ extern int select_nodeinfo_get(select_nodeinfo_t *nodeinfo,
 {
 	int rc = SLURM_SUCCESS;
 	uint16_t *uint16 = (uint16_t *) data;
+	uint32_t *uint32 = (uint32_t *) data;
 	bitstr_t **bitmap = (bitstr_t **) data;
 	char **tmp_char = (char **) data;
 	ListIterator itr = NULL;
@@ -537,6 +538,9 @@ extern int select_nodeinfo_get(select_nodeinfo_t *nodeinfo,
 		if (nodeinfo->failed_cnodes)
 			xstrfmtcat(*tmp_char, "Failed cnodes=%s",
 				   nodeinfo->failed_cnodes);
+		break;
+	case SELECT_NODEDATA_MEM_ALLOC:
+		*uint32 = 0;
 		break;
 	default:
 		error("Unsupported option %d for get_nodeinfo.", dinfo);
