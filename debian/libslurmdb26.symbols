@@ -23,7 +23,7 @@ libslurmdb.so.26 libslurmdb26 #MINVER#
  slurm_arg_name_by_idx@Base 2.2.0
 #MISSING: 2.5.3# slurm_auth_context_create@Base 2.2.0
  slurm_auth_fini@Base 2.2.0
- slurm_auth_get_arg_desc@Base 2.2.0
+#MISSING: 2.6.5# slurm_auth_get_arg_desc@Base 2.2.0
  slurm_auth_init@Base 2.2.0
  slurm_bg_block_state_string@Base 2.2.0
  slurm_bit_alloc@Base 2.2.0

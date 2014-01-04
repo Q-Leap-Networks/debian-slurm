@@ -12,5 +12,6 @@
   size=5M
   postrotate
       /usr/sbin/invoke-rc.d --quiet slurm-llnl reconfig >/dev/null
+      /bin/sleep 1
   endscript
 }

@@ -1,3 +1,15 @@
+slurm-llnl (2.6.5-1) unstable; urgency=low
+
+  * New upstream release
+  * Changed Build-Depends entry from postgresql-server-dev to libpq-dev
+    (Closes: #732512) thanks to Christoph Berg and Martin Pitt
+  * Sleeping one second in the postrotate section of slurm-llnl.logrotate
+    (Closes: #735741) thanks to Stephane Vaillant
+  * Adding optional dependency for mysql in slurm-llnl-slurmdbd.init.d
+    (Closes: #735748) thanks to Stephane Vaillant
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Sat, 04 Jan 2014 10:43:02 +0100
+
 slurm-llnl (2.6.4-1) unstable; urgency=low
 
   * New upstream release 

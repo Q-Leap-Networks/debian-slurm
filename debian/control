@@ -2,8 +2,8 @@ Source: slurm-llnl
 Section: admin
 Priority: extra
 Maintainer: Gennaro Oliva <oliva.g@na.icar.cnr.it>
-Build-Depends: debhelper (>= 7.0.0), autotools-dev, libmunge-dev, libncurses5-dev, libssl-dev, po-debconf, python, libglade2-dev, libgtk2.0-dev, libmysqlclient-dev, postgresql-server-dev-9.1,  libpam0g-dev, libperl-dev, chrpath, libpam0g-dev
-Standards-Version: 3.9.4
+Build-Depends: debhelper (>= 7.0.0), autotools-dev, libmunge-dev, libncurses5-dev, libssl-dev, po-debconf, python, libglade2-dev, libgtk2.0-dev, libmysqlclient-dev, libpq-dev, libpam0g-dev, libperl-dev, chrpath, libpam0g-dev
+Standards-Version: 3.9.5
 Homepage: http://www.schedmd.com
 
 Package: slurm-llnl

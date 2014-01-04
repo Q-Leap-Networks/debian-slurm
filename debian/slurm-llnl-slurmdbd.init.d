@@ -13,8 +13,8 @@
 # Provides:          slurm-llnl-slurmdbd
 # Required-Start:    $remote_fs $syslog $network munge
 # Required-Stop:     $remote_fs $syslog $network munge
-# Should-Start:      $named
-# Should-Stop:       $named
+# Should-Start:      $named mysql
+# Should-Stop:       $named mysql
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
 # Short-Description: SLURM database daemon

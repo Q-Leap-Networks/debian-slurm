@@ -874,21 +874,26 @@ static void _slurm_rpc_allocate_resources(slurm_msg_t * msg)
 			job_desc_msg->alloc_node, job_desc_msg->alloc_sid, uid);
 	}
 #endif
-	slurm_get_peer_addr(msg->conn_fd, &resp_addr);
-	job_desc_msg->resp_host = xmalloc(16);
-	slurm_get_ip_str(&resp_addr, &port, job_desc_msg->resp_host, 16);
-	dump_job_desc(job_desc_msg);
-	if (error_code == SLURM_SUCCESS) {
-		do_unlock = true;
-		_throttle_start(&active_rpc_cnt);
-		lock_slurmctld(job_write_lock);
+	if (!slurm_get_peer_addr(msg->conn_fd, &resp_addr)) {
+		job_desc_msg->resp_host = xmalloc(16);
+		slurm_get_ip_str(&resp_addr, &port,
+				 job_desc_msg->resp_host, 16);
+		dump_job_desc(job_desc_msg);
+		if (error_code == SLURM_SUCCESS) {
+			do_unlock = true;
+			_throttle_start(&active_rpc_cnt);
+			lock_slurmctld(job_write_lock);
 
-		error_code = job_allocate(job_desc_msg, immediate,
-					  false, NULL,
-					  true, uid, &job_ptr);
-		/* unlock after finished using the job structure data */
-		END_TIMER2("_slurm_rpc_allocate_resources");
-	}
+			error_code = job_allocate(job_desc_msg, immediate,
+						  false, NULL,
+						  true, uid, &job_ptr);
+			/* unlock after finished using the job structure data */
+			END_TIMER2("_slurm_rpc_allocate_resources");
+		}
+	} else if (errno)
+		error_code = errno;
+	else
+		error_code = SLURM_ERROR;
 
 	/* return result */
 	if ((error_code == ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE) ||
@@ -1106,9 +1111,9 @@ static void _slurm_rpc_dump_job_single(slurm_msg_t * msg)
 	int dump_size, rc;
 	slurm_msg_t response_msg;
 	job_id_msg_t *job_id_msg = (job_id_msg_t *) msg->data;
-	/* Locks: Read config job, write node (for hiding) */
+	/* Locks: Read config, job, and node info */
 	slurmctld_lock_t job_read_lock = {
-		READ_LOCK, READ_LOCK, NO_LOCK, WRITE_LOCK };
+		READ_LOCK, READ_LOCK, NO_LOCK, READ_LOCK };
 	uid_t uid = g_slurm_auth_get_uid(msg->auth_cred, NULL);
 
 	START_TIMER;
@@ -2050,22 +2055,29 @@ static void _slurm_rpc_job_will_run(slurm_msg_t * msg)
 	}
 	if (error_code == SLURM_SUCCESS)
 		error_code = validate_job_create_req(job_desc_msg);
-	slurm_get_peer_addr(msg->conn_fd, &resp_addr);
-	job_desc_msg->resp_host = xmalloc(16);
-	slurm_get_ip_str(&resp_addr, &port, job_desc_msg->resp_host, 16);
-	dump_job_desc(job_desc_msg);
-	if (error_code == SLURM_SUCCESS) {
-		lock_slurmctld(job_write_lock);
-		if (job_desc_msg->job_id == NO_VAL) {
-			error_code = job_allocate(job_desc_msg, false,
-						  true, &resp,
-						  true, uid, &job_ptr);
-		} else {	/* existing job test */
-			error_code = job_start_data(job_desc_msg, &resp);
+
+	if (!slurm_get_peer_addr(msg->conn_fd, &resp_addr)) {
+		job_desc_msg->resp_host = xmalloc(16);
+		slurm_get_ip_str(&resp_addr, &port,
+				 job_desc_msg->resp_host, 16);
+		dump_job_desc(job_desc_msg);
+		if (error_code == SLURM_SUCCESS) {
+			lock_slurmctld(job_write_lock);
+			if (job_desc_msg->job_id == NO_VAL) {
+				error_code = job_allocate(job_desc_msg, false,
+							  true, &resp,
+							  true, uid, &job_ptr);
+			} else {	/* existing job test */
+				error_code = job_start_data(job_desc_msg,
+							    &resp);
+			}
+			unlock_slurmctld(job_write_lock);
+			END_TIMER2("_slurm_rpc_job_will_run");
 		}
-		unlock_slurmctld(job_write_lock);
-		END_TIMER2("_slurm_rpc_job_will_run");
-	}
+	} else if (errno)
+		error_code = errno;
+	else
+		error_code = SLURM_ERROR;
 
 	/* return result */
 	if (error_code) {
