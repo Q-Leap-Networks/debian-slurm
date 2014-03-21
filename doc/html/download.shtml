@@ -87,10 +87,18 @@ the same high-level API to link their software with different cluster/resource
 management systems.</li><br>
 
 <li><b>Hostlist</b><br>
-A python program used for manipulation of SLURM hostlists including
+A Python program used for manipulation of SLURM hostlists including
 functions such as intersection and difference. Download the code from:<br>
 <a href="http://www.nsc.liu.se/~kent/python-hostlist">
-http://www.nsc.liu.se/~kent/python-hostlist</a></li><br>
+http://www.nsc.liu.se/~kent/python-hostlist</a><br><br>
+
+Lua bindings for hostlist functions are also available here:<br>
+<a href="https://github.com/grondo/lua-hostlist">
+https://github.com/grondo/lua-hostlist</a><br>
+<b>NOTE:</b> The Lua  hostlist functions do not support the
+IBM Bluegene naming convention or bracketed numeric ranges
+anywhere except at the end of the name (i.e. "bgq[0000x1333]"
+and "rack[0-3]_blade[0-63]" are not supported).</li><br>
 
 <li><b>Interactive Script</b><br>
 A wrapper script that makes it very simple to get an interactive shell on a
@@ -232,6 +240,17 @@ For more information, see
 <a href="http://ubmod.sourceforge.net/resource-manager-slurm.html">UDMod home page</a> and
 <a href="https://github.com/ubccr/ubmod">source code</a>.</li><br>
 
+<li><b>Slurmmon</b><br>
+Slurmmon is a system for gathering and plotting data about Slurm scheduling and
+job characteristics. It currently simply sends the data to ganglia, but it
+includes some custom reports and a web page for an organized summary.
+It collects all the data from sdiag as well as total counts of running and
+pending jobs in the system and the maximum such values for any single user.
+It can also submit probe jobs to various partitions in order to trend the
+times spent pending in them, which is often a good bellwether of scheduling
+problems.<br>
+<a href="https://github.com/fasrc/slurmmon">Slurmmon code</a></li><br>
+
 <li><b>MSlurm</b><br>
 Such a superstructure for the management of multiple Slurm environments is done
 with MSlurm. Thereby several Slurm clusters - even across multiple Slurm
@@ -245,6 +264,6 @@ easy and elegantly manner.
 
 </ul>
 
-<p style="text-align:center;">Last modified 7 November 2013</p>
+<p style="text-align:center;">Last modified 24 January 2014</p>
 
 <!--#include virtual="footer.txt"-->

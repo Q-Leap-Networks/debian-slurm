@@ -714,7 +714,7 @@ libslurmdb.so.26 libslurmdb26 #MINVER#
  slurm_submit_batch_job@Base 2.2.0
  slurm_suspend@Base 2.2.0
  slurm_takeover@Base 2.2.0
- slurm_terminate_job@Base 2.2.0
+#MISSING: 2.6.7# slurm_terminate_job@Base 2.2.0
  slurm_terminate_job_step@Base 2.2.0
  slurm_topo_build_config@Base 2.2.0
  slurm_topo_fini@Base 2.2.0

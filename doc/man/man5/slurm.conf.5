@@ -323,6 +323,9 @@ The default value is 0 to disable caching group data.
 The system\-initiated checkpoint method to be used for user jobs.
 The slurmctld daemon must be restarted for a change in \fBCheckpointType\fR
 to take effect.
+\fBNOTE\fR\ there must not be any running and/or pending jobs
+in the cluster when the plugin is both enabled or disabled. Since the format
+of the job state file changes all jobs will be lost upon slurmctld restart.
 Supported values presently include:
 .RS
 .TP 18
@@ -344,6 +347,7 @@ OpenMPI (version 1.3 or higher)
 .TP
 \fBcheckpoint/poe\fR
 for use with IBM POE (Parallel Operating Environment) only
+.TP
 .RE
 
 .TP
@@ -573,7 +577,7 @@ NOTE: If set, then a job's QOS can not be used to exceed partition limits.
 \fBEpilog\fR
 Fully qualified pathname of a script to execute as user root on every
 node when a user's job completes (e.g. "/usr/local/slurm/epilog"). A
-glob pattern (See \fBglob\fR(7)) may also be used to run more than
+glob pattern (See \fBglob\fR (7)) may also be used to run more than
 one epilog script (e.g. "/etc/slurm/epilog.d/*"). The Epilog script
 or scripts may be used to purge files, disable user login, etc.
 By default there is no epilog.
@@ -1790,6 +1794,12 @@ partitions and jobs.
 The default value is 0, which means no limit.
 This option applies only to \fBSchedulerType=sched/backfill\fR.
 .TP
+\fBbf_max_job_start=#\fR
+The maximum number of jobs which can be initiated in a single iteration
+of the backfill scheduler.
+The default value is 0, which means no limit.
+This option applies only to \fBSchedulerType=sched/backfill\fR.
+.TP
 \fBbf_max_job_user=#\fR
 The maximum number of jobs per user to attempt backfill scheduling for,
 not counting jobs which cannot be started due to an association resource
@@ -1815,7 +1825,6 @@ advisable to prevent job starvation.
 In order limit the amount of data managed by the backfill scheduler,
 if the value of \fBbf_window\fR is increased, then it is generally advisable
 to also increase \fBbf_resolution\fR.
-if 
 This option applies only to \fBSchedulerType=sched/backfill\fR.
 .TP
 \fBmax_job_bf=#\fR
@@ -2397,11 +2406,11 @@ The default value is "task/none".
 \fBTaskPluginParam\fR
 Optional parameters for the task plugin.
 Multiple options should be comma separated
-If \fBNone\fR, \fBSockets\fR, \fBCores\fR, \fBThreads\fR,
+If \fBNone\fR, \fBBoards\fR, \fBSockets\fR, \fBCores\fR, \fBThreads\fR,
 and/or \fBVerbose\fR are specified, they will override
 the \fB\-\-cpu_bind\fR option specified by the user
 in the \fBsrun\fR command.
-\fBNone\fR, \fBSockets\fR, \fBCores\fR and \fBThreads\fR are mutually
+\fBNone\fR, \fBBoards\fR, \fBSockets\fR, \fBCores\fR and \fBThreads\fR are mutually
 exclusive and since they decrease scheduling flexibility are not generally
 recommended (select no more than one of them).
 \fBCpusets\fR and \fBSched\fR
@@ -2409,6 +2418,10 @@ are mutually exclusive (select only one of them).
 
 .RS
 .TP 10
+\fBBoards\fR
+Always bind to boards.
+Overrides user options or automatic binding.
+.TP
 \fBCores\fR
 Always bind to cores.
 Overrides user options or automatic binding.
@@ -2552,7 +2565,7 @@ of time specified by the \fBUnkillableStepTimeout\fR variable, the program
 specified by \fBUnkillableStepProgram\fR will be executed.
 This program can be used to take special actions to clean up the unkillable
 processes and/or notify computer administrators.
-The program will be run \fBSlurmdUser\fR (usually "root").
+The program will be run \fBSlurmdUser\fR (usually "root") on the compute node.
 By default no program is run.
 
 .TP

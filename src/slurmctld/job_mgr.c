@@ -5,7 +5,7 @@
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
- *  Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
+ *  Portions Copyright (C) 2010-2014 SchedMD <http://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -359,8 +359,6 @@ static slurmdb_qos_rec_t *_determine_and_validate_qos(
 	   with the association.  If not just fill in the qos and
 	   continue. */
 
-	if (accounting_enforce & ACCOUNTING_ENFORCE_ASSOCS)
-		xassert(assoc_ptr);
 	xassert(qos_rec);
 
 	if (!qos_rec->name && !qos_rec->id) {
@@ -503,7 +501,7 @@ int dump_all_job_state(void)
 		int pos = 0, nwrite, amount, rc;
 		char *data;
 
-		fd_set_close_on_exec(log_fd); 
+		fd_set_close_on_exec(log_fd);
 		nwrite = get_buf_offset(buffer);
 		data = (char *)get_buf_data(buffer);
 		high_buffer_size = MAX(nwrite, high_buffer_size);
@@ -1429,7 +1427,7 @@ static int _load_job_state(Buf buffer, uint16_t protocol_version)
 		goto unpack_error;
 	}
 
-	if (priority > 1) {
+	if ((priority > 1) && (direct_set_prio == 0)) {
 		highest_prio = MAX(highest_prio, priority);
 		lowest_prio  = MIN(lowest_prio,  priority);
 	}
@@ -2293,6 +2291,10 @@ extern int kill_job_by_front_end_name(char *node_name)
 				 * removes the submit we need to add it
 				 * again. */
 				acct_policy_add_job_submit(job_ptr);
+
+				if (!job_ptr->node_bitmap_cg ||
+				    bit_set_count(job_ptr->node_bitmap_cg) == 0)
+					batch_requeue_fini(job_ptr);
 			} else {
 				info("Killing job_id %u on failed node %s",
 				     job_ptr->job_id, node_name);
@@ -2527,6 +2529,10 @@ extern int kill_running_job_by_node_name(char *node_name)
 				 * removes the submit we need to add it
 				 * again. */
 				acct_policy_add_job_submit(job_ptr);
+
+				if (!job_ptr->node_bitmap_cg ||
+				    bit_set_count(job_ptr->node_bitmap_cg) == 0)
+					batch_requeue_fini(job_ptr);
 			} else {
 				info("Killing job_id %u on failed node %s",
 				     job_ptr->job_id, node_name);
@@ -3006,6 +3012,7 @@ static void _create_job_array(struct job_record *job_ptr,
 			break;
 		job_ptr_new->array_job_id  = job_ptr->job_id;
 		job_ptr_new->array_task_id = i;
+		acct_policy_add_job_submit(job_ptr);
 	}
 }
 
@@ -4430,7 +4437,7 @@ static int _job_create(job_desc_msg_t * job_desc, int allocate, int will_run,
 		else
 			job_ptr->state_reason = WAIT_HELD;
 	} else if (job_ptr->priority != NO_VAL) {
-		job_ptr->direct_set_prio = true;
+		job_ptr->direct_set_prio = 1;
 	}
 
 	error_code = update_job_dependency(job_ptr, job_desc->dependency);
@@ -5928,7 +5935,7 @@ extern int pack_one_job(char **buffer_ptr, int *buffer_size,
 	} else {
 		/* Job ID not found. It could reference a job array. */
 		job_iterator = list_iterator_create(job_list);
-		while ((job_ptr = (struct job_record *) 
+		while ((job_ptr = (struct job_record *)
 				  list_next(job_iterator))) {
 			if ((job_ptr->job_id != job_id) &&
 			    ((job_ptr->array_task_id == (uint16_t) NO_VAL) ||
@@ -6816,7 +6823,7 @@ extern void sync_job_priorities(void)
 
 	job_iterator = list_iterator_create(job_list);
 	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
-		if (job_ptr->priority)
+		if ((job_ptr->priority) && (job_ptr->direct_set_prio == 0))
 			job_ptr->priority += prio_boost;
 	}
 	list_iterator_destroy(job_iterator);
@@ -8073,6 +8080,7 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 			error_code = ESLURM_DISABLED;
 			goto fini;
 		} else {
+			xfree(job_ptr->name);
 			job_ptr->name = job_specs->name;
 			job_specs->name = NULL;
 
@@ -9327,8 +9335,12 @@ void batch_requeue_fini(struct job_record  *job_ptr)
 	now = time(NULL);
 	/* Clear everything so this appears to be a new job and then restart
 	 * it in accounting. */
-	job_ptr->start_time = job_ptr->end_time = 0;
+	job_ptr->start_time = 0;
+	job_ptr->end_time = 0;
 	job_ptr->total_cpus = 0;
+	job_ptr->pre_sus_time = 0;
+	job_ptr->suspend_time = 0;
+	job_ptr->tot_sus_time = 0;
 	/* Current code (<= 2.1) has it so we start the new job with the next
 	 * step id.  This could be used when restarting to figure out which
 	 * step the previous run of this job stopped on. */
@@ -9918,6 +9930,8 @@ extern int job_suspend(suspend_msg_t *sus_ptr, uid_t uid,
 		if (rc != SLURM_SUCCESS)
 			goto reply;
 		_suspend_job(job_ptr, sus_ptr->op, indf_susp);
+		if (job_ptr->priority == 0)
+			set_job_prio(job_ptr);
 		job_ptr->job_state = JOB_RUNNING;
 		job_ptr->tot_sus_time +=
 			difftime(now, job_ptr->suspend_time);

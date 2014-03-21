@@ -1,5 +1,102 @@
-This file describes changes in recent versions of SLURM. It primarily
+This file describes changes in recent versions of Slurm. It primarily
 documents those changes that are of interest to users and admins.
+
+* Changes in Slurm 2.6.7
+========================
+ -- Properly enforce a job's cpus-per-task option when a job's allocation is
+    constrained on some nodes by the mem-per-cpu option.
+ -- Correct the slurm.conf man pages and checkpoint_blcr.html page
+    describing that jobs must be drained from cluster before deploying
+    any checkpoint plugin. Corrected in version 14.03.
+ -- Fix issue where if using munge and munge wasn't running and a slurmd
+    needed to forward a message, the slurmd would core dump.
+ -- Update srun.1 man page documenting the PMI2 support.
+ -- Fix slurmctld core dump when a jobs gets its QOS updated but there
+    is not a corresponding association.
+ -- If a job requires specific nodes and can not run due to those nodes being
+    busy, the main scheduling loop will block those specific nodes rather than
+    the entire queue/partition.
+ -- Fix minor memory leak when updating a job's name.
+ -- Fix minor memory leak when updating a reservation on a partition using "ALL"
+    nodes.
+ -- Fix minor memory leak when adding a reservation with a nodelist and core
+    count.
+ -- Update sacct man page description of job states.
+ -- BGQ - Fix minor memory leak when selecting blocks that can't immediately be
+    placed.
+ -- Fixed minor memory leak in backfill scheduler.
+ -- MYSQL - Fixed memory leak when querying clusters.
+ -- MYSQL - Fix when updating QOS on an association.
+ -- NRT - Fix to supply correct error messages to poe/pmd when a launch fails.
+ -- Add SLURM_STEP_ID to Prolog environment.
+ -- Add support for SchedulerParameters value of bf_max_job_start that limits
+    the total number of jobs that can be started in a single iteration of the
+    backfill scheduler.
+ -- Don't print negative number when dealing with large memory sizes with
+    sacct.
+ -- Fix sinfo output so that host in state allocated and mixed will not be
+    merged together.
+ -- GRES: Avoid crash if GRES configurations is inconstent.
+ -- Make S_SLURM_RESTART_COUNT item available to SPANK.
+ -- Munge plugins - Add sleep between retries if can't connect to socket.
+ -- Fix the database query to return all pending jobs in a given time interval.
+ -- switch/nrt - Correct logic to get dynamic window count.
+ -- Remove need to use job->ctx_params in the launch plugin, just to simplify
+    code.
+ -- NRT - Fix possible memory leak if using multiple adapters.
+ -- NRT - Fix issue where there are more than NRT_MAXADAPTERS on a system.
+ -- NRT - Increase Max number of adapters from 8 -> 9
+ -- NRT - Initialize missing variables when the PMD is starting a job.
+ -- NRT - Fix issue where we are launching hosts out of numerical order,
+    this would cause pmd's to hang.
+ -- NRT - Change xmalloc's to malloc just to be safe.
+ -- NRT - Sanity check to make sure a jobinfo is there before packing.
+ -- Add missing options to the print of TaskPluginParam.
+ -- Fix a couple of issues with scontrol reconfig and adding nodes to
+    slurm.conf.  Rebooting daemons after adding nodes to the slurm.conf
+    is highly recommended.
+
+* Changes in Slurm 2.6.6
+========================
+ -- sched/backfill - Fix bug that could result in failing to reserve resources
+    for high priority jobs.
+ -- Correct job RunTime if requeued from suspended state.
+ -- Reset job priority from zero (held) on manual resume from suspend state.
+ -- If FastSchedule=0 then do not DOWN a node with low memory or disk size.
+ -- Remove vestigial note.
+ -- Update sshare.1 man page making it consistent with sacctmgr.1.
+ -- Do not reset a job's priority when the slurmctld restarts if previously
+    set to some specific value.
+ -- sview - Fix regression where the Node tab wasn't able to add/remove columns.
+ -- Fix slurmstepd lock when job terminates inside the infiniband
+    network traffic accounting plugin.
+ -- Correct the documentation to read filesystem instead of Lustre. Update
+    the srun help.
+ -- Fix the acct_gather_filesystem_lustre.c to compute the Lustre accounting
+    data correctly accumulating differences between sampling intervals.
+    Fix the data structure mismatch between acct_gather_filesystem_lustre.c
+    and slurm_jobacct_gather.h which caused the hdf5 plugin to log incorrect
+    data.
+ -- Don't allow PMI_TIME to be zero which will cause floating exception.
+ -- Fix purging of old reservation errors in database.
+ -- MYSQL - If starting the plugin and the database isn't up attempt to
+    connect in a loop instead of producing a fatal.
+ -- BLUEGENE - If IONodesPerMP changes in bluegene.conf recalculate bitmaps
+    based on ionode count correctly on slurmctld restart.
+ -- Fix step allocation when some CPUs are not available due to memory limits.
+    This happens when one step is active and using memory that blocks the
+    scheduling of another step on a portion of the CPUs needed. The new step
+    is now delayed rather than aborting with "Requested node configuration is
+    not available".
+ -- Make sure node limits get assessed if no node count was given in request.
+ -- Removed obsolete slurm_terminate_job() API.
+ -- Update documentation about QOS limits
+ -- Retry task exit message from slurmstepd to srun on message timeout.
+ -- Correction to logic reserving all nodes in a specified partition.
+ -- Added support for selecting AMD GPU by setting GPU_DEVICE_ORDINAL env var.
+ -- Properly enforce GrpSubmit limit for job arrays.
+ -- CRAY - fix issue with using CR_ONE_TASK_PER_CORE
+ -- CRAY - fix memory leak when using accelerators
 
 * Changes in Slurm 2.6.5
 ========================
@@ -46,7 +143,7 @@ documents those changes that are of interest to users and admins.
     on a random memory location (i.e. whatever is on the stack), which can
     result in slurmstepd dying and a completed job not being purged in a
     timely fashion.
- -- Fix slurmstepd race condition when separate threads are reading and 
+ -- Fix slurmstepd race condition when separate threads are reading and
     modifying the job's environment, which can result in the slurmstepd failing
     with an invalid memory reference.
  -- Fix erroneous error messages when running gang scheduling.
@@ -118,7 +215,7 @@ documents those changes that are of interest to users and admins.
  -- Fix sacctmgr modify qos set preempt+/-=.
  -- BLUEGENE - fix issue where node count wasn't set up correctly when srun
     preforms the allocation, regression in 2.6.3.
- -- Add support for dependencies of job array elements (e.g. 
+ -- Add support for dependencies of job array elements (e.g.
     "sbatch --depend=afterok:123_4 ...") or all elements of a job array (e.g.
     "sbatch --depend=afterok:123 ...").
  -- Add support for new options in sbatch qsub wrapper:

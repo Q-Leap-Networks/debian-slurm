@@ -1,0 +1,29 @@
+Description: man pages hyphen to minus substitution
+ TODO: sacct.1 and srun.1 manual page contains a hyphen where a minus
+ sign was intended
+Origin: maintainer
+Forwarded: http://bugs.schedmd.com/show_bug.cgi?id=648
+Last-Update: 2014-03-18
+
+--- slurm-llnl-2.6.7.orig/doc/man/man1/sacct.1
++++ slurm-llnl-2.6.7/doc/man/man1/sacct.1
+@@ -318,7 +318,7 @@ Job terminated due to failure of one or
+ Job is awaiting resource allocation. Note for a job to be selected in this state
+ it must have "EligibleTime" in the requested time interval or different
+ from "Unknown". The "EligibleTime" is displayed by the "scontrol show job" command.
+-For example jobs submitted with the "--hold" option will have "EligibleTime=Unknown"
++For example jobs submitted with the "\-\-hold" option will have "EligibleTime=Unknown"
+ as they are pending indefinitely.
+ .TP
+ \fBPR  PREEMPTED\fR
+--- slurm-llnl-2.6.7.orig/doc/man/man1/srun.1
++++ slurm-llnl-2.6.7/doc/man/man1/srun.1
+@@ -915,7 +915,7 @@ For use with OpenMPI.
+ .B pmi2
+ To enable PMI2 support. The PMI2 support in Slurm works only if the MPI
+ implementation supports it, in other words if the MPI has the PMI2
+-interface implemented. The --mpi=pmi2 will load the library
++interface implemented. The \-\-mpi=pmi2 will load the library
+ lib/slurm/mpi_pmi2.so which provides the server side functionality but
+ the client side must implement PMI2_Init() and the other interface calls.
+ .TP
