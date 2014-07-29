@@ -1,3 +1,19 @@
+slurm-llnl (2.6.7-2) unstable; urgency=medium
+
+  [ gregor herrmann ]
+  * Fix "hardcodes /usr/lib/perl5":
+    - drop debian/libslurmdb-perl.dirs
+    - dynamically create directories and move files in debian/rules, using the
+      value of $Config{vendorarch}
+    (Closes: #752814)
+
+  [ Gennaro Oliva ]
+  * Add lintian overrides for spelling-error-in-binary in the
+    slurm-llnl-basic-plugins package to avoid wrong spelling error detection
+  * Added dh_autoreconf (Closes: #744659)
+
+ -- Gennaro Oliva <oliva.g@na.icar.cnr.it>  Tue, 29 Jul 2014 17:13:06 +0200
+
 slurm-llnl (2.6.7-1) unstable; urgency=medium
 
   * New upstream release

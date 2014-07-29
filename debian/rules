@@ -26,6 +26,8 @@ CFLAGS += -Wall
 LDFLAGS = `dpkg-buildflags --get LDFLAGS`
 CPPFLAGS = `dpkg-buildflags --get CPPFLAGS`
 
+PERL_ARCHLIB := $(shell perl -MConfig -e 'print substr($$Config{vendorarch}, 1)')
+
 config.status: configure
 	dh_testdir
 ifneq "$(wildcard /usr/share/misc/config.sub)" ""
@@ -35,6 +37,7 @@ ifneq "$(wildcard /usr/share/misc/config.guess)" ""
 	cp -f /usr/share/misc/config.guess config.guess
 endif
 	# Add here commands to configure the package.
+	dh_autoreconf
 	CFLAGS="$(CFLAGS)" CPPFLAGS="$(CPPFLAGS)" LDFLAGS="$(LDFLAGS)" ./configure --host=$(DEB_HOST_GNU_TYPE) --build=$(DEB_BUILD_GNU_TYPE) --prefix=/usr --mandir=\$${prefix}/share/man --infodir=\$${prefix}/share/info --sysconfdir=/etc/slurm-llnl --with-munge --localstatedir=/var/run/slurm-llnl --without-blcr --libexecdir=/usr/share --enable-pam --without-rpath
 
 
@@ -72,6 +75,7 @@ clean:
 		src/plugins/accounting_storage/common/.libs
 	  rm -f config.sub
 	  rm -f config.guess
+	  dh_autoreconf_clean
 	  dh_clean
 
   install: install-indep install-arch
@@ -194,8 +198,9 @@ clean:
 
 	find debian/libslurm-perl -type f -name "*.so" | xargs chrpath -d
 
-	mv debian/libslurm-perl/usr/lib/perl5/Slurmdb.pm debian/libslurmdb-perl/usr/lib/perl5/
-	mv debian/libslurm-perl/usr/lib/perl5/auto/Slurmdb debian/libslurmdb-perl/usr/lib/perl5/auto
+	dh_installdirs -plibslurmdb-perl usr/share/man/man3 $(PERL_ARCHLIB)/auto
+	mv debian/libslurm-perl/$(PERL_ARCHLIB)/Slurmdb.pm debian/libslurmdb-perl/$(PERL_ARCHLIB)/
+	mv debian/libslurm-perl/$(PERL_ARCHLIB)/auto/Slurmdb debian/libslurmdb-perl/$(PERL_ARCHLIB)/auto
 	mv debian/libslurm-perl/usr/share/man/man3/Slurmdb.3pm debian/libslurmdb-perl/usr/share/man/man3
 
 	dh_install -s
