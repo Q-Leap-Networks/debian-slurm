@@ -1,3 +1,0 @@
-slurm-llnl-basic-plugins: hardening-no-fortify-functions
-slurm-llnl-basic-plugins: shlib-with-executable-stack
-slurm-llnl-basic-plugins: spelling-error-in-binary
