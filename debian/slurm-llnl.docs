@@ -3,3 +3,5 @@ README.rst
 AUTHORS
 RELEASE_NOTES
 debian/README.cryptotype-openssl
+debian/slurm-llnl-configurator.html
+debian/slurm-llnl-configurator.easy.html

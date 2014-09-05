@@ -2,7 +2,7 @@ Source: slurm-llnl
 Section: admin
 Priority: extra
 Maintainer: Gennaro Oliva <oliva.g@na.icar.cnr.it>
-Build-Depends: debhelper (>= 7.0.0), autotools-dev, libmunge-dev, libncurses5-dev, libssl-dev, po-debconf, python, libglade2-dev, libgtk2.0-dev, libmysqlclient-dev, libpam0g-dev, libperl-dev, chrpath, libpam0g-dev, liblua5.1-0-dev, dh-autoreconf
+Build-Depends: debhelper (>= 9.0.0), autotools-dev, libmunge-dev, libncurses5-dev, libssl-dev, po-debconf, python, libglade2-dev, libgtk2.0-dev, libmysqlclient-dev, libpam0g-dev, libperl-dev, chrpath, libpam0g-dev, liblua5.1-0-dev, dh-autoreconf, dh-exec
 Standards-Version: 3.9.5
 Homepage: http://www.schedmd.com
 
@@ -18,6 +18,7 @@ Description: Simple Linux Utility for Resource Management
 Package: libslurmdb27
 Section: libs
 Architecture: any
+Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: Runtime library files for the SLURM DataBase Daemon
  SLURM, the Simple Linux Utility for Resource Management,
@@ -27,6 +28,7 @@ Description: Runtime library files for the SLURM DataBase Daemon
 Package: libslurm27
 Section: libs
 Architecture: any
+Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: Runtime library files for SLURM
  SLURM, the Simple Linux Utility for Resource Management,
@@ -36,6 +38,7 @@ Description: Runtime library files for SLURM
 Package: libpmi0
 Section: libs
 Architecture: any
+Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: SLURM PMI library implementation
  SLURM, the Simple Linux Utility for Resource Management,
@@ -151,6 +154,7 @@ Description: Torque compatibility wrappers for SLURM
 
 Package: libpam-slurm
 Architecture: any
+Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: PAM module to authenticate using the SLURM resource manager
  Pluggable Authentication Module (PAM) for restricting access to compute
