@@ -5,16 +5,13 @@
 #              manages exclusive access o a set of compute \
 #              resources and distributes work to those resources.
 #
-# processname: /usr/sbin/slurmd 
-# pidfile: /var/run/slurm-llnl/slurmd.pid
-#
 # processname: /usr/sbin/slurmctld
 # pidfile: /var/run/slurm-llnl/slurmctld.pid
 #
-# config: /etc/default/slurm-llnl
+# config: /etc/default/slurm-llnl-slurmctld
 #
 ### BEGIN INIT INFO
-# Provides:          slurm-llnl
+# Provides:          slurm-llnl-slurmctld
 # Required-Start:    $remote_fs $syslog $network munge
 # Required-Stop:     $remote_fs $syslog $network munge
 # Should-Start:      $named
@@ -31,11 +28,10 @@ LIBDIR=/usr/lib
 SBINDIR=/usr/sbin
 
 # Source slurm specific configuration
-if [ -f /etc/default/slurm-llnl ] ; then
-    . /etc/default/slurm-llnl
+if [ -f /etc/default/slurm-llnl-slurmctld ] ; then
+    . /etc/default/slurm-llnl-slurmctld
 else
     SLURMCTLD_OPTIONS=""
-    SLURMD_OPTIONS=""
 fi
 
 # Checking for slurm.conf presence
@@ -51,22 +47,17 @@ fi
 
 
 test -f $BINDIR/scontrol || exit 0
-DAEMONLIST=$($BINDIR/scontrol show daemons 2>/dev/null)
+DAEMONLIST="slurmctld"
 if [ $? = 0 ] ; then
-  for prog in $DAEMONLIST ; do 
+  for prog in $DAEMONLIST ; do
     test -f $SBINDIR/$prog || exit 0
   done
 else
   if [ -n "$(echo $1 | grep start)" ] ; then
-    echo "Not starting slurm-llnl for problems in the configuration file"
+    echo "Not starting slurm-llnl-slurmctld for problems in the configuration file"
   else
     echo "Problems in the configuration file"
   fi
-  echo "${CONFDIR}/slurm.conf"
-  echo "If upgrading from version 1.2 it is recommended that you rebuild"
-  echo "your configuration file. Please read instructions in"
-  echo "     /usr/share/doc/slurm-llnl/README.Debian"
-  echo "Otherwise use \"scontrol show daemons\" for more information"
   exit 0
 fi
 
@@ -74,7 +65,7 @@ fi
 if [ -f /lib/lsb/init-functions ] ; then
   . /lib/lsb/init-functions
 else
-  echo Can\'t find lsb init functions 
+  echo Can\'t find lsb init functions
   exit 1
 fi
 
@@ -88,13 +79,7 @@ checkcertkey()
   keyfile=""
   certfile=""
 
-  if [ "$1" = "slurmd" ] ; then 
-    keyfile=$(grep JobCredentialPublicCertificate $CONFDIR/slurm.conf \
-                  | grep -v "^ *#")
-    keyfile=${keyfile##*=}
-    keyfile=${keyfile%#*}
-    [ -e $keyfile ] || MISSING="$keyfile"
-  elif [ "$1" = "slurmctld" ] ; then 
+  if [ "$1" = "slurmctld" ] ; then
     keyfile=$(grep JobCredentialPrivateKey $CONFDIR/slurm.conf | grep -v "^ *#")
     keyfile=${keyfile##*=}
     keyfile=${keyfile%#*}
@@ -105,13 +90,13 @@ checkcertkey()
     echo Not starting slurm-llnl
     echo $MISSING not found
     echo Please follow the instructions in \
-  	  /usr/share/doc/slurm-llnl/README.cryptotype-openssl
+      /usr/share/doc/slurm-llnl/README.cryptotype-openssl
     exit 0
   fi
 
   if [ -f "$keyfile" ] && [ "$1" = "slurmctld" ] ; then
     keycheck=$(openssl-vulnkey $keyfile | cut -d : -f 1)
-    if [ "$keycheck" = "COMPROMISED" ] ; then 
+    if [ "$keycheck" = "COMPROMISED" ] ; then
       echo Your slurm key stored in the file $keyfile
       echo is vulnerable because has been created with a buggy openssl.
       echo Please rebuild it with openssl version \>= 0.9.8g-9
@@ -123,7 +108,7 @@ checkcertkey()
 
 get_daemon_description()
 {
-    case $1 in 
+    case $1 in
       slurmd)
         echo slurm compute node daemon
 	;;
@@ -148,19 +133,6 @@ start() {
   mkdir -p /var/run/slurm-llnl
   chown slurm:slurm /var/run/slurm-llnl
 
-  # Checking if SlurmdSpoolDir is under run
-  if [ "$1" = "slurmd" ] ; then
-    SDIRLOCATION=$(grep SlurmdSpoolDir /etc/slurm-llnl/slurm.conf \
-                       | grep -v "^ *#")
-    SDIRLOCATION=${SDIRLOCATION##*=}
-    SDIRLOCATION=${SDIRLOCATION%#*}
-    if [ "${SDIRLOCATION}" = "/var/run/slurm-llnl/slurmd" ] ; then
-      if ! [ -e /var/run/slurm-llnl/slurmd ] ; then
-        ln -s /var/lib/slurm-llnl/slurmd /var/run/slurm-llnl/slurmd
-      fi
-    fi
-  fi
-    
   # Checking if StateSaveLocation is under run
   if [ "$1" = "slurmctld" ] ; then
     SDIRLOCATION=$(grep StateSaveLocation /etc/slurm-llnl/slurm.conf \
@@ -176,26 +148,26 @@ start() {
 
   desc="$(get_daemon_description $1)"
   log_daemon_msg "Starting $desc" "$1"
-  unset HOME MAIL USER USERNAME 
+  unset HOME MAIL USER USERNAME
   #FIXME $STARTPROC $SBINDIR/$1 $2
   STARTERRORMSG="$(start-stop-daemon --start --oknodo \
-    			--exec "$SBINDIR/$1" -- $2 2>&1)"
+                   --exec "$SBINDIR/$1" -- $2 2>&1)"
   STATUS=$?
   log_end_msg $STATUS
-  if [ "$STARTERRORMSG" != "" ] ; then 
+  if [ "$STARTERRORMSG" != "" ] ; then
     echo $STARTERRORMSG
   fi
   touch /var/lock/slurm
 }
 
-stop() { 
+stop() {
     desc="$(get_daemon_description $1)"
     log_daemon_msg "Stopping $desc" "$1"
     STOPERRORMSG="$(start-stop-daemon --oknodo --stop -s TERM \
-    			--exec "$SBINDIR/$1" 2>&1)"
+                    --exec "$SBINDIR/$1" 2>&1)"
     STATUS=$?
     log_end_msg $STATUS
-    if [ "$STOPERRORMSG" != "" ] ; then 
+    if [ "$STOPERRORMSG" != "" ] ; then
       echo $STOPERRORMSG
     fi
     rm -f /var/lock/slurm
@@ -203,7 +175,7 @@ stop() {
 
 startall() {
     for PROG in $DAEMONLIST ; do
-      case $PROG in 
+      case $PROG in
         slurmd)
 	  OPTVAR=$SLURMD_OPTIONS
 	  ;;
@@ -246,19 +218,19 @@ slurmstatus() {
         read rpid < $pidfile
         if [ "$rpid" != "" -a "$pid" != "" ]; then
             for i in $pid ; do
-                if [ "$i" = "$rpid" ]; then 
+                if [ "$i" = "$rpid" ]; then
                     echo "${base} (pid $pid) is running..."
                     return 0
-                fi     
+                fi
             done
         elif [ "$rpid" != "" -a "$pid" = "" ]; then
-#           Due to change in user id, pid file may persist 
+#           Due to change in user id, pid file may persist
 #           after slurmctld terminates
             if [ "$base" != "slurmctld" ] ; then
                echo "${base} dead but pid file exists"
             fi
             return 1
-        fi 
+        fi
 
     fi
 
@@ -266,14 +238,14 @@ slurmstatus() {
         echo "${base} (pid $pid) is running..."
         return 0
     fi
-     
+
     echo "${base} is stopped"
-    
+
     return 3
 }
 
 #
-# stop slurm daemons, 
+# stop slurm daemons,
 # wait for termination to complete (up to 10 seconds) before returning
 #
 slurmstop() {
@@ -303,7 +275,6 @@ case "$1" in
         ;;
     startclean)
         SLURMCTLD_OPTIONS="-c $SLURMCTLD_OPTIONS"
-        SLURMD_OPTIONS="-c $SLURMD_OPTIONS"
         startall
         ;;
     stop)
@@ -334,11 +305,11 @@ case "$1" in
 	for prog in $DAEMONLIST ; do
 	    PIDFILE=$(getpidfile $prog)
 	    start-stop-daemon --stop --signal HUP --pidfile \
-	    	"$PIDFILE" --quiet $prog
+	      "$PIDFILE" --quiet $prog
 	done
 	;;
     test)
-	for prog in $DAEMONLIST ; do   
+	for prog in $DAEMONLIST ; do
 	    echo "$prog runs here"
 	done
 	;;

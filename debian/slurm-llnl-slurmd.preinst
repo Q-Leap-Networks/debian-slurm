@@ -1,5 +1,5 @@
 #!/bin/sh
-# preinst script for slurm-llnl-slurmdbd
+# preinst script for slurm-llnl-slurmd
 #
 # see: dh_installdeb(1)
 
@@ -13,7 +13,6 @@ set -e
 #
 # for details, see http://www.debian.org/doc/debian-policy/ or
 # the debian-policy package
-
 
 case "$1" in
     install)
@@ -40,6 +39,9 @@ case "$1" in
       else
         adduser --quiet --system --group --uid 64030 --no-create-home slurm
       fi
+      if [ -e "$2" ] ; then
+        exit 0
+      fi
     ;;
 
     abort-upgrade)
@@ -57,5 +59,3 @@ esac
 #DEBHELPER#
 
 exit 0
-
-

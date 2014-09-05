@@ -28,8 +28,8 @@ DESCRIPTION="slurm-llnl database server interface"
 NAME="slurmdbd"
 
 # Source slurm specific configuration
-if [ -f /etc/default/slurm-llnl ] ; then
-    . /etc/default/slurm-llnl
+if [ -f /etc/default/slurm-llnl-slurmdbd ] ; then
+    . /etc/default/slurm-llnl-slurmdbd
 else
     SLURMDBD_OPTIONS=""
 fi
