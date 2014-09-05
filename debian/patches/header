@@ -5,10 +5,10 @@ Author: Gennaro Oliva <oliva.g@na.icar.cnr.it>
 ---
 Origin: other
 Forwarded: no
-Last-Update: 2014-01-22
+Last-Update: 2014-09-05
 
---- slurm-llnl-2.6.5.orig/doc/html/header.txt
-+++ slurm-llnl-2.6.5/doc/html/header.txt
+--- slurm-llnl-14.03.7.orig/doc/html/header.txt
++++ slurm-llnl-14.03.7/doc/html/header.txt
 @@ -12,15 +12,8 @@ Linux clusters, high-performance computi
  <title>Simple Linux Utility for Resource Management</title>
  <link href="linuxstyles.css" rel="stylesheet" type="text/css">
