@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  allocate.c - allocate nodes for a job or step with supplied contraints
- *  $Id: allocate.c 19271 2010-01-19 21:00:56Z jette $
+ *  $Id: allocate.c 19303 2010-01-21 22:42:24Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -684,7 +684,7 @@ static void _destroy_allocation_response_socket(listen_t *listen)
 }
 
 /* process RPC from slurmctld
- * IN msg: message recieved
+ * IN msg: message received
  * OUT resp: resource allocation response message
  * RET 1 if resp is filled in, 0 otherwise */
 static int

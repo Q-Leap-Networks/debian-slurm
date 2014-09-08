@@ -1,6 +1,35 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 2.1.2
+=============================
+ -- Added nodelist to sview for jobs on non-bluegene systems
+ -- Correction in value of batch job environment variable SLURM_TASKS_PER_NODE
+    under some conditions.
+ -- When a node silently fails which is already drained/down the reason
+    for draining for the node is not changed.
+ -- Srun will ignore SLURM_NNODES environment variable and use the count of 
+    currently allocated nodes if that count changes during the job's lifetime 
+    (e.g. job allocation uses the --no-kill option and a node goes DOWN, job 
+    step would previously always fail).
+ -- Made it so sacctmgr can't add blank user or account.  The MySQL plugin
+    will also reject such requests.
+ -- Revert libpmi.so version for compatibility with SLURM version 2.0 and
+    earlier to avoid forcing applications using a specific libpmi.so version to
+    rebuild unnecessarily (revert from libpmi.so.21.0.0 to libpmi.so.0.0.0).
+ -- Restore support for a pending job's constraints (required node features) 
+    when slurmctld is restarted (internal structure needed to be rebuilt).
+ -- Removed checkpoint_blcr.so from the plugin rpm in the slurm.spec since
+    it is also in the blcr rpm.
+ -- Fixed issue in sview where you were unable to edit the count
+    of jobs to share resources.
+ -- BLUEGENE - Fixed issue where tasks on steps weren't being displayed
+    correctly with scontrol and sview.
+ -- BLUEGENE - fixed wiki2 plugin to report correct task count for pending jobs.
+ -- BLUEGENE - Added /etc/ld.so.conf.d/slurm.conf to point to the
+    directory holding libsched_if64.so when building rpms.
+ -- Adjust get_wckeys call in slurmdbd to allow operators to list wckeys.
+
 * Changes in SLURM 2.1.1
 =============================
  -- Fix for case sensitive databases when a slurmctld has a mixed case
@@ -4698,7 +4727,7 @@ documents those changes that are of interest to users and admins.
 * Changes in SLURM 0.2.9
 ========================
  -- Fixes for reported problems:
-   - Argument to srun `-n' option was taken as octal if preceeded with a `0'.
+   - Argument to srun `-n' option was taken as octal if preceded with a `0'.
  -- New format for Elan hosts config file (/etc/elanhosts. See README)
  -- Various fixes for managing COMPLETING jobs.
  -- Support for passing options to squeue via environment variables 
@@ -4799,4 +4828,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 19293 2010-01-21 01:45:33Z da $
+$Id: NEWS 19384 2010-02-02 22:11:39Z da $
