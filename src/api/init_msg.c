@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  init_msg.c - initialize RPC messages contents
- *  $Id: init_msg.c 10912 2007-02-01 19:48:22Z jette $
+ *  $Id: init_msg.c 12457 2007-10-05 23:15:28Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -74,6 +74,7 @@ void slurm_init_job_desc_msg(job_desc_msg_t * job_desc_msg)
 	job_desc_msg->job_min_procs   = (uint16_t) NO_VAL;
 	job_desc_msg->job_min_sockets = (uint16_t) NO_VAL;
 	job_desc_msg->job_min_threads = (uint16_t) NO_VAL;
+	job_desc_msg->job_max_memory  = NO_VAL;
 	job_desc_msg->job_min_memory  = NO_VAL;
 	job_desc_msg->job_min_tmp_disk= NO_VAL;
 	job_desc_msg->kill_on_node_fail = (uint16_t) NO_VAL;

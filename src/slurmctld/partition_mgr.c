@@ -2,7 +2,7 @@
  *  partition_mgr.c - manage the partition information of slurm
  *	Note: there is a global partition list (part_list) and
  *	time stamp (last_part_update)
- *  $Id: partition_mgr.c 11781 2007-07-02 23:00:56Z jette $
+ *  $Id: partition_mgr.c 12452 2007-10-05 19:07:07Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -341,8 +341,7 @@ int dump_all_part_state(void)
 	unlock_state_files();
 
 	free_buf(buffer);
-	END_TIMER;
-	debug3("dump_all_part_state %s", TIME_STR);
+	END_TIMER2("dump_all_part_state");
 	return 0;
 }
 
@@ -945,7 +944,7 @@ uid_t *_get_groups_members(char *group_names)
 	uid_t *group_uids = NULL;
 	uid_t *temp_uids  = NULL;
 	int i, j, k;
-	char *tmp_names, *name_ptr, *one_group_name;
+	char *tmp_names = NULL, *name_ptr = NULL, *one_group_name = NULL;
 
 	if (group_names == NULL)
 		return NULL;

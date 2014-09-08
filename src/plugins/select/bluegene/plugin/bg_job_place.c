@@ -2,7 +2,7 @@
  *  bg_job_place.c - blue gene job placement (e.g. base block selection)
  *  functions.
  *
- *  $Id: bg_job_place.c 11400 2007-04-24 18:50:38Z da $ 
+ *  $Id: bg_job_place.c 12450 2007-10-05 18:22:36Z da $ 
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -655,6 +655,10 @@ try_again:
 			if(check_block_bp_states(
 				   (*found_bg_record)->bg_block_id) 
 			   == SLURM_ERROR) {
+				error("_find_best_block_match: Marking "
+				      "block %s in an error state "
+				      "because of bad bps.",
+				      (*found_bg_record)->bg_block_id);
 				(*found_bg_record)->job_running =
 					BLOCK_ERROR_STATE;
 				(*found_bg_record)->state = RM_PARTITION_ERROR;

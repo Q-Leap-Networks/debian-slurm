@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  select_bluegene.c - node selection plugin for Blue Gene system.
  * 
- *  $Id: select_bluegene.c 11400 2007-04-24 18:50:38Z da $
+ *  $Id: select_bluegene.c 12409 2007-09-26 16:32:16Z jette $
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -315,8 +315,7 @@ extern int select_p_state_save(char *dir_name)
 	xfree(new_file);
 
 	free_buf(buffer);
-	END_TIMER;
-	debug3("select_p_state_save %s", TIME_STR);
+	END_TIMER2("select_p_state_save");
 	return SLURM_SUCCESS;
 }
 

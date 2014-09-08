@@ -1,6 +1,6 @@
 /****************************************************************************\
  *  opts.c - sfree command line option processing functions
- *  $Id: opts.c 10574 2006-12-15 23:38:29Z jette $
+ *  $Id: opts.c 12403 2007-09-25 18:36:42Z da $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -95,31 +95,6 @@ void parse_command_line(int argc, char *argv[])
 		}
 	}
 
-}
-
-void snprint_time(char *buf, size_t buf_size, time_t time)
-{
-	if (time == INFINITE) {
-		snprintf(buf, buf_size, "UNLIMITED");
-	} else {
-		long days, hours, minutes, seconds;
-		seconds = time % 60;
-		minutes = (time / 60) % 60;
-		hours = (time / 3600) % 24;
-		days = time / 86400;
-
-		if (days)
-			snprintf(buf, buf_size,
-				"%ld:%2.2ld:%2.2ld:%2.2ld",
-				days, hours, minutes, seconds);
-		else if (hours)
-			snprintf(buf, buf_size,
-				"%ld:%2.2ld:%2.2ld", 
-				hours, minutes, seconds);
-		else
-			snprintf(buf, buf_size,
-				"%ld:%2.2ld", minutes,seconds);
-	}
 }
 
 static void _print_version(void)

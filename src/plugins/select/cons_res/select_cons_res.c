@@ -2,7 +2,7 @@
  *  select_cons_res.c - node selection plugin supporting consumable 
  *  resources policies.
  *
- *  $Id: select_cons_res.c 12266 2007-09-11 20:34:43Z jette $
+ *  $Id: select_cons_res.c 12452 2007-10-05 19:07:07Z da $
  *****************************************************************************\
  *
  *  The following example below illustrates how four jobs are allocated
@@ -1083,11 +1083,11 @@ extern int select_p_state_save(char *dir_name)
 {
 	int error_code = SLURM_SUCCESS;
 	ListIterator job_iterator;
-	struct select_cr_job *job;
+	struct select_cr_job *job = NULL;
 	Buf buffer = NULL;
 	int state_fd, i;
 	uint16_t job_cnt;
-	char *file_name;
+	char *file_name = NULL;
 	static time_t last_save_time;
 
 	if (last_save_time > last_cr_update_time)
@@ -1910,33 +1910,6 @@ extern int select_p_job_test(struct job_record *job_ptr, bitstr_t * bitmap,
 
 extern int select_p_job_begin(struct job_record *job_ptr)
 {
-	ListIterator job_iterator;
-	struct select_cr_job *job;
-	uint32_t cnt = 0;
-	int i;
-
-	xassert(job_ptr);
-	xassert(select_cr_job_list);
-
-	/* set job's processor count (for accounting purposes) */
-	job_iterator = list_iterator_create(select_cr_job_list);
-	if (job_iterator == NULL)
-		fatal("list_iterator_create: %m");
-	while ((job = (struct select_cr_job *) list_next(job_iterator))) {
-		if (job->job_id != job_ptr->job_id)
-			continue;
-		for (i=0; i<job->nhosts; i++)
-			cnt += MIN(job->cpus[i], job->alloc_lps[i]);
-		if (job_ptr->num_procs != cnt) {
-			debug2("cons_res: reset num_procs for %u from "
-			       "%u to %u", 
-			       job_ptr->job_id, job_ptr->num_procs, cnt);
-			job_ptr->num_procs = cnt;
-		}
-		break;
-	}
-	list_iterator_destroy(job_iterator);
-
 	return SLURM_SUCCESS;
 }
 
