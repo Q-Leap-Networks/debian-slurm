@@ -210,6 +210,10 @@ the Comment String
 Quality of Service.
 
 .TP
+\fIResource\fP
+Resources - software resources for the system.
+
+.TP
 \fItransaction\fR
 List of transactions that have occurred during a given time period.
 
@@ -314,9 +318,6 @@ Resource plugin.
 Maximum number of nodes running jobs are able to be allocated in aggregate for
 this association and all associations which are children of this association.
 To clear a previously set value use the modify command with a new value of \-1.
-Each job's node allocation is counted separately
-(i.e. if a single node has resources allocated to two jobs, this is counted
-as two allocated nodes).
 
 .TP
 \fIGrpSubmitJobs\fP=<max jobs>
@@ -411,15 +412,21 @@ Valid <operator> values include:
 .RS
 .TP 5
 \fB=\fR
-Set \fIQosLevel\fP to the specified value.
+Set \fIQosLevel\fP to the specified value. \fBNote:\fR the QOS that can be used
+at a given account in the hierarchy are inherited by the children of that account.
+By assigning QOS with the \fB=\fR sign only the assigned QOS can be used by the
+account and its childern.
 .TP
 \fB+=\fR
-Add the specified <qos> value to the current \fIQosLevel\fP.
+Add the specified <qos> value to the current \fIQosLevel\fP. The account will
+have access to this QOS and the other previously assigned to it.
 .TP
 \fB\-=\fR
 Remove the specified <qos> value from the current \fIQosLevel\fP.
 .RE
+.TP
 
+See the \fBEXAMPLES\fR section below.
 
 .SH "SPECIFICATIONS FOR ACCOUNTS"
 
@@ -603,9 +610,6 @@ this association and all associations which are children of this association.
 \fIGrpNodes\fP
 Maximum number of nodes running jobs are able to be allocated in aggregate for
 this association and all associations which are children of this association.
-Each job's node allocation is counted separately
-(i.e. if a single node has resources allocated to two jobs, this is counted
-as two allocated nodes).
 
 .TP
 \fIGrpSubmitJobs\fP
@@ -683,7 +687,6 @@ children of this association.
 .TP
 \fIUser\fP
 The name of a user in the association.
-
 
 .SH "SPECIFICATIONS FOR CLUSTERS"
 
@@ -1019,9 +1022,6 @@ Maximum number of running jobs in aggregate for this QOS.
 \fIGrpNodes\fP
 Maximum number of nodes running jobs are able to be allocated in aggregate for
 this QOS.
-Each job's node allocation is counted separately
-(i.e. if a single node has resources allocated to two jobs, this is counted
-as two allocated nodes).
 
 .TP
 \fIGrpSubmitJobs\fP
@@ -1092,6 +1092,13 @@ from the resources).
 What priority will be added to a job\'s priority when using this QOS.
 
 .TP
+\fIRawUsage\fP=<value>
+This allows an administrator to reset the raw usage accrued to a
+QOS.  The only value currently supported is 0 (zero).  This is a
+settable specification only - it cannot be used as a filter to list
+accounts.
+
+.TP
 \fIUsageFactor\fP
 Usage factor when running with this QOS
 
@@ -1153,9 +1160,6 @@ To clear a previously set value use the modify command with a new value of \-1.
 Maximum number of nodes running jobs are able to be allocated in aggregate for
 this QOS.
 To clear a previously set value use the modify command with a new value of \-1.
-Each job's node allocation is counted separately
-(i.e. if a single node has resources allocated to two jobs, this is counted
-as two allocated nodes).
 
 .TP
 \fIGrpSubmitJobs\fP
@@ -1258,6 +1262,108 @@ if the usagefactor was .5 every second would only could for half the time.
 Setting this value to 0 will make it so any job running will not add
 time to fairshare or association/qos limits.
 To clear a previously set value use the modify command with a new value of \-1.
+
+
+.SH "SPECIFICATIONS FOR RESOURCE"
+
+\fIClusters\fP=<name list>
+Comma separated list of cluster names on which specified resources are to be
+available.  If no names are designated the all clusters already
+allowed to use this resource will be altered.
+
+.TP
+\fICount\fP=<OPT>
+Number of software resources of a specific name configured on the system being
+controlled by a resource manager.
+
+.TP
+\fIDescription=\fP
+A brief description of the resource.
+
+.TP
+\fIFlags\fP=<OPT>
+Flags that identify specific attributes of the system resource.  At this time
+no flags have been defined.
+
+.TP
+\fIManager\fP=<OPT>
+The name of a software resource manager controlling this system resource.
+
+.TP
+\fINames\fP=<OPT>
+Comma separated list of the name of a resource configured on the
+system being controlled by a resource manager.  If this resource is
+seen on the slurmctld it's name will be name@server to distinguish it
+from local resources defined in a slurm.conf.
+
+.TP
+\fIPercentAllowed\fP=<percent allowed>
+Percentage of a specific resource that can be used on specified cluster.
+
+.TP
+\fIServer\fP=<OPT>
+The name of the server serving up the resource.  Default is 'slurmdb'.
+
+.TP
+\fIType\fP=<OPT>
+The type of the resource represented by this record.  Currently the only valid
+type is License.
+.P
+NOTE:  Resource is used to define each resource configured on a system
+available for usage by Slurm clusters.
+
+
+.SH "LIST/SHOW RESOURCE FORMAT OPTIONS"
+
+.TP
+\fICluster\fP
+Name of cluster resource is given to.
+
+.TP
+\fICount\fP
+The count of a specific resource configured on the system globally.
+
+.TP
+\fICountAllowed\fP
+The count of a specific resource configured on the system to a cluster.
+
+.TP
+\fICountUsed\fP
+The used count of a specific resource configured on the system globally.
+
+.TP
+\fIDescription\fP
+Description of the resource.
+
+.TP
+\fIFlags\fP
+Flags that identify specific attributes associated with the resource.  At
+this time no flags have been defined.
+
+ .TP
+\fIManager\fP
+Name of the resource manager that controls this resource.
+
+.TP
+\fIName\fP
+Name of this resource.
+
+.TP
+\fIPercentAllowed\fP
+The percent of a specific resource given to a cluster.
+
+.TP
+\fIPercentUsed\fP
+The used percentage of a specific resource globally.
+
+ .TP
+\fIServer\fP
+Server serving up the resource.
+
+.TP
+\fIType\fP
+Type of resource this record represents.
+
 
 .SH "SPECIFICATIONS FOR TRANSACTIONS"
 
@@ -1507,9 +1613,6 @@ association and all associations which are children of this association.
 Maximum number of nodes running jobs are able to be
 allocated in aggregate for this association and all associations which
 are children of this association.
-Each job's node allocation is counted separately
-(i.e. if a single node has resources allocated to two jobs, this is counted
-as two allocated nodes).
 .TP
 \fIGrpSubmitJobs=\fP
 Maximum number of jobs which can be in a pending or
@@ -1586,9 +1689,6 @@ association and all associations which are children of this association.
 Maximum number of nodes running jobs are able to be
 allocated in aggregate for this association and all associations which
 are children of this association.
-Each job's node allocation is counted separately
-(i.e. if a single node has resources allocated to two jobs, this is counted
-as two allocated nodes).
 .TP
 \fIGrpSubmitJobs=\fP
 Maximum number of jobs which can be in a pending or
@@ -1745,31 +1845,36 @@ before you can add users.
 
 .eo
 .br
-> sacctmgr create cluster tux
+-> sacctmgr create cluster tux
 .br
-> sacctmgr create account name=science fairshare=50
+-> sacctmgr create account name=science fairshare=50
 .br
-> sacctmgr create account name=chemistry parent=science fairshare=30
+-> sacctmgr create account name=chemistry parent=science fairshare=30
 .br
-> sacctmgr create account name=physics parent=science fairshare=20
+-> sacctmgr create account name=physics parent=science fairshare=20
 .br
-> sacctmgr create user name=adam cluster=tux account=physics fairshare=10
+-> sacctmgr create user name=adam cluster=tux account=physics fairshare=10
 .br
-> sacctmgr delete user name=adam cluster=tux account=physics
+-> sacctmgr delete user name=adam cluster=tux account=physics
 .br
-> sacctmgr delete account name=physics cluster=tux
+-> sacctmgr delete account name=physics cluster=tux
 .br
-> sacctmgr modify user where name=adam cluster=tux account=physics set
+-> sacctmgr modify user where name=adam cluster=tux account=physics set
   maxjobs=2 maxwall=30:00
 .br
-> sacctmgr list associations cluster=tux format=Account,Cluster,User,Fairshare tree withd
+-> sacctmgr list associations cluster=tux format=Account,Cluster,User,Fairshare tree withd
 .br
-> sacctmgr list transactions StartTime=11/03\-10:30:00 format=Timestamp,Action,Actor
+-> sacctmgr list transactions StartTime=11/03\-10:30:00 format=Timestamp,Action,Actor
 .br
-> sacctmgr dump cluster=tux file=tux_data_file
+-> sacctmgr dump cluster=tux file=tux_data_file
 .br
-> sacctmgr load tux_data_file
+-> sacctmgr load tux_data_file
 .br
+
+.br
+A user's account can not be changed directly. A new association needs to be
+created for the user with the new account. Then the association with the old
+account can be deleted.
 
 .br
 When modifying an object placing the key words 'set' and the
@@ -1781,7 +1886,7 @@ word 'where'.
 .br
 
 .br
-wrong> sacctmgr modify user name=adam set fairshare=10 cluster=tux
+wrong-> sacctmgr modify user name=adam set fairshare=10 cluster=tux
 .br
 
 .br
@@ -1790,9 +1895,9 @@ set fairshare=10 and cluster=tux.
 .br
 
 .br
-right> sacctmgr modify user name=adam cluster=tux set fairshare=10
+right-> sacctmgr modify user name=adam cluster=tux set fairshare=10
 .br
-right> sacctmgr modify user name=adam set fairshare=10 where cluster=tux
+right-> sacctmgr modify user name=adam set fairshare=10 where cluster=tux
 .br
 
 .br
@@ -1808,19 +1913,131 @@ explicitly set you should use qos+=expedite to add this to the list in
 this fashion.
 .br
 
-.br
-> sacctmgr modify user name=adam set qos+=expedite
-.br
-
-.br
 If you are looking to only add the qos expedite to only a certain
 account and or cluster you can do that by specifying them in the
 sacctmgr line.
+
+.br
+-> sacctmgr modify user name=adam set qos+=expedite
 .br
 
 .br
 > sacctmgr modify user name=adam acct=this cluster=tux set qos+=expedite
 .br
+
+.br
+Let's give an example how to add QOS to user accounts.
+List all available QOSs in the cluster.
+.br
+
+.br
+->sacctmgr show qos format=name
+      Name
+.br
+  ---------
+.br
+    normal
+.br
+  expedite
+.br
+
+.br
+List all the associations in the cluster.
+.br
+
+->sacctmgr show assoc format=cluster,account,qos
+   Cluster    Account    QOS
+.br
+  --------  ---------- -----
+.br
+  zebra       root         normal
+.br
+  zebra       root         normal
+.br
+  zebra          g         normal
+.br
+  zebra         g1         normal
+.br
+
+.br
+Add the QOS expedite to account G1 and display the result.
+Using the operator += the QOS will be added together
+with the  existing QOS to this account.
+.br
+
+.br
+->sacctmgr modify account name=g1 set qos+=expedite
+.br
+
+.br
+->sacctmgr show assoc format=cluster,account,qos
+.br
+   Cluster    Account   QOS
+.br
+   --------  --------  -------
+.br
+   zebra       root         normal
+.br
+   zebra       root         normal
+.br
+   zebra          g         normal
+.br
+   zebra         g1  expedite,normal
+.br
+
+.br
+Now set the QOS expedite as the only QOS for the account G and display
+the result. Using the operator = that expedite is the only usable
+QOS by account G
+.br
+
+.br
+->sacctmgr modify account name=G set qos=expedite
+.br
+
+.br
+>sacctmgr show assoc format=cluster,account,user,qos
+.br
+   Cluster    Account  QOS
+.br
+  ---------   -------- -----
+.br
+  zebra       root      normal
+.br
+  zebra       root      normal
+.br
+  zebra          g      expedite
+.br
+  zebra         g1      expedite,normal
+.br
+
+.br
+If a new account is added under the account G it will inherit the
+QOS expedite and it will not have access to QOS normal.
+.br
+
+.br
+->sacctmgr add account banana parent=G
+.br
+
+.br
+->sacctmgr show assoc format=cluster,account,qos
+.br
+   Cluster    Account   QOS
+.br
+  ---------  --------  -----
+.br
+  zebra       root       normal
+.br
+  zebra       root       normal
+.br
+  zebra          g       expedite
+.br
+  zebra     banana       expedite
+.br
+  zebra         g1       expedite,normal
+.br
+
 .ec
 
 .SH "COPYING"

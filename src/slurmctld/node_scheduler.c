@@ -130,6 +130,8 @@ static bitstr_t *_valid_features(struct job_details *detail_ptr,
 
 static int _fill_in_gres_fields(struct job_record *job_ptr);
 
+static void _launch_prolog(struct job_record *job_ptr);
+
 /*
  * _get_ntasks_per_core - Retrieve the value of ntasks_per_core from
  *	the given job_details record.  If it wasn't set, return 0xffff.
@@ -196,7 +198,7 @@ static int _get_gres_alloc(struct job_record *job_ptr)
 }
 
 /*
- * _get_gres_config - Fill in the gres_alloc string field for a given 
+ * _get_gres_config - Fill in the gres_alloc string field for a given
  *      job_record with the count of gres on each node (e.g. for whole node
  *	allocations.
  * IN job_ptr - the job record whose "gres_alloc" field is to be constructed
@@ -221,7 +223,7 @@ static int _get_gres_config(struct job_record *job_ptr)
 		i_first = bit_ffs(node_bitmap);
 		i_last  = bit_fls(node_bitmap);
 	} else {
-		if (slurm_get_debug_flags() & DEBUG_FLAG_GRES)
+		if (slurmctld_conf.debug_flags & DEBUG_FLAG_GRES)
 			debug("(%s:%d) job id: %u -- No nodes in bitmap of "
 			      "job_record!",
 			      THIS_FILE, __LINE__, job_ptr->job_id);
@@ -246,7 +248,7 @@ static int _get_gres_config(struct job_record *job_ptr)
 		else
 			count = 0;
 
-		if (slurm_get_debug_flags() & DEBUG_FLAG_GRES)
+		if (slurmctld_conf.debug_flags & DEBUG_FLAG_GRES)
 			debug("(%s:%d) job id: %u -- Count of "
 			      "GRES types in the gres_list is: %d",
 			      THIS_FILE, __LINE__, job_ptr->job_id, count);
@@ -254,7 +256,7 @@ static int _get_gres_config(struct job_record *job_ptr)
 		/* Only reallocate when there is an increase in size of the
 		 * local arrays. */
 		if (count > oldcount) {
-			if (slurm_get_debug_flags() & DEBUG_FLAG_GRES)
+			if (slurmctld_conf.debug_flags & DEBUG_FLAG_GRES)
 				debug("(%s:%d) job id: %u -- Old GRES "
 				      "count: %d New GRES count: %d",
 				      THIS_FILE, __LINE__, job_ptr->job_id,
@@ -330,7 +332,7 @@ static int _get_gres_config(struct job_record *job_ptr)
 		if (prefix[0] == '\0')
 			prefix = ",";
 
-		if (slurm_get_debug_flags() & DEBUG_FLAG_GRES)
+		if (slurmctld_conf.debug_flags & DEBUG_FLAG_GRES)
 			debug("(%s:%d) job id: %u -- gres_alloc substring=(%s)",
 			      THIS_FILE, __LINE__, job_ptr->job_id, buf);
 	}
@@ -473,7 +475,7 @@ extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
 
 	license_job_return(job_ptr);
 	acct_policy_job_fini(job_ptr);
-	if (slurm_sched_freealloc(job_ptr) != SLURM_SUCCESS)
+	if (slurm_sched_g_freealloc(job_ptr) != SLURM_SUCCESS)
 		error("slurm_sched_freealloc(%u): %m", job_ptr->job_id);
 	if (select_g_job_fini(job_ptr) != SLURM_SUCCESS)
 		error("select_g_job_fini(%u): %m", job_ptr->job_id);
@@ -487,7 +489,7 @@ extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
 	else
 		agent_args->msg_type = REQUEST_TERMINATE_JOB;
 	agent_args->retry = 0;	/* re_kill_job() resends as needed */
-	agent_args->hostlist = hostlist_create("");
+	agent_args->hostlist = hostlist_create(NULL);
 	kill_job = xmalloc(sizeof(kill_job_msg_t));
 	last_node_update    = time(NULL);
 	kill_job->job_id    = job_ptr->job_id;
@@ -506,6 +508,7 @@ extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
 #ifdef HAVE_FRONT_END
 	if (job_ptr->batch_host &&
 	    (front_end_ptr = job_ptr->front_end_ptr)) {
+		agent_args->protocol_version = front_end_ptr->protocol_version;
 		if (IS_NODE_DOWN(front_end_ptr)) {
 			/* Issue the KILL RPC, but don't verify response */
 			front_end_ptr->job_cnt_comp = 0;
@@ -552,12 +555,13 @@ extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
 			}
 		}
 
-		hostlist_push(agent_args->hostlist, job_ptr->batch_host);
+		hostlist_push_host(agent_args->hostlist, job_ptr->batch_host);
 		agent_args->node_count++;
 	}
 #else
 	if (!job_ptr->node_bitmap_cg)
 		build_cg_bitmap(job_ptr);
+	agent_args->protocol_version = SLURM_PROTOCOL_VERSION;
 	for (i = 0, node_ptr = node_record_table_ptr;
 	     i < node_record_count; i++, node_ptr++) {
 		if (!bit_test(job_ptr->node_bitmap_cg, i))
@@ -581,7 +585,10 @@ extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
 		}
 		make_node_comp(node_ptr, job_ptr, suspended);
 
-		hostlist_push(agent_args->hostlist, node_ptr->name);
+		if (agent_args->protocol_version > node_ptr->protocol_version)
+			agent_args->protocol_version =
+				node_ptr->protocol_version;
+		hostlist_push_host(agent_args->hostlist, node_ptr->name);
 		agent_args->node_count++;
 	}
 #endif
@@ -589,7 +596,7 @@ extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
 	if ((agent_args->node_count - down_node_cnt) == 0) {
 		job_ptr->job_state &= (~JOB_COMPLETING);
 		delete_step_records(job_ptr);
-		slurm_sched_schedule();
+		slurm_sched_g_schedule();
 	}
 
 	if (agent_args->node_count == 0) {
@@ -648,15 +655,16 @@ static int _match_feature(char *seek, struct node_set *node_set_ptr)
  *					part=	part=	part=	part=
  *	cons_res	user_request	EXCLUS	NO	YES	FORCE
  *	--------	------------	------	-----	-----	-----
- *	no		default/exclus	whole	whole	whole	share/O
- *	no		share=yes	whole	whole	share/O	share/O
- *	yes		default		whole	share	share/O	share/O
- *	yes		exclusive	whole	whole	whole	share/O
+ *	no		default		whole	whole	whole	whole/O
+ *	no		exclusive	whole	whole	whole	whole/O
+ *	no		share=yes	whole	whole	whole/O	whole/O
+ *	yes		default		whole	share	share	share/O
+ *	yes		exclusive	whole	whole	whole	whole/O
  *	yes		share=yes	whole	share	share/O	share/O
  *
- * whole   = whole node is allocated exclusively to the user
- * share   = nodes may be shared but the resources are not overcommitted
- * share/O = nodes are shared and the resources can be overcommitted
+ * whole  = entire node is allocated to the job
+ * share  = less than entire node may be allocated to the job
+ * -/O    = resources can be over-committed (e.g. gang scheduled)
  *
  * part->max_share:
  *	&SHARED_FORCE 	= FORCE
@@ -664,44 +672,45 @@ static int _match_feature(char *seek, struct node_set *node_set_ptr)
  *	1		= NO
  *	> 1		= YES
  *
- * job_ptr->details->shared:
- *	(uint16_t)NO_VAL	= default
- *	0			= exclusive
- *	1			= share=yes
+ * job_ptr->details->share_res:
+ *	0		= default or share=no
+ *	1		= share=yes
+ *
+ * job_ptr->details->whole_node:
+ *	0		= default
+ *	1		= exclusive
  *
  * Return values:
  *	0 = no sharing
- *	1 = user requested sharing
- *	2 = sharing enforced (either by partition or cons_res)
- * (cons_res plugin needs to distinguish between "enforced" and
- *  "requested" sharing)
+ *	1 = share resources
  */
 static int
-_resolve_shared_status(uint16_t user_flag, uint16_t part_max_share,
+_resolve_shared_status(struct job_record *job_ptr, uint16_t part_max_share,
 		       int cons_res_flag)
 {
-	/* no sharing if part=EXCLUSIVE */
-	if (part_max_share == 0)
+	/* no sharing if partition Shared=EXCLUSIVE */
+	if (part_max_share == 0) {
+		job_ptr->details->whole_node = 1;
 		return 0;
+	}
 
-	/* sharing if part=FORCE with count > 1 */
+	/* sharing if partition Shared=FORCE with count > 1 */
 	if ((part_max_share & SHARED_FORCE) &&
 	    ((part_max_share & (~SHARED_FORCE)) > 1))
-		return 2;
+		return 1;
 
 	if (cons_res_flag) {
-		/* sharing unless user requested exclusive */
-		if (user_flag == 0)
+		if ((job_ptr->details->share_res  == 0) ||
+		    (job_ptr->details->whole_node == 1))
 			return 0;
-		if (user_flag == 1)
-			return 1;
-		return 2;
+		return 1;
 	} else {
-		/* no sharing if part=NO */
+		job_ptr->details->whole_node = 1;
+		/* no sharing if partition Shared=NO */
 		if (part_max_share == 1)
 			return 0;
 		/* share if the user requested it */
-		if (user_flag == 1)
+		if (job_ptr->details->share_res == 1)
 			return 1;
 	}
 	return 0;
@@ -1010,6 +1019,7 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 		 List *preemptee_job_list, bool has_xand,
 		 bitstr_t *exc_core_bitmap)
 {
+	struct node_record *node_ptr;
 	int error_code = SLURM_SUCCESS, i, j, pick_code;
 	int total_nodes = 0, avail_nodes = 0;
 	bitstr_t *avail_bitmap = NULL, *total_bitmap = NULL;
@@ -1064,9 +1074,9 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 		}
 	}
 
-	shared = _resolve_shared_status(job_ptr->details->shared,
-					part_ptr->max_share, cr_enabled);
-	job_ptr->details->shared = shared;
+	shared = _resolve_shared_status(job_ptr, part_ptr->max_share,
+					cr_enabled);
+	job_ptr->details->share_res = shared;
 	if (cr_enabled)
 		job_ptr->cr_enabled = cr_enabled; /* CR enabled for this job */
 
@@ -1084,6 +1094,23 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 		}
 		if (total_nodes > max_nodes) {	/* exceeds node limit */
 			return ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE;
+		}
+		if (job_ptr->details->core_spec) {
+			i = bit_ffs(job_ptr->details->req_node_bitmap);
+			if (i >= 0) {
+				node_ptr = node_record_table_ptr + i;
+				if (slurmctld_conf.fast_schedule) {
+					j = node_ptr->config_ptr->sockets *
+					    node_ptr->config_ptr->cores;
+				} else {
+					j = node_ptr->sockets * node_ptr->cores;
+				}
+			}
+			if ((i >= 0) && (job_ptr->details->core_spec >= j)) {
+				info("_pick_best_nodes: job %u never runnable",
+				     job_ptr->job_id);
+				return ESLURM_REQUESTED_NODE_CONFIG_UNAVAILABLE;
+			}
 		}
 
 		/* check the availability of these nodes */
@@ -1302,7 +1329,7 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 		    (avail_nodes >= min_nodes)		&&
 		    ((job_ptr->details->req_node_bitmap == NULL) ||
 		     bit_super_set(job_ptr->details->req_node_bitmap,
-                                   avail_bitmap))) {
+				   avail_bitmap))) {
 			if (*preemptee_job_list) {
 				list_destroy(*preemptee_job_list);
 				*preemptee_job_list = NULL;
@@ -1660,17 +1687,20 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 		} else if (error_code == ESLURM_RESERVATION_NOT_USABLE) {
 			job_ptr->state_reason = WAIT_RESERVATION;
 			xfree(job_ptr->state_desc);
+		} else if ((job_ptr->state_reason == WAIT_BLOCK_MAX_ERR) ||
+			   (job_ptr->state_reason == WAIT_BLOCK_D_ACTION)) {
+			/* state_reason was already setup */
 		} else {
 			job_ptr->state_reason = WAIT_RESOURCES;
 			xfree(job_ptr->state_desc);
 			if (error_code == ESLURM_NODES_BUSY)
-				slurm_sched_job_is_pending();
+				slurm_sched_g_job_is_pending();
 		}
 		goto cleanup;
 	}
 
 	if (test_only) {	/* set if job not highest priority */
-		slurm_sched_job_is_pending();
+		slurm_sched_g_job_is_pending();
 		error_code = SLURM_SUCCESS;
 		goto cleanup;
 	}
@@ -1754,7 +1784,7 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 	 * strings representing the amount of each GRES type requested
 	 *  and allocated. */
 	_fill_in_gres_fields(job_ptr);
-	if (slurm_get_debug_flags() & DEBUG_FLAG_GRES)
+	if (slurmctld_conf.debug_flags & DEBUG_FLAG_GRES)
 		debug("(%s:%d) job id: %u -- job_record->gres: (%s), "
 		      "job_record->gres_alloc: (%s)",
 		      THIS_FILE, __LINE__, job_ptr->job_id,
@@ -1768,7 +1798,15 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 		jobacct_storage_g_job_start(acct_db_conn, job_ptr);
 
 	prolog_slurmctld(job_ptr);
-	slurm_sched_newalloc(job_ptr);
+	slurm_sched_g_newalloc(job_ptr);
+
+	/* Request asynchronous launch of a prolog for a
+	 * non batch job. For a batch job the prolog will be
+	 * started synchroniously by slurmd. */
+	if (job_ptr->batch_flag == 0 &&
+		(slurmctld_conf.prolog_flags & PROLOG_FLAG_ALLOC)) {
+		_launch_prolog(job_ptr);
+	}
 
       cleanup:
 	if (preemptee_job_list)
@@ -1787,6 +1825,60 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 	}
 
 	return error_code;
+}
+
+/*
+ * Launch prolog via RPC to slurmd. This is useful when we need to run
+ * prolog at allocation stage. Then we ask slurmd to launch the prolog
+ * asynchroniously and wait on REQUEST_COMPLETE_PROLOG message from slurmd.
+ */
+static void _launch_prolog(struct job_record *job_ptr)
+{
+	prolog_launch_msg_t *prolog_msg_ptr;
+	agent_arg_t *agent_arg_ptr;
+	prolog_msg_ptr = (prolog_launch_msg_t *)
+				xmalloc(sizeof(prolog_launch_msg_t));
+
+	xassert(job_ptr);
+	xassert(job_ptr->batch_host);
+	xassert(prolog_msg_ptr);
+
+	/* Locks: Write job */
+	job_ptr->state_reason = WAIT_PROLOG;
+
+	prolog_msg_ptr->job_id = job_ptr->job_id;
+	prolog_msg_ptr->uid = job_ptr->user_id;
+	prolog_msg_ptr->gid = job_ptr->group_id;
+	prolog_msg_ptr->alias_list = xstrdup(job_ptr->alias_list);
+	prolog_msg_ptr->nodes = xstrdup(job_ptr->nodes);
+	prolog_msg_ptr->partition = xstrdup(job_ptr->partition);
+	prolog_msg_ptr->std_err = xstrdup(job_ptr->details->std_err);
+	prolog_msg_ptr->std_out = xstrdup(job_ptr->details->std_out);
+	prolog_msg_ptr->work_dir = xstrdup(job_ptr->details->work_dir);
+	prolog_msg_ptr->spank_job_env_size = job_ptr->spank_job_env_size;
+	prolog_msg_ptr->spank_job_env = xduparray(job_ptr->spank_job_env_size,
+						  job_ptr->spank_job_env);
+
+	agent_arg_ptr = (agent_arg_t *) xmalloc(sizeof(agent_arg_t));
+	agent_arg_ptr->retry = 0;
+	agent_arg_ptr->node_count = 1;
+  #ifdef HAVE_FRONT_END
+	xassert(job_ptr->front_end_ptr);
+	xassert(job_ptr->front_end_ptr->name);
+	agent_arg_ptr->protocol_version =
+		job_ptr->front_end_ptr->protocol_version;
+	agent_arg_ptr->hostlist = hostlist_create(job_ptr->front_end_ptr->name);
+  #else
+	struct node_record *node_ptr;
+	if ((node_ptr = find_node_record(job_ptr->batch_host)))
+		agent_arg_ptr->protocol_version = node_ptr->protocol_version;
+	agent_arg_ptr->hostlist = hostlist_create(job_ptr->batch_host);
+  #endif
+	agent_arg_ptr->msg_type = REQUEST_LAUNCH_PROLOG;
+	agent_arg_ptr->msg_args = (void *) prolog_msg_ptr;
+
+	/* Launch the RPC via agent */
+	agent_queue_request(agent_arg_ptr);
 }
 
 /*
@@ -1811,7 +1903,7 @@ static int _fill_in_gres_fields(struct job_record *job_ptr)
 
 	/* First build the GRES requested field. */
 	if ((req_config == NULL) || (req_config[0] == '\0')) {
-		if (slurm_get_debug_flags() & DEBUG_FLAG_GRES)
+		if (slurmctld_conf.debug_flags & DEBUG_FLAG_GRES)
 			debug("(%s:%d) job id: %u -- job_record->gres "
 			      "is empty or NULL; this is OK if no GRES "
 			      "was requested",
@@ -1821,7 +1913,7 @@ static int _fill_in_gres_fields(struct job_record *job_ptr)
 			xstrcat(job_ptr->gres_req, "");
 
 	} else if (job_ptr->node_cnt > 0
-	           && job_ptr->gres_req == NULL) {
+		   && job_ptr->gres_req == NULL) {
 		/* job_ptr->gres_req is rebuilt/replaced here */
 		tmp_str = xstrdup(req_config);
 
@@ -1853,7 +1945,7 @@ static int _fill_in_gres_fields(struct job_record *job_ptr)
 
 			if (prefix[0] == '\0')
 				prefix = ",";
-			if (slurm_get_debug_flags() & DEBUG_FLAG_GRES) {
+			if (slurmctld_conf.debug_flags & DEBUG_FLAG_GRES) {
 				debug("(%s:%d) job id:%u -- ngres_req:"
 				      "%u, gres_req substring = (%s)",
 				      THIS_FILE, __LINE__,
@@ -1868,7 +1960,7 @@ static int _fill_in_gres_fields(struct job_record *job_ptr)
 	if ( !job_ptr->gres_alloc || (job_ptr->gres_alloc[0] == '\0') ) {
 		/* Now build the GRES allocated field. */
 		rv = _build_gres_alloc_string(job_ptr);
-		if (slurm_get_debug_flags() & DEBUG_FLAG_GRES) {
+		if (slurmctld_conf.debug_flags & DEBUG_FLAG_GRES) {
 			debug("(%s:%d) job id: %u -- job_record->gres: (%s), "
 			      "job_record->gres_alloc: (%s)",
 			      THIS_FILE, __LINE__, job_ptr->job_id,
@@ -2266,7 +2358,7 @@ static int _build_node_list(struct job_record *job_ptr,
 	 * scheduling jobs on powered down nodes where possible. */
 	for (i = (node_set_inx-1); i >= 0; i--) {
 		power_cnt = bit_overlap(node_set_ptr[i].my_bitmap,
-				        power_node_bitmap);
+					power_node_bitmap);
 		if (power_cnt == 0)
 			continue;	/* no nodes powered down */
 		if (power_cnt == node_set_ptr[i].nodes) {
@@ -2553,11 +2645,11 @@ extern void re_kill_job(struct job_record *job_ptr)
 	xassert(job_ptr);
 	xassert(job_ptr->details);
 
-	kill_hostlist = hostlist_create("");
+	kill_hostlist = hostlist_create(NULL);
 
 	agent_args = xmalloc(sizeof(agent_arg_t));
 	agent_args->msg_type = REQUEST_TERMINATE_JOB;
-	agent_args->hostlist = hostlist_create("");
+	agent_args->hostlist = hostlist_create(NULL);
 	agent_args->retry = 0;
 	kill_job = xmalloc(sizeof(kill_job_msg_t));
 	kill_job->job_id    = job_ptr->job_id;
@@ -2575,6 +2667,7 @@ extern void re_kill_job(struct job_record *job_ptr)
 #ifdef HAVE_FRONT_END
 	if (job_ptr->batch_host &&
 	    (front_end_ptr = find_front_end_record(job_ptr->batch_host))) {
+		agent_args->protocol_version = front_end_ptr->protocol_version;
 		if (IS_NODE_DOWN(front_end_ptr)) {
 			for (i = 0, node_ptr = node_record_table_ptr;
 			     i < node_record_count; i++, node_ptr++) {
@@ -2590,7 +2683,7 @@ extern void re_kill_job(struct job_record *job_ptr)
 					last_node_update = time(NULL);
 					job_ptr->job_state &= (~JOB_COMPLETING);
 					delete_step_records(job_ptr);
-					slurm_sched_schedule();
+					slurm_sched_g_schedule();
 					batch_requeue_fini(job_ptr);
 					last_node_update = time(NULL);
 				}
@@ -2598,7 +2691,7 @@ extern void re_kill_job(struct job_record *job_ptr)
 		} else if (!IS_NODE_NO_RESPOND(front_end_ptr)) {
 			(void) hostlist_push_host(kill_hostlist,
 						  job_ptr->batch_host);
-			hostlist_push(agent_args->hostlist,
+			hostlist_push_host(agent_args->hostlist,
 				      job_ptr->batch_host);
 			agent_args->node_count++;
 		}
@@ -2619,13 +2712,18 @@ extern void re_kill_job(struct job_record *job_ptr)
 			    ((--job_ptr->node_cnt) == 0)) {
 				job_ptr->job_state &= (~JOB_COMPLETING);
 				delete_step_records(job_ptr);
-				slurm_sched_schedule();
+				slurm_sched_g_schedule();
 				batch_requeue_fini(job_ptr);
 				last_node_update = time(NULL);
 			}
 		} else if (!IS_NODE_NO_RESPOND(node_ptr)) {
 			(void)hostlist_push_host(kill_hostlist, node_ptr->name);
-			hostlist_push(agent_args->hostlist, node_ptr->name);
+			if (agent_args->protocol_version >
+			    node_ptr->protocol_version)
+				agent_args->protocol_version =
+					node_ptr->protocol_version;
+			hostlist_push_host(agent_args->hostlist,
+					   node_ptr->name);
 			agent_args->node_count++;
 		}
 	}

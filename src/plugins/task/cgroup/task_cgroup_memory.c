@@ -300,7 +300,7 @@ static int memcg_initialize (xcgroup_ns_t *ns, xcgroup_t *cg,
 	return 0;
 }
 
-extern int task_cgroup_memory_create(slurmd_job_t *job)
+extern int task_cgroup_memory_create(stepd_step_rec_t *job)
 {
 	int fstatus = SLURM_ERROR;
 
@@ -432,7 +432,7 @@ error:
 	return fstatus;
 }
 
-extern int task_cgroup_memory_attach_task(slurmd_job_t *job)
+extern int task_cgroup_memory_attach_task(stepd_step_rec_t *job)
 {
 	int fstatus = SLURM_ERROR;
 	pid_t pid;
@@ -467,7 +467,7 @@ int failcnt_non_zero(xcgroup_t* cg, char* param)
 	return value > 0;
 }
 
-extern int task_cgroup_memory_check_oom(slurmd_job_t *job)
+extern int task_cgroup_memory_check_oom(stepd_step_rec_t *job)
 {
 	xcgroup_t memory_cg;
 

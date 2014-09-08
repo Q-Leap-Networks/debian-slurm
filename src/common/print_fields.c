@@ -38,21 +38,10 @@
 \*****************************************************************************/
 #include "src/common/print_fields.h"
 #include "src/common/parse_time.h"
+#include "src/common/read_config.h"
 
 int print_fields_parsable_print = 0;
 int print_fields_have_header = 1;
-
-static int _sort_char_list(char *name_a, char *name_b)
-{
-	int diff = strcmp(name_a, name_b);
-
-	if (diff < 0)
-		return -1;
-	else if (diff > 0)
-		return 1;
-
-	return 0;
-}
 
 extern void destroy_print_field(void *object)
 {
@@ -159,7 +148,7 @@ extern void print_fields_int(print_field_t *field, int value, int last)
 {
 	int abs_len = abs(field->len);
 	/* (value == unset)  || (value == cleared) */
-	if ((value == NO_VAL) || (value == INFINITE)) {
+	if ((value == (int)NO_VAL) || (value == (int)INFINITE)) {
 		if (print_fields_parsable_print
 		   == PRINT_FIELDS_PARSABLE_NO_ENDING
 		   && last)
@@ -179,6 +168,37 @@ extern void print_fields_int(print_field_t *field, int value, int last)
 			printf("%*d ", abs_len, value);
 		else
 			printf("%-*d ", abs_len, value);
+	}
+}
+
+/* print_fields_t->print_routine does not like uint16_t being passed
+ * in so pass in a uint32_t and typecast.
+ */
+extern void print_fields_uint16(print_field_t *field, uint32_t value, int last)
+{
+	int abs_len = abs(field->len);
+	/* (value == unset)  || (value == cleared) */
+	if (((uint16_t)value == (uint16_t)NO_VAL)
+	    || ((uint16_t)value == (uint16_t)INFINITE)) {
+		if (print_fields_parsable_print
+		   == PRINT_FIELDS_PARSABLE_NO_ENDING
+		   && last)
+			;
+		else if (print_fields_parsable_print)
+			printf("|");
+		else
+			printf("%*s ", field->len, " ");
+	} else {
+		if (print_fields_parsable_print
+		   == PRINT_FIELDS_PARSABLE_NO_ENDING
+		   && last)
+			printf("%u", value);
+		else if (print_fields_parsable_print)
+			printf("%u|", value);
+		else if (field->len == abs_len)
+			printf("%*u ", abs_len, value);
+		else
+			printf("%-*u ", abs_len, value);
 	}
 }
 
@@ -241,7 +261,7 @@ extern void print_fields_double(print_field_t *field, double value, int last)
 {
 	int abs_len = abs(field->len);
 	/* (value == unset)  || (value == cleared) */
-	if ((value == NO_VAL) || (value == INFINITE)) {
+	if ((value == (double)NO_VAL) || (value == (double)INFINITE)) {
 		if (print_fields_parsable_print
 		   == PRINT_FIELDS_PARSABLE_NO_ENDING
 		   && last)
@@ -269,7 +289,8 @@ extern void print_fields_long_double(
 {
 	int abs_len = abs(field->len);
 	/* (value == unset)  || (value == cleared) */
-	if ((value == NO_VAL) || (value == INFINITE)) {
+	if ((value == (long double)NO_VAL)
+	    || (value == (long double)INFINITE)) {
 		if (print_fields_parsable_print
 		   == PRINT_FIELDS_PARSABLE_NO_ENDING
 		   && last)
@@ -365,7 +386,7 @@ extern void print_fields_char_list(print_field_t *field, List value, int last)
 		else
 			print_this = xstrdup(" ");
 	} else {
-		list_sort(value, (ListCmpF)_sort_char_list);
+		list_sort(value, (ListCmpF)slurm_sort_char_list_asc);
 		itr = list_iterator_create(value);
 		while ((object = list_next(itr))) {
 			if (print_this)

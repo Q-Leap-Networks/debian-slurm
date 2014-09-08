@@ -129,11 +129,17 @@
 /**************************************************************************\
  * To test for memory leaks, set MEMORY_LEAK_DEBUG to 1 using
  * "configure --enable-memory-leak-debug" then execute
- * $ valgrind --tool=memcheck --leak-check=yes --num-callers=8 \
- *   --leak-resolution=med ./slurmctld -Dc >valg.ctld.out 2>&1
+ *
+ * $ valgrind --tool=memcheck --leak-check=yes --num-callers=40 \
+ *   --leak-resolution=high ./slurmctld -Dc >valg.ctld.out 2>&1
  *
  * Then exercise the slurmctld functionality before executing
  * > scontrol shutdown
+ *
+ * Note that --enable-memory-leak-debug will cause the daemon to
+ * unload the shared objects at exit thus preventing valgrind
+ * to display the stack where the eventual leaks may be.
+ * It is always best to test with and without --enable-memory-leak-debug.
  *
  * The OpenSSL code produces a bunch of errors related to use of
  *    non-initialized memory use.
@@ -183,8 +189,6 @@ static pthread_cond_t server_thread_cond = PTHREAD_COND_INITIALIZER;
 static pid_t	slurmctld_pid;
 static char    *slurm_conf_filename;
 static int      primary = 1 ;
-static pthread_t assoc_cache_thread = (pthread_t) 0;
-
 /*
  * Static list of signals to block in this process
  * *Must be zero-terminated*
@@ -240,20 +244,24 @@ int main(int argc, char *argv[])
 	/* Locks: Write configuration, job, node, and partition */
 	slurmctld_lock_t config_write_lock = {
 		WRITE_LOCK, WRITE_LOCK, WRITE_LOCK, WRITE_LOCK };
+	assoc_init_args_t assoc_init_arg;
+	pthread_t assoc_cache_thread = (pthread_t) 0;
 	slurm_trigger_callbacks_t callbacks;
 	char *dir_name;
 
-        /*
-         * Make sure we have no extra open files which
-         * would be propagated to spawned tasks.
-         */
-        for (i=3; i<256; i++)
-                (void) close(i);
+	/*
+	 * Make sure we have no extra open files which
+	 * would be propagated to spawned tasks.
+	 */
+	cnt = sysconf(_SC_OPEN_MAX);
+	for (i = 3; i < cnt; i++)
+		close(i);
 
 	/*
 	 * Establish initial configuration
 	 */
 	_init_config();
+	slurm_conf_init(NULL);
 	log_init(argv[0], log_opts, LOG_DAEMON, NULL);
 	sched_log_init(argv[0], sched_log_opts, LOG_DAEMON, NULL);
 	slurmctld_pid = getpid();
@@ -265,13 +273,14 @@ int main(int argc, char *argv[])
 	_update_nice();
 	_kill_old_slurmctld();
 
-        for (i=0; i<3; i++)
+	for (i = 0; i < 3; i++)
 		fd_set_close_on_exec(i);
 
 	if (daemonize) {
 		slurmctld_config.daemonize = 1;
 		if (daemon(1, 1))
 			error("daemon(): %m");
+		log_set_timefmt(slurmctld_conf.log_fmt);
 		log_alter(log_opts, LOG_DAEMON,
 			  slurmctld_conf.slurmctld_logfile);
 		sched_log_alter(sched_log_opts, LOG_DAEMON,
@@ -293,6 +302,12 @@ int main(int argc, char *argv[])
 	_become_slurm_user();
 	if (daemonize)
 		_set_work_dir();
+
+	/* load old config */
+	load_config_state_lite();
+
+	/* store new config */
+	dump_config_state_lite();
 
 	if (stat(slurmctld_conf.mail_prog, &stat_buf) != 0)
 		error("Configured MailProg is invalid");
@@ -359,12 +374,69 @@ int main(int argc, char *argv[])
 		      slurmctld_conf.accounting_storage_type);
 	}
 
-	memset(&callbacks, 0, sizeof(slurm_trigger_callbacks_t));
+	memset(&assoc_init_arg, 0, sizeof(assoc_init_args_t));
+	assoc_init_arg.enforce = accounting_enforce;
+	assoc_init_arg.add_license_notify = license_add_remote;
+	assoc_init_arg.remove_assoc_notify = _remove_assoc;
+	assoc_init_arg.remove_license_notify = license_remove_remote;
+	assoc_init_arg.remove_qos_notify = _remove_qos;
+	assoc_init_arg.sync_license_notify = license_sync_remote;
+	assoc_init_arg.update_assoc_notify = _update_assoc;
+	assoc_init_arg.update_license_notify = license_update_remote;
+	assoc_init_arg.update_qos_notify = _update_qos;
+	assoc_init_arg.update_resvs = update_assocs_in_resvs;
+	assoc_init_arg.cache_level = ASSOC_MGR_CACHE_ASSOC |
+				     ASSOC_MGR_CACHE_USER  |
+				     ASSOC_MGR_CACHE_QOS   |
+				     ASSOC_MGR_CACHE_RES;
+	if (slurmctld_conf.track_wckey)
+		assoc_init_arg.cache_level |= ASSOC_MGR_CACHE_WCKEY;
+
 	callbacks.acct_full   = trigger_primary_ctld_acct_full;
 	callbacks.dbd_fail    = trigger_primary_dbd_fail;
 	callbacks.dbd_resumed = trigger_primary_dbd_res_op;
 	callbacks.db_fail     = trigger_primary_db_fail;
 	callbacks.db_resumed  = trigger_primary_db_res_op;
+	acct_db_conn = acct_storage_g_get_connection(&callbacks, 0, false,
+						     slurmctld_cluster_name);
+	if (assoc_mgr_init(acct_db_conn, &assoc_init_arg, errno)) {
+		if (accounting_enforce & ACCOUNTING_ENFORCE_ASSOCS)
+			error("Association database appears down, "
+			      "reading from state file.");
+		else
+			debug("Association database appears down, "
+			      "reading from state file.");
+
+		if ((load_assoc_mgr_state(slurmctld_conf.state_save_location)
+		     != SLURM_SUCCESS)
+		    && (accounting_enforce & ACCOUNTING_ENFORCE_ASSOCS)) {
+			error("Unable to get any information from "
+			      "the state file");
+			fatal("slurmdbd and/or database must be up at "
+			      "slurmctld start time");
+		}
+	}
+
+	/* Now load the usage from a flat file since it isn't kept in
+	   the database No need to check for an error since if this
+	   fails we will get an error message and we will go on our
+	   way.  If we get an error we can't do anything about it.
+	*/
+	load_assoc_usage(slurmctld_conf.state_save_location);
+	load_qos_usage(slurmctld_conf.state_save_location);
+
+	/* This thread is looking for when we get correct data from
+	   the database so we can update the assoc_ptr's in the jobs
+	*/
+	if (running_cache) {
+		slurm_attr_init(&thread_attr);
+		while (pthread_create(&assoc_cache_thread, &thread_attr,
+				      _assoc_cache_mgr, NULL)) {
+			error("pthread_create error %m");
+			sleep(1);
+		}
+		slurm_attr_destroy(&thread_attr);
+	}
 
 	info("%s version %s started on cluster %s",
 	     slurm_prog_name, SLURM_VERSION_STRING, slurmctld_cluster_name);
@@ -398,12 +470,18 @@ int main(int argc, char *argv[])
 		fatal( "failed to initialize preempt plugin" );
 	if (checkpoint_init(slurmctld_conf.checkpoint_type) != SLURM_SUCCESS )
 		fatal( "failed to initialize checkpoint plugin" );
+	if (acct_gather_conf_init() != SLURM_SUCCESS )
+		fatal( "failed to initialize acct_gather plugins" );
+	if (slurm_acct_storage_init(NULL) != SLURM_SUCCESS )
+		fatal( "failed to initialize accounting_storage plugin");
 	if (jobacct_gather_init() != SLURM_SUCCESS )
 		fatal( "failed to initialize jobacct_gather plugin");
 	if (job_submit_plugin_init() != SLURM_SUCCESS )
 		fatal( "failed to initialize job_submit plugin");
 	if (ext_sensors_init() != SLURM_SUCCESS )
 		fatal( "failed to initialize ext_sensors plugin");
+	if (switch_g_slurmctld_init() != SLURM_SUCCESS )
+		fatal( "failed to initialize switch plugin");
 
 	while (1) {
 		/* initialization for each primary<->backup switch */
@@ -417,19 +495,12 @@ int main(int argc, char *argv[])
 			slurm_sched_fini();	/* make sure shutdown */
 			primary = 0;
 			run_backup(&callbacks);
-			if (slurm_acct_storage_init(NULL) != SLURM_SUCCESS )
-				fatal("failed to initialize "
-				      "accounting_storage plugin");
 		} else if (_valid_controller()) {
 			(void) _shutdown_backup_controller(SHUTDOWN_WAIT);
 			trigger_primary_ctld_res_ctrl();
-			ctld_assoc_mgr_init(&callbacks);
-			if (slurm_acct_storage_init(NULL) != SLURM_SUCCESS )
-				fatal("failed to initialize "
-				      "accounting_storage plugin");
 			/* Now recover the remaining state information */
 			lock_slurmctld(config_write_lock);
-			if (switch_restore(slurmctld_conf.state_save_location,
+			if (switch_g_restore(slurmctld_conf.state_save_location,
 					   recover ? true : false))
 				fatal(" failed to initialize switch plugin" );
 			if ((error_code = read_slurm_conf(recover, false))) {
@@ -540,7 +611,7 @@ int main(int argc, char *argv[])
 
 		/* termination of controller */
 		dir_name = slurm_get_state_save_location();
-		switch_save(dir_name);
+		switch_g_save(dir_name);
 		xfree(dir_name);
 		slurm_priority_fini();
 		slurmctld_plugstack_fini();
@@ -632,6 +703,7 @@ int main(int argc, char *argv[])
 	slurm_preempt_fini();
 	g_slurm_jobcomp_fini();
 	jobacct_gather_fini();
+	acct_gather_conf_destroy();
 	slurm_select_fini();
 	slurm_topo_fini();
 	checkpoint_fini();
@@ -753,7 +825,7 @@ static int _reconfigure_slurm(void)
 		_update_cred_key();
 		set_slurmctld_state_loc();
 	}
-	slurm_sched_partition_change();	/* notify sched plugin */
+	slurm_sched_g_partition_change();	/* notify sched plugin */
 	unlock_slurmctld(config_write_lock);
 	assoc_mgr_set_missing_uids();
 	start_power_mgr(&slurmctld_config.thread_id_power);
@@ -874,15 +946,19 @@ static void *_slurmctld_rpc_mgr(void *no_data)
 	/* initialize ports for RPCs */
 	lock_slurmctld(config_read_lock);
 	nports = slurmctld_conf.slurmctld_port_count;
-	if (nports == 0)
+	if (nports == 0) {
 		fatal("slurmctld port count is zero");
+		return NULL;	/* Fix CLANG false positive */
+	}
 	sockfd = xmalloc(sizeof(slurm_fd_t) * nports);
 	for (i=0; i<nports; i++) {
 		sockfd[i] = slurm_init_msg_engine_addrname_port(
 					node_addr,
 					slurmctld_conf.slurmctld_port+i);
-		if (sockfd[i] == SLURM_SOCKET_ERROR)
+		if (sockfd[i] == SLURM_SOCKET_ERROR) {
 			fatal("slurm_init_msg_engine_addrname_port error %m");
+			return NULL;	/* Fix CLANG false positive */
+		}
 		fd_set_close_on_exec(sockfd[i]);
 		slurm_get_stream_addr(sockfd[i], &srv_addr);
 		slurm_get_ip_str(&srv_addr, &port, ip, sizeof(ip));
@@ -1247,7 +1323,7 @@ static void _queue_reboot_msg(void)
 			reboot_agent_args = xmalloc(sizeof(agent_arg_t));
 			reboot_agent_args->msg_type = REQUEST_REBOOT_NODES;
 			reboot_agent_args->retry = 0;
-			reboot_agent_args->hostlist = hostlist_create("");
+			reboot_agent_args->hostlist = hostlist_create(NULL);
 		}
 		hostlist_push(reboot_agent_args->hostlist, node_ptr->name);
 		reboot_agent_args->node_count++;
@@ -1558,6 +1634,7 @@ static void *_slurmctld_background(void *no_data)
 			_accounting_cluster_ready();
 		}
 
+
 		if (last_proc_req_start == 0) {
 			/* Stats will reset at midnight (aprox).
 			 * Uhmmm... UTC time?... It is  not so important.
@@ -1611,6 +1688,7 @@ static void *_slurmctld_background(void *no_data)
 	return NULL;
 }
 
+
 /* save_all_state - save entire slurmctld state for later recovery */
 extern void save_all_state(void)
 {
@@ -1629,84 +1707,6 @@ extern void save_all_state(void)
 		dump_assoc_mgr_state(save_loc);
 		xfree(save_loc);
 	}
-}
-
-/* make sure the assoc_mgr is up and running with the most current state */
-extern void ctld_assoc_mgr_init(slurm_trigger_callbacks_t *callbacks)
-{
-	assoc_init_args_t assoc_init_arg;
-	int num_jobs = 0;
-	slurmctld_lock_t job_read_lock =
-		{ NO_LOCK, READ_LOCK, NO_LOCK, NO_LOCK };
-
-	memset(&assoc_init_arg, 0, sizeof(assoc_init_args_t));
-	assoc_init_arg.enforce = accounting_enforce;
-	assoc_init_arg.update_resvs = update_assocs_in_resvs;
-	assoc_init_arg.remove_assoc_notify = _remove_assoc;
-	assoc_init_arg.remove_qos_notify = _remove_qos;
-	assoc_init_arg.update_assoc_notify = _update_assoc;
-	assoc_init_arg.update_qos_notify = _update_qos;
-	assoc_init_arg.cache_level = ASSOC_MGR_CACHE_ASSOC |
-				     ASSOC_MGR_CACHE_USER  |
-				     ASSOC_MGR_CACHE_QOS;
-	if (slurmctld_conf.track_wckey)
-		assoc_init_arg.cache_level |= ASSOC_MGR_CACHE_WCKEY;
-
-	/* Don't save state but blow away old lists if they exist. */
-	assoc_mgr_fini(NULL);
-
-	if (acct_db_conn)
-		acct_storage_g_close_connection(&acct_db_conn);
-
-	acct_db_conn = acct_storage_g_get_connection(callbacks, 0, false,
-						     slurmctld_cluster_name);
-
-	if (assoc_mgr_init(acct_db_conn, &assoc_init_arg, errno)) {
-		if (accounting_enforce & ACCOUNTING_ENFORCE_ASSOCS)
-			error("Association database appears down, "
-			      "reading from state file.");
-		else
-			debug("Association database appears down, "
-			      "reading from state file.");
-
-		if ((load_assoc_mgr_state(slurmctld_conf.state_save_location)
-		     != SLURM_SUCCESS)
-		    && (accounting_enforce & ACCOUNTING_ENFORCE_ASSOCS)) {
-			error("Unable to get any information from "
-			      "the state file");
-			fatal("slurmdbd and/or database must be up at "
-			      "slurmctld start time");
-		}
-	}
-
-	/* Now load the usage from a flat file since it isn't kept in
-	   the database No need to check for an error since if this
-	   fails we will get an error message and we will go on our
-	   way.  If we get an error we can't do anything about it.
-	*/
-	load_assoc_usage(slurmctld_conf.state_save_location);
-	load_qos_usage(slurmctld_conf.state_save_location);
-
-	lock_slurmctld(job_read_lock);
-	if (job_list)
-		num_jobs = list_count(job_list);
-	unlock_slurmctld(job_read_lock);
-
-	/* This thread is looking for when we get correct data from
-	   the database so we can update the assoc_ptr's in the jobs
-	*/
-	if (running_cache || num_jobs) {
-		pthread_attr_t thread_attr;
-
-		slurm_attr_init(&thread_attr);
-		while (pthread_create(&assoc_cache_thread, &thread_attr,
-				      _assoc_cache_mgr, NULL)) {
-			error("pthread_create error %m");
-			sleep(1);
-		}
-		slurm_attr_destroy(&thread_attr);
-	}
-
 }
 
 /* send all info for the controller to accounting */
@@ -2034,6 +2034,8 @@ void update_logging(void)
 	log_alter(log_opts, SYSLOG_FACILITY_DAEMON,
 		  slurmctld_conf.slurmctld_logfile);
 
+	log_set_timefmt(slurmctld_conf.log_fmt);
+
 	/*
 	 * SchedLogLevel restore
 	 */
@@ -2151,9 +2153,6 @@ static void *_assoc_cache_mgr(void *no_data)
 	slurmctld_lock_t job_write_lock =
 		{ NO_LOCK, WRITE_LOCK, READ_LOCK, READ_LOCK };
 
-	if (!running_cache)
-		lock_slurmctld(job_write_lock);
-
 	while(running_cache == 1) {
 		slurm_mutex_lock(&assoc_cache_mutex);
 		pthread_cond_wait(&assoc_cache_cond, &assoc_cache_mutex);
@@ -2165,19 +2164,10 @@ static void *_assoc_cache_mgr(void *no_data)
 			return NULL;
 		}
 		lock_slurmctld(job_write_lock);
-		assoc_mgr_refresh_lists(acct_db_conn, NULL);
+		assoc_mgr_refresh_lists(acct_db_conn);
 		if (running_cache)
 			unlock_slurmctld(job_write_lock);
 		slurm_mutex_unlock(&assoc_cache_mutex);
-	}
-
-	if (!job_list) {
-		/* This could happen in rare occations, it doesn't
-		 * matter since when the job_list is populated things
-		 * will be in sync.
-		 */
-		debug2("No job list yet");
-		goto end_it;
 	}
 
 	debug2("got real data from the database "
@@ -2226,7 +2216,6 @@ static void *_assoc_cache_mgr(void *no_data)
 		}
 	}
 	list_iterator_destroy(itr);
-end_it:
 	unlock_slurmctld(job_write_lock);
 	/* This needs to be after the lock and after we update the
 	   jobs so if we need to send them we are set. */

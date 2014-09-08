@@ -39,10 +39,12 @@ set test_id     "24.1"
 set exit_code   0
 set test_prog   "test$test_id.prog"
 set matches     0
+
 print_header $test_id
 
-if {![file exists /usr/include/hwloc.h]} {
-	send_user "\nWARNING: This test is can now be run without hwloc being installed\n"
+set damp [get_fs_damping_factor]
+if {$damp != 1} {
+	send_user "Unable to run with FairShareDampeningFactor=$damp (must be 1)\n"
 	exit 0
 }
 
@@ -56,7 +58,7 @@ if {[test_aix]} {
 	send_user "$bin_cc ${test_prog}.c -ldl -lm -lntbl -fno-gcse -fno-strict-aliasing -Wl,-brtl -Wl,-bgcbypass:1000 -Wl,-bexpfull -Wl,-bmaxdata:0x70000000 -Wl,-bhwloc -g -lpthreads -o ${test_prog} -I${build_dir} -I${src_dir} ${build_dir}/src/api/libslurm.o ${build_dir}/src/slurmctld/locks.o  ${build_dir}/src/sshare/process.o\n"
 	exec       $bin_cc ${test_prog}.c -ldl -lm -lntbl -fno-gcse -fno-strict-aliasing -Wl,-brtl -Wl,-bgcbypass:1000 -Wl,-bexpfull -Wl,-bmaxdata:0x70000000 -Wl,-bhwloc -g -lpthreads -o ${test_prog} -I${build_dir} -I${src_dir} ${build_dir}/src/api/libslurm.o ${build_dir}/src/slurmctld/locks.o  ${build_dir}/src/sshare/process.o
 } else {
-	send_user "$bin_cc ${test_prog}.c -g -pthread -o ${test_prog} -I${build_dir} -I${src_dir} ${build_dir}/src/api/libslurm.o ${build_dir}/src/slurmctld/locks.o  ${build_dir}/src/sshare/process.o -ldl -lm -lhwloc-export-dynamic \n"
+	send_user "$bin_cc ${test_prog}.c -g -pthread -o ${test_prog} -I${build_dir} -I${src_dir} ${build_dir}/src/api/libslurm.o ${build_dir}/src/slurmctld/locks.o  ${build_dir}/src/sshare/process.o -ldl -lm -lhwloc -export-dynamic \n"
 	exec       $bin_cc ${test_prog}.c -g -pthread -o ${test_prog} -I${build_dir} -I${src_dir} ${build_dir}/src/api/libslurm.o ${build_dir}/src/slurmctld/locks.o ${build_dir}/src/sshare/process.o -ldl -lm -lhwloc -export-dynamic
 }
 	exec $bin_chmod 700 $test_prog

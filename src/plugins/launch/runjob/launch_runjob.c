@@ -310,6 +310,19 @@ extern int launch_p_setup_srun_opt(char **rest)
 			xfree(tmp);
 		}
 
+		if (opt.export_env) {
+			if (!strcasecmp(opt.export_env, "NONE")) {
+				/* represents the difference between --env-all
+				 * and --exp-env */
+				command_pos += 2;
+			} else {
+				error("--export= only accepts NONE as "
+				      "an option, ignoring '%s'.",
+				      opt.export_env);
+				xfree(opt.export_env);
+			}
+		}
+
 		opt.argc += command_pos;
 	}
 
@@ -377,9 +390,16 @@ extern int launch_p_setup_srun_opt(char **rest)
 			xfree(tmp);
 		}
 
-		/* Export all the environment so the runjob_mux will get the
-		 * correct info about the job, namely the block. */
-		opt.argv[i++] = xstrdup("--env-all");
+		if (opt.export_env && !strcasecmp(opt.export_env, "NONE")) {
+			opt.argv[i++]  = xstrdup("--exp-env");
+			opt.argv[i++]  = xstrdup("SLURM_JOB_ID");
+			opt.argv[i++]  = xstrdup("SLURM_STEP_ID");
+		} else {
+			/* Export all the environment so the
+			 * runjob_mux will get the correct info about
+			 * the job, namely the block. */
+			opt.argv[i++] = xstrdup("--env-all");
+		}
 
 		/* With runjob anything after a ':' is treated as the actual
 		 * job, which in this case is exactly what it is.  So, very

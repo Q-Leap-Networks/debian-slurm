@@ -73,7 +73,7 @@
 #ifdef HAVE_BG
 #include "src/common/node_select.h"
 #include "src/plugins/select/bluegene/bg_enums.h"
-#elif defined(HAVE_CRAY)
+#elif defined(HAVE_ALPS_CRAY)
 #include "src/common/node_select.h"
 
 #ifdef HAVE_REAL_CRAY
@@ -176,6 +176,7 @@ int main(int argc, char *argv[])
 	static char *msg = "Slurm job queue full, sleeping and retrying.";
 	slurm_allocation_callbacks_t callbacks;
 
+	slurm_conf_init(NULL);
 	log_init(xbasename(argv[0]), logopt, 0, NULL);
 	_set_exit_code();
 
@@ -247,7 +248,7 @@ int main(int argc, char *argv[])
 		 * after first making sure stdin is not redirected.
 		 */
 	} else if ((tpgid = tcgetpgrp(STDIN_FILENO)) < 0) {
-#ifdef HAVE_CRAY
+#ifdef HAVE_ALPS_CRAY
 		verbose("no controlling terminal");
 #else
 		if (!opt.no_shell) {
@@ -343,7 +344,7 @@ int main(int argc, char *argv[])
 			error("Unable to allocate resources: %m");
 			error_exit = immediate_exit;
 		} else {
-			error("Failed to allocate resources: %m");
+			error("Job submit/allocate failed: %m");
 		}
 		slurm_allocation_msg_thr_destroy(msg_thr);
 		exit(error_exit);
@@ -588,7 +589,7 @@ static void _set_submit_dir_env(void)
 /* Returns 0 on success, -1 on failure */
 static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 {
-#ifdef HAVE_REAL_CRAY
+#if defined HAVE_ALPS_CRAY && defined HAVE_REAL_CRAY
 	uint64_t pagg_id = job_getjid(getpid());
 	/*
 	 * Interactive sessions require pam_job.so in /etc/pam.d/common-session
@@ -608,6 +609,8 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 	}
 #endif
 	desc->contiguous = opt.contiguous ? 1 : 0;
+	if (opt.core_spec)
+		desc->core_spec = opt.core_spec;
 	desc->features = opt.constraints;
 	desc->gres = opt.gres;
 	if (opt.immediate == 1)
@@ -915,7 +918,7 @@ static void _timeout_handler(srun_timeout_msg_t *msg)
 	if (msg->timeout != last_timeout) {
 		last_timeout = msg->timeout;
 		verbose("Job allocation time limit to be reached at %s",
-			ctime(&msg->timeout));
+			slurm_ctime(&msg->timeout));
 	}
 }
 

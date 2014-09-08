@@ -723,8 +723,7 @@ static char *_get_ui_description()
 		"      <menuitem action='topoorder'/>"
 #endif
 		"      <menuitem action='ruled'/>");
-	if (!(cluster_flags & CLUSTER_FLAG_BG) &&
-	    !(cluster_flags & CLUSTER_FLAG_CRAYXT))
+	if (cluster_dims == 1)
 		xstrcat(ui_description,
 			"      <menuitem action='grid_specs'/>");
 
@@ -1237,26 +1236,26 @@ extern void _change_cluster_main(GtkComboBox *combo, gpointer extra)
 	node_tab = gtk_container_get_focus_child(GTK_CONTAINER(node_tab));
 #else
 	/* See above comment.  Since gtk_container_get_focus_child
-	 * doesn't exist yet we will just traverse the childern until
+	 * doesn't exist yet we will just traverse the children until
 	 * we find the label widget and then break.
 	 */
 	{
 		int i = 0;
-		GList *childern = gtk_container_get_children(
+		GList *children = gtk_container_get_children(
 			GTK_CONTAINER(node_tab));
-		while ((node_tab = g_list_nth_data(childern, i++))) {
+		while ((node_tab = g_list_nth_data(children, i++))) {
 			int j = 0;
-			GList *childern2 = gtk_container_get_children(
+			GList *children2 = gtk_container_get_children(
 				GTK_CONTAINER(node_tab));
-			while ((node_tab = g_list_nth_data(childern2, j++))) {
+			while ((node_tab = g_list_nth_data(children2, j++))) {
 				if (GTK_IS_LABEL(node_tab))
 					break;
 			}
-			g_list_free(childern2);
+			g_list_free(children2);
 			if (node_tab)
 				break;
 		}
-		g_list_free(childern);
+		g_list_free(children);
 	}
 #endif
 	if (node_tab)
@@ -1453,6 +1452,7 @@ int main(int argc, char *argv[])
 	int i=0;
 	log_options_t lopts = LOG_OPTS_STDERR_ONLY;
 
+	slurm_conf_init(NULL);
 	log_init(argv[0], lopts, SYSLOG_FACILITY_USER, NULL);
 	load_defaults();
 	cluster_flags = slurmdb_setup_cluster_flags();

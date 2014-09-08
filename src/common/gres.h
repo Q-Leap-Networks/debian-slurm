@@ -170,8 +170,9 @@ extern int gres_plugin_help_msg(char *msg, int msg_size);
 /*
  * Load this node's configuration (how many resources it has, topology, etc.)
  * IN cpu_cnt - Number of CPUs on configured on this node
+ * IN array_len - count of elements in dev_path and gres_name
  */
-extern int gres_plugin_node_config_load(uint32_t cpu_cnt);
+extern int gres_plugin_node_config_load(uint32_t cpu_cnt, char *node_name);
 
 /*
  * Pack this node's gres configuration into a buffer
@@ -184,11 +185,13 @@ extern int gres_plugin_node_config_pack(Buf buffer);
  * OUT dev_path - the devices paths as written on gres.conf file
  * OUT gres_name - the names of the devices (ex. gpu, nic,..)
  * IN array_len - count of elements in dev_path and gres_name
+ * IN node_name - Name of this compute node
  * OUT int - number of lines of gres.conf file
  */
 extern int gres_plugin_node_config_devices_path(char **dev_path,
 						char **gres_name,
-						int array_len);
+						int array_len,
+						char *node_name);
 
 /*
  * Provide information about the allocate gres devices for a particular job
@@ -208,10 +211,10 @@ extern void gres_plugin_job_state_file(List gres_list, int *gres_bit_alloc,
 extern void gres_plugin_step_state_file(List gres_list, int *gres_bit_alloc,
 					int *gres_count);
 
-/* Send GRES information to slurmstepd on the specified file descriptor*/
+/* Send GRES information to slurmstepd on the specified file descriptor */
 extern void gres_plugin_send_stepd(int fd);
 
-/* Receive GRES information from slurmd on the specified file descriptor*/
+/* Receive GRES information from slurmd on the specified file descriptor */
 extern void gres_plugin_recv_stepd(int fd);
 
 /*
@@ -485,7 +488,7 @@ extern void gres_plugin_job_set_env(char ***job_env_ptr, List job_gres_list);
 
 /*
  * Extract from the job record's gres_list the count of allocated resources of
- * 	the named gres gres type.
+ * 	the named gres type.
  * IN job_gres_list  - job record's gres_list.
  * IN gres_name_type - the name of the gres type to retrieve the associated
  *	value from.
@@ -631,5 +634,46 @@ extern int gres_gresid_to_gresname(uint32_t gres_id, char* gres_name,
  * RET count of this GRES allocated to this job
  */
 extern uint32_t gres_get_value_by_type(List job_gres_list, char* gres_name);
+
+enum gres_job_data_type {
+	GRES_JOB_DATA_COUNT,	/* data-> uint32_t  */
+	GRES_JOB_DATA_BITMAP,	/* data-> bitstr_t* */
+};
+
+/*
+ * get data from a job's GRES data structure
+ * IN job_gres_list  - job's GRES data structure
+ * IN gres_name - name of a GRES type
+ * IN node_inx - zero-origin index of the node within the job's allocation
+ *	for which data is desired
+ * IN data_type - type of data to get from the job's data
+ * OUT data - pointer to the data from job's GRES data structure
+ *            DO NOT FREE: This is a pointer into the job's data structure
+ * RET - SLURM_SUCCESS or error code
+ */
+extern int gres_get_job_info(List job_gres_list, char *gres_name,
+			     uint32_t node_inx,
+			     enum gres_job_data_type data_type, void *data);
+
+enum gres_step_data_type {
+	GRES_STEP_DATA_COUNT,	/* data-> uint32_t  */
+	GRES_STEP_DATA_BITMAP,	/* data-> bitstr_t* */
+};
+
+/*
+ * get data from a step's GRES data structure
+ * IN job_gres_list  - step's GRES data structure
+ * IN gres_name - name of a GRES type
+ * IN node_inx - zero-origin index of the node within the job's allocation
+ *	for which data is desired. Note this can differ from the step's
+ *	node allocation index.
+ * IN data_type - type of data to get from the step's data
+ * OUT data - pointer to the data from step's GRES data structure
+ *            DO NOT FREE: This is a pointer into the step's data structure
+ * RET - SLURM_SUCCESS or error code
+ */
+extern int gres_get_step_info(List step_gres_list, char *gres_name,
+			      uint32_t node_inx,
+			      enum gres_step_data_type data_type, void *data);
 
 #endif /* !_GRES_H */

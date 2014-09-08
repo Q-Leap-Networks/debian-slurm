@@ -41,11 +41,21 @@
 #include "src/common/env.h"
 #include "src/common/proc_args.h"
 
+
+typedef struct job_ids {
+	uint32_t job_id;
+	uint32_t array_job_id;
+	uint32_t array_task_id;
+} job_ids_t;
+
 static int _parse_checkpoint_args(int argc, char **argv,
 				  uint16_t *max_wait, char **image_dir);
 static int _parse_restart_args(int argc, char **argv,
 			       uint16_t *stick, char **image_dir);
 static void _update_job_size(uint32_t job_id);
+static int _parse_requeue_flags(char *, uint32_t *state_flags);
+static job_info_msg_t *_get_job_info(const char *jobid, uint32_t *task_id);
+static job_ids_t *_get_job_ids(const char *jobid,  uint32_t *num_ids);
 
 /*
  * scontrol_checkpoint - perform some checkpoint/resume operation
@@ -238,16 +248,16 @@ scontrol_hold(char *op, char *job_id_str)
 	char *next_str;
 	job_desc_msg_t job_msg;
 	uint32_t job_id;
-	uint16_t array_id;
+	uint32_t array_id;
 	job_info_msg_t *resp;
 	slurm_job_info_t *job_ptr;
 
 	if (job_id_str) {
 		job_id = (uint32_t) strtol(job_id_str, &next_str, 10);
 		if (next_str[0] == '_')
-			array_id = (uint16_t) strtol(next_str+1, &next_str, 10);
+			array_id = strtol(next_str+1, &next_str, 10);
 		else
-			array_id = (uint16_t) NO_VAL;
+			array_id = NO_VAL;
 		if ((job_id == 0) || (next_str[0] != '\0')) {
 			fprintf(stderr, "Invalid job id specified\n");
 			return 1;
@@ -278,13 +288,13 @@ scontrol_hold(char *op, char *job_id_str)
 		job_msg.priority = INFINITE;
 	for (i = 0, job_ptr = resp->job_array; i < resp->record_count;
 	     i++, job_ptr++) {
-		if ((array_id != (uint16_t) NO_VAL) &&
+		if ((array_id != NO_VAL) &&
 		    (job_ptr->array_task_id != array_id))
 			continue;
 
 		if (!IS_JOB_PENDING(job_ptr)) {
-			if ((array_id == (uint16_t) NO_VAL) &&
-			    (job_ptr->array_task_id != (uint16_t) NO_VAL))
+			if ((array_id == NO_VAL) &&
+			    (job_ptr->array_task_id != NO_VAL))
 				continue;
 			slurm_seterrno(ESLURM_JOB_NOT_PENDING);
 			return ESLURM_JOB_NOT_PENDING;
@@ -309,26 +319,41 @@ scontrol_hold(char *op, char *job_id_str)
 extern int
 scontrol_suspend(char *op, char *job_id_str)
 {
-	uint32_t job_id = 0;
-	char *next_str;
+	job_ids_t *ids;
+	uint32_t num_ids;
+	int i;
+	int cc;
 
-	if (job_id_str) {
-		job_id = (uint32_t) strtol (job_id_str, &next_str, 10);
-		if (next_str[0] != '\0') {
-			fprintf(stderr, "Invalid job id specified\n");
-			exit_code = 1;
-			return SLURM_SUCCESS;
-		}
-	} else {
-		fprintf(stderr, "Invalid job id specified\n");
+	ids = _get_job_ids(job_id_str, &num_ids);
+	if (ids == NULL) {
 		exit_code = 1;
-		return SLURM_SUCCESS;
+		return 0;
 	}
 
-	if (strncasecmp(op, "suspend", MAX(strlen(op), 2)) == 0)
-		return slurm_suspend(job_id);
-	else
-		return slurm_resume(job_id);
+	cc = SLURM_SUCCESS;
+	for (i = 0; i < num_ids; i++) {
+		if (strncasecmp(op, "suspend", MAX(strlen(op), 2)) == 0)
+			cc = slurm_suspend(ids[i].job_id);
+		else
+			cc = slurm_resume(ids[i].job_id);
+		if (cc != SLURM_SUCCESS) {
+			if (ids[i].array_task_id != NO_VAL) {
+				fprintf(stderr, "%s for job %u_%u (%u)\n",
+					slurm_strerror(slurm_get_errno()),
+					ids[i].array_job_id,
+					ids[i].array_task_id,
+					ids[i].job_id);
+			} else {
+				fprintf(stderr, "%s for job %u\n",
+					slurm_strerror(slurm_get_errno()),
+					ids[i].job_id);
+			}
+		}
+	}
+
+	xfree(ids);
+
+	return cc;
 }
 
 /*
@@ -338,26 +363,102 @@ scontrol_suspend(char *op, char *job_id_str)
  *              error message and returns 0
  */
 extern int
-scontrol_requeue(char *job_id_str)
+scontrol_requeue(int argc, char **argv)
 {
 	int rc = SLURM_SUCCESS;
-	uint32_t job_id = 0;
-	char *next_str;
+	int i;
+	job_ids_t *ids;
+	uint32_t num_ids;
 
-	if (job_id_str) {
-		job_id = (uint32_t) strtol (job_id_str, &next_str, 10);
-		if (next_str[0] != '\0') {
-			fprintf(stderr, "Invalid job id specified\n");
-			exit_code = 1;
-			return 0;
-		}
-	} else {
-		fprintf(stderr, "Invalid job id specified\n");
+	if (! argv[0]) {
 		exit_code = 1;
 		return 0;
 	}
 
-	rc = slurm_requeue (job_id);
+	ids = _get_job_ids(argv[0], &num_ids);
+	if (ids == NULL) {
+		exit_code = 1;
+		return 0;
+	}
+
+	for (i = 0; i < num_ids; i++) {
+		rc = slurm_requeue(ids[i].job_id, 0);
+		if (rc != SLURM_SUCCESS) {
+			if (ids[i].array_task_id != NO_VAL) {
+				fprintf(stderr, "%s for job %u_%u (%u)\n",
+					slurm_strerror(slurm_get_errno()),
+					ids[i].array_job_id,
+					ids[i].array_task_id,
+					ids[i].job_id);
+			} else {
+				fprintf(stderr, "%s for job %u\n",
+					slurm_strerror(slurm_get_errno()),
+					ids[i].job_id);
+			}
+		}
+	}
+
+	xfree(ids);
+
+	return rc;
+}
+
+extern int
+scontrol_requeue_hold(int argc, char **argv)
+{
+	int rc = SLURM_SUCCESS;
+	int i;
+	uint32_t state_flag;
+	job_ids_t *ids;
+	uint32_t num_ids;
+	char *job_id_str;
+
+	state_flag = 0;
+
+	if (argc == 1)
+		job_id_str = argv[0];
+	else
+		job_id_str = argv[1];
+
+	ids = _get_job_ids(job_id_str, &num_ids);
+	if (ids == NULL) {
+		exit_code = 1;
+		return 0;
+	}
+
+	if (argc == 2) {
+		rc = _parse_requeue_flags(argv[0], &state_flag);
+		if (rc < 0) {
+			error("Invalid state specification %s", argv[0]);
+			exit_code = 1;
+			xfree(ids);
+			return 0;
+		}
+	}
+	state_flag |= JOB_REQUEUE_HOLD;
+
+	/* Go and requeue the state either in
+	 * JOB_SPECIAL_EXIT or HELD state.
+	 */
+	for (i = 0; i < num_ids; i++) {
+		rc = slurm_requeue(ids[i].job_id, state_flag);
+		if (rc != SLURM_SUCCESS) {
+			if (ids[i].array_task_id != NO_VAL) {
+				fprintf(stderr, "%s for job %u_%u (%u)\n",
+					slurm_strerror(slurm_get_errno()),
+					ids[i].array_job_id,
+					ids[i].array_task_id,
+					ids[i].job_id);
+			} else {
+				fprintf(stderr, "%s for job %u\n",
+					slurm_strerror(slurm_get_errno()),
+					ids[i].job_id);
+			}
+		}
+	}
+
+	xfree(ids);
+
 	return rc;
 }
 
@@ -673,6 +774,14 @@ scontrol_update_job (int argc, char *argv[])
 			}
 			update_cnt++;
 		}
+		else if (strncasecmp(tag, "CoreSpec", MAX(taglen, 4)) == 0) {
+			if (parse_uint16(val, &job_msg.core_spec)) {
+				error ("Invalid CoreSpec value: %s", val);
+				exit_code = 1;
+				return 0;
+			}
+			update_cnt++;
+		}
 		else if (strncasecmp(tag, "ExcNodeList", MAX(taglen, 3)) == 0){
 			job_msg.exc_nodes = val;
 			update_cnt++;
@@ -856,12 +965,12 @@ static void _update_job_size(uint32_t job_id)
 	(void) unlink(fname_csh);
 	(void) unlink(fname_sh);
  	if (!(resize_csh = fopen(fname_csh, "w"))) {
-		fprintf(stderr, "Could not create file %s: %s\n", fname_csh, 
+		fprintf(stderr, "Could not create file %s: %s\n", fname_csh,
 			strerror(errno));
 		goto fini;
 	}
  	if (!(resize_sh = fopen(fname_sh, "w"))) {
-		fprintf(stderr, "Could not create file %s: %s\n", fname_sh, 
+		fprintf(stderr, "Could not create file %s: %s\n", fname_sh,
 			strerror(errno));
 		goto fini;
 	}
@@ -875,9 +984,9 @@ static void _update_job_size(uint32_t job_id)
 			alloc_info->node_list);
 	}
 	if (getenv("SLURM_JOB_NODELIST")) {
-		fprintf(resize_sh, "export SLURM_JOB_NODELIST=\"%s\"\n", 
+		fprintf(resize_sh, "export SLURM_JOB_NODELIST=\"%s\"\n",
 			alloc_info->node_list);
-		fprintf(resize_csh, "setenv SLURM_JOB_NODELIST \"%s\"\n", 
+		fprintf(resize_csh, "setenv SLURM_JOB_NODELIST \"%s\"\n",
 			alloc_info->node_list);
 	}
 	if (getenv("SLURM_NNODES")) {
@@ -920,4 +1029,169 @@ fini:	slurm_free_resource_allocation_response_msg(alloc_info);
 		fclose(resize_csh);
 	if (resize_sh)
 		fclose(resize_sh);
+}
+
+/* _parse_requeue_args()
+ */
+static int
+_parse_requeue_flags(char *s, uint32_t *state)
+{
+	char *p;
+	char *p0;
+	char *z;
+
+	p0 = p = xstrdup(s);
+	/* search for =
+	 */
+	z = strchr(p, '=');
+	if (!z) {
+		return -1;
+	}
+	*z = 0;
+
+	/* validate flags keyword
+	 */
+	if (strncasecmp(p, "state", 5) != 0) {
+		return -1;
+	}
+	++z;
+
+	p = z;
+	if (strncasecmp(p, "specialexit", 11) == 0
+	    || strncasecmp(p, "se", 2) == 0) {
+		*state = JOB_SPECIAL_EXIT;
+		xfree(p0);
+		return 0;
+	}
+
+	xfree(p0);
+	return -1;
+}
+
+/* _get_job_info()
+ */
+static job_info_msg_t *
+_get_job_info(const char *jobid, uint32_t *task_id)
+{
+	char buf[64];
+	char *taskid;
+	char *next_str;
+	uint32_t job_id;
+	int cc;
+	job_info_msg_t *job_info;
+
+	if (strlen(jobid) > 63)
+		return NULL;
+
+	strcpy(buf, jobid);
+
+	taskid = strchr(buf, '_');
+	if (taskid) {
+		*taskid = 0;
+		++taskid;
+
+		*task_id = (uint32_t)strtol(taskid, &next_str, 10);
+		if (next_str[0] != '\0') {
+			fprintf(stderr, "Invalid task_id specified\n");
+			return NULL;
+		}
+	} else {
+		*task_id = NO_VAL;
+	}
+
+	job_id = (uint32_t)strtol(buf, &next_str, 10);
+	if (next_str[0] != '\0') {
+		fprintf(stderr, "Invalid job_id specified\n");
+		return NULL;
+	}
+
+	cc = slurm_load_job(&job_info, job_id, SHOW_ALL);
+	if (cc < 0) {
+		slurm_perror("slurm_load_job");
+		return NULL;
+	}
+
+	return job_info;
+}
+
+/* _get_job_ids()
+ */
+static job_ids_t *
+_get_job_ids(const char *jobid, uint32_t *num_ids)
+{
+	job_info_msg_t *job_info;
+	job_ids_t *job_ids;
+	uint32_t task_id;
+	int i;
+	int cc;
+
+	task_id = 0;
+	job_info = _get_job_info(jobid, &task_id);
+	if (job_info == NULL)
+		return NULL;
+
+	if (task_id != NO_VAL) {
+		job_ids = xmalloc(sizeof(job_ids_t));
+		*num_ids = 1;
+
+		/* Search for the job_id of the specified task. */
+		for (cc = 0; cc < job_info->record_count; cc++) {
+			if (task_id == job_info->job_array[cc].array_task_id) {
+				job_ids[0].array_job_id =
+					job_info->job_array[cc].array_job_id;
+				job_ids[0].array_task_id =
+					job_info->job_array[cc].array_task_id;
+				job_ids[0].job_id =
+					job_info->job_array[cc].job_id;
+				break;
+			}
+		}
+
+		slurm_free_job_info_msg(job_info);
+		return job_ids;
+	}
+
+	if (job_info->record_count == 1) {
+		job_ids = xmalloc(sizeof(job_ids_t));
+		*num_ids = 1;
+		job_ids[0].array_job_id = job_info->job_array[0].array_job_id;
+		job_ids[0].array_task_id = job_info->job_array[0].array_task_id;
+		job_ids[0].job_id = job_info->job_array[0].job_id;
+		slurm_free_job_info_msg(job_info);
+
+		return job_ids;
+	}
+
+	*num_ids = job_info->record_count;
+	job_ids = xmalloc((*num_ids) * sizeof(job_ids_t));
+	/* First save the pending jobs
+	 */
+	i = 0;
+	for (cc = 0; cc < job_info->record_count; cc++) {
+		if (job_info->job_array[cc].job_state == JOB_PENDING) {
+			job_ids[i].array_job_id =
+				job_info->job_array[cc].array_job_id;
+			job_ids[i].array_task_id =
+				job_info->job_array[cc].array_task_id;
+			job_ids[i].job_id = job_info->job_array[cc].job_id;
+			++i;
+		}
+	}
+	/* then the rest of the states
+	 */
+	for (cc = 0; cc < job_info->record_count; cc++) {
+		if (job_info->job_array[cc].job_state != JOB_PENDING) {
+			job_ids[i].array_job_id =
+				job_info->job_array[cc].array_job_id;
+			job_ids[i].array_task_id =
+				job_info->job_array[cc].array_task_id;
+			job_ids[i].job_id = job_info->job_array[cc].job_id;
+			++i;
+		}
+	}
+
+	xassert(i == *num_ids);
+	slurm_free_job_info_msg(job_info);
+
+	return job_ids;
 }

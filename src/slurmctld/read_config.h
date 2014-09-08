@@ -40,6 +40,13 @@
 #ifndef _HAVE_READ_CONFIG_H
 #define _HAVE_READ_CONFIG_H
 
+/* Convert a comma delimited list of account names into a NULL terminated
+ * array of pointers to strings. Call accounts_list_free() to release memory */
+extern void accounts_list_build(char *accounts, char ***accounts_array);
+
+/* Free memory allocated for an account array by accounts_list_build() */
+extern void accounts_list_free(char ***accounts_array);
+
 /*
  * read_slurm_conf - load the slurm configuration from the configured file.
  * read_slurm_conf can be called more than once if so desired.
@@ -56,5 +63,8 @@
  * Note: Operates on common variables only
  */
 extern int read_slurm_conf(int recover, bool reconfig);
+
+extern int dump_config_state_lite(void);
+extern int load_config_state_lite(void);
 
 #endif /* !_HAVE_READ_CONFIG_H */

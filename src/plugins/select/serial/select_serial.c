@@ -43,6 +43,7 @@
 #endif
 
 #include "src/common/slurm_xlator.h"
+#include "src/common/slurm_selecttype_info.h"
 #include "select_serial.h"
 #include "dist_tasks.h"
 #include "job_test.h"
@@ -113,7 +114,7 @@ uint32_t *cr_node_cores_offset;
 const char plugin_name[] = "Serial Job Resource Selection plugin";
 const char plugin_type[] = "select/serial";
 const uint32_t plugin_id      = 106;
-const uint32_t plugin_version = 100;
+const uint32_t plugin_version = 110;
 const uint32_t pstate_version = 7;	/* version control on saved state */
 
 uint16_t cr_type = CR_CPU; /* cr_type is overwritten in init() */
@@ -381,8 +382,8 @@ static void _create_part_data(void)
 /* List sort function: sort by the job's expected end time */
 static int _cr_job_list_sort(void *x, void *y)
 {
-	struct job_record *job1_ptr = (struct job_record *) x;
-	struct job_record *job2_ptr = (struct job_record *) y;
+	struct job_record *job1_ptr = *(struct job_record **) x;
+	struct job_record *job2_ptr = *(struct job_record **) y;
 	return (int) SLURM_DIFFTIME(job1_ptr->end_time, job2_ptr->end_time);
 }
 
@@ -1019,7 +1020,7 @@ static uint16_t _get_job_node_share(struct job_record *job_ptr)
 	if (max_share & SHARED_FORCE)
 		return NODE_CR_AVAILABLE;
 
-	if ((max_share > 1) && (job_ptr->details->shared == 1))
+	if ((max_share > 1) && (job_ptr->details->share_res == 1))
 		/* part allows sharing, and the user has requested it */
 		return NODE_CR_AVAILABLE;
 
@@ -1435,7 +1436,7 @@ extern int select_p_node_init(struct node_record *node_ptr, int node_cnt)
 	info("cons_res: select_p_node_init");
 	if ((cr_type & (CR_CPU | CR_CORE)) == 0) {
 		fatal("Invalid SelectTypeParameter: %s",
-		      sched_param_type_string(cr_type));
+		      select_type_param_string(cr_type));
 	}
 	if (node_ptr == NULL) {
 		error("select_p_node_init: node_ptr == NULL");
@@ -1503,10 +1504,11 @@ static bool _is_job_spec_serial(struct job_record *job_ptr)
 	struct multi_core_data *mc_ptr = NULL;
 
 	if (details_ptr) {
-		if (job_ptr->details->shared == 0) {
+		if (job_ptr->details->share_res == 0) {
 			info("Clearing exclusive flag for job %u",
 			     job_ptr->job_id);
-			job_ptr->details->shared = 1;
+			job_ptr->details->share_res  = 1;
+			job_ptr->details->whole_node = 0;
 		}
 		if ((details_ptr->cpus_per_task > 1) &&
 		    (details_ptr->cpus_per_task != (uint16_t) NO_VAL))
@@ -1605,9 +1607,16 @@ extern int select_p_job_test(struct job_record *job_ptr, bitstr_t * bitmap,
 
 	if (!job_ptr->details)
 		return EINVAL;
+
 	if ((min_nodes > 1) || !_is_job_spec_serial(job_ptr)) {
 		info("select/serial: job %u not serial", job_ptr->job_id);
 		return SLURM_ERROR;
+	}
+
+	if (job_ptr->details->core_spec) {
+		verbose("select/serial: job %u core_spec(%u) not supported",
+			job_ptr->job_id, job_ptr->details->core_spec);
+		job_ptr->details->core_spec = 0;
 	}
 
 	job_node_share = _get_job_node_share(job_ptr);
@@ -1739,9 +1748,15 @@ extern int select_p_job_resume(struct job_record *job_ptr, bool indf_susp)
 
 extern bitstr_t *select_p_step_pick_nodes(struct job_record *job_ptr,
 					  select_jobinfo_t *jobinfo,
-					  uint32_t node_count)
+					  uint32_t node_count,
+					  bitstr_t **avail_nodes)
 {
 	return NULL;
+}
+
+extern int select_p_step_start(struct step_record *step_ptr)
+{
+	return SLURM_SUCCESS;
 }
 
 extern int select_p_step_finish(struct step_record *step_ptr)
@@ -2117,24 +2132,36 @@ extern int select_p_reconfigure(void)
  *	request. "best" is defined as either single set of consecutive nodes
  *	satisfying the request and leaving the minimum number of unused nodes
  *	OR the fewest number of consecutive node sets
- * IN avail_bitmap - nodes available for the reservation
+ * IN/OUT avail_bitmap - nodes available for the reservation
  * IN node_cnt - count of required nodes
- * IN core_bitmap - cores which can not be used for this reservation
- * OUT avail_bitmap - nodes allocated for the reservation
- * OUT core_bitmap - cores which allocated to this reservation
+ * IN core_cnt - count of required cores per node
+ * IN/OUT core_bitmap - cores which can not be used for this reservation
+ * IN flags - reservation request flags
  * RET - nodes selected for use by the reservation
  */
 extern bitstr_t * select_p_resv_test(bitstr_t *avail_bitmap, uint32_t node_cnt,
-				     uint32_t core_cnt, bitstr_t **core_bitmap)
+				     uint32_t *core_cnt, bitstr_t **core_bitmap,
+				     uint32_t flags)
 {
 	int i, j;
 	int core_inx = 0, node_cores;
 	int rem_nodes = node_cnt;
-	int rem_cores = core_cnt;
+	int rem_cores = 0;
 	bitstr_t *new_bitmap;
 	bool enforce_node_cnt = (node_cnt != 0);
 
 	xassert(avail_bitmap);
+
+	if (flags & RESERVE_FLAG_FIRST_CORES) {
+		debug("select/serial: Reservation flag FIRST_CORES not "
+		      "supported, ignored");
+	}
+
+	if (core_cnt) {
+		for (i = 0; core_cnt[i]; i++)
+			rem_cores += core_cnt[i];
+	}
+
 	new_bitmap = bit_copy(avail_bitmap);
 	if (*core_bitmap == NULL)
 		*core_bitmap = bit_alloc(select_core_cnt);

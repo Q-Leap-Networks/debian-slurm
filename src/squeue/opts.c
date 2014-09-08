@@ -3,6 +3,7 @@
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
+ *  Copyright (C) 2010-2013 SchedMD LLC.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>, Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -152,7 +153,7 @@ parse_command_line( int argc, char* argv[] )
 		case (int) 'A':
 		case (int) 'U':	/* backwards compatibility */
 			xfree(params.accounts);
-		        params.accounts = xstrdup(optarg);
+			params.accounts = xstrdup(optarg);
 			params.account_list =
 				_build_str_list( params.accounts );
 		break;
@@ -439,6 +440,10 @@ _parse_state( char* str, uint16_t* states )
 	xstrcat(state_names, job_state_string(JOB_COMPLETING));
 	xstrcat(state_names, ",");
 	xstrcat(state_names, job_state_string(JOB_CONFIGURING));
+	xstrcat(state_names, ",");
+	xstrcat(state_names, job_state_string(JOB_RESIZING));
+	xstrcat(state_names, ",");
+	xstrcat(state_names, job_state_string(JOB_SPECIAL_EXIT));
 	error ("Valid job states include: %s\n", state_names);
 	xfree (state_names);
 	return SLURM_ERROR;
@@ -458,6 +463,8 @@ extern int parse_format( char* format )
 	char *prefix = NULL, *suffix = NULL, *token = NULL;
 	char *tmp_char = NULL, *tmp_format = NULL;
 	char field[1];
+	bool format_all = false;
+	int i;
 
 	if (format == NULL) {
 		error ("Format option lacks specification.");
@@ -474,9 +481,16 @@ extern int parse_format( char* format )
 					       prefix);
 	}
 
-	field_size = strlen( format );
-	tmp_format = xmalloc( field_size + 1 );
-	strcpy( tmp_format, format );
+	if (!strcasecmp(format, "%all")) {
+		xstrfmtcat(tmp_format, "%c%c", '%', 'a');
+		for (i = 'b'; i <= 'z'; i++)
+			xstrfmtcat(tmp_format, "|%c%c", '%', (char) i);
+		for (i = 'A'; i <= 'Z'; i++)
+			xstrfmtcat(tmp_format, "|%c%c ", '%', (char) i);
+		format_all = true;
+	} else {
+		tmp_format = xstrdup(format);
+	}
 
 	token = strtok_r( tmp_format, "%", &tmp_char);
 	if (token && (format[0] != '%'))	/* toss header */
@@ -537,12 +551,14 @@ extern int parse_format( char* format )
 							   field_size,
 							   right_justify,
 							   suffix );
+			else if (format_all)
+				;	/* ignore */
 			else {
 				prefix = xstrdup("%");
 				xstrcat(prefix, token);
 				xfree(suffix);
 				suffix = prefix;
-				
+
 				step_format_add_invalid( params.format_list,
 							   field_size,
 							   right_justify,
@@ -691,6 +707,10 @@ extern int parse_format( char* format )
 				job_format_add_nodes( params.format_list,
 						      field_size,
 						      right_justify, suffix );
+			else if (field[0] == 'o')
+				job_format_add_command( params.format_list,
+							field_size,
+							right_justify, suffix);
 			else if (field[0] == 'O')
 				job_format_add_contiguous( params.format_list,
 							   field_size,
@@ -778,17 +798,29 @@ extern int parse_format( char* format )
 							  field_size,
 							  right_justify,
 							  suffix );
+			else if (field[0] == 'X')
+				job_format_add_core_spec( params.format_list,
+							  field_size,
+							  right_justify,
+							  suffix );
 			else if (field[0] == 'z')
 				job_format_add_num_sct( params.format_list,
 							   field_size,
 							   right_justify,
 							   suffix );
+			else if (field[0] == 'Z')
+				job_format_add_work_dir( params.format_list,
+							 field_size,
+							 right_justify,
+							 suffix );
+			else if (format_all)
+				;	/* ignore */
 			else {
 				prefix = xstrdup("%");
 				xstrcat(prefix, token);
 				xfree(suffix);
 				suffix = prefix;
-				
+
 				job_format_add_invalid( params.format_list,
 							   field_size,
 							   right_justify,
@@ -1179,9 +1211,11 @@ _build_user_list( char* str )
 static void _usage(void)
 {
 	printf("\
-Usage: squeue [-i seconds] [-n name] [-o format] [-p partitions]\n\
-              [-R reservation] [-S fields] [--start] [-t states]\n\
-              [-u user_name] [--usage] [-w nodes] [-ahjlsv]\n");
+Usage: squeue [-A account] [--clusters names] [-i seconds] [--job jobid]\n\
+              [-n name] [-o format] [-p partitions] [--qos qos]\n\
+              [--reservation reservation] [--sort fields] [--start]\n\
+              [--step step_id] [-t states] [-u user_name] [--usage]\n\
+              [-w nodes] [-ahjlrsv]\n");
 }
 
 static void _help(void)
@@ -1207,6 +1241,7 @@ Usage: squeue [OPTIONS]\n\
   -q, --qos=qos(s)                comma separated list of qos's\n\
 				  to view, default is all qos's\n\
   -R, --reservation=name          reservation to view, default is all\n\
+  -r, --array                     display one job array element per line\n\
   -s, --step=step(s)              comma separated list of job steps\n\
 				  to view, default is all\n\
   -S, --sort=fields               comma separated list of fields to sort on\n\

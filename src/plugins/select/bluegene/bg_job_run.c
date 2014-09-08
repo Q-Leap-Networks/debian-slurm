@@ -108,7 +108,8 @@ static int _make_sure_block_still_exists(bg_action_t *bg_action_ptr,
 			      "job %u requeueing if possible.",
 			      bg_action_ptr->bg_block_id,
 			      bg_action_ptr->job_ptr->job_id);
-			bg_requeue_job(bg_action_ptr->job_ptr->job_id, 1, 0);
+			bg_requeue_job(bg_action_ptr->job_ptr->job_id, 1, 0,
+				       JOB_BOOT_FAIL, false);
 		}
 		return 0;
 	}
@@ -168,7 +169,7 @@ static void _sync_agent(bg_action_t *bg_action_ptr, bg_record_t *bg_record)
 
 		if (sync_user_rc == SLURM_ERROR) {
 			slurm_mutex_unlock(&block_state_mutex);
-			(void) slurm_fail_job(job_ptr->job_id);
+			(void) slurm_fail_job(job_ptr->job_id, JOB_BOOT_FAIL);
 			slurm_mutex_lock(&block_state_mutex);
 		}
 		_destroy_bg_action(bg_action_ptr);
@@ -209,7 +210,7 @@ static void _start_agent(bg_action_t *bg_action_ptr)
 		slurm_mutex_unlock(&block_state_mutex);
 		error("block %s not found in bg_lists->main",
 		      bg_action_ptr->bg_block_id);
-		bg_requeue_job(req_job_id, 1, 0);
+		bg_requeue_job(req_job_id, 1, 0, JOB_BOOT_FAIL, false);
 		return;
 	}
 
@@ -279,7 +280,7 @@ static void _start_agent(bg_action_t *bg_action_ptr)
 
 		bg_record->modifying = 0;
 		slurm_mutex_unlock(&block_state_mutex);
-		bg_requeue_job(req_job_id, 0, 0);
+		bg_requeue_job(req_job_id, 0, 0, JOB_BOOT_FAIL, false);
 		return;
 	}
 
@@ -580,7 +581,7 @@ no_reboot:
 		   is a no-op if issued prior
 		   to the script initiation do clean up just
 		   incase the fail job isn't ran */
-		(void) slurm_fail_job(req_job_id);
+		(void) slurm_fail_job(req_job_id, JOB_BOOT_FAIL);
 	}
 }
 
@@ -802,7 +803,7 @@ extern int sync_jobs(List job_list)
 {
 	ListIterator itr;
 	struct job_record  *job_ptr = NULL;
-	List block_list = NULL;
+	List block_list = NULL, kill_list = NULL;
 	static bool run_already = false;
 	bg_record_t *bg_record = NULL;
 
@@ -871,10 +872,9 @@ extern int sync_jobs(List job_list)
 		}
 
 		if (!bg_record) {
-			/* Don't use slurm_fail_job, locks are already
-			   in place.
-			*/
-			job_fail(job_ptr->job_id);
+			/* Can't fail it just now, we have locks in
+			   place. */
+			bg_status_add_job_kill_list(job_ptr, &kill_list);
 			_destroy_bg_action(bg_action_ptr);
 			continue;
 		}
@@ -899,6 +899,14 @@ extern int sync_jobs(List job_list)
 	}
 	list_iterator_destroy(itr);
 	slurm_mutex_unlock(&block_state_mutex);
+
+	if (kill_list) {
+		/* slurmctld is already locked up, so handle this right after
+		 * the unlock of block_state_mutex.
+		 */
+		bg_status_process_kill_job_list(kill_list, JOB_BOOT_FAIL, 1);
+		list_destroy(kill_list);
+	}
 
 	/* Insure that all other blocks are free of users */
 	if (block_list) {

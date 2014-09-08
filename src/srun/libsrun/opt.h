@@ -153,8 +153,9 @@ typedef struct srun_options {
 	/*int debug;*/		/* -d, --debug			*/
 
 	int immediate;		/* -I, --immediate=secs      	*/
-	uint16_t warn_signal;	/* --signal=<int>@<time>	*/
-	uint16_t warn_time;	/* --signal=<int>@<time>	*/
+	uint16_t warn_flags;	/* --signal=flags:<int>@<time>	*/
+	uint16_t warn_signal;	/* --signal=flags:<int>@<time>	*/
+	uint16_t warn_time;	/* --signal=flags:<int>@<time>	*/
 
 	bool hold;		/* --hold, -H			*/
 	char *hostfile;         /* location of hostfile if there is one */
@@ -179,6 +180,7 @@ typedef struct srun_options {
 	char *task_prolog;	/* --task-prolog=		*/
 	char *licenses;		/* --licenses, -L		*/
 	bool preserve_env;	/* --preserve-env		*/
+	char *export_env;	/* --export			*/
 
 	/* constraint options */
 	int32_t pn_min_cpus;	/* --mincpus=n			*/
@@ -235,6 +237,8 @@ typedef struct srun_options {
 	int req_switch;		/* Minimum number of switches	*/
 	int wait4switch;	/* Maximum time to wait for minimum switches */
 	bool user_managed_io;   /* 0 for "normal" IO, 1 for "user manged" IO */
+	int core_spec;		/* --core-spec=n,      -S n	*/
+	bool core_spec_set;	/* true if core_spec explicitly set */
 } opt_t;
 
 extern opt_t opt;

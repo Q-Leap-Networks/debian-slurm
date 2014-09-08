@@ -69,6 +69,7 @@
 #include <unistd.h>
 #include <slurm/slurmdb.h>
 
+#include "src/common/bitstring.h"
 #include "src/common/hostlist.h"
 #include "src/common/log.h"
 #include "src/common/macros.h"
@@ -77,7 +78,6 @@
 #include "src/common/working_cluster.h"
 #include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
-#include "src/common/bitstring.h"
 
 /*
  * Define slurm-specific aliases for use by plugins, see slurm_xlator.h
@@ -503,7 +503,7 @@ static void _error(char *file, int line, char *msg, ...)
  */
 static char * _next_tok(char *sep, char **str)
 {
-	char *tok;
+	char *tok, *parse, *open_bracket, *close_bracket;
 
 	/* push str past any leading separators */
 	while ((**str != '\0') && (strchr(sep, **str) != NULL))
@@ -514,32 +514,25 @@ static char * _next_tok(char *sep, char **str)
 
 	/* assign token ptr */
 	tok = *str;
+	parse = tok;
 
-	/* push str past token and leave pointing to first separator */
-	while ((**str != '\0') && (strchr(sep, **str) == NULL))
-		(*str)++;
-
-	/* if _single_ opening bracket exists b/w tok and str,
-	 * push str past first closing bracket */
-	if ((memchr(tok, '[', *str - tok) != NULL) &&
-	    (memchr(tok, ']', *str - tok) == NULL)) {
-		char *q = strchr(*str, ']');
-
-		if (q && (memchr(*str, '[', q - *str) == NULL))
-			*str = ++q;
-
-		/* push str past token and leave pointing to next separator */
+	while (1) {
+		/* push str past token and leave pointing to first separator */
 		while ((**str != '\0') && (strchr(sep, **str) == NULL))
 			(*str)++;
 
-		/* if _second_ opening bracket exists b/w tok and str,
-		 * push str past second closing bracket */
-		if ((**str != '\0') && q &&
-		    (memchr(tok, '[', *str - q) != NULL) &&
-		    (memchr(tok, ']', *str - q) == NULL)) {
-			q = strchr(*str, ']');
-			if (q && (memchr(*str, '[', q - *str) == NULL))
-				*str = q + 1;
+		/* push str past pairs of brackets */
+bracket: 	open_bracket = strchr(parse, '[');
+		if ((open_bracket == NULL) || (open_bracket > *str))
+			break;
+		close_bracket = strchr(parse, ']');
+		if ((close_bracket == NULL) || (close_bracket < open_bracket))
+			break;
+		if (close_bracket < *str) {
+			parse = close_bracket + 1;
+			goto bracket;
+		} else {
+			*str = close_bracket;
 		}
 	}
 
@@ -1821,7 +1814,7 @@ static int
 _push_range_list(hostlist_t hl, char *prefix, struct _range *range,
 		 int n, int dims)
 {
-	int i, k, nr;
+	int i, k, nr, rc = 0, rc1;
 	char *p, *q;
 	char new_prefix[1024], tmp_prefix[1024];
 
@@ -1831,14 +1824,15 @@ _push_range_list(hostlist_t hl, char *prefix, struct _range *range,
 		struct _range *prefix_range;
 		struct _range *saved_range = range, *pre_range;
 		unsigned long j, prefix_cnt = 0;
+		bool recurse = false;
 		*p++ = '\0';
 		*q++ = '\0';
 		if (strrchr(tmp_prefix, '[') != NULL)
-			return -1;	/* third range is illegal */
-		prefix_range = xmalloc(sizeof(struct _range) * MAX_RANGES);
+			recurse = true;
+		prefix_range = malloc(sizeof(struct _range) * MAX_RANGES);
 		nr = _parse_range_list(p, prefix_range, MAX_RANGES, dims);
 		if (nr < 0) {
-			xfree(prefix_range);
+			free(prefix_range);
 			return -1;	/* bad numeric expression */
 		}
 		pre_range = prefix_range;
@@ -1847,25 +1841,33 @@ _push_range_list(hostlist_t hl, char *prefix, struct _range *range,
 			if (prefix_cnt > MAX_PREFIX_CNT) {
 				/* Prevent overflow of memory with user input
 				 * of something like "a[0-999999999].b[0-9]" */
-				xfree(prefix_range);
+				free(prefix_range);
 				return -1;
 			}
 			for (j = pre_range->lo; j <= pre_range->hi; j++) {
 				snprintf(new_prefix, sizeof(new_prefix),
 					 "%s%0*lu%s", tmp_prefix,
 					 pre_range->width, j, q);
-				range = saved_range;
-				for (k = 0; k < n; k++) {
-					hostlist_push_hr(hl, new_prefix,
-							 range->lo, range->hi,
-							 range->width);
-					range++;
+				if (recurse) {
+					rc1 = _push_range_list(hl, new_prefix,
+							       saved_range,
+							       n, dims);
+					rc = MAX(rc, rc1);
+				} else {
+					range = saved_range;
+					for (k = 0; k < n; k++) {
+						hostlist_push_hr(hl, new_prefix,
+								 range->lo,
+								 range->hi,
+								 range->width);
+						range++;
+					}
 				}
 			}
 			pre_range++;
 		}
-		xfree(prefix_range);
-		return 0;
+		free(prefix_range);
+		return rc;
 	}
 
 	for (k = 0; k < n; k++) {
@@ -1898,7 +1900,7 @@ _hostlist_create_bracketed(const char *hostlist, char *sep,
 		return NULL;
 	}
 
-	ranges = xmalloc(sizeof(struct _range) * MAX_RANGES);
+	ranges = malloc(sizeof(struct _range) * MAX_RANGES);
 	while ((tok = _next_tok(sep, &str)) != NULL) {
 		strncpy(cur_tok, tok, 1024);
 		if ((p = strrchr(tok, '[')) != NULL) {
@@ -1934,7 +1936,7 @@ _hostlist_create_bracketed(const char *hostlist, char *sep,
 		} else
 			hostlist_push_host_dims(new, cur_tok, dims);
 	}
-	xfree(ranges);
+	free(ranges);
 
 	free(orig);
 	return new;
@@ -1942,6 +1944,7 @@ _hostlist_create_bracketed(const char *hostlist, char *sep,
 error:
 	err = errno = EINVAL;
 	hostlist_destroy(new);
+	free(ranges);
 	free(orig);
 	seterrno_ret(err, NULL);
 }
@@ -2652,9 +2655,8 @@ _get_bracketed_list(hostlist_t hl, int *start, const size_t n, char *buf)
 	int m, len = 0;
 	int bracket_needed = _is_bracket_needed(hl, i);
 	int zeropad = 0;
-	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
 
-	if (cluster_flags & CLUSTER_FLAG_CRAYXT) {
+	if (is_cray_system()) {
 		/*
 		 * Find minimum common zero-padding prefix. Cray has nid%05u
 		 * syntax, factoring this out makes host strings much shorter.

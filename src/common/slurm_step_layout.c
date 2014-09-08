@@ -53,6 +53,13 @@
 #include "src/common/node_select.h"
 #include "src/common/slurmdb_defs.h"
 
+/*
+** Define slurm-specific aliases for use by plugins, see slurm_xlator.h
+** for details.
+ */
+strong_alias(pack_slurm_step_layout, slurm_pack_slurm_step_layout);
+strong_alias(unpack_slurm_step_layout, slurm_unpack_slurm_step_layout);
+
 /* build maps for task layout on nodes */
 static int _init_task_layout(slurm_step_layout_t *step_layout,
 			     const char *arbitrary_nodes,
@@ -123,7 +130,7 @@ slurm_step_layout_t *slurm_step_layout_create(
 		 * but can fake it by just allocating all tasks to
 		 * one of the allocated nodes. */
 		if ((cluster_flags & CLUSTER_FLAG_BG)
-		    || (cluster_flags & CLUSTER_FLAG_CRAYXT))
+		    || (cluster_flags & CLUSTER_FLAG_CRAY_A))
 			step_layout->node_cnt  = num_hosts;
 		else
 			step_layout->node_cnt  = 1;
@@ -257,7 +264,7 @@ extern void pack_slurm_step_layout(slurm_step_layout_t *step_layout,
 {
 	uint32_t i = 0;
 
-	if (protocol_version >= SLURM_2_3_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_2_5_PROTOCOL_VERSION) {
 		if (step_layout)
 			i=1;
 
@@ -289,7 +296,7 @@ extern int unpack_slurm_step_layout(slurm_step_layout_t **layout, Buf buffer,
 	slurm_step_layout_t *step_layout = NULL;
 	int i;
 
-	if (protocol_version >= SLURM_2_3_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_2_5_PROTOCOL_VERSION) {
 		safe_unpack16(&uint16_tmp, buffer);
 		if (!uint16_tmp)
 			return SLURM_SUCCESS;

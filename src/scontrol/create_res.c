@@ -151,6 +151,10 @@ static uint32_t _parse_flags(const char *flagstr, const char *msg)
 				outflags |= RESERVE_FLAG_NO_PART_NODES;
 			else
 				outflags |= RESERVE_FLAG_PART_NODES;
+		} else if (!strncasecmp(curr, "First_Cores", MAX(taglen,1)) &&
+			   !flip) {
+			curr += taglen;
+			outflags |= RESERVE_FLAG_FIRST_CORES;
 		} else {
 			error("Error parsing flags %s.  %s", flagstr, msg);
 			return 0xffffffff;
@@ -421,7 +425,6 @@ scontrol_create_res(int argc, char *argv[])
 	resv_desc_msg_t resv_msg;
 	char *new_res_name = NULL;
 	int free_user_str = 0, free_acct_str = 0;
-	int free_node_cnt = 0;
 	int err, ret = 0;
 
 	slurm_init_resv_desc_msg (&resv_msg);
@@ -466,7 +469,7 @@ scontrol_create_res(int argc, char *argv[])
 	 */
 	if ((resv_msg.partition != NULL) && (resv_msg.node_list != NULL) &&
 	    (strcasecmp(resv_msg.node_list, "ALL") == 0)) {
-		if (resv_msg.flags == (uint16_t) NO_VAL)
+		if (resv_msg.flags == NO_VAL)
 			resv_msg.flags = RESERVE_FLAG_PART_NODES;
 		else
 			resv_msg.flags |= RESERVE_FLAG_PART_NODES;
@@ -478,7 +481,7 @@ scontrol_create_res(int argc, char *argv[])
 	 */
 	if ((resv_msg.partition == NULL) && (resv_msg.node_list != NULL) &&
 	    (strcasecmp(resv_msg.node_list, "ALL") == 0) &&
-	    (resv_msg.flags != (uint16_t) NO_VAL) &&
+	    (resv_msg.flags != NO_VAL) &&
 	    (resv_msg.flags & RESERVE_FLAG_PART_NODES)) {
 		exit_code = 1;
 		error("Part_Nodes flag requires specifying a Partition. "
@@ -529,7 +532,5 @@ SCONTROL_CREATE_RES_CLEANUP:
 		xfree(resv_msg.users);
 	if (free_acct_str)
 		xfree(resv_msg.accounts);
-	if (free_node_cnt)
-		xfree(resv_msg.node_cnt);
 	return ret;
 }

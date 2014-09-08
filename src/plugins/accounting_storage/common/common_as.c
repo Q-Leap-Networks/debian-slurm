@@ -65,9 +65,11 @@ extern char *wckey_month_table;
 /*
  * We want SLURMDB_MODIFY_ASSOC always to be the last
  */
-static int _sort_update_object_dec(slurmdb_update_object_t *object_a,
-				   slurmdb_update_object_t *object_b)
+static int _sort_update_object_dec(void *a, void *b)
 {
+	slurmdb_update_object_t *object_a = *(slurmdb_update_object_t **)a;
+	slurmdb_update_object_t *object_b = *(slurmdb_update_object_t **)b;
+
 	if ((object_a->type == SLURMDB_MODIFY_ASSOC)
 	    && (object_b->type != SLURMDB_MODIFY_ASSOC))
 		return 1;
@@ -85,6 +87,43 @@ static void _dump_slurmdb_assoc_records(List assoc_list)
 	itr = list_iterator_create(assoc_list);
 	while((assoc = list_next(itr))) {
 		debug("\t\tid=%d", assoc->id);
+	}
+	list_iterator_destroy(itr);
+}
+
+static void _dump_slurmdb_clus_res_record(slurmdb_clus_res_rec_t *clus_res)
+{
+	debug("\t\t\tname=%s", clus_res->cluster);
+	debug("\t\t\tpercent_allowed=%u", clus_res->percent_allowed);
+}
+
+static void _dump_slurmdb_clus_res_records(List clus_res_list)
+{
+	slurmdb_clus_res_rec_t *clus_res = NULL;
+	ListIterator itr = NULL;
+	itr = list_iterator_create(clus_res_list);
+	while ((clus_res = list_next(itr))) {
+		_dump_slurmdb_clus_res_record(clus_res);
+	}
+	list_iterator_destroy(itr);
+}
+
+static void _dump_slurmdb_res_records(List res_list)
+{
+	slurmdb_res_rec_t *res = NULL;
+	ListIterator itr = NULL;
+	itr = list_iterator_create(res_list);
+	while ((res = list_next(itr))) {
+		debug("\t\tname=%s", res->name);
+		debug("\t\tcount=%u", res->count);
+		debug("\t\ttype=%u", res->type);
+		debug("\t\tmanager=%s", res->manager);
+		debug("\t\tserver=%s", res->server);
+		debug("\t\tdescription=%s", res->description);
+		if (res->clus_res_rec && res->clus_res_rec->cluster)
+			_dump_slurmdb_clus_res_record(res->clus_res_rec);
+		else if (res->clus_res_list)
+			_dump_slurmdb_clus_res_records(res->clus_res_list);
 	}
 	list_iterator_destroy(itr);
 }
@@ -125,6 +164,7 @@ extern int addto_update_list(List update_list, slurmdb_update_type_t type,
 		list_prepend(update_object->objects, object);
 		return SLURM_SUCCESS;
 	}
+
 	update_object = xmalloc(sizeof(slurmdb_update_object_t));
 
 	list_append(update_list, update_object);
@@ -240,6 +280,15 @@ extern int addto_update_list(List update_list, slurmdb_update_type_t type,
 		*/
 		update_object->objects = list_create(slurm_destroy_char);
 		break;
+	case SLURMDB_ADD_RES:
+		xassert(((slurmdb_res_rec_t *)object)->name);
+		xassert(((slurmdb_res_rec_t *)object)->server);
+	case SLURMDB_MODIFY_RES:
+	case SLURMDB_REMOVE_RES:
+		xassert(((slurmdb_res_rec_t *)object)->id != NO_VAL);
+		update_object->objects = list_create(
+			slurmdb_destroy_res_rec);
+		break;
 	case SLURMDB_UPDATE_NOTSET:
 	default:
 		error("unknown type set in update_object: %d", type);
@@ -285,6 +334,12 @@ extern void dump_update_list(List update_list)
 		case SLURMDB_MODIFY_QOS:
 		case SLURMDB_REMOVE_QOS:
 			debug3("\tQOS RECORDS");
+			break;
+		case SLURMDB_ADD_RES:
+		case SLURMDB_MODIFY_RES:
+		case SLURMDB_REMOVE_RES:
+			debug3("\tRES RECORDS");
+			_dump_slurmdb_res_records(object->objects);
 			break;
 		case SLURMDB_ADD_WCKEY:
 		case SLURMDB_MODIFY_WCKEY:

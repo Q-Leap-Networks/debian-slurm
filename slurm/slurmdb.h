@@ -112,6 +112,11 @@ typedef enum {
 } slurmdb_report_time_format_t;
 
 typedef enum {
+	SLURMDB_RESOURCE_NOTSET,
+	SLURMDB_RESOURCE_LICENSE,
+} slurmdb_resource_type_t;
+
+typedef enum {
 	SLURMDB_UPDATE_NOTSET,
 	SLURMDB_ADD_USER,
 	SLURMDB_ADD_ASSOC,
@@ -130,9 +135,14 @@ typedef enum {
 	SLURMDB_ADD_CLUSTER,
 	SLURMDB_REMOVE_CLUSTER,
 	SLURMDB_REMOVE_ASSOC_USAGE,
+	SLURMDB_ADD_RES,
+	SLURMDB_REMOVE_RES,
+	SLURMDB_MODIFY_RES,
+	SLURMDB_REMOVE_QOS_USAGE,
 } slurmdb_update_type_t;
 
 /* Define QOS flags */
+#define	QOS_FLAG_BASE                0x0fffffff
 #define	QOS_FLAG_NOTSET              0x10000000
 #define	QOS_FLAG_ADD                 0x20000000
 #define	QOS_FLAG_REMOVE              0x40000000
@@ -144,6 +154,15 @@ typedef enum {
 #define	QOS_FLAG_NO_RESERVE          0x00000010
 #define	QOS_FLAG_REQ_RESV            0x00000020
 #define	QOS_FLAG_DENY_LIMIT          0x00000040
+
+/* Define Server Resource flags */
+#define	SLURMDB_RES_FLAG_BASE        0x0fffffff /* apply to get real flags */
+#define	SLURMDB_RES_FLAG_NOTSET      0x10000000
+#define	SLURMDB_RES_FLAG_ADD         0x20000000
+#define	SLURMDB_RES_FLAG_REMOVE      0x40000000
+
+/* flags and types of resources */
+/* when we come up with some */
 
 /* Archive / Purge time flags */
 #define SLURMDB_PURGE_BASE    0x0000ffff   /* Apply to get the number
@@ -170,15 +189,23 @@ typedef enum {
 #define CLUSTER_FLAG_XCPU   0x00000020 /* This has xcpu */
 #define CLUSTER_FLAG_AIX    0x00000040 /* This is an aix cluster */
 #define CLUSTER_FLAG_MULTSD 0x00000080 /* This cluster is multiple slurmd */
-#define CLUSTER_FLAG_CRAYXT 0x00000100 /* This cluster is a cray XT */
+#define CLUSTER_FLAG_CRAYXT 0x00000100 /* This cluster is a ALPS cray
+					* (deprecated) Same as CRAY_A */
+#define CLUSTER_FLAG_CRAY_A 0x00000100 /* This cluster is a ALPS cray */
 #define CLUSTER_FLAG_FE     0x00000200 /* This cluster is a front end system */
+#define CLUSTER_FLAG_CRAY_N 0x00000400 /* This cluster is a Native cray */
+
+
+/* Cluster Combo flags */
+#define CLUSTER_FLAG_CRAY   0x00000500 /* This cluster is a cray.
+					  Combo of CRAY_A | CRAY_N */
 
 /* Define assoc_mgr_association_usage_t below to avoid including
  * extraneous slurmdb headers */
 #ifndef __assoc_mgr_association_usage_t_defined
 #  define  __assoc_mgr_association_usage_t_defined
 /* opaque data type */
-   typedef struct assoc_mgr_association_usage assoc_mgr_association_usage_t;
+typedef struct assoc_mgr_association_usage assoc_mgr_association_usage_t;
 #endif
 
 /* Define assoc_mgr_qos_usage_t below to avoid including
@@ -186,7 +213,7 @@ typedef enum {
 #ifndef __assoc_mgr_qos_usage_t_defined
 #  define  __assoc_mgr_qos_usage_t_defined
 /* opaque data type */
-   typedef struct assoc_mgr_qos_usage assoc_mgr_qos_usage_t;
+typedef struct assoc_mgr_qos_usage assoc_mgr_qos_usage_t;
 #endif
 
 /********************************************/
@@ -298,19 +325,18 @@ typedef struct {
 	uint32_t disk_write_max_nodeid; /* contains  node number max was on */
 	uint32_t disk_write_max_taskid;/* contains task number max was on */
 	double pages_ave;
-	uint32_t pages_max;
+	uint64_t pages_max;
 	uint32_t pages_max_nodeid; /* contains which node number it was on */
 	uint32_t pages_max_taskid; /* contains which task number it was on */
 	double rss_ave;
-	uint32_t rss_max;
+	uint64_t rss_max;
 	uint32_t rss_max_nodeid; /* contains which node number it was on */
 	uint32_t rss_max_taskid; /* contains which task number it was on */
 	double vsize_ave;
-	uint32_t vsize_max;
+	uint64_t vsize_max;
 	uint32_t vsize_max_nodeid; /* contains which node number it was on */
 	uint32_t vsize_max_taskid; /* contains which task number it was on */
 } slurmdb_stats_t;
-
 
 /************** alphabetical order of structures **************/
 
@@ -334,6 +360,7 @@ typedef struct {
 
 typedef struct {
 	uint64_t alloc_secs; /* number of cpu seconds allocated */
+	uint64_t consumed_energy; /* energy allocated in Joules */
 	uint32_t id;	/* association/wckey ID		*/
 	time_t period_start; /* when this record was started */
 } slurmdb_accounting_rec_t;
@@ -490,6 +517,7 @@ typedef struct {
 
 typedef struct {
 	uint64_t alloc_secs; /* number of cpu seconds allocated */
+	uint64_t consumed_energy; /* energy allocated in Joules */
 	uint32_t cpu_count; /* number of cpus during time period */
 	uint64_t down_secs; /* number of cpu seconds down */
 	uint64_t idle_secs; /* number of cpu seconds idle */
@@ -498,6 +526,12 @@ typedef struct {
 	time_t period_start; /* when this record was started */
 	uint64_t resv_secs; /* number of cpu seconds reserved */
 } slurmdb_cluster_accounting_rec_t;
+
+typedef struct {
+	char *cluster; /* name of cluster */
+	uint16_t percent_allowed; /* percentage of total resources
+				   * allowed for this cluster */
+} slurmdb_clus_res_rec_t;
 
 typedef struct {
 	char *name;
@@ -615,8 +649,8 @@ typedef struct {
 	uint64_t max_cpu_mins_pj; /* max number of cpu mins a job can
 				   * use with this qos */
 	uint64_t max_cpu_run_mins_pu; /* max number of cpu mins a user can
-				   * allocate at a given time when
-				   * using this qos (Not yet valid option) */
+				       * allocate at a given time when
+				       * using this qos (Not yet valid option) */
 	uint32_t max_cpus_pj; /* max number of cpus a job can
 			       * allocate with this qos */
 	uint32_t max_cpus_pu; /* max number of cpus a user can
@@ -673,7 +707,7 @@ typedef struct {
 	char *cluster; /* cluster reservation is for */
 	uint32_t cpus; /* how many cpus are in reservation */
 	uint64_t down_secs; /* number of cpu seconds down */
-	uint16_t flags; /* flags for reservation. */
+	uint32_t flags; /* flags for reservation. */
 	uint32_t id;   /* id of reservation. */
 	char *name; /* name of reservation */
 	char *nodes; /* list of nodes in reservation */
@@ -718,6 +752,35 @@ typedef struct {
 } slurmdb_step_rec_t;
 
 /* slurmdb_stats_t defined above alphabetical */
+
+typedef struct {
+	List cluster_list; /* list of char * */
+	List description_list; /* list of char * */
+	uint32_t flags;
+	List id_list; /* list of char * */
+	List manager_list; /* list of char * */
+	List name_list; /* list of char * */
+	List percent_list; /* list of char * */
+	List server_list; /* list of char * */
+	List type_list; /* list of char * */
+	uint16_t with_deleted;
+	uint16_t with_clusters;
+} slurmdb_res_cond_t;
+
+typedef struct {
+	List clus_res_list; /* list of slurmdb_clus_res_rec_t *'s */
+	slurmdb_clus_res_rec_t *clus_res_rec; /* if only one cluster
+						 being represented */
+	uint32_t count; /* count of resources managed on the server */
+	char *description;
+	uint32_t flags; /* resource attribute flags */
+	uint32_t id;
+	char *manager;  /* resource manager name */
+	char *name;
+	uint16_t percent_used;
+	char *server;  /* resource server name */
+	uint32_t type; /* resource type */
+} slurmdb_res_rec_t;
 
 typedef struct {
 	List acct_list; /* list of char * */
@@ -840,7 +903,7 @@ typedef struct {
 typedef struct {
 	slurmdb_association_rec_t *assoc;
 	char *sort_name;
-	List childern;
+	List children;
 } slurmdb_hierarchical_rec_t;
 
 /************** report specific structures **************/
@@ -848,6 +911,7 @@ typedef struct {
 typedef struct {
 	char *acct;
 	char *cluster;
+	uint64_t consumed_energy;
 	uint64_t cpu_secs;
 	char *parent_acct;
 	char *user;
@@ -857,6 +921,7 @@ typedef struct {
 	char *acct;
 	List acct_list; /* list of char *'s */
 	List assoc_list; /* list of slurmdb_report_assoc_rec_t's */
+	uint64_t consumed_energy;
 	uint64_t cpu_secs;
 	char *name;
 	uid_t uid;
@@ -864,6 +929,7 @@ typedef struct {
 
 typedef struct {
 	List assoc_list; /* list of slurmdb_report_assoc_rec_t *'s */
+	uint64_t consumed_energy;
 	uint32_t cpu_count;
 	uint64_t cpu_secs;
 	char *name;
@@ -1043,7 +1109,7 @@ extern List slurmdb_clusters_remove(void *db_conn,
  * note List needs to be freed with slurm_list_destroy() when called
  */
 extern List slurmdb_report_cluster_account_by_user(void *db_conn,
-	slurmdb_association_cond_t *assoc_cond);
+						   slurmdb_association_cond_t *assoc_cond);
 
 /* report for clusters of users per account
  * IN: slurmdb_association_cond_t *assoc_cond
@@ -1051,7 +1117,7 @@ extern List slurmdb_report_cluster_account_by_user(void *db_conn,
  * note List needs to be freed with slurm_list_destroy() when called
  */
 extern List slurmdb_report_cluster_user_by_account(void *db_conn,
-	slurmdb_association_cond_t *assoc_cond);
+						   slurmdb_association_cond_t *assoc_cond);
 
 /* report for clusters of wckey per user
  * IN: slurmdb_wckey_cond_t *wckey_cond
@@ -1059,7 +1125,7 @@ extern List slurmdb_report_cluster_user_by_account(void *db_conn,
  * note List needs to be freed with slurm_list_destroy() when called
  */
 extern List slurmdb_report_cluster_wckey_by_user(void *db_conn,
-	slurmdb_wckey_cond_t *wckey_cond);
+						 slurmdb_wckey_cond_t *wckey_cond);
 
 /* report for clusters of users per wckey
  * IN: slurmdb_wckey_cond_t *wckey_cond
@@ -1067,14 +1133,14 @@ extern List slurmdb_report_cluster_wckey_by_user(void *db_conn,
  * note List needs to be freed with slurm_list_destroy() when called
  */
 extern List slurmdb_report_cluster_user_by_wckey(void *db_conn,
-	slurmdb_wckey_cond_t *wckey_cond);
+						 slurmdb_wckey_cond_t *wckey_cond);
 
 
 extern List slurmdb_report_job_sizes_grouped_by_top_account(void *db_conn,
-	slurmdb_job_cond_t *job_cond, List grouping_list, bool flat_view);
+							    slurmdb_job_cond_t *job_cond, List grouping_list, bool flat_view);
 
 extern List slurmdb_report_job_sizes_grouped_by_wckey(void *db_conn,
-	slurmdb_job_cond_t *job_cond, List grouping_list);
+						      slurmdb_job_cond_t *job_cond, List grouping_list);
 
 extern List slurmdb_report_job_sizes_grouped_by_top_account_then_wckey(
 	void *db_conn, slurmdb_job_cond_t *job_cond,
@@ -1186,14 +1252,20 @@ extern List slurmdb_txn_get(void *db_conn, slurmdb_txn_cond_t *txn_cond);
 
 extern void slurmdb_init_association_rec(slurmdb_association_rec_t *assoc,
 					 bool free_it);
+extern void slurmdb_init_clus_res_rec(slurmdb_clus_res_rec_t *clus_res,
+				      bool free_it);
 extern void slurmdb_init_cluster_rec(slurmdb_cluster_rec_t *cluster,
 				     bool free_it);
 extern void slurmdb_init_qos_rec(slurmdb_qos_rec_t *qos,
+				 bool free_it);
+extern void slurmdb_init_res_rec(slurmdb_res_rec_t *res,
 				 bool free_it);
 extern void slurmdb_init_wckey_rec(slurmdb_wckey_rec_t *wckey,
 				   bool free_it);
 extern void slurmdb_init_cluster_cond(slurmdb_cluster_cond_t *cluster,
 				      bool free_it);
+extern void slurmdb_init_res_cond(slurmdb_res_cond_t *cluster,
+				  bool free_it);
 /* The next two functions have pointers to assoc_list so do not
  * destroy assoc_list before using the list returned from this function.
  */
@@ -1206,6 +1278,40 @@ extern char *slurmdb_tree_name_get(char *name, char *parent, List tree_list);
 
 /************** job report functions **************/
 
+/************** resource functions **************/
+/*
+ * add resource's to accounting system
+ * IN:  res_list List of char *
+ * RET: SLURM_SUCCESS on success SLURM_ERROR else
+ */
+extern int slurmdb_res_add(void *db_conn, uint32_t uid, List res_list);
+
+/*
+ * get info from the storage
+ * IN:  slurmdb_res_cond_t *
+ * RET: List of slurmdb_res_rec_t *
+ * note List needs to be freed with slurm_list_destroy() when called
+ */
+extern List slurmdb_res_get(void *db_conn, slurmdb_res_cond_t *res_cond);
+
+/*
+ * modify existing resource in the accounting system
+ * IN:  slurmdb_res_cond_t *res_cond
+ * IN:  slurmdb_res_rec_t *res
+ * RET: List containing (char *'s) else NULL on error
+ * note List needs to be freed with slurm_list_destroy() when called
+ */
+extern List slurmdb_res_modify(void *db_conn,
+			       slurmdb_res_cond_t *res_cond,
+			       slurmdb_res_rec_t *res);
+
+/*
+ * remove resource from accounting system
+ * IN:  slurmdb_res_cond_t *res
+ * RET: List containing (char *'s) else NULL on error
+ * note List needs to be freed with slurm_list_destroy() when called
+ */
+extern List slurmdb_res_remove(void *db_conn, slurmdb_res_cond_t *res_cond);
 
 /************** qos functions **************/
 

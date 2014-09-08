@@ -53,16 +53,18 @@
 #include "slurm/slurm_errno.h"
 
 #define ASSOC_MGR_CACHE_ASSOC 0x0001
-#define ASSOC_MGR_CACHE_QOS 0x0002
-#define ASSOC_MGR_CACHE_USER 0x0004
+#define ASSOC_MGR_CACHE_QOS   0x0002
+#define ASSOC_MGR_CACHE_USER  0x0004
 #define ASSOC_MGR_CACHE_WCKEY 0x0008
-#define ASSOC_MGR_CACHE_ALL 0xffff
+#define ASSOC_MGR_CACHE_RES   0x0010
+#define ASSOC_MGR_CACHE_ALL   0xffff
 
 /* to lock or not */
 typedef struct {
 	lock_level_t assoc;
 	lock_level_t file;
 	lock_level_t qos;
+	lock_level_t res;
 	lock_level_t user;
 	lock_level_t wckey;
 } assoc_mgr_lock_t;
@@ -78,6 +80,7 @@ typedef enum {
 	ASSOC_LOCK,
 	FILE_LOCK,
 	QOS_LOCK,
+	RES_LOCK,
 	USER_LOCK,
 	WCKEY_LOCK,
 	ASSOC_MGR_ENTITY_COUNT
@@ -90,15 +93,19 @@ typedef struct {
 typedef struct {
  	uint16_t cache_level;
 	uint16_t enforce;
+	void (*add_license_notify) (slurmdb_res_rec_t *rec);
  	void (*remove_assoc_notify) (slurmdb_association_rec_t *rec);
+	void (*remove_license_notify) (slurmdb_res_rec_t *rec);
  	void (*remove_qos_notify) (slurmdb_qos_rec_t *rec);
+	void (*sync_license_notify) (List clus_res_list);
  	void (*update_assoc_notify) (slurmdb_association_rec_t *rec);
+	void (*update_license_notify) (slurmdb_res_rec_t *rec);
  	void (*update_qos_notify) (slurmdb_qos_rec_t *rec);
 	void (*update_resvs) ();
 } assoc_init_args_t;
 
 struct assoc_mgr_association_usage {
-	List childern_list;     /* list of childern associations
+	List children_list;     /* list of children associations
 				 * (DON'T PACK) */
 
 	uint32_t grp_used_cpus; /* count of active jobs in the group
@@ -163,6 +170,7 @@ struct assoc_mgr_qos_usage {
 
 
 extern List assoc_mgr_association_list;
+extern List assoc_mgr_res_list;
 extern List assoc_mgr_qos_list;
 extern List assoc_mgr_user_list;
 extern List assoc_mgr_wckey_list;
@@ -316,6 +324,13 @@ extern int assoc_mgr_update_wckeys(slurmdb_update_object_t *update);
 extern int assoc_mgr_update_qos(slurmdb_update_object_t *update);
 
 /*
+ * update cluster resources in cache
+ * IN:  slurmdb_update_object_t *object
+ * RET: SLURM_SUCCESS on success (or not found) SLURM_ERROR else
+ */
+extern int assoc_mgr_update_res(slurmdb_update_object_t *update);
+
+/*
  * update users in cache
  * IN:  slurmdb_update_object_t *object
  * RET: SLURM_SUCCESS on success (or not found) SLURM_ERROR else
@@ -347,6 +362,13 @@ extern void assoc_mgr_clear_used_info(void);
 extern void assoc_mgr_remove_assoc_usage(slurmdb_association_rec_t *assoc);
 
 /*
+ * Remove the QOS's accumulated usage
+ * IN:  slurmdb_qos_rec_t *qos
+ * RET: SLURM_SUCCESS on success or else SLURM_ERROR
+ */
+extern void assoc_mgr_remove_qos_usage(slurmdb_qos_rec_t *qos);
+
+/*
  * Dump the state information of the association mgr just incase the
  * database isn't up next time we run.
  */
@@ -371,10 +393,8 @@ extern int load_assoc_mgr_state(char *state_save_location);
 /*
  * Refresh the lists if when running_cache is set this will load new
  * information from the database (if any) and update the cached list.
- * If args are set will set internal variables and return, no lists
- * are refreshed.
  */
-extern int assoc_mgr_refresh_lists(void *db_conn, assoc_init_args_t *args);
+extern int assoc_mgr_refresh_lists(void *db_conn);
 
 /*
  * Sets the uids of users added to the system after the start of the

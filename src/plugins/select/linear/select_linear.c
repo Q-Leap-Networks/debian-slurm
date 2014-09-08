@@ -154,8 +154,7 @@ static int _run_now(struct job_record *job_ptr, bitstr_t *bitmap,
 		    int max_share, uint32_t req_nodes,
 		    List preemptee_candidates,
 		    List *preemptee_job_list);
-static int _sort_usable_nodes_dec(struct job_record *job_a,
-				  struct job_record *job_b);
+static int _sort_usable_nodes_dec(void *, void *);
 static bool _test_run_job(struct cr_record *cr_ptr, uint32_t job_id);
 static bool _test_tot_job(struct cr_record *cr_ptr, uint32_t job_id);
 static int _test_only(struct job_record *job_ptr, bitstr_t *bitmap,
@@ -201,7 +200,7 @@ extern int select_p_select_nodeinfo_free(select_nodeinfo_t *nodeinfo);
 const char plugin_name[]       	= "Linear node selection plugin";
 const char plugin_type[]       	= "select/linear";
 const uint32_t plugin_id	= 102;
-const uint32_t plugin_version	= 100;
+const uint32_t plugin_version	= 110;
 
 static struct node_record *select_node_ptr = NULL;
 static int select_node_cnt = 0;
@@ -1501,7 +1500,7 @@ static int _rm_job_from_nodes(struct cr_record *cr_ptr,
 	}
 
 	is_job_running = _rem_run_job(cr_ptr, job_ptr->job_id);
-	exclusive = (job_ptr->details->shared == 0);
+	exclusive = (job_ptr->details->share_res == 0);
 	i_first = bit_ffs(job_resrcs_ptr->node_bitmap);
 	i_last  = bit_fls(job_resrcs_ptr->node_bitmap);
 	if (i_first == -1)	/* job has no nodes */
@@ -1820,7 +1819,7 @@ static int _decr_node_job_cnt(int node_inx, struct job_record *job_ptr,
 	bool exclusive = false, is_job_running;
 
 	if (job_ptr->details)
-		exclusive = (job_ptr->details->shared == 0);
+		exclusive = (job_ptr->details->share_res == 0);
 	if (exclusive) {
 		if (cr_ptr->nodes[node_inx].exclusive_cnt)
 			cr_ptr->nodes[node_inx].exclusive_cnt--;
@@ -1994,7 +1993,7 @@ static int _add_job_to_nodes(struct cr_record *cr_ptr,
 		return SLURM_ERROR;
 	}
 
-	exclusive = (job_ptr->details->shared == 0);
+	exclusive = (job_ptr->details->share_res == 0);
 	if (alloc_all)
 		_add_run_job(cr_ptr, job_ptr->job_id);
 	_add_tot_job(cr_ptr, job_ptr->job_id);
@@ -2263,7 +2262,7 @@ static void _init_node_cr(void)
 			continue;
 
 		if (job_ptr->details)
-			exclusive = (job_ptr->details->shared == 0);
+			exclusive = (job_ptr->details->share_res == 0);
 		else
 			exclusive = 0;
 		node_offset = -1;
@@ -2275,7 +2274,7 @@ static void _init_node_cr(void)
 			if (!bit_test(job_resrcs_ptr->node_bitmap, i))
 				continue;
 			node_offset++;
-			if (!bit_test(job_ptr->node_bitmap, i)) 
+			if (!bit_test(job_ptr->node_bitmap, i))
 				continue; /* node already released */
 			node_ptr = node_record_table_ptr + i;
 			if (exclusive)
@@ -2384,9 +2383,11 @@ static int _test_only(struct job_record *job_ptr, bitstr_t *bitmap,
  * Sort the usable_node element to put jobs in the correct
  * preemption order.
  */
-static int _sort_usable_nodes_dec(struct job_record *job_a,
-				  struct job_record *job_b)
+static int _sort_usable_nodes_dec(void *j1, void *j2)
 {
+	struct job_record *job_a = *(struct job_record **)j1;
+	struct job_record *job_b = *(struct job_record **)j2;
+
 	if (job_a->details->usable_nodes > job_b->details->usable_nodes)
 		return -1;
 	else if (job_a->details->usable_nodes < job_b->details->usable_nodes)
@@ -2678,8 +2679,8 @@ static int _will_run_test(struct job_record *job_ptr, bitstr_t *bitmap,
 
 static int  _cr_job_list_sort(void *x, void *y)
 {
-	struct job_record *job1_ptr = (struct job_record *) x;
-	struct job_record *job2_ptr = (struct job_record *) y;
+	struct job_record *job1_ptr = *(struct job_record **) x;
+	struct job_record *job2_ptr = *(struct job_record **) y;
 	return (int) SLURM_DIFFTIME(job1_ptr->end_time, job2_ptr->end_time);
 }
 
@@ -2836,7 +2837,13 @@ extern int select_p_job_test(struct job_record *job_ptr, bitstr_t *bitmap,
 		return EINVAL;
 	}
 
-	if (job_ptr->details->shared)
+	if (job_ptr->details->core_spec) {
+		verbose("select/linear: job %u core_spec(%u) not supported",
+			job_ptr->job_id, job_ptr->details->core_spec);
+		job_ptr->details->core_spec = 0;
+	}
+
+	if (job_ptr->details->share_res)
 		max_share = job_ptr->part_ptr->max_share & ~SHARED_FORCE;
 	else	/* ((shared == 0) || (shared == (uint16_t) NO_VAL)) */
 		max_share = 1;
@@ -3072,9 +3079,15 @@ extern int select_p_job_resume(struct job_record *job_ptr, bool indf_susp)
 
 extern bitstr_t *select_p_step_pick_nodes(struct job_record *job_ptr,
 					  select_jobinfo_t *jobinfo,
-					  uint32_t node_count)
+					  uint32_t node_count,
+					  bitstr_t **avail_nodes)
 {
 	return NULL;
+}
+
+extern int select_p_step_start(struct step_record *step_ptr)
+{
+	return SLURM_SUCCESS;
 }
 
 extern int select_p_step_finish(struct step_record *step_ptr)
@@ -3183,8 +3196,7 @@ extern int select_p_select_nodeinfo_set_all(void)
 			continue;
 		}
 
-		if ((node_ptr->node_state & NODE_STATE_COMPLETING) ||
-		    (node_ptr->node_state == NODE_STATE_ALLOCATED)) {
+		if (IS_NODE_COMPLETING(node_ptr) || IS_NODE_ALLOCATED(node_ptr)) {
 			if (slurmctld_conf.fast_schedule)
 				nodeinfo->alloc_cpus =
 					node_ptr->config_ptr->cpus;
@@ -3419,12 +3431,16 @@ extern int select_p_reconfigure(void)
  *	request. "best" is defined as either single set of consecutive nodes
  *	satisfying the request and leaving the minimum number of unused nodes
  *	OR the fewest number of consecutive node sets
- * IN avail_bitmap - nodes available for the reservation
+ * IN/OUT avail_bitmap - nodes available for the reservation
  * IN node_cnt - count of required nodes
+ * IN core_cnt - count of required cores per node
+ * IN/OUT core_bitmap - cores which can not be used for this reservation
+ * IN flags - reservation request flags
  * RET - nodes selected for use by the reservation
  */
 extern bitstr_t * select_p_resv_test(bitstr_t *avail_bitmap, uint32_t node_cnt,
-				     uint32_t *core_cnt, bitstr_t **core_bitmap)
+				     uint32_t *core_cnt, bitstr_t **core_bitmap,
+				     uint32_t flags)
 {
 	bitstr_t **switches_bitmap;		/* nodes on this switch */
 	int       *switches_cpu_cnt;		/* total CPUs on switch */

@@ -47,8 +47,8 @@
 #define xstrcatchar(__p, __c)		_xstrcatchar(&(__p), __c)
 #define xslurm_strerrorcat(__p)		_xslurm_strerrorcat(&(__p))
 #define xstrftimecat(__p, __fmt)	_xstrftimecat(&(__p), __fmt)
-#define xiso8601timecat(__p)            _xiso8601timecat(&(__p))
-#define xrfc5424timecat(__p)            _xrfc5424timecat(&(__p))
+#define xiso8601timecat(__p, __msec)            _xiso8601timecat(&(__p), __msec)
+#define xrfc5424timecat(__p, __msec)            _xrfc5424timecat(&(__p), __msec)
 #define xstrfmtcat(__p, __fmt, args...)	_xstrfmtcat(&(__p), __fmt, ## args)
 #define xmemcat(__p, __s, __e)          _xmemcat(&(__p), __s, __e)
 #define xstrsubstitute(__p, __pat, __rep) _xstrsubstitute(&(__p), __pat, __rep)
@@ -93,12 +93,12 @@ void _xstrftimecat(char **str, const char *fmt);
 /*
 ** Concatenate a ISO 8601 timestamp onto str.
 */
-void _xiso8601timecat(char **str);
+void _xiso8601timecat(char **str, bool);
 
 /*
 ** Concatenate a RFC 5424 timestamp onto str.
 */
-void _xrfc5424timecat(char **str);
+void _xrfc5424timecat(char **str, bool);
 
 /*
 ** concatenate printf-style formatted string onto str
@@ -174,5 +174,20 @@ bool xstring_is_whitespace(const char *str);
  * Returns the lowered string which is the same pointer that is sent in.
  */
 char *xstrtolower(char *str);
+
+/*
+ * safe strchr (handles NULL values)
+ */
+char *xstrchr(const char *s1, int c);
+
+/*
+ * safe strcmp (handles NULL values)
+ */
+int xstrcmp(const char *s1, const char *s2);
+
+/*
+ * safe strcasecmp (handles NULL values)
+ */
+int xstrcasecmp(const char *s1, const char *s2);
 
 #endif /* !_XSTRING_H */

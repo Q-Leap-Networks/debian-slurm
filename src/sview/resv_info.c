@@ -38,6 +38,7 @@ typedef struct {
 	GtkTreeIter iter_ptr;
 	bool iter_set;
 	int pos;
+	char *resv_name;
 	reserve_info_t *resv_ptr;
 } sview_resv_info_t;
 
@@ -179,8 +180,8 @@ static display_data_t options_data_resv[] = {
 
 
 static display_data_t *local_display_data = NULL;
-
 static char *got_edit_signal = NULL;
+static GtkTreeModel *last_model = NULL;
 
 static void _admin_resv(GtkTreeModel *model, GtkTreeIter *iter, char *type);
 static void _process_each_resv(GtkTreeModel *model, GtkTreePath *path,
@@ -260,6 +261,10 @@ static uint32_t _parse_flags(const char *flagstr)
 				outflags |= RESERVE_FLAG_NO_PART_NODES;
 			else
 				outflags |= RESERVE_FLAG_PART_NODES;
+		} else if (!strncasecmp(curr, "First_Cores", MAX(taglen,1)) &&
+			   !flip) {
+			curr += taglen;
+			outflags |= RESERVE_FLAG_FIRST_CORES;
 		} else {
 			char *temp = g_strdup_printf("Error parsing flags %s.",
 						     flagstr);
@@ -416,11 +421,19 @@ return_error:
 	return type;
 }
 
+static void _resv_info_free(sview_resv_info_t *sview_resv_info)
+{
+	if (sview_resv_info) {
+		xfree(sview_resv_info->resv_name);
+	}
+}
+
 static void _resv_info_list_del(void *object)
 {
 	sview_resv_info_t *sview_resv_info = (sview_resv_info_t *)object;
 
 	if (sview_resv_info) {
+		_resv_info_free(sview_resv_info);
 		xfree(sview_resv_info);
 	}
 }
@@ -664,8 +677,6 @@ static void _update_info_resv(List info_list,
 			      GtkTreeView *tree_view)
 {
 	GtkTreeModel *model = gtk_tree_view_get_model(tree_view);
-	static GtkTreeModel *last_model = NULL;
-	reserve_info_t *resv_ptr = NULL;
 	char *name = NULL;
 	ListIterator itr = NULL;
 	sview_resv_info_t *sview_resv_info = NULL;
@@ -674,8 +685,6 @@ static void _update_info_resv(List info_list,
 
 	itr = list_iterator_create(info_list);
 	while ((sview_resv_info = (sview_resv_info_t*) list_next(itr))) {
-		resv_ptr = sview_resv_info->resv_ptr;
-
 		/* This means the tree_store changed (added new column
 		   or something). */
 		if (last_model != model)
@@ -684,7 +693,8 @@ static void _update_info_resv(List info_list,
 		if (sview_resv_info->iter_set) {
 			gtk_tree_model_get(model, &sview_resv_info->iter_ptr,
 					   SORTID_NAME, &name, -1);
-			if (strcmp(name, resv_ptr->name)) { /* Bad pointer */
+			if (strcmp(name, sview_resv_info->resv_name)) {
+				/* Bad pointer */
 				sview_resv_info->iter_set = false;
 				//g_print("bad resv iter pointer\n");
 			}
@@ -694,42 +704,9 @@ static void _update_info_resv(List info_list,
 			_update_resv_record(sview_resv_info,
 					    GTK_TREE_STORE(model));
 		} else {
-			GtkTreePath *path = gtk_tree_path_new_first();
-
-			/* get the iter, or find out the list is empty
-			 * goto add */
-			if (gtk_tree_model_get_iter(
-				    model, &sview_resv_info->iter_ptr, path)) {
-				do {
-					/* search for the jobid and
-					   check to see if it is in
-					   the list */
-					gtk_tree_model_get(
-						model,
-						&sview_resv_info->iter_ptr,
-						SORTID_NAME,
-						&name, -1);
-					if (!strcmp(name, resv_ptr->name)) {
-						/* update with new info */
-						g_free(name);
-						_update_resv_record(
-							sview_resv_info,
-							GTK_TREE_STORE(model));
-						sview_resv_info->iter_set = 1;
-						break;
-					}
-					g_free(name);
-				} while (gtk_tree_model_iter_next(
-						 model,
-						 &sview_resv_info->iter_ptr));
-			}
-
-			if (!sview_resv_info->iter_set) {
-				_append_resv_record(sview_resv_info,
-						    GTK_TREE_STORE(model));
-				sview_resv_info->iter_set = true;
-			}
-			gtk_tree_path_free(path);
+			_append_resv_record(sview_resv_info,
+					    GTK_TREE_STORE(model));
+			sview_resv_info->iter_set = true;
 		}
 	}
 	list_iterator_destroy(itr);
@@ -739,11 +716,15 @@ static void _update_info_resv(List info_list,
 	last_model = model;
 }
 
-static int _sview_resv_sort_aval_dec(sview_resv_info_t* rec_a,
-				     sview_resv_info_t* rec_b)
+static int _sview_resv_sort_aval_dec(void *s1, void *s2)
 {
-	int size_a = rec_a->resv_ptr->node_cnt;
-	int size_b = rec_b->resv_ptr->node_cnt;
+	sview_resv_info_t *rec_a = *(sview_resv_info_t **)s1;
+	sview_resv_info_t *rec_b = *(sview_resv_info_t **)s2;
+	int size_a;
+	int size_b;
+
+	size_a = rec_a->resv_ptr->node_cnt;
+	size_b = rec_b->resv_ptr->node_cnt;
 
 	if (size_a < size_b)
 		return -1;
@@ -764,6 +745,8 @@ static int _sview_resv_sort_aval_dec(sview_resv_info_t* rec_a,
 static List _create_resv_info_list(reserve_info_msg_t *resv_info_ptr)
 {
 	static List info_list = NULL;
+	List last_list = NULL;
+	ListIterator last_list_itr = NULL;
 	int i = 0;
 	static reserve_info_msg_t *last_resv_info_ptr = NULL;
 	sview_resv_info_t *sview_resv_info_ptr = NULL;
@@ -775,19 +758,37 @@ static List _create_resv_info_list(reserve_info_msg_t *resv_info_ptr)
 	last_resv_info_ptr = resv_info_ptr;
 
 	if (info_list)
-		list_flush(info_list);
-	else
-		info_list = list_create(_resv_info_list_del);
+		last_list = info_list;
 
+	info_list = list_create(_resv_info_list_del);
 	if (!info_list) {
 		g_print("malloc error\n");
 		return NULL;
 	}
 
+	if (last_list)
+		last_list_itr = list_iterator_create(last_list);
 	for(i=0; i<resv_info_ptr->record_count; i++) {
 		resv_ptr = &(resv_info_ptr->reservation_array[i]);
 
-		sview_resv_info_ptr = xmalloc(sizeof(sview_resv_info_t));
+		sview_resv_info_ptr = NULL;
+
+		if (last_list_itr) {
+			while ((sview_resv_info_ptr =
+				list_next(last_list_itr))) {
+				if (!strcmp(sview_resv_info_ptr->resv_name,
+					    resv_ptr->name)) {
+					list_remove(last_list_itr);
+					_resv_info_free(sview_resv_info_ptr);
+					break;
+				}
+			}
+			list_iterator_reset(last_list_itr);
+		}
+		if (!sview_resv_info_ptr)
+			sview_resv_info_ptr =
+				xmalloc(sizeof(sview_resv_info_t));
+		sview_resv_info_ptr->resv_name = xstrdup(resv_ptr->name);
 		sview_resv_info_ptr->pos = i;
 		sview_resv_info_ptr->resv_ptr = resv_ptr;
 		sview_resv_info_ptr->color_inx = i % sview_colors_cnt;
@@ -796,6 +797,11 @@ static List _create_resv_info_list(reserve_info_msg_t *resv_info_ptr)
 
 	list_sort(info_list,
 		  (ListCmpF)_sview_resv_sort_aval_dec);
+
+	if (last_list) {
+		list_iterator_destroy(last_list_itr);
+		list_destroy(last_list);
+	}
 
 update_color:
 	return info_list;
@@ -986,6 +992,7 @@ extern GtkListStore *create_model_resv(int type)
 	GtkListStore *model = NULL;
 	GtkTreeIter iter;
 
+	last_model = NULL;	/* Reformat display */
 	switch(type) {
 	case SORTID_ACTION:
 		model = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_INT);

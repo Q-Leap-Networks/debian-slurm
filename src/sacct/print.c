@@ -111,7 +111,7 @@ static void _print_small_double(
 		return;
 
 	if (dub > 1)
-		convert_num_unit((float)dub, outbuf, buf_size, units);
+		convert_num_unit((double)dub, outbuf, buf_size, units);
 	else if (dub > 0)
 		snprintf(outbuf, buf_size, "%.2fM", dub);
 	else
@@ -205,7 +205,7 @@ void print_fields(type_t type, void *object)
 				break;
 			}
 			if (!fuzzy_equal(tmp_dub, NO_VAL))
-				convert_num_unit2((float)tmp_dub,
+				convert_num_unit2((double)tmp_dub,
 						  outbuf, sizeof(outbuf),
 						  UNIT_KILO, 1000, false);
 
@@ -306,7 +306,7 @@ void print_fields(type_t type, void *object)
 				break;
 			}
 			if (!fuzzy_equal(tmp_dub, NO_VAL))
-				convert_num_unit((float)tmp_dub,
+				convert_num_unit((double)tmp_dub,
 						 outbuf, sizeof(outbuf),
 						 UNIT_KILO);
 
@@ -328,7 +328,7 @@ void print_fields(type_t type, void *object)
 				break;
 			}
 			if (!fuzzy_equal(tmp_dub, NO_VAL))
-				convert_num_unit((float)tmp_dub,
+				convert_num_unit((double)tmp_dub,
 						 outbuf, sizeof(outbuf),
 						 UNIT_KILO);
 
@@ -350,7 +350,7 @@ void print_fields(type_t type, void *object)
 				break;
 			}
 			if (!fuzzy_equal(tmp_dub, NO_VAL))
-				convert_num_unit((float)tmp_dub,
+				convert_num_unit((double)tmp_dub,
 						 outbuf, sizeof(outbuf),
 						 UNIT_KILO);
 
@@ -419,7 +419,7 @@ void print_fields(type_t type, void *object)
 				break;
 			}
 			if (!fuzzy_equal(tmp_dub, NO_VAL))
-				convert_num_unit2((float)tmp_dub,
+				convert_num_unit2((double)tmp_dub,
 						  outbuf, sizeof(outbuf),
 						  UNIT_NONE, 1000, false);
 
@@ -831,17 +831,17 @@ void print_fields(type_t type, void *object)
 			switch(type) {
 			case JOB:
 				if (!job->track_steps)
-					tmp_int = job->stats.pages_max;
+					tmp_uint64 = job->stats.pages_max;
 				break;
 			case JOBSTEP:
-				tmp_int = step->stats.pages_max;
+				tmp_uint64 = step->stats.pages_max;
 				break;
 			case JOBCOMP:
 			default:
 				break;
 			}
-			if (tmp_int != NO_VAL)
-				convert_num_unit((float)tmp_int,
+			if (tmp_uint64 != (uint64_t)NO_VAL)
+				convert_num_unit((double)tmp_uint64,
 						 outbuf, sizeof(outbuf),
 						 UNIT_KILO);
 
@@ -897,17 +897,17 @@ void print_fields(type_t type, void *object)
 			switch(type) {
 			case JOB:
 				if (!job->track_steps)
-					tmp_uint32 = job->stats.rss_max;
+					tmp_uint64 = job->stats.rss_max;
 				break;
 			case JOBSTEP:
-				tmp_uint32 = step->stats.rss_max;
+				tmp_uint64 = step->stats.rss_max;
 				break;
 			case JOBCOMP:
 			default:
 				break;
 			}
-			if (tmp_uint32 != NO_VAL)
-				convert_num_unit((float)tmp_uint32,
+			if (tmp_uint64 != (uint64_t)NO_VAL)
+				convert_num_unit((double)tmp_uint64,
 						 outbuf, sizeof(outbuf),
 						 UNIT_KILO);
 
@@ -962,18 +962,18 @@ void print_fields(type_t type, void *object)
 			switch(type) {
 			case JOB:
 				if (!job->track_steps)
-					tmp_uint32 = job->stats.vsize_max;
+					tmp_uint64 = job->stats.vsize_max;
 				break;
 			case JOBSTEP:
-				tmp_uint32 = step->stats.vsize_max;
+				tmp_uint64 = step->stats.vsize_max;
 				break;
 			case JOBCOMP:
 			default:
-				tmp_uint32 = NO_VAL;
+				tmp_uint64 = (uint64_t)NO_VAL;
 				break;
 			}
-			if (tmp_uint32 != NO_VAL)
-				convert_num_unit((float)tmp_uint32,
+			if (tmp_uint64 != (uint64_t)NO_VAL)
+				convert_num_unit((double)tmp_uint64,
 						 outbuf, sizeof(outbuf),
 						 UNIT_KILO);
 
@@ -1129,7 +1129,7 @@ void print_fields(type_t type, void *object)
 				tmp_int = hostlist_count(hl);
 				hostlist_destroy(hl);
 			}
-			convert_num_unit((float)tmp_int,
+			convert_num_unit((double)tmp_int,
 					 outbuf, sizeof(outbuf), UNIT_NONE);
 			field->print_routine(field,
 					     outbuf,
@@ -1263,7 +1263,7 @@ void print_fields(type_t type, void *object)
 			else if (tmp_dub == CPU_FREQ_HIGH)
 				snprintf(outbuf, sizeof(outbuf), "High");
 			else if (!fuzzy_equal(tmp_dub, NO_VAL))
-				convert_num_unit2((float)tmp_dub,
+				convert_num_unit2((double)tmp_dub,
 						  outbuf, sizeof(outbuf),
 						  UNIT_KILO, 1000, false);
 			field->print_routine(field,
@@ -1309,7 +1309,7 @@ void print_fields(type_t type, void *object)
 					tmp_uint32 &= (~MEM_PER_CPU);
 					per_cpu = true;
 				}
-				convert_num_unit((float)tmp_uint32,
+				convert_num_unit((double)tmp_uint32,
 						 outbuf, sizeof(outbuf),
 						 UNIT_MEGA);
 				if (per_cpu)

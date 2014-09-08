@@ -93,6 +93,7 @@ EXTRA_DIST = \
 	test1.70			\
 	test1.71			\
 	test1.72			\
+	test1.73			\
 	test1.80			\
 	test1.81			\
 	test1.82			\
@@ -134,6 +135,14 @@ EXTRA_DIST = \
 	test2.13			\
 	test2.14			\
 	test2.15			\
+	test2.16			\
+	test2.17			\
+	test2.18			\
+	test2.19			\
+	test2.20			\
+	test2.21			\
+	test2.22			\
+	test2.23			\
 	test3.1				\
 	test3.2				\
 	test3.3				\
@@ -363,6 +372,7 @@ EXTRA_DIST = \
 	test17.31			\
 	test17.32			\
 	test17.33			\
+	test17.34			\
 	test19.1			\
 	test19.2			\
 	test19.3			\
@@ -374,6 +384,13 @@ EXTRA_DIST = \
 	test20.2			\
 	test20.3			\
 	test20.4			\
+	test20.5			\
+	test20.6			\
+	test20.7			\
+	test20.8			\
+	test20.9			\
+	test20.10			\
+	test20.11			\
 	test21.1			\
 	test21.2			\
 	test21.3			\
@@ -416,6 +433,14 @@ EXTRA_DIST = \
 	inc21.30.6                      \
 	inc21.30.7                      \
 	inc21.30.8                      \
+	inc21.30.9			\
+	inc21.30.10			\
+	inc21.30.11			\
+	inc21.30.12			\
+	inc21.30.13			\
+	inc21.30.14			\
+	inc21.30.15			\
+	inc21.30.16			\
 	test22.1			\
 	inc22.1.1                       \
 	inc22.1.2                       \
@@ -441,6 +466,29 @@ EXTRA_DIST = \
 	test28.4                        \
 	test28.5                        \
 	test28.6                        \
+	test28.7			\
+	test29.1                        \
+	test29.2                        \
+	test29.3                        \
+	test29.4                        \
+	test29.5                        \
+	test29.6                        \
+	test29.7			\
+	test29.8			\
+	test30.1			\
+	test31.1			\
+	test32.1			\
+	test32.2			\
+	test32.3			\
+	test32.4			\
+	test32.5			\
+	test32.6			\
+	test32.7			\
+	test32.8			\
+	test32.9			\
+	test32.10			\
+	test32.11			\
+	test32.12			\
 	usleep
 
 distclean-local:

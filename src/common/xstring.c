@@ -92,7 +92,10 @@ strong_alias(_xstrsubstitute,   slurm_xstrsubstitute);
 strong_alias(xstrstrip,         slurm_xstrstrip);
 strong_alias(xshort_hostname,   slurm_xshort_hostname);
 strong_alias(xstring_is_whitespace, slurm_xstring_is_whitespace);
-strong_alias(xstrtolower, slurm_xstrtolower);
+strong_alias(xstrtolower,       slurm_xstrtolower);
+strong_alias(xstrchr,           slurm_xstrchr);
+strong_alias(xstrcmp,           slurm_xstrcmp);
+strong_alias(xstrcasecmp,       slurm_xstrcasecmp);
 
 /*
  * Ensure that a string has enough space to add 'needed' characters.
@@ -220,7 +223,7 @@ void _xstrftimecat(char **buf, const char *fmt)
 /*
  * Append a ISO 8601 formatted timestamp to buffer buf, expand as needed
  */
-void _xiso8601timecat(char **buf)
+void _xiso8601timecat(char **buf, bool msec)
 {
 	char p[64] = "";
 	struct timeval tv;
@@ -235,18 +238,17 @@ void _xiso8601timecat(char **buf)
 	if (strftime(p, sizeof(p), "%Y-%m-%dT%T", &tm) == 0)
 		fprintf(stderr, "strftime() returned 0\n");
 
-#if defined LOG_TIME_MSEC	/* Add millisecond data */
-	_xstrfmtcat(buf, "%s.%3.3d", p, (int)(tv.tv_usec / 1000));
-#else
-	_xstrfmtcat(buf, "%s", p);
-#endif
+	if (msec)
+		_xstrfmtcat(buf, "%s.%3.3d", p, (int)(tv.tv_usec / 1000));
+	else
+		_xstrfmtcat(buf, "%s", p);
 }
 
 /*
  * Append a RFC 5424 formatted timestamp to buffer buf, expand as needed
  *
  */
-void _xrfc5424timecat(char **buf)
+void _xrfc5424timecat(char **buf, bool msec)
 {
 	char p[64] = "";
 	char z[12] = "";
@@ -272,11 +274,10 @@ void _xrfc5424timecat(char **buf)
 	z[4] = z[3];
 	z[3] = ':';
 
-#if defined LOG_TIME_MSEC	/* Add millisecond data */
-	_xstrfmtcat(buf, "%s.%3.3d%s", p, (int)(tv.tv_usec / 1000), z);
-#else
-	_xstrfmtcat(buf, "%s%s", p, z);
-#endif
+	if (msec)
+		_xstrfmtcat(buf, "%s.%3.3d%s", p, (int)(tv.tv_usec / 1000), z);
+	else
+		_xstrfmtcat(buf, "%s%s", p, z);
 }
 
 /*
@@ -553,6 +554,34 @@ char *xstrtolower(char *str)
 		}
 	}
 	return str;
+}
+
+/* safe strchr */
+char *xstrchr(const char *s1, int c)
+{
+	return s1 ? strchr(s1, c) : NULL;
+}
+
+/* safe strcmp */
+int xstrcmp(const char *s1, const char *s2)
+{
+	if (!s1 && !s2)
+		return 0;
+	else if ((s1 && !s2) || (!s1 && s2))
+		return 1;
+	else
+		return strcmp(s1, s2);
+}
+
+/* safe strcasecmp */
+int xstrcasecmp(const char *s1, const char *s2)
+{
+	if (!s1 && !s2)
+		return 0;
+	else if ((s1 && !s2) || (!s1 && s2))
+		return 1;
+	else
+		return strcasecmp(s1, s2);
 }
 
 /*

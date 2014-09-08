@@ -83,6 +83,8 @@ typedef struct pmi2_job_info {
 
 	MPIR_PROCDESC *MPIR_proctable;	/* used only in srun */
 	opt_t      *srun_opt;	/* used only in srun */
+	switch_jobinfo_t *switch_job; /* switch-specific job information */
+	char *resv_ports; /* MPI reserved ports */
 } pmi2_job_info_t;
 
 typedef struct pmi2_tree_info {
@@ -103,11 +105,12 @@ extern pmi2_tree_info_t tree_info;
 extern char tree_sock_addr[];
 extern int  tree_sock;
 extern int *task_socks;
+extern char sun_path[];
 #define STEPD_PMI_SOCK(lrank) task_socks[lrank * 2]
 #define TASK_PMI_SOCK(lrank) task_socks[lrank * 2 + 1]
 
 extern bool in_stepd(void);
-extern int  pmi2_setup_stepd(const slurmd_job_t *job, char ***env);
+extern int  pmi2_setup_stepd(const stepd_step_rec_t *job, char ***env);
 extern int  pmi2_setup_srun(const mpi_plugin_client_info_t *job, char ***env);
 
 #endif	/* _SETUP_H */

@@ -42,6 +42,7 @@
 #  include "config.h"
 #endif
 
+#include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -582,6 +583,14 @@ char *slurm_read_hostfile(char *filename, int n)
 
 	while (fgets(in_line, BUFFER_SIZE, fp) != NULL) {
 		line_num++;
+		if (!isalpha(in_line[0]) && !isdigit(in_line[0])) {
+			error ("Invalid hostfile %s contents on line %d",
+			       filename, line_num);
+			fclose (fp);
+			hostlist_destroy(hostlist);
+			return NULL;
+		}
+
 		line_size = strlen(in_line);
 		total_file_len += line_size;
 		if (line_size == (BUFFER_SIZE - 1)) {
@@ -619,9 +628,9 @@ char *slurm_read_hostfile(char *filename, int n)
 			    (i = atoi(asterisk + 1))) {
 				asterisk[0] = '\0';
 				for (j = 0; j < i; j++)
-					hostlist_push(hostlist, host_name);
+					hostlist_push_host(hostlist, host_name);
 			} else {
-				hostlist_push(hostlist, host_name);
+				hostlist_push_host(hostlist, host_name);
 			}
 			host_name = strtok_r(NULL, ",", &save_ptr);
 		}

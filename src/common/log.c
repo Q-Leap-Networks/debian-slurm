@@ -134,6 +134,7 @@ typedef struct {
 	log_facility_t facility;
 	log_options_t opt;
 	unsigned initialized:1;
+	uint16_t fmt;            /* Flag for specifying timestamp format */
 	uint32_t debug_flags;
 }	log_t;
 
@@ -201,25 +202,33 @@ size_t rfc2822_timestamp(char *s, size_t max)
 
 size_t log_timestamp(char *s, size_t max)
 {
-#ifdef USE_RFC5424_TIME
-	size_t written = _make_timestamp(s, max, "%Y-%m-%dT%T%z");
-	if (max >= 26 && written == 24) {
-		/* The strftime %z format creates timezone offsets of
-		 * the form (+/-)hhmm, whereas the RFC 5424 format is
-		 * (+/-)hh:mm. So shift the minutes one step back and
-		 * insert the semicolon. */
-		s[25] = '\0';
-		s[24] = s[23];
-		s[23] = s[22];
-		s[22] = ':';
-		return written + 1;
+	if (!log)
+		return _make_timestamp(s, max, "%Y-%m-%dT%T");
+	switch (log->fmt) {
+	case LOG_FMT_RFC5424_MS:
+	case LOG_FMT_RFC5424:
+	{
+		size_t written = _make_timestamp(s, max, "%Y-%m-%dT%T%z");
+		if (max >= 26 && written == 24) {
+			/* The strftime %z format creates timezone offsets of
+			 * the form (+/-)hhmm, whereas the RFC 5424 format is
+			 * (+/-)hh:mm. So shift the minutes one step back and
+			 * insert the semicolon. */
+			s[25] = '\0';
+			s[24] = s[23];
+			s[23] = s[22];
+			s[22] = ':';
+			return written + 1;
+		}
+		return written;
 	}
-	return written;
-#elif defined USE_ISO_8601
-	return _make_timestamp(s, max, "%Y-%m-%dT%T");
-#else
-	return _make_timestamp(s, max, "%b %d %T");
-#endif
+	case LOG_FMT_SHORT:
+		return _make_timestamp(s, max, "%b %d %T");
+		break;
+	default:
+		return _make_timestamp(s, max, "%Y-%m-%dT%T");
+		break;
+	}
 }
 
 /* check to see if a file is writeable,
@@ -303,7 +312,7 @@ _log_init(char *prog, log_options_t opt, log_facility_t fac, char *logfile )
 	}
 
 	/* Only take the first one here.  In some situations it can change. */
-	if (!slurm_prog_name)
+	if (!slurm_prog_name && log->argv0 && (strlen(log->argv0) > 1))
 		slurm_prog_name = xstrdup(log->argv0);
 
 	if (!log->fpfx)
@@ -636,12 +645,42 @@ void log_oom(const char *file, int line, const char *func)
 {
 	if (log && log->logfp) {
 		fprintf(log->logfp, "%s:%d: %s: malloc failed\n",
-			file, line, func);
+		        file, line, func);
 	}
 	if (!log || log->opt.stderr_level) {
 		fprintf(stderr, "%s:%d: %s: malloc failed\n",
-			file, line, func);
+		        file, line, func);
 	}
+}
+
+
+/* Set the timestamp format flag */
+void log_set_timefmt(unsigned fmtflag)
+{
+	if (log) {
+		slurm_mutex_lock(&log_lock);
+		log->fmt = fmtflag;
+		slurm_mutex_unlock(&log_lock);
+	} else {
+		fprintf(stderr, "%s:%d: %s Slurm log not initialized\n",
+			__FILE__, __LINE__, __func__);
+	}
+}
+
+/* set_idbuf()
+ * Write in the input buffer the current time and milliseconds
+ * the process id and the current thread id.
+ */
+static void
+set_idbuf(char *idbuf)
+{
+	struct timeval now;
+
+	gettimeofday(&now, NULL);
+
+	sprintf(idbuf, "%.15s.%-6d %5d %p", ctime(&now.tv_sec) + 4,
+	        (int)now.tv_usec, (int)getpid(), (void *)pthread_self());
+
 }
 
 /* return a heap allocated string formed from fmt and ap arglist
@@ -698,24 +737,42 @@ static char *vxstrfmt(const char *fmt, va_list ap)
 			case 'T': 	/* "%T" => "dd, Mon yyyy hh:mm:ss off" */
 				xstrftimecat(buf, "%a, %d %b %Y %H:%M:%S %z");
 				break;
-#if defined USE_USEC_CLOCK
-			case 'M':       /* "%M" => "usec"                    */
-				snprintf(tmp, sizeof(tmp), "%ld", clock());
-				xstrcat(buf, tmp);
-				break;
-#elif defined USE_RFC5424_TIME
-			case 'M': /* "%M" => "yyyy-mm-ddThh:mm:ss.fff(+/-)hh:mm" */
-				xrfc5424timecat(buf);
-				break;
-#elif defined USE_ISO_8601
-			case 'M':       /* "%M" => "yyyy-mm-ddThh:mm:ss.fff"  */
-				xiso8601timecat(buf);
-				break;
+			case 'M':
+				if (!log)
+					xiso8601timecat(buf, true);
+				else {
+					switch (log->fmt) {
+					case LOG_FMT_ISO8601_MS: /* "%M" => "yyyy-mm-ddThh:mm:ss.fff"  */
+						xiso8601timecat(buf, true);
+						break;
+					case LOG_FMT_ISO8601: /* "%M" => "yyyy-mm-ddThh:mm:ss.fff"  */
+						xiso8601timecat(buf, false);
+						break;
+					case LOG_FMT_RFC5424_MS: /* "%M" => "yyyy-mm-ddThh:mm:ss.fff(+/-)hh:mm" */
+						xrfc5424timecat(buf, true);
+						break;
+					case LOG_FMT_RFC5424:  /* "%M" => "yyyy-mm-ddThh:mm:ss.fff(+/-)hh:mm" */
+						xrfc5424timecat(buf, false);
+						break;
+					case LOG_FMT_CLOCK:
+						/* "%M" => "usec" */
+#if defined(__FreeBSD__)
+						snprintf(tmp, sizeof(tmp), "%d", clock());
 #else
-			case 'M':       /* "%M" => "Mon DD hh:mm:ss"         */
-				xstrftimecat(buf, "%b %d %T");
-				break;
+						snprintf(tmp, sizeof(tmp), "%ld", clock());
 #endif
+						xstrcat(buf, tmp);
+						break;
+					case LOG_FMT_SHORT: /* "%M" => "Mon DD hh:mm:ss"         */
+						xstrftimecat(buf, "%b %d %T");
+						break;
+					case LOG_FMT_THREAD_ID:
+						set_idbuf(tmp);
+						xstrcat(buf, tmp);
+						break;
+					}
+				}
+				break;
 			case 's':	/* "%s" => append string */
 				/* we deal with this case for efficiency */
 				if (unprocessed == 0)
@@ -892,25 +949,6 @@ _log_printf(log_t *log, cbuf_t cb, FILE *stream, const char *fmt, ...)
 
 }
 
-#if defined(EXT_DEBUG)
-/* set_idbuf()
- * Write in the input buffer the current time and milliseconds
- * the process id and the current thread id.
- */
-static void
-set_idbuf(char *idbuf)
-{
-	struct timeval now;
-
-	gettimeofday(&now, NULL);
-
-	sprintf(idbuf, "\
-%.15s.%-6d %5d %p", ctime(&now.tv_sec) + 4,
-	        (int)now.tv_usec, (int)getpid(), (void *)pthread_self());
-
-}
-#endif
-
 /*
  * log a message at the specified level to facilities that have been
  * configured to receive messages at that level
@@ -921,15 +959,8 @@ static void log_msg(log_level_t level, const char *fmt, va_list args)
 	char *buf = NULL;
 	char *msgbuf = NULL;
 	int priority = LOG_INFO;
-#if defined(EXT_DEBUG)
-	char idbuf[128];
-#endif
 
 	slurm_mutex_lock(&log_lock);
-
-#if defined(EXT_DEBUG)
-	set_idbuf(idbuf);
-#endif
 
 	if (!LOG_INITIALIZED) {
 		log_options_t opts = LOG_OPTS_STDERR_ONLY;
@@ -1012,30 +1043,23 @@ static void log_msg(log_level_t level, const char *fmt, va_list args)
 	}
 
 	if (level <= log->opt.stderr_level) {
+
 		fflush(stdout);
-#if defined(EXT_DEBUG)
-		_log_printf(log, log->buf, stderr, "%s ", idbuf);
-#endif
-		if (log->debug_flags & DEBUG_FLAG_THREADID)
-			_log_printf(log, log->buf, stderr, "%s: %p %s%s\n",
-				    log->argv0, (void *)pthread_self(),
-				    pfx, buf);
-		else
+		if (log->fmt == LOG_FMT_THREAD_ID) {
+			char tmp[64];
+			set_idbuf(tmp);
+			_log_printf(log, log->buf, stderr, "%s %s: %s%s\n",
+			            tmp, log->argv0, pfx, buf);
+		} else {
 			_log_printf(log, log->buf, stderr, "%s: %s%s\n",
-				    log->argv0, pfx, buf);
+			            log->argv0, pfx, buf);
+		}
 		fflush(stderr);
 	}
 
 	if ((level <= log->opt.logfile_level) && (log->logfp != NULL)) {
 
-#if defined(EXT_DEBUG)
-		_log_printf(log, log->buf, log->logfp, "%s ", idbuf);
-#endif
-		if (log->debug_flags & DEBUG_FLAG_THREADID)
-			xlogfmtcat(&msgbuf, "[%M] %p %s%s%s", log->fpfx,
-				   (void *)pthread_self(), pfx, buf);
-		else
-			xlogfmtcat(&msgbuf, "[%M] %s%s%s", log->fpfx, pfx, buf);
+		xlogfmtcat(&msgbuf, "[%M] %s%s%s", log->fpfx, pfx, buf);
 		_log_printf(log, log->fbuf, log->logfp, "%s\n", msgbuf);
 		fflush(log->logfp);
 
@@ -1043,8 +1067,8 @@ static void log_msg(log_level_t level, const char *fmt, va_list args)
 	}
 
 	if (level <=  log->opt.syslog_level) {
-		xlogfmtcat(&msgbuf, "%s%s", pfx, buf);
 
+		xlogfmtcat(&msgbuf, "%s%s", pfx, buf);
 		openlog(log->argv0, LOG_PID, log->facility);
 		syslog(priority, "%.500s", msgbuf);
 		closelog();
@@ -1358,4 +1382,3 @@ dump_cleanup_list(void)
 	}
 	slurm_mutex_unlock(&fatal_lock);
 }
-

@@ -147,18 +147,20 @@ struct node_record {
 					 * or other sequence number used to
 					 * order nodes by location,
 					 * no need to save/restore */
-#ifdef HAVE_CRAY
+#ifdef HAVE_ALPS_CRAY
 	uint32_t basil_node_id;		/* Cray-XT BASIL node ID,
 					 * no need to save/restore */
 	time_t down_time;		/* When first set to DOWN state */
-#endif	/* HAVE_CRAY */
+#endif	/* HAVE_ALPS_CRAY */
 	acct_gather_energy_t *energy;
 	ext_sensors_data_t *ext_sensors; /* external sensor data */
 	dynamic_plugin_data_t *select_nodeinfo; /* opaque data structure,
 						 * use select_g_get_nodeinfo()
 						 * to access contents */
 	uint32_t cpu_load;		/* CPU load * 100 */
-
+	time_t cpu_load_time;		/* Time when cpu_load last set */
+	uint16_t protocol_version;	/* Slurm version number */
+	char *version;			/* Slurm version */
 };
 extern struct node_record *node_record_table_ptr;  /* ptr to node records */
 extern int node_record_count;		/* count in node_record_table_ptr */

@@ -26,6 +26,9 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA.
 \*****************************************************************************/
 
+#ifndef _SLURMD_TERM_MONITOR_H
+#define _SLURMD_TERM_MONITOR_H
+
 /*
  * Start a monitor pthread that will wait for a period of time,
  * as defined in the slurm.conf variable UnkillableStepTimeout,
@@ -49,3 +52,5 @@ void step_terminate_monitor_start(uint32_t jobid, uint32_t stepid);
  * said pthread.
  */
 void step_terminate_monitor_stop(void);
+
+#endif /* !_SLURMD_TERM_MONITOR_H */

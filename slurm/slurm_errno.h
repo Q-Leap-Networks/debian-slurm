@@ -193,6 +193,7 @@ enum {
 	ESLURM_INTERCONNECT_BUSY,
 	ESLURM_RESERVATION_EMPTY,
 	ESLURM_INVALID_ARRAY,
+	ESLURM_RESERVATION_NAME_DUP,
 
 	/* switch specific error codes, specific values defined in plugin module */
 	ESLURM_SWITCH_MIN = 3000,
@@ -260,6 +261,7 @@ enum {
 	ESLURM_CLUSTER_DELETED,
 	ESLURM_ONE_CHANGE,
 	ESLURM_BAD_NAME,
+	ESLURM_OVER_ALLOCATE,
 
 	/* plugin and custom errors */
 	ESLURM_MISSING_TIME_LIMIT       = 8000

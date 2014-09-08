@@ -40,7 +40,7 @@ set exit_code   0
 
 print_header $test_id
 
-if {[test_cray]} {
+if {[test_alps]} {
 	send_user "\nWARNING: This test is incompatible with Cray systems\n"
 	exit 0
 } elseif {[test_serial]} {
@@ -78,6 +78,8 @@ if {[test_launch_poe]} {
 } else {
 	set node_name_env SLURMD_NODENAME
 }
+
+set timeout $max_job_delay
 set salloc_pid [spawn $salloc -N$node_cnt -t1 $srun -l $bin_printenv $node_name_env]
 expect {
 	-re "Granted job allocation ($number)" {

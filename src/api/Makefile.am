@@ -3,7 +3,7 @@
 
 AUTOMAKE_OPTIONS = foreign
 
-INCLUDES = -I$(top_srcdir) $(BG_INCLUDES)
+AM_CPPFLAGS = -I$(top_srcdir) $(BG_INCLUDES)
 
 if WITH_GNU_LD
 VERSION_SCRIPT = \
@@ -106,8 +106,8 @@ slurmapi_src =           \
 	topo_info.c      \
 	triggers.c       \
 	reconfigure.c    \
-	update_config.c
-
+	update_config.c  \
+	license_info.c
 
 common_dir = $(top_builddir)/src/common
 
@@ -132,7 +132,6 @@ libslurm_la_LDFLAGS        = \
         $(LIB_LDFLAGS) \
         -version-info $(current):$(rev):$(age) \
         $(OTHER_FLAGS) $(HWLOC_LDFLAGS) $(HWLOC_LIBS)
-
 #
 # The libpmi_la_LIBADD specification below causes libpmi.la to relink
 # when running "make install", but removing it prevents essential slurm
@@ -152,9 +151,8 @@ libslurm_o_LDADD = $(top_builddir)/src/common/libeio.o	\
 	$(top_builddir)/src/common/libspank.o	\
 	$(top_builddir)/src/common/libcommon.o
 
-libslurm.o: $(libslurmhelper_la_OBJECTS) $(libslurm_o_LDADD)
+libslurm.o$(EXEEXT): $(libslurmhelper_la_OBJECTS) $(libslurm_o_LDADD)
 	$(LINK) $(libslurmhelper_la_OBJECTS) $(libslurm_o_LDADD)
-
 
 force:
 $(libslurm_o_LDADD) $(convenience_libs) $(slurmapi_add) : force

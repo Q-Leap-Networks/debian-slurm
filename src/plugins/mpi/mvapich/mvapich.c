@@ -329,8 +329,8 @@ static void report_absent_tasks (mvapich_state_t *st, int check_do_poll)
 		if ((m == NULL) || (m->fd < 0) || (check_do_poll && m->do_poll)) {
 			const char *host = slurm_step_layout_host_name (sl, i);
 			sprintf (buf, "%d", i);
-			hostlist_push (tasks, buf);
-			hostlist_push (hosts, host);
+			hostlist_push_host (tasks, buf);
+			hostlist_push_host (hosts, host);
 		}
 	}
 
@@ -1654,7 +1654,7 @@ static int mvapich_accept_new (mvapich_state_t *st)
 
 		if (st->nconnected == 0 && st->protocol_phase == 0) {
 			mvapich_debug ("first task connected");
-			do_timings (st, NULL);
+			do_timings (st, "Start");
 			/*
 			 *  Officially start timeout timer now.
 			 */
@@ -2252,6 +2252,3 @@ void mvapich_thr_exit(mvapich_state_t *st)
 
 	pthread_exit(NULL);
 }
-
-
-

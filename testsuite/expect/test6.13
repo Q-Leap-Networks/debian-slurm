@@ -41,6 +41,28 @@ set file_prog    "test$test_id.prog"
 
 print_header $test_id
 
+set conf_test 0
+log_user 0
+spawn $scontrol show config
+expect {
+	-re "launch/poe" {
+		incr conf_test
+		exp_continue
+	}
+	-re "proctrack/pgid" {
+		incr conf_test
+		exp_continue
+	}
+	eof {
+		wait
+	}
+}
+log_user 1
+if {$conf_test == 2} {
+	send_user "\nWARNING: launch/poe plus proctrack/pgid are incompatible with this test\n"
+	exit 0
+}
+
 #
 # Delete left-over programs and rebuild them.
 # We use our own program to get ulimit values since the output
@@ -81,9 +103,9 @@ if {[wait_for_job $job_id RUNNING] != 0} {
 	cancel_job $job_id
 	exit 1
 }
-# Allow time for the step to start
+# Allow time for poe to start the step
 # This could take a while with launch/poe
-sleep 20
+sleep 30
 
 #
 # Test verbose scancel
@@ -264,4 +286,3 @@ if {$exit_code == 0} {
 	send_user "\nSUCCESS\n"
 }
 exit $exit_code
-

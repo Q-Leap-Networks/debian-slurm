@@ -113,10 +113,12 @@ typedef struct sbatch_options {
 	char *propagate;	/* --propagate[=RLIMIT_CORE,...]*/
 	char *qos;		/* --qos			*/
 	int immediate;		/* -i, --immediate      	*/
-	uint16_t warn_signal;	/* --signal=<int>@<time>	*/
-	uint16_t warn_time;	/* --signal=<int>@<time>	*/
+	uint16_t warn_flags;	/* --signal=flags:<int>@<time>	*/
+	uint16_t warn_signal;	/* --signal=flags:<int>@<time>	*/
+	uint16_t warn_time;	/* --signal=flags:<int>@<time>	*/
 
 	bool hold;		/* --hold, -H			*/
+	bool parsable;		/* --parsable			*/
 	bool no_kill;		/* --no-kill, -k		*/
 	int requeue;		/* --requeue and --no-requeue	*/
 	uint8_t open_mode;	/* --open-mode			*/
@@ -178,6 +180,8 @@ typedef struct sbatch_options {
 				 * Prolog and Epilog		*/
 	int spank_job_env_size;	/* size of spank_job_env	*/
 	int umask;		/* job umask for PBS		*/
+	int core_spec;		/* --core-spec=n,      -S n	*/
+	bool test_only;		/* --test-only			*/
 } opt_t;
 
 extern opt_t opt;

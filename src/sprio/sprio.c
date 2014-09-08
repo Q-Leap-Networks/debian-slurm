@@ -81,6 +81,7 @@ int main (int argc, char *argv[])
 	priority_factors_response_msg_t *resp_msg = NULL;
 	log_options_t opts = LOG_OPTS_STDERR_ONLY ;
 
+	slurm_conf_init(NULL);
 	log_init(xbasename(argv[0]), opts, SYSLOG_FACILITY_USER, NULL);
 
 	parse_command_line( argc, argv );
@@ -148,10 +149,10 @@ int main (int argc, char *argv[])
 	if (params.format == NULL) {
 		if (params.normalized) {
 			if (params.long_list)
-				params.format = "%.7i %.8u %10y %10a %10f %10j "
-					"%10p %10q";
+				params.format = "%.15i %.8u %10y %10a %10f "
+					"%10j %10p %10q";
 			else{
-				params.format = xstrdup("%.7i");
+				params.format = xstrdup("%.15i");
 				if (params.users)
 					xstrcat(params.format, " %.8u");
 				xstrcat(params.format, " %10y");
@@ -168,10 +169,10 @@ int main (int argc, char *argv[])
 			}
 		} else {
 			if (params.long_list)
-				params.format = "%.7i %.8u %.10Y %.10A %.10F "
+				params.format = "%.15i %.8u %.10Y %.10A %.10F "
 					"%.10J %.10P %.10Q %.6N";
 			else{
-				params.format = xstrdup("%.7i");
+				params.format = xstrdup("%.15i");
 				if (params.users)
 					xstrcat(params.format, " %.8u");
 				xstrcat(params.format, " %.10Y");

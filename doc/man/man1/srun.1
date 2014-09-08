@@ -176,7 +176,7 @@ Users can specify which of these \fBfeatures\fR are required by their job
 using the constraint option.
 Only nodes having features matching the job constraints will be used to
 satisfy the request.
-Multiple constraints may be specified with AND, OR, exclusive OR,
+Multiple constraints may be specified with AND, OR, matching OR,
 resource counts, etc.
 Supported \fbconstraint\fR options include:
 .PD 1
@@ -203,7 +203,7 @@ If only nodes with at least one of specified features will be used.
 The vertical bar is used for an OR operator.
 For example, \fB\-\-constraint="intel|amd"\fR
 .TP
-\fBExclusive OR\fR
+\fBMatching OR\fR
 If only one of a set of possible options should be used for all allocated
 nodes, then use the OR operator and enclose the options within square brackets.
 For example: "\fB\-\-constraint=[rack1|rack2|rack3|rack4]"\fR might
@@ -311,18 +311,17 @@ where <list> is <cpuid1>,<cpuid2>,...<cpuidN>.
 CPU IDs are interpreted as decimal values unless they are preceded
 with '0x' in which case they are interpreted as hexadecimal values.
 Not supported unless the entire node is allocated to the job.
-This option is currently only supported by the task/affinity plugin.
 .TP
 .B mask_cpu:<list>
 Bind by setting CPU masks on tasks as specified
 where <list> is <mask1>,<mask2>,...<maskN>.
 CPU masks are \fBalways\fR interpreted as hexadecimal values but can be
-preceded with an optional '0x'.
-Not supported unless the entire node is allocated to the job.
-This option is currently only supported by the task/affinity plugin.
+preceded with an optional '0x'. Not supported unless the entire node is
+allocated to the job.
 .TP
 .B rank_ldom
-Bind to a NUMA locality domain by rank
+Bind to a NUMA locality domain by rank. Not supported unless the entire
+node is allocated to the job.
 .TP
 .B map_ldom:<list>
 Bind by mapping NUMA locality domain IDs to tasks as specified where
@@ -358,6 +357,12 @@ this can result in sub\-optimal binding.
 Automatically generate masks binding tasks to NUMA locality domains.
 If the number of tasks differs from the number of allocated locality domains
 this can result in sub\-optimal binding.
+.TP
+.B boards
+Automatically generate masks binding tasks to boards.
+If the number of tasks differs from the number of allocated boards
+this can result in sub\-optimal binding. This option is supported by the
+task/cgroup plugin only.
 .TP
 .B help
 Show help message for cpu_bind
@@ -399,6 +404,14 @@ implies that the tasks are confined to those cpus.  If task
 confinement (i.e., TaskPlugin=task/affinity or
 TaskPlugin=task/cgroup with the "ConstrainCores" option) is not
 configured, this parameter is ignored.
+
+\fBNOTE\fR: When the step completes, the frequency of each selected cpu
+is set to its minimum available scaling frequency, to minimize default
+energy consumption.  The frequency scaling governor for each selected
+cpu is then reset to its previous type. If that previous
+type is not \fIuserspace\fR, the frequency may also be changed, depending
+on the restored governor type. In general, the frequencies of selected
+cpus before and after a job step is run are unpredictable.
 
 .TP
 \fB\-c\fR, \fB\-\-cpus\-per\-task\fR=<\fIncpus\fR>
@@ -783,6 +796,9 @@ Default value is \fBDefMemPerNode\fR and the maximum value is
 seen using the \fBscontrol show config\fR command.
 This parameter would generally be used if whole nodes
 are allocated to jobs (\fBSelectType=select/linear\fR).
+Specifying a memory limit of zero for a job step will restrict the job step
+to the amount of memory allocated to the job, but not remove any of the job's
+memory allocation from being available to other job steps.
 Also see \fB\-\-mem\-per\-cpu\fR.
 \fB\-\-mem\fR and \fB\-\-mem\-per\-cpu\fR are mutually exclusive.
 NOTE: Enforcement of memory limits currently relies upon the task/cgroup plugin
@@ -806,6 +822,9 @@ value will equal the original \fB\-\-mem\-per\-cpu\fR value specified by
 the user.
 This parameter would generally be used if individual processors
 are allocated to jobs (\fBSelectType=select/cons_res\fR).
+Specifying a memory limit of zero for a job step will restrict the job step
+to the amount of memory allocated to the job, but not remove any of the job's
+memory allocation from being available to other job steps.
 Also see \fB\-\-mem\fR.
 \fB\-\-mem\fR and \fB\-\-mem\-per\-cpu\fR are mutually exclusive.
 
@@ -967,9 +986,43 @@ that the \fB\-\-cpus\-per\-task\fR option will change this default.
 
 .TP
 \fB\-\-network\fR=<\fItype\fR>
-Specify the communication protocol to be used.
+Specify information pertaining to the switch or network.
 The interpretation of \fItype\fR is system dependent.
-This option is current supported on systems with IBM's Parallel Environment (PE).
+This option is supported when running Slurm on a Cray natively.  It is
+used to request using Network Performace Counters.
+Only one value per request is valid.
+All options are case in\-sensitive.
+In this configuration supported values include:
+.RS
+.TP 6
+\fBsystem\fR
+Use the system\-wide network performance counters. Because only one
+job can use this at a time this option will allocate every node in the
+cluster.  In steps inside the allocation wish to run on less than the
+full system they must specify the node count for each step.
+.TP
+\fBblade\fR
+Use the blade network performance counters. Only nodes requested
+will be marked in use for the job allocation.  If the job does not
+fill up the entire blade(s) allocated to the job those blade(s) are not
+able to be used by other jobs, but will appear in the state PerfCnts.
+.TP
+.RE
+
+.br
+.br
+In all cases the job or step allocation request \fBmust specify the
+--exclusive option\fR.  Otherwise the request will be denied.
+
+.br
+.br
+Also with any of these options steps are not allowed to share blades,
+so resources would remain idle inside an allocation if the step
+running on a blade does not take up all the nodes on the blade.
+
+.br
+.br
+The \fBnetwork\fR option is also supported on systems with IBM's Parallel Environment (PE).
 See IBM's LoadLeveler job command keyword documentation about the keyword
 "network" for more information.
 Multiple values may be specified in a comma separated list.
@@ -1327,6 +1380,13 @@ option was not set and allow higher system utilization, but application
 performance will likely suffer due to competition for resources within a node.
 
 .TP
+\fB\-S\fR, \fB\-\-core\-spec\fR=<\fInum\fR>
+Count of specialized cores per nodereserved by the job for system operations
+and not used by the application. The application will not use these cores,
+but will be charged for their allocation. Default value is zero.
+
+
+.TP
 \fB\-\-signal\fR=<\fIsig_num\fR>[@<\fIsig_time\fR>]
 When a job is within \fIsig_time\fR seconds of its end time,
 send it the signal \fIsig_num\fR.
@@ -1340,9 +1400,29 @@ the default time will be 60 seconds.
 
 .TP
 \fB\-\-slurmd\-debug\fR=<\fIlevel\fR>
-Specify a debug level for slurmd(8). \fIlevel\fR may be an integer
-value between 0 [quiet, only errors are displayed] and 4 [verbose
-operation].  The slurmd debug information is copied onto the stderr of
+Specify a debug level for slurmd(8). The \fIlevel\fR may be specified either
+an integer value between 0 [quiet, only errors are displayed] and 4 [verbose
+operation] or the \fISlurmdDebug\fR tags.
+.RS
+.TP 10
+\fBquiet\fR
+Log nothing
+.TP
+\fBfatal\fR
+Log only fatal errors
+.TP
+\fBerror\fR
+Log only errors
+.TP
+\fBinfo\fR
+Log errors and general informational messages
+.TP
+\fBverbose\fR
+Log errors and verbose informational messages
+.TP
+.RE
+
+The slurmd debug information is copied onto the stderr of
 the job. By default only errors are displayed.
 
 .TP
@@ -1493,13 +1573,17 @@ exits with a non\-zero exit code.
 
 .TP
 \fB\-w\fR, \fB\-\-nodelist\fR=<\fIhost1,host2,...\fR or \fIfilename\fR>
-Request a specific list of hosts. The job will contain \fIat least\fR
-these hosts. The list may be specified as a comma\-separated list of
-hosts, a range of hosts (host[1\-5,7,...] for example), or a filename.
-The host list will be assumed to be a filename if it contains a "/"
-character. If you specify a max node count (\-N1\-2) if there are more
-than 2 hosts in the file only the first 2 nodes will be used in the
-request list.
+Request a specific list of hosts.
+Unless constrained by the maximum node count, the job will contain
+\fIall\fR of these hosts.
+The list may be specified as a comma\-separated list of hosts, a range of hosts
+(host[1\-5,7,...] for example), or a filename.
+The host list will be assumed to be a filename if it contains a "/" character.
+If you specify a maximum node count and the host list contains more nodes, the
+extra node names will be silently ignored.
+If you specify a minimum node or processor count larger than can be satisfied
+by the supplied host list, additional resources will be allocated on other
+nodes as needed.
 Rather than repeating a host name multiple times, an asterisk and
 a repitition count may be appended to a host name. For example
 "host1,host1" and "host1*2" are equivalent.
@@ -1560,6 +1644,11 @@ For systems that allow a different connection type per dimension you
 can supply a comma separated list of connection types may be specified, one for
 each dimension (i.e. M,T,T,T will give you a torus connection is all
 dimensions expect the first).
+
+.TP
+\fB\-\-export\fR=\fINONE\fR
+When running on a BGQ only export the minimal set of environment
+variables needed to start a job, nothing else.
 
 .TP
 \fB\-g\fR, \fB\-\-geometry\fR=<\fIXxYxZ\fR> | <\fIAxXxYxZ\fR>
@@ -1818,6 +1907,9 @@ Same as \fB\-\-cnload\-image\fR
 \fBSLURM_CONN_TYPE\fR
 Same as \fB\-\-conn\-type\fR
 .TP
+\fBSLURM_CORE_SPEC\fR
+Same as \fB\-\-core\-spec\fR
+.TP
 \fBSLURM_CPU_BIND\fR
 Same as \fB\-\-cpu_bind\fR
 .TP
@@ -1953,7 +2045,9 @@ Same as \fB\-O, \-\-overcommit\fR
 Same as \fB\-p, \-\-partition\fR
 .TP
 \fBSLURM_PMI_KVS_NO_DUP_KEYS\fR
-If set, then PMI key\-pairs will contain no duplicate keys.
+If set, then PMI key\-pairs will contain no duplicate keys. MPI can use
+this variable to inform the PMI library that it will not use duplicate
+keys so PMI can skip the check for duplicate keys.
 This is the case for MPICH2 and reduces overhead in testing for duplicates
 for improved performance
 .TP
@@ -2099,6 +2193,10 @@ Job id of the executing job
 Set to the value of the \-\-job\-name option or the command name when srun
 is used to create a new job allocation. Not set when srun is used only to
 create a job step (i.e. within an existing job allocation).
+
+.TP
+\fBSLURM_JOB_PARTITION\fR
+Name of the partition in which the job is running.
 
 .TP
 \fBSLURM_LAUNCH_NODE_IPADDR\fR

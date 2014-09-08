@@ -1,4 +1,4 @@
-.TH SCONTROL "1" "December 2012" "scontrol 2.5" "Slurm components"
+.TH SCONTROL "1" "March 2014" "scontrol 14.03" "Slurm components"
 
 .SH "NAME"
 scontrol \- Used view and modify Slurm configuration and state.
@@ -165,6 +165,10 @@ command. To also list the batch script for batch jobs, in addition to the
 details, use the \fBscript\fP option described below instead of this option.
 
 .TP
+\fBerrnumstr\fP \fIERRNO\fP
+Given a Slurm error number, return a descriptive string.
+
+.TP
 \fBexit\fP
 Terminate the execution of scontrol.
 This is an independent command with no options meant for use in interactive mode.
@@ -270,9 +274,23 @@ Also see \fBhold\fR.
 
 .TP
 \fBrequeue\fP \fIjob_id\fP
-Requeue a running or pending SLURM batch job.
+Requeue a running, suspended or finished SLURM batch job into pending state.
 
 .TP
+\fBrequeuehold\fP \fIjob_id\fP
+Requeue a running, suspended or finished SLURM batch job into pending state,
+moreover the job is put in held state (priority zero). A held job can be
+release using scontrol to reset its priority (e.g. "scontrol release <job_id>").
+The command accepts the following option:
+.RS
+.TP 12
+\fIState=SpecialExit\fP
+The "SpecialExit" keyword specifies that the job
+has to be put in a special state \fBJOB_SPECIAL_EXIT\fP.
+The "scontrol show job" command will display the JobState as
+\fBSPECIAL_EXIT\fP, while the "squeue" command as \fBSE\fP.
+.RE
+
 \fBresume\fP \fIjob_id_list\fP
 Resume a previously suspended job.
 Multiple job ID values may be specified separated by spaces.
@@ -893,7 +911,7 @@ Use quotes to enclose a reason having more than one word.
 \fIState\fP=<state>
 Identify the state to be assigned to the node. Possible values are  "NoResp",
 "ALLOC", "ALLOCATED", "DOWN", "DRAIN", "FAIL", "FAILING", "IDLE",
-"MIXED", "MAINT", "POWER_DOWN", "POWER_UP", or "RESUME".
+"MIXED", "MAINT", "POWER_DOWN", "POWER_UP", "RESUME" or "UNDRAIN".
 If a node is in a "MIXED" state it usually means the node is in
 multiple states.  For instance if only part of the node is "ALLOCATED"
 and the rest of the node is "IDLE" the state will be "MIXED".
@@ -903,6 +921,8 @@ it's state to "DRAIN".
 seek to relinquish those nodes before the job completes.
 "RESUME" is not an actual node state, but will return a "DRAINED", "DRAINING",
 or "DOWN" node to service, either "IDLE" or "ALLOCATED" state as appropriate.
+"UNDRAIN" clears the node from being drained (like "RESUME"), but will
+not change the node's base state (e.g. "DOWN").
 Setting a node "DOWN" will cause all running and suspended jobs on that
 node to be terminated.
 "POWER_DOWN" and "POWER_UP" will use the configured \fISuspendProg\fR and
@@ -1252,6 +1272,8 @@ Flags\-=DAILY (NOTE: this shortcut is not supported for all flags).
 Currently supported flags include:
 .RS
 .TP 12
+\fFIRST_CORES\fR
+Use the lowest numbered cores on a node only.
 \fILICENSE_ONLY\fR
 This is a reservation for licenses only and not compute nodes.
 If this flag is set, a job using this reservation may use the associated
@@ -1571,7 +1593,7 @@ Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 .br
 Copyright (C) 2008\-2010 Lawrence Livermore National Security.
 .br
-Copyright (C) 2010-2013 SchedMD LLC.
+Copyright (C) 2010-2014 SchedMD LLC.
 .LP
 This file is part of SLURM, a resource management program.
 For details, see <http://slurm.schedmd.com/>.

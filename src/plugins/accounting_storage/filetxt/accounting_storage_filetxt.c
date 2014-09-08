@@ -39,7 +39,7 @@
 \*****************************************************************************/
 
 #include <strings.h>
-#include "src/common/node_select.h"
+#include "src/common/slurm_xlator.h"
 #include "src/common/slurm_accounting_storage.h"
 #include "filetxt_jobacct_process.h"
 
@@ -316,6 +316,12 @@ extern int acct_storage_p_add_qos(void *db_conn, uint32_t uid,
 	return SLURM_SUCCESS;
 }
 
+extern int acct_storage_p_add_res(void *db_conn, uint32_t uid,
+				  List res_list)
+{
+	return SLURM_SUCCESS;
+}
+
 extern int acct_storage_p_add_wckeys(void *db_conn, uint32_t uid,
 				  List wckey_list)
 {
@@ -370,6 +376,13 @@ extern List acct_storage_p_modify_qos(void *db_conn, uint32_t uid,
 	return SLURM_SUCCESS;
 }
 
+extern List acct_storage_p_modify_res(void *db_conn, uint32_t uid,
+				      slurmdb_res_cond_t *ser_res_cond,
+				      slurmdb_res_rec_t *ser_res)
+{
+	return SLURM_SUCCESS;
+}
+
 extern List acct_storage_p_modify_wckeys(void *db_conn, uint32_t uid,
 				      slurmdb_wckey_cond_t *wckey_cond,
 				      slurmdb_wckey_rec_t *wckey)
@@ -416,6 +429,12 @@ extern List acct_storage_p_remove_associations(void *db_conn, uint32_t uid,
 
 extern List acct_storage_p_remove_qos(void *db_conn, uint32_t uid,
 				      slurmdb_qos_cond_t *qos_cond)
+{
+	return NULL;
+}
+
+extern List acct_storage_p_remove_res(void *db_conn, uint32_t uid,
+				      slurmdb_res_cond_t *res_cond)
 {
 	return NULL;
 }
@@ -475,6 +494,12 @@ extern List acct_storage_p_get_problems(void *db_conn, uid_t uid,
 
 extern List acct_storage_p_get_qos(void *db_conn, uid_t uid,
 				   slurmdb_qos_cond_t *qos_cond)
+{
+	return NULL;
+}
+
+extern List acct_storage_p_get_res(void *db_conn, uid_t uid,
+				   slurmdb_res_cond_t *res_cond)
 {
 	return NULL;
 }

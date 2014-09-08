@@ -154,7 +154,7 @@ scontrol_pid_info(pid_t job_pid)
 			slurm_perror ("slurm_get_end_time error");
 		return;
 	}
-	printf("Slurm job id %u ends at %s\n", job_id, ctime(&end_time));
+	printf("Slurm job id %u ends at %s\n", job_id, slurm_ctime(&end_time));
 
 	rem_time = slurm_get_rem_time(job_id);
 	printf("slurm_get_rem_time is %ld\n", rem_time);
@@ -212,8 +212,8 @@ scontrol_print_completing_job(job_info_t *job_ptr,
 	char *node_buf;
 
 	all_nodes  = hostlist_create(job_ptr->nodes);
-	comp_nodes = hostlist_create("");
-	down_nodes = hostlist_create("");
+	comp_nodes = hostlist_create(NULL);
+	down_nodes = hostlist_create(NULL);
 
 	for (i=0; i<node_info_msg->record_count; i++) {
 		node_info = &(node_info_msg->node_array[i]);
@@ -284,7 +284,7 @@ scontrol_print_job (char * job_id_str)
 {
 	int error_code = SLURM_SUCCESS, i, print_cnt = 0;
 	uint32_t job_id = 0;
-	uint16_t array_id = (uint16_t) NO_VAL;
+	uint32_t array_id = NO_VAL;
 	job_info_msg_t * job_buffer_ptr = NULL;
 	job_info_t *job_ptr = NULL;
 	char *end_ptr = NULL;
@@ -310,10 +310,9 @@ scontrol_print_job (char * job_id_str)
 			time_str, job_buffer_ptr->record_count);
 	}
 
-	job_ptr = job_buffer_ptr->job_array ;
 	for (i = 0, job_ptr = job_buffer_ptr->job_array;
 	     i < job_buffer_ptr->record_count; i++, job_ptr++) {
-		if ((array_id != (uint16_t) NO_VAL) &&
+		if ((array_id != NO_VAL) &&
 		    (array_id != job_ptr->array_task_id))
 			continue;
 		slurm_print_job_info(stdout, job_ptr, one_liner);
@@ -346,7 +345,7 @@ scontrol_print_step (char *job_step_id_str)
 {
 	int error_code, i, print_cnt = 0;
 	uint32_t job_id = NO_VAL, step_id = NO_VAL;
-	uint16_t array_id = (uint16_t) NO_VAL;
+	uint32_t array_id = NO_VAL;
 	char *next_str;
 	job_step_info_response_msg_t *job_step_info_ptr;
 	job_step_info_t * job_step_ptr;
@@ -414,10 +413,9 @@ scontrol_print_step (char *job_step_id_str)
 			time_str, job_step_info_ptr->job_step_count);
 	}
 
-	job_step_ptr = job_step_info_ptr->job_steps ;
 	for (i = 0, job_step_ptr = job_step_info_ptr->job_steps;
 	     i < job_step_info_ptr->job_step_count; i++, job_step_ptr++) {
-		if ((array_id != (uint16_t) NO_VAL) &&
+		if ((array_id != NO_VAL) &&
 		    (array_id != job_step_ptr->array_task_id))
 			continue;
 		slurm_print_job_step_info(stdout, job_step_ptr, one_liner);

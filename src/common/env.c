@@ -48,6 +48,7 @@
 #include <string.h>
 #include <strings.h>
 #include <unistd.h>
+#include <signal.h>
 #include <sys/poll.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -85,6 +86,8 @@ strong_alias(env_array_overwrite_fmt,	slurm_env_array_overwrite_fmt);
 strong_alias(env_unset_environment,	slurm_env_unset_environment);
 
 #define ENV_BUFSIZE (256 * 1024)
+#define MAX_ENV_STRLEN (32 * 4096)	/* Needed for CPU_BIND and MEM_BIND on
+					 * SGI systems with huge CPU counts */
 
 static int _setup_particulars(uint32_t cluster_flags,
 			       char ***dest,
@@ -139,7 +142,7 @@ static int _setup_particulars(uint32_t cluster_flags,
 			error("Can't set MPIRUN_PARTITION "
 			      "environment variable");
 		}
-	} else if (cluster_flags & CLUSTER_FLAG_CRAYXT) {
+	} else if (cluster_flags & CLUSTER_FLAG_CRAY_A) {
 		uint32_t resv_id = 0;
 
 		select_g_select_jobinfo_get(select_jobinfo,
@@ -249,17 +252,28 @@ int
 setenvfs(const char *fmt, ...)
 {
 	va_list ap;
-	char *buf, *bufcpy;
-	int rc;
+	char *buf, *bufcpy, *loc;
+	int rc, size;
 
 	buf = xmalloc(ENV_BUFSIZE);
 	va_start(ap, fmt);
 	vsnprintf(buf, ENV_BUFSIZE, fmt, ap);
 	va_end(ap);
 
+	size = strlen(buf);
 	bufcpy = xstrdup(buf);
 	xfree(buf);
-	rc = putenv(bufcpy);
+
+	if (size >= MAX_ENV_STRLEN) {
+		if ((loc = strchr(bufcpy, '=')))
+			loc[0] = '\0';
+		error("environment variable %s is too long", bufcpy);
+		xfree(bufcpy);
+		rc = ENOMEM;
+	} else {
+		rc = putenv(bufcpy);
+	}
+
 	return rc;
 }
 
@@ -280,10 +294,21 @@ int setenvf(char ***envp, const char *name, const char *fmt, ...)
 		else
 			rc = 1;
 	} else {
-		/* XXX Space is allocated on the heap and will never
-		 * be reclaimed. */
-		xstrfmtcat(str, "%s=%s", name, value);
-		rc = putenv(str);
+		int size = strlen(name) + strlen(value) + 2;
+		if (size >= MAX_ENV_STRLEN) {
+			error("environment variable %s is too long", name);
+			rc = ENOMEM;
+		} else {
+			/* XXX Space is allocated on the heap and will never
+			 * be reclaimed.
+			 * Also you can not use xmalloc here since some of the
+			 * external api's like perl will crap out when they
+			 * try to free it.
+			 */
+			str = malloc(size);
+			snprintf(str, size, "%s=%s", name, value);
+			rc = putenv(str);
+		}
 	}
 	xfree(value);
 	return rc;
@@ -445,6 +470,8 @@ int setup_env(env_t *env, bool preserve_env)
 			xstrcat(str_bind_type, "sockets,");
 		} else if (env->cpu_bind_type & CPU_BIND_TO_LDOMS) {
 			xstrcat(str_bind_type, "ldoms,");
+		} else if (env->cpu_bind_type & CPU_BIND_TO_BOARDS) {
+			xstrcat(str_bind_type, "boards,");
 		}
 		if (env->cpu_bind_type & CPU_BIND_NONE) {
 			xstrcat(str_bind_type, "none");
@@ -617,7 +644,7 @@ int setup_env(env_t *env, bool preserve_env)
 		char *str;
 
 		if (env->cpu_freq & CPU_FREQ_RANGE_FLAG) {
-			switch (env->cpu_freq) 
+			switch (env->cpu_freq)
 			{
 			case CPU_FREQ_LOW :
 				str="low";
@@ -671,7 +698,7 @@ int setup_env(env_t *env, bool preserve_env)
 			error("Unable to set SLURM_JOB_ID environment");
 			rc = SLURM_FAILURE;
 		}
-		/* and for backwards compatability... */
+		/* and for backwards compatibility... */
 		if (setenvf(&env->env, "SLURM_JOBID", "%d", env->jobid)) {
 			error("Unable to set SLURM_JOBID environment");
 			rc = SLURM_FAILURE;
@@ -716,7 +743,7 @@ int setup_env(env_t *env, bool preserve_env)
 			error("Unable to set SLURM_STEP_ID environment");
 			rc = SLURM_FAILURE;
 		}
-		/* and for backwards compatability... */
+		/* and for backwards compatibility... */
 		if (setenvf(&env->env, "SLURM_STEPID", "%d", env->stepid)) {
 			error("Unable to set SLURM_STEPID environment");
 			rc = SLURM_FAILURE;
@@ -738,6 +765,12 @@ int setup_env(env_t *env, bool preserve_env)
 	if (env->nodelist
 	    && setenvf(&env->env, "SLURM_NODELIST", "%s", env->nodelist)) {
 		error("Unable to set SLURM_NODELIST environment var.");
+		rc = SLURM_FAILURE;
+	}
+
+	if (env->partition
+	    && setenvf(&env->env, "SLURM_JOB_PARTITION", "%s", env->partition)) {
+		error("Unable to set SLURM_JOB_PARTITION environment var.");
 		rc = SLURM_FAILURE;
 	}
 
@@ -822,6 +855,18 @@ int setup_env(env_t *env, bool preserve_env)
 	    setenvf(&env->env, "SLURM_RESTART_COUNT", "%u", env->restart_cnt)) {
 		error("Can't set SLURM_RESTART_COUNT env variable");
 		rc = SLURM_FAILURE;
+	}
+
+	if (env->user_name) {
+		if (setenvf(&env->env, "SLURM_JOB_UID", "%u",
+			    (unsigned int) env->uid)) {
+			error("Can't set SLURM_JOB_UID env variable");
+			rc = SLURM_FAILURE;
+		}
+		if (setenvf(&env->env, "SLURM_JOB_USER", "%s", env->user_name)){
+			error("Can't set SLURM_JOB_USER env variable");
+			rc = SLURM_FAILURE;
+		}
 	}
 
 	return rc;
@@ -964,6 +1009,8 @@ env_array_for_job(char ***dest, const resource_allocation_response_msg_t *alloc,
 				alloc->node_list);
 	env_array_overwrite_fmt(dest, "SLURM_NODE_ALIASES", "%s",
 				alloc->alias_list);
+	env_array_overwrite_fmt(dest, "SLURM_JOB_PARTITION", "%s",
+				alloc->partition);
 
 	set_distribution(desc->task_dist, &dist, &lllp_dist);
 	if (dist)
@@ -988,13 +1035,13 @@ env_array_for_job(char ***dest, const resource_allocation_response_msg_t *alloc,
 		uint32_t tmp_mem = alloc->pn_min_memory & (~MEM_PER_CPU);
 		env_array_overwrite_fmt(dest, "SLURM_MEM_PER_CPU", "%u",
 					tmp_mem);
-#ifdef HAVE_CRAY
+#ifdef HAVE_ALPS_CRAY
 		env_array_overwrite_fmt(dest, "APRUN_DEFAULT_MEMORY", "%u",
 					tmp_mem);
 #endif
 	} else if (alloc->pn_min_memory) {
 		uint32_t tmp_mem = alloc->pn_min_memory;
-#ifdef HAVE_CRAY
+#ifdef HAVE_ALPS_CRAY
 		uint32_t i, max_cpus_per_node = 1;
 		for (i = 0; i < alloc->num_cpu_groups; i++) {
 			if ((i == 0) ||
@@ -1115,13 +1162,14 @@ env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch,
 		env_array_overwrite_fmt(dest, "SLURM_BG_NUM_NODES",
 					"%u", num_nodes);
 	}
-	if (batch->array_task_id != (uint16_t) NO_VAL) {
+	if (batch->array_task_id != NO_VAL) {
 		env_array_overwrite_fmt(dest, "SLURM_ARRAY_JOB_ID", "%u",
 					batch->array_job_id);
 		env_array_overwrite_fmt(dest, "SLURM_ARRAY_TASK_ID", "%u",
 					batch->array_task_id);
 	}
 	env_array_overwrite_fmt(dest, "SLURM_JOB_NODELIST", "%s", batch->nodes);
+	env_array_overwrite_fmt(dest, "SLURM_JOB_PARTITION", "%s", batch->partition);
 	env_array_overwrite_fmt(dest, "SLURM_NODE_ALIASES", "%s",
 				batch->alias_list);
 
@@ -1183,13 +1231,13 @@ env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch,
 		uint32_t tmp_mem = batch->pn_min_memory & (~MEM_PER_CPU);
 		env_array_overwrite_fmt(dest, "SLURM_MEM_PER_CPU", "%u",
 					tmp_mem);
-#ifdef HAVE_CRAY
+#ifdef HAVE_ALPS_CRAY
 		env_array_overwrite_fmt(dest, "CRAY_AUTO_APRUN_OPTIONS",
 					"\"-m%u\"", tmp_mem);
 #endif
 	} else if (batch->pn_min_memory) {
 		uint32_t tmp_mem = batch->pn_min_memory;
-#ifdef HAVE_CRAY
+#ifdef HAVE_ALPS_CRAY
 		uint32_t i, max_cpus_per_node = 1;
 		for (i = 0; i < batch->num_cpu_groups; i++) {
 			if ((i == 0) ||
@@ -1200,7 +1248,7 @@ env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch,
 #endif
 		env_array_overwrite_fmt(dest, "SLURM_MEM_PER_NODE", "%u",
 					tmp_mem);
-#ifdef HAVE_CRAY
+#ifdef HAVE_ALPS_CRAY
 		tmp_mem /= max_cpus_per_node;
 		env_array_overwrite_fmt(dest, "CRAY_AUTO_APRUN_OPTIONS",
 					"\"-m%u\"", tmp_mem);
@@ -1598,6 +1646,29 @@ void env_array_merge(char ***dest_array, const char **src_array)
 	for (ptr = (char **)src_array; *ptr != NULL; ptr++) {
 		if (_env_array_entry_splitter(*ptr, name, sizeof(name),
 					      value, ENV_BUFSIZE))
+			env_array_overwrite(dest_array, name, value);
+	}
+	xfree(value);
+}
+
+/*
+ * Merge the environment variables in src_array beginning with "SLURM" into the
+ * array dest_array.  Any variables already found in dest_array will be
+ * overwritten with the value from src_array.
+ */
+void env_array_merge_slurm(char ***dest_array, const char **src_array)
+{
+	char **ptr;
+	char name[256], *value;
+
+	if (src_array == NULL)
+		return;
+
+	value = xmalloc(ENV_BUFSIZE);
+	for (ptr = (char **)src_array; *ptr != NULL; ptr++) {
+		if (_env_array_entry_splitter(*ptr, name, sizeof(name),
+					      value, ENV_BUFSIZE) &&
+		    (strncmp(name, "SLURM", 5) == 0))
 			env_array_overwrite(dest_array, name, value);
 	}
 	xfree(value);

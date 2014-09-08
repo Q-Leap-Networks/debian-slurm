@@ -99,7 +99,7 @@ extern int task_cgroup_devices_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
 		goto error;
 	}
 
-	(void) gres_plugin_node_config_load(cpunum);
+	(void) gres_plugin_node_config_load(cpunum, conf->node_name);
 
 	strcpy(cgroup_allowed_devices_file,
 	       slurm_cgroup_conf->allowed_devices_file);
@@ -138,7 +138,7 @@ extern int task_cgroup_devices_fini(slurm_cgroup_conf_t *slurm_cgroup_conf)
 	return SLURM_SUCCESS;
 }
 
-extern int task_cgroup_devices_create(slurmd_job_t *job)
+extern int task_cgroup_devices_create(stepd_step_rec_t *job)
 {
 	int f, k, rc, gres_conf_lines, allow_lines;
 	int fstatus = SLURM_ERROR;
@@ -230,7 +230,8 @@ extern int task_cgroup_devices_create(slurmd_job_t *job)
 	  */
 	gres_conf_lines = gres_plugin_node_config_devices_path(dev_path,
 							       gres_name,
-							       PATH_MAX);	
+							       PATH_MAX,
+							       job->node_name);	
 
 	/* 
 	 * create the entry for cgroup devices subsystem with major minor
@@ -407,7 +408,7 @@ error:
 	return fstatus;
 }
 
-extern int task_cgroup_devices_attach_task(slurmd_job_t *job)
+extern int task_cgroup_devices_attach_task(stepd_step_rec_t *job)
 {
 	int fstatus = SLURM_ERROR;
 

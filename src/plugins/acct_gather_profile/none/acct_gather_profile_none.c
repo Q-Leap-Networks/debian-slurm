@@ -130,7 +130,7 @@ extern void acct_gather_profile_p_get(enum acct_gather_profile_info info_type,
 	return;
 }
 
-extern int acct_gather_profile_p_node_step_start(slurmd_job_t* job)
+extern int acct_gather_profile_p_node_step_start(stepd_step_rec_t* job)
 {
 	return SLURM_SUCCESS;
 }
@@ -153,4 +153,9 @@ extern int acct_gather_profile_p_task_end(pid_t taskpid)
 extern int acct_gather_profile_p_add_sample_data(uint32_t type, void* data)
 {
 	return SLURM_SUCCESS;
+}
+
+extern void acct_gather_profile_p_conf_values(List *data)
+{
+	return;
 }

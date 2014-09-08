@@ -108,8 +108,9 @@ typedef struct salloc_options {
 	char *comment;		/* --comment			*/
 	char *qos;		/* --qos			*/
 	int immediate;		/* -I, --immediate      	*/
-	uint16_t warn_signal;	/* --signal=<int>@<time>	*/
-	uint16_t warn_time;	/* --signal=<int>@<time>	*/
+	uint16_t warn_flags;	/* --signal=flags:<int>@<time>	*/
+	uint16_t warn_signal;	/* --signal=flags:<int>@<time>	*/
+	uint16_t warn_time;	/* --signal=flags:<int>@<time>	*/
 
 	bool hold;		/* --hold, -H			*/
 	bool no_kill;		/* --no-kill, -k		*/
@@ -162,6 +163,7 @@ typedef struct salloc_options {
 	char **spank_job_env;	/* SPANK controlled environment for job
 				 * Prolog and Epilog		*/
 	int spank_job_env_size;	/* size of spank_job_env	*/
+	int core_spec;		/* --core-spec=n,      -S n	*/
 } opt_t;
 
 extern opt_t opt;

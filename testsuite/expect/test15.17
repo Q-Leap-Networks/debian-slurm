@@ -41,7 +41,7 @@ set job_id_2     0
 
 print_header $test_id
 
-if { [test_cray] } {
+if { [test_alps] } {
 	send_user "\nWARNING: This test is incompatible with Cray systems\n"
 	exit $exit_code
 }
@@ -74,6 +74,11 @@ expect {
 		exp_continue
 	}
 	-re "Submitted batch job ($number)" {
+#
+#		Sleep gives time for the batch job to start and prevents a race
+#		condition that can briefly leave node in a not responding state
+#
+		sleep 1
 		set job_id_2 $expect_out(1,string)
 		send "exit \r"
 		exp_continue

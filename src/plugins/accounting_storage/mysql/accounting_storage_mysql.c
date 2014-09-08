@@ -51,11 +51,11 @@
 #include "as_mysql_archive.h"
 #include "as_mysql_assoc.h"
 #include "as_mysql_cluster.h"
-#include "as_mysql_convert.h"
 #include "as_mysql_job.h"
 #include "as_mysql_jobacct_process.h"
 #include "as_mysql_problems.h"
 #include "as_mysql_qos.h"
+#include "as_mysql_resource.h"
 #include "as_mysql_resv.h"
 #include "as_mysql_rollup.h"
 #include "as_mysql_txn.h"
@@ -126,6 +126,7 @@ char *assoc_day_table = "assoc_usage_day_table";
 char *assoc_hour_table = "assoc_usage_hour_table";
 char *assoc_month_table = "assoc_usage_month_table";
 char *assoc_table = "assoc_table";
+char *clus_res_table = "clus_res_table";
 char *cluster_day_table = "usage_day_table";
 char *cluster_hour_table = "usage_hour_table";
 char *cluster_month_table = "usage_month_table";
@@ -135,6 +136,7 @@ char *job_table = "job_table";
 char *last_ran_table = "last_ran_table";
 char *qos_table = "qos_table";
 char *resv_table = "resv_table";
+char *res_table = "res_table";
 char *step_table = "step_table";
 char *txn_table = "txn_table";
 char *user_table = "user_table";
@@ -476,6 +478,16 @@ static int _as_mysql_acct_check_tables(mysql_conn_t *mysql_conn)
 		{ NULL, NULL}
 	};
 
+	storage_field_t clus_res_table_fields[] = {
+		{ "creation_time", "int unsigned not null" },
+		{ "mod_time", "int unsigned default 0 not null" },
+		{ "deleted", "tinyint default 0" },
+		{ "cluster", "tinytext not null" },
+		{ "res_id", "int not null" },
+		{ "percent_allowed", "int unsigned default 0" },
+		{ NULL, NULL}
+	};
+
 	storage_field_t qos_table_fields[] = {
 		{ "creation_time", "int unsigned not null" },
 		{ "mod_time", "int unsigned default 0 not null" },
@@ -507,6 +519,21 @@ static int _as_mysql_acct_check_tables(mysql_conn_t *mysql_conn)
 		{ "priority", "int unsigned default 0" },
 		{ "usage_factor", "double default 1.0 not null" },
 		{ "usage_thres", "double default NULL" },
+		{ NULL, NULL}
+	};
+
+	storage_field_t res_table_fields[] = {
+		{ "creation_time", "int unsigned not null" },
+		{ "mod_time", "int unsigned default 0 not null" },
+		{ "deleted", "tinyint default 0" },
+		{ "id", "int not null auto_increment" },
+		{ "name", "tinytext not null" },
+		{ "description", "text default null" },
+		{ "manager", "tinytext not null" },
+		{ "server", "tinytext not null" },
+		{ "count", "int unsigned default 0" },
+		{ "type", "int unsigned default 0"},
+		{ "flags", "int unsigned default 0"},
 		{ NULL, NULL}
 	};
 
@@ -657,12 +684,6 @@ static int _as_mysql_acct_check_tables(mysql_conn_t *mysql_conn)
 
 	if (rc != SLURM_SUCCESS)
 		return rc;
-	/* DEF_TIMERS; */
-	/* START_TIMER; */
-	if (as_mysql_convert_tables(mysql_conn) != SLURM_SUCCESS)
-		return SLURM_ERROR;
-	/* END_TIMER; */
-	/* info("conversion took %s", TIME_STR); */
 
 	if (mysql_db_create_table(mysql_conn, acct_coord_table,
 				  acct_coord_table_fields,
@@ -673,6 +694,21 @@ static int _as_mysql_acct_check_tables(mysql_conn_t *mysql_conn)
 	if (mysql_db_create_table(mysql_conn, acct_table, acct_table_fields,
 				  ", primary key (name(20)))") == SLURM_ERROR)
 		return SLURM_ERROR;
+
+	if (mysql_db_create_table(mysql_conn, res_table,
+				  res_table_fields,
+				  ", primary key (id), "
+				  "unique index (name(20), server(20), type))")
+	    == SLURM_ERROR)
+		return SLURM_ERROR;
+
+	if (mysql_db_create_table(mysql_conn, clus_res_table,
+				  clus_res_table_fields,
+				  ", primary key (res_id, cluster(20)), "
+				  "unique index (res_id, cluster(20)))")
+	    == SLURM_ERROR)
+		return SLURM_ERROR;
+
 
 	if (mysql_db_create_table(mysql_conn, qos_table,
 				  qos_table_fields,
@@ -732,7 +768,9 @@ static int _as_mysql_acct_check_tables(mysql_conn_t *mysql_conn)
 			xfree(query);
 		}
 
-		/* We need to have the last character in a preempt to
+		/* This was introduced in 2.6.7, once 2 versions of Slurm go
+		 * by we can remove this.
+		 * We need to have the last character in a preempt to
 		 * be ','.  In older versions of Slurm this was not the case. */
 		query = xstrdup_printf(
 			"update %s set "
@@ -899,6 +937,7 @@ extern int create_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name)
 		{ "id_assoc", "int not null" },
 		{ "time_start", "int unsigned not null" },
 		{ "alloc_cpu_secs", "bigint default 0 not null" },
+		{ "consumed_energy", "bigint unsigned default 0 not null" },
 		{ NULL, NULL}
 	};
 
@@ -914,6 +953,7 @@ extern int create_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name)
 		{ "idle_cpu_secs", "bigint default 0 not null" },
 		{ "resv_cpu_secs", "bigint default 0 not null" },
 		{ "over_cpu_secs", "bigint default 0 not null" },
+		{ "consumed_energy", "bigint unsigned default 0 not null" },
 		{ NULL, NULL}
 	};
 
@@ -1070,73 +1110,26 @@ extern int create_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name)
 		{ "alloc_cpu_secs", "bigint default 0" },
 		{ "resv_cpu_secs", "bigint default 0" },
 		{ "over_cpu_secs", "bigint default 0" },
+		{ "consumed_energy", "bigint unsigned default 0 not null" },
 		{ NULL, NULL}
 	};
 
 	char table_name[200];
 	char *query = NULL;
-	bool def_exist = 0, user_table_exists = 0;
-	MYSQL_RES *result = NULL;
-
-	query = xstrdup_printf("show tables like '%s';", user_table);
-
-	debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
-	if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
-		xfree(query);
-		return SLURM_ERROR;
-	}
-	xfree(query);
-	user_table_exists = mysql_num_rows(result);
-	mysql_free_result(result);
-	result = NULL;
 
 	snprintf(table_name, sizeof(table_name), "\"%s_%s\"",
 		 cluster_name, assoc_table);
-
-	/* See if the tables exist (if not new cluster, so no altering
-	   has to take place.)  table_name can't be used here since it
-	   has the "'s in it which don't work in this query.
-	*/
-	query = xstrdup_printf("show tables like '%s_%s';",
-			       cluster_name, assoc_table);
-
-	debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
-	if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
-		xfree(query);
-		return SLURM_ERROR;
-	}
-	xfree(query);
-	/* Here if the tables do exist then set def_exist to 0 so we
-	   check for the fields afterwards.
-	*/
-	def_exist = mysql_num_rows(result) ? 0 : 1;
-	mysql_free_result(result);
-	result = NULL;
-	if (!def_exist) {
-		/* need to see if this table already has defaults or not */
-		query = xstrdup_printf(
-			"show columns from %s where Field='is_def';",
-			table_name);
-		debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
-		if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
-			xfree(query);
-			return SLURM_ERROR;
-		}
-		xfree(query);
-		def_exist = mysql_num_rows(result);
-		mysql_free_result(result);
-		result = NULL;
-	}
-
 	if (mysql_db_create_table(mysql_conn, table_name,
 				  assoc_table_fields,
 				  ", primary key (id_assoc), "
 				  " unique index (user(20), acct(20), "
-				  "partition(20)))")
+				  "`partition`(20)))")
 	    == SLURM_ERROR)
 		return SLURM_ERROR;
 
-	/* We need to have the last character in a preempt to
+	/* This was introduced in 2.6.7, once 2 versions of Slurm go
+	 * by we can remove this.
+	 * We need to have the last character in a preempt to
 	 * be ','.  In older versions of Slurm this was not the case. */
 	query = xstrdup_printf(
 		"update %s set qos=if(qos='', '', concat(qos, ',')) "
@@ -1224,7 +1217,10 @@ extern int create_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name)
 	if (mysql_db_create_table(mysql_conn, table_name, job_table_fields,
 				  ", primary key (job_db_inx), "
 				  "unique index (id_job, "
-				  "id_assoc, time_submit))")
+				  "id_assoc, time_submit), "
+				  "key rollup (time_eligible, time_end), "
+				  "key sacct_def (id_user, time_start, "
+				  "time_end))")
 	    == SLURM_ERROR)
 		return SLURM_ERROR;
 
@@ -1256,27 +1252,12 @@ extern int create_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name)
 		 cluster_name, suspend_table);
 	if (mysql_db_create_table(mysql_conn, table_name,
 				  suspend_table_fields,
-				  ")") == SLURM_ERROR)
+				  ", key job_db_inx_times (job_db_inx, "
+				  "time_start, time_end))") == SLURM_ERROR)
 		return SLURM_ERROR;
 
 	snprintf(table_name, sizeof(table_name), "\"%s_%s\"",
 		 cluster_name, wckey_table);
-	if (!def_exist) {
-		/* need to see if this table already has defaults or not */
-		query = xstrdup_printf(
-			"show columns from %s where Field='is_def';",
-			table_name);
-		debug4("(%s:%d) query\n%s", THIS_FILE, __LINE__, query);
-		if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
-			xfree(query);
-			return SLURM_ERROR;
-		}
-		xfree(query);
-		def_exist = mysql_num_rows(result);
-		mysql_free_result(result);
-		result = NULL;
-	}
-
 	if (mysql_db_create_table(mysql_conn, table_name,
 				  wckey_table_fields,
 				  ", primary key (id_wckey), "
@@ -1312,13 +1293,6 @@ extern int create_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name)
 	    == SLURM_ERROR)
 		return SLURM_ERROR;
 
-	if (!def_exist && user_table_exists)
-		/* now set the default for each user since the tables
-		 * exist, but the defaults don't. */
-		if (as_mysql_convert_user_defs(mysql_conn, cluster_name)
-		    != SLURM_SUCCESS)
-			return SLURM_ERROR;
-
 	return SLURM_SUCCESS;
 }
 
@@ -1353,10 +1327,10 @@ extern int remove_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name)
 	mysql_free_result(result);
 	xstrfmtcat(mysql_conn->pre_commit_query,
 		   "drop table \"%s_%s\", \"%s_%s\", "
-		   "\"%s_%s\", \"%s_%s\", \"%s_%s\", "
 		   "\"%s_%s\", \"%s_%s\", \"%s_%s\", \"%s_%s\", "
 		   "\"%s_%s\", \"%s_%s\", \"%s_%s\", \"%s_%s\", "
-		   "\"%s_%s\", \"%s_%s\", \"%s_%s\", \"%s_%s\";",
+		   "\"%s_%s\", \"%s_%s\", \"%s_%s\", \"%s_%s\", "
+		   "\"%s_%s\", \"%s_%s\", \"%s_%s\";",
 		   cluster_name, assoc_table,
 		   cluster_name, assoc_day_table,
 		   cluster_name, assoc_hour_table,
@@ -1713,7 +1687,8 @@ extern int modify_common(mysql_conn_t *mysql_conn,
 	/* figure out which tables we need to append the cluster name to */
 	if ((table == cluster_table) || (table == acct_coord_table)
 	    || (table == acct_table) || (table == qos_table)
-	    || (table == txn_table) || (table == user_table))
+	    || (table == txn_table) || (table == user_table)
+	    || (table == res_table) || (table == clus_res_table))
 		cluster_centric = false;
 
 	if (vals[1])
@@ -1785,14 +1760,16 @@ extern int remove_common(mysql_conn_t *mysql_conn,
 	/* figure out which tables we need to append the cluster name to */
 	if ((table == cluster_table) || (table == acct_coord_table)
 	    || (table == acct_table) || (table == qos_table)
-	    || (table == txn_table) || (table == user_table))
+	    || (table == txn_table) || (table == user_table)
+	    || (table == res_table) || (table == clus_res_table))
 		cluster_centric = false;
 
 	/* If we have jobs associated with this we do not want to
 	 * really delete it for accounting purposes.  This is for
 	 * corner cases most of the time this won't matter.
 	 */
-	if (table == acct_coord_table) {
+	if ((table == acct_coord_table) || (table == res_table)
+	    || (table == clus_res_table)) {
 		/* This doesn't apply for these tables since we are
 		 * only looking for association type tables.
 		 */
@@ -1892,7 +1869,9 @@ extern int remove_common(mysql_conn_t *mysql_conn,
 		return SLURM_ERROR;
 	} else if ((table == acct_coord_table)
 		   || (table == qos_table)
-		   || (table == wckey_table))
+		   || (table == wckey_table)
+		   || (table == clus_res_table)
+		   || (table == res_table))
 		return SLURM_SUCCESS;
 
 	/* mark deleted=1 or remove completely the accounting tables
@@ -2203,8 +2182,10 @@ extern void *acct_storage_p_get_connection(const slurm_trigger_callbacks_t *cb,
 	       rollback);
 
 	if (!(mysql_conn = create_mysql_conn(
-		      conn_num, rollback, cluster_name)))
+		      conn_num, rollback, cluster_name))) {
 		fatal("couldn't get a mysql_conn");
+		return NULL;	/* Fix CLANG false positive error */
+	}
 
 	errno = SLURM_SUCCESS;
 	mysql_db_get_db_connection(mysql_conn, mysql_db_name, mysql_db_info);
@@ -2389,6 +2370,12 @@ extern int acct_storage_p_add_qos(mysql_conn_t *mysql_conn, uint32_t uid,
 	return as_mysql_add_qos(mysql_conn, uid, qos_list);
 }
 
+extern int acct_storage_p_add_res(mysql_conn_t *mysql_conn, uint32_t uid,
+				  List res_list)
+{
+	return as_mysql_add_res(mysql_conn, uid, res_list);
+}
+
 extern int acct_storage_p_add_wckeys(mysql_conn_t *mysql_conn, uint32_t uid,
 				     List wckey_list)
 {
@@ -2445,6 +2432,14 @@ extern List acct_storage_p_modify_qos(mysql_conn_t *mysql_conn, uint32_t uid,
 	return as_mysql_modify_qos(mysql_conn, uid, qos_cond, qos);
 }
 
+extern List acct_storage_p_modify_res(mysql_conn_t *mysql_conn,
+					  uint32_t uid,
+					  slurmdb_res_cond_t *res_cond,
+					  slurmdb_res_rec_t *res)
+{
+	return as_mysql_modify_res(mysql_conn, uid, res_cond, res);
+}
+
 extern List acct_storage_p_modify_wckeys(mysql_conn_t *mysql_conn,
 					 uint32_t uid,
 					 slurmdb_wckey_cond_t *wckey_cond,
@@ -2496,6 +2491,13 @@ extern List acct_storage_p_remove_qos(mysql_conn_t *mysql_conn, uint32_t uid,
 				      slurmdb_qos_cond_t *qos_cond)
 {
 	return as_mysql_remove_qos(mysql_conn, uid, qos_cond);
+}
+
+extern List acct_storage_p_remove_res(mysql_conn_t *mysql_conn,
+					  uint32_t uid,
+					  slurmdb_res_cond_t *res_cond)
+{
+	return as_mysql_remove_res(mysql_conn, uid, res_cond);
 }
 
 extern List acct_storage_p_remove_wckeys(mysql_conn_t *mysql_conn,
@@ -2578,6 +2580,12 @@ extern List acct_storage_p_get_qos(mysql_conn_t *mysql_conn, uid_t uid,
 				   slurmdb_qos_cond_t *qos_cond)
 {
 	return as_mysql_get_qos(mysql_conn, uid, qos_cond);
+}
+
+extern List acct_storage_p_get_res(mysql_conn_t *mysql_conn, uid_t uid,
+				       slurmdb_res_cond_t *res_cond)
+{
+	return as_mysql_get_res(mysql_conn, uid, res_cond);
 }
 
 extern List acct_storage_p_get_wckeys(mysql_conn_t *mysql_conn, uid_t uid,

@@ -156,7 +156,7 @@ int _do_stat(uint32_t jobid, uint32_t stepid, char *nodelist,
 			print_fields(&step);
 			xfree(step.pid_str);
 		} else {
-			hostlist_push(hl, step_stat->step_pids->node_name);
+			hostlist_push_host(hl, step_stat->step_pids->node_name);
 			ntasks += step_stat->num_tasks;
 			if (step_stat->jobacct) {
 				jobacctinfo_2_stats(&temp_stats,
@@ -199,7 +199,7 @@ int main(int argc, char **argv)
 	uint32_t stepid = NO_VAL;
 	slurmdb_selected_step_t *selected_step = NULL;
 
-#ifdef HAVE_CRAY
+#ifdef HAVE_ALPS_CRAY
 	error("The sstat command is not supported on Cray systems");
 	return 1;
 #endif
@@ -208,6 +208,7 @@ int main(int argc, char **argv)
 	return 1;
 #endif
 
+	slurm_conf_init(NULL);
 	print_fields_list = list_create(NULL);
 	print_fields_itr = list_iterator_create(print_fields_list);
 

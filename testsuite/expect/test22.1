@@ -161,14 +161,14 @@ remove_user "" "" $users
 remove_acct "" $accounts
 remove_cluster "$cluster"
 #add cluster
-incr exit_code [add_cluster "$cluster" "" "" "" "" "" "" "" "" "" "" "" ""]
+incr exit_code [add_cluster "$cluster" "" "" "" "" "" "" "" "" "" "" "" "" ""]
 if { $exit_code } {
  	remove_cluster "$cluster"
 	exit $exit_code
 }
 
 #add accounts
-incr exit_code [add_acct "$cluster" "" "$account1,$account2" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" ]
+incr exit_code [add_acct "$cluster" "" "$account1,$account2" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" ""]
 if { $exit_code } {
 	remove_acct "" "$account1,$account2"
 	remove_cluster "$cluster"
@@ -176,7 +176,7 @@ if { $exit_code } {
 }
 
 #add accounts
-incr exit_code [add_acct "$cluster" "$account2" "$account3" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" ]
+incr exit_code [add_acct "$cluster" "$account2" "$account3" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" ""]
 if { $exit_code } {
 	remove_acct "" $accounts
 	remove_cluster "$cluster"
@@ -184,7 +184,7 @@ if { $exit_code } {
 }
 
 #add users
-incr exit_code [add_user "$cluster" $accounts $users "" "" "" $wckey1 "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" ]
+incr exit_code [add_user "$cluster" $accounts $users "" "" "" $wckey1 "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" ""]
 if { $exit_code } {
 	remove_user "" "" $users
 	remove_acct "" $accounts
@@ -304,7 +304,7 @@ puts $file ", ('$node0', '$cluster', $node0_cpus, $node0_down_start, $node0_down
 puts $file "on duplicate key update period_start=VALUES(period_start), period_end=VALUES(period_end);"
 
 #now we will put in a job running for an hour and 5 minutes
-puts $file "insert into job_table (jobid, associd, wckey, wckeyid, uid, gid, partition, blockid, cluster, account, eligible, submit, start, end, suspended, name, track_steps, state, comp_code, priority, req_cpus, alloc_cpus, nodelist, kill_requid, qos, deleted) values"
+puts $file "insert into job_table (jobid, associd, wckey, wckeyid, uid, gid, `partition`, blockid, cluster, account, eligible, submit, start, end, suspended, name, track_steps, state, comp_code, priority, req_cpus, alloc_cpus, nodelist, kill_requid, qos, deleted) values"
 puts $file "('65537', '$user1acct1', '$wckey1', '$user1wckey1', '$uid', '$gid', 'debug', '', '$cluster', '$job1_acct', $job1_start, $job1_start, $job1_start, $job1_end, '0', 'test_job1', '0', '3', '0', '$job1_cpus', '$job1_cpus', '$job1_cpus', '$job1_nodes', '0', '0', '0')"
 puts $file ", ('65538', '$user2acct3', '$wckey1', '$user2wckey1', '$uid', '$gid', 'debug', '', '$cluster', '$job2_acct', $job2_elig, $job2_elig, $job2_start, $job2_end, '0', 'test_job2', '0', '3', '0', '$job2_cpus', '$job2_cpus', '$job2_cpus', '$job2_nodes', '0', '0', '0')"
 puts $file ", ('65539', '$user1acct2', '$wckey1', '$user1wckey1', '$uid', '$gid', 'debug', '', '$cluster', '$job3_acct', $job3_elig, $job3_elig, $job3_start, $job3_end, '0', 'test_job3', '0', '3', '0', '$job3_cpus', '$job3_cpus', '$job3_cpus', '$job3_nodes', '0', '0', '0')"

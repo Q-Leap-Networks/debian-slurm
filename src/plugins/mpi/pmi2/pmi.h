@@ -214,6 +214,8 @@
 
 #define JOB_ATTR_PROC_MAP       "PMI_process_mapping"
 #define JOB_ATTR_UNIV_SIZE      "universeSize"
+#define JOB_ATTR_NETINFO        "PMI_netinfo_of_task"
+#define JOB_ATTR_RESV_PORTS     "mpi_reserved_ports"
 
 /***********************************************************\
  * Environment variables
@@ -229,6 +231,7 @@
 #define PMI2_PREPUT_CNT_ENV     "SLURM_PMI2_PREPUT_COUNT"
 #define PMI2_PPKEY_ENV          "SLURM_PMI2_PPKEY"
 #define PMI2_PPVAL_ENV          "SLURM_PMI2_PPVAL"
+#define SLURM_STEP_RESV_PORTS   "SLURM_STEP_RESV_PORTS"
 /* old PMIv1 envs */
 #define PMI2_PMI_DEBUGGED_ENV   "PMI_DEBUG"
 #define PMI2_KVS_NO_DUP_KEYS_ENV "SLURM_PMI_KVS_NO_DUP_KEYS"

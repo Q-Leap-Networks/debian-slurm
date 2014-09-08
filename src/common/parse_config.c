@@ -63,11 +63,21 @@
 
 #include "slurm/slurm.h"
 
-strong_alias(s_p_get_string,		slurm_s_p_get_string);
-strong_alias(s_p_get_uint32,		slurm_s_p_get_uint32);
 strong_alias(s_p_hashtbl_create,	slurm_s_p_hashtbl_create);
 strong_alias(s_p_hashtbl_destroy,	slurm_s_p_hashtbl_destroy);
 strong_alias(s_p_parse_file,		slurm_s_p_parse_file);
+strong_alias(s_p_parse_pair,		slurm_s_p_parse_pair);
+strong_alias(s_p_parse_line,		slurm_s_p_parse_line);
+strong_alias(s_p_hashtbl_merge, 	slurm_s_p_hashtbl_merge);
+strong_alias(s_p_get_string,		slurm_s_p_get_string);
+strong_alias(s_p_get_long,		slurm_s_p_get_long);
+strong_alias(s_p_get_uint16,		slurm_s_p_get_uint16);
+strong_alias(s_p_get_uint32,		slurm_s_p_get_uint32);
+strong_alias(s_p_get_pointer,		slurm_s_p_get_pointer);
+strong_alias(s_p_get_array,		slurm_s_p_get_array);
+strong_alias(s_p_get_boolean,		slurm_s_p_get_boolean);
+strong_alias(s_p_dump_values,		slurm_s_p_dump_values);
+strong_alias(transfer_s_p_options,	slurm_transfer_s_p_options);
 
 #define BUFFER_SIZE 4096
 
@@ -873,7 +883,7 @@ int s_p_parse_file(s_p_hashtbl_t *hashtbl, uint32_t *hash_val, char *filename,
 {
 	FILE *f;
 	char *leftover = NULL;
-	int rc = SLURM_SUCCESS;
+	int i, rc = SLURM_SUCCESS;
 	int line_number;
 	int merged_lines;
 	int inc_rc;
@@ -886,9 +896,17 @@ int s_p_parse_file(s_p_hashtbl_t *hashtbl, uint32_t *hash_val, char *filename,
 	}
 
 	_keyvalue_regex_init();
-	if (stat(filename, &stat_buf) < 0) {
-		info("s_p_parse_file: unable to status file \"%s\"", filename);
-		return SLURM_ERROR;
+	for (i = 0; ; i++) {
+		if (i == 1) {	/* Long once, on first retry */
+			error("s_p_parse_file: unable to status file \"%s\"",
+			      filename);
+		}
+		if (i >= 60)	/* Give up after 60 seconds */
+			return SLURM_ERROR;
+		if (i > 0)
+			sleep(1);
+		if (stat(filename, &stat_buf) >= 0)
+			break;
 	}
 	if (stat_buf.st_size == 0) {
 		info("s_p_parse_file: file \"%s\" is empty", filename);

@@ -59,10 +59,9 @@
 #include "src/common/slurm_accounting_storage.h"
 
 /*
- * SLURMDBD_VERSION is the version of the slurmdbd protocol currently
- *	being used (i.e. this code). Increment this value whenever an
- *	RPC is modified. When modifing an existing RPC copy the old
- *	version and the create a new pack/unpack for the new rpc_version.
+ * SLURMDBD_VERSION in 14.03 this was changed to be the same as
+ * SLURM_PROTOCOL_VERSION in 15.03 we can remove all instances of
+ * SLURMDBD_*VERSION* SLURMDBD_VERSION was already replaced.
  *
  * SLURMDBD_VERSION_MIN is the minimum protocol version which slurmdbd
  *	will accept. Messages being sent to the slurmdbd from commands
@@ -74,14 +73,11 @@
  *
  * The slurmdbd should be at least as current as any Slurm cluster
  *	communicating with it (e.g. it will not accept messages with a
- *	version higher than SLURMDBD_VERSION).
+ *	version higher than SLURM_VERSION).
  */
-#define SLURMDBD_VERSION       12
-#define SLURMDBD_2_6_VERSION   12 /* 2.6 */
-#define SLURMDBD_2_5_VERSION   11 /* 2.5 */
-#define SLURMDBD_2_4_VERSION   10 /* 2.4 */
-#define SLURMDBD_2_3_VERSION	9 /* 2.3 */
-#define SLURMDBD_VERSION_MIN	9
+#define SLURMDBD_2_6_VERSION   12	/* slurm version 2.6 */
+#define SLURMDBD_2_5_VERSION   11	/* slurm version 2.5 */
+#define SLURMDBD_VERSION_MIN   11
 
 /* SLURM DBD message types */
 /* ANY TIME YOU ADD TO THIS LIST UPDATE THE CONVERSION FUNCTIONS! */
@@ -169,7 +165,15 @@ typedef enum {
 	DBD_GOT_MULT_JOB_START,	/* Get response to DBD_SEND_MULT_JOB_START */
 	DBD_SEND_MULT_MSG,      /* Send multiple message		*/
 	DBD_GOT_MULT_MSG,	/* Get response to DBD_SEND_MULT_MSG    */
-	DBD_MODIFY_JOB		/* Modify existing Job(s)               */
+	DBD_MODIFY_JOB,		/* Modify existing Job(s)               */
+	DBD_ADD_RES,    	/* Add new system resource to the mix   */
+	DBD_GET_RES,		/* Get resource information		*/
+	DBD_GOT_RES,		/* Got resource information		*/
+	DBD_REMOVE_RES,     	/* Remove existing resource      	*/
+	DBD_MODIFY_RES,     	/* Modify existing resource      	*/
+	DBD_ADD_CLUS_RES,    	/* Add cluster using a resource    	*/
+	DBD_REMOVE_CLUS_RES,   	/* Remove existing cluster resource    	*/
+	DBD_MODIFY_CLUS_RES,   	/* Modify existing cluster resource   	*/
 } slurmdbd_msg_type_t;
 
 /*****************************************************************************\

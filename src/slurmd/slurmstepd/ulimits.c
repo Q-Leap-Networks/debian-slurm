@@ -81,13 +81,29 @@ static int _set_limit(char **env, slurm_rlimits_info_t *rli);
  * OF THE CURRENT SLURMD.LOG THE STEPD WILL CORE THE NEXT TIME
  * ANYTHING IS WRITTEN TO IT.  SO IF RUNNING +DEBUG2 AND THE USER IS
  * GETTING CORES WITH FILE SYSTEM LIMIT ERRORS THIS IS THE REASON.
+ *
+ * NOTE: The slurmstepd will not normally write a core file due to setuid().
+ * Run as normal user to disable setuid() and permit a core file to be written.
  */
 
-int set_user_limits(slurmd_job_t *job)
+int set_user_limits(stepd_step_rec_t *job)
 {
+#ifdef RLIMIT_AS
+#define SLURM_RLIMIT_VSIZE RLIMIT_AS
+#define SLURM_RLIMIT_VNAME "RLIMIT_AS"
+#elif defined(RLIMIT_DATA)
+/* RLIMIT_DATA is useless on many systems which provide anonymous
+ * mmap()'s in addition to brk(), use it here only as a fallback for
+ * oddball systems lacking RLIMIT_AS. */
+#define SLURM_RLIMIT_VSIZE RLIMIT_DATA
+#define SLURM_RLIMIT_VNAME "RLIMIT_DATA"
+#endif
 	slurm_rlimits_info_t *rli;
 	struct rlimit r;
 	rlim_t task_mem_bytes;
+#ifdef SLURM_RLIMIT_VSIZE
+	uint16_t vsize_factor;
+#endif
 
 	if (getrlimit(RLIMIT_CPU, &r) == 0) {
 		if (r.rlim_max != RLIM_INFINITY) {
@@ -99,26 +115,54 @@ int set_user_limits(slurmd_job_t *job)
 	for (rli = get_slurm_rlimits_info(); rli->name; rli++)
 		_set_limit( job->env, rli );
 
-	/* Set soft and hard memory and data size limit for this process,
+	/* Set soft and hard rss and vsize limit for this process,
 	 * handle job limit (for all spawned processes) in slurmd */
 	task_mem_bytes  = job->step_mem;	/* MB */
 	task_mem_bytes *= (1024 * 1024);
-#ifdef RLIMIT_DATA
-	if ((task_mem_bytes) && (getrlimit(RLIMIT_DATA, &r) == 0) &&
+
+	/* Many systems, Linux included, ignore RSS limits, but set it
+	 * here anyway for consistency and to provide a way for
+	 * applications to interrogate what the RSS limit is (with the
+	 * caveat that the real RSS limit is over all job tasks on the
+	 * node and not per process, but hopefully this is better than
+	 * nothing).  */
+#ifdef RLIMIT_RSS
+	if ((task_mem_bytes) && (getrlimit(RLIMIT_RSS, &r) == 0) &&
 	    (r.rlim_max > task_mem_bytes)) {
 		r.rlim_max =  r.rlim_cur = task_mem_bytes;
-		if (setrlimit(RLIMIT_DATA, &r)) {
+		if (setrlimit(RLIMIT_RSS, &r)) {
 			/* Indicates that limit has already been exceeded */
-			fatal("setrlimit(RLIMIT_DATA, %u MB): %m",
+			fatal("setrlimit(RLIMIT_RSS, %u MB): %m",
 			      job->step_mem);
 		} else
-			debug2("Set task_data(%u MB)", job->step_mem);
+			debug2("Set task rss(%u MB)", job->step_mem);
 #if 0
-		getrlimit(RLIMIT_DATA, &r);
-		info("task DATA limits: %u %u", r.rlim_cur, r.rlim_max);
+		getrlimit(RLIMIT_RSS, &r);
+		info("task RSS limits: %u %u", r.rlim_cur, r.rlim_max);
 #endif
 	}
 #endif
+
+#ifdef SLURM_RLIMIT_VSIZE
+	if ((task_mem_bytes) &&
+	    ((vsize_factor = slurm_get_vsize_factor()) != 0) &&
+	    (getrlimit(SLURM_RLIMIT_VSIZE, &r) == 0) &&
+	    (r.rlim_max > task_mem_bytes)) {
+		r.rlim_max = task_mem_bytes * (vsize_factor / 100.0);
+		r.rlim_cur = r.rlim_max;
+		if (setrlimit(SLURM_RLIMIT_VSIZE, &r)) {
+			/* Indicates that limit has already been exceeded */
+			fatal("setrlimit(%s, %u MB): %m", 
+			      SLURM_RLIMIT_VNAME, job->step_mem);
+		} else
+			debug2("Set task vsize(%u MB)", job->step_mem);
+#if 0
+		getrlimit(SLURM_RLIMIT_VSIZE, &r);
+		info("task VSIZE limits:   %u %u", r.rlim_cur, r.rlim_max);
+#endif
+	}
+#endif
+
 	return SLURM_SUCCESS;
 }
 
@@ -136,7 +180,7 @@ static char * rlim_to_string (unsigned long rlim, char *buf, size_t n)
 
 /* Set umask using value of env var SLURM_UMASK */
 extern int
-set_umask(slurmd_job_t *job)
+set_umask(stepd_step_rec_t *job)
 {
 	mode_t mask;
 	char *val;
@@ -153,7 +197,7 @@ set_umask(slurmd_job_t *job)
 }
 
 /*
- * Set rlimit using value of env vars such as SLURM_RLIMIT_CORE if
+ * Set rlimit using value of env vars such as SLURM_RLIMIT_FSIZE if
  * the slurm config file has PropagateResourceLimits=YES or the user
  * requested it with srun --propagate.
  *

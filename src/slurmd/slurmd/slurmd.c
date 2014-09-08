@@ -5,6 +5,8 @@
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Portions Copyright (C) 2008 Vijay Ramasubramanian.
+ *  Portions Copyright (C) 2010-2013 SchedMD LLC.
+ *  Copyright (C) 2013      Intel, Inc.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
@@ -97,10 +99,13 @@
 #include "src/common/xsignal.h"
 #include "src/common/plugstack.h"
 
-#include "src/slurmd/slurmd/slurmd.h"
-#include "src/slurmd/slurmd/req.h"
-#include "src/slurmd/slurmd/get_mach_stat.h"
+#include "src/slurmd/common/core_spec_plugin.h"
+#include "src/slurmd/common/job_container_plugin.h"
 #include "src/slurmd/common/proctrack.h"
+#include "src/slurmd/slurmd/get_mach_stat.h"
+#include "src/slurmd/slurmd/req.h"
+#include "src/slurmd/slurmd/slurmd.h"
+#include "src/slurmd/slurmd/slurmd_plugstack.h"
 
 #define GETOPT_ARGS	"cCd:Df:hL:Mn:N:vV"
 
@@ -177,6 +182,7 @@ main (int argc, char *argv[])
 {
 	int i, pidfd;
 	int blocked_signals[] = {SIGPIPE, 0};
+	int cc;
 	char *oom_value;
 	uint32_t slurmd_uid = 0;
 	uint32_t curr_uid = 0;
@@ -190,8 +196,9 @@ main (int argc, char *argv[])
 	 * Make sure we have no extra open files which
 	 * would be propagated to spawned tasks.
 	 */
-	for (i=3; i<256; i++)
-		(void) close(i);
+	cc = sysconf(_SC_OPEN_MAX);
+	for (i = 3; i < cc; i++)
+		close(i);
 
 	/*
 	 * Drop supplementary groups.
@@ -295,7 +302,13 @@ main (int argc, char *argv[])
 
 	if (jobacct_gather_init() != SLURM_SUCCESS)
 		fatal("Unable to initialize jobacct_gather");
-	if (interconnect_node_init() < 0)
+	if (job_container_init() < 0)
+		fatal("Unable to initialize job_container plugin.");
+	if (container_g_restore(conf->spooldir, !conf->cleanstart))
+		error("Unable to restore job_container state.");
+	if (core_spec_g_init() < 0)
+		fatal("Unable to initialize core specialization plugin.");
+	if (switch_g_node_init() < 0)
 		fatal("Unable to initialize interconnect.");
 	if (conf->cleanstart && switch_g_clear_node_state())
 		fatal("Unable to clear interconnect state.");
@@ -315,6 +328,12 @@ main (int argc, char *argv[])
 	_install_fork_handlers();
 	list_install_fork_handlers();
 	slurm_conf_install_fork_handlers();
+
+	/*
+	 * Initialize any plugins
+	 */
+	if (slurmd_plugstack_init())
+		fatal("failed to initialize slurmd_plugstack");
 
 	_spawn_registration_engine();
 	_msg_engine();
@@ -594,6 +613,9 @@ _fill_registration_msg(slurm_node_registration_status_msg_t *msg)
 	Buf gres_info;
 
 	msg->node_name   = xstrdup (conf->node_name);
+	msg->version     = xstrdup (PACKAGE_VERSION);
+
+
 	msg->cpus	 = conf->cpus;
 	msg->boards	 = conf->boards;
 	msg->sockets	 = conf->sockets;
@@ -724,7 +746,7 @@ _read_config(void)
 {
 	char *path_pubkey = NULL;
 	slurm_ctl_conf_t *cf = NULL;
-	uint16_t tmp16 = 0;
+	int cc;
 
 #ifndef HAVE_FRONT_END
 	bool cr_flag = false, gang_flag = false;
@@ -871,6 +893,7 @@ _read_config(void)
 
 	cf = slurm_conf_lock();
 	get_tmp_disk(&conf->tmp_disk_space, cf->tmp_fs);
+	_free_and_set(&conf->cluster_name, xstrdup(cf->cluster_name));
 	_free_and_set(&conf->epilog,   xstrdup(cf->epilog));
 	_free_and_set(&conf->prolog,   xstrdup(cf->prolog));
 	_free_and_set(&conf->tmpfs,    xstrdup(cf->tmp_fs));
@@ -892,10 +915,10 @@ _read_config(void)
 		      xstrdup(cf->job_acct_gather_freq));
 
 	conf->acct_freq_task = (uint16_t)NO_VAL;
-	tmp16 = acct_gather_parse_freq(PROFILE_TASK,
-				       conf->job_acct_gather_freq);
-	if (tmp16 != -1)
-		conf->acct_freq_task = tmp16;
+	cc = acct_gather_parse_freq(PROFILE_TASK,
+				    conf->job_acct_gather_freq);
+	if (cc != -1)
+		conf->acct_freq_task = cc;
 
 	_free_and_set(&conf->acct_gather_energy_type,
 		      xstrdup(cf->acct_gather_energy_type));
@@ -988,9 +1011,10 @@ _reconfigure(void)
 
 	gres_plugin_reconfig(&did_change);
 	(void) switch_g_reconfig();
+	container_g_reconfig();
 	if (did_change) {
 		uint32_t cpu_cnt = MAX(conf->conf_cpus, conf->block_map_size);
-		(void) gres_plugin_node_config_load(cpu_cnt);
+		(void) gres_plugin_node_config_load(cpu_cnt, conf->node_name);
 		send_registration_msg(SLURM_SUCCESS, false);
 	}
 
@@ -1018,6 +1042,7 @@ _print_conf(void)
 	else
 		i = 0;
 	debug3("CacheGroups = %d",       i);
+	debug3("ClusterName = %s",       conf->cluster_name);
 	debug3("Confile     = `%s'",     conf->conffile);
 	debug3("Debug       = %d",       cf->slurmd_debug);
 	debug3("CPUs        = %-2u (CF: %2u, HW: %2u)",
@@ -1125,6 +1150,7 @@ _destroy_conf(void)
 		xfree(conf->acct_gather_profile_type);
 		xfree(conf->block_map);
 		xfree(conf->block_map_inv);
+		xfree(conf->cluster_name);
 		xfree(conf->conffile);
 		xfree(conf->epilog);
 		xfree(conf->health_check_program);
@@ -1164,6 +1190,7 @@ _print_config(void)
 	int days, hours, mins, secs;
 	char name[128];
 
+	printf("ClusterName=%s ", conf->cluster_name);
 	gethostname_short(name, sizeof(name));
 	printf("NodeName=%s ", name);
 
@@ -1323,7 +1350,7 @@ _stepd_cleanup_batch_dirs(const char *directory, const char *nodename)
 				 "%s/%s", directory, ent->d_name);
 			snprintf(file_path, sizeof(file_path),
 				 "%s/slurm_script", dir_path);
-			info("Purging vestigal job script %s", file_path);
+			info("Purging vestigial job script %s", file_path);
 			(void) unlink(file_path);
 			(void) rmdir(dir_path);
 		}
@@ -1369,7 +1396,8 @@ _slurmd_init(void)
 	cpu_cnt = MAX(conf->conf_cpus, conf->block_map_size);
 
 	if ((gres_plugin_init() != SLURM_SUCCESS) ||
-	    (gres_plugin_node_config_load(cpu_cnt) != SLURM_SUCCESS))
+	    (gres_plugin_node_config_load(cpu_cnt, conf->node_name)
+	     != SLURM_SUCCESS))
 		return SLURM_FAILURE;
 	if (slurm_topo_init() != SLURM_SUCCESS)
 		return SLURM_FAILURE;
@@ -1561,7 +1589,10 @@ cleanup:
 static int
 _slurmd_fini(void)
 {
-	interconnect_node_fini();
+	core_spec_g_fini();
+	switch_g_node_fini();
+	jobacct_gather_fini();
+	acct_gather_profile_fini();
 	save_cred_state(conf->vctx);
 	switch_fini();
 	slurmd_task_fini();
@@ -1576,6 +1607,7 @@ _slurmd_fini(void)
 	slurm_select_fini();
 	spank_slurmd_exit();
 	cpu_freq_fini();
+	job_container_fini();
 	acct_gather_conf_destroy();
 
 	return SLURM_SUCCESS;
@@ -1762,6 +1794,7 @@ static void _update_logging(void)
 	cf = slurm_conf_lock();
 	if (!conf->debug_level_set && (cf->slurmd_debug != (uint16_t) NO_VAL))
 		conf->debug_level = cf->slurmd_debug;
+	conf->log_fmt = cf->log_fmt;
 	slurm_conf_unlock();
 
 	o->stderr_level  = conf->debug_level;
@@ -1783,6 +1816,20 @@ static void _update_logging(void)
 		o->syslog_level  = LOG_LEVEL_QUIET;
 
 	log_alter(conf->log_opts, SYSLOG_FACILITY_DAEMON, conf->logfile);
+	log_set_timefmt(conf->log_fmt);
+
+	/* If logging to syslog and running in
+	 * MULTIPLE_SLURMD mode add my node_name
+	 * in the name tag for syslog.
+	 */
+#if defined(MULTIPLE_SLURMD)
+	if (conf->logfile == NULL) {
+		char buf[64];
+
+		snprintf(buf, sizeof(buf), "slurmd-%s", conf->node_name);
+		log_set_argv0(buf);
+	}
+#endif
 }
 
 /* Reset slurmd nice value */

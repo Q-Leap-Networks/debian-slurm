@@ -17,8 +17,11 @@ generated_html = \
 	cons_res.html \
 	cons_res_share.html \
 	contributor.html \
+	core_spec.html \
+	core_spec_plugins.html \
 	cpu_management.html \
 	cray.html \
+	cray_alps.html \
 	crypto_plugins.html \
 	disclaimer.html \
 	dist_plane.html \
@@ -38,6 +41,7 @@ generated_html = \
 	ibm-pe.html \
 	jobacct_gatherplugins.html \
 	job_array.html \
+	job_container_plugins.html \
 	job_exit_code.html \
 	job_launch.html \
 	job_submit_plugins.html \
@@ -61,6 +65,7 @@ generated_html = \
 	preemption_plugins.html \
 	priority_multifactor.html \
 	priority_multifactor2.html \
+	priority_multifactor3.html \
 	priority_plugins.html \
 	proctrack_plugins.html \
 	programmer_guide.html \
@@ -72,6 +77,7 @@ generated_html = \
 	reservations.html \
 	resource_limits.html \
 	rosetta.html \
+	rpc.html \
 	schedplugins.html \
 	select_design.html \
 	selectplugins.html \
@@ -104,6 +110,7 @@ html_DATA = \
 	hdf5_job_outline.png \
 	ibm_pe_fig1.png \
 	ibm_pe_fig2.png \
+	k_function.gif \
 	linuxstyles.css \
 	lll.gif \
 	mc_support.gif \

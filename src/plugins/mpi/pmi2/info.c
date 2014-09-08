@@ -38,6 +38,22 @@
 #include "pmi.h"
 #include "setup.h"
 #include "client.h"
+#if !defined(__FreeBSD__)
+#include <net/if.h>
+#endif
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <ifaddrs.h>
+#include <netdb.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include "slurm/slurm.h"
+#include "src/srun/libsrun/launch.h"
+#include "src/common/switch.h"
+#include "src/common/slurm_protocol_api.h"
+#include "src/common/xmalloc.h"
 
 #define NODE_ATTR_SIZE_INC 8
 
@@ -58,6 +74,7 @@ static char **node_attr = NULL;
 #define KEY_INDEX(i) (i * 2)
 #define VAL_INDEX(i) (i * 2 + 1)
 
+static char *ifconfig(void);
 
 static void inline
 _free_nag_req(nag_req_t *req)
@@ -158,7 +175,26 @@ node_attr_get(char *key)
 	return val;
 }
 
-/* returned value not dup-ed */
+/* job_attr_get_netinfo()
+ */
+static char *
+job_attr_get_netinfo(char *key, char *attr)
+{
+	char *netinfo;
+
+	/* get network information of node in netinfo, xmalloc'ed
+	 */
+	netinfo = ifconfig();
+	snprintf(attr, PMI2_MAX_VALLEN, "%s", netinfo);
+	xfree(netinfo);
+
+	debug3("%s: netinfo %s", __func__, attr);
+
+	return attr;
+}
+
+/* job_attr_get()
+ */
 extern char *
 job_attr_get(char *key)
 {
@@ -173,5 +209,102 @@ job_attr_get(char *key)
 		return attr;
 	}
 
+	if (!strcmp(key, JOB_ATTR_RESV_PORTS)) {
+
+		if (! job_info.resv_ports)
+			return NULL;
+
+		debug3("%s: SLURM_STEP_RESV_PORTS %s", __func__, job_info.resv_ports);
+		snprintf(attr, PMI2_MAX_VALLEN, "%s", job_info.resv_ports);
+		return attr;
+	}
+
+	if (strcmp(key, JOB_ATTR_NETINFO) >= 0) {
+		if (job_attr_get_netinfo(key, attr) == NULL) {
+			return NULL;
+		}
+		return attr;
+	}
+
 	return NULL;
+}
+
+/* ifconfig()
+ *
+ * Return information about network interfaces.
+ */
+static char *
+ifconfig(void)
+{
+	struct ifaddrs *ifaddr;
+	struct ifaddrs *ifa;
+	int s;
+	int n;
+	char addr[NI_MAXHOST];
+	char hostname[MAXHOSTNAMELEN];
+	char *buf;
+
+	if (getifaddrs(&ifaddr) == -1) {
+		error("%s: getifaddrs failed %m", __func__);
+		return NULL;
+	}
+
+	n = 0;
+	for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next)
+		++n;
+	/* this should be a good guess of the size we need.
+	 */
+	buf = xmalloc((MAXHOSTNAMELEN + n) * 64);
+
+	gethostname(hostname, sizeof(hostname));
+	n = sprintf(buf, "(%s", hostname);
+
+	/* Walk through linked list, maintaining head pointer so we
+	 * can free list later
+	 */
+	for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+
+		if (ifa->ifa_addr == NULL)
+			continue;
+#if !defined(__FreeBSD__)
+		if (ifa->ifa_flags & IFF_LOOPBACK)
+			continue;
+#endif
+		if (ifa->ifa_addr->sa_family != AF_INET
+			&& ifa->ifa_addr->sa_family != AF_INET6)
+			continue;
+
+		if (ifa->ifa_addr->sa_family == AF_INET) {
+			s = getnameinfo(ifa->ifa_addr,
+							sizeof(struct sockaddr_in),
+							addr, NI_MAXHOST, NULL, 0, NI_NUMERICHOST);
+			if (s != 0) {
+				error("%s: AF_INET getnameinfo() failed: %s",
+					  __func__, gai_strerror(s));
+				continue;
+			}
+			n = n + sprintf(buf + n, ",(%s,%s,%s)",
+							ifa->ifa_name, "IP_V4", addr);
+			continue;
+		}
+		if (ifa->ifa_addr->sa_family == AF_INET6) {
+			s = getnameinfo(ifa->ifa_addr,
+							sizeof(struct sockaddr_in6),
+							addr, NI_MAXHOST, NULL, 0, NI_NUMERICHOST);
+			if (s != 0) {
+				error("%s: AF_INET6 getnameinfo() failed: %s",
+					  __func__, gai_strerror(s));
+				continue;
+			}
+			n = n + sprintf(buf + n, ",(%s,%s,%s)",
+							ifa->ifa_name, "IP_V6", addr);
+		}
+	}
+	n = n + sprintf(buf + n, ")");
+
+	debug("%s: ifconfig %s", __func__, buf);
+
+	freeifaddrs(ifaddr);
+
+	return buf;
 }

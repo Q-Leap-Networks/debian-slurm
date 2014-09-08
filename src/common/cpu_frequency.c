@@ -221,9 +221,9 @@ rwfail:
  *  a pointer to a hex map string of the cpus to be used by this step
  */
 void
-cpu_freq_cpuset_validate(slurmd_job_t *job)
+cpu_freq_cpuset_validate(stepd_step_rec_t *job)
 {
-	int cpuidx;
+	int cpuidx, cpu_num;
 	bitstr_t *cpus_to_set;
 	bitstr_t *cpu_map;
 	char *cpu_bind;
@@ -259,13 +259,26 @@ cpu_freq_cpuset_validate(slurmd_job_t *job)
 	do {
 		debug3("  cpu_str = %s", cpu_str);
 
-		if (bit_unfmt_hexmask(cpu_map, cpu_str) == -1) {
-			error("cpu_freq_cpuset_validate: invalid cpu mask %s",
-			      cpu_bind);
-			bit_free(cpu_map);
-			bit_free(cpus_to_set);
-			xfree(cpu_bind);
-			return;
+		if ((job->cpu_bind_type & CPU_BIND_MAP) == CPU_BIND_MAP) {
+			cpu_num = atoi(cpu_str);
+			if (cpu_num >= cpu_freq_count) {
+				error("cpu_freq_cpuset_validate: invalid cpu "
+				      "number %d", cpu_num);
+				bit_free(cpu_map);
+				bit_free(cpus_to_set);
+				xfree(cpu_bind);
+				return;
+			}
+			bit_set(cpu_map, (bitoff_t)cpu_num);
+		} else {
+			if (bit_unfmt_hexmask(cpu_map, cpu_str) == -1) {
+				error("cpu_freq_cpuset_validate: invalid cpu "
+				      "mask %s", cpu_bind);
+				bit_free(cpu_map);
+				bit_free(cpus_to_set);
+				xfree(cpu_bind);
+				return;
+			}
 		}
 		bit_or(cpus_to_set, cpu_map);
 	} while ( (cpu_str = strtok_r(NULL, ",", &savestr) ) != NULL);
@@ -290,7 +303,7 @@ cpu_freq_cpuset_validate(slurmd_job_t *job)
  *  the list of cpus to be used by this step
  */
 void
-cpu_freq_cgroup_validate(slurmd_job_t *job, char *step_alloc_cores)
+cpu_freq_cgroup_validate(stepd_step_rec_t *job, char *step_alloc_cores)
 {
 	uint16_t start  = USHRT_MAX;
 	uint16_t end    = USHRT_MAX;
@@ -423,7 +436,7 @@ _cpu_freq_find_valid(uint32_t cpu_freq, int cpuidx)
 		case CPU_FREQ_LOW :
 			/* get the value from scale min freq */
 			snprintf(path, sizeof(path),
-				 PATH_TO_CPU 
+				 PATH_TO_CPU
 				 "cpu%u/cpufreq/scaling_min_freq", cpuidx);
 			if ( ( fp = fopen(path, "r") ) == NULL ) {
 				error("cpu_freq_cgroup_valid: Could not open "
@@ -484,7 +497,7 @@ _cpu_freq_find_valid(uint32_t cpu_freq, int cpuidx)
 	} else {
 		/* find legal value close to requested value */
 		snprintf(path, sizeof(path),
-			 PATH_TO_CPU 
+			 PATH_TO_CPU
 			 "cpu%u/cpufreq/scaling_available_frequencies", cpuidx);
 		if ( ( fp = fopen(path, "r") ) == NULL )
 			return;
@@ -501,7 +514,7 @@ _cpu_freq_find_valid(uint32_t cpu_freq, int cpuidx)
 					/* ascending order */
 					if ((cpu_freq > freq_list[j-1]) &&
 					    (cpu_freq < freq_list[j])) {
-						cpufreq[cpuidx].frequency_to_set = 
+						cpufreq[cpuidx].frequency_to_set =
 							freq_list[j];
 						break;
 					}
@@ -509,7 +522,7 @@ _cpu_freq_find_valid(uint32_t cpu_freq, int cpuidx)
 					/* descending order */
 					if ((cpu_freq > freq_list[j]) &&
 					    (cpu_freq < freq_list[j-1])) {
-						cpufreq[cpuidx].frequency_to_set = 
+						cpufreq[cpuidx].frequency_to_set =
 							freq_list[j];
 						break;
 					}
@@ -534,7 +547,7 @@ _cpu_freq_find_valid(uint32_t cpu_freq, int cpuidx)
  *
  * returns -1 on error, 0 otherwise
  */
-int 
+int
 cpu_freq_verify_param(const char *arg, uint32_t *cpu_freq)
 {
 	char *end;
@@ -569,7 +582,7 @@ cpu_freq_verify_param(const char *arg, uint32_t *cpu_freq)
  * set cpu frequency if possible for each cpu of the job step
  */
 void
-cpu_freq_set(slurmd_job_t *job)
+cpu_freq_set(stepd_step_rec_t *job)
 {
 	char path[SYSFS_PATH_MAX];
 	FILE *fp;
@@ -613,7 +626,7 @@ cpu_freq_set(slurmd_job_t *job)
  * default frequency and governor type
  */
 void
-cpu_freq_reset(slurmd_job_t *job)
+cpu_freq_reset(stepd_step_rec_t *job)
 {
 	char path[SYSFS_PATH_MAX];
 	FILE *fp;

@@ -616,6 +616,38 @@ static int _check_coord_request(slurmdb_user_cond_t *user_cond, bool check)
 	return rc;
 }
 
+static void _check_user_has_default_assoc(char *user_name, List assoc_list)
+{
+	ListIterator itr = list_iterator_create(assoc_list);
+	slurmdb_association_rec_t *assoc;
+	bool def_found = 0;
+	char *last_cluster = NULL;
+
+	while ((assoc = list_next(itr))) {
+		if (last_cluster && strcmp(last_cluster, assoc->cluster)) {
+			if (!def_found) {
+				printf(" User %s on cluster %s no "
+				       "longer has a default account.\n",
+				       user_name, last_cluster);
+			}
+			def_found = 0;
+		}
+
+		last_cluster = assoc->cluster;
+
+		if (assoc->is_def)
+			def_found = 1;
+	}
+	list_iterator_destroy(itr);
+
+	if (!def_found)
+		printf(" User %s on cluster %s no "
+		       "longer has a default account.\n",
+		       user_name, last_cluster);
+	return;
+}
+
+
 extern int sacctmgr_add_user(int argc, char *argv[])
 {
 	int rc = SLURM_SUCCESS;
@@ -778,48 +810,14 @@ extern int sacctmgr_add_user(int argc, char *argv[])
 				list_destroy(local_acct_list);
 			return SLURM_ERROR;
 		}
-	} else {
-		List temp_list = NULL;
-		slurmdb_cluster_cond_t cluster_cond;
-
-		slurmdb_init_cluster_cond(&cluster_cond, 0);
-		cluster_cond.cluster_list = assoc_cond->cluster_list;
-
-		temp_list = acct_storage_g_get_clusters(db_conn, my_uid,
-							&cluster_cond);
-
-		itr_c = list_iterator_create(assoc_cond->cluster_list);
-		itr = list_iterator_create(temp_list);
-		while((cluster = list_next(itr_c))) {
-			slurmdb_cluster_rec_t *cluster_rec = NULL;
-
-			list_iterator_reset(itr);
-			while((cluster_rec = list_next(itr))) {
-				if (!strcasecmp(cluster_rec->name, cluster))
-					break;
-			}
-			if (!cluster_rec) {
-				exit_code=1;
-				fprintf(stderr, " This cluster '%s' "
-					"doesn't exist.\n"
-					"        Contact your admin "
-					"to add it to accounting.\n",
-					cluster);
-				list_delete_item(itr_c);
-			}
-		}
-		list_iterator_destroy(itr);
-		list_iterator_destroy(itr_c);
-		list_destroy(temp_list);
-
-		if (!list_count(assoc_cond->cluster_list)) {
-			slurmdb_destroy_wckey_cond(wckey_cond);
-			slurmdb_destroy_association_cond(assoc_cond);
-			list_destroy(local_user_list);
-			if (local_acct_list)
-				list_destroy(local_acct_list);
-			return SLURM_ERROR;
-		}
+	} else if (sacctmgr_validate_cluster_list(assoc_cond->cluster_list)
+		   != SLURM_SUCCESS) {
+		slurmdb_destroy_wckey_cond(wckey_cond);
+		slurmdb_destroy_association_cond(assoc_cond);
+		list_destroy(local_user_list);
+		if (local_acct_list)
+			list_destroy(local_acct_list);
+		return SLURM_ERROR;
 	}
 
 	if (!list_count(assoc_cond->acct_list)) {
@@ -1697,13 +1695,6 @@ extern int sacctmgr_modify_user(int argc, char *argv[])
 
 	user_cond->assoc_cond = xmalloc(sizeof(slurmdb_association_cond_t));
 	user_cond->assoc_cond->cluster_list = list_create(slurm_destroy_char);
-	/* We need this to make sure we only change users, not
-	 * accounts if this list didn't exist it would change
-	 * accounts. Having it blank is fine, it just needs to
-	 * exist.  This also happens in _set_cond, but that doesn't
-	 * always happen.
-	 */
-	user_cond->assoc_cond->user_list = list_create(slurm_destroy_char);
 
 	for (i=0; i<argc; i++) {
 		int command_len = strlen(argv[i]);
@@ -2025,8 +2016,12 @@ extern int sacctmgr_delete_user(int argc, char *argv[])
 			if (user_list) {
 				itr = list_iterator_create(user_list);
 				while ((user = list_next(itr))) {
-					if (user->assoc_list)
+					if (user->assoc_list) {
+						_check_user_has_default_assoc(
+							user->name,
+							user->assoc_list);
 						continue;
+					}
 					if (!del_user_list) {
 						del_user_list = list_create(
 							slurm_destroy_char);
