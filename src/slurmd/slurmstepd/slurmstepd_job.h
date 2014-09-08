@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/slurmstepd_job.h  slurmd_job_t definition
- *  $Id: slurmstepd_job.h 14546 2008-07-17 21:03:59Z jette $
+ *  $Id: slurmstepd_job.h 14702 2008-08-05 22:18:13Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -138,6 +138,7 @@ typedef struct slurmd_job {
 	gid_t         gid;     /* group ID for job                          */
 	int           ngids;   /* length of the following gids array        */
 	gid_t        *gids;    /* array of gids for user specified in uid   */
+	bool           aborted;    /* true if already aborted               */
 	bool           batch;      /* true if this is a batch job           */
 	bool           run_prolog; /* true if need to run prolog            */
 	bool           user_managed_io;

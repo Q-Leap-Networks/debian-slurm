@@ -137,6 +137,14 @@ inline static void  _slurm_rpc_accounting_update_msg(slurm_msg_t *msg);
  */
 void slurmctld_req (slurm_msg_t * msg)
 {
+	/* Just to validate the cred */
+	(void) g_slurm_auth_get_uid(msg->auth_cred, NULL);
+	if (g_slurm_auth_errno(msg->auth_cred) != SLURM_SUCCESS) {
+		error("Bad authentication: %s",
+		      g_slurm_auth_errstr(g_slurm_auth_errno(msg->auth_cred)));
+		return;
+	}
+
 	switch (msg->msg_type) {
 	case REQUEST_RESOURCE_ALLOCATION:
 		_slurm_rpc_allocate_resources(msg);
@@ -983,6 +991,7 @@ static void _slurm_rpc_job_step_kill(slurm_msg_t * msg)
 
 	/* do RPC call */
 	if (job_step_kill_msg->job_step_id == SLURM_BATCH_SCRIPT) {
+		/* NOTE: SLURM_BATCH_SCRIPT == NO_VAL */
 		error_code = job_signal(job_step_kill_msg->job_id, 
 					job_step_kill_msg->signal, 
 					job_step_kill_msg->batch_flag, uid);
@@ -1638,7 +1647,7 @@ static void _slurm_rpc_reconfigure_controller(slurm_msg_t * msg)
 static void _slurm_rpc_shutdown_controller(slurm_msg_t * msg)
 {
 	int error_code = SLURM_SUCCESS, i;
-	uint16_t core_arg = 0;
+	uint16_t options = 0;
 	shutdown_msg_t *shutdown_msg = (shutdown_msg_t *) msg->data;
 	uid_t uid = g_slurm_auth_get_uid(msg->auth_cred, NULL);
 	/* Locks: Read node */
@@ -1657,17 +1666,19 @@ static void _slurm_rpc_shutdown_controller(slurm_msg_t * msg)
 		slurmctld_config.resume_backup = true;	
 	} else {
 		info("Performing RPC: REQUEST_SHUTDOWN");
-		core_arg = shutdown_msg->core;
+		options = shutdown_msg->options;
 	}
 
 	/* do RPC call */
-	if (error_code);
-	else if (core_arg)
+	if (error_code)
+		;
+	else if (options == 1)
 		info("performing immeditate shutdown without state save");
 	else if (slurmctld_config.shutdown_time)
 		debug2("shutdown RPC issued when already in progress");
 	else {
-		if (msg->msg_type == REQUEST_SHUTDOWN) {
+		if ((msg->msg_type == REQUEST_SHUTDOWN) &&
+		    (options == 0)) {
 			/* This means (msg->msg_type != REQUEST_CONTROL) */
 			lock_slurmctld(node_read_lock);
 			msg_to_slurmd(REQUEST_SHUTDOWN);
@@ -1699,7 +1710,7 @@ static void _slurm_rpc_shutdown_controller(slurm_msg_t * msg)
 	
 	
 	slurm_send_rc_msg(msg, error_code);
-	if ((error_code == SLURM_SUCCESS) && core_arg &&
+	if ((error_code == SLURM_SUCCESS) && (options == 1) &&
 	    (slurmctld_config.thread_id_sig))
 		pthread_kill(slurmctld_config.thread_id_sig, SIGABRT);
 }

@@ -42,6 +42,7 @@
 #include "src/common/jobacct_common.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_defs.h"
+#include "src/common/uid.h"
 #include "src/slurmdbd/read_config.h"
 #include "src/slurmdbd/rpc_mgr.h"
 #include "src/slurmctld/slurmctld.h"
@@ -327,7 +328,7 @@ static int _add_accounts(void *db_conn,
 	char *comment = NULL;
 
 	debug2("DBD_ADD_ACCOUNTS: called");
-	if(*uid != slurmdbd_conf->slurm_user_id
+	if((*uid != slurmdbd_conf->slurm_user_id && *uid != 0)
 	   && assoc_mgr_get_admin_level(db_conn, *uid) < ACCT_ADMIN_OPERATOR) {
 		acct_user_rec_t user;
 
@@ -382,7 +383,7 @@ static int _add_account_coords(void *db_conn,
 	}
 	
 	debug2("DBD_ADD_ACCOUNT_COORDS: called");
-	if(*uid != slurmdbd_conf->slurm_user_id
+	if((*uid != slurmdbd_conf->slurm_user_id && *uid != 0)
 	   && assoc_mgr_get_admin_level(db_conn, *uid) < ACCT_ADMIN_OPERATOR) {
 		ListIterator itr = NULL;
 		ListIterator itr2 = NULL;
@@ -454,7 +455,7 @@ static int _add_assocs(void *db_conn,
 		goto end_it;
 	}
 	
-	if(*uid != slurmdbd_conf->slurm_user_id
+	if((*uid != slurmdbd_conf->slurm_user_id && *uid != 0)
 	   && assoc_mgr_get_admin_level(db_conn, *uid) < ACCT_ADMIN_OPERATOR) {
 		ListIterator itr = NULL;
 		ListIterator itr2 = NULL;
@@ -517,7 +518,7 @@ static int _add_clusters(void *db_conn,
 	char *comment = NULL;
 
 	debug2("DBD_ADD_CLUSTERS: called");
-	if(*uid != slurmdbd_conf->slurm_user_id
+	if((*uid != slurmdbd_conf->slurm_user_id && *uid != 0)
 	   && assoc_mgr_get_admin_level(db_conn, *uid) < ACCT_ADMIN_SUPER_USER) {
 		comment = "Your user doesn't have privilege to preform this action";
 		error("%s", comment);
@@ -551,7 +552,7 @@ static int _add_qos(void *db_conn,
 	char *comment = NULL;
 
 	debug2("DBD_ADD_QOS: called");
-	if(*uid != slurmdbd_conf->slurm_user_id
+	if((*uid != slurmdbd_conf->slurm_user_id && *uid != 0)
 	   && (assoc_mgr_get_admin_level(db_conn, *uid) 
 	       < ACCT_ADMIN_SUPER_USER)) {
 		comment = "Your user doesn't have privilege to preform this action";
@@ -585,7 +586,7 @@ static int _add_users(void *db_conn,
 	dbd_list_msg_t *get_msg = NULL;
 	char *comment = NULL;
 	debug2("DBD_ADD_USERS: called");
-	if(*uid != slurmdbd_conf->slurm_user_id
+	if((*uid != slurmdbd_conf->slurm_user_id && *uid != 0)
 	   && assoc_mgr_get_admin_level(db_conn, *uid) < ACCT_ADMIN_OPERATOR) {
 		acct_user_rec_t user;
 
@@ -633,7 +634,7 @@ static int _cluster_procs(void *db_conn,
 	int rc = SLURM_SUCCESS;
 	char *comment = NULL;
 
-	if (*uid != slurmdbd_conf->slurm_user_id) {
+	if ((*uid != slurmdbd_conf->slurm_user_id && *uid != 0)) {
 		comment = "DBD_CLUSTER_PROCS message from invalid uid";
 		error("DBD_CLUSTER_PROCS message from invalid uid %u", *uid);
 		rc = ESLURM_ACCESS_DENIED;
@@ -780,9 +781,9 @@ static int _get_jobs(void *db_conn,
 
 	sacct_params.opt_uid = -1;
 	if(get_jobs_msg->user) {
-		struct passwd *pw = NULL;
-		if ((pw=getpwnam(get_jobs_msg->user)))
-			sacct_params.opt_uid = pw->pw_uid;
+		uid_t pw_uid = uid_from_string(get_jobs_msg->user);
+		if (pw_uid != (uid_t) -1)
+			sacct_params.opt_uid = pw_uid;
 	}
 		
 	list_msg.my_list = jobacct_storage_g_get_jobs(
@@ -985,7 +986,7 @@ static int _flush_jobs(void *db_conn,
 	int rc = SLURM_SUCCESS;
 	char *comment = NULL;
 
-	if (*uid != slurmdbd_conf->slurm_user_id) {
+	if ((*uid != slurmdbd_conf->slurm_user_id && *uid != 0)) {
 		comment = "DBD_FLUSH_JOBS message from invalid uid";
 		error("DBD_FLUSH_JOBS message from invalid uid %u", *uid);
 		rc = ESLURM_ACCESS_DENIED;
@@ -1247,7 +1248,7 @@ static int   _modify_accounts(void *db_conn,
 	char *comment = NULL;
 
 	debug2("DBD_MODIFY_ACCOUNTS: called");
-	if(*uid != slurmdbd_conf->slurm_user_id
+	if((*uid != slurmdbd_conf->slurm_user_id && *uid != 0)
 	   && assoc_mgr_get_admin_level(db_conn, *uid) < ACCT_ADMIN_OPERATOR) {
 		comment = "Your user doesn't have privilege to preform this action";
 		error("%s", comment);
@@ -1361,7 +1362,7 @@ static int   _modify_clusters(void *db_conn,
 	dbd_modify_msg_t *get_msg = NULL;
 	char *comment = NULL;
 
-	if(*uid != slurmdbd_conf->slurm_user_id
+	if((*uid != slurmdbd_conf->slurm_user_id && *uid != 0)
 	   && assoc_mgr_get_admin_level(db_conn, *uid)
 	   < ACCT_ADMIN_SUPER_USER) {
 		comment = "Your user doesn't have privilege to preform this action";
@@ -1421,18 +1422,12 @@ static int   _modify_users(void *db_conn,
 	int rc = SLURM_SUCCESS;
 	dbd_modify_msg_t *get_msg = NULL;
 	char *comment = NULL;
-
+	int same_user = 0;
+	int admin_level = assoc_mgr_get_admin_level(db_conn, *uid);
+	acct_user_cond_t *user_cond = NULL;
+	acct_user_rec_t *user_rec = NULL;
+		
 	debug2("DBD_MODIFY_USERS: called");
-
-	if(*uid != slurmdbd_conf->slurm_user_id
-	   && assoc_mgr_get_admin_level(db_conn, *uid) < ACCT_ADMIN_OPERATOR) {
-		comment = "Your user doesn't have privilege to preform this action";
-		error("%s", comment);
-		*out_buffer = make_dbd_rc_msg(ESLURM_ACCESS_DENIED,
-					      comment, DBD_MODIFY_USERS);
-
-		return ESLURM_ACCESS_DENIED;
-	}
 
 	if (slurmdbd_unpack_modify_msg(DBD_MODIFY_USERS, &get_msg, in_buffer) !=
 	    SLURM_SUCCESS) {
@@ -1442,18 +1437,57 @@ static int   _modify_users(void *db_conn,
 					      comment, DBD_MODIFY_USERS);
 		return SLURM_ERROR;
 	}
+	
+	user_cond = (acct_user_cond_t *)get_msg->cond;
+	user_rec = (acct_user_rec_t *)get_msg->rec;
+			
+	if((*uid != slurmdbd_conf->slurm_user_id && *uid != 0)
+	   && admin_level < ACCT_ADMIN_OPERATOR) {
+		if(user_cond && user_cond->assoc_cond 
+		   && user_cond->assoc_cond->user_list
+		   && (list_count(user_cond->assoc_cond->user_list) == 1)) {
+			uid_t pw_uid = uid_from_string(
+				list_peek(user_cond->assoc_cond->user_list));
+			if (pw_uid == *uid) {
+				same_user = 1;
+				goto is_same_user;
+			}
+		}
+		comment = "Your user doesn't have privilege to preform this action";
+		error("%s", comment);
+		*out_buffer = make_dbd_rc_msg(ESLURM_ACCESS_DENIED,
+					      comment, DBD_MODIFY_USERS);
 
-	if(((acct_user_rec_t *)get_msg->rec)->admin_level != ACCT_ADMIN_NOTSET 
-	   && *uid != slurmdbd_conf->slurm_user_id
-	   && assoc_mgr_get_admin_level(db_conn, *uid) 
-	   < ((acct_user_rec_t *)get_msg->rec)->admin_level) {
+		return ESLURM_ACCESS_DENIED;
+	}
+
+is_same_user:
+	
+	/* same_user can only alter the default account nothing else */ 
+	if(same_user) {
+		/* If we add anything else here for the user we will
+		 * need to document it
+		 */
+		if((user_rec->admin_level != ACCT_ADMIN_NOTSET)
+		   || (user_rec->qos_list)) {
+			comment = "You can only change your own default account, nothing else";
+			error("%s", comment);
+			*out_buffer = make_dbd_rc_msg(ESLURM_ACCESS_DENIED,
+						      comment, DBD_MODIFY_USERS);
+			
+			return ESLURM_ACCESS_DENIED;	
+		}		
+	}
+
+	if((user_rec->admin_level != ACCT_ADMIN_NOTSET) 
+	   && (*uid != slurmdbd_conf->slurm_user_id && *uid != 0)
+	   && (admin_level < user_rec->admin_level)) {
 		comment = "You have to be the same or higher admin level to change another persons";
-		((acct_user_rec_t *)get_msg->rec)->admin_level =
-			ACCT_ADMIN_NOTSET;
+		user_rec->admin_level = ACCT_ADMIN_NOTSET;
 	}
 
 	if(!(list_msg.my_list = acct_storage_g_modify_users(
-		     db_conn, *uid, get_msg->cond, get_msg->rec))) {
+		     db_conn, *uid, user_cond, user_rec))) {
 		if(errno == ESLURM_ACCESS_DENIED) {
 			comment = "Your user doesn't have privilege to preform this action";
 			rc = ESLURM_ACCESS_DENIED;
@@ -1641,7 +1675,7 @@ static int   _remove_accounts(void *db_conn,
 
 	debug2("DBD_REMOVE_ACCOUNTS: called");
 
-	if(*uid != slurmdbd_conf->slurm_user_id
+	if((*uid != slurmdbd_conf->slurm_user_id && *uid != 0)
 	   && assoc_mgr_get_admin_level(db_conn, *uid) < ACCT_ADMIN_OPERATOR) {
 		comment = "Your user doesn't have privilege to preform this action";
 		error("%s", comment);
@@ -1813,7 +1847,7 @@ static int   _remove_clusters(void *db_conn,
 
 	debug2("DBD_REMOVE_CLUSTERS: called");
 
-	if(*uid != slurmdbd_conf->slurm_user_id
+	if((*uid != slurmdbd_conf->slurm_user_id && *uid != 0)
 	   && assoc_mgr_get_admin_level(db_conn, *uid) 
 	   < ACCT_ADMIN_SUPER_USER) {
 		comment = "Your user doesn't have privilege to preform this action";
@@ -1874,7 +1908,7 @@ static int   _remove_qos(void *db_conn,
 
 	debug2("DBD_REMOVE_QOS: called");
 
-	if(*uid != slurmdbd_conf->slurm_user_id
+	if((*uid != slurmdbd_conf->slurm_user_id && *uid != 0)
 	   && assoc_mgr_get_admin_level(db_conn, *uid) 
 	   < ACCT_ADMIN_SUPER_USER) {
 		comment = "Your user doesn't have privilege to preform this action";
@@ -1935,7 +1969,7 @@ static int   _remove_users(void *db_conn,
 
 	debug2("DBD_REMOVE_USERS: called");
 
-	if(*uid != slurmdbd_conf->slurm_user_id
+	if((*uid != slurmdbd_conf->slurm_user_id && *uid != 0)
 	   && assoc_mgr_get_admin_level(db_conn, *uid) < ACCT_ADMIN_OPERATOR) {
 		comment = "Your user doesn't have privilege to preform this action";
 		error("%s", comment);
@@ -1994,7 +2028,7 @@ static int   _roll_usage(void *db_conn,
 
 	info("DBD_ROLL_USAGE: called");
 
-	if(*uid != slurmdbd_conf->slurm_user_id
+	if((*uid != slurmdbd_conf->slurm_user_id && *uid != 0)
 	   && assoc_mgr_get_admin_level(db_conn, *uid) < ACCT_ADMIN_OPERATOR) {
 		comment = "Your user doesn't have privilege to preform this action";
 		error("%s", comment);

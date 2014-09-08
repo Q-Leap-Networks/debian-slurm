@@ -1,4 +1,4 @@
-# $Id: slurm.spec 14616 2008-07-23 22:28:22Z jette $
+# $Id: slurm.spec 14836 2008-08-21 15:58:32Z jette $
 #
 # Note that this package is not relocatable
 
@@ -62,7 +62,7 @@
 %slurm_with_opt aix
 %endif
 
-# Build with sgijob, and mysql plugins on CHAOS systems
+# Build with sgijob plugin and mysql (for slurmdbdb) on CHAOS systems
 %if %{?chaos}0
 %slurm_with_opt mysql
 %slurm_with_opt sgijob
@@ -71,14 +71,14 @@
 %endif
 
 Name:    slurm
-Version: 1.3.6
-Release: 1
+Version: 1.3.7
+Release: 1%{?dist}
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL 
 Group: System Environment/Base
-Source: slurm-1.3.6.tar.bz2
+Source: slurm-1.3.7.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: https://computing.llnl.gov/linux/slurm/
 
@@ -87,12 +87,19 @@ Requires: slurm-plugins
 %ifos linux
 BuildRequires: python
 %endif
+
+%if %{?chaos}0
+BuildRequires: ncurses-devel
+%endif
+
 %if %{slurm_with pam}
 BuildRequires: pam-devel
 %endif
+
 %if %{slurm_with readline}
 BuildRequires: readline-devel
 %endif
+
 %if %{slurm_with openssl}
 BuildRequires: openssl-devel >= 0.9.6 openssl >= 0.9.6
 %endif
@@ -249,7 +256,7 @@ SLURM process tracking plugin for SGI job containers.
 #############################################################################
 
 %prep
-%setup -n slurm-1.3.6
+%setup -n slurm-1.3.7
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \

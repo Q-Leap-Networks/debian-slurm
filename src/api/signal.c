@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  signal.c - Send a signal to a slurm job or job step
- *  $Id: signal.c 13672 2008-03-19 23:10:58Z jette $
+ *  $Id: signal.c 14725 2008-08-08 20:42:06Z jette $
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -172,7 +172,7 @@ _local_send_recv_rc_msgs(const char *nodelist, slurm_msg_type_t type,
 	msg->msg_type = type;
 	msg->data = data;
 
-	if((ret_list = slurm_send_recv_msgs(nodelist, msg, 0))) {
+	if((ret_list = slurm_send_recv_msgs(nodelist, msg, 0, false))) {
 		while((ret_data_info = list_pop(ret_list))) {
 			temp_rc = slurm_get_return_code(ret_data_info->type,
 							ret_data_info->data);

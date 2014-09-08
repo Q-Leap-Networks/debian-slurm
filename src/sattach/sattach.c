@@ -326,7 +326,8 @@ static int _attach_to_tasks(uint32_t jobid,
 	msg.msg_type = REQUEST_REATTACH_TASKS;
 	msg.data = &reattach_msg;
 	
-	nodes_resp = slurm_send_recv_msgs(layout->node_list, &msg, timeout);
+	nodes_resp = slurm_send_recv_msgs(layout->node_list, &msg, 
+					  timeout, false);
 	if (nodes_resp == NULL) {
 		error("slurm_send_recv_msgs failed: %m");
 		return SLURM_ERROR;
@@ -528,6 +529,12 @@ _exit_handler(message_thread_state_t *mts, slurm_msg_t *exit_msg)
 	task_exit_msg_t *msg = (task_exit_msg_t *) exit_msg->data;
 	int i;
 	int rc;
+
+	if ((msg->job_id != opt.jobid) || (msg->step_id != opt.stepid)) {
+		debug("Received MESSAGE_TASK_EXIT from wrong job: %u.%u",
+		      msg->job_id, msg->step_id);
+		return;
+	}
 
 	pthread_mutex_lock(&mts->lock);
 

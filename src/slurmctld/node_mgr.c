@@ -4,7 +4,7 @@
  *	hash table (node_hash_table), time stamp (last_node_update) and 
  *	configuration list (config_list)
  *
- *  $Id: node_mgr.c 14293 2008-06-19 19:27:39Z jette $
+ *  $Id: node_mgr.c 14872 2008-08-25 16:25:28Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -102,7 +102,6 @@ static void 	_make_node_down(struct node_record *node_ptr,
 				time_t event_time);
 static void	_node_did_resp(struct node_record *node_ptr);
 static bool	_node_is_hidden(struct node_record *node_ptr);
-static void	_node_not_resp (struct node_record *node_ptr, time_t msg_time);
 static void 	_pack_node (struct node_record *dump_node_ptr, bool cr_flag,
 				Buf buffer);
 static void	_sync_bitmaps(struct node_record *node_ptr, int job_count);
@@ -110,6 +109,9 @@ static void	_update_config_ptr(bitstr_t *bitmap,
 				struct config_record *config_ptr);
 static int	_update_node_features(char *node_names, char *features);
 static bool 	_valid_node_state_change(uint16_t old, uint16_t new); 
+#ifndef HAVE_FRONT_END
+static void	_node_not_resp (struct node_record *node_ptr, time_t msg_time);
+#endif
 #if _DEBUG
 static void	_dump_hash (void);
 #endif
@@ -842,8 +844,8 @@ extern void pack_all_node (char **buffer_ptr, int *buffer_size,
 		xassert (node_ptr->config_ptr->magic ==  
 			 CONFIG_MAGIC);
 
-		if (((show_flags & SHOW_ALL) == 0)
-		&&  (_node_is_hidden(node_ptr)))
+		if (((show_flags & SHOW_ALL) == 0) && (uid != 0) &&
+		    (_node_is_hidden(node_ptr)))
 			continue;
 		if ((node_ptr->name == NULL) ||
 		    (node_ptr->name[0] == '\0'))
@@ -1067,9 +1069,13 @@ int update_node ( update_node_msg_t * update_node_msg )
 				node_ptr->node_state &= (~NODE_STATE_DRAIN);
 				node_ptr->node_state &= (~NODE_STATE_FAIL);
 				base_state &= NODE_STATE_BASE;
-				if (base_state == NODE_STATE_DOWN)
+				if (base_state == NODE_STATE_DOWN) {
 					state_val = NODE_STATE_IDLE;
-				else
+					node_ptr->node_state |= 
+							NODE_STATE_NO_RESPOND;
+					node_ptr->last_response = now;
+					ping_nodes_now = true;
+				} else
 					state_val = base_state;
 			}
 			if (state_val == NODE_STATE_DOWN) {
@@ -1668,7 +1674,7 @@ extern int validate_nodes_via_front_end(
 		if (job_ptr == NULL) {
 			error("Orphan job %u.%u reported",
 			      reg_msg->job_id[i], reg_msg->step_id[i]);
-			kill_job_on_node(reg_msg->job_id[i], job_ptr, node_ptr);
+			abort_job_on_node(reg_msg->job_id[i], job_ptr, node_ptr);
 		}
 
 		else if ((job_ptr->job_state == JOB_RUNNING) ||
@@ -1689,17 +1695,11 @@ extern int validate_nodes_via_front_end(
 
 
 		else if (job_ptr->job_state == JOB_PENDING) {
+			/* Typically indicates a job requeue and the hung
+			 * slurmd that went DOWN is now responding */
 			error("Registered PENDING job %u.%u",
 				reg_msg->job_id[i], reg_msg->step_id[i]);
-			/* FIXME: Could possibly recover the job */
-			job_ptr->job_state = JOB_FAILED;
-			job_ptr->exit_code = 1;
-			job_ptr->state_reason = FAIL_SYSTEM;
-			last_job_update    = now;
-			job_ptr->start_time = job_ptr->end_time = now;
-			kill_job_on_node(reg_msg->job_id[i], job_ptr, node_ptr);
-			job_completion_logger(job_ptr);
-			delete_job_details(job_ptr);
+			abort_job_on_node(reg_msg->job_id[i], job_ptr, node_ptr);
 		}
 
 		else {		/* else job is supposed to be done */
@@ -1992,30 +1992,55 @@ void node_not_resp (char *name, time_t msg_time)
 	struct node_record *node_ptr;
 #ifdef HAVE_FRONT_END		/* Fake all other nodes */
 	int i;
-	char host_str[64];
-	hostlist_t no_resp_hostlist = hostlist_create("");
 
 	for (i=0; i<node_record_count; i++) {
-		node_ptr = &node_record_table_ptr[i];
-		(void) hostlist_push_host(no_resp_hostlist, node_ptr->name);
-		_node_not_resp(node_ptr, msg_time);
+		node_ptr = node_record_table_ptr + i;
+		node_ptr->not_responding = true;
 	}
-	hostlist_uniq(no_resp_hostlist);
-	hostlist_ranged_string(no_resp_hostlist, sizeof(host_str), host_str);
-	error("Nodes %s not responding", host_str);
-	hostlist_destroy(no_resp_hostlist);
 #else
 	node_ptr = find_node_record (name);
 	if (node_ptr == NULL) {
 		error ("node_not_resp unable to find node %s", name);
 		return;
 	}
-	if ((node_ptr->node_state & NODE_STATE_BASE) != NODE_STATE_DOWN)
-		error("Node %s not responding", node_ptr->name);
+	if ((node_ptr->node_state & NODE_STATE_BASE) != NODE_STATE_DOWN) {
+		/* Logged by node_no_resp_msg() on periodic basis */
+		node_ptr->not_responding = true;
+	}
 	_node_not_resp(node_ptr, msg_time);
 #endif
 }
 
+/* For every node with the "not_responding" flag set, clear the flag
+ * and log that the node is not responding using a hostlist expression */
+extern void node_no_resp_msg(void)
+{
+	int i;
+	struct node_record *node_ptr;
+	char host_str[1024];
+	hostlist_t no_resp_hostlist = NULL;
+
+	for (i=0; i<node_record_count; i++) {
+		node_ptr = &node_record_table_ptr[i];
+		if (!node_ptr->not_responding)
+			continue;
+		if (no_resp_hostlist) {
+			(void) hostlist_push_host(no_resp_hostlist, 
+						  node_ptr->name);
+		} else
+			no_resp_hostlist = hostlist_create(node_ptr->name);
+		node_ptr->not_responding = false;
+ 	}
+	if (no_resp_hostlist) {
+		hostlist_uniq(no_resp_hostlist);
+		hostlist_ranged_string(no_resp_hostlist, 
+				       sizeof(host_str), host_str);
+		error("Nodes %s not responding", host_str);
+		hostlist_destroy(no_resp_hostlist);
+	}
+}
+
+#ifndef HAVE_FRONT_END
 static void _node_not_resp (struct node_record *node_ptr, time_t msg_time)
 {
 	int i;
@@ -2034,6 +2059,7 @@ static void _node_not_resp (struct node_record *node_ptr, time_t msg_time)
 	node_ptr->node_state |= NODE_STATE_NO_RESPOND;
 	return;
 }
+#endif
 
 /*
  * set_node_down - make the specified node's state DOWN and
@@ -2173,7 +2199,7 @@ void msg_to_slurmd (slurm_msg_type_t msg_type)
 	kill_agent_args->hostlist = hostlist_create("");
 	if (msg_type == REQUEST_SHUTDOWN) {
  		shutdown_req = xmalloc(sizeof(shutdown_msg_t));
-		shutdown_req->core = 0;
+		shutdown_req->options = 0;
 		kill_agent_args->msg_args = shutdown_req;
 	}
 

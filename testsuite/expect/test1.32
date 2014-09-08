@@ -54,7 +54,7 @@ if { [test_xcpu] } {
 # Delete left-over program and rebuild it
 #
 exec $bin_rm -f $file_prog
-exec $bin_make -f /dev/null $file_prog
+exec $bin_cc -O ${file_prog}.c -o $file_prog
 exec $bin_chmod 700 $file_prog
 
 #
@@ -81,12 +81,11 @@ expect {
 #
 set timeout $max_job_delay
 set srun_pid [spawn $srun -N1 -t1 --unbuffered $file_prog]
-exec $bin_sleep 5
-exec $bin_kill -USR1 $srun_pid
-exec $bin_kill -USR2 $srun_pid
 expect {
 	-re "WAITING" {
 		incr matches
+		exec $bin_kill -USR1 $srun_pid
+		exec $bin_kill -USR2 $srun_pid
 		exp_continue
 	}
 	-re "SIGUSR($number)" {

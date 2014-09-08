@@ -1677,7 +1677,13 @@ extern int job_signal(uint32_t job_id, uint16_t signal, uint16_t batch_flag,
 	/* save user ID of the one who requested the job be cancelled */
 	if(signal == SIGKILL)
 		job_ptr->requid = uid;
-	
+	if ((job_ptr->job_state == (JOB_PENDING | JOB_COMPLETING)) &&
+	    (signal == SIGKILL)) {
+		job_ptr->job_state = JOB_CANCELLED | JOB_COMPLETING;
+		verbose("job_signal of requeuing job %u successful", job_id);
+		return SLURM_SUCCESS;
+	}
+
 	if ((job_ptr->job_state == JOB_PENDING) &&
 	    (signal == SIGKILL)) {
 		last_job_update		= now;
@@ -2741,7 +2747,8 @@ _copy_job_desc_to_job_record(job_desc_msg_t * job_desc,
 	job_ptr->comment    = xstrdup(job_desc->comment);
 	if (!wiki_sched_test) {
 		char *sched_type = slurm_get_sched_type();
-		if (strcmp(sched_type, "sched/wiki") == 0)
+		if ((strcmp(sched_type, "sched/wiki") == 0) ||
+		    (strcmp(sched_type, "sched/wiki2") == 0))
 			wiki_sched = true;
 		xfree(sched_type);
 		wiki_sched_test = true;
@@ -2991,18 +2998,6 @@ static void _job_timed_out(struct job_record *job_ptr)
 static int _validate_job_desc(job_desc_msg_t * job_desc_msg, int allocate, 
 			      uid_t submit_uid)
 {
-	/* Permit normal user to specify job id only for sched/wiki 
-	 * (Maui scheduler). This was also required with earlier
-	 * versions of the Moab scheduler (wiki2), but was fixed 
-	 * in early 2007 to submit jobs as user root */
-	if (!wiki_sched_test) {
-		char *sched_type = slurm_get_sched_type();
-		if (strcmp(sched_type, "sched/wiki") == 0)
-			wiki_sched = true;
-		xfree(sched_type);
-		wiki_sched_test = true;
-	}
-
 	if ((job_desc_msg->num_procs == NO_VAL)
 	    &&  (job_desc_msg->min_nodes == NO_VAL)
 	    &&  (job_desc_msg->req_nodes == NULL)) {
@@ -3037,7 +3032,7 @@ static int _validate_job_desc(job_desc_msg_t * job_desc_msg, int allocate,
 
 	if (job_desc_msg->job_id != NO_VAL) {
 		struct job_record *dup_job_ptr;
-		if ((submit_uid != 0) && (!wiki_sched) &&
+		if ((submit_uid != 0) && 
 		    (submit_uid != slurmctld_conf.slurm_user_id)) {
 			info("attempt by uid %u to set job_id", submit_uid);
 			return ESLURM_INVALID_JOB_ID;
@@ -3243,7 +3238,7 @@ extern void pack_all_jobs(char **buffer_ptr, int *buffer_size,
 	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
 		xassert (job_ptr->magic == JOB_MAGIC);
 
-		if (((show_flags & SHOW_ALL) == 0) &&
+		if (((show_flags & SHOW_ALL) == 0) && (uid != 0) &&
 		    (job_ptr->part_ptr) && 
 		    (job_ptr->part_ptr->hidden))
 			continue;
@@ -3837,6 +3832,14 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 		return ESLURM_USER_ID_MISSING;
 	}
 
+	if (!wiki_sched_test) {
+		char *sched_type = slurm_get_sched_type();
+		if ((strcmp(sched_type, "sched/wiki") == 0) ||
+		    (strcmp(sched_type, "sched/wiki2") == 0))
+			wiki_sched = true;
+		xfree(sched_type);
+		wiki_sched_test = true;
+	}
 	detail_ptr = job_ptr->details;
 	if (detail_ptr)
 		mc_ptr = detail_ptr->mc_ptr;
@@ -4131,7 +4134,21 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 		}
 	}
 
-	if (job_specs->comment) {
+	if (job_specs->comment && wiki_sched && (!super_user)) {
+		/* User must use Moab command to change job comment */
+		error("Attempt to change comment for job %u",
+		      job_specs->job_id);
+		error_code = ESLURM_ACCESS_DENIED;
+#if 0
+		if (wiki_sched && strstr(job_ptr->comment, "QOS:")) {
+			if (strstr(job_ptr->comment, "FLAGS:PREEMPTOR"))
+				job_ptr->qos = QOS_EXPEDITE;
+			else if (strstr(job_ptr->comment, "FLAGS:PREEMPTEE"))
+				job_ptr->qos = QOS_STANDBY;
+			else
+				job_ptr->qos = QOS_NORMAL;
+#endif
+	} else if (job_specs->comment) {
 		xfree(job_ptr->comment);
 		job_ptr->comment = job_specs->comment;
 		job_specs->comment = NULL;	/* Nothing left to free */
@@ -4546,7 +4563,7 @@ extern void validate_jobs_on_node(slurm_node_registration_status_msg_t *reg_msg)
 			error("Orphan job %u.%u reported on node %s",
 				reg_msg->job_id[i], reg_msg->step_id[i], 
 				reg_msg->node_name);
-			kill_job_on_node(reg_msg->job_id[i], job_ptr, node_ptr);
+			abort_job_on_node(reg_msg->job_id[i], job_ptr, node_ptr);
 		}
 
 		else if ((job_ptr->job_state == JOB_RUNNING) ||
@@ -4563,10 +4580,13 @@ extern void validate_jobs_on_node(slurm_node_registration_status_msg_t *reg_msg)
 					job_ptr->time_last_active = now;
 				}
 			} else {
+				/* Typically indicates a job requeue and
+				 * restart on another nodes. A node from the
+				 * original allocation just responded here. */
 				error("Registered job %u.%u on wrong node %s ",
 					reg_msg->job_id[i], reg_msg->step_id[i],
 					reg_msg->node_name);
-				kill_job_on_node(reg_msg->job_id[i], job_ptr, 
+				abort_job_on_node(reg_msg->job_id[i], job_ptr, 
 						node_ptr);
 			}
 		}
@@ -4579,25 +4599,19 @@ extern void validate_jobs_on_node(slurm_node_registration_status_msg_t *reg_msg)
 
 
 		else if (job_ptr->job_state == JOB_PENDING) {
+			/* Typically indicates a job requeue and the hung
+			 * slurmd that went DOWN is now responding */
 			error("Registered PENDING job %u.%u on node %s ",
 				reg_msg->job_id[i], reg_msg->step_id[i], 
 				reg_msg->node_name);
-			job_ptr->job_state = JOB_FAILED;
-			job_ptr->exit_code = 1;
-			job_ptr->state_reason = FAIL_SYSTEM;
-			last_job_update = now;
-			job_ptr->start_time = job_ptr->end_time  = now;
-			kill_job_on_node(reg_msg->job_id[i], job_ptr, node_ptr);
-			job_completion_logger(job_ptr);
-			delete_job_details(job_ptr);
+			abort_job_on_node(reg_msg->job_id[i], job_ptr, node_ptr);
 		}
 
 		else {		/* else job is supposed to be done */
-			error
-			    ("Registered job %u.%u in state %s on node %s ",
-			     reg_msg->job_id[i], reg_msg->step_id[i], 
-			     job_state_string(job_ptr->job_state),
-			     reg_msg->node_name);
+			error("Registered job %u.%u in state %s on node %s ",
+			      reg_msg->job_id[i], reg_msg->step_id[i], 
+			      job_state_string(job_ptr->job_state),
+			      reg_msg->node_name);
 			kill_job_on_node(reg_msg->job_id[i], job_ptr, node_ptr);
 		}
 	}
@@ -4644,13 +4658,47 @@ static void _purge_lost_batch_jobs(int node_inx, time_t now)
 }
 
 /*
- * kill_job_on_node - Kill the specific job_id on a specific node,
+ * abort_job_on_node - Kill the specific job_id on a specific node,
  *	the request is not processed immediately, but queued. 
  *	This is to prevent a flood of pthreads if slurmctld restarts 
  *	without saved state and slurmd daemons register with a 
  *	multitude of running jobs. Slurmctld will not recognize 
  *	these jobs and use this function to kill them - one 
  *	agent request per node as they register.
+ * IN job_id - id of the job to be killed
+ * IN job_ptr - pointer to terminating job (NULL if unknown, e.g. orphaned)
+ * IN node_ptr - pointer to the node on which the job resides
+ */
+extern void
+abort_job_on_node(uint32_t job_id, struct job_record *job_ptr, 
+		  struct node_record *node_ptr)
+{
+	agent_arg_t *agent_info;
+	kill_job_msg_t *kill_req;
+
+	debug("Aborting job %u on node %s", job_id, node_ptr->name);
+
+	kill_req = xmalloc(sizeof(kill_job_msg_t));
+	kill_req->job_id	= job_id;
+	kill_req->time          = time(NULL);
+	kill_req->nodes	        = xstrdup(node_ptr->name);
+	if (job_ptr) {  /* NULL if unknown */
+		kill_req->select_jobinfo = 
+			select_g_copy_jobinfo(job_ptr->select_jobinfo);
+	}
+
+	agent_info = xmalloc(sizeof(agent_arg_t));
+	agent_info->node_count	= 1;
+	agent_info->retry	= 0;
+	agent_info->hostlist	= hostlist_create(node_ptr->name);
+	agent_info->msg_type	= REQUEST_ABORT_JOB;
+	agent_info->msg_args	= kill_req;
+
+	agent_queue_request(agent_info);
+}
+
+/*
+ * kill_job_on_node - Kill the specific job_id on a specific node.
  * IN job_id - id of the job to be killed
  * IN job_ptr - pointer to terminating job (NULL if unknown, e.g. orphaned)
  * IN node_ptr - pointer to the node on which the job resides

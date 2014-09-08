@@ -61,6 +61,12 @@ static int _set_cond(int *start, int argc, char *argv[],
 		user_cond->assoc_cond->max_jobs = NO_VAL;
 		user_cond->assoc_cond->max_nodes_per_job = NO_VAL;
 		user_cond->assoc_cond->max_wall_duration_per_job = NO_VAL;
+		/* we need this to make sure we only change users, not
+		 * accounts if this list didn't exist it would change
+		 * accounts.
+		 */
+		user_cond->assoc_cond->user_list = 
+			list_create(slurm_destroy_char);
 	}
 
 	for (i=(*start); i<argc; i++) {
@@ -77,13 +83,9 @@ static int _set_cond(int *start, int argc, char *argv[],
 		} else if(!end
 			  || !strncasecmp (argv[i], "Names", 1)
 			  || !strncasecmp (argv[i], "Users", 1)) {
-			if(!user_cond->assoc_cond->user_list) {
-				user_cond->assoc_cond->user_list = 
-					list_create(slurm_destroy_char);
-			}
 			if(slurm_addto_char_list(
 				   user_cond->assoc_cond->user_list,
-				   argv[i]+end))
+				   argv[i]+end)) 
 				u_set = 1;
 		} else if (!strncasecmp (argv[i], "Account", 2)) {
 			if(!user_cond->assoc_cond->acct_list) {
@@ -155,7 +157,9 @@ static int _set_cond(int *start, int argc, char *argv[],
 
 	(*start) = i;
 
-	if(a_set) {
+	if(u_set && a_set)
+		return 3;
+	else if(a_set) {
 		return 2;
 	} else if(u_set)
 		return 1;
@@ -619,9 +623,10 @@ extern int sacctmgr_add_user(int argc, char *argv[])
 
 				if(sacctmgr_find_association_from_list(
 					   local_assoc_list,
-					   name, account, cluster, NULL))
-						continue;
-					
+					   name, account, cluster, NULL)) {
+					continue;
+				}		
+			
 				assoc = xmalloc(sizeof(acct_association_rec_t));
 				assoc->user = xstrdup(name);
 				assoc->acct = xstrdup(account);
@@ -846,7 +851,7 @@ extern int sacctmgr_list_user(int argc, char *argv[])
 	int rc = SLURM_SUCCESS;
 	acct_user_cond_t *user_cond = xmalloc(sizeof(acct_user_cond_t));
 	List user_list;
-	int i=0;
+	int i=0, set=0;
 	ListIterator itr = NULL;
 	ListIterator itr2 = NULL;
 	acct_user_rec_t *user = NULL;
@@ -855,6 +860,7 @@ extern int sacctmgr_list_user(int argc, char *argv[])
 	List qos_list = NULL;
 
 	print_field_t *field = NULL;
+	int field_count = 0;
 
 	List format_list = list_create(slurm_destroy_char);
 	List print_fields_list; /* types are of print_field_t */
@@ -881,7 +887,7 @@ extern int sacctmgr_list_user(int argc, char *argv[])
 
 	user_cond->with_assocs = with_assoc_flag;
 
-	_set_cond(&i, argc, argv, user_cond, format_list);
+	set = _set_cond(&i, argc, argv, user_cond, format_list);
 
 	if(exit_code) {
 		destroy_acct_user_cond(user_cond);
@@ -896,6 +902,17 @@ extern int sacctmgr_list_user(int argc, char *argv[])
 					"Cl,Ac,Part,F,MaxC,MaxJ,MaxN,MaxW");
 		if(user_cond->with_coords)
 			slurm_addto_char_list(format_list, "Coord");
+	}
+
+	if(!user_cond->with_assocs && set > 1) {
+		if(!commit_check("You requested options that are only vaild "
+				 "when querying with the withassoc option.\n"
+				 "Are you sure you want to continue?")) {
+			printf("Aborted\n");
+			list_destroy(format_list);
+			destroy_acct_user_cond(user_cond);
+			return SLURM_SUCCESS;
+		}		
 	}
 
 	print_fields_list = list_create(destroy_print_field);
@@ -978,7 +995,8 @@ extern int sacctmgr_list_user(int argc, char *argv[])
 			field->name = xstrdup("Partition");
 			field->len = 10;
 			field->print_routine = print_fields_str;
-		} else if(!strncasecmp("User", object, 1)) {
+		} else if(!strncasecmp("User", object, 1)
+			  || !strncasecmp("Name", object, 2)) {
 			field->type = PRINT_USER;
 			field->name = xstrdup("User");
 			field->len = 10;
@@ -1014,73 +1032,100 @@ extern int sacctmgr_list_user(int argc, char *argv[])
 	itr2 = list_iterator_create(print_fields_list);
 	print_fields_header(print_fields_list);
 
+	field_count = list_count(print_fields_list);
+
 	while((user = list_next(itr))) {
-		if(user->assoc_list && list_count(user->assoc_list)) {
+		if(user->assoc_list) {
 			ListIterator itr3 =
 				list_iterator_create(user->assoc_list);
 			
 			while((assoc = list_next(itr3))) {
+				int curr_inx = 1;
 				while((field = list_next(itr2))) {
 					switch(field->type) {
 					case PRINT_ACCOUNT:
 						field->print_routine(
 							field, 
-							assoc->acct);
+							assoc->acct,
+							(curr_inx == 
+							 field_count));
 						break;
 					case PRINT_ADMIN:
 						field->print_routine(
 							field,
 							acct_admin_level_str(
 								user->
-								admin_level));
+								admin_level),
+							(curr_inx == 
+							 field_count));
 						break;
 					case PRINT_CLUSTER:
 						field->print_routine(
 							field,
-							assoc->cluster);
+							assoc->cluster,
+							(curr_inx == 
+							 field_count));
 						break;
 					case PRINT_COORDS:
 						field->print_routine(
 							field,
-							user->coord_accts);
+							user->coord_accts,
+							(curr_inx == 
+							 field_count));
 						break;
 					case PRINT_DACCT:
 						field->print_routine(
 							field,
-							user->default_acct);
+							user->default_acct,
+							(curr_inx == 
+							 field_count),
+							(curr_inx == 
+							 field_count));
 						break;
 					case PRINT_FAIRSHARE:
 						field->print_routine(
 							field,
-							assoc->fairshare);
+							assoc->fairshare,
+							(curr_inx == 
+							 field_count));
 						break;
 					case PRINT_ID:
 						field->print_routine(
 							field,
-							assoc->id);
+							assoc->id,
+							(curr_inx == 
+							 field_count));
 						break;
 					case PRINT_MAXC:
 						field->print_routine(
 							field,
 							assoc->
-							max_cpu_secs_per_job);
+							max_cpu_secs_per_job,
+							(curr_inx == 
+							 field_count));
 						break;
 					case PRINT_MAXJ:
 						field->print_routine(
 							field, 
-							assoc->max_jobs);
+							assoc->max_jobs,
+							(curr_inx == 
+							 field_count));
 						break;
 					case PRINT_MAXN:
 						field->print_routine(
 							field,
 							assoc->
-							max_nodes_per_job);
+							max_nodes_per_job,
+							(curr_inx == 
+							 field_count));
 						break;
 					case PRINT_MAXW:
 						field->print_routine(
 							field,
 							assoc->
-							max_wall_duration_per_job);
+							max_wall_duration_per_job,
+							(curr_inx == 
+							 field_count));
 						break;
 					case PRINT_QOS:
 						if(!qos_list) {
@@ -1092,7 +1137,9 @@ extern int sacctmgr_list_user(int argc, char *argv[])
 						field->print_routine(
 							field,
 							qos_list,
-							user->qos_list);
+							user->qos_list,
+							(curr_inx == 
+							 field_count));
 						break;
 					case PRINT_QOS_RAW:
 						if(!qos_list) {
@@ -1104,94 +1151,117 @@ extern int sacctmgr_list_user(int argc, char *argv[])
 						field->print_routine(
 							field,
 							qos_list,
-							user->qos_list);
+							user->qos_list,
+							(curr_inx == 
+							 field_count));
 						break;
 					case PRINT_PID:
 						field->print_routine(
 							field,
-							assoc->parent_id);
+							assoc->parent_id,
+							(curr_inx == 
+							 field_count));
 						break;
 					case PRINT_PNAME:
 						field->print_routine(
 							field,
-							assoc->parent_acct);
+							assoc->parent_acct,
+							(curr_inx == 
+							 field_count));
 						break;
 					case PRINT_PART:
 						field->print_routine(
 							field,
-							assoc->partition);
+							assoc->partition,
+							(curr_inx == 
+							 field_count));
 						break;
 					case PRINT_USER:
 						field->print_routine(
 							field,
-							user->name);
+							user->name,
+							(curr_inx == 
+							 field_count));
 						break;
 					default:
 						break;
 					}
+					curr_inx++;
 				}
 				list_iterator_reset(itr2);
 				printf("\n");
 			}
 			list_iterator_destroy(itr3);				
 		} else {
+			int curr_inx = 1;
 			while((field = list_next(itr2))) {
 				switch(field->type) {
 				case PRINT_ACCOUNT:
 					field->print_routine(
 						field, 
-						NULL);
+						NULL,
+						(curr_inx == field_count));
 					break;
 				case PRINT_ADMIN:
 					field->print_routine(
 						field,
 						acct_admin_level_str(
-							user->admin_level));
+							user->admin_level),
+						(curr_inx == field_count));
 					break;
 				case PRINT_CLUSTER:
 					field->print_routine(
 						field,
-						NULL);
+						NULL,
+						(curr_inx == field_count));
 					break;
 				case PRINT_COORDS:
 					field->print_routine(
 						field,
-						user->coord_accts);
+						user->coord_accts,
+						(curr_inx == field_count));
 					break;
 				case PRINT_DACCT:
 					field->print_routine(
 						field,
-						user->default_acct);
+						user->default_acct,
+						(curr_inx == field_count));
 					break;
 				case PRINT_FAIRSHARE:
 					field->print_routine(
 						field,
-						NULL);
+						NULL,
+						(curr_inx == field_count));
 					break;
 				case PRINT_ID:
 					field->print_routine(
 						field,
-						NULL);
+						NULL,
+						(curr_inx == field_count));
 					break;
 				case PRINT_MAXC:
 					field->print_routine(
 						field,
-						NULL);
+						NULL,
+						(curr_inx == field_count));
 					break;
 				case PRINT_MAXJ:
 					field->print_routine(
 						field, 
-						NULL);
+						NULL,
+						(curr_inx == field_count));
 					break;
 				case PRINT_MAXN:
 					field->print_routine(
 						field,
-						NULL);
+						NULL,
+						(curr_inx == field_count));
 					break;
 				case PRINT_MAXW:
 					field->print_routine(
 						field,
-						NULL);
+						NULL,
+						(curr_inx == field_count));
 					break;
 				case PRINT_QOS:
 					if(!qos_list) {
@@ -1202,7 +1272,8 @@ extern int sacctmgr_list_user(int argc, char *argv[])
 					}
 					field->print_routine(
 						field, qos_list,
-						user->qos_list);
+						user->qos_list,
+						(curr_inx == field_count));
 					break;
 				case PRINT_QOS_RAW:
 					if(!qos_list) {
@@ -1213,26 +1284,31 @@ extern int sacctmgr_list_user(int argc, char *argv[])
 					}
 					field->print_routine(
 						field, qos_list,
-						user->qos_list);
+						user->qos_list,
+						(curr_inx == field_count));
 					break;
 				case PRINT_PID:
 					field->print_routine(
 						field,
-						NULL);
+						NULL,
+						(curr_inx == field_count));
 					break;
 				case PRINT_PART:
 					field->print_routine(
 						field, 
-						NULL);
+						NULL,
+						(curr_inx == field_count));
 					break;
 				case PRINT_USER:
 					field->print_routine(
 						field, 
-						user->name);
+						user->name,
+						(curr_inx == field_count));
 					break;
 				default:
 					break;
 				}
+			curr_inx++;
 			}
 			list_iterator_reset(itr2);
 			printf("\n");
@@ -1298,30 +1374,32 @@ extern int sacctmgr_modify_user(int argc, char *argv[])
 			return SLURM_SUCCESS;
 		}		
 	}
-	
+
 	notice_thread_init();
 	if(rec_set == 3 || rec_set == 1) { // process the account changes
 		if(cond_set == 2) {
 			rc = SLURM_ERROR;
-			if(list_count(user_cond->assoc_cond->acct_list)) {
-				notice_thread_fini();
-				if(!commit_check(
-					   " You specified Accounts if your "
-					   "request.  Did you mean "
-					   "DefaultAccounts?\n")) {
-					goto assoc_start;
-				}
-				notice_thread_init();
+			exit_code=1;
+			fprintf(stderr, 
+				" There was a problem with your "
+				"'where' options.\n");
+			goto assoc_start;
+		}
+
+		if(user_cond->assoc_cond 
+		   && user_cond->assoc_cond->acct_list 
+		   && list_count(user_cond->assoc_cond->acct_list)) {
+			notice_thread_fini();
+			if(commit_check(
+				   " You specified Accounts in your "
+				   "request.  Did you mean "
+				   "DefaultAccounts?\n")) {
 				list_transfer(user_cond->def_acct_list,
 					      user_cond->assoc_cond->acct_list);
-			} else {
-				exit_code=1;
-				fprintf(stderr, 
-					" There was a problem with your "
-					"'where' options.\n");
-				goto assoc_start;
 			}
+			notice_thread_init();
 		}
+			
 		ret_list = acct_storage_g_modify_users(
 			db_conn, my_uid, user_cond, user);
 		if(ret_list && list_count(ret_list)) {
@@ -1347,6 +1425,16 @@ extern int sacctmgr_modify_user(int argc, char *argv[])
 
 assoc_start:
 	if(rec_set == 3 || rec_set == 2) { // process the association changes
+		if(cond_set == 1 
+		   && !list_count(user_cond->assoc_cond->user_list)) {
+			rc = SLURM_ERROR;
+			exit_code=1;
+			fprintf(stderr, 
+				" There was a problem with your "
+				"'where' options.\n");
+			goto assoc_end;
+		}
+
 		ret_list = acct_storage_g_modify_associations(
 			db_conn, my_uid, user_cond->assoc_cond, assoc);
 
@@ -1370,6 +1458,7 @@ assoc_start:
 		if(ret_list)
 			list_destroy(ret_list);
 	}
+assoc_end:
 
 	notice_thread_fini();
 	if(set) {
@@ -1413,7 +1502,7 @@ extern int sacctmgr_delete_user(int argc, char *argv[])
 	if(set == 1) {
 		ret_list = acct_storage_g_remove_users(
 			db_conn, my_uid, user_cond);		
-	} else if(set == 2) {
+	} else if(set == 2 || set == 3) {
 		ret_list = acct_storage_g_remove_associations(
 			db_conn, my_uid, user_cond->assoc_cond);
 	}
@@ -1426,7 +1515,7 @@ extern int sacctmgr_delete_user(int argc, char *argv[])
 		ListIterator itr = list_iterator_create(ret_list);
 		if(set == 1) {
 			printf(" Deleting users...\n");
-		} else if(set == 2) {
+		} else if(set == 2 || set == 3) {
 			printf(" Deleting user associations...\n");
 		}
 		while((object = list_next(itr))) {
@@ -1481,20 +1570,24 @@ extern int sacctmgr_delete_coord(int argc, char *argv[])
 		destroy_acct_user_cond(user_cond);
 		return SLURM_ERROR;
 	}
-
-	itr = list_iterator_create(user_cond->assoc_cond->user_list);
-	while((name = list_next(itr))) {
-		xstrfmtcat(user_str, "  %s\n", name);
-
+	if(user_cond->assoc_cond->user_list) {	
+		itr = list_iterator_create(user_cond->assoc_cond->user_list);
+		while((name = list_next(itr))) {
+			xstrfmtcat(user_str, "  %s\n", name);
+			
+		}
+		list_iterator_destroy(itr);
 	}
-	list_iterator_destroy(itr);
 
-	itr = list_iterator_create(user_cond->assoc_cond->acct_list);
-	while((name = list_next(itr))) {
-		xstrfmtcat(acct_str, "  %s\n", name);
-
+	if(user_cond->assoc_cond->acct_list) {
+		itr = list_iterator_create(user_cond->assoc_cond->acct_list);
+		while((name = list_next(itr))) {
+			xstrfmtcat(acct_str, "  %s\n", name);
+			
+		}
+		list_iterator_destroy(itr);
 	}
-	list_iterator_destroy(itr);
+
 	if(!user_str && !acct_str) {
 		exit_code=1;
 		fprintf(stderr, " You need to specify a user list "

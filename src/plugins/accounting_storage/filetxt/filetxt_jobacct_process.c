@@ -749,15 +749,15 @@ static int _parse_line(char *f[], void **data, int len)
 		(*step)->rusage.ru_nsignals = atoi(f[F_NSIGNALS]);
 		(*step)->rusage.ru_nvcsw = atoi(f[F_NVCSW]);
 		(*step)->rusage.ru_nivcsw = atoi(f[F_NIVCSW]);
-		(*step)->sacct.max_vsize = atoi(f[F_MAX_VSIZE]) * 1024;
+		(*step)->sacct.max_vsize = atoi(f[F_MAX_VSIZE]);
 		if(len > F_STEPNODES) {
 			(*step)->sacct.max_vsize_id.taskid = 
 				atoi(f[F_MAX_VSIZE_TASK]);
-			(*step)->sacct.ave_vsize = atof(f[F_AVE_VSIZE]) * 1024;
-			(*step)->sacct.max_rss = atoi(f[F_MAX_RSS]) * 1024;
+			(*step)->sacct.ave_vsize = atof(f[F_AVE_VSIZE]);
+			(*step)->sacct.max_rss = atoi(f[F_MAX_RSS]);
 			(*step)->sacct.max_rss_id.taskid = 
 				atoi(f[F_MAX_RSS_TASK]);
-			(*step)->sacct.ave_rss = atof(f[F_AVE_RSS]) * 1024;
+			(*step)->sacct.ave_rss = atof(f[F_AVE_RSS]);
 			(*step)->sacct.max_pages = atoi(f[F_MAX_PAGES]);
 			(*step)->sacct.max_pages_id.taskid = 
 				atoi(f[F_MAX_PAGES_TASK]);
@@ -771,13 +771,13 @@ static int _parse_line(char *f[], void **data, int len)
 		} else {
 			(*step)->sacct.max_vsize_id.taskid = (uint16_t)NO_VAL;
 			(*step)->sacct.ave_vsize = (float)NO_VAL;
-			(*step)->sacct.max_rss = (uint32_t)NO_VAL;
+			(*step)->sacct.max_rss = NO_VAL;
 			(*step)->sacct.max_rss_id.taskid = (uint16_t)NO_VAL;
 			(*step)->sacct.ave_rss = (float)NO_VAL;
-			(*step)->sacct.max_pages = (uint32_t)NO_VAL;
+			(*step)->sacct.max_pages = NO_VAL;
 			(*step)->sacct.max_pages_id.taskid = (uint16_t)NO_VAL;
 			(*step)->sacct.ave_pages = (float)NO_VAL;
-			(*step)->sacct.min_cpu = (uint32_t)NO_VAL;
+			(*step)->sacct.min_cpu = NO_VAL;
 			(*step)->sacct.min_cpu_id.taskid = (uint16_t)NO_VAL;
 			(*step)->sacct.ave_cpu =  (float)NO_VAL;
 			(*step)->stepname = NULL;
@@ -793,14 +793,10 @@ static int _parse_line(char *f[], void **data, int len)
 			(*step)->sacct.min_cpu_id.nodeid = 
 				atoi(f[F_MIN_CPU_NODE]);
 		} else {
-			(*step)->sacct.max_vsize_id.nodeid = 
-				(uint32_t)NO_VAL;
-			(*step)->sacct.max_rss_id.nodeid = 
-				(uint32_t)NO_VAL;
-			(*step)->sacct.max_pages_id.nodeid = 
-				(uint32_t)NO_VAL;
-			(*step)->sacct.min_cpu_id.nodeid = 
-				(uint32_t)NO_VAL;
+			(*step)->sacct.max_vsize_id.nodeid = NO_VAL;
+			(*step)->sacct.max_rss_id.nodeid = NO_VAL;
+			(*step)->sacct.max_pages_id.nodeid = NO_VAL;
+			(*step)->sacct.min_cpu_id.nodeid = NO_VAL;
 		}
 		if(len > F_STEP_ACCOUNT)
 			(*step)->account = xstrdup(f[F_STEP_ACCOUNT]);
@@ -1467,6 +1463,17 @@ extern void filetxt_jobacct_process_archive(List selected_parts,
 	}
 	list_iterator_destroy(itr);
 	
+	/* write records in other_list to new log */
+	itr = list_iterator_create(other_list);
+	while((exp_rec = list_next(itr))) {
+		if (fputs(exp_rec->line, new_logfile)<0) {
+			perror("writing keep_logfile");
+			list_iterator_destroy(itr);
+			goto finished2;
+		}
+	}
+	list_iterator_destroy(itr);
+	
 	if (rename(params->opt_filein, old_logfile_name)) {
 		perror("renaming logfile to .old.");
 		goto finished2;
@@ -1503,6 +1510,13 @@ extern void filetxt_jobacct_process_archive(List selected_parts,
 		perror("looking for late-arriving records");
 		goto finished2;
 	}
+
+	/* reopen new logfile in append mode, since slurmctld may write it */
+	if (freopen(params->opt_filein, "a", new_logfile) == NULL) {
+		perror("reopening new logfile");
+		goto finished2;
+	}
+
 	while (fgets(line, BUFFER_SIZE, fd)) {
 		if (fputs(line, new_logfile)<0) {
 			perror("writing final records");

@@ -48,6 +48,7 @@
 #include "src/common/log.h"
 #include "src/common/parse_config.h"
 #include "src/common/read_config.h"
+#include "src/common/uid.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 #include "src/slurmdbd/read_config.h"
@@ -153,7 +154,8 @@ extern int read_slurmdbd_conf(void)
 		}
 
 		s_p_get_uint16(&slurmdbd_conf->archive_age, "ArchiveAge", tbl);
-		s_p_get_string(&slurmdbd_conf->archive_script, "ArchiveScript", tbl);
+		s_p_get_string(&slurmdbd_conf->archive_script, "ArchiveScript",
+			       tbl);
 		s_p_get_string(&slurmdbd_conf->auth_info, "AuthInfo", tbl);
 		s_p_get_string(&slurmdbd_conf->auth_type, "AuthType", tbl);
 		s_p_get_string(&slurmdbd_conf->dbd_host, "DbdHost", tbl);
@@ -174,7 +176,8 @@ extern int read_slurmdbd_conf(void)
 		s_p_get_string(&slurmdbd_conf->plugindir, "PluginDir", tbl);
 		s_p_get_string(&slurmdbd_conf->slurm_user_name, "SlurmUser",
 			       tbl);
-		if (!s_p_get_uint16(&slurmdbd_conf->step_purge, "StepPurge", tbl))
+		if (!s_p_get_uint16(&slurmdbd_conf->step_purge, "StepPurge",
+				    tbl))
 			slurmdbd_conf->step_purge = DEFAULT_SLURMDBD_STEP_PURGE;
 		s_p_get_string(&slurmdbd_conf->storage_host,
 				"StorageHost", tbl);
@@ -196,7 +199,8 @@ extern int read_slurmdbd_conf(void)
 	if (slurmdbd_conf->auth_type == NULL)
 		slurmdbd_conf->auth_type = xstrdup(DEFAULT_SLURMDBD_AUTHTYPE);
 	if (slurmdbd_conf->dbd_host == NULL) {
-		error("slurmdbd.conf lacks DbdHost parameter, using 'localhost'");
+		error("slurmdbd.conf lacks DbdHost parameter, "
+		      "using 'localhost'");
 		slurmdbd_conf->dbd_host = xstrdup("localhost");
 	}
 	if (slurmdbd_conf->dbd_addr == NULL)
@@ -208,13 +212,12 @@ extern int read_slurmdbd_conf(void)
 	if(slurmdbd_conf->plugindir == NULL)
 		slurmdbd_conf->plugindir = xstrdup(default_plugin_path);
 	if (slurmdbd_conf->slurm_user_name) {
-		struct passwd *slurm_passwd;
-		slurm_passwd = getpwnam(slurmdbd_conf->slurm_user_name);
-		if (slurm_passwd == NULL) {
+		uid_t pw_uid = uid_from_string(slurmdbd_conf->slurm_user_name);
+		if (pw_uid == (uid_t) -1) {
 			fatal("Invalid user for SlurmUser %s, ignored",
 			      slurmdbd_conf->slurm_user_name);
 		} else
-			slurmdbd_conf->slurm_user_id = slurm_passwd->pw_uid;
+			slurmdbd_conf->slurm_user_id = pw_uid;
 	} else {
 		slurmdbd_conf->slurm_user_name = xstrdup("root");
 		slurmdbd_conf->slurm_user_id = 0;

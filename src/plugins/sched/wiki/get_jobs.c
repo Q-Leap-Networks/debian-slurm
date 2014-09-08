@@ -48,7 +48,6 @@
 
 static char *	_dump_all_jobs(int *job_cnt, time_t update_time);
 static char *	_dump_job(struct job_record *job_ptr, time_t update_time);
-static char *	_get_group_name(gid_t gid);
 static uint16_t _get_job_cpus_per_task(struct job_record *job_ptr);
 static uint32_t	_get_job_end_time(struct job_record *job_ptr);
 static char *	_get_job_features(struct job_record *job_ptr);
@@ -73,6 +72,7 @@ static char *	_task_list(struct job_record *job_ptr);
  * ARG=<cnt>#<JOBID>;
  *	STATE=<state>;			Moab equivalent job state
  *	[HOSTLIST=<node1:node2>;]	list of required nodes, if any
+ *	[STARTDATE=<uts>;]		earliest start time, if any
  *	[TASKLIST=<node1:node2>;]	nodes in use, if running or completing
  *	[RFEATURES=<features>;]		required features, if any, 
  *					NOTE: OR operator not supported
@@ -202,6 +202,7 @@ static char *   _dump_all_jobs(int *job_cnt, time_t update_time)
 static char *	_dump_job(struct job_record *job_ptr, time_t update_time)
 {
 	char tmp[16384], *buf = NULL;
+	char *uname, *gname;
 	uint32_t end_time, suspend_time;
 
 	if (!job_ptr)
@@ -213,17 +214,24 @@ static char *	_dump_job(struct job_record *job_ptr, time_t update_time)
 
 	if (update_time > last_job_update)
 		return buf;
-
+	
 	if ((job_ptr->job_state == JOB_PENDING)
-	&&  (job_ptr->details)
-	&&  (job_ptr->details->req_nodes)
-	&&  (job_ptr->details->req_nodes[0])) {
-		char *hosts = bitmap2wiki_node_name(
-			job_ptr->details->req_node_bitmap);
-		snprintf(tmp, sizeof(tmp),
-			"HOSTLIST=%s;", hosts);
-		xstrcat(buf, tmp);
-		xfree(hosts);
+	    &&  (job_ptr->details)) {
+		if ((job_ptr->details->req_nodes)
+		    &&  (job_ptr->details->req_nodes[0])) {
+			char *hosts = bitmap2wiki_node_name(
+				job_ptr->details->req_node_bitmap);
+			snprintf(tmp, sizeof(tmp),
+				 "HOSTLIST=%s;", hosts);
+			xstrcat(buf, tmp);
+			xfree(hosts);
+		}
+		if (job_ptr->details->begin_time) {
+			snprintf(tmp, sizeof(tmp),
+				 "STARTDATE=%u;", (uint32_t)
+				 job_ptr->details->begin_time);
+			xstrcat(buf, tmp);
+		}
 	} else if (!IS_JOB_FINISHED(job_ptr)) {
 		char *hosts = _task_list(job_ptr);
 		snprintf(tmp, sizeof(tmp),
@@ -317,11 +325,13 @@ static char *	_dump_job(struct job_record *job_ptr, time_t update_time)
 	    (update_time > job_ptr->details->submit_time))
 		return buf;
 
+	uname = uid_to_string((uid_t) job_ptr->user_id);
+	gname = gid_to_string(job_ptr->group_id);
 	snprintf(tmp, sizeof(tmp),
-		"UNAME=%s;GNAME=%s;",
-		uid_to_string((uid_t) job_ptr->user_id),
-		_get_group_name(job_ptr->group_id));
+		"UNAME=%s;GNAME=%s;", uname, gname);
 	xstrcat(buf, tmp);
+	xfree(uname);
+	xfree(gname);
 
 	return buf;
 }
@@ -361,16 +371,6 @@ static uint32_t	_get_job_min_nodes(struct job_record *job_ptr)
 	if (job_ptr->details)
 		return job_ptr->details->min_nodes;
 	return (uint32_t) 1;
-}
-
-static char *	_get_group_name(gid_t gid)
-{
-	struct group *grp;
-
-	grp = getgrgid(gid);
-	if (grp)
-		return grp->gr_name;
-	return "nobody";
 }
 
 static uint32_t _get_job_submit_time(struct job_record *job_ptr)

@@ -65,6 +65,8 @@
 #include "src/api/step_ctx.h"
 #include "src/api/pmi_server.h"
 
+#define STEP_ABORT_TIME 2
+
 extern char **environ;
 
 /**********************************************************************
@@ -369,15 +371,16 @@ void slurm_step_launch_wait_finish(slurm_step_ctx_t *ctx)
 				sls->abort_action_taken = true;
 			}
 			if (!time_set) {
-				/* Only set the time once, because we only
-				 * want to wait 10 seconds, no matter how many
+				/* Only set the time once, because we only want
+				 * to wait STEP_ABORT_TIME, no matter how many
 				 * times the condition variable is signalled.
 				 */
-				ts.tv_sec = time(NULL) + 10;
+				ts.tv_sec = time(NULL) + STEP_ABORT_TIME;
 				time_set = true;
 				/* FIXME - should this be a callback? */
 				info("Job step aborted: Waiting up to "
-				     "10 seconds for job step to finish.");
+				     "%d seconds for job step to finish.",
+				     STEP_ABORT_TIME);
 			}
 
 			errnum = pthread_cond_timedwait(&sls->cond,
@@ -510,7 +513,7 @@ void slurm_step_launch_fwd_signal(slurm_step_ctx_t *ctx, int signo)
 	
 	debug3("sending signal to host %s", name);
 	
-	if (!(ret_list = slurm_send_recv_msgs(name, &req, 0))) { 
+	if (!(ret_list = slurm_send_recv_msgs(name, &req, 0, false))) { 
 		error("fwd_signal: slurm_send_recv_msgs really failed bad");
 		xfree(name);
 		return;
@@ -766,6 +769,13 @@ _exit_handler(struct step_launch_state *sls, slurm_msg_t *exit_msg)
 {
 	task_exit_msg_t *msg = (task_exit_msg_t *) exit_msg->data;
 	int i;
+
+	if ((msg->job_id != sls->mpi_info->jobid) || 
+	    (msg->step_id != sls->mpi_info->stepid)) {
+		debug("Received MESSAGE_TASK_EXIT from wrong job: %u.%u",
+		      msg->job_id, msg->step_id);
+		return;
+	}
 
 	/* Record SIGTERM and SIGKILL termination codes to 
 	 * recognize abnormal termination */
@@ -1032,7 +1042,7 @@ static int _launch_tasks(slurm_step_ctx_t *ctx,
 	
 	if(!(ret_list = slurm_send_recv_msgs(
 		     ctx->step_resp->step_layout->node_list,
-		     &msg, timeout))) {
+		     &msg, timeout, false))) {
 		error("slurm_send_recv_msgs failed miserably: %m");
 		return SLURM_ERROR;
 	}

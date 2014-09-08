@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  auth_munge.c - SLURM auth implementation via Chris Dunlap's Munge
- *  $Id: auth_munge.c 14360 2008-06-26 16:17:40Z da $
+ *  $Id: auth_munge.c 14770 2008-08-14 18:24:35Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008 Lawrence Livermore National Security.
@@ -512,7 +512,6 @@ _decode_cred(slurm_auth_credential_t *c, char *socket)
 
      done:
 	munge_ctx_destroy(ctx);
-
 	return e ? SLURM_ERROR : SLURM_SUCCESS;
 }
 

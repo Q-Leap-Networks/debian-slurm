@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  block_sys.c - component used for wiring up the blocks
  *
- *  $Id: block_sys.c 13960 2008-04-30 21:45:26Z jette $
+ *  $Id: block_sys.c 14691 2008-08-04 19:29:55Z jette $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -37,7 +37,7 @@
 \*****************************************************************************/
 
 #include "bluegene.h"
-
+#include "src/common/uid.h"
 
 /** these are used in the dynamic partitioning algorithm */
 
@@ -158,7 +158,7 @@ static int _post_allocate(bg_record_t *bg_record)
 #ifdef HAVE_BG_FILES	
 	int i;
 	pm_partition_id_t block_id;
-	struct passwd *pw_ent = NULL;
+	uid_t my_uid;
 
 	/* Add partition record to the DB */
 	debug2("adding block\n");
@@ -208,11 +208,12 @@ static int _post_allocate(bg_record_t *bg_record)
 		bg_record->user_name = 
 			xstrdup(slurmctld_conf.slurm_user_name);
 		slurm_conf_unlock();
-	
-		if((pw_ent = getpwnam(bg_record->user_name)) == NULL) {
-			error("getpwnam(%s): %m", bg_record->user_name);
+
+		my_uid = uid_from_string(bg_record->user_name);
+		if (my_uid == (uid_t) -1) {
+			error("uid_from_string(%s): %m", bg_record->user_name);
 		} else {
-			bg_record->user_uid = pw_ent->pw_uid;
+			bg_record->user_uid = my_uid;
 		} 
 	}
 	/* We are done with the block */
@@ -378,7 +379,7 @@ int read_bg_blocks()
 	rm_partition_t *block_ptr = NULL;
 	char node_name_tmp[255], *user_name = NULL;
 	bg_record_t *bg_record = NULL;
-	struct passwd *pw_ent = NULL;
+	uid_t my_uid;
 	
 	int *coord = NULL;
 	int block_number, block_count;
@@ -707,12 +708,12 @@ int read_bg_blocks()
 				free(user_name);
 					
 			}
-			if((pw_ent = getpwnam(bg_record->user_name)) 
-			   == NULL) {
-				error("getpwnam(%s): %m", 
+			my_uid = uid_from_string(bg_record->user_name);
+			if (my_uid == (uid_t) -1) {
+				error("uid_from_string(%s): %m", 
 				      bg_record->user_name);
 			} else {
-				bg_record->user_uid = pw_ent->pw_uid;
+				bg_record->user_uid = my_uid;
 			} 
 		}
 		

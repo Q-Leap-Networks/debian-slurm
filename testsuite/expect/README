@@ -127,7 +127,7 @@ test1.31   Verify that SLURM directed environment variables are processed:
            SLURM_STDOUTMODE.
 test1.32   Test of srun signal forwarding
 test1.33   Test of srun application exit code reporting
-test1.34   REMOVED
+test1.34   Test of task signal abort message
 test1.35   Test of batch job with multiple concurrent job steps
 test1.36   Test parallel launch of srun (e.g. "srun srun hostname")
 test1.37   REMOVED
@@ -291,6 +291,8 @@ test7.9    Test that no files are open in spawned tasks (except stdin,
            stdout, and stderr) to insure successful checkpoint/restart.
 test7.10   Test if we can trick SLURM into using the wrong user ID 
            through an LD_PRELOAD option.
+test7.11   Test of SPANK plugin.
+
 
 test8.#    Test of Blue Gene specific functionality.
 =================================================
@@ -301,6 +303,7 @@ test8.4    Test of Blue Gene MPI job execution
 test8.5    Confirm we can make a 32, 128, and 512 cnode block.
 test8.6    Stress test Dynamic mode block creation.
 test8.7    Test of Blue Gene scheduling with sched/wik2 plugin.
+
 
 test9.#    System stress testing. Exercises all commands and daemons.
 =====================================================================
@@ -504,3 +507,13 @@ test21.6   sacctmgr add multiple clusters
 test21.7   sacctmgr list clusters
 test21.8   sacctmgr modify a cluster
 test21.9   sacctmgr modify multiple clusters
+test21.10  sacctmgr add an account
+test21.11  sacctmgr add multiple accounts
+test21.12  sacctmgr list multiple accounts
+test21.13  sacctmgr modify account
+test21.14  sacctmgr modify multiple accounts
+test21.15  sacctmgr add an user
+test21.16  sacctmgr add and list multiple users
+test21.17  sacctmgr modify user
+test21.18  sacctmgr modify multiple users
+test21.19  sacctmgr add and delete coordinator

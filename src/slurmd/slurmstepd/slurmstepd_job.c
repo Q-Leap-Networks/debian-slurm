@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/slurmd/slurmstepd/slurmstepd_job.c - slurmd_job_t routines
- * $Id: slurmstepd_job.c 14546 2008-07-17 21:03:59Z jette $
+ * $Id: slurmstepd_job.c 14753 2008-08-12 22:40:54Z da $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -124,11 +124,13 @@ _valid_gid(struct passwd *pwd, gid_t *gid)
 	}
 
 	/* Allow user root to use any valid gid */
-	if (pwd->pw_uid == 0)
+	if (pwd->pw_uid == 0) {
+		pwd->pw_gid = *gid;
 		return 1;
-
+	}
 	for (i = 0; grp->gr_mem[i]; i++) {
 	       	if (strcmp(pwd->pw_name,grp->gr_mem[i]) == 0) {
+			pwd->pw_gid = *gid;
 		       	return 1;
 	       	}
 	}

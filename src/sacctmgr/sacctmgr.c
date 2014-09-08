@@ -41,16 +41,15 @@
 #include "src/sacctmgr/sacctmgr.h"
 #include "src/common/xsignal.h"
 
-#define OPT_LONG_HIDE   0x102
 #define BUFFER_SIZE 4096
 
 char *command_name;
-int all_flag;		/* display even hidden partitions */
 int exit_code;		/* sacctmgr's exit code, =1 on any error at any time */
 int exit_flag;		/* program to terminate if =1 */
 int input_words;	/* number of words of input permitted */
 int one_liner;		/* one record per line if =1 */
 int quiet_flag;		/* quiet=1, verbose=-1, normal=0 */
+int readonly_flag;      /* make it so you can only run list commands */
 int verbosity;		/* count of -v options */
 int rollback_flag;       /* immediate execute=1, else = 0 */
 int with_assoc_flag = 0;
@@ -76,14 +75,14 @@ main (int argc, char *argv[])
 
 	int option_index;
 	static struct option long_options[] = {
-		{"all",      0, 0, 'a'},
 		{"help",     0, 0, 'h'},
-		{"hide",     0, 0, OPT_LONG_HIDE},
 		{"immediate",0, 0, 'i'},
 		{"oneliner", 0, 0, 'o'},
 		{"no_header", 0, 0, 'n'},
 		{"parsable", 0, 0, 'p'},
+		{"parsable2", 0, 0, 'P'},
 		{"quiet",    0, 0, 'q'},
+		{"readonly", 0, 0, 'r'},
 		{"associations", 0, 0, 's'},
 		{"usage",    0, 0, 'h'},
 		{"verbose",  0, 0, 'v'},
@@ -92,19 +91,16 @@ main (int argc, char *argv[])
 	};
 
 	command_name      = argv[0];
-	all_flag          = 0;
 	rollback_flag     = 1;
 	exit_code         = 0;
 	exit_flag         = 0;
 	input_field_count = 0;
 	quiet_flag        = 0;
+	readonly_flag     = 0;
 	verbosity         = 0;
 	log_init("sacctmgr", opts, SYSLOG_FACILITY_DAEMON, NULL);
 
-	if (getenv ("SACCTMGR_ALL"))
-		all_flag= 1;
-
-	while((opt_char = getopt_long(argc, argv, "ahionpqsvV",
+	while((opt_char = getopt_long(argc, argv, "hionpPqrsvV",
 			long_options, &option_index)) != -1) {
 		switch (opt_char) {
 		case (int)'?':
@@ -112,15 +108,9 @@ main (int argc, char *argv[])
 				"for more information\n");
 			exit(1);
 			break;
-		case (int)'a':
-			all_flag = 1;
-			break;
 		case (int)'h':
 			_usage ();
 			exit(exit_code);
-			break;
-		case OPT_LONG_HIDE:
-			all_flag = 0;
 			break;
 		case (int)'i':
 			rollback_flag = 0;
@@ -132,10 +122,18 @@ main (int argc, char *argv[])
 			print_fields_have_header = 0;
 			break;
 		case (int)'p':
-			print_fields_parsable_print = 1;
+			print_fields_parsable_print = 
+			PRINT_FIELDS_PARSABLE_ENDING;
+			break;
+		case (int)'P':
+			print_fields_parsable_print =
+			PRINT_FIELDS_PARSABLE_NO_ENDING;
 			break;
 		case (int)'q':
 			quiet_flag = 1;
+			break;
+		case (int)'r':
+			readonly_flag = 1;
 			break;
 		case (int)'s':
 			with_assoc_flag = 1;
@@ -325,8 +323,6 @@ _process_command (int argc, char *argv[])
 		exit_code = 1;
 		if (quiet_flag == -1)
 			fprintf(stderr, "no input");
-	} else if (strncasecmp (argv[0], "all", 3) == 0) {
-		all_flag = 1;
 	} else if (strncasecmp (argv[0], "associations", 3) == 0) {
 		with_assoc_flag = 1;
 	} else if (strncasecmp (argv[0], "dump", 3) == 0) {
@@ -346,8 +342,6 @@ _process_command (int argc, char *argv[])
 				 argv[0]);
 		}
 		_usage ();
-	} else if (strncasecmp (argv[0], "hide", 2) == 0) {
-		all_flag = 0;
 	} else if (strncasecmp (argv[0], "load", 2) == 0) {
 		if (argc < 2) {
 			exit_code = 1;
@@ -427,6 +421,14 @@ _process_command (int argc, char *argv[])
 				 argv[0]);
 		}		
 		quiet_flag = -1;
+	} else if (strncasecmp (argv[0], "readonly", 4) == 0) {
+		if (argc > 1) {
+			exit_code = 1;
+			fprintf (stderr,
+				 "too many arguments for %s keyword\n",
+				 argv[0]);
+		}		
+		readonly_flag = 1;
 	} else if (strncasecmp (argv[0], "rollup", 2) == 0) {
 		time_t my_time = 0;
 		if (argc > 2) {
@@ -471,6 +473,12 @@ _process_command (int argc, char *argv[])
 static void _add_it (int argc, char *argv[]) 
 {
 	int error_code = SLURM_SUCCESS;
+
+	if(readonly_flag) {
+		exit_code = 1;
+		fprintf(stderr, "Can't run this command in readonly mode.\n");
+		return;		
+	}
 
 	/* First identify the entity to add */
 	if (strncasecmp (argv[0], "Account", 1) == 0) {
@@ -543,6 +551,13 @@ static void _modify_it (int argc, char *argv[])
 {
 	int error_code = SLURM_SUCCESS;
 
+
+	if(readonly_flag) {
+		exit_code = 1;
+		fprintf(stderr, "Can't run this command in readonly mode.\n");
+		return;		
+	}
+
 	/* First identify the entity to modify */
 	if (strncasecmp (argv[0], "Account", 1) == 0) {
 		error_code = sacctmgr_modify_account((argc - 1), &argv[1]);
@@ -571,6 +586,12 @@ static void _modify_it (int argc, char *argv[])
 static void _delete_it (int argc, char *argv[]) 
 {
 	int error_code = SLURM_SUCCESS;
+
+	if(readonly_flag) {
+		exit_code = 1;
+		fprintf(stderr, "Can't run this command in readonly mode.\n");
+		return;		
+	}
 
 	/* First identify the entity to delete */
 	if (strncasecmp (argv[0], "Account", 1) == 0) {
@@ -601,14 +622,14 @@ void _usage () {
 	printf ("\
 sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
     Valid <OPTION> values are:                                             \n\
-     -a or --all: equivalent to \"all\" command                            \n\
      -h or --help: equivalent to \"help\" command                          \n\
-     --hide: equivalent to \"hide\" command                                \n\
      -i or --immediate: commit changes immediately                         \n\
      -n or --no_header: no header will be added to the beginning of output \n\
      -o or --oneliner: equivalent to \"oneliner\" command                  \n\
-     -p or --parsable: output will be '|' delimited                        \n\
+     -p or --parsable: output will be '|' delimited with a '|' at the end  \n\
+     -P or --parsable2: output will be '|' delimited without a '|' at the end\n\
      -q or --quiet: equivalent to \"quiet\" command                        \n\
+     -r or --readonly: equivalent to \"readonly\" command                  \n\
      -s or --associations: equivalent to \"associations\" command          \n\
      -v or --verbose: equivalent to \"verbose\" command                    \n\
      -V or --version: equivalent to \"version\" command                    \n\
@@ -618,23 +639,21 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
   terminated.                                                              \n\
                                                                            \n\
     Valid <COMMAND> values are:                                            \n\
-     all                      display information about all entities,      \n\
-                              including hidden/deleted ones.               \n\
      add <ENTITY> <SPECS>     add entity                                   \n\
      associations             when using show/list will list the           \n\
                               associations associated with the entity.     \n\
      delete <ENTITY> <SPECS>  delete the specified entity(s)               \n\
      exit                     terminate sacctmgr                           \n\
      help                     print this description of use.               \n\
-     hide                     do not display information about             \n\
-                              hidden/deleted entities.                     \n\
      list <ENTITY> [<SPECS>]  display info of identified entity, default   \n\
                               is display all.                              \n\
      modify <ENTITY> <SPECS>  modify entity                                \n\
      oneliner                 report output one record per line.           \n\
+     parsable                 output will be | delimited with an ending '|'\n\
+     parsable2                output will be | delimited without an ending '|'\n\
+     readonly                 makes it so no modification can happen.      \n\
      quiet                    print no messages other than error messages. \n\
      quit                     terminate this command.                      \n\
-     parsable                 output will be | delimited                   \n\
      show                     same as list                                 \n\
      verbose                  enable detailed logging.                     \n\
      version                  display tool version number.                 \n\
@@ -645,7 +664,8 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
                                                                            \n\
   <SPECS> are different for each command entity pair.                      \n\
        list account       - Clusters=, Descriptions=, Format=, Names=,     \n\
-                            Organizations=, Parents=, and WithAssocs       \n\
+                            Organizations=, Parents=, WithCoor=,           \n\
+                            and WithAssocs                                 \n\
        add account        - Clusters=, Description=, Fairshare=,           \n\
                             MaxCPUSecs=, MaxJobs=, MaxNodes=, MaxWall=,    \n\
                             Names=, Organization=, Parent=, and QosLevel   \n\
@@ -658,7 +678,8 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
                             Organizations=, and Parents=                   \n\
                                                                            \n\
        list associations  - Accounts=, Clusters=, Format=, ID=,            \n\
-                            Partitions=, Parent=, Tree, Users=             \n\
+                            Partitions=, Parent=, Tree, Users=,            \n\
+                            WithDeleted, WOPInfo, WOPLimits                \n\
                                                                            \n\
        list cluster       - Names= Format=                                 \n\
        add cluster        - Fairshare=, MaxCPUSecs=,                       \n\
@@ -679,7 +700,7 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
                             Format=, ID=, and Start=                       \n\
                                                                            \n\
        list user          - AdminLevel=, DefaultAccounts=, Format=, Names=,\n\
-                            QosLevel=, and WithAssocs                      \n\
+                            QosLevel=, WithCoor=, and WithAssocs           \n\
        add user           - Accounts=, AdminLevel=, Clusters=,             \n\
                             DefaultAccount=, Fairshare=, MaxCPUSecs=,      \n\
                             MaxJobs=, MaxNodes=, MaxWall=, Names=,         \n\
