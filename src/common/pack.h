@@ -1,5 +1,5 @@
 /****************************************************************************\
- *  pack.h - definitions for lowest level un/pack functions. all functions 
+ *  pack.h - definitions for lowest level un/pack functions. all functions
  *	utilize a Buf structure. Call init_buf, un/pack, and free_buf
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
@@ -7,32 +7,32 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov>, Morris Jette <jette1@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  In addition, as a special exception, the copyright holders give permission
+ *  to link the code of portions of this program with the OpenSSL library under
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -208,7 +208,7 @@ int	unpackmem_array(char *valp, uint32_t size_valp, Buf buffer);
 	assert(size_val == 0 || array != NULL);		\
 	assert(buf->magic == BUF_MAGIC);		\
 	pack32_array(array,size_val,buf);		\
-} while (0)				
+} while (0)
 
 #define safe_unpack16_array(valp,size_valp,buf) do {    \
         assert(valp != NULL);                           \
@@ -276,7 +276,7 @@ int	unpackmem_array(char *valp, uint32_t size_valp, Buf buffer);
 		packmem(_tmp_str,_size,buf);	\
 	} else						\
 		packmem(NULL,(uint32_t)0,buf);		\
-} while (0)				
+} while (0)
 
 #define safe_packstr(str,max_len,buf) do {		\
 	uint32_t _size;					\
@@ -292,7 +292,7 @@ int	unpackmem_array(char *valp, uint32_t size_valp, Buf buffer);
 		tmp_str[max_len - 1] = (char) NULL;	\
 		packmem(tmp_str,max_len,buf);	\
 	}						\
-} while (0)				
+} while (0)
 
 #define packstr(str,buf) do {				\
 	uint32_t _size = 0;				\
@@ -302,7 +302,7 @@ int	unpackmem_array(char *valp, uint32_t size_valp, Buf buffer);
 	assert(_size <= 0xffffffff);			\
 	assert(buf->magic == BUF_MAGIC);		\
 	packmem(str,(uint32_t)_size,buf);		\
-} while (0)				
+} while (0)
 
 #define packnull(buf) do { \
 	assert(buf != NULL); \
@@ -320,7 +320,39 @@ int	unpackmem_array(char *valp, uint32_t size_valp, Buf buffer);
 		packmem(_tmp_str,_size,buf);	\
 	} else						\
 		packmem(NULL,(uint32_t)0,buf);		\
-} while (0)				
+} while (0)
+
+#define pack_bit_str(bitmap,buf) do {	\
+	assert(buf->magic == BUF_MAGIC);		\
+	if (bitmap) {					\
+		char _tmp_str[0xfffe];			\
+		uint32_t _size;				\
+		bit_fmt(_tmp_str,0xfffe,bitmap);	\
+		_size = bit_size(bitmap);               \
+		pack32(_size, buf);              	\
+		_size = strlen(_tmp_str)+1;		\
+		packmem(_tmp_str,_size,buf);	        \
+	} else						\
+		pack32(NO_VAL, buf);                 	\
+} while (0)
+
+#define unpack_bit_str(bitmap,buf) do {	\
+	assert(bitmap != NULL);                         \
+	assert(*bitmap == NULL);                        \
+	assert(buf->magic == BUF_MAGIC);		\
+	if (bitmap) {					\
+		char *tmp_str = NULL;      		\
+		uint32_t _size = NO_VAL;		\
+		safe_unpack32(&_size, buf);             \
+		if(_size != NO_VAL) {                   \
+			*bitmap = bit_alloc(_size);	\
+			safe_unpackstr_xmalloc(&tmp_str, &_size, buf); \
+			bit_unfmt(*bitmap, tmp_str);    \
+			xfree(tmp_str);			\
+		} else					\
+			*bitmap = NULL;                 \
+	}                                               \
+} while (0)
 
 #define unpackstr_ptr		                        \
         unpackmem_ptr
@@ -342,7 +374,7 @@ int	unpackmem_array(char *valp, uint32_t size_valp, Buf buffer);
 	assert(sizeof(*size_valp) == sizeof(uint32_t)); \
 	assert(buf->magic == BUF_MAGIC);		\
 	packstr_array(array,size_val,buf);		\
-} while (0)				
+} while (0)
 
 #define safe_unpackstr_array(valp,size_valp,buf) do {	\
 	assert(valp != NULL);				\

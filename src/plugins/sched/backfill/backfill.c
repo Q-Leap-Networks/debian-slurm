@@ -1,17 +1,17 @@
 /*****************************************************************************\
- *  backfill.c - simple backfill scheduler plugin. 
+ *  backfill.c - simple backfill scheduler plugin.
  *
  *  If a partition is does not have root only access and nodes are not shared
  *  then raise the priority of pending jobs if doing so does not adversely
  *  effect the expected initiation of any higher priority job. We do not alter
- *  a job's required or excluded node list, so this is a conservative 
+ *  a job's required or excluded node list, so this is a conservative
  *  algorithm.
  *
- *  For example, consider a cluster "lx[01-08]" with one job executing on 
- *  nodes "lx[01-04]". The highest priority pending job requires five nodes 
- *  including "lx05". The next highest priority pending job requires any 
- *  three nodes. Without explicitly forcing the second job to use nodes 
- *  "lx[06-08]", we can't start it without possibly delaying the higher 
+ *  For example, consider a cluster "lx[01-08]" with one job executing on
+ *  nodes "lx[01-04]". The highest priority pending job requires five nodes
+ *  including "lx05". The next highest priority pending job requires any
+ *  three nodes. Without explicitly forcing the second job to use nodes
+ *  "lx[06-08]", we can't start it without possibly delaying the higher
  *  priority job.
  *****************************************************************************
  *  Copyright (C) 2003-2007 The Regents of the University of California.
@@ -19,32 +19,32 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
+ *  In addition, as a special exception, the copyright holders give permission
  *  to link the code of portions of this program with the OpenSSL library under
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -73,6 +73,7 @@
 #include "src/slurmctld/licenses.h"
 #include "src/slurmctld/locks.h"
 #include "src/slurmctld/node_scheduler.h"
+#include "src/slurmctld/preempt.h"
 #include "src/slurmctld/reservation.h"
 #include "src/slurmctld/slurmctld.h"
 #include "src/slurmctld/srun_comm.h"
@@ -90,6 +91,7 @@ int backfilled_jobs = 0;
 static bool new_work      = false;
 static bool stop_backfill = false;
 static pthread_mutex_t thread_flag_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int max_backfill_job_cnt = 50;
 
 #ifndef BACKFILL_INTERVAL
 #  ifdef HAVE_BG
@@ -99,26 +101,23 @@ static pthread_mutex_t thread_flag_mutex = PTHREAD_MUTEX_INITIALIZER;
 #  endif
 #endif
 
-/* Set __DEBUG to get detailed logging for this thread without 
+/* Set __DEBUG to get detailed logging for this thread without
  * detailed logging for the entire slurmctld daemon */
 #define __DEBUG			0
 
-/* Do not attempt to build job/resource/time record for
- * more than MAX_BACKFILL_JOB_CNT records */
-#define MAX_BACKFILL_JOB_CNT	100
-
-/* Do not build job/resource/time record for more than this 
+/* Do not build job/resource/time record for more than this
  * far in the future, in seconds, currently one day */
 #define BACKFILL_WINDOW		(24 * 60 * 60)
 
 /*********************** local functions *********************/
-static void _add_reservation(uint32_t start_time, uint32_t end_reserve, 
-			     bitstr_t *res_bitmap, 
-			     node_space_map_t *node_space, 
+static void _add_reservation(uint32_t start_time, uint32_t end_reserve,
+			     bitstr_t *res_bitmap,
+			     node_space_map_t *node_space,
 			     int *node_space_recs);
 static void _attempt_backfill(void);
 static void _diff_tv_str(struct timeval *tv1,struct timeval *tv2,
 		char *tv_str, int len_tv_str);
+static bool _job_is_completing(void);
 static bool _more_work(void);
 static int  _num_feature_count(struct job_record *job_ptr);
 static int  _start_job(struct job_record *job_ptr, bitstr_t *avail_bitmap);
@@ -140,7 +139,8 @@ static void _dump_node_space_table(node_space_map_t *node_space_ptr)
 		slurm_make_time_str(&node_space_ptr[i].end_time,
 				    end_buf, sizeof(end_buf));
 		node_list = bitmap2node_name(node_space_ptr[i].avail_bitmap);
-		info("Begin:%s End:%s Nodes:%s", begin_buf, end_buf, node_list);
+		info("Begin:%s End:%s Nodes:%s",
+		     begin_buf, end_buf, node_list);
 		xfree(node_list);
 		if ((i = node_space_ptr[i].next) == 0)
 			break;
@@ -163,6 +163,37 @@ static void _diff_tv_str(struct timeval *tv1,struct timeval *tv2,
 	delta_t  = (tv2->tv_sec  - tv1->tv_sec) * 1000000;
 	delta_t +=  tv2->tv_usec - tv1->tv_usec;
 	snprintf(tv_str, len_tv_str, "usec=%ld", delta_t);
+}
+
+/*
+ * _job_is_completing - Determine if jobs are in the process of completing.
+ *	This is a variant of job_is_completing in slurmctld/job_scheduler.c.
+ *	It always gives completing jobs at least 5 secs to complete.
+ * RET - True of any job is in the process of completing
+ */
+static bool _job_is_completing(void)
+{
+	bool completing = false;
+	ListIterator job_iterator;
+	struct job_record *job_ptr = NULL;
+	uint16_t complete_wait = slurm_get_complete_wait();
+	time_t recent;
+
+	if (job_list == NULL)
+		return completing;
+
+	recent = time(NULL) - MIN(complete_wait, 5);
+	job_iterator = list_iterator_create(job_list);
+	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
+		if (IS_JOB_COMPLETING(job_ptr) &&
+		    (job_ptr->end_time >= recent)) {
+			completing = true;
+			break;
+		}
+	}
+	list_iterator_destroy(job_iterator);
+
+	return completing;
 }
 
 /* test if job has feature count specification */
@@ -198,12 +229,13 @@ static int  _try_sched(struct job_record *job_ptr, bitstr_t **avail_bitmap,
 	bitstr_t *tmp_bitmap;
 	int rc = SLURM_SUCCESS;
 	int feat_cnt = _num_feature_count(job_ptr);
+	List preemptee_candidates = NULL;
 
 	if (feat_cnt) {
 		/* Ideally schedule the job feature by feature,
 		 * but I don't want to add that complexity here
 		 * right now, so clear the feature counts and try
-		 * to schedule. This will work if there is only 
+		 * to schedule. This will work if there is only
 		 * one feature count. It should work fairly well
 		 * in cases where there are multiple feature
 		 * counts. */
@@ -217,7 +249,7 @@ static int  _try_sched(struct job_record *job_ptr, bitstr_t **avail_bitmap,
 		list_size = list_count(detail_ptr->feature_list);
 		feat_cnt_orig = xmalloc(sizeof(uint16_t) * list_size);
 		feat_iter = list_iterator_create(detail_ptr->feature_list);
-		while ((feat_ptr = 
+		while ((feat_ptr =
 			(struct feature_record *) list_next(feat_iter))) {
 			high_cnt = MAX(high_cnt, feat_ptr->count);
 			feat_cnt_orig[i++] = feat_ptr->count;
@@ -225,20 +257,23 @@ static int  _try_sched(struct job_record *job_ptr, bitstr_t **avail_bitmap,
 		}
 		list_iterator_destroy(feat_iter);
 
-		if ((job_req_node_filter(job_ptr, *avail_bitmap) != 
+		if ((job_req_node_filter(job_ptr, *avail_bitmap) !=
 		     SLURM_SUCCESS) ||
 		    (bit_set_count(*avail_bitmap) < high_cnt)) {
 			rc = ESLURM_NODES_BUSY;
 		} else {
-			rc = select_g_job_test(job_ptr, *avail_bitmap, 
+			preemptee_candidates =
+					slurm_find_preemptable_jobs(job_ptr);
+			rc = select_g_job_test(job_ptr, *avail_bitmap,
 					       high_cnt, max_nodes, req_nodes,
-					       SELECT_MODE_WILL_RUN);
+					       SELECT_MODE_WILL_RUN,
+					       preemptee_candidates, NULL);
 		}
 
 		/* Restore the feature counts */
 		i = 0;
 		feat_iter = list_iterator_create(detail_ptr->feature_list);
-		while ((feat_ptr = 
+		while ((feat_ptr =
 			(struct feature_record *) list_next(feat_iter))) {
 			feat_ptr->count = feat_cnt_orig[i++];
 		}
@@ -249,24 +284,29 @@ static int  _try_sched(struct job_record *job_ptr, bitstr_t **avail_bitmap,
 		 * then on shared nodes (if so configured). */
 		uint16_t orig_shared;
 		time_t now = time(NULL);
+		preemptee_candidates = slurm_find_preemptable_jobs(job_ptr);
 		orig_shared = job_ptr->details->shared;
 		job_ptr->details->shared = 0;
 		tmp_bitmap = bit_copy(*avail_bitmap);
 		rc = select_g_job_test(job_ptr, *avail_bitmap, min_nodes,
 				       max_nodes, req_nodes,
-				       SELECT_MODE_WILL_RUN);
+				       SELECT_MODE_WILL_RUN,
+				       preemptee_candidates, NULL);
 		job_ptr->details->shared = orig_shared;
 		if (((rc != SLURM_SUCCESS) || (job_ptr->start_time > now)) &&
 		    (orig_shared != 0)) {
 			FREE_NULL_BITMAP(*avail_bitmap);
 			*avail_bitmap= tmp_bitmap;
-			rc = select_g_job_test(job_ptr, *avail_bitmap, 
+			rc = select_g_job_test(job_ptr, *avail_bitmap,
 					       min_nodes, max_nodes, req_nodes,
-					       SELECT_MODE_WILL_RUN);
+					       SELECT_MODE_WILL_RUN,
+					       preemptee_candidates, NULL);
 		} else
 			FREE_NULL_BITMAP(tmp_bitmap);
 	}
 
+	if (preemptee_candidates)
+		list_destroy(preemptee_candidates);
 	return rc;
 
 }
@@ -284,7 +324,7 @@ extern void *backfill_agent(void *args)
 	struct timeval tv1, tv2;
 	char tv_str[20], *sched_params, *tmp_ptr;
 	time_t now;
-	int backfill_interval = 0, i, iter;
+	int backfill_interval = BACKFILL_INTERVAL, i, iter;
 	static time_t last_backfill_time = 0;
 	/* Read config, and partitions; Write jobs and nodes */
 	slurmctld_lock_t all_locks = {
@@ -292,29 +332,32 @@ extern void *backfill_agent(void *args)
 
 	sched_params = slurm_get_sched_params();
 	if (sched_params && (tmp_ptr=strstr(sched_params, "interval=")))
-		backfill_interval = atoi(tmp_ptr+9);
-	else
-		backfill_interval = BACKFILL_INTERVAL;
+		backfill_interval = atoi(tmp_ptr + 9);
 	if (backfill_interval < 1) {
-		fatal("Invalid backfill scheduler interval: %d", 
+		fatal("Invalid backfill scheduler interval: %d",
 		      backfill_interval);
+	}
+	if (sched_params && (tmp_ptr=strstr(sched_params, "max_job_bf=")))
+		max_backfill_job_cnt = atoi(tmp_ptr + 11);
+	if (max_backfill_job_cnt < 1) {
+		fatal("Invalid backfill scheduler max_job_bf: %d",
+		      max_backfill_job_cnt);
 	}
 
 	while (!stop_backfill) {
 		iter = (BACKFILL_CHECK_SEC * 1000000) /
 		       STOP_CHECK_USEC;
 		for (i=0; ((i<iter) && (!stop_backfill)); i++) {
-			/* test stop_backfill every 0.1 sec for
-			 * 2.0 secs to avoid running continuously */
+			/* test stop_backfill every 0.2 sec for
+			 * 5.0 secs to avoid running continuously */
 			usleep(STOP_CHECK_USEC);
 		}
-		
+		if (stop_backfill)
+			break;
+
 		now = time(NULL);
-		/* Avoid resource fragmentation if important */
-		if (job_is_completing())
-			continue;
-		if ((difftime(now, last_backfill_time) < backfill_interval) ||
-		    stop_backfill || (!_more_work()))
+		if (!_more_work() || _job_is_completing() ||
+		    (difftime(now, last_backfill_time) < backfill_interval))
 			continue;
 		last_backfill_time = now;
 
@@ -341,8 +384,8 @@ static void _attempt_backfill(void)
 	uint32_t end_time, end_reserve, time_limit;
 	uint32_t min_nodes, max_nodes, req_nodes;
 	bitstr_t *avail_bitmap = NULL, *resv_bitmap = NULL;
-	time_t now = time(NULL), start_res;
-	node_space_map_t node_space[MAX_BACKFILL_JOB_CNT + 2];
+	time_t now = time(NULL), later_start, start_res;
+	node_space_map_t *node_space;
 	static int sched_timeout = 0;
 
 	if(!sched_timeout)
@@ -357,6 +400,8 @@ static void _attempt_backfill(void)
 
 	sort_job_queue(job_queue, job_queue_size);
 
+	node_space = xmalloc(sizeof(node_space_map_t) *
+			     (max_backfill_job_cnt + 3));
 	node_space[0].begin_time = now;
 	node_space[0].end_time = now + BACKFILL_WINDOW;
 	node_space[0].avail_bitmap = bit_copy(avail_node_bitmap);
@@ -387,7 +432,7 @@ static void _attempt_backfill(void)
 			continue;
 
 		if ((!job_independent(job_ptr, 0)) ||
-		    (license_job_test(job_ptr) != SLURM_SUCCESS))
+		    (license_job_test(job_ptr, time(NULL)) != SLURM_SUCCESS))
 			continue;
 
 		/* Determine minimum and maximum node counts */
@@ -423,8 +468,10 @@ static void _attempt_backfill(void)
 		}
 
 		/* Determine impact of any resource reservations */
-		FREE_NULL_BITMAP(avail_bitmap);
-		start_res = now;
+		later_start = now;
+ TRY_LATER:	FREE_NULL_BITMAP(avail_bitmap);
+		start_res   = later_start;
+		later_start = 0;
 		j = job_test_resv(job_ptr, &start_res, true, &avail_bitmap);
 		if (j != SLURM_SUCCESS)
 			continue;
@@ -437,10 +484,13 @@ static void _attempt_backfill(void)
 		bit_and(avail_bitmap, part_ptr->node_bitmap);
 		bit_and(avail_bitmap, up_node_bitmap);
 		for (j=0; ; ) {
-			if (node_space[j].end_time < start_res)
+			if ((node_space[j].end_time > start_res) &&
+			     node_space[j].next && (later_start == 0))
+				later_start = node_space[j].end_time;
+			if (node_space[j].end_time <= start_res)
 				;
 			else if (node_space[j].begin_time <= end_time) {
-				bit_and(avail_bitmap, 
+				bit_and(avail_bitmap,
 					node_space[j].avail_bitmap);
 			} else
 				break;
@@ -448,27 +498,32 @@ static void _attempt_backfill(void)
 				break;
 		}
 
+		if (job_ptr->details->exc_node_bitmap) {
+			bit_not(job_ptr->details->exc_node_bitmap);
+			bit_and(avail_bitmap,
+				job_ptr->details->exc_node_bitmap);
+			bit_not(job_ptr->details->exc_node_bitmap);
+		}
+
+		/* Test if insufficient nodes remain OR
+		 *	required nodes missing OR
+		 *	nodes lack features */
+		if ((bit_set_count(avail_bitmap) < min_nodes) ||
+		    ((job_ptr->details->req_node_bitmap) &&
+		     (!bit_super_set(job_ptr->details->req_node_bitmap,
+				     avail_bitmap))) ||
+		    (job_req_node_filter(job_ptr, avail_bitmap))) {
+			if (later_start)
+				goto TRY_LATER;
+			continue;
+		}
+
 		/* Identify nodes which are definitely off limits */
 		FREE_NULL_BITMAP(resv_bitmap);
 		resv_bitmap = bit_copy(avail_bitmap);
 		bit_not(resv_bitmap);
 
-		if (job_ptr->details->exc_node_bitmap) {
-			bit_not(job_ptr->details->exc_node_bitmap);
-			bit_and(avail_bitmap, 
-				job_ptr->details->exc_node_bitmap);
-			bit_not(job_ptr->details->exc_node_bitmap);
-		}
-		if ((job_ptr->details->req_node_bitmap) &&
-		    (!bit_super_set(job_ptr->details->req_node_bitmap,
-				    avail_bitmap)))
-			continue;	/* required nodes missing */
-		if (bit_set_count(avail_bitmap) < min_nodes)
-			continue;	/* insufficient nodes remain */
-		if (job_req_node_filter(job_ptr, avail_bitmap))
-			continue;	/* nodes lack features */
-
-		j = _try_sched(job_ptr, &avail_bitmap, 
+		j = _try_sched(job_ptr, &avail_bitmap,
 			       min_nodes, max_nodes, req_nodes);
 		if (j != SLURM_SUCCESS) {
 			if((time(NULL) - now) >= sched_timeout) {
@@ -482,20 +537,19 @@ static void _attempt_backfill(void)
 		job_ptr->start_time = MAX(job_ptr->start_time, start_res);
 		if (job_ptr->start_time <= now) {
 			int rc = _start_job(job_ptr, resv_bitmap);
-			if (rc == ESLURM_ACCOUNTING_POLICY) 
+			if (rc == ESLURM_ACCOUNTING_POLICY)
 				continue;
 			else if (rc != SLURM_SUCCESS)
 				/* Planned to start job, but something bad
-				 * happended. Reserve nodes where this should
-				 * apparently run and try more jobs. */
-				continue;
+				 * happended. */
+				break;
 		}
 		if (job_ptr->start_time > (now + BACKFILL_WINDOW)) {
 			/* Starts too far in the future to worry about */
 			continue;
 		}
 
-		if (node_space_recs == MAX_BACKFILL_JOB_CNT) {
+		if (node_space_recs == max_backfill_job_cnt) {
 			/* Already have too many jobs to deal with */
 			break;
 		}
@@ -505,12 +559,12 @@ static void _attempt_backfill(void)
 		 */
 		end_reserve = job_ptr->start_time + (time_limit * 60);
 		bit_not(avail_bitmap);
-		_add_reservation(job_ptr->start_time, end_reserve, 
+		_add_reservation(job_ptr->start_time, end_reserve,
 				 avail_bitmap, node_space, &node_space_recs);
 #if __DEBUG
 		_dump_node_space_table(node_space);
 #endif
-		if((time(NULL) - now) >= sched_timeout) {
+		if ((time(NULL) - now) >= sched_timeout) {
 			debug("backfill: loop taking to long breaking out");
 			break;
 		}
@@ -523,6 +577,7 @@ static void _attempt_backfill(void)
 		if ((i = node_space[i].next) == 0)
 			break;
 	}
+	xfree(node_space);
 	xfree(job_queue);
 }
 
@@ -542,7 +597,7 @@ static int _start_job(struct job_record *job_ptr, bitstr_t *resv_bitmap)
 	rc = select_nodes(job_ptr, false, NULL);
 	bit_free(job_ptr->details->exc_node_bitmap);
 	job_ptr->details->exc_node_bitmap = orig_exc_nodes;
-	if (rc == SLURM_SUCCESS) {	
+	if (rc == SLURM_SUCCESS) {
 		/* job initiated */
 		last_job_update = time(NULL);
 		info("backfill: Started JobId=%u on %s",
@@ -561,9 +616,9 @@ static int _start_job(struct job_record *job_ptr, bitstr_t *resv_bitmap)
 		bit_not(resv_bitmap);
 		node_list = bitmap2node_name(resv_bitmap);
 		/* This happens when a job has sharing disabled and
-		 * a selected node is still completing some job, 
+		 * a selected node is still completing some job,
 		 * which should be a temporary situation. */
-		verbose("backfill: Failed to start JobId=%u in %s: %s",
+		verbose("backfill: Failed to start JobId=%u on %s: %s",
 			job_ptr->job_id, node_list, slurm_strerror(rc));
 		xfree(node_list);
 		fail_jobid = job_ptr->job_id;
@@ -609,11 +664,12 @@ static bool _more_work (void)
 }
 
 /* Create a reservation for a job in the future */
-static void _add_reservation(uint32_t start_time, uint32_t end_reserve, 
-			     bitstr_t *res_bitmap, 
-			     node_space_map_t *node_space, 
+static void _add_reservation(uint32_t start_time, uint32_t end_reserve,
+			     bitstr_t *res_bitmap,
+			     node_space_map_t *node_space,
 			     int *node_space_recs)
 {
+	bool placed = false;
 	int i, j;
 
 	for (j=0; ; ) {
@@ -623,15 +679,32 @@ static void _add_reservation(uint32_t start_time, uint32_t end_reserve,
 			node_space[i].begin_time = start_time;
 			node_space[i].end_time = node_space[j].end_time;
 			node_space[j].end_time = start_time;
-			node_space[i].avail_bitmap = 
+			node_space[i].avail_bitmap =
 				bit_copy(node_space[j].avail_bitmap);
 			node_space[i].next = node_space[j].next;
 			node_space[j].next = i;
 			(*node_space_recs)++;
-			break;
+			placed = true;
 		}
 		if (node_space[j].end_time == start_time) {
-			/* no need to insert start entry record */
+			/* no need to insert new start entry record */
+			placed = true;
+		}
+		if (placed == true) {
+			j = node_space[j].next;
+			if (j && (end_reserve < node_space[j].end_time)) {
+				/* insert end entry record */
+				i = *node_space_recs;
+				node_space[i].begin_time = end_reserve;
+				node_space[i].end_time = node_space[j].
+							 end_time;
+				node_space[j].end_time = end_reserve;
+				node_space[i].avail_bitmap =
+					bit_copy(node_space[j].avail_bitmap);
+				node_space[i].next = node_space[j].next;
+				node_space[j].next = i;
+				(*node_space_recs)++;
+			}
 			break;
 		}
 		if ((j = node_space[j].next) == 0)
@@ -639,9 +712,11 @@ static void _add_reservation(uint32_t start_time, uint32_t end_reserve,
 	}
 
 	for (j=0; ; ) {
-		if (node_space[j].begin_time >= start_time)
+		if ((node_space[j].begin_time >= start_time) &&
+		    (node_space[j].end_time <= end_reserve))
 			bit_and(node_space[j].avail_bitmap, res_bitmap);
-		if ((j = node_space[j].next) == 0)
+		if ((node_space[j].begin_time >= end_reserve) ||
+		    ((j = node_space[j].next) == 0))
 			break;
 	}
 }

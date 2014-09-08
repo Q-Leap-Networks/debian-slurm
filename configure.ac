@@ -1,4 +1,4 @@
-# $Id: configure.ac 18850 2009-10-08 22:23:44Z da $
+# $Id: configure.ac 19204 2010-01-05 00:30:14Z da $
 # This file is to be processed with autoconf to generate a configure script
 
 dnl Prologue
@@ -37,12 +37,21 @@ dnl Check to see if this architecture should use slurm_* prefix function
 dnl aliases for plugins.
 dnl
 case "$host" in
-	*-*-aix*) AC_DEFINE(USE_ALIAS, 0, 
+	*-*-aix*) AC_DEFINE(USE_ALIAS, 0,
                  	[Define slurm_ prefix function aliases for plusins]) ;;
 	*darwin*) AC_DEFINE(USE_ALIAS, 0,
                   	[Define slurm_ prefix function aliases for plusins]) ;;
-	*)        AC_DEFINE(USE_ALIAS, 1, 
+	*)        AC_DEFINE(USE_ALIAS, 1,
 			[Define slurm_ prefix function aliases for plugins]) ;;
+esac
+
+dnl
+dnl add some flags for Solaris
+dnl
+case "$host" in
+	*solaris*) CC="/usr/sfw/bin/gcc"
+		   CFLAGS="$CFLAGS -D_POSIX_PTHREAD_SEMANTICS -I/usr/sfw/include"
+		   LDFLAGS="$LDFLAGS -L/usr/sfw/lib"
 esac
 
 dnl Checks for programs.
@@ -51,12 +60,17 @@ AC_PROG_CC
 AC_PROG_CXX
 AC_PROG_MAKE_SET
 AC_PROG_LIBTOOL
+PKG_PROG_PKG_CONFIG([0.9.0])
 
 AM_CONDITIONAL(WITH_GNU_LD, test "$with_gnu_ld" = "yes")
 
 
 dnl Checks for libraries
 dnl
+AC_SEARCH_LIBS([socket],        [socket])
+AC_SEARCH_LIBS([gethostbyname], [nsl])
+AC_SEARCH_LIBS([hstrerror],     [resolv])
+AC_SEARCH_LIBS([kstat_open],    [kstat])
 
 dnl Checks for header files.
 dnl
@@ -68,6 +82,7 @@ AC_CHECK_HEADERS(mcheck.h values.h socket.h sys/socket.h  \
                  pam/pam_appl.h security/pam_appl.h sys/sysctl.h \
                  pty.h utmp.h \
 		 sys/syslog.h \
+		 kstat.h paths.h limits.h sys/statfs.h sys/ptrace.h sys/termios.h \
 		)
 AC_HEADER_SYS_WAIT
 AC_HEADER_TIME
@@ -126,12 +141,13 @@ AC_CHECK_FUNCS( \
    mtrace    \
    strndup   \
    strlcpy   \
-   strsignal \ 
+   strsignal \
    inet_aton \
    inet_ntop \
    inet_pton \
    setproctitle \
    sysctlbyname \
+   cfmakeraw \
 )
 
 AC_CHECK_DECLS([hstrerror, strsignal, sys_siglist])
@@ -158,8 +174,20 @@ X_AC_NCURSES
 AM_CONDITIONAL(HAVE_SOME_CURSES, test "x$ac_have_some_curses" = "xyes")
 AC_SUBST(HAVE_SOME_CURSES)
 
-X_AC_GTK
+#
+#  Tests for GTK+
+#
+AM_PATH_GTK_2_0([2.7.1], [ac_have_gtk="yes"], [ac_have_gtk="no"], [gthread])
 AM_CONDITIONAL(HAVE_GTK, test "x$ac_have_gtk" = "xyes")
+
+if test ${gtk_config_minor_version=0} -gt 10 ; then
+       AC_DEFINE([GTK2_USE_RADIO_SET], 1, [Define to 1 if using gtk+-2.10.0 or higher])
+fi
+
+if test ${gtk_config_minor_version=0} -gt 12 ; then
+       AC_DEFINE([GTK2_USE_TOOLTIP], 1, [Define to 1 if using gtk+-2.12.0 or higher])
+fi
+
 
 X_AC_DATABASES
 
@@ -210,11 +238,19 @@ dnl check for SGI job container support
 dnl
 X_AC_SGI_JOB
 
+dnl check for lua library
+dnl
+X_AC_LUA
+
+dnl check if we can use standard printf functions
+dnl
+X_AC_PRINTF_NULL
+
 dnl Check for whether to include readline support
-dnl 
+dnl
 X_AC_READLINE
 
-dnl 
+dnl
 dnl
 X_AC_SLURM_WITH_SSL
 AM_CONDITIONAL(HAVE_OPENSSL, test "x$ac_have_openssl" = "xyes")
@@ -277,18 +313,18 @@ X_AC_BLCR
 dnl All slurm Makefiles:
 
 AC_CONFIG_FILES([Makefile
-		 config.xml 
+		 config.xml
 		 auxdir/Makefile
 		 contribs/Makefile
+		 contribs/pam/Makefile
 		 contribs/perlapi/Makefile
 		 contribs/perlapi/libslurm-perl/Makefile.PL
 		 contribs/torque/Makefile
 		 contribs/phpext/Makefile
 		 contribs/phpext/slurm_php/config.m4
-		 contribs/python/Makefile
 		 contribs/slurmdb-direct/Makefile
-		 src/Makefile 
-		 src/api/Makefile 
+		 src/Makefile
+		 src/api/Makefile
 		 src/common/Makefile
 		 src/database/Makefile
 		 src/sacct/Makefile
@@ -296,18 +332,18 @@ AC_CONFIG_FILES([Makefile
 		 src/sreport/Makefile
 		 src/sstat/Makefile
 		 src/sshare/Makefile
-		 src/salloc/Makefile 
-		 src/sbatch/Makefile 
+		 src/salloc/Makefile
+		 src/sbatch/Makefile
 		 src/sattach/Makefile
 		 src/sprio/Makefile
-		 src/srun/Makefile 
-		 src/srun_cr/Makefile 
-		 src/slurmd/Makefile 
-		 src/slurmd/slurmd/Makefile 
-		 src/slurmd/slurmstepd/Makefile 
+		 src/srun/Makefile
+		 src/srun_cr/Makefile
+		 src/slurmd/Makefile
+		 src/slurmd/slurmd/Makefile
+		 src/slurmd/slurmstepd/Makefile
 		 src/slurmdbd/Makefile
 		 src/slurmctld/Makefile
-		 src/sbcast/Makefile 
+		 src/sbcast/Makefile
 		 src/scontrol/Makefile
 		 src/scancel/Makefile
 		 src/squeue/Makefile
@@ -347,6 +383,10 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/jobcomp/script/Makefile
 		 src/plugins/jobcomp/mysql/Makefile
 		 src/plugins/jobcomp/pgsql/Makefile
+		 src/plugins/preempt/Makefile
+		 src/plugins/preempt/none/Makefile
+		 src/plugins/preempt/partition_prio/Makefile
+		 src/plugins/preempt/qos/Makefile
 		 src/plugins/priority/Makefile
 		 src/plugins/priority/basic/Makefile
 		 src/plugins/priority/multifactor/Makefile
@@ -356,10 +396,10 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/proctrack/linuxproc/Makefile
 		 src/plugins/proctrack/rms/Makefile
 		 src/plugins/proctrack/sgi_job/Makefile
+		 src/plugins/proctrack/lua/Makefile
 		 src/plugins/sched/Makefile
 		 src/plugins/sched/backfill/Makefile
 		 src/plugins/sched/builtin/Makefile
-		 src/plugins/sched/gang/Makefile
 		 src/plugins/sched/hold/Makefile
 		 src/plugins/sched/wiki/Makefile
 		 src/plugins/sched/wiki2/Makefile

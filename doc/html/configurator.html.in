@@ -161,6 +161,7 @@ function displayfile()
    "#Licenses=foo*4,bar <br>" +
    "#MailProg=/bin/mail <br>" +
    "#MaxJobCount=5000 <br>" +
+   "#MaxTasksPerNode=128 <br>" +
    "MpiDefault=" + get_radio_value(document.config.mpi_default) + "<br>" +
    "#MpiParams=ports=#-# <br>" +
    "#PluginDir= <br>" +
@@ -219,6 +220,7 @@ function displayfile()
    "# <br>" +
    "# SCHEDULING <br>" +
    "#DefMemPerCPU=0 <br>" +
+   "#EnablePreemption=no <br>" +
    "FastSchedule=" + get_radio_value(document.config.fast_schedule) + "<br>" +
    "#MaxMemPerCPU=0 <br>" +
    "#SchedulerRootFilter=1 <br>" +
@@ -232,6 +234,7 @@ function displayfile()
    "# JOB PRIORITY <br>" +
    "#PriorityType=priority/basic <br>" +
    "#PriorityDecayHalfLife= <br>" +
+   "#PriorityCalcPeriod= <br>" +
    "#PriorityFavorSmall= <br>" +
    "#PriorityMaxAge= <br>" +
    "#PriorityUsageResetPeriod= <br>" +
@@ -845,6 +848,6 @@ before terminating all remaining tasks. A value of zero indicates unlimited wait
 </FORM>
 <HR>
 <P class="footer">LLNL-WEB-402631<BR>
-Last modified 13 May 2009</P>
+Last modified 13 August 2009</P>
 </BODY>
 

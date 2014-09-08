@@ -1,27 +1,27 @@
 /*****************************************************************************\
  *  step_launch.h - launch a parallel job step
  *
- *  $Id: step_launch.h 16616 2009-02-20 17:00:27Z jette $
+ *  $Id: step_launch.h 19095 2009-12-01 22:59:18Z da $
  *****************************************************************************
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA.
@@ -52,11 +52,25 @@ typedef struct {
 } user_managed_io_t;
 
 struct step_launch_state {
+	/* This lock protects tasks_started, tasks_exited, node_io_error,
+	   io_deadline, abort, and abort_action_taken.  The main thread
+	   blocks on cond, waking when a tast starts or exits, or the abort
+	   flag is set. */
 	pthread_mutex_t lock;
 	pthread_cond_t cond;
 	int tasks_requested;
 	bitstr_t *tasks_started; /* or attempted to start, but failed */
 	bitstr_t *tasks_exited;  /* or never started correctly */
+	bitstr_t *node_io_error;      /* set after write or read error */
+	pthread_t io_timeout_thread;
+	bool	  io_timeout_thread_created;
+	time_t   *io_deadline;  /* Holds the time by which a "connection okay"
+				   message must be received.  Each entry holds
+				   NO_VAL unless the node is suspected to be
+				   down and is being tested. */
+	int	 io_timeout;    /* num seconds between I/O tests */
+	bool	 halt_io_test;  /* set to true when I/O test thread should
+				   shut down. */
 	bool abort;
 	bool abort_action_taken;
 
@@ -84,6 +98,8 @@ struct step_launch_state {
 	/* user registered callbacks */
 	slurm_step_launch_callbacks_t callback;
 };
+typedef struct step_launch_state step_launch_state_t;
+
 
 /*
  * Create a launch state structure for a specified step context, "ctx".
@@ -100,4 +116,19 @@ void step_launch_state_destroy(struct step_launch_state *sls);
  * Needed to locate the mpirun program for OpenMPI checkpoint
  */
 void record_ppid(void);
+
+/*
+ * Notify the step_launch_state that an I/O connection went bad.
+ * If the node is suspected to be down, abort the job.
+ */
+int step_launch_notify_io_failure(step_launch_state_t *sls, int node_id);
+
+/*
+ * Just in case the node was marked questionable very early in the
+ * job step setup, clear this flag when the node makes its initial
+ * connection.
+ */
+int step_launch_clear_questionable_state(step_launch_state_t *sls, int node_id);
+
+
 #endif /* _STEP_LAUNCH_H */

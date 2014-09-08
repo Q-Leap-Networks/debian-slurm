@@ -7,24 +7,35 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
- *  
+ *
+ *  In addition, as a special exception, the copyright holders give permission
+ *  to link the code of portions of this program with the OpenSSL library under
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
+ *  so. If you do not wish to do so, delete this exception statement from your
+ *  version.  If you delete this exception statement from all source files in
+ *  the program, then also delete it here.
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
- *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA.
+ *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
 #if HAVE_CONFIG_H
@@ -46,6 +57,7 @@
 #include "src/common/env.h"
 #include "src/common/read_config.h"
 #include "src/common/slurm_rlimits_info.h"
+#include "src/common/uid.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
@@ -55,8 +67,6 @@
 #include "src/salloc/opt.h"
 
 #ifdef HAVE_BG
-#include "src/api/job_info.h"
-#include "src/api/node_select_info.h"
 #include "src/common/node_select.h"
 #include "src/plugins/select/bluegene/plugin/bg_boot_time.h"
 #include "src/plugins/select/bluegene/wrap_rm_api.h"
@@ -71,6 +81,7 @@
 char **command_argv;
 int command_argc;
 pid_t command_pid = -1;
+
 enum possible_allocation_states allocation_state = NOT_GRANTED;
 pthread_mutex_t allocation_state_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -81,12 +92,13 @@ static time_t last_timeout = 0;
 
 static int  _fill_job_desc_from_opts(job_desc_msg_t *desc);
 static void _ring_terminal_bell(void);
-static int  _fork_command(char **command);
+static pid_t  _fork_command(char **command);
 static void _pending_callback(uint32_t job_id);
 static void _ignore_signal(int signo);
 static void _exit_on_signal(int signo);
 static void _signal_while_allocating(int signo);
 static void _job_complete_handler(srun_job_complete_msg_t *msg);
+static void _set_exit_code(void);
 static void _set_rlimits(char **env);
 static void _timeout_handler(srun_timeout_msg_t *msg);
 static void _user_msg_handler(srun_user_msg_t *msg);
@@ -123,8 +135,11 @@ int main(int argc, char *argv[])
 
 	log_init(xbasename(argv[0]), logopt, 0, NULL);
 
-	if (spank_init_allocator() < 0)
-		fatal("Failed to initialize plugin stack");
+	_set_exit_code();
+	if (spank_init_allocator() < 0) {
+		error("Failed to initialize plugin stack");
+		exit(error_exit);
+	}
 
 	/* Be sure to call spank_fini when salloc exits
 	 */
@@ -133,7 +148,8 @@ int main(int argc, char *argv[])
 
 
 	if (initialize_and_process_args(argc, argv) < 0) {
-		fatal("salloc parameter parsing");
+		error("salloc parameter parsing");
+		exit(error_exit);
 	}
 	/* reinit log with new verbosity (if changed by command line) */
 	if (opt.verbose || opt.quiet) {
@@ -143,26 +159,27 @@ int main(int argc, char *argv[])
 		log_alter(logopt, 0, NULL);
 	}
 
-	if (spank_init_post_opt() < 0)
-		fatal("Plugin stack post-option processing failed");
-
+	if (spank_init_post_opt() < 0) {
+		error("Plugin stack post-option processing failed");
+		exit(error_exit);
+	}
 	if (opt.cwd && chdir(opt.cwd)) {
 		error("chdir(%s): %m", opt.cwd);
-		exit(1);
+		exit(error_exit);
 	}
 
 	if (opt.get_user_env_time >= 0) {
-		struct passwd *pw;
-		pw = getpwuid(opt.uid);
-		if (pw == NULL) {
-			error("getpwuid(%u): %m", (uint32_t)opt.uid);
-			exit(1);
+		char *user = uid_to_string(opt.uid);
+		if (strcmp(user, "nobody") == 0) {
+			error("Invalid user id %u: %m", (uint32_t)opt.uid);
+			exit(error_exit);
 		}
-		env = env_array_user_default(pw->pw_name,
+		env = env_array_user_default(user,
 					     opt.get_user_env_time,
 					     opt.get_user_env_mode);
+		xfree(user);
 		if (env == NULL)
-			exit(1);    /* error already logged */
+			exit(error_exit);    /* error already logged */
 		_set_rlimits(env);
 	}
 
@@ -171,15 +188,19 @@ int main(int argc, char *argv[])
 	 */
 	slurm_init_job_desc_msg(&desc);
 	if (_fill_job_desc_from_opts(&desc) == -1) {
-		exit(1);
+		exit(error_exit);
 	}
 	if (opt.gid != (gid_t) -1) {
-		if (setgid(opt.gid) < 0)
-			fatal("setgid: %m");
+		if (setgid(opt.gid) < 0) {
+			error("setgid: %m");
+			exit(error_exit);
+		}
 	}
 	if (opt.uid != (uid_t) -1) {
-		if (setuid(opt.uid) < 0)
-			fatal("setuid: %m");
+		if (setuid(opt.uid) < 0) {
+			error("setuid: %m");
+			exit(error_exit);
+		}
 	}
 
 	callbacks.ping = _ping_handler;
@@ -188,7 +209,7 @@ int main(int argc, char *argv[])
 	callbacks.user_msg = _user_msg_handler;
 	callbacks.node_fail = _node_fail_handler;
 	/* create message thread to handle pings and such from slurmctld */
-	msg_thr = slurm_allocation_msg_thr_create(&desc.other_port, 
+	msg_thr = slurm_allocation_msg_thr_create(&desc.other_port,
 						  &callbacks);
 
 	xsignal(SIGHUP, _signal_while_allocating);
@@ -198,7 +219,7 @@ int main(int argc, char *argv[])
 	xsignal(SIGTERM, _signal_while_allocating);
 	xsignal(SIGUSR1, _signal_while_allocating);
 	xsignal(SIGUSR2, _signal_while_allocating);
-	
+
 	before = time(NULL);
 	while ((alloc = slurm_allocate_resources_blocking(&desc, opt.immediate,
 					_pending_callback)) == NULL) {
@@ -218,14 +239,17 @@ int main(int argc, char *argv[])
 		} else if (errno == EINTR) {
 			error("Interrupted by signal."
 			      "  Allocation request rescinded.");
-		} else if ((errno == ETIMEDOUT) && opt.immediate) {
+		} else if (opt.immediate &&
+			   ((errno == ETIMEDOUT) ||
+			    (errno == ESLURM_NODES_BUSY))) {
 			error("Unable to allocate resources: %s",
 			      slurm_strerror(ESLURM_NODES_BUSY));
+			error_exit = immediate_exit;
 		} else {
 			error("Failed to allocate resources: %m");
 		}
 		slurm_allocation_msg_thr_destroy(msg_thr);
-		exit(1);
+		exit(error_exit);
 	} else if (!allocation_interrupted) {
 		/*
 		 * Allocation granted!
@@ -289,7 +313,7 @@ int main(int argc, char *argv[])
 				     opt.cpus_per_task);
 	}
 	if (opt.overcommit) {
-		env_array_append_fmt(&env, "SLURM_OVERCOMMIT", "%d", 
+		env_array_append_fmt(&env, "SLURM_OVERCOMMIT", "%d",
 			opt.overcommit);
 	}
 	if (opt.acctg_freq >= 0) {
@@ -298,7 +322,7 @@ int main(int argc, char *argv[])
 	}
 	if (opt.network)
 		env_array_append_fmt(&env, "SLURM_NETWORK", "%s", opt.network);
-	
+
 	env_array_set_environment(env);
 	env_array_free(env);
 	pthread_mutex_lock(&allocation_state_lock);
@@ -324,7 +348,7 @@ int main(int argc, char *argv[])
 				continue;
 		}
 		errnum = errno;
-		if (rc_pid == -1 && errnum != EINTR)
+		if ((rc_pid == -1) && (errnum != EINTR))
 			error("waitpid for %s failed: %m", command_argv[0]);
 	}
 
@@ -353,15 +377,15 @@ relinquish:
 	 */
 	rc = 1;
 	if (rc_pid != -1) {
-		
+
 		if (WIFEXITED(status)) {
 			rc = WEXITSTATUS(status);
 		} else if (WIFSIGNALED(status)) {
 			verbose("Command \"%s\" was terminated by signal %d",
 				command_argv[0], WTERMSIG(status));
 			/* if we get these signals we return a normal
-			   exit since this was most likely sent from the
-			   user */
+			 * exit since this was most likely sent from the
+			 * user */
 			switch(WTERMSIG(status)) {
 			case SIGHUP:
 			case SIGINT:
@@ -377,13 +401,34 @@ relinquish:
 	return rc;
 }
 
+static void _set_exit_code(void)
+{
+	int i;
+	char *val;
+
+	if ((val = getenv("SLURM_EXIT_ERROR"))) {
+		i = atoi(val);
+		if (i == 0)
+			error("SLURM_EXIT_ERROR has zero value");
+		else
+			error_exit = i;
+	}
+
+	if ((val = getenv("SLURM_EXIT_IMMEDIATE"))) {
+		i = atoi(val);
+		if (i == 0)
+			error("SLURM_EXIT_IMMEDIATE has zero value");
+		else
+			immediate_exit = i;
+	}
+}
 
 /* Returns 0 on success, -1 on failure */
 static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 {
 	desc->contiguous = opt.contiguous ? 1 : 0;
 	desc->features = opt.constraints;
-	if (opt.immediate == 1)	
+	if (opt.immediate == 1)
 		desc->immediate = 1;
 	desc->name = xstrdup(opt.job_name);
 	desc->reservation = xstrdup(opt.reservation);
@@ -428,10 +473,12 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->account = xstrdup(opt.account);
 	if (opt.comment)
 		desc->comment = xstrdup(opt.comment);
+	if (opt.qos)
+		desc->qos = xstrdup(opt.qos);
 
 	if (opt.hold)
 		desc->priority     = 0;
-#if SYSTEM_DIMENSIONS
+#ifdef HAVE_BG
 	if (opt.geometry[0] > 0) {
 		int i;
 		for (i=0; i<SYSTEM_DIMENSIONS; i++)
@@ -455,13 +502,7 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 
 	/* job constraints */
 	if (opt.mincpus > -1)
-		desc->job_min_procs = opt.mincpus;
-	if (opt.minsockets > -1)
-		desc->job_min_sockets = opt.minsockets;
-	if (opt.mincores > -1)
-		desc->job_min_cores = opt.mincores;
-	if (opt.minthreads > -1)
-		desc->job_min_threads = opt.minthreads;
+		desc->job_min_cpus = opt.mincpus;
 	if (opt.realmem > -1)
 		desc->job_min_memory = opt.realmem;
 	else if (opt.mem_per_cpu > -1)
@@ -487,16 +528,10 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 	/* node constraints */
 	if (opt.min_sockets_per_node > -1)
 		desc->min_sockets = opt.min_sockets_per_node;
-	if (opt.max_sockets_per_node > -1)
-		desc->max_sockets = opt.max_sockets_per_node;
 	if (opt.min_cores_per_socket > -1)
 		desc->min_cores = opt.min_cores_per_socket;
-	if (opt.max_cores_per_socket > -1)
-		desc->max_cores = opt.max_cores_per_socket;
 	if (opt.min_threads_per_core > -1)
 		desc->min_threads = opt.min_threads_per_core;
-	if (opt.max_threads_per_core > -1)
-		desc->max_threads = opt.max_threads_per_core;
 
 	if (opt.no_kill)
 		desc->kill_on_node_fail = 0;
@@ -504,6 +539,16 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->time_limit = opt.time_limit;
 	desc->shared = opt.shared;
 	desc->job_id = opt.jobid;
+
+	if (opt.warn_signal)
+		desc->warn_signal = opt.warn_signal;
+	if (opt.warn_time)
+		desc->warn_time = opt.warn_time;
+
+	if (opt.spank_job_env_size) {
+		desc->spank_job_env      = opt.spank_job_env;
+		desc->spank_job_env_size = opt.spank_job_env_size;
+	}
 
 	return 0;
 }
@@ -530,7 +575,7 @@ static pid_t _fork_command(char **command)
 
 		/* should only get here if execvp failed */
 		error("Unable to exec command \"%s\"", command[0]);
-		exit(1);
+		exit(error_exit);
 	}
 	/* parent returns */
 	return pid;
@@ -596,18 +641,18 @@ static void _job_complete_handler(srun_job_complete_msg_t *comp)
 }
 
 /*
- * Job has been notified of it's approaching time limit. 
+ * Job has been notified of it's approaching time limit.
  * Job will be killed shortly after timeout.
  * This RPC can arrive multiple times with the same or updated timeouts.
  * FIXME: We may want to signal the job or perform other action for this.
- * FIXME: How much lead time do we want for this message? Some jobs may 
+ * FIXME: How much lead time do we want for this message? Some jobs may
  *	require tens of minutes to gracefully terminate.
  */
 static void _timeout_handler(srun_timeout_msg_t *msg)
 {
 	if (msg->timeout != last_timeout) {
 		last_timeout = msg->timeout;
-		verbose("Job allocation time limit to be reached at %s", 
+		verbose("Job allocation time limit to be reached at %s",
 			ctime(&msg->timeout));
 	}
 }
@@ -617,7 +662,7 @@ static void _user_msg_handler(srun_user_msg_t *msg)
 	info("%s", msg->msg);
 }
 
-static void _ping_handler(srun_ping_msg_t *msg) 
+static void _ping_handler(srun_ping_msg_t *msg)
 {
 	/* the api will respond so there really isn't anything to do
 	   here */
@@ -651,7 +696,7 @@ static void _set_rlimits(char **env)
 		}
 		env_num = strtol(env_value, &p, 10);
 		if (p && (p[0] != '\0')) {
-			error("Invalid environment %s value %s", 
+			error("Invalid environment %s value %s",
 			      env_name, env_value);
 			continue;
 		}
@@ -676,8 +721,9 @@ static int _wait_bluegene_block_ready(resource_allocation_response_msg_t *alloc)
 		(BG_INCR_BLOCK_BOOT * alloc->node_cnt);
 
 	pending_job_id = alloc->job_id;
-	select_g_get_jobinfo(alloc->select_jobinfo, SELECT_DATA_BLOCK_ID,
-			     &block_id);
+	select_g_select_jobinfo_get(alloc->select_jobinfo,
+				    SELECT_JOBDATA_BLOCK_ID,
+				    &block_id);
 
 	for (i=0; (cur_delay < max_delay); i++) {
 		if (i == 1)
@@ -686,7 +732,7 @@ static int _wait_bluegene_block_ready(resource_allocation_response_msg_t *alloc)
 		if (i) {
 			sleep(POLL_SLEEP);
 			rc = _blocks_dealloc();
-			if ((rc == 0) || (rc == -1)) 
+			if ((rc == 0) || (rc == -1))
 				cur_delay += POLL_SLEEP;
 			debug("still waiting");
 		}
@@ -728,20 +774,20 @@ static int _wait_bluegene_block_ready(resource_allocation_response_msg_t *alloc)
  */
 static int _blocks_dealloc(void)
 {
-	static node_select_info_msg_t *bg_info_ptr = NULL, *new_bg_ptr = NULL;
+	static block_info_msg_t *bg_info_ptr = NULL, *new_bg_ptr = NULL;
 	int rc = 0, error_code = 0, i;
-	
+
 	if (bg_info_ptr) {
-		error_code = slurm_load_node_select(bg_info_ptr->last_update, 
+		error_code = slurm_load_block_info(bg_info_ptr->last_update,
 						   &new_bg_ptr);
 		if (error_code == SLURM_SUCCESS)
-			select_g_free_node_info(&bg_info_ptr);
+			slurm_free_block_info_msg(&bg_info_ptr);
 		else if (slurm_get_errno() == SLURM_NO_CHANGE_IN_DATA) {
 			error_code = SLURM_SUCCESS;
 			new_bg_ptr = bg_info_ptr;
 		}
 	} else {
-		error_code = slurm_load_node_select((time_t) NULL, &new_bg_ptr);
+		error_code = slurm_load_block_info((time_t) NULL, &new_bg_ptr);
 	}
 
 	if (error_code) {
@@ -750,7 +796,7 @@ static int _blocks_dealloc(void)
 		return -1;
 	}
 	for (i=0; i<new_bg_ptr->record_count; i++) {
-		if(new_bg_ptr->bg_info_array[i].state 
+		if(new_bg_ptr->block_array[i].state
 		   == RM_PARTITION_DEALLOCATING) {
 			rc = 1;
 			break;
@@ -768,8 +814,9 @@ static int _claim_reservation(resource_allocation_response_msg_t *alloc)
 	int rc = 0;
 	char *resv_id = NULL;
 
-	select_g_get_jobinfo(alloc->select_jobinfo, SELECT_DATA_RESV_ID,
-			     &resv_id);
+	select_g_select_jobinfo_get(alloc->select_jobinfo,
+				    SELECT_JOBDATA_RESV_ID,
+				    &resv_id);
 	if (resv_id == NULL)
 		return rc;
 	if (basil_resv_conf(resv_id, alloc->job_id) == SLURM_SUCCESS)

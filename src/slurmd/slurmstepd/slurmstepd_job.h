@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/slurmstepd_job.h  slurmd_job_t definition
- *  $Id: slurmstepd_job.h 17056 2009-03-26 23:35:52Z dbremer $
+ *  $Id: slurmstepd_job.h 19152 2009-12-10 22:29:52Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -133,7 +133,7 @@ typedef struct slurmd_job {
 	char          *cpu_bind;       /* binding map for map/mask_cpu      */
 	mem_bind_type_t mem_bind_type; /* --mem_bind=                       */
 	char          *mem_bind;       /* binding map for tasks to memory   */
-	switch_jobinfo_t switch_job; /* switch-specific job information     */
+	switch_jobinfo_t *switch_job; /* switch-specific job information     */
 	uid_t         uid;     /* user id for job                           */
 	gid_t         gid;     /* group ID for job                          */
 	int           ngids;   /* length of the following gids array        */
@@ -201,6 +201,7 @@ typedef struct slurmd_job {
 	char          *restart_dir;	/* restart from context */
 	char          *resv_id;		/* Cray/BASIL reservation ID	*/
 	uint16_t       restart_cnt;	/* batch job restart count	*/
+	char	      *alloc_cores;	/* needed by the SPANK cpuset plugin */
 } slurmd_job_t;
 
 
@@ -211,12 +212,28 @@ void job_kill(slurmd_job_t *job, int signal);
 
 void job_destroy(slurmd_job_t *job);
 
-struct srun_info * srun_info_create(slurm_cred_t cred, slurm_addr *respaddr, 
+struct srun_info * srun_info_create(slurm_cred_t *cred, slurm_addr *respaddr, 
 		                    slurm_addr *ioaddr);
 
 void  srun_info_destroy(struct srun_info *srun);
 
 slurmd_task_info_t * task_info_create(int taskid, int gtaskid,
 				      char *ifname, char *ofname, char *efname);
+
+/*
+ *  Return a task info structure corresponding to pid.
+ *   We inline it here so that it can be included from src/common/plugstack.c
+ *   without undefined symbol warnings.
+ */
+static inline slurmd_task_info_t *
+job_task_info_by_pid (slurmd_job_t *job, pid_t pid)
+{
+	int i;
+	for (i = 0; i < job->ntasks; i++) {
+		if (job->task[i]->pid == pid)
+			return (job->task[i]);
+	}
+	return (NULL);
+}
 
 #endif /* !_SLURMSTEPD_JOB_H */

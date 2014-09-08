@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/slurmd/slurmd/slurmd.h - header for slurmd
- * $Id: slurmd.h 17386 2009-05-01 19:40:09Z jette $
+ * $Id: slurmd.h 19024 2009-11-12 18:50:27Z lipari $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -90,6 +90,7 @@ typedef struct slurmd_config {
 	uint16_t     actual_threads;    /* actual thread per core count    */
 	uint32_t     real_memory_size;  /* amount of real memory	   */
 	uint32_t     tmp_disk_space;    /* size of temporary disk	   */
+	uint32_t     up_time;		/* seconds since last boot time    */
 	uint16_t     block_map_size;	/* size of block map               */
 	uint16_t     *block_map;	/* abstract->machine block map     */
 	uint16_t     *block_map_inv;	/* machine->abstract (inverse) map */
@@ -98,6 +99,8 @@ typedef struct slurmd_config {
 					 * CR_DEFAULT, etc.                */
 	char         *node_name;	/* node name                       */
 	char         *node_addr;	/* node's address                  */
+	char         *node_topo_addr;   /* node's topology address         */
+	char         *node_topo_pattern;/* node's topology address pattern */
 	char         *conffile;		/* config filename                 */
 	char         *logfile;		/* slurmd logfile, if any          */
 	char         *spooldir;		/* SlurmdSpoolDir	           */
@@ -121,6 +124,7 @@ typedef struct slurmd_config {
 
 	slurm_cred_ctx_t vctx;          /* slurm_cred_t verifier context   */
 
+	uint16_t	slurmd_timeout;	/* SlurmdTimeout                   */
 	uid_t           slurm_user_id;	/* UID that slurmctld runs as      */
 	pthread_mutex_t config_mutex;	/* lock for slurmd_config access   */
 	uint16_t        job_acct_gather_freq;
@@ -128,6 +132,14 @@ typedef struct slurmd_config {
 	uint16_t	task_plugin_param; /* TaskPluginParams, expressed
 					 * using cpu_bind_type_t flags */
 	uint16_t	propagate_prio;	/* PropagatePrioProcess flag       */
+
+	List		starting_steps; /* steps that are starting but cannot 
+					   receive RPCs yet */
+	pthread_mutex_t	starting_steps_lock;
+	pthread_cond_t	starting_steps_cond;
+	List		prolog_running_jobs;
+	pthread_mutex_t	prolog_running_lock;
+	pthread_cond_t	prolog_running_cond;
 } slurmd_conf_t;
 
 extern slurmd_conf_t * conf;

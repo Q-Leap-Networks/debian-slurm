@@ -1,5 +1,5 @@
 /*****************************************************************************
- *  read_config.h - definitions for reading the overall slurm configuration 
+ *  read_config.h - definitions for reading the overall slurm configuration
  *  file
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
@@ -12,28 +12,28 @@
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
+ *  In addition, as a special exception, the copyright holders give permission
  *  to link the code of portions of this program with the OpenSSL library under
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -54,6 +54,7 @@ extern char *default_plugstack;
 #define ACCOUNTING_ENFORCE_ASSOCS 0x0001
 #define ACCOUNTING_ENFORCE_LIMITS 0x0002
 #define ACCOUNTING_ENFORCE_WCKEYS 0x0004
+#define ACCOUNTING_ENFORCE_QOS    0x0008
 
 #define DEFAULT_ACCOUNTING_DB      "slurm_acct_db"
 #define DEFAULT_ACCOUNTING_ENFORCE  0
@@ -96,7 +97,9 @@ extern char *default_plugstack;
 #  define DEFAULT_CHECKPOINT_TYPE   "checkpoint/none"
 #  define DEFAULT_PROCTRACK_TYPE    "proctrack/pgid"
 #endif
+#define DEFAULT_PREEMPT_TYPE        "preempt/none"
 #define DEFAULT_PRIORITY_DECAY      604800 /* 7 days */
+#define DEFAULT_PRIORITY_CALC_PERIOD 300 /* in seconds */
 #define DEFAULT_PRIORITY_TYPE       "priority/basic"
 #define DEFAULT_PROPAGATE_PRIO_PROCESS 0
 #define DEFAULT_RETURN_TO_SERVICE   0
@@ -137,6 +140,7 @@ extern char *default_plugstack;
 #define DEFAULT_WAIT_TIME           0
 #define DEFAULT_TREE_WIDTH          50
 #define DEFAULT_UNKILLABLE_TIMEOUT  60 /* seconds */
+#define DEFAULT_MAX_TASKS_PER_NODE  128
 
 typedef struct slurm_conf_node {
 	char *nodenames;
@@ -152,15 +156,15 @@ typedef struct slurm_conf_node {
 	char *reason;
 	char *state;
 	uint32_t tmp_disk;	/* MB total storage in TMP_FS file system */
-	uint32_t weight;	/* arbitrary priority of node for 
+	uint32_t weight;	/* arbitrary priority of node for
 				 * scheduling work on */
 } slurm_conf_node_t;
 
 typedef struct slurm_conf_partition {
 	char *allow_alloc_nodes;/* comma delimited list of allowed
-				 * allocating nodes 
+				 * allocating nodes
 				 * NULL indicates all */
-	char *allow_groups;	/* comma delimited list of groups, 
+	char *allow_groups;	/* comma delimited list of groups,
 				 * NULL indicates all */
 	bool default_flag;	/* Set if default partition */
 	uint32_t default_time;	/* minutes or INFINITE */
@@ -176,7 +180,7 @@ typedef struct slurm_conf_partition {
 	char	*name;		/* name of the partition */
 	char 	*nodes;		/* comma delimited list names of nodes */
 	uint16_t priority;	/* scheduling priority for jobs */
-	bool     root_only_flag;/* 1 if allocate/submit RPC can only be 
+	bool     root_only_flag;/* 1 if allocate/submit RPC can only be
 				   issued by user root */
 	bool     state_up_flag;	/* 1 if state is up, 0 if down */
 	uint32_t total_nodes;	/* total number of nodes in the partition */
@@ -222,7 +226,7 @@ extern int slurm_conf_init(const char *file_name);
  */
 extern int slurm_conf_reinit(const char *file_name);
 
-/* 
+/*
  * slurm_conf_mutex_init - init the slurm_conf mutex
  */
 extern void slurm_conf_mutex_init(void);
@@ -244,7 +248,7 @@ extern void slurm_conf_unlock(void);
 /*
  * Set "ptr_array" with the pointer to an array of pointers to
  * slurm_conf_node_t structures.
- * 
+ *
  * Return value is the length of the array.
  */
 extern int slurm_conf_nodename_array(slurm_conf_node_t **ptr_array[]);
@@ -252,7 +256,7 @@ extern int slurm_conf_nodename_array(slurm_conf_node_t **ptr_array[]);
 /*
  * Set "ptr_array" with the pointer to an array of pointers to
  * slurm_conf_partition_t structures.
- * 
+ *
  * Return value is the length of the array.
  */
 extern int slurm_conf_partition_array(slurm_conf_partition_t **ptr_array[]);
@@ -260,7 +264,7 @@ extern int slurm_conf_partition_array(slurm_conf_partition_t **ptr_array[]);
 /*
  * Set "ptr_array" with the pointer to an array of pointers to
  * slurm_conf_downnodes_t structures.
- * 
+ *
  * Return value is the length of the array.
  */
 extern int slurm_conf_downnodes_array(slurm_conf_downnodes_t **ptr_array[]);
@@ -329,16 +333,16 @@ extern int slurm_conf_get_cpus_sct(const char *node_name,
 				   uint16_t *procs, uint16_t *sockets,
 				   uint16_t *cores, uint16_t *threads);
 
-/* 
- * init_slurm_conf - initialize or re-initialize the slurm configuration 
+/*
+ * init_slurm_conf - initialize or re-initialize the slurm configuration
  *	values defaults (NULL or NO_VAL). Note that the configuration
- *	file pathname (slurm_conf) is not changed.    
+ *	file pathname (slurm_conf) is not changed.
  * IN/OUT ctl_conf_ptr - pointer to data structure to be initialized
  */
 extern void init_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr);
 
-/* 
- * free_slurm_conf - free all storage associated with a slurm_ctl_conf_t.   
+/*
+ * free_slurm_conf - free all storage associated with a slurm_ctl_conf_t.
  * IN/OUT ctl_conf_ptr - pointer to data structure to be freed
  * IN purge_node_hash - purge system-wide node hash table if set,
  *			set to zero if clearing private copy of config data
@@ -347,9 +351,9 @@ extern void free_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr,
 			     bool purge_node_hash);
 
 /*
- * gethostname_short - equivalent to gethostname(), but return only the first 
- *      component of the fully qualified name (e.g. "linux123.foo.bar" 
- *      becomes "linux123") 
+ * gethostname_short - equivalent to gethostname(), but return only the first
+ *      component of the fully qualified name (e.g. "linux123.foo.bar"
+ *      becomes "linux123")
  * NOTE: NodeName in the config may be different from real hostname.
  *       Use get_conf_node_name() to get the former.
  */
@@ -380,7 +384,7 @@ extern uint32_t debug_str2flags(char *debug_flags);
 
 extern void destroy_config_key_pair(void *object);
 extern void pack_config_key_pair(void *in, uint16_t rpc_version, Buf buffer);
-extern int unpack_config_key_pair(void **object, uint16_t rpc_version, 
+extern int unpack_config_key_pair(void **object, uint16_t rpc_version,
 				  Buf buffer);
 extern int sort_key_pairs(config_key_pair_t *key_a, config_key_pair_t *key_b);
 

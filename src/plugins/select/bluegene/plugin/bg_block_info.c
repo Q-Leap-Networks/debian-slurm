@@ -1,37 +1,37 @@
 /*****************************************************************************\
  *  bg_block_info.c - bluegene block information from the db2 database.
  *
- *  $Id: bg_block_info.c 18904 2009-10-15 15:52:20Z da $
+ *  $Id: bg_block_info.c 19095 2009-12-01 22:59:18Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
+ *  In addition, as a special exception, the copyright holders give permission
  *  to link the code of portions of this program with the OpenSSL library under
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -64,7 +64,6 @@
 #include "src/common/uid.h"
 #include "src/common/xstring.h"
 #include "src/slurmctld/proc_req.h"
-#include "src/api/job_info.h"
 #include "src/slurmctld/trigger_mgr.h"
 #include "src/slurmctld/locks.h"
 #include "bluegene.h"
@@ -90,15 +89,15 @@ static int _block_is_deallocating(bg_record_t *bg_record)
 
 	if(bg_record->modifying)
 		return SLURM_SUCCESS;
-	
+
 	user_name = xstrdup(bg_conf->slurm_user_name);
-	if(remove_all_users(bg_record->bg_block_id, NULL) 
+	if(remove_all_users(bg_record->bg_block_id, NULL)
 	   == REMOVE_USER_ERR) {
 		error("Something happened removing "
-		      "users from block %s", 
+		      "users from block %s",
 		      bg_record->bg_block_id);
-	} 	
-	
+	}
+
 	if(bg_record->target_name && bg_record->user_name) {
 		if(!strcmp(bg_record->target_name, user_name)) {
 			if(strcmp(bg_record->target_name, bg_record->user_name)
@@ -107,7 +106,7 @@ static int _block_is_deallocating(bg_record_t *bg_record)
 					xmalloc(sizeof(freeit));
 				freeit->jobid = jobid;
 				list_push(kill_job_list, freeit);
-				
+
 				error("Block %s was in a ready state "
 				      "for user %s but is being freed. "
 				      "Job %d was lost.",
@@ -138,12 +137,12 @@ static int _block_is_deallocating(bg_record_t *bg_record)
 	}
 
 	if(remove_from_bg_list(bg_lists->job_running, bg_record)
-	   == SLURM_SUCCESS) 
-		num_unused_cpus += bg_record->cpu_cnt;			       
+	   == SLURM_SUCCESS)
+		num_unused_cpus += bg_record->cpu_cnt;
 	remove_from_bg_list(bg_lists->booted, bg_record);
 
 	xfree(user_name);
-			
+
 	return SLURM_SUCCESS;
 }
 static void _destroy_kill_struct(void *object)
@@ -160,7 +159,7 @@ static void _destroy_kill_struct(void *object)
 
 /*
  * check to see if block is ready to execute.  Meaning
- * User is added to the list of users able to run, and no one 
+ * User is added to the list of users able to run, and no one
  * else is running on the block.
  *
  * NOTE: This happens in parallel with srun and slurmd spawning
@@ -172,18 +171,18 @@ extern int block_ready(struct job_record *job_ptr)
 	int rc = 1;
 	char *block_id = NULL;
 	bg_record_t *bg_record = NULL;
-	
-	rc = select_g_get_jobinfo(job_ptr->select_jobinfo,
-				  SELECT_DATA_BLOCK_ID, &block_id);
+
+	rc = select_g_select_jobinfo_get(job_ptr->select_jobinfo,
+					 SELECT_JOBDATA_BLOCK_ID, &block_id);
 	if (rc == SLURM_SUCCESS) {
-		bg_record = find_bg_record_in_list(bg_lists->main, block_id);
 		slurm_mutex_lock(&block_state_mutex);
-		
+		bg_record = find_bg_record_in_list(bg_lists->main, block_id);
+
 		if(bg_record) {
 			if(bg_record->job_running != job_ptr->job_id) {
 				rc = 0;
 			} else if ((bg_record->user_uid == job_ptr->user_id)
-				   && (bg_record->state 
+				   && (bg_record->state
 				       == RM_PARTITION_READY)) {
 				rc = 1;
 			} else if (bg_record->user_uid != job_ptr->user_id)
@@ -191,7 +190,11 @@ extern int block_ready(struct job_record *job_ptr)
 			else
 				rc = READY_JOB_ERROR;	/* try again */
 		} else {
-			error("block_ready: block %s not in bg_lists->main.",
+			/* This means the block has been removed and
+			   is no longer valid.  This could happen
+			   often during an epilog on a busy system.
+			*/
+			debug2("block_ready: block %s not in bg_lists->main.",
 			      block_id);
 			rc = READY_JOB_FATAL;	/* fatal error */
 		}
@@ -202,30 +205,31 @@ extern int block_ready(struct job_record *job_ptr)
 /* 	info("returning %d for job %u %d %d", */
 /* 	     rc, job_ptr->job_id, READY_JOB_ERROR, READY_JOB_FATAL); */
 	return rc;
-}				
+}
 
 /* Pack all relevent information about a block */
 extern void pack_block(bg_record_t *bg_record, Buf buffer)
 {
-	packstr(bg_record->nodes, buffer);
-	packstr(bg_record->ionodes, buffer);
-	packstr(bg_record->user_name, buffer);
 	packstr(bg_record->bg_block_id, buffer);
-	pack16((uint16_t)bg_record->state, buffer);
-	pack16((uint16_t)bg_record->conn_type, buffer);
-#ifdef HAVE_BGL
-	pack16((uint16_t)bg_record->node_use, buffer);	
-#endif
-	pack32((uint32_t)bg_record->node_cnt, buffer);
-	pack32((uint32_t)bg_record->job_running, buffer);
-	pack_bit_fmt(bg_record->bitmap, buffer);
-	pack_bit_fmt(bg_record->ionode_bitmap, buffer);
 #ifdef HAVE_BGL
 	packstr(bg_record->blrtsimage, buffer);
 #endif
+	pack_bit_fmt(bg_record->bitmap, buffer);
+	pack16((uint16_t)bg_record->conn_type, buffer);
+	packstr(bg_record->ionodes, buffer);
+	pack_bit_fmt(bg_record->ionode_bitmap, buffer);
+	pack32((uint32_t)bg_record->job_running, buffer);
 	packstr(bg_record->linuximage, buffer);
 	packstr(bg_record->mloaderimage, buffer);
+	packstr(bg_record->nodes, buffer);
+	pack32((uint32_t)bg_record->node_cnt, buffer);
+#ifdef HAVE_BGL
+	pack16((uint16_t)bg_record->node_use, buffer);
+#endif
+
+	packstr(bg_record->user_name, buffer);
 	packstr(bg_record->ramdiskimage, buffer);
+	pack16((uint16_t)bg_record->state, buffer);
 }
 
 extern int update_block_list()
@@ -245,20 +249,20 @@ extern int update_block_list()
 	ListIterator itr = NULL;
 	slurmctld_lock_t job_write_lock = {
 		NO_LOCK, WRITE_LOCK, WRITE_LOCK, NO_LOCK };
-	
+
 	if(!kill_job_list)
 		kill_job_list = list_create(_destroy_kill_struct);
 
-	if(!bg_lists->main) 
+	if(!bg_lists->main)
 		return updated;
-	
+
 	slurm_mutex_lock(&block_state_mutex);
 	itr = list_iterator_create(bg_lists->main);
 	while ((bg_record = (bg_record_t *) list_next(itr)) != NULL) {
 		if(!bg_record->bg_block_id)
 			continue;
 		name = bg_record->bg_block_id;
-		if ((rc = bridge_get_block_info(name, &block_ptr)) 
+		if ((rc = bridge_get_block_info(name, &block_ptr))
 		    != STATUS_OK) {
 			if(bg_conf->layout_mode == LAYOUT_DYNAMIC) {
 				switch(rc) {
@@ -288,12 +292,12 @@ extern int update_block_list()
 				break;
 			}
 
-			error("bridge_get_block_info(%s): %s", 
-			      name, 
+			error("bridge_get_block_info(%s): %s",
+			      name,
 			      bg_err_str(rc));
 			continue;
 		}
-				
+
 #ifdef HAVE_BGL
 		if ((rc = bridge_get_data(block_ptr, RM_PartitionMode,
 					  &node_use))
@@ -305,14 +309,14 @@ extern int update_block_list()
 		} else if(bg_record->node_use != node_use) {
 			debug("node_use of Block %s was %d "
 			      "and now is %d",
-			      bg_record->bg_block_id, 
-			      bg_record->node_use, 
+			      bg_record->bg_block_id,
+			      bg_record->node_use,
 			      node_use);
 			bg_record->node_use = node_use;
 			updated = 1;
 		}
 #else
-		if((bg_record->node_cnt < bg_conf->bp_node_cnt) 
+		if((bg_record->node_cnt < bg_conf->bp_node_cnt)
 		   || (bg_conf->bp_node_cnt == bg_conf->nodecard_node_cnt)) {
 			char *mode = NULL;
 			uint16_t conn_type = SELECT_SMALL;
@@ -344,18 +348,18 @@ extern int update_block_list()
 				}
 				free(mode);
 			}
-			
+
 			if(bg_record->conn_type != conn_type) {
 				debug("mode of small Block %s was %u "
 				      "and now is %u",
-				      bg_record->bg_block_id, 
-				      bg_record->conn_type, 
+				      bg_record->bg_block_id,
+				      bg_record->conn_type,
 				      conn_type);
 				bg_record->conn_type = conn_type;
 				updated = 1;
 			}
 		}
-#endif		
+#endif
 		if ((rc = bridge_get_data(block_ptr, RM_PartitionState,
 					  &state))
 		    != STATUS_OK) {
@@ -363,18 +367,18 @@ extern int update_block_list()
 			      bg_err_str(rc));
 			updated = -1;
 			goto next_block;
-		} else if(bg_record->job_running != BLOCK_ERROR_STATE 
+		} else if(bg_record->job_running != BLOCK_ERROR_STATE
 			  //plugin set error
 			  && bg_record->state != state) {
 			int skipped_dealloc = 0;
 
 			debug("state of Block %s was %d and now is %d",
-			      bg_record->bg_block_id, 
-			      bg_record->state, 
+			      bg_record->bg_block_id,
+			      bg_record->state,
 			      state);
-			/* 
-			   check to make sure block went 
-			   through freeing correctly 
+			/*
+			   check to make sure block went
+			   through freeing correctly
 			*/
 			if((bg_record->state != RM_PARTITION_DEALLOCATING
 			    && bg_record->state != RM_PARTITION_ERROR)
@@ -393,9 +397,9 @@ extern int update_block_list()
 				xfree(bg_record->target_name);
 				bg_record->target_name =
 					xstrdup(bg_record->user_name);
-			} else if((bg_record->state 
+			} else if((bg_record->state
 				   == RM_PARTITION_DEALLOCATING)
-				  && (state == RM_PARTITION_CONFIGURING)) 
+				  && (state == RM_PARTITION_CONFIGURING))
 				/* This is a funky state IBM says
 				   isn't a bug, but all their
 				   documentation says this doesn't
@@ -404,11 +408,11 @@ extern int update_block_list()
 				   that. So we will just skip this
 				   state and act like this didn't happen. */
 				goto nochange_state;
-			
+
 			bg_record->state = state;
 
 			if(bg_record->state == RM_PARTITION_DEALLOCATING
-			   || skipped_dealloc) 
+			   || skipped_dealloc)
 				_block_is_deallocating(bg_record);
 #ifndef HAVE_BGL
 			else if(bg_record->state == RM_PARTITION_REBOOTING) {
@@ -426,8 +430,8 @@ extern int update_block_list()
 			else if(bg_record->state == RM_PARTITION_CONFIGURING)
 				bg_record->boot_state = 1;
 			else if(bg_record->state == RM_PARTITION_FREE) {
-				if(remove_from_bg_list(bg_lists->job_running, 
-						       bg_record) 
+				if(remove_from_bg_list(bg_lists->job_running,
+						       bg_record)
 				   == SLURM_SUCCESS) {
 					num_unused_cpus += bg_record->cpu_cnt;
 				}
@@ -438,7 +442,7 @@ extern int update_block_list()
 					error("Block %s in an error "
 					      "state while booting.",
 					      bg_record->bg_block_id);
-				else					
+				else
 					error("Block %s in an error state.",
 					      bg_record->bg_block_id);
 				remove_from_bg_list(bg_lists->booted,
@@ -459,10 +463,14 @@ extern int update_block_list()
 				debug3("checking to make sure user %s "
 				       "is the user.",
 				       bg_record->target_name);
-				
+
 				if(update_block_user(bg_record, 0) == 1)
 					last_bg_update = time(NULL);
-				
+				if(bg_record->job_ptr) {
+					bg_record->job_ptr->job_state |=
+						JOB_CONFIGURING;
+					last_job_update = time(NULL);
+				}
 				break;
 			case RM_PARTITION_ERROR:
 				/* If we get an error on boot that
@@ -492,30 +500,30 @@ extern int update_block_list()
 
 					error("Couldn't boot Block %s "
 					      "for user %s",
-					      bg_record->bg_block_id, 
+					      bg_record->bg_block_id,
 					      bg_record->target_name);
 					slurm_mutex_unlock(&block_state_mutex);
-					
+
 					now = time(NULL);
 					slurm_make_time_str(&now, time_str,
 							    sizeof(time_str));
-					snprintf(reason, 
+					snprintf(reason,
 						 sizeof(reason),
 						 "update_block_list: "
 						 "Boot fails "
-						 "[SLURM@%s]", 
+						 "[SLURM@%s]",
 						 time_str);
 					drain_as_needed(bg_record, reason);
 					slurm_mutex_lock(&block_state_mutex);
 					bg_record->boot_state = 0;
 					bg_record->boot_count = 0;
 					if(remove_from_bg_list(
-						   bg_lists->job_running, 
-						   bg_record) 
+						   bg_lists->job_running,
+						   bg_record)
 					   == SLURM_SUCCESS) {
-						num_unused_cpus += 
+						num_unused_cpus +=
 							bg_record->cpu_cnt;
-					} 
+					}
 					remove_from_bg_list(
 						bg_lists->booted,
 						bg_record);
@@ -524,6 +532,12 @@ extern int update_block_list()
 			case RM_PARTITION_READY:
 				debug("block %s is ready.",
 				      bg_record->bg_block_id);
+				if(bg_record->job_ptr) {
+					bg_record->job_ptr->job_state &=
+						(~JOB_CONFIGURING);
+					last_job_update = time(NULL);
+				}
+
 				if(set_block_user(bg_record) == SLURM_ERROR) {
 					freeit = xmalloc(
 						sizeof(kill_job_struct_t));
@@ -553,29 +567,29 @@ extern int update_block_list()
 			}
 		}
 	next_block:
-		if ((rc = bridge_free_block(block_ptr)) 
+		if ((rc = bridge_free_block(block_ptr))
 		    != STATUS_OK) {
-			error("bridge_free_block(): %s", 
+			error("bridge_free_block(): %s",
 			      bg_err_str(rc));
-		}				
+		}
 	}
 	list_iterator_destroy(itr);
 	slurm_mutex_unlock(&block_state_mutex);
-	
+
 	/* kill all the jobs from unexpectedly freed blocks */
 	while((freeit = list_pop(kill_job_list))) {
 		debug2("Trying to requeue job %d", freeit->jobid);
 		lock_slurmctld(job_write_lock);
 		if((rc = job_requeue(0, freeit->jobid, -1))) {
 			error("couldn't requeue job %u, failing it: %s",
-			      freeit->jobid, 
+			      freeit->jobid,
 			      slurm_strerror(rc));
 			(void) job_fail(freeit->jobid);
 		}
 		unlock_slurmctld(job_write_lock);
 		_destroy_kill_struct(freeit);
 	}
-		
+
 #endif
 	return updated;
 }
@@ -590,10 +604,10 @@ extern int update_freeing_block_list()
 	char *name = NULL;
 	bg_record_t *bg_record = NULL;
 	ListIterator itr = NULL;
-	
-	if(!bg_lists->freeing) 
+
+	if(!bg_lists->freeing)
 		return updated;
-	
+
 	slurm_mutex_lock(&block_state_mutex);
 	itr = list_iterator_create(bg_lists->freeing);
 	while ((bg_record = (bg_record_t *) list_next(itr)) != NULL) {
@@ -601,7 +615,7 @@ extern int update_freeing_block_list()
 			continue;
 
 		name = bg_record->bg_block_id;
-		if ((rc = bridge_get_block_info(name, &block_ptr)) 
+		if ((rc = bridge_get_block_info(name, &block_ptr))
 		    != STATUS_OK) {
 			if(bg_conf->layout_mode == LAYOUT_DYNAMIC) {
 				switch(rc) {
@@ -630,12 +644,12 @@ extern int update_freeing_block_list()
 				break;
 			}
 
-			error("bridge_get_block_info(%s): %s", 
-			      name, 
+			error("bridge_get_block_info(%s): %s",
+			      name,
 			      bg_err_str(rc));
 			continue;
 		}
-				
+
 		if ((rc = bridge_get_data(block_ptr, RM_PartitionState,
 					  &state))
 		    != STATUS_OK) {
@@ -645,23 +659,23 @@ extern int update_freeing_block_list()
 			goto next_block;
 		} else if(bg_record->state != state) {
 			debug("freeing state of Block %s was %d and now is %d",
-			      bg_record->bg_block_id, 
-			      bg_record->state, 
+			      bg_record->bg_block_id,
+			      bg_record->state,
 			      state);
 
 			bg_record->state = state;
 			updated = 1;
 		}
 	next_block:
-		if ((rc = bridge_free_block(block_ptr)) 
+		if ((rc = bridge_free_block(block_ptr))
 		    != STATUS_OK) {
-			error("bridge_free_block(): %s", 
+			error("bridge_free_block(): %s",
 			      bg_err_str(rc));
 		}
 	}
 	list_iterator_destroy(itr);
 	slurm_mutex_unlock(&block_state_mutex);
-		
+
 #endif
 	return updated;
 }

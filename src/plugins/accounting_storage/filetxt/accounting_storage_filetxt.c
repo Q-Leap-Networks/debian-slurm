@@ -3,35 +3,36 @@
  *
  *  $Id: accounting_storage_filetxt.c 13061 2008-01-22 21:23:56Z da $
  *****************************************************************************
- *  Copyright (C) 2004-2008 The Regents of the University of California.
+ *  Copyright (C) 2004-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
+ *  In addition, as a special exception, the copyright holders give permission
  *  to link the code of portions of this program with the OpenSSL library under
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -60,14 +61,14 @@
  * where <application> is a description of the intended application of
  * the plugin (e.g., "jobacct" for SLURM job completion logging) and <method>
  * is a description of how this plugin satisfies that application.  SLURM will
- * only load job completion logging plugins if the plugin_type string has a 
+ * only load job completion logging plugins if the plugin_type string has a
  * prefix of "jobacct/".
  *
  * plugin_version - an unsigned 32-bit integer giving the version number
  * of the plugin.  If major and minor revisions are desired, the major
  * version number may be multiplied by a suitable magnitude constant such
  * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum versions for their plugins as the job accounting API 
+ * minimum versions for their plugins as the job accounting API
  * matures.
  */
 const char plugin_name[] = "Accounting storage FileTxt plugin";
@@ -78,7 +79,7 @@ static int		LOGFILE_FD;
 static pthread_mutex_t  logfile_lock = PTHREAD_MUTEX_INITIALIZER;
 static int              storage_init;
 /* Format of the JOB_STEP record */
-const char *_jobstep_format = 
+const char *_jobstep_format =
 "%d "
 "%u "	/* stepid */
 "%d "	/* completion status */
@@ -115,7 +116,7 @@ const char *_jobstep_format =
 "%u "	/* max pages */
 "%u "	/* max pages task */
 "%.2f "	/* ave pages */
-"%.2f "	/* min cpu */
+"%u "	/* min cpu */
 "%u "	/* min cpu task */
 "%.2f "	/* ave cpu */
 "%s "	/* step process name */
@@ -131,9 +132,9 @@ const char *_jobstep_format =
  * Print the record to the log file.
  */
 
-static int _print_record(struct job_record *job_ptr, 
+static int _print_record(struct job_record *job_ptr,
 			 time_t time, char *data)
-{ 
+{
 	static int   rc=SLURM_SUCCESS;
 	char *block_id = NULL;
 	if(!job_ptr->details) {
@@ -143,10 +144,10 @@ static int _print_record(struct job_record *job_ptr,
 	debug2("_print_record, job=%u, \"%s\"",
 	       job_ptr->job_id, data);
 #ifdef HAVE_BG
-	select_g_get_jobinfo(job_ptr->select_jobinfo, 
-			     SELECT_DATA_BLOCK_ID, 
+	select_g_select_jobinfo_get(job_ptr->select_jobinfo,
+			     SELECT_JOBDATA_BLOCK_ID,
 			     &block_id);
-		
+
 #endif
 	if(!block_id)
 		block_id = xstrdup("-");
@@ -156,7 +157,7 @@ static int _print_record(struct job_record *job_ptr,
 	if (fprintf(LOGFILE,
 		    "%u %s %d %d %u %u %s - %s\n",
 		    job_ptr->job_id, job_ptr->partition,
-		    (int)job_ptr->details->submit_time, (int)time, 
+		    (int)job_ptr->details->submit_time, (int)time,
 		    job_ptr->user_id, job_ptr->group_id, block_id, data)
 	    < 0)
 		rc=SLURM_ERROR;
@@ -176,11 +177,11 @@ static int _print_record(struct job_record *job_ptr,
 extern int init ( void )
 {
 	static int first = 1;
-	char *log_file = NULL;	
+	char *log_file = NULL;
 	int 		rc = SLURM_SUCCESS;
 	mode_t		prot = 0600;
 	struct stat	statbuf;
-	
+
 	if(slurmdbd_conf) {
 		fatal("The filetxt plugin should not "
 		      "be run from the slurmdbd.  "
@@ -200,7 +201,7 @@ extern int init ( void )
 		slurm_mutex_lock( &logfile_lock );
 		if (LOGFILE)
 			fclose(LOGFILE);
-		
+
 		if (*log_file != '/')
 			fatal("JobAcctLogfile must specify an "
 			      "absolute pathname");
@@ -214,10 +215,10 @@ extern int init ( void )
 			slurm_mutex_unlock( &logfile_lock );
 			return SLURM_ERROR;
 		} else
-			chmod(log_file, prot); 
-		
+			chmod(log_file, prot);
+
 		xfree(log_file);
-		
+
 		if (setvbuf(LOGFILE, NULL, _IOLBF, 0))
 			error("setvbuf() failed");
 		LOGFILE_FD = fileno(LOGFILE);
@@ -287,19 +288,19 @@ extern int acct_storage_p_add_associations(void *db_conn, uint32_t uid,
 	return SLURM_SUCCESS;
 }
 
-extern int acct_storage_p_add_qos(void *db_conn, uint32_t uid, 
+extern int acct_storage_p_add_qos(void *db_conn, uint32_t uid,
 				  List qos_list)
 {
 	return SLURM_SUCCESS;
 }
 
-extern int acct_storage_p_add_wckeys(void *db_conn, uint32_t uid, 
+extern int acct_storage_p_add_wckeys(void *db_conn, uint32_t uid,
 				  List wckey_list)
 {
 	return SLURM_SUCCESS;
 }
 
-extern int acct_storage_p_add_reservation(void *db_conn, 
+extern int acct_storage_p_add_reservation(void *db_conn,
 					  acct_reservation_rec_t *resv)
 {
 	return SLURM_SUCCESS;
@@ -347,7 +348,7 @@ extern List acct_storage_p_modify_wckeys(void *db_conn, uint32_t uid,
 	return SLURM_SUCCESS;
 }
 
-extern int acct_storage_p_modify_reservation(void *db_conn, 
+extern int acct_storage_p_modify_reservation(void *db_conn,
 					     acct_reservation_rec_t *resv)
 {
 	return SLURM_SUCCESS;
@@ -360,7 +361,7 @@ extern List acct_storage_p_remove_users(void *db_conn, uint32_t uid,
 }
 
 extern List acct_storage_p_remove_coord(void *db_conn, uint32_t uid,
-					List acct_list, 
+					List acct_list,
 					acct_user_cond_t *user_q)
 {
 	return SLURM_SUCCESS;
@@ -384,19 +385,19 @@ extern List acct_storage_p_remove_associations(void *db_conn, uint32_t uid,
 	return SLURM_SUCCESS;
 }
 
-extern List acct_storage_p_remove_qos(void *db_conn, uint32_t uid, 
+extern List acct_storage_p_remove_qos(void *db_conn, uint32_t uid,
 				      acct_qos_cond_t *qos_cond)
 {
 	return NULL;
 }
 
-extern List acct_storage_p_remove_wckeys(void *db_conn, uint32_t uid, 
+extern List acct_storage_p_remove_wckeys(void *db_conn, uint32_t uid,
 				      acct_wckey_cond_t *wckey_cond)
 {
 	return NULL;
 }
 
-extern int acct_storage_p_remove_reservation(void *db_conn, 
+extern int acct_storage_p_remove_reservation(void *db_conn,
 					     acct_reservation_rec_t *resv)
 {
 	return SLURM_SUCCESS;
@@ -427,6 +428,12 @@ extern List acct_storage_p_get_config(void *db_conn)
 
 extern List acct_storage_p_get_associations(void *db_conn, uid_t uid,
 					    acct_association_cond_t *assoc_q)
+{
+	return NULL;
+}
+
+extern List acct_storage_p_get_problems(void *db_conn, uid_t uid,
+					acct_association_cond_t *assoc_q)
 {
 	return NULL;
 }
@@ -464,7 +471,7 @@ extern int acct_storage_p_get_usage(void *db_conn, uid_t uid,
 	return rc;
 }
 
-extern int acct_storage_p_roll_usage(void *db_conn, 
+extern int acct_storage_p_roll_usage(void *db_conn,
 				     time_t sent_start, time_t sent_end,
 				     uint16_t archive_data)
 {
@@ -505,14 +512,14 @@ extern int clusteracct_storage_p_cluster_procs(void *db_conn,
 }
 
 extern int clusteracct_storage_p_get_usage(
-	void *db_conn, uid_t uid, 
+	void *db_conn, uid_t uid,
 	acct_cluster_rec_t *cluster_rec, int type, time_t start, time_t end)
 {
 
 	return SLURM_SUCCESS;
 }
 
-/* 
+/*
  * load into the storage the start of a job
  */
 extern int jobacct_storage_p_job_start(void *db_conn, char *cluster_name,
@@ -545,7 +552,7 @@ extern int jobacct_storage_p_job_start(void *db_conn, char *cluster_name,
 
 	if (job_ptr->name && job_ptr->name[0]) {
 		jname = xstrdup(job_ptr->name);
-		for (i=0; jname[i]; i++) 
+		for (i=0; jname[i]; i++)
 			if (isspace(jname[i]))
 				jname[i]='_';
 	} else {
@@ -575,12 +582,12 @@ extern int jobacct_storage_p_job_start(void *db_conn, char *cluster_name,
 		 nodes, account);
 
 	rc = _print_record(job_ptr, job_ptr->start_time, buf);
-	
+
 	xfree(jname);
 	return rc;
 }
 
-/* 
+/*
  * load into the storage the end of a job
  */
 extern int jobacct_storage_p_job_complete(void *db_conn,
@@ -591,7 +598,7 @@ extern int jobacct_storage_p_job_complete(void *db_conn,
 		debug("jobacct init was not called or it failed");
 		return SLURM_ERROR;
 	}
-	
+
 	debug2("jobacct_job_complete() called");
 	if (job_ptr->end_time == 0) {
 		debug("jobacct: job %u never started", job_ptr->job_id);
@@ -602,13 +609,13 @@ extern int jobacct_storage_p_job_complete(void *db_conn,
 	snprintf(buf, BUFFER_SIZE, "%d %d %d %u %u",
 		 JOB_TERMINATED,
 		 (int) (job_ptr->end_time - job_ptr->start_time),
-		 job_ptr->job_state & (~JOB_COMPLETING),
+		 job_ptr->job_state & JOB_STATE_BASE,
 		 job_ptr->requid, job_ptr->exit_code);
-	
+
 	return  _print_record(job_ptr, job_ptr->end_time, buf);
 }
 
-/* 
+/*
  * load into the storage the start of a job step
  */
 extern int jobacct_storage_p_step_start(void *db_conn,
@@ -622,7 +629,7 @@ extern int jobacct_storage_p_step_start(void *db_conn,
 #endif
 	float float_tmp = 0;
 	char *account;
-	
+
 	if(!storage_init) {
 		debug("jobacct init was not called or it failed");
 		return SLURM_ERROR;
@@ -630,24 +637,24 @@ extern int jobacct_storage_p_step_start(void *db_conn,
 
 #ifdef HAVE_BG
 	cpus = step_ptr->job_ptr->num_procs;
-	select_g_get_jobinfo(step_ptr->job_ptr->select_jobinfo, 
-			     SELECT_DATA_IONODES, 
+	select_g_select_jobinfo_get(step_ptr->job_ptr->select_jobinfo,
+			     SELECT_JOBDATA_IONODES,
 			     &ionodes);
 	if(ionodes) {
-		snprintf(node_list, BUFFER_SIZE, 
+		snprintf(node_list, BUFFER_SIZE,
 			 "%s[%s]", step_ptr->job_ptr->nodes, ionodes);
 		xfree(ionodes);
 	} else
 		snprintf(node_list, BUFFER_SIZE, "%s",
 			 step_ptr->job_ptr->nodes);
-	
+
 #else
 	if(!step_ptr->step_layout || !step_ptr->step_layout->task_cnt) {
 		cpus = step_ptr->job_ptr->total_procs;
 		snprintf(node_list, BUFFER_SIZE, "%s", step_ptr->job_ptr->nodes);
 	} else {
 		cpus = step_ptr->step_layout->task_cnt;
-		snprintf(node_list, BUFFER_SIZE, "%s", 
+		snprintf(node_list, BUFFER_SIZE, "%s",
 			 step_ptr->step_layout->node_list);
 	}
 #endif
@@ -696,7 +703,7 @@ extern int jobacct_storage_p_step_start(void *db_conn,
 		 0,	/* max pages */
 		 0,	/* max pages task */
 		 float_tmp,	/* ave pages */
-		 float_tmp,	/* min cpu */
+		 0,	/* min cpu */
 		 0,	/* min cpu task */
 		 float_tmp,	/* ave cpu */
 		 step_ptr->name,    /* step exe name */
@@ -707,11 +714,11 @@ extern int jobacct_storage_p_step_start(void *db_conn,
 		 0,	/* min cpu node */
 		 account,
 		 step_ptr->job_ptr->requid); /* requester user id */
-		 
+
 	return _print_record(step_ptr->job_ptr, step_ptr->start_time, buf);
 }
 
-/* 
+/*
  * load into the storage the end of a job step
  */
 extern int jobacct_storage_p_step_complete(void *db_conn,
@@ -729,7 +736,8 @@ extern int jobacct_storage_p_step_complete(void *db_conn,
 	char *ionodes = NULL;
 #endif
 	float ave_vsize = 0, ave_rss = 0, ave_pages = 0;
-	float ave_cpu = 0, ave_cpu2 = 0;
+	float ave_cpu = 0;
+	uint32_t ave_cpu2 = 0;
 	char *account;
 	uint32_t exit_code;
 
@@ -737,7 +745,7 @@ extern int jobacct_storage_p_step_complete(void *db_conn,
 		debug("jobacct init was not called or it failed");
 		return SLURM_ERROR;
 	}
-	
+
 	now = time(NULL);
 
 	if (jobacct == NULL) {
@@ -745,7 +753,7 @@ extern int jobacct_storage_p_step_complete(void *db_conn,
 		memset(&dummy_jobacct, 0, sizeof(dummy_jobacct));
 		jobacct = &dummy_jobacct;
 	}
-	
+
 	if ((elapsed=now-step_ptr->start_time)<0)
 		elapsed=0;	/* For *very* short jobs, if clock is wrong */
 
@@ -760,25 +768,25 @@ extern int jobacct_storage_p_step_complete(void *db_conn,
 
 #ifdef HAVE_BG
 	cpus = step_ptr->job_ptr->num_procs;
-	select_g_get_jobinfo(step_ptr->job_ptr->select_jobinfo, 
-			     SELECT_DATA_IONODES, 
+	select_g_select_jobinfo_get(step_ptr->job_ptr->select_jobinfo,
+			     SELECT_JOBDATA_IONODES,
 			     &ionodes);
 	if(ionodes) {
-		snprintf(node_list, BUFFER_SIZE, 
+		snprintf(node_list, BUFFER_SIZE,
 			 "%s[%s]", step_ptr->job_ptr->nodes, ionodes);
 		xfree(ionodes);
 	} else
-		snprintf(node_list, BUFFER_SIZE, "%s", 
+		snprintf(node_list, BUFFER_SIZE, "%s",
 			 step_ptr->job_ptr->nodes);
-	
+
 #else
 	if(!step_ptr->step_layout || !step_ptr->step_layout->task_cnt) {
 		cpus = step_ptr->job_ptr->total_procs;
 		snprintf(node_list, BUFFER_SIZE, "%s", step_ptr->job_ptr->nodes);
-	
+
 	} else {
 		cpus = step_ptr->step_layout->task_cnt;
-		snprintf(node_list, BUFFER_SIZE, "%s", 
+		snprintf(node_list, BUFFER_SIZE, "%s",
 			 step_ptr->step_layout->node_list);
 	}
 #endif
@@ -791,10 +799,10 @@ extern int jobacct_storage_p_step_complete(void *db_conn,
 		ave_pages = jobacct->tot_pages;
 		ave_pages /= cpus;
 		ave_cpu = jobacct->tot_cpu;
-		ave_cpu /= cpus;	
+		ave_cpu /= cpus;
 		ave_cpu /= 100;
 	}
- 
+
 	if(jobacct->min_cpu != (uint32_t)NO_VAL) {
 		ave_cpu2 = jobacct->min_cpu;
 		ave_cpu2 /= 100;
@@ -814,10 +822,10 @@ extern int jobacct_storage_p_step_complete(void *db_conn,
 		 cpus,                  /* number of cpus */
 		 elapsed,	        /* elapsed seconds */
 		 /* total cputime seconds */
-		 jobacct->user_cpu_sec	
+		 jobacct->user_cpu_sec
 		 + jobacct->sys_cpu_sec,
 		 /* total cputime seconds */
-		 jobacct->user_cpu_usec	
+		 jobacct->user_cpu_usec
 		 + jobacct->sys_cpu_usec,
 		 jobacct->user_cpu_sec,	/* user seconds */
 		 jobacct->user_cpu_usec,/* user microseconds */
@@ -857,11 +865,11 @@ extern int jobacct_storage_p_step_complete(void *db_conn,
 		 jobacct->min_cpu_id.nodeid,	/* min cpu task */
 		 account,
 		 step_ptr->job_ptr->requid); /* requester user id */
-		 
-	return _print_record(step_ptr->job_ptr, now, buf);	
+
+	return _print_record(step_ptr->job_ptr, now, buf);
 }
 
-/* 
+/*
  * load into the storage a suspention of a job
  */
 extern int jobacct_storage_p_suspend(void *db_conn,
@@ -875,30 +883,30 @@ extern int jobacct_storage_p_suspend(void *db_conn,
 		debug("jobacct init was not called or it failed");
 		return SLURM_ERROR;
 	}
-	
+
 	/* tell what time has passed */
 	if(!now)
 		now = job_ptr->start_time;
 	temp = now;
 	now = time(NULL);
-	
+
 	if ((elapsed=now-temp) < 0)
 		elapsed=0;	/* For *very* short jobs, if clock is wrong */
-	
+
 	/* here we are really just going for a marker in time to tell when
-	 * the process was suspended or resumed (check job state), we don't 
+	 * the process was suspended or resumed (check job state), we don't
 	 * really need to keep track of anything else */
 	snprintf(buf, BUFFER_SIZE, "%d %d %d",
 		 JOB_SUSPEND,
 		 elapsed,
-		 job_ptr->job_state & (~JOB_COMPLETING));/* job status */
-		
+		 job_ptr->job_state & JOB_STATE_BASE);/* job status */
+
 	return _print_record(job_ptr, now, buf);
 }
 
 
-/* 
- * get info from the storage 
+/*
+ * get info from the storage
  * returns List of jobacct_job_rec_t *
  * note List needs to be freed when called
  */
@@ -908,20 +916,20 @@ extern List jobacct_storage_p_get_jobs_cond(void *db_conn, uid_t uid,
 	return filetxt_jobacct_process_get_jobs(job_cond);
 }
 
-/* 
- * expire old info from the storage 
+/*
+ * expire old info from the storage
  */
 extern int jobacct_storage_p_archive(void *db_conn,
 				      acct_archive_cond_t *arch_cond)
 {
 	return filetxt_jobacct_process_archive(arch_cond);
-	
+
 }
 
-/* 
- * load old info into the storage 
+/*
+ * load old info into the storage
  */
-extern int jobacct_storage_p_archive_load(void *db_conn, 
+extern int jobacct_storage_p_archive_load(void *db_conn,
 					  acct_archive_rec_t *arch_rec)
 {
 	return SLURM_ERROR;

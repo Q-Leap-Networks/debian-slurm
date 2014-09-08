@@ -1,38 +1,38 @@
 /*****************************************************************************\
  *  opt.h - definitions for srun option processing
- *  $Id: opt.h 17903 2009-06-19 18:04:48Z jette $
+ *  $Id: opt.h 19190 2009-12-30 00:20:27Z lipari $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona1@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
+ *  In addition, as a special exception, the copyright holders give permission
  *  to link the code of portions of this program with the OpenSSL library under
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -43,6 +43,10 @@
 
 #if HAVE_CONFIG_H
 #  include "config.h"
+#endif
+
+#ifndef SYSTEM_DIMENSIONS
+#  define SYSTEM_DIMENSIONS 1
 #endif
 
 #include <time.h>
@@ -56,7 +60,6 @@
 
 #define DEFAULT_IMMEDIATE	1
 #define MAX_THREADS		60
-#define MAX_USERNAME		9
 
 #define INT_UNASSIGNED ((int)-1)
 
@@ -78,30 +81,27 @@ extern enum modes mode;
 
 typedef struct srun_options {
 
-	char *progname;		/* argv[0] of this program or 
+	char *progname;		/* argv[0] of this program or
 				 * configuration file if multi_prog */
 	bool multi_prog;	/* multiple programs to execute */
-	char user[MAX_USERNAME];/* local username		*/
+	char *user;		/* local username		*/
 	uid_t uid;		/* local uid			*/
 	gid_t gid;		/* local gid			*/
 	uid_t euid;		/* effective user --uid=user	*/
 	gid_t egid;		/* effective group --gid=group	*/
 	char *cwd;		/* current working directory	*/
 	bool cwd_set;		/* true if cwd is explicitly set */
-	
+
 	int  nprocs;		/* --nprocs=n,      -n n	*/
 	bool nprocs_set;	/* true if nprocs explicitly set */
 	int  cpus_per_task;	/* --cpus-per-task=n, -c n	*/
 	bool cpus_set;		/* true if cpus_per_task explicitly set */
 	int32_t max_threads;	/* --threads, -T (threads in srun) */
-	int32_t min_nodes;	/* --nodes=n,       -N n	*/ 
-	int32_t max_nodes;	/* --nodes=x-n,       -N x-n	*/ 
+	int32_t min_nodes;	/* --nodes=n,       -N n	*/
+	int32_t max_nodes;	/* --nodes=x-n,       -N x-n	*/
 	int32_t min_sockets_per_node; /* --sockets-per-node=n      */
-	int32_t max_sockets_per_node; /* --sockets-per-node=x-n    */
 	int32_t min_cores_per_socket; /* --cores-per-socket=n      */
-	int32_t max_cores_per_socket; /* --cores-per-socket=x-n    */
 	int32_t min_threads_per_core; /* --threads-per-core=n      */
-	int32_t max_threads_per_core; /* --threads-per-core=x-n    */
 	int32_t ntasks_per_node;   /* --ntasks-per-node=n	*/
 	int32_t ntasks_per_socket; /* --ntasks-per-socket=n	*/
 	int32_t ntasks_per_core;   /* --ntasks-per-core=n	*/
@@ -123,7 +123,7 @@ typedef struct srun_options {
 	        distribution;	/* --distribution=, -m dist	*/
         uint32_t plane_size;    /* lllp distribution -> plane_size for
 				 * when -m plane=<# of lllp per
-				 * plane> */      
+				 * plane> */
 	char *cmd_name;		/* name of command to execute	*/
 	char *job_name;		/* --job-name=,     -J name	*/
 	bool job_name_set_cmd;	/* true if job_name set by cmd line option */
@@ -135,7 +135,7 @@ typedef struct srun_options {
 	int nice;		/* --nice			*/
 	char *account;		/* --account, -U acct_name	*/
 	char *comment;		/* --comment			*/
-
+	char *qos;		/* --qos			*/
 	char *ofname;		/* --output -o filename         */
 	char *ifname;		/* --input  -i filename         */
 	char *efname;		/* --error, -e filename         */
@@ -145,10 +145,12 @@ typedef struct srun_options {
 	bool join;		/* --join, 	    -j		*/
 
 	/* no longer need these, they are set globally : 	*/
-	/*int verbose;*/	/* -v, --verbose		*/	
+	/*int verbose;*/	/* -v, --verbose		*/
 	/*int debug;*/		/* -d, --debug			*/
 
 	int immediate;		/* -I, --immediate=secs      	*/
+	uint16_t warn_signal;	/* --signal=<int>@<time>	*/
+	uint16_t warn_time;	/* --signal=<int>@<time>	*/
 
 	bool hold;		/* --hold, -H			*/
 	bool labelio;		/* --label-output, -l		*/
@@ -174,9 +176,6 @@ typedef struct srun_options {
 
 	/* constraint options */
 	int32_t job_min_cpus;	/* --mincpus=n			*/
-	int32_t job_min_sockets;/* --minsockets=n		*/
-	int32_t job_min_cores;	/* --mincores=n			*/
-	int32_t job_min_threads;/* --minthreads=n		*/
 	int32_t job_min_memory;	/* --mem=n			*/
 	int32_t mem_per_cpu;	/* --mem-per-cpu=n		*/
 	long job_min_tmp_disk;	/* --tmp=n			*/
@@ -217,22 +216,28 @@ typedef struct srun_options {
 	char **argv;		/* left over on command line	*/
 	char *wckey;            /* --wckey workload characterization key */
 	char *reservation;      /* --reservation		*/
+	char **spank_job_env;	/* SPANK controlled environment for job
+				 * Prolog and Epilog		*/
+	int spank_job_env_size;	/* size of spank_job_env	*/
 } opt_t;
 
 extern opt_t opt;
 
-/* return whether any constraints were specified by the user 
+extern int error_exit;		/* exit code for slurm errors */
+extern int immediate_exit;	/* exit code for --imediate option & busy */
+
+/* return whether any constraints were specified by the user
  * (if new constraints are added above, might want to add them to this
  *  macro or move this to a function if it gets a little complicated)
  */
-#define constraints_given() opt.job_min_cpus     != NO_VAL ||\
-			    opt.job_min_memory   != NO_VAL ||\
-			    opt.job_max_memory   != NO_VAL ||\
-			    opt.job_min_tmp_disk != NO_VAL ||\
-			    opt.job_min_sockets  != NO_VAL ||\
-			    opt.job_min_cores    != NO_VAL ||\
-			    opt.job_min_threads  != NO_VAL ||\
-			    opt.contiguous   
+#define constraints_given() ((opt.job_min_cpus     != NO_VAL) || \
+			     (opt.job_min_memory   != NO_VAL) || \
+			     (opt.job_max_memory   != NO_VAL) || \
+			     (opt.job_min_tmp_disk != NO_VAL) || \
+			     (opt.job_min_sockets  != NO_VAL) || \
+			     (opt.job_min_cores    != NO_VAL) || \
+			     (opt.job_min_threads  != NO_VAL) || \
+			     (opt.contiguous))
 
 /* process options:
  * 1. set defaults
@@ -241,5 +246,12 @@ extern opt_t opt;
  * 4. perform some verification that options are reasonable
  */
 int initialize_and_process_args(int argc, char *argv[]);
+
+/* external functions available for SPANK plugins to modify the environment
+ * exported to the SLURM Prolog and Epilog programs */
+extern char *spank_get_job_env(const char *name);
+extern int   spank_set_job_env(const char *name, const char *value,
+			       int overwrite);
+extern int   spank_unset_job_env(const char *name);
 
 #endif	/* _HAVE_OPT_H */

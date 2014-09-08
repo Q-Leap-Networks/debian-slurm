@@ -6,32 +6,32 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
+ *  In addition, as a special exception, the copyright holders give permission
  *  to link the code of portions of this program with the OpenSSL library under
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -44,10 +44,10 @@
 #include "src/common/stepd_api.h"
 
 static bool	_in_node_bit_list(int inx, int *node_list_array);
-static int	_scontrol_load_jobs(job_info_msg_t ** job_buffer_pptr, 
+static int	_scontrol_load_jobs(job_info_msg_t ** job_buffer_pptr,
 				    uint32_t job_id);
 /*
- * Determine if a node index is in a node list pair array. 
+ * Determine if a node index is in a node list pair array.
  * RET -  true if specified index is in the array
  */
 static bool
@@ -70,8 +70,8 @@ _in_node_bit_list(int inx, int *node_list_array)
 }
 
 /* Load current job table information into *job_buffer_pptr */
-static int 
-_scontrol_load_jobs(job_info_msg_t ** job_buffer_pptr, uint32_t job_id) 
+static int
+_scontrol_load_jobs(job_info_msg_t ** job_buffer_pptr, uint32_t job_id)
 {
 	int error_code;
 	static job_info_msg_t *old_job_info_ptr = NULL;
@@ -82,11 +82,15 @@ _scontrol_load_jobs(job_info_msg_t ** job_buffer_pptr, uint32_t job_id)
 	if (all_flag)
 		show_flags |= SHOW_ALL;
 
+	if (detail_flag)
+		show_flags |= SHOW_DETAIL;
+
 	if (old_job_info_ptr) {
 		if (last_show_flags != show_flags)
 			old_job_info_ptr->last_update = (time_t) 0;
 		if (job_id) {
-			error_code = slurm_load_job(&job_info_ptr, job_id);
+			error_code = slurm_load_job(&job_info_ptr, job_id,
+						    show_flags);
 		} else {
 			error_code = slurm_load_jobs(
 					old_job_info_ptr->last_update,
@@ -101,7 +105,7 @@ _scontrol_load_jobs(job_info_msg_t ** job_buffer_pptr, uint32_t job_id)
  				printf ("slurm_load_jobs no change in data\n");
 		}
 	} else if (job_id) {
-		error_code = slurm_load_job(&job_info_ptr, job_id);
+		error_code = slurm_load_job(&job_info_ptr, job_id, show_flags);
 	} else {
 		error_code = slurm_load_jobs((time_t) NULL, &job_info_ptr,
 					     show_flags);
@@ -118,8 +122,8 @@ _scontrol_load_jobs(job_info_msg_t ** job_buffer_pptr, uint32_t job_id)
 	return error_code;
 }
 
-/* 
- * scontrol_pid_info - given a local process id, print the corresponding 
+/*
+ * scontrol_pid_info - given a local process id, print the corresponding
  *	slurm job id and its expected end time
  * IN job_pid - the local process id of interest
  */
@@ -154,10 +158,10 @@ scontrol_pid_info(pid_t job_pid)
 }
 
 /*
- * scontrol_print_completing - print jobs in completing state and 
+ * scontrol_print_completing - print jobs in completing state and
  *	associated nodes in COMPLETING or DOWN state
  */
-extern void	
+extern void
 scontrol_print_completing (void)
 {
 	int error_code, i;
@@ -173,7 +177,7 @@ scontrol_print_completing (void)
 			slurm_perror ("slurm_load_jobs error");
 		return;
 	}
-	/* Must load all nodes including hidden for cross-index 
+	/* Must load all nodes including hidden for cross-index
 	 * from job's node_inx to node table to work */
 	/*if (all_flag)		Always set this flag */
 		show_flags |= SHOW_ALL;
@@ -189,18 +193,17 @@ scontrol_print_completing (void)
 	job_info = job_info_msg->job_array;
 	for (i=0; i<job_info_msg->record_count; i++) {
 		if (job_info[i].job_state & JOB_COMPLETING)
-			scontrol_print_completing_job(&job_info[i], 
+			scontrol_print_completing_job(&job_info[i],
 					node_info_msg);
 	}
 }
 
 extern void
-scontrol_print_completing_job(job_info_t *job_ptr, 
+scontrol_print_completing_job(job_info_t *job_ptr,
 		node_info_msg_t *node_info_msg)
 {
 	int i;
 	node_info_t *node_info;
-	uint16_t node_state, base_state;
 	hostlist_t all_nodes, comp_nodes, down_nodes;
 	char node_buf[MAXHOSTRANGELEN];
 
@@ -208,16 +211,14 @@ scontrol_print_completing_job(job_info_t *job_ptr,
 	comp_nodes = hostlist_create("");
 	down_nodes = hostlist_create("");
 
-	node_info = node_info_msg->node_array;
 	for (i=0; i<node_info_msg->record_count; i++) {
-		node_state = node_info[i].node_state;
-		base_state = node_info[i].node_state & NODE_STATE_BASE;
-		if ((node_state & NODE_STATE_COMPLETING) && 
+		node_info = &(node_info_msg->node_array[i]);
+		if (IS_NODE_COMPLETING(node_info) &&
 		    (_in_node_bit_list(i, job_ptr->node_inx)))
-			hostlist_push_host(comp_nodes, node_info[i].name);
-		else if ((base_state == NODE_STATE_DOWN) &&
-			 (hostlist_find(all_nodes, node_info[i].name) != -1))
-			hostlist_push_host(down_nodes, node_info[i].name);
+			hostlist_push_host(comp_nodes, node_info->name);
+		else if (IS_NODE_DOWN(node_info) &&
+			 (hostlist_find(all_nodes, node_info->name) != -1))
+			hostlist_push_host(down_nodes, node_info->name);
 	}
 
 	fprintf(stdout, "JobId=%u ", job_ptr->job_id);
@@ -238,8 +239,8 @@ scontrol_print_completing_job(job_info_t *job_ptr,
  * scontrol_print_job - print the specified job's information
  * IN job_id - job's id or NULL to print information about all jobs
  */
-extern void 
-scontrol_print_job (char * job_id_str) 
+extern void
+scontrol_print_job (char * job_id_str)
 {
 	int error_code = SLURM_SUCCESS, i, print_cnt = 0;
 	uint32_t job_id = 0;
@@ -256,12 +257,12 @@ scontrol_print_job (char * job_id_str)
 			slurm_perror ("slurm_load_jobs error");
 		return;
 	}
-	
+
 	if (quiet_flag == -1) {
 		char time_str[32];
-		slurm_make_time_str ((time_t *)&job_buffer_ptr->last_update, 
+		slurm_make_time_str ((time_t *)&job_buffer_ptr->last_update,
 				     time_str, sizeof(time_str));
-		printf ("last_update_time=%s, records=%d\n", 
+		printf ("last_update_time=%s, records=%d\n",
 			time_str, job_buffer_ptr->record_count);
 	}
 
@@ -288,11 +289,11 @@ scontrol_print_job (char * job_id_str)
  * IN job_step_id_str - job step's id or NULL to print information
  *	about all job steps
  */
-extern void 
+extern void
 scontrol_print_step (char *job_step_id_str)
 {
 	int error_code, i;
-	uint32_t job_id = 0, step_id = 0, step_id_set = 0;
+	uint32_t job_id = NO_VAL, step_id = NO_VAL;
 	char *next_str;
 	job_step_info_response_msg_t *job_step_info_ptr;
 	job_step_info_t * job_step_ptr;
@@ -303,10 +304,8 @@ scontrol_print_step (char *job_step_id_str)
 
 	if (job_step_id_str) {
 		job_id = (uint32_t) strtol (job_step_id_str, &next_str, 10);
-		if (next_str[0] == '.') {
+		if (next_str[0] == '.')
 			step_id = (uint32_t) strtol (&next_str[1], NULL, 10);
-			step_id_set = 1;
-		}
 	}
 
 	if (all_flag)
@@ -316,7 +315,7 @@ scontrol_print_step (char *job_step_id_str)
 	    (last_job_id == job_id) && (last_step_id == step_id)) {
 		if (last_show_flags != show_flags)
 			old_job_step_info_ptr->last_update = (time_t) 0;
-		error_code = slurm_get_job_steps ( 
+		error_code = slurm_get_job_steps (
 					old_job_step_info_ptr->last_update,
 					job_id, step_id, &job_step_info_ptr,
 					show_flags);
@@ -336,7 +335,7 @@ scontrol_print_step (char *job_step_id_str)
 					old_job_step_info_ptr);
 			old_job_step_info_ptr = NULL;
 		}
-		error_code = slurm_get_job_steps ( (time_t) 0, job_id, step_id, 
+		error_code = slurm_get_job_steps ( (time_t) 0, job_id, step_id,
 				&job_step_info_ptr, show_flags);
 	}
 
@@ -354,18 +353,15 @@ scontrol_print_step (char *job_step_id_str)
 
 	if (quiet_flag == -1) {
 		char time_str[32];
-		slurm_make_time_str ((time_t *)&job_step_info_ptr->last_update, 
+		slurm_make_time_str ((time_t *)&job_step_info_ptr->last_update,
 			             time_str, sizeof(time_str));
-		printf ("last_update_time=%s, records=%d\n", 
+		printf ("last_update_time=%s, records=%d\n",
 			time_str, job_step_info_ptr->job_step_count);
 	}
 
 	job_step_ptr = job_step_info_ptr->job_steps ;
 	for (i = 0; i < job_step_info_ptr->job_step_count; i++) {
-		if (step_id_set && (step_id == 0) && 
-		    (job_step_ptr[i].step_id != 0)) 
-			continue;
-		slurm_print_job_step_info (stdout, & job_step_ptr[i], 
+		slurm_print_job_step_info (stdout, & job_step_ptr[i],
 		                           one_liner ) ;
 	}
 
@@ -373,7 +369,7 @@ scontrol_print_step (char *job_step_id_str)
 		if (job_step_id_str) {
 			exit_code = 1;
 			if (quiet_flag != 1)
-				printf ("Job step %u.%u not found\n", 
+				printf ("Job step %u.%u not found\n",
 				        job_id, step_id);
 		} else if (quiet_flag != 1)
 			printf ("No job steps in the system\n");
@@ -511,7 +507,7 @@ _list_pids_all_steps(const char *node_name, uint32_t jobid)
 	steps = stepd_available(NULL, node_name);
 	if (!steps || list_count(steps) == 0) {
 		fprintf(stderr, "Job %u does not exist on this node.\n", jobid);
-		if (steps) 
+		if (steps)
 			list_destroy(steps);
 		exit_code = 1;
 		return;
@@ -560,7 +556,7 @@ _list_pids_all_jobs(const char *node_name)
 	list_destroy(steps);
 }
 
-/* 
+/*
  * scontrol_list_pids - given a slurmd job ID or job ID + step ID,
  *	print the process IDs of the processes each job step (or
  *	just the specified step ID).
@@ -612,7 +608,7 @@ scontrol_print_hosts (char * node_list)
 	}
 	hl = hostlist_create(node_list);
 	if (!hl) {
-		slurm_perror("hostlist_create");
+		fprintf(stderr, "Invalid hostlist: %s\n", node_list);
 		return;
 	}
 	while ((host = hostlist_shift(hl))) {
@@ -629,7 +625,7 @@ _reformat_hostlist(char *hostlist)
 	int i, o;
 	for (i=0; (hostlist[i] != '\0'); i++) {
 		if (hostlist[i] == '\n')
-			hostlist[i] = ','; 
+			hostlist[i] = ',';
 	}
 
 	o = 0;
@@ -642,7 +638,7 @@ _reformat_hostlist(char *hostlist)
 }
 
 /*
- * scontrol_encode_hostlist - given a list of hostnames or the pathname 
+ * scontrol_encode_hostlist - given a list of hostnames or the pathname
  *	of a file containing hostnames, translate them into a hostlist
  *	expression
  */

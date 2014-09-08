@@ -1,5 +1,5 @@
 /*****************************************************************************\
- *  srun.c - user interface to allocate resources, submit jobs, and execute 
+ *  srun.c - user interface to allocate resources, submit jobs, and execute
  *	parallel jobs.
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
@@ -7,32 +7,32 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
+ *  In addition, as a special exception, the copyright holders give permission
  *  to link the code of portions of this program with the OpenSSL library under
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -62,7 +62,6 @@
 #include <sys/wait.h>
 #include <ctype.h>
 #include <fcntl.h>
-#include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -85,6 +84,7 @@
 #include "src/common/slurm_rlimits_info.h"
 #include "src/common/plugstack.h"
 #include "src/common/read_config.h"
+#include "src/common/uid.h"
 
 #include "src/srun/allocate.h"
 #include "src/srun/srun_job.h"
@@ -104,7 +104,7 @@
 #endif /* defined HAVE_DECL_STRSIGNAL && !HAVE_DECL_STRSIGNAL */
 
 #ifndef OPEN_MPI_PORT_ERROR
-/* This exit code indicates the launched Open MPI tasks could 
+/* This exit code indicates the launched Open MPI tasks could
  *	not open the reserved port. It was already open by some
  *	other process. */
 #define OPEN_MPI_PORT_ERROR 108
@@ -143,6 +143,7 @@ static void  _run_srun_prolog (srun_job_t *job);
 static void  _run_srun_epilog (srun_job_t *job);
 static int   _run_srun_script (srun_job_t *job, char *script);
 static void  _set_cpu_env_var(resource_allocation_response_msg_t *resp);
+static void  _set_exit_code(void);
 static int   _setup_signals();
 static void  _step_opt_exclusive(void);
 static void  _set_stdio_fds(srun_job_t *job, slurm_step_io_fds_t *cio_fds);
@@ -153,6 +154,26 @@ static int   _slurm_debug_env_val (void);
 static void  _task_start(launch_tasks_response_msg_t *msg);
 static void  _task_finish(task_exit_msg_t *msg);
 static char *_uint16_array_to_str(int count, const uint16_t *array);
+
+/*
+ * from libvirt-0.6.2 GPL2
+ *
+ * console.c: A dumb serial console client
+ *
+ * Copyright (C) 2007, 2008 Red Hat, Inc.
+ *
+ */
+#ifndef HAVE_CFMAKERAW
+void cfmakeraw(struct termios *attr)
+{
+	attr->c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP
+				| INLCR | IGNCR | ICRNL | IXON);
+	attr->c_oflag &= ~OPOST;
+	attr->c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
+	attr->c_cflag &= ~(CSIZE | PARENB);
+	attr->c_cflag |= CS8;
+}
+#endif
 
 int srun(int ac, char **av)
 {
@@ -176,6 +197,7 @@ int srun(int ac, char **av)
 	debug_level = _slurm_debug_env_val();
 	logopt.stderr_level += debug_level;
 	log_init(xbasename(av[0]), logopt, 0, NULL);
+	_set_exit_code();
 
 /* 	xsignal(SIGQUIT, _ignore_signal); */
 /* 	xsignal(SIGPIPE, _ignore_signal); */
@@ -185,7 +207,8 @@ int srun(int ac, char **av)
 	/* Initialize plugin stack, read options from plugins, etc.
 	 */
 	if (spank_init(NULL) < 0) {
-		fatal("Plug-in initialization failed");
+		error("Plug-in initialization failed");
+		exit(error_exit);
 		_define_symbols();
 	}
 
@@ -193,7 +216,7 @@ int srun(int ac, char **av)
 	 */
 	if (atexit((void (*) (void)) spank_fini) < 0)
 		error("Failed to register atexit handler for plugins: %m");
-		
+
 	/* set default options, process commandline arguments, and
 	 * verify some basic values
 	 */
@@ -203,9 +226,11 @@ int srun(int ac, char **av)
 	}
 	record_ppid();
 
-	if (spank_init_post_opt() < 0)
-		fatal("Plugin stack post-option processing failed.");
-	
+	if (spank_init_post_opt() < 0) {
+		error("Plugin stack post-option processing failed.");
+		exit(error_exit);
+	}
+
 	/* reinit log with new verbosity (if changed by command line)
 	 */
 	if (_verbose || opt.quiet) {
@@ -223,7 +248,7 @@ int srun(int ac, char **av)
 	(void) _set_rlimit_env();
 	_set_prio_process_env();
 	(void) _set_umask_env();
-	
+
 	/* Set up slurmctld message handler */
 	slurmctld_msg_init();
 
@@ -240,12 +265,12 @@ int srun(int ac, char **av)
 
 	} else if (opt.no_alloc) {
 		info("do not allocate resources");
-		job = job_create_noalloc(); 
+		job = job_create_noalloc();
 		if (create_job_step(job, false) < 0) {
-			exit(1);
+			exit(error_exit);
 		}
 	} else if ((resp = existing_allocation())) {
-		
+
 		job_id = resp->job_id;
 		if (opt.alloc_nodelist == NULL)
                        opt.alloc_nodelist = xstrdup(resp->node_list);
@@ -260,25 +285,25 @@ int srun(int ac, char **av)
 				" are already allocated.");
 
 		if (!job || create_job_step(job, false) < 0)
-			exit(1);
+			exit(error_exit);
 	} else {
 		/* Combined job allocation and job step launch */
 #ifdef HAVE_FRONT_END
 		uid_t my_uid = getuid();
-		if ((my_uid != 0)
-		&&  (my_uid != slurm_get_slurm_user_id())) {
+		if ((my_uid != 0) &&
+		    (my_uid != slurm_get_slurm_user_id())) {
 			error("srun task launch not supported on this system");
-			exit(1);
+			exit(error_exit);
 		}
 #endif
-	
-		if ( !(resp = allocate_nodes()) ) 
-			exit(1);
+
+		if ( !(resp = allocate_nodes()) )
+			exit(error_exit);
 		got_alloc = 1;
 		_print_job_information(resp);
 		_set_cpu_env_var(resp);
 		job = job_create_allocation(resp);
-		
+
 		opt.exclusive = false;	/* not applicable for this step */
 		if (!opt.job_name_set_cmd && opt.job_name_set_env) {
 			/* use SLURM_JOB_NAME env var */
@@ -286,9 +311,9 @@ int srun(int ac, char **av)
 		}
 		if (!job || create_job_step(job, true) < 0) {
 			slurm_complete_job(resp->job_id, 1);
-			exit(1);
+			exit(error_exit);
 		}
-		
+
 		slurm_free_resource_allocation_response_msg(resp);
 	}
 
@@ -322,7 +347,7 @@ int srun(int ac, char **av)
 	env->batch_flag = 0;
 	if (job) {
 		uint16_t *tasks = NULL;
-		slurm_step_ctx_get(job->step_ctx, SLURM_STEP_CTX_TASKS, 
+		slurm_step_ctx_get(job->step_ctx, SLURM_STEP_CTX_TASKS,
 				   &tasks);
 
 		env->select_jobinfo = job->select_jobinfo;
@@ -337,7 +362,7 @@ int srun(int ac, char **av)
 		int fd = STDIN_FILENO;
 
 		/* Save terminal settings for restore */
-		tcgetattr(fd, &termdefaults); 
+		tcgetattr(fd, &termdefaults);
 		tcgetattr(fd, &term);
 		/* Set raw mode on local tty */
 		cfmakeraw(&term);
@@ -354,7 +379,7 @@ int srun(int ac, char **av)
 	setup_env(env, opt.preserve_env);
 	xfree(env->task_count);
 	xfree(env);
-	
+
  re_launch:
 	task_state = task_state_create(opt.nprocs);
 	slurm_step_launch_params_t_init(&launch_params);
@@ -374,19 +399,18 @@ int srun(int ac, char **av)
 	launch_params.cpu_bind = opt.cpu_bind;
 	launch_params.cpu_bind_type = opt.cpu_bind_type;
 	launch_params.mem_bind = opt.mem_bind;
-	launch_params.mem_bind_type = opt.mem_bind_type;	
+	launch_params.mem_bind_type = opt.mem_bind_type;
 	launch_params.open_mode = opt.open_mode;
 	if (opt.acctg_freq >= 0)
 		launch_params.acctg_freq = opt.acctg_freq;
 	launch_params.pty = opt.pty;
-	launch_params.max_sockets	= opt.max_sockets_per_node;
-	launch_params.max_cores		= opt.max_cores_per_socket;
-	launch_params.max_threads	= opt.max_threads_per_core;
 	launch_params.cpus_per_task	= opt.cpus_per_task;
 	launch_params.task_dist         = opt.distribution;
 	launch_params.ckpt_dir		= opt.ckpt_dir;
 	launch_params.restart_dir       = opt.restart_dir;
 	launch_params.preserve_env      = opt.preserve_env;
+	launch_params.spank_job_env     = opt.spank_job_env;
+	launch_params.spank_job_env_size = opt.spank_job_env_size;
 	/* job structure should now be filled in */
 	_setup_signals();
 
@@ -408,12 +432,12 @@ int srun(int ac, char **av)
 	if (_call_spank_local_user (job) < 0) {
 		error("Failure in local plugin stack");
 		slurm_step_launch_abort(job->step_ctx);
-		exit(1);
+		exit(error_exit);
 	}
 
 	update_job_state(job, SRUN_JOB_LAUNCHING);
 	launch_start_time = time(NULL);
-	if (slurm_step_launch(job->step_ctx, &launch_params, &callbacks) != 
+	if (slurm_step_launch(job->step_ctx, &launch_params, &callbacks) !=
 	    SLURM_SUCCESS) {
 		error("Application launch failed: %m");
 		global_rc = 1;
@@ -445,10 +469,10 @@ int srun(int ac, char **av)
 		slurm_step_ctx_destroy(job->step_ctx);
 		if (got_alloc) {
 			if (create_job_step(job, true) < 0)
-				exit(1);
+				exit(error_exit);
 		} else {
 			if (create_job_step(job, false) < 0)
-				exit(1);
+				exit(error_exit);
 		}
 		task_state_destroy(task_state);
 		goto re_launch;
@@ -560,11 +584,11 @@ static char *_uint16_array_to_str(int array_len, const uint16_t *array)
 		}
 		previous = 0;
 	}
-	
+
 	return str;
 }
 
-static void 
+static void
 _print_job_information(resource_allocation_response_msg_t *resp)
 {
 	int i;
@@ -599,13 +623,13 @@ static int _set_umask_env(void)
 	mask = (int)umask(0);
 	umask(mask);
 
-	sprintf(mask_char, "0%d%d%d", 
+	sprintf(mask_char, "0%d%d%d",
 		((mask>>6)&07), ((mask>>3)&07), mask&07);
 	if (setenvf(NULL, "SLURM_UMASK", "%s", mask_char) < 0) {
 		error ("unable to set SLURM_UMASK in environment");
 		return SLURM_FAILURE;
 	}
-	debug ("propagating UMASK=%s", mask_char); 
+	debug ("propagating UMASK=%s", mask_char);
 	return SLURM_SUCCESS;
 }
 
@@ -637,6 +661,28 @@ static void  _set_prio_process_env(void)
 	debug ("propagating SLURM_PRIO_PROCESS=%d", retval);
 }
 
+static void _set_exit_code(void)
+{
+	int i;
+	char *val;
+
+	if ((val = getenv("SLURM_EXIT_ERROR"))) {
+		i = atoi(val);
+		if (i == 0)
+			error("SLURM_EXIT_ERROR has zero value");
+		else
+			error_exit = i;
+	}
+
+	if ((val = getenv("SLURM_EXIT_IMMEDIATE"))) {
+		i = atoi(val);
+		if (i == 0)
+			error("SLURM_EXIT_IMMEDIATE has zero value");
+		else
+			immediate_exit = i;
+	}
+}
+
 static void _set_cpu_env_var(resource_allocation_response_msg_t *resp)
 {
 	char *tmp;
@@ -651,9 +697,9 @@ static void _set_cpu_env_var(resource_allocation_response_msg_t *resp)
 		error("unable to set SLURM_JOB_CPUS_PER_NODE in environment");
 	xfree(tmp);
 	return;
-} 
+}
 
-/* Set SLURM_RLIMIT_* environment variables with current resource 
+/* Set SLURM_RLIMIT_* environment variables with current resource
  * limit values, reset RLIMIT_NOFILE to maximum possible value */
 static int _set_rlimit_env(void)
 {
@@ -664,8 +710,10 @@ static int _set_rlimit_env(void)
 	slurm_rlimits_info_t *rli;
 
 	/* Modify limits with any command-line options */
-	if (opt.propagate && parse_rlimits( opt.propagate, PROPAGATE_RLIMITS))
-		fatal( "--propagate=%s is not valid.", opt.propagate );
+	if (opt.propagate && parse_rlimits( opt.propagate, PROPAGATE_RLIMITS)){
+		error( "--propagate=%s is not valid.", opt.propagate );
+		exit(error_exit);
+	}
 
 	for (rli = get_slurm_rlimits_info(); rli->name != NULL; rli++ ) {
 
@@ -677,7 +725,7 @@ static int _set_rlimit_env(void)
 			rc = SLURM_FAILURE;
 			continue;
 		}
-		
+
 		cur = (unsigned long) rlim->rlim_cur;
 		snprintf(name, sizeof(name), "SLURM_RLIMIT_%s", rli->name);
 		if (opt.propagate && rli->propagate_flag == PROPAGATE_RLIMITS)
@@ -687,17 +735,17 @@ static int _set_rlimit_env(void)
 			format = "U%lu";
 		else
 			format = "%lu";
-		
+
 		if (setenvf (NULL, name, format, cur) < 0) {
 			error ("unable to set %s in environment", name);
 			rc = SLURM_FAILURE;
 			continue;
 		}
-		
+
 		debug ("propagating RLIMIT_%s=%lu", rli->name, cur);
 	}
 
-	/* 
+	/*
 	 *  Now increase NOFILE to the max available for this srun
 	 */
 	if (getrlimit (RLIMIT_NOFILE, rlim) < 0)
@@ -705,7 +753,7 @@ static int _set_rlimit_env(void)
 
 	if (rlim->rlim_cur < rlim->rlim_max) {
 		rlim->rlim_cur = rlim->rlim_max;
-		if (setrlimit (RLIMIT_NOFILE, rlim) < 0) 
+		if (setrlimit (RLIMIT_NOFILE, rlim) < 0)
 			return (error ("Unable to increase max no. files: %m"));
 	}
 
@@ -714,7 +762,11 @@ static int _set_rlimit_env(void)
 
 static int _become_user (void)
 {
-	struct passwd *pwd = getpwuid (opt.uid);
+	char *user = uid_to_string(opt.uid);
+	gid_t gid = gid_from_uid(opt.uid);
+
+	if (strcmp(user, "nobody") == 0)
+		return (error ("Invalid user id %u: %m", opt.uid));
 
 	if (opt.uid == getuid ())
 		return (0);
@@ -722,7 +774,8 @@ static int _become_user (void)
 	if ((opt.egid != (gid_t) -1) && (setgid (opt.egid) < 0))
 		return (error ("setgid: %m"));
 
-	initgroups (pwd->pw_name, pwd->pw_gid); /* Ignore errors */
+	initgroups (user, gid); /* Ignore errors */
+	xfree(user);
 
 	if (setuid (opt.uid) < 0)
 		return (error ("setuid: %m"));
@@ -803,7 +856,7 @@ _is_local_file (fname_t *fname)
 {
 	if (fname->name == NULL)
 		return 1;
-	
+
 	if (fname->taskid != -1)
 		return 1;
 
@@ -834,12 +887,15 @@ _set_stdio_fds(srun_job_t *job, slurm_step_io_fds_t *cio_fds)
 	 * create stdin file descriptor
 	 */
 	if (_is_local_file(job->ifname)) {
-		if ((job->ifname->name == NULL) || (job->ifname->taskid != -1)) {
+		if ((job->ifname->name == NULL) ||
+		    (job->ifname->taskid != -1)) {
 			cio_fds->in.fd = STDIN_FILENO;
 		} else {
 			cio_fds->in.fd = open(job->ifname->name, O_RDONLY);
-			if (cio_fds->in.fd == -1)
-				fatal("Could not open stdin file: %m");
+			if (cio_fds->in.fd == -1) {
+				error("Could not open stdin file: %m");
+				exit(error_exit);
+			}
 		}
 		if (job->ifname->type == IO_ONE) {
 			cio_fds->in.taskid = job->ifname->taskid;
@@ -853,13 +909,16 @@ _set_stdio_fds(srun_job_t *job, slurm_step_io_fds_t *cio_fds)
 	 * create stdout file descriptor
 	 */
 	if (_is_local_file(job->ofname)) {
-		if ((job->ofname->name == NULL) || (job->ofname->taskid != -1)) {
+		if ((job->ofname->name == NULL) ||
+		    (job->ofname->taskid != -1)) {
 			cio_fds->out.fd = STDOUT_FILENO;
 		} else {
 			cio_fds->out.fd = open(job->ofname->name,
 					       file_flags, 0644);
-			if (cio_fds->out.fd == -1)
-				fatal("Could not open stdout file: %m");
+			if (cio_fds->out.fd == -1) {
+				error("Could not open stdout file: %m");
+				exit(error_exit);
+			}
 		}
 		if (job->ofname->name != NULL
 		    && job->efname->name != NULL
@@ -877,25 +936,29 @@ _set_stdio_fds(srun_job_t *job, slurm_step_io_fds_t *cio_fds)
 		cio_fds->err.fd = cio_fds->out.fd;
 		cio_fds->err.taskid = cio_fds->out.taskid;
 	} else if (_is_local_file(job->efname)) {
-		if ((job->efname->name == NULL) || (job->efname->taskid != -1)) {
+		if ((job->efname->name == NULL) ||
+		    (job->efname->taskid != -1)) {
 			cio_fds->err.fd = STDERR_FILENO;
 		} else {
 			cio_fds->err.fd = open(job->efname->name,
 					       file_flags, 0644);
-			if (cio_fds->err.fd == -1)
-				fatal("Could not open stderr file: %m");
+			if (cio_fds->err.fd == -1) {
+				error("Could not open stderr file: %m");
+				exit(error_exit);
+			}
 		}
 	}
 }
 
 /* Plugins must be able to resolve symbols.
- * Since srun statically links with src/api/libslurmhelper rather than 
- * dynamicaly linking with libslurm, we need to reference all needed 
- * symbols within srun. None of the functions below are actually 
+ * Since srun statically links with src/api/libslurmhelper rather than
+ * dynamicaly linking with libslurm, we need to reference all needed
+ * symbols within srun. None of the functions below are actually
  * used, but we need to load the symbols. */
 static void _define_symbols(void)
 {
-	slurm_signal_job_step(0,0,0);	/* needed by mvapich and mpichgm */
+	/* needed by mvapich and mpichgm */
+	slurm_signal_job_step(NO_VAL, NO_VAL, 0);
 }
 
 static void _pty_restore(void)
@@ -915,12 +978,18 @@ static void _step_opt_exclusive(void)
 		opt.min_nodes = 1;
 		opt.max_nodes = 0;
 	}
-	if (!opt.nprocs_set)
-		fatal("--ntasks must be set with --exclusive");
-	if (opt.relative_set)
-		fatal("--relative disabled, incompatible with --exclusive");
-	if (opt.exc_nodes)
-		fatal("--exclude is incompatible with --exclusive");
+	if (!opt.nprocs_set) {
+		error("--ntasks must be set with --exclusive");
+		exit(error_exit);
+	}
+	if (opt.relative_set) {
+		error("--relative disabled, incompatible with --exclusive");
+		exit(error_exit);
+	}
+	if (opt.exc_nodes) {
+		error("--exclude is incompatible with --exclusive");
+		exit(error_exit);
+	}
 }
 
 static void
@@ -990,7 +1059,7 @@ _hostset_to_string(hostset_t hs)
 }
 
 /* Convert an array of task IDs into a list of host names
- * RET: the string, caller must xfree() this value */ 
+ * RET: the string, caller must xfree() this value */
 static char *
 _task_ids_to_host_list(int ntasks, uint32_t taskids[])
 {
@@ -1022,7 +1091,7 @@ _task_ids_to_host_list(int ntasks, uint32_t taskids[])
 
 /* Convert an array of task IDs into a string.
  * RET: the string, caller must xfree() this value
- * NOTE: the taskids array is not necessarily in numeric order, 
+ * NOTE: the taskids array is not necessarily in numeric order,
  *       so we use existing bitmap functions to format */
 static char *
 _task_array_to_string(int ntasks, uint32_t taskids[])
@@ -1032,8 +1101,10 @@ _task_array_to_string(int ntasks, uint32_t taskids[])
 	int i;
 
 	tasks_bitmap = bit_alloc(job->ntasks);
-	if (!tasks_bitmap)
-		fatal("bit_alloc: memory allocation failure");
+	if (!tasks_bitmap) {
+		error("bit_alloc: memory allocation failure");
+		exit(error_exit);
+	}
 	for (i=0; i<ntasks; i++)
 		bit_set(tasks_bitmap, taskids[i]);
 	str = xmalloc(2048);
@@ -1135,7 +1206,7 @@ _task_finish(task_exit_msg_t *msg)
 			normal_exit = 1;
 		}
 		else if (_is_openmpi_port_error(rc)) {
-			_handle_openmpi_port_error(tasks, hosts, 
+			_handle_openmpi_port_error(tasks, hosts,
 						   job->step_ctx);
 		} else {
 			error("%s: %s %s: Exited with exit code %d",
@@ -1181,7 +1252,7 @@ static void _handle_intr()
 	static time_t last_intr      = 0;
 	static time_t last_intr_sent = 0;
 
-	if (!opt.quit_on_intr && 
+	if (!opt.quit_on_intr &&
 	    (((time(NULL) - last_intr) > 1) && !opt.disable_status)) {
 		if (job->state < SRUN_JOB_FORCETERM)
 			info("interrupt (one more within 1 sec to abort)");
@@ -1264,7 +1335,7 @@ static int _setup_signals()
 	xassert(job);
 	xassert(job->step_ctx);
 
-	while ((signo = sigarray[i++])) 
+	while ((signo = sigarray[i++]))
 		xsignal(signo, _handle_signal);
 	/* special case for SIGPIPE since we don't want to print stuff
 	 * and get into a locked up state

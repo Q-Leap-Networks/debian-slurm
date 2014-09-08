@@ -6,32 +6,32 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
+ *  In addition, as a special exception, the copyright holders give permission
  *  to link the code of portions of this program with the OpenSSL library under
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -65,9 +65,6 @@ static int _sort_job_by_time_used(void *void1, void *void2);
 static int _sort_job_by_node_list(void *void1, void *void2);
 static int _sort_job_by_num_nodes(void *void1, void *void2);
 static int _sort_job_by_num_procs(void *void1, void *void2);
-static int _sort_job_by_num_sockets(void *void1, void *void2);
-static int _sort_job_by_num_cores(void *void1, void *void2);
-static int _sort_job_by_num_threads(void *void1, void *void2);
 static int _sort_job_by_num_sct(void *void1, void *void2);
 static int _sort_job_by_min_sockets(void *void1, void *void2);
 static int _sort_job_by_min_cores(void *void1, void *void2);
@@ -84,6 +81,7 @@ static int _sort_step_by_id(void *void1, void *void2);
 static int _sort_step_by_node_list(void *void1, void *void2);
 static int _sort_step_by_partition(void *void1, void *void2);
 static int _sort_step_by_time_start(void *void1, void *void2);
+static int _sort_step_by_time_limit(void *void1, void *void2);
 static int _sort_step_by_time_used(void *void1, void *void2);
 static int _sort_step_by_user_id(void *void1, void *void2);
 static int _sort_step_by_user_name(void *void1, void *void2);
@@ -101,7 +99,7 @@ void sort_job_list(List job_list)
 
 	for (i=(strlen(params.sort)-1); i >= 0; i--) {
 		reverse_order = false;
-		if ((params.sort[i] == ',') || 
+		if ((params.sort[i] == ',') ||
 		    (params.sort[i] == '+') || params.sort[i] == '-')
 			continue;
 		if ((i > 0) && (params.sort[i-1] == '-'))
@@ -165,12 +163,6 @@ void sort_job_list(List job_list)
 			list_sort(job_list, _sort_job_by_user_id);
 		else if (params.sort[i] == 'v')
 			list_sort(job_list, _sort_job_by_reservation);
-		else if (params.sort[i] == 'X')
-			list_sort(job_list, _sort_job_by_num_sockets);
-		else if (params.sort[i] == 'Y')
-			list_sort(job_list, _sort_job_by_num_cores);
-		else if (params.sort[i] == 'Z')
-			list_sort(job_list, _sort_job_by_num_threads);
 		else if (params.sort[i] == 'z')
 			list_sort(job_list, _sort_job_by_num_sct);
 	}
@@ -191,7 +183,7 @@ void sort_step_list(List step_list)
 		params.sort = xstrdup("P,i");	/* Partition, step id */
 	for (i=(strlen(params.sort)-1); i >= 0; i--) {
 		reverse_order = false;
-		if ((params.sort[i] == ',') || 
+		if ((params.sort[i] == ',') ||
 		    (params.sort[i] == '+') || params.sort[i] == '-')
 			continue;
 		if ((i > 0) && (params.sort[i-1] == '-'))
@@ -203,6 +195,8 @@ void sort_step_list(List step_list)
 			list_sort(step_list, _sort_step_by_node_list);
 		else if (params.sort[i] == 'P')
 			list_sort(step_list, _sort_step_by_partition);
+		else if (params.sort[i] == 'l')
+			list_sort(step_list, _sort_step_by_time_limit);
 		else if (params.sort[i] == 'S')
 			list_sort(step_list, _sort_step_by_time_start);
 		else if (params.sort[i] == 'M')
@@ -361,45 +355,6 @@ static int _sort_job_by_num_procs(void *void1, void *void2)
 	return diff;
 }
 
-static int _sort_job_by_num_sockets(void *void1, void *void2)
-{
-	int diff;
-	job_info_t *job1 = (job_info_t *) void1;
-	job_info_t *job2 = (job_info_t *) void2;
-
-	diff = job1->min_sockets - job2->min_sockets;
-
-	if (reverse_order)
-		diff = -diff;
-	return diff;
-}
-
-static int _sort_job_by_num_cores(void *void1, void *void2)
-{
-	int diff;
-	job_info_t *job1 = (job_info_t *) void1;
-	job_info_t *job2 = (job_info_t *) void2;
-
-	diff = job1->min_cores - job2->min_cores;
-
-	if (reverse_order)
-		diff = -diff;
-	return diff;
-}
-
-static int _sort_job_by_num_threads(void *void1, void *void2)
-{
-	int diff;
-	job_info_t *job1 = (job_info_t *) void1;
-	job_info_t *job2 = (job_info_t *) void2;
-
-	diff = job1->min_threads - job2->min_threads;
-
-	if (reverse_order)
-		diff = -diff;
-	return diff;
-}
-
 static int _sort_job_by_num_sct(void *void1, void *void2)
 {
 	int diffs, diffc, difft;
@@ -429,7 +384,7 @@ static int _sort_job_by_min_sockets(void *void1, void *void2)
 	job_info_t *job1 = (job_info_t *) void1;
 	job_info_t *job2 = (job_info_t *) void2;
 
-	diff = job1->job_min_sockets - job2->job_min_sockets;
+	diff = job1->min_sockets - job2->min_sockets;
 
 	if (reverse_order)
 		diff = -diff;
@@ -442,7 +397,7 @@ static int _sort_job_by_min_cores(void *void1, void *void2)
 	job_info_t *job1 = (job_info_t *) void1;
 	job_info_t *job2 = (job_info_t *) void2;
 
-	diff = job1->job_min_cores - job2->job_min_cores;
+	diff = job1->min_cores - job2->min_cores;
 
 	if (reverse_order)
 		diff = -diff;
@@ -455,7 +410,7 @@ static int _sort_job_by_min_threads(void *void1, void *void2)
 	job_info_t *job1 = (job_info_t *) void1;
 	job_info_t *job2 = (job_info_t *) void2;
 
-	diff = job1->job_min_threads - job2->job_min_threads;
+	diff = job1->min_threads - job2->min_threads;
 
 	if (reverse_order)
 		diff = -diff;
@@ -576,13 +531,33 @@ static int _sort_job_by_time_limit(void *void1, void *void2)
 	return diff;
 }
 
+static uint32_t _get_start_time(job_info_t *job)
+{
+	time_t now = time(NULL);
+
+	if (job->start_time == (time_t) 0)
+		return 0xffffffff;
+	if ((job->job_state == JOB_PENDING) && (job->start_time < now))
+		return (uint32_t) now;
+	return (uint32_t) job->start_time;
+}
+
 static int _sort_job_by_time_start(void *void1, void *void2)
 {
 	int diff;
 	job_info_t *job1 = (job_info_t *) void1;
 	job_info_t *job2 = (job_info_t *) void2;
+	uint32_t start_time1, start_time2;
 
-	diff = job1->start_time - job2->start_time;
+	start_time1 = _get_start_time(job1);
+	start_time2 = _get_start_time(job2);
+
+	if (start_time1 > start_time2)
+		diff = 1;
+	else if (start_time1 < start_time2)
+		diff = -1;
+	else
+		diff = 0;
 
 	if (reverse_order)
 		diff = -diff;
@@ -771,6 +746,19 @@ static int _sort_step_by_partition(void *void1, void *void2)
 	if (step2->partition)
 		val2 = step2->partition;
 	diff = strcmp(val1, val2);
+
+	if (reverse_order)
+		diff = -diff;
+	return diff;
+}
+
+static int _sort_step_by_time_limit(void *void1, void *void2)
+{
+	int diff;
+	job_step_info_t *step1 = (job_step_info_t *) void1;
+	job_step_info_t *step2 = (job_step_info_t *) void2;
+
+	diff = step1->time_limit - step2->time_limit;
 
 	if (reverse_order)
 		diff = -diff;

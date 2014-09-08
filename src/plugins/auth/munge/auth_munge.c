@@ -1,38 +1,38 @@
 /*****************************************************************************\
  *  auth_munge.c - SLURM auth implementation via Chris Dunlap's Munge
- *  $Id: auth_munge.c 16616 2009-02-20 17:00:27Z jette $
+ *  $Id: auth_munge.c 19095 2009-12-01 22:59:18Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  Written by Mark Grondona <mgrondona@llnl.gov> 
+ *  Written by Mark Grondona <mgrondona@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  In addition, as a special exception, the copyright holders give permission
+ *  to link the code of portions of this program with the OpenSSL library under
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -74,9 +74,37 @@
 
 #define MUNGE_ERRNO_OFFSET	1000
 
-const char plugin_name[]       	= "auth plugin for Munge (http://home.gna.org/munge/)";
+/*
+ * These variables are required by the generic plugin interface.  If they
+ * are not found in the plugin, the plugin loader will ignore it.
+ *
+ * plugin_name - a string giving a human-readable description of the
+ * plugin.  There is no maximum length, but the symbol must refer to
+ * a valid string.
+ *
+ * plugin_type - a string suggesting the type of the plugin or its
+ * applicability to a particular form of data or method of data handling.
+ * If the low-level plugin API is used, the contents of this string are
+ * unimportant and may be anything.  SLURM uses the higher-level plugin
+ * interface which requires this string to be of the form
+ *
+ *	<application>/<method>
+ *
+ * where <application> is a description of the intended application of
+ * the plugin (e.g., "auth" for SLURM authentication) and <method> is a
+ * description of how this plugin satisfies that application.  SLURM will
+ * only load authentication plugins if the plugin_type string has a prefix
+ * of "auth/".
+ *
+ * plugin_version   - specifies the version number of the plugin.
+ * min_plug_version - specifies the minumum version number of incomming
+ *                    messages that this plugin can accept
+ */
+const char plugin_name[]       	= "auth plugin for Munge "
+				  "(http://home.gna.org/munge/)";
 const char plugin_type[]       	= "auth/munge";
-const uint32_t plugin_version	= 10;
+const uint32_t plugin_version   = 10;
+const uint32_t min_plug_version = 10; /* minimum version accepted */
 
 static int plugin_errno = SLURM_SUCCESS;
 
@@ -87,7 +115,7 @@ enum {
 	SLURM_AUTH_UNPACK = SLURM_AUTH_FIRST_LOCAL_ERROR
 };
 
-/* 
+/*
  * The Munge implementation of the slurm AUTH credential
  */
 typedef struct _slurm_auth_credential {
@@ -132,9 +160,9 @@ static int            _decode_cred(slurm_auth_credential_t *c, char *socket);
  */
 int init ( void )
 {
-	host_list_idx = arg_idx_by_name( slurm_auth_get_arg_desc(), 
+	host_list_idx = arg_idx_by_name( slurm_auth_get_arg_desc(),
 			                 ARG_HOST_LIST );
-	if (host_list_idx == -1) 
+	if (host_list_idx == -1)
 		return SLURM_ERROR;
 
 	verbose("%s loaded", plugin_name);
@@ -189,8 +217,8 @@ slurm_auth_create( void *argv[], char *socket )
 	xassert(cred->magic = MUNGE_MAGIC);
 
 	/*
-	 *  Temporarily block SIGALARM to avoid misleading 
-	 *    "Munged communication error" from libmunge if we 
+	 *  Temporarily block SIGALARM to avoid misleading
+	 *    "Munged communication error" from libmunge if we
 	 *    happen to time out the connection in this secion of
 	 *    code.
 	 */
@@ -228,7 +256,7 @@ slurm_auth_destroy( slurm_auth_credential_t *cred )
 	xassert(cred->magic == MUNGE_MAGIC);
 
 	/*
-	 * Note: Munge cred string and application-specific data in 
+	 * Note: Munge cred string and application-specific data in
 	 *  "buf" not encoded with xmalloc()
 	 */
 	if (cred->m_str)
@@ -246,7 +274,7 @@ slurm_auth_destroy( slurm_auth_credential_t *cred )
  * Return SLURM_SUCCESS if the credential is in order and valid.
  */
 int
-slurm_auth_verify( slurm_auth_credential_t *c, void *argv, char *socket )
+slurm_auth_verify( slurm_auth_credential_t *c, char *socket )
 {
 	if (!c) {
 		plugin_errno = SLURM_AUTH_BADARG;
@@ -255,10 +283,10 @@ slurm_auth_verify( slurm_auth_credential_t *c, void *argv, char *socket )
 
 	xassert(c->magic == MUNGE_MAGIC);
 
-	if (c->verified) 
+	if (c->verified)
 		return SLURM_SUCCESS;
 
-	if (_decode_cred(c, socket) < 0) 
+	if (_decode_cred(c, socket) < 0)
 		return SLURM_ERROR;
 
 	return SLURM_SUCCESS;
@@ -321,7 +349,7 @@ slurm_auth_pack( slurm_auth_credential_t *cred, Buf buf )
 		cred->cr_errno = SLURM_AUTH_BADARG;
 		return SLURM_ERROR;
 	}
-	
+
 	xassert(cred->magic == MUNGE_MAGIC);
 
 	/*
@@ -349,25 +377,25 @@ slurm_auth_unpack( Buf buf )
 	char    *type;
 	uint32_t size;
 	uint32_t version;
-	
+
 	if ( buf == NULL ) {
 		plugin_errno = SLURM_AUTH_BADARG;
 		return NULL;
 	}
-	
+
 	/*
 	 * Get the authentication type.
 	 */
 	safe_unpackmem_ptr( &type, &size, buf );
-	
-	if (( type == NULL )
-	||  ( strcmp( type, plugin_type ) != 0 )) {
+
+	if (( type == NULL ) ||
+	    ( strcmp( type, plugin_type ) != 0 )) {
 		plugin_errno = SLURM_AUTH_MISMATCH;
 		return NULL;
 	}
 	safe_unpack32( &version, buf );
-	if ( version != plugin_version ) {
-		plugin_errno = SLURM_AUTH_MISMATCH;
+	if ( version < min_plug_version ) {
+		plugin_errno = SLURM_AUTH_VERSION;
 		return NULL;
 	}
 
@@ -437,11 +465,13 @@ slurm_auth_errstr( int slurm_errno )
 	int i;
 
 	if (slurm_errno > MUNGE_ERRNO_OFFSET)
-		return munge_strerror(slurm_errno);
+		return munge_strerror(slurm_errno - MUNGE_ERRNO_OFFSET);
 
 	for ( i = 0; ; ++i ) {
-		if ( tbl[ i ].msg == NULL ) return "unknown error";
-		if ( tbl[ i ].err == slurm_errno ) return tbl[ i ].msg;
+		if ( tbl[ i ].msg == NULL )
+			return "unknown error";
+		if ( tbl[ i ].err == slurm_errno )
+			return tbl[ i ].msg;
 	}
 }
 
@@ -450,19 +480,19 @@ slurm_auth_errstr( int slurm_errno )
  * Decode the munge encoded credential `m_str' placing results, if validated,
  * into slurm credential `c'
  */
-static int 
+static int
 _decode_cred(slurm_auth_credential_t *c, char *socket)
 {
 	int retry = 2;
 	munge_err_t e;
 	munge_ctx_t ctx;
 
-	if (c == NULL) 
+	if (c == NULL)
 		return SLURM_ERROR;
 
 	xassert(c->magic == MUNGE_MAGIC);
 
-	if (c->verified) 
+	if (c->verified)
 		return SLURM_SUCCESS;
 
 	if ((ctx = munge_ctx_create()) == NULL) {
@@ -477,7 +507,8 @@ _decode_cred(slurm_auth_credential_t *c, char *socket)
 	}
 
     again:
-	if ((e = munge_decode(c->m_str, ctx, &c->buf, &c->len, &c->uid, &c->gid))) {
+	if ((e = munge_decode(c->m_str, ctx, &c->buf, &c->len, &c->uid,
+			      &c->gid))) {
 		if ((e == EMUNGE_SOCKET) && retry--) {
 			error ("Munge decode failed: %s (retrying ...)",
 				munge_ctx_strerror(ctx));
@@ -491,13 +522,13 @@ _decode_cred(slurm_auth_credential_t *c, char *socket)
 		if (e != EMUNGE_CRED_REPLAYED) {
 #endif
 			/*
-			 *  Print any valid credential data 
+			 *  Print any valid credential data
 			 */
 			error ("Munge decode failed: %s",
 			       munge_ctx_strerror(ctx));
-			_print_cred(ctx); 
-			
-			plugin_errno = e + MUNGE_ERRNO_OFFSET;
+			_print_cred(ctx);
+
+			c->cr_errno = e + MUNGE_ERRNO_OFFSET;
 #ifdef MULTIPLE_SLURMD
 		} else {
 			debug2("We had a replayed cred, "
@@ -597,7 +628,7 @@ _print_cred_info(munge_info_t *mi)
 /*
  *  Print credential information.
  */
-static void 
+static void
 _print_cred(munge_ctx_t ctx)
 {
 	munge_info_t *mi = cred_info_create(ctx);

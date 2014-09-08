@@ -7,14 +7,18 @@ scancel \- Used to signal jobs or job steps that are under the control of Slurm.
 \fBscancel\fR [\fIOPTIONS\fR...] [\fIjob_id\fR[.\fIstep_id\fR]] [\fIjob_id\fR[.\fIstep_id\fR]...]
 
 .SH "DESCRIPTION"
-\fBscancel\fR is used to signal or cancel jobs or job steps. An arbitrary number 
+\fBscancel\fR is used to signal or cancel jobs or job steps. An arbitrary number
 of jobs or job steps may be signaled using job specification filters or a
-space separated list of specific job and/or job step IDs. A job or job step 
-can only be signaled by the owner of that job or user root. If an attempt is 
-made by an unauthorized user to signal a job or job step, an error message will 
-be printed and the job will not be signaled. 
+space separated list of specific job and/or job step IDs. A job or job step
+can only be signaled by the owner of that job or user root. If an attempt is
+made by an unauthorized user to signal a job or job step, an error message will
+be printed and the job will not be signaled.
 
 .SH "OPTIONS"
+
+.TP
+\fB\-A\fR, \fB\-\-account\fR=\fIaccount\fR
+Restrict the scancel operation to jobs under this charge account.
 
 .TP
 \fB\-b\fR, \fB\-\-batch\fR
@@ -22,7 +26,7 @@ Signal the batch job shell and its child processes.
 This is not applicable if \fIstep_id\fR is specified.
 NOTE: The shell itself may exit upon receipt of many signals.
 You may avoid this by explicitly trap signals within the shell
-script (e.g. "trap <arg> <signals>"). See the shell documentation 
+script (e.g. "trap <arg> <signals>"). See the shell documentation
 for details.
 
 .TP
@@ -40,30 +44,35 @@ Interactive mode. Confirm each job_id.step_id before performing the cancel opera
 
 .TP
 \fB\-n\fR, \fB\-\-name\fR=\fIjob_name\fR
-The name of jobs to be signaled.
+Restrict the scancel operation to jobs with this job name.
 
 .TP
 \fB\-p\fR, \fB\-\-partition\fR=\fIpartition_name\fR
-The name of the partition from which jobs are to be signaled.
+Restrict the scancel operation to jobs in this partition.
 
 .TP
-\fB\-q\fR, \fB\-\-quiet\fR
+\fB\-p\fR, \fB\-\-qos\fR=\fIqos\fR
+Restrict the scancel operation to jobs with this quality of service.
+
+.TP
+\fB\-Q\fR, \fB\-\-quiet\fR
 Do not report an error if the specified job is already completed.
 This option is incompatible with the \fB\-\-verbose\fR option.
 
 .TP
 \fB\-s\fR, \fB\-\-signal\fR=\fIsignal_name\fR
-The name or number of the signal to be send. 
-If no signal is specified, the specified job or step will be terminated.
+The name or number of the signal to send.  If no signal is specified,
+the specified job or step will be terminated.
 
 .TP
 \fB\-t\fR, \fB\-\-state\fR=\fIjob_state_name\fR
-The state of the jobs to be signaled. \fIjob_state_name\fR may have a value of 
-either "PENDING", "RUNNING" or "SUSPENDED".
+Restrict the scancel operation to jobs in this
+state. \fIjob_state_name\fR may have a value of either "PENDING",
+"RUNNING" or "SUSPENDED".
 
 .TP
 \fB\-u\fR, \fB\-\-user\fR=\fIuser_name\fR
-The name of the user whose jobs are to be signaled.
+Restrict the scancel operation to jobs owned by this user.
 
 .TP
 \fB\-\-usage\fR
@@ -75,15 +84,20 @@ Print additional logging. Multiple v's increase logging detail.
 This option is incompatible with the \fB\-\-quiet\fR option.
 
 .TP
-\fB\-V\fR, \fB\-\-Version\fR
-Print the version number of the scancel command. 
+\fB\-V\fR, \fB\-\-version\fR
+Print the version number of the scancel command.
 
 .TP
 \fB\-w\fR, \fB\-\-nodelist=\fIhost1,host2,...\fR
-Cancel any jobs using any of the given hosts.  The list may be specified as 
-a comma\-separated list of hosts, a range of hosts (host[1\-5,7,...] for 
-example), or a filename. The host list will be assumed to be a filename only 
-if it contains a "/" character. 
+Cancel any jobs using any of the given hosts.  The list may be specified as
+a comma\-separated list of hosts, a range of hosts (host[1\-5,7,...] for
+example), or a filename. The host list will be assumed to be a filename only
+if it contains a "/" character.
+
+.TP
+\fB\-\-wckey\fR=\fIwckey\fR
+Restrict the scancel operation to jobs using this workload
+characterization key.
 
 .TP
 ARGUMENTS
@@ -94,25 +108,28 @@ The Slurm job ID to be signaled.
 
 .TP
 \fIstep_id\fP
-The step ID of the job step to be signaled. 
+The step ID of the job step to be signaled.
 If not specified, the operation is performed at the level of a job.
 
-If neither \fB\-\-batch\fR nor \fB\-\-signal\fR are used, 
+If neither \fB\-\-batch\fR nor \fB\-\-signal\fR are used,
 the entire job will be terminated.
 
 When \fB\-\-batch\fR is used, the batch shell processes will be signaled.
-The child processes of the shell will not be signalled by SLURM, but 
+The child processes of the shell will not be signalled by SLURM, but
 the shell may forward the signal.
 
-When \fB\-\-batch\fR is not used but \fB\-\-signal\fR is used, 
-then all job steps will be signalled, but the batch script itself 
+When \fB\-\-batch\fR is not used but \fB\-\-signal\fR is used,
+then all job steps will be signalled, but the batch script itself
 will not be signalled.
 
 .SH "ENVIRONMENT VARIABLES"
 .PP
-Some \fBscancel\fR options may be set via environment variables. These 
+Some \fBscancel\fR options may be set via environment variables. These
 environment variables, along with their corresponding options, are listed below.
 (Note: commandline options will always override these settings)
+.TP 20
+\fBSCANCEL_ACCOUNT\fR
+\fB\-A\fR, \fB\-\-account\fR=\fIaccount\fR
 .TP 20
 \fBSCANCEL_BATCH\fR
 \fB\-b, \-\-batch\fR
@@ -129,6 +146,9 @@ environment variables, along with their corresponding options, are listed below.
 \fBSCANCEL_PARTITION\fR
 \fB\-p\fR, \fB\-\-partition\fR=\fIpartition_name\fR
 .TP 20
+\fBSCANCEL_QOS\fR
+\fB\-q\fR, \fB\-\-qos\fR=\fIqos\fR
+.TP 20
 \fBSCANCEL_STATE\fR
 \fB\-t\fR, \fB\-\-state\fR=\fIjob_state_name\fR
 .TP 20
@@ -138,20 +158,23 @@ environment variables, along with their corresponding options, are listed below.
 \fBSCANCEL_VERBOSE\fR
 \fB\-v\fR, \fB\-\-verbose\fR
 .TP 20
+\fBSCANCEL_WCKEY\fR
+\fB\-\-wckey\fR=\fIwckey\fR
+.TP 20
 \fBSLURM_CONF\fR
 The location of the SLURM configuration file.
 
 .SH "NOTES"
 .LP
-If multiple filters are supplied (e.g. \fB\-\-partition\fR and \fB\-\-name\fR) 
+If multiple filters are supplied (e.g. \fB\-\-partition\fR and \fB\-\-name\fR)
 only the jobs satisfying all of the filtering options will be signaled.
 .LP
-If a signal value of "KILL" (the default value) is to be sent to an entire 
-job, this will result in the job's termination and its resource allocation 
+If a signal value of "KILL" (the default value) is to be sent to an entire
+job, this will result in the job's termination and its resource allocation
 being released.
 .LP
-Cancelling a job step will not result in a job being terminated. 
-The job must be cancelled to release a resource allocation. 
+Cancelling a job step will not result in a job being terminated.
+The job must be cancelled to release a resource allocation.
 
 .SH "EXAMPLES"
 .TP

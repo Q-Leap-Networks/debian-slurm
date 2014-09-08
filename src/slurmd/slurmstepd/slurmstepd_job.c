@@ -1,38 +1,38 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/slurmstepd_job.c - slurmd_job_t routines
- *  $Id: slurmstepd_job.c 18092 2009-07-09 14:38:56Z jette $
+ *  $Id: slurmstepd_job.c 19187 2009-12-23 20:11:00Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  In addition, as a special exception, the copyright holders give permission
+ *  to link the code of portions of this program with the OpenSSL library under
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -114,7 +114,7 @@ _valid_gid(struct passwd *pwd, gid_t *gid)
 {
 	struct group *grp;
 	int i;
-	
+
 	if (!pwd)
 		return 0;
 	if (pwd->pw_gid == *gid)
@@ -137,8 +137,8 @@ _valid_gid(struct passwd *pwd, gid_t *gid)
 		       	return 1;
 	       	}
 	}
-	
-	/* root user may have launched this job for this user, but 
+
+	/* root user may have launched this job for this user, but
 	 * root did not explicitly set the gid. This would set the
 	 * gid to 0. In this case we should set the appropriate
 	 * default gid for the user (from the passwd struct).
@@ -153,7 +153,7 @@ _valid_gid(struct passwd *pwd, gid_t *gid)
 }
 
 /* create a slurmd job structure from a launch tasks message */
-slurmd_job_t * 
+slurmd_job_t *
 job_create(launch_tasks_request_msg_t *msg)
 {
 	struct passwd *pwd = NULL;
@@ -162,7 +162,7 @@ job_create(launch_tasks_request_msg_t *msg)
 	slurm_addr     resp_addr;
 	slurm_addr     io_addr;
 	int            nodeid = NO_VAL;
-	
+
 	xassert(msg != NULL);
 	xassert(msg->complete_nodelist != NULL);
 	debug3("entering job_create");
@@ -176,6 +176,18 @@ job_create(launch_tasks_request_msg_t *msg)
 		_pwd_destroy(pwd);
 		return NULL;
 	}
+
+	if(msg->job_mem && (msg->acctg_freq != (uint16_t) NO_VAL)
+	   && (msg->acctg_freq > conf->job_acct_gather_freq)) {
+		error("Can't set frequency to %u, it is higher than %u.  "
+		      "We need it to be at least at this level to "
+		      "monitor memory usage.",
+		      msg->acctg_freq, conf->job_acct_gather_freq);
+		slurm_seterrno (ESLURMD_INVALID_ACCT_FREQ);
+		_pwd_destroy(pwd);
+		return NULL;
+	}
+
 	job = xmalloc(sizeof(slurmd_job_t));
 #ifndef HAVE_FRONT_END
 	nodeid = nodelist_find(msg->complete_nodelist, conf->node_name);
@@ -185,12 +197,12 @@ job_create(launch_tasks_request_msg_t *msg)
 	job->node_name = xstrdup(msg->complete_nodelist);
 #endif
 	if(nodeid < 0) {
-		error("couldn't find node %s in %s", 
+		error("couldn't find node %s in %s",
 		      job->node_name, msg->complete_nodelist);
 		job_destroy(job);
 		return NULL;
 	}
-	
+
 	job->state	= SLURMSTEPD_STEP_STARTING;
 	job->pwd	= pwd;
 	job->ntasks	= msg->tasks_to_launch[nodeid];
@@ -201,12 +213,12 @@ job_create(launch_tasks_request_msg_t *msg)
 	job->job_mem	= msg->job_mem;
 	if (job->job_mem)
 		jobacct_common_set_mem_limit(job->jobid, job->job_mem);
-	
+
 	job->uid	= (uid_t) msg->uid;
 	job->gid	= (gid_t) msg->gid;
 	job->cwd	= xstrdup(msg->cwd);
 	job->task_dist	= msg->task_dist;
-	
+
 	job->cpu_bind_type = msg->cpu_bind_type;
 	job->cpu_bind = xstrdup(msg->cpu_bind);
 	job->mem_bind_type = msg->mem_bind_type;
@@ -240,7 +252,7 @@ job_create(launch_tasks_request_msg_t *msg)
 	job->envtp->mem_bind_type = 0;
 	job->envtp->mem_bind = NULL;
 	job->envtp->ckpt_dir = NULL;
-	
+
 	memcpy(&resp_addr, &msg->orig_addr, sizeof(slurm_addr));
 	slurm_set_addr(&resp_addr,
 		       msg->resp_port[nodeid % msg->num_resp_port],
@@ -252,7 +264,7 @@ job_create(launch_tasks_request_msg_t *msg)
 			       msg->io_port[nodeid % msg->num_io_port],
 			       NULL);
 	}
-	
+
 	srun = srun_info_create(msg->cred, &resp_addr, &io_addr);
 
 	job->buffered_stdio = msg->buffered_stdio;
@@ -277,7 +289,8 @@ job_create(launch_tasks_request_msg_t *msg)
 	job->pty         = msg->pty;
 	job->open_mode   = msg->open_mode;
 	job->options     = msg->options;
-	
+	job->alloc_cores = format_core_allocs(msg->cred, conf->node_name);
+
 	list_append(job->sruns, (void *) srun);
 
 	_job_init_task_info(job, msg->global_task_ids[nodeid],
@@ -292,13 +305,13 @@ job_create(launch_tasks_request_msg_t *msg)
 static char *
 _batchfilename(slurmd_job_t *job, const char *name)
 {
-	if (name == NULL) 
+	if (name == NULL)
 		return fname_create(job, "slurm-%J.out", 0);
 	else
 		return fname_create(job, name, 0);
 }
 
-slurmd_job_t * 
+slurmd_job_t *
 job_batch_job_create(batch_job_launch_msg_t *msg)
 {
 	struct passwd *pwd;
@@ -307,7 +320,7 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 	char *in_name;
 
 	xassert(msg != NULL);
-	
+
 	debug3("entering batch_job_create");
 
 	if ((pwd = _pwd_create((uid_t)msg->uid)) == NULL) {
@@ -320,13 +333,23 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 		_pwd_destroy(pwd);
 		return NULL;
 	}
-	
+	if(msg->job_mem && (msg->acctg_freq != (uint16_t) NO_VAL)
+	   && (msg->acctg_freq > conf->job_acct_gather_freq)) {
+		error("Can't set frequency to %u, it is higher than %u.  "
+		      "We need it to be at least at this level to "
+		      "monitor memory usage.",
+		      msg->acctg_freq, conf->job_acct_gather_freq);
+		slurm_seterrno (ESLURMD_INVALID_ACCT_FREQ);
+		_pwd_destroy(pwd);
+		return NULL;
+	}
+
 	job = xmalloc(sizeof(slurmd_job_t));
-	
+
 	job->state   = SLURMSTEPD_STEP_STARTING;
 	job->pwd     = pwd;
 	job->cpus    = msg->cpus_per_node[0];
-	job->ntasks  = 1; 
+	job->ntasks  = 1;
 	job->nprocs  = msg->nprocs;
 	job->jobid   = msg->job_id;
 	job->stepid  = msg->step_id;
@@ -369,6 +392,7 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 	job->envtp->restart_cnt = msg->restart_cnt;
 
 	job->cpus_per_task = msg->cpus_per_node[0];
+	job->alloc_cores = format_core_allocs(msg->cred, conf->node_name);
 
 	srun = srun_info_create(NULL, NULL, NULL);
 
@@ -387,18 +411,18 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 
 	job->task = (slurmd_task_info_t **)
 		xmalloc(sizeof(slurmd_task_info_t *));
-	if (msg->err == NULL)
-		msg->err = xstrdup(msg->out);
+	if (msg->std_err == NULL)
+		msg->std_err = xstrdup(msg->std_out);
 
-	if (msg->in == NULL)
+	if (msg->std_in == NULL)
 		in_name = xstrdup("/dev/null");
-	else 
-		in_name = fname_create(job, msg->in, 0);
+	else
+		in_name = fname_create(job, msg->std_in, 0);
 
 	job->task[0] = task_info_create(0, 0,
 					in_name,
-					_batchfilename(job, msg->out),
-					_batchfilename(job, msg->err));
+					_batchfilename(job, msg->std_out),
+					_batchfilename(job, msg->std_err));
 	job->task[0]->argc = job->argc;
 	job->task[0]->argv = job->argv;
 
@@ -457,7 +481,7 @@ _job_init_task_info(slurmd_job_t *job, uint32_t *gtid,
 		return;
 	}
 
-	job->task = (slurmd_task_info_t **) 
+	job->task = (slurmd_task_info_t **)
 		xmalloc(job->ntasks * sizeof(slurmd_task_info_t *));
 
 	for (i = 0; i < job->ntasks; i++){
@@ -486,14 +510,14 @@ job_signal_tasks(slurmd_job_t *job, int signal)
 		if ((job->task[n]->pid > (pid_t) 0)
 		&&  (kill(job->task[n]->pid, signal) < 0)) {
 			if (errno != ESRCH) {
-				error("job %d.%d: kill task %d: %m", 
+				error("job %d.%d: kill task %d: %m",
 				      job->jobid, job->stepid, n);
 			}
 		}
 	}
 }
 
-void 
+void
 job_destroy(slurmd_job_t *job)
 {
 	int i;
@@ -510,6 +534,7 @@ job_destroy(slurmd_job_t *job)
 	xfree(job->node_name);
 	xfree(job->task_prolog);
 	xfree(job->task_epilog);
+	xfree(job->alloc_cores);
 	xfree(job);
 }
 
@@ -531,7 +556,7 @@ static void
 _array_free(char ***array)
 {
 	int i = 0;
-	while ((*array)[i] != NULL) 
+	while ((*array)[i] != NULL)
 		xfree((*array)[i++]);
 	xfree(*array);
 	*array = NULL;
@@ -539,10 +564,10 @@ _array_free(char ***array)
 
 
 struct srun_info *
-srun_info_create(slurm_cred_t cred, slurm_addr *resp_addr, slurm_addr *ioaddr)
+srun_info_create(slurm_cred_t *cred, slurm_addr *resp_addr, slurm_addr *ioaddr)
 {
 	char             *data = NULL;
-	int               len  = 0;
+	uint32_t          len  = 0;
 	struct srun_info *srun = xmalloc(sizeof(struct srun_info));
 	srun_key_t       *key  = xmalloc(sizeof(srun_key_t));
 
@@ -563,8 +588,8 @@ srun_info_create(slurm_cred_t cred, slurm_addr *resp_addr, slurm_addr *ioaddr)
 		memcpy((void *) key->data, data, len);
 
 		if (len < SLURM_IO_KEY_SIZE)
-			memset( (void *) (key->data + len), 0, 
-			        SLURM_IO_KEY_SIZE - len);
+			memset( (void *) (key->data + len), 0,
+				SLURM_IO_KEY_SIZE - len);
 	}
 
 	if (ioaddr != NULL)
@@ -624,7 +649,7 @@ task_info_create(int taskid, int gtaskid,
 }
 
 
-static void 
+static void
 _task_info_destroy(slurmd_task_info_t *t, uint16_t multi_prog)
 {
 	slurm_mutex_lock(&t->mutex);
@@ -635,3 +660,4 @@ _task_info_destroy(slurmd_task_info_t *t, uint16_t multi_prog)
 	} /* otherwise, t->argv is a pointer to job->argv */
 	xfree(t);
 }
+

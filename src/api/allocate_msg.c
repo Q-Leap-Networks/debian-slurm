@@ -7,32 +7,32 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
+ *  In addition, as a special exception, the copyright holders give permission
  *  to link the code of portions of this program with the OpenSSL library under
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- * 
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -70,15 +70,13 @@ struct allocation_msg_thread {
 };
 
 static uid_t slurm_uid;
-static void _handle_msg(struct allocation_msg_thread *msg_thr,
-			slurm_msg_t *msg);
-static bool _message_socket_readable(eio_obj_t *obj);
-static int _message_socket_accept(eio_obj_t *obj, List objs);
+static void _handle_msg(void *arg, slurm_msg_t *msg);
 static pthread_mutex_t msg_thr_start_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t msg_thr_start_cond = PTHREAD_COND_INITIALIZER;
 static struct io_operations message_socket_ops = {
-	readable:	&_message_socket_readable,
-	handle_read:	&_message_socket_accept
+	readable:	&eio_message_socket_readable,
+	handle_read:	&eio_message_socket_accept,
+	handle_msg:     &_handle_msg
 };
 
 static void *_msg_thr_internal(void *arg)
@@ -129,7 +127,6 @@ extern allocation_msg_thread_t *slurm_allocation_msg_thr_create(
 		return NULL;
 	}
 	debug("port from net_stream_listen is %hu", *port);
-
 	obj = eio_obj_create(sock, &message_socket_ops, (void *)msg_thr);
 
 	msg_thr->handle = eio_handle_create();
@@ -168,90 +165,7 @@ extern void slurm_allocation_msg_thr_destroy(
 	xfree(msg_thr);
 }
 
-
-static bool _message_socket_readable(eio_obj_t *obj)
-{
-	debug3("Called _message_socket_readable");
-	if (obj->shutdown == true) {
-		if (obj->fd != -1) {
-			debug2("  false, shutdown");
-			close(obj->fd);
-			obj->fd = -1;
-			/*_wait_for_connections();*/
-		} else {
-			debug2("  false");
-		}
-		return false;
-	} else {
-		return true;
-	}
-}
-
-static int _message_socket_accept(eio_obj_t *obj, List objs)
-{
-	struct allocation_msg_thread *msg_thr = 
-		(struct allocation_msg_thread *)obj->arg;
-
-	int fd;
-	unsigned char *uc;
-	short        port;
-	struct sockaddr_un addr;
-	slurm_msg_t *msg = NULL;
-	int len = sizeof(addr);
-	
-	debug2("Called _msg_socket_accept");
-
-	while ((fd = accept(obj->fd, (struct sockaddr *)&addr,
-			    (socklen_t *)&len)) < 0) {
-		if (errno == EINTR)
-			continue;
-		
-		if (errno == EAGAIN
-		    || errno == ECONNABORTED
-		    || errno == EWOULDBLOCK) {
-			return SLURM_SUCCESS;
-		}
-		error("Error on msg accept socket: %m");
-		obj->shutdown = true;
-		return SLURM_SUCCESS;
-	}
-
-	fd_set_close_on_exec(fd);
-	fd_set_blocking(fd);
-
-	/* Should not call slurm_get_addr() because the IP may not be
-	   in /etc/hosts. */
-	uc = (unsigned char *)&((struct sockaddr_in *)&addr)->sin_addr.s_addr;
-	port = ((struct sockaddr_in *)&addr)->sin_port;
-	debug2("allocation got message connection from %u.%u.%u.%u:%hu",
-	       uc[0], uc[1], uc[2], uc[3], ntohs(port));
-	fflush(stdout);
-
-	msg = xmalloc(sizeof(slurm_msg_t));
-	slurm_msg_t_init(msg);
-again:
-	if(slurm_receive_msg(fd, msg, 0) != 0) {
-		printf("error on slurm_recieve_msg\n");
-		fflush(stdout);
-		if (errno == EINTR) {
-			goto again;
-		}
-		error("slurm_receive_msg[%u.%u.%u.%u]: %m",
-		      uc[0],uc[1],uc[2],uc[3]);
-		goto cleanup;
-	}
-	
-	_handle_msg(msg_thr, msg); /* handle_msg frees msg->data */
-cleanup:
-	if ((msg->conn_fd >= 0) && slurm_close_accepted_conn(msg->conn_fd) < 0)
-		error ("close(%d): %m", msg->conn_fd);
-	slurm_free_msg(msg);
-
-	return SLURM_SUCCESS;
-}
-
-
-static void _handle_node_fail(struct allocation_msg_thread *msg_thr, 
+static void _handle_node_fail(struct allocation_msg_thread *msg_thr,
 			      slurm_msg_t *msg)
 {
 	srun_node_fail_msg_t *nf = (srun_node_fail_msg_t *)msg->data;
@@ -263,36 +177,36 @@ static void _handle_node_fail(struct allocation_msg_thread *msg_thr,
 }
 
 /*
- * Job has been notified of it's approaching time limit. 
+ * Job has been notified of it's approaching time limit.
  * Job will be killed shortly after timeout.
  * This RPC can arrive multiple times with the same or updated timeouts.
  */
-static void _handle_timeout(struct allocation_msg_thread *msg_thr, 
+static void _handle_timeout(struct allocation_msg_thread *msg_thr,
 			    slurm_msg_t *msg)
 {
 	srun_timeout_msg_t *to = (srun_timeout_msg_t *)msg->data;
 
 	debug3("received timeout message");
-	
+
 	if (msg_thr->callback.timeout != NULL)
 		(msg_thr->callback.timeout)(to);
 
 	slurm_free_srun_timeout_msg(msg->data);
 }
 
-static void _handle_user_msg(struct allocation_msg_thread *msg_thr, 
+static void _handle_user_msg(struct allocation_msg_thread *msg_thr,
 			     slurm_msg_t *msg)
 {
 	srun_user_msg_t *um = (srun_user_msg_t *)msg->data;
 	debug3("received user message");
-	
+
 	if (msg_thr->callback.user_msg != NULL)
 		(msg_thr->callback.user_msg)(um);
-	
+
 	slurm_free_srun_user_msg(msg->data);
 }
 
-static void _handle_ping(struct allocation_msg_thread *msg_thr, 
+static void _handle_ping(struct allocation_msg_thread *msg_thr,
 			     slurm_msg_t *msg)
 {
 	srun_ping_msg_t *ping = (srun_ping_msg_t *)msg->data;
@@ -301,10 +215,10 @@ static void _handle_ping(struct allocation_msg_thread *msg_thr,
 
 	if (msg_thr->callback.ping != NULL)
 		(msg_thr->callback.ping)(ping);
-	
+
 	slurm_free_srun_ping_msg(msg->data);
 }
-static void _handle_job_complete(struct allocation_msg_thread *msg_thr, 
+static void _handle_job_complete(struct allocation_msg_thread *msg_thr,
 				 slurm_msg_t *msg)
 {
 	srun_job_complete_msg_t *comp = (srun_job_complete_msg_t *)msg->data;
@@ -312,18 +226,20 @@ static void _handle_job_complete(struct allocation_msg_thread *msg_thr,
 
 	if (msg_thr->callback.job_complete != NULL)
 		(msg_thr->callback.job_complete)(comp);
-	
+
 	slurm_free_srun_job_complete_msg(msg->data);
 }
 
 static void
-_handle_msg(struct allocation_msg_thread *msg_thr, slurm_msg_t *msg)
+_handle_msg(void *arg, slurm_msg_t *msg)
 {
+	struct allocation_msg_thread *msg_thr =
+		(struct allocation_msg_thread *)arg;
 	uid_t req_uid = g_slurm_auth_get_uid(msg->auth_cred, NULL);
 	uid_t uid = getuid();
-	
+
 	if ((req_uid != slurm_uid) && (req_uid != 0) && (req_uid != uid)) {
-		error ("Security violation, slurm message from uid %u", 
+		error ("Security violation, slurm message from uid %u",
 		       (unsigned int) req_uid);
 		return;
 	}

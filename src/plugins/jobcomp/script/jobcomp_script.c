@@ -1,37 +1,37 @@
 /*****************************************************************************\
  *  jobcomp_script.c - Script running slurm job completion logging plugin.
- *  $Id: jobcomp_script.c 17214 2009-04-09 23:31:28Z jette $
+ *  $Id: jobcomp_script.c 19095 2009-12-01 22:59:18Z da $
  *****************************************************************************
  *  Produced at Center for High Performance Computing, North Dakota State
  *  University
  *  Written by Nathan Huff <nhuff@acm.org>
  *  CODE-OCEC-09-009. All rights reserved.
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  In addition, as a special exception, the copyright holders give permission
+ *  to link the code of portions of this program with the OpenSSL library under
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -57,7 +57,7 @@
  *  BlueGene specific environment variables:
  *  BLOCKID		Name of Block ID
  *  CONNECT_TYPE	Connection type: small, torus or mesh
- *  GEOMETRY		Requested geometry of the job, "#x#x#" where "#" 
+ *  GEOMETRY		Requested geometry of the job, "#x#x#" where "#"
  *			represents the X, Y and Z dimension sizes
 \*****************************************************************************/
 
@@ -72,10 +72,13 @@
 #  include <inttypes.h>
 #endif
 
+#if HAVE_PATHS_H
+#  include <paths.h>
+#endif
+
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
-#include <paths.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -112,14 +115,14 @@
  * where <application> is a description of the intended application of
  * the plugin (e.g., "jobcomp" for SLURM job completion logging) and <method>
  * is a description of how this plugin satisfies that application.  SLURM will
- * only load job completion logging plugins if the plugin_type string has a 
+ * only load job completion logging plugins if the plugin_type string has a
  * prefix of "jobcomp/".
  *
  * plugin_version - an unsigned 32-bit integer giving the version number
  * of the plugin.  If major and minor revisions are desired, the major
  * version number may be multiplied by a suitable magnitude constant such
  * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum versions for their plugins as the job completion logging API 
+ * minimum versions for their plugins as the job completion logging API
  * matures.
  */
 const char plugin_name[]       	= "Job completion logging script plugin";
@@ -204,10 +207,10 @@ static struct jobcomp_info * _jobcomp_info_create (struct job_record *job)
 
 	/*
 	 *  Job will typically be COMPLETING when this code is called.
-	 *  We remove the COMPLETING flag to hopefully get the evenual
+	 *  We remove the flags to hopefully get the eventual
 	 *  completion state: e.g.: JOB_FAILED, TIMEOUT, ....
 	 */
-	state = job->job_state & (~JOB_COMPLETING);
+	state = job->job_state & JOB_STATE_BASE;
 	j->jobstate = xstrdup (job_state_string (state));
 
 	j->partition = xstrdup (job->partition);
@@ -225,11 +228,11 @@ static struct jobcomp_info * _jobcomp_info_create (struct job_record *job)
 	else
 		j->work_dir = xstrdup("unknown");
 #ifdef HAVE_BG
-	j->connect_type = select_g_xstrdup_jobinfo(job->select_jobinfo,
+	j->connect_type = select_g_select_jobinfo_xstrdup(job->select_jobinfo,
 						   SELECT_PRINT_CONNECTION);
-	j->geometry = select_g_xstrdup_jobinfo(job->select_jobinfo,
+	j->geometry = select_g_select_jobinfo_xstrdup(job->select_jobinfo,
 					       SELECT_PRINT_GEOMETRY);
-	j->blockid = select_g_xstrdup_jobinfo(job->select_jobinfo,
+	j->blockid = select_g_select_jobinfo_xstrdup(job->select_jobinfo,
 					      SELECT_PRINT_BG_ID);
 #endif
 	return (j);
@@ -256,7 +259,7 @@ static void _jobcomp_info_destroy (struct jobcomp_info *j)
 /*
  * Check if the script exists and if we can execute it.
  */
-static int 
+static int
 _check_script_permissions(char * path)
 {
 	struct stat st;
@@ -289,7 +292,7 @@ static char ** _extend_env (char ***envp)
 	(*envp)[newcnt - 1] = NULL;
 	ep = &((*envp)[newcnt - 2]);
 
-	/* 
+	/*
 	 *  Find last non-NULL entry
 	 */
 	while (*ep == NULL)
@@ -317,7 +320,7 @@ static int _env_append (char ***envp, const char *name, const char *val)
 	return (0);
 }
 
-static int _env_append_fmt (char ***envp, const char *name, 
+static int _env_append_fmt (char ***envp, const char *name,
 		const char *fmt, ...)
 {
 	char val[1024];
@@ -363,7 +366,7 @@ static char ** _create_environment (struct jobcomp_info *job)
 
 	if (job->limit == INFINITE)
 		_env_append (&env, "LIMIT", "UNLIMITED");
-	else 
+	else
 		_env_append_fmt (&env, "LIMIT", "%lu", job->limit);
 
 	if ((tz = getenv ("TZ")))
@@ -404,7 +407,7 @@ static void _jobcomp_child (char * script, struct jobcomp_info *job)
 	tmpdir = "/tmp";
 #endif
 	/*
-	 * Reinitialize log so we can log any errors for 
+	 * Reinitialize log so we can log any errors for
 	 *  diagnosis
 	 */
 	log_reinit ();
@@ -413,7 +416,7 @@ static void _jobcomp_child (char * script, struct jobcomp_info *job)
 		exit (1);
 
 	if (chdir (tmpdir) != 0) {
-		error ("jobcomp/script: chdir (%s): %m", _PATH_TMP);
+		error ("jobcomp/script: chdir (%s): %m", tmpdir);
 		exit(1);
 	}
 
@@ -454,7 +457,7 @@ static int _jobcomp_exec_child (char *script, struct jobcomp_info *job)
 	if (waitpid(pid, &status, 0) < 0)
 		error ("jobcomp/script: waitpid: %m");
 
-	if (WEXITSTATUS(status)) 
+	if (WEXITSTATUS(status))
 		error ("jobcomp/script: script %s exited with status %d\n",
 		       script, WEXITSTATUS(status));
 
@@ -465,7 +468,7 @@ static int _jobcomp_exec_child (char *script, struct jobcomp_info *job)
 /*
  * Thread function that executes a script
  */
-static void * _script_agent (void *args) 
+static void * _script_agent (void *args)
 {
 	while (1) {
 		struct jobcomp_info *job;
@@ -524,7 +527,7 @@ extern int init (void)
 	slurm_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 	pthread_create(&script_thread, &attr, _script_agent, NULL);
-	
+
 	pthread_mutex_unlock(&thread_flag_mutex);
 	slurm_attr_destroy(&attr);
 
@@ -544,7 +547,7 @@ extern int slurm_jobcomp_set_location (char * location)
 
 	xfree(script);
 	script = xstrdup(location);
-	
+
 	return SLURM_SUCCESS;
 }
 
@@ -554,14 +557,13 @@ int slurm_jobcomp_log_record (struct job_record *record)
 
 	debug3("Entering slurm_jobcomp_log_record");
 
-	if (!(job = _jobcomp_info_create (record))) 
+	if (!(job = _jobcomp_info_create (record)))
 		return error ("jobcomp/script: Failed to create job info!");
 
 	pthread_mutex_lock(&comp_list_mutex);
 	list_append(comp_list, job);
-	pthread_mutex_unlock(&comp_list_mutex);
-
 	pthread_cond_broadcast(&comp_list_cond);
+	pthread_mutex_unlock(&comp_list_mutex);
 
 	return SLURM_SUCCESS;
 }
@@ -618,8 +620,8 @@ extern int fini ( void )
 	return rc;
 }
 
-/* 
- * get info from the storage 
+/*
+ * get info from the storage
  * in/out job_list List of job_rec_t *
  * note List needs to be freed when called
  */
@@ -630,8 +632,8 @@ extern List slurm_jobcomp_get_jobs(acct_job_cond_t *job_cond)
 	return NULL;
 }
 
-/* 
- * expire old info from the storage 
+/*
+ * expire old info from the storage
  */
 extern int slurm_jobcomp_archive(acct_archive_cond_t *archive_cond)
 {

@@ -66,16 +66,15 @@ by their application.  Table 1 summarizes the new multi-core flags.
 </td></tr>
 <tr>
     <td> --sockets-per-node=<i>S</i></td>
-    <td>Number of sockets in a node to dedicate to a job (minimum or range)
+    <td>Number of sockets in a node to dedicate to a job (minimum)
 </td></tr>
 <tr>
     <td> --cores-per-socket=<i>C</i></td>
-    <td> Number of cores in a CPU to dedicate to a job (minimum or range)
+    <td> Number of cores in a socket to dedicate to a job (minimum)
 </td></tr>
 <tr>
     <td> --threads-per-core=<i>T</i></td>
-    <td> Number of threads in a core
-to dedicate to a job (minimum or range)
+    <td> Number of threads in a core to dedicate to a job (minimum)
 </td></tr>
 <tr>
     <td> -B <i>S[:C[:T]]</i></td>
@@ -130,10 +129,10 @@ to dedicate to a job (minimum or range)
 </td></tr>
 <tr>
     <td> --hint=compute_bound</td>
-    <td> use all cores in each physical CPU
+    <td> use all cores in each socket
 </td></tr>
     <td> --hint=memory_bound</td>
-    <td> use only one core in each physical CPU
+    <td> use only one core in each socket
 </td></tr>
     <td> --hint=[no]multithread</td>
     <td> [don't] use extra threads with in-core multi-threading
@@ -151,7 +150,7 @@ the affinity to be set, the task/affinity plugin must be first enabled in
 slurm.conf:
 
 <PRE>
-TaskPlugin=task/affinity          # enable task affinity   
+TaskPlugin=task/affinity          # enable task affinity
 </PRE>
 
 <p>See the "Task Launch" section if generating slurm.conf via
@@ -209,7 +208,7 @@ of nodes, sockets,&nbsp; cores, and threads:</p>
     --sockets-per-node=<i>S</i>      number of sockets per node to allocate
     --cores-per-socket=<i>C</i>      number of cores per socket to allocate
     --threads-per-core=<i>T</i>      number of threads per core to allocate
-                each field can be 'min[-max]' or wildcard '*'
+                each field can be 'min' or wildcard '*'
 
      <font face="serif">Total cpus requested = (<i>Nodes</i>) x (<i>S</i> x <i>C</i> x <i>T</i>)</font>
 </PRE>
@@ -225,12 +224,12 @@ note: compare the above with the previous corresponding --cpu_bind=... examples
 
 <LI> srun -n 16 -N 4 a.out
 <LI> srun -n 16 -N 4 -B 2:2:1 a.out
-<LI> srun -n 16 -N 4 -B 2-2:2-2:1-1 a.out
+<LI> srun -n 16 -N 4 -B 2:2:1 a.out
 <BR> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;or
-<LI> srun -n 16 -N 4 --sockets-per-node 2-2 --cores-per-socket 2-2 --threads-per-core 1-1 a.out
-<LI> srun -n 16 -N 2-4 -B '1-2:*:1' a.out
-<LI> srun -n 16 -N 4:2 -B '2:*:1-1' a.out
-<LI> srun -n 16 -N 4:4 -B '1-1:1-1' a.out
+<LI> srun -n 16 -N 4 --sockets-per-node=2 --cores-per-socket=2 --threads-per-core=1 a.out
+<LI> srun -n 16 -N 2-4 -B '1:*:1' a.out
+<LI> srun -n 16 -N 4-2 -B '2:*:1' a.out
+<LI> srun -n 16 -N 4-4 -B '1:1' a.out
 </UL>
 </UL>
 
@@ -294,15 +293,15 @@ to -m block:cyclic with --cpu_bind=thread.</p>
 <a name="srun_constraints">
 <h3>New Constraints</h3></a>
 
-<p>To compliment the existing SLURM job minimum constraints
-(CPUs, memory, temp disk),
-constraint flags have also been added to allow a user to 
-specify a minimum number of sockets, cores, or threads:</p>
+<p>To complement the existing SLURM job minimum constraints (CPUs,
+memory, temp disk), constraint flags have also been added to allow a
+user to request nodes with a minimum number of sockets, cores, or
+threads:</p>
 
 <PRE>
---mincpus=<i>n</i>             minimum number of logical cpus per node
+--mincpus=<i>n</i>             minimum number of logical processors (threads) per node
 <u>--minsockets=<i>n</i></u>          minimum number of sockets per node
-<u>--mincores=<i>n</i></u>            minimum number of cores per cpu
+<u>--mincores=<i>n</i></u>            minimum number of cores per socket
 <u>--minthreads=<i>n</i></u>          minimum number of threads per core
 --mem=<i>MB</i>                minimum amount of real memory
 --tmp=<i>MB</i>                minimum amount of temporary disk
@@ -362,7 +361,7 @@ each node.  In some cases, it is more convenient to be able to
 request that no more than a specific number of ntasks be invoked
 on each node, socket, or core.  Examples of this include submitting
 a hybrid MPI/OpenMP app where only one MPI "task/rank" should be
-assigned to each node while allowing the OpenMP portion to utilize 
+assigned to each node while allowing the OpenMP portion to utilize
 all of the parallelism present in the node, or submitting a single
 setup/cleanup/monitoring job to each node of a pre-existing
 allocation as one step in a larger job script.
@@ -422,7 +421,7 @@ the right mappings.</p>
 
 <p>For computationally intensive applications, all cores in a multi-core
 system would normally be used. For memory bound applications, only
-using a single core on each CPU will result in the highest per
+using a single core on each socket will result in the highest per
 core memory bandwidth. For communication intensive applications,
 using in-core multi-threading (e.g. hyperthreading, SMT, or TMT)
 may also improve performance.
@@ -431,8 +430,8 @@ types of application hints to the SLURM multi-core support:</p>
 
 <PRE>
 --hint=             Bind tasks according to application hints
-    compute_bound   use all cores in each physical CPU
-    memory_bound    use only one core in each physical CPU
+    compute_bound   use all cores in each socket
+    memory_bound    use only one core in each socket
     [no]multithread [don't] use extra threads with in-core multi-threading
     help            show this help message
 </PRE>
@@ -476,7 +475,7 @@ a different layout using the high-level flags since users do not have to
 recalculate mask or CPU IDs. The new approach is very effortless compared to
 rearranging the mask or map.</p>
 
-<p>Given a 32-process MPI job and a four dual-CPU dual-core node
+<p>Given a 32-process MPI job and a four dual-socket dual-core node
 cluster, we want to use a block distribution across the four nodes and then a
 cyclic distribution within the node across the physical processors. We have had
 several requests from users that they would like this distribution to be the
@@ -537,7 +536,7 @@ nodes. The --cpu_bind option only allows users to specify a single
 mask for all the nodes. Using SLURM high-level flags remove this limitation
 since SLURM will correctly generate the appropriate masks for each requested nodes.</p>
 
-<h3>On a four dual-CPU dual-core node cluster with core block numbering </h3>
+<h3>On a four dual-socket dual-core node cluster with core block numbering </h3>
 
 <p>The cores are shown as c0 and c1 and the processors are shown
 as p0 through p3. The CPU IDs within a node in the block numbering are:
@@ -719,7 +718,7 @@ trivial and that it assumes that users are experts.</p>
 <p>Several extensions have also been made to the other SLURM utilities to
 make working with multi-core/multi-threaded systems easier.</p>
 
-<!- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --> 
+<!- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
 <h3>sinfo</h3>
 
 <p>The long version (-l) of the sinfo node listing (-N) has been
@@ -728,8 +727,8 @@ node.  For example:
 
 <PRE>
 % sinfo -N
-NODELIST     NODES PARTITION STATE 
-hydra[12-15]     4    parts* idle  
+NODELIST     NODES PARTITION STATE
+hydra[12-15]     4    parts* idle
 
 % sinfo -lN
 Thu Sep 14 17:47:13 2006
@@ -759,13 +758,13 @@ the following identifiers are available:</p>
 
 <PRE>
 % sinfo -o '%9P %4c %8z %8X %8Y %8Z'
-PARTITION CPUS S:C:T    SOCKETS  CORES    THREADS 
-parts*    4    2:2:1    2        2        1       
+PARTITION CPUS S:C:T    SOCKETS  CORES    THREADS
+parts*    4    2:2:1    2        2        1
 </PRE>
 
 <p>See also 'sinfo --help' and 'man sinfo'</p>
 
-<!- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --> 
+<!- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
 <h3>squeue</h3>
 
 <p>For user specified output formats (-o/--format) and sorting (-S/--sort),
@@ -798,23 +797,23 @@ the following identifiers are available:</p>
 <PRE>
 % squeue -o '%.5i %.2t %.4M %.5D %7X %7Y %7Z %7z %R'
 JOBID ST TIME NODES SOCKETS CORES   THREADS S:C:T   NODELIST(REASON)
-   17 PD 0:00     1 2       2       1       2:2:1   (Resources) 
-   18 PD 0:00     1 2       2       1       2:2:1   (Resources) 
-   19 PD 0:00     1 2       2       1       2:2:1   (Resources) 
-   13  R 1:27     1 2       2       1       2:2:1   hydra12 
-   14  R 1:26     1 2       2       1       2:2:1   hydra13 
-   15  R 1:26     1 2       2       1       2:2:1   hydra14 
-   16  R 1:26     1 2       2       1       2:2:1   hydra15 
+   17 PD 0:00     1 2       2       1       2:2:1   (Resources)
+   18 PD 0:00     1 2       2       1       2:2:1   (Resources)
+   19 PD 0:00     1 2       2       1       2:2:1   (Resources)
+   13  R 1:27     1 2       2       1       2:2:1   hydra12
+   14  R 1:26     1 2       2       1       2:2:1   hydra13
+   15  R 1:26     1 2       2       1       2:2:1   hydra14
+   16  R 1:26     1 2       2       1       2:2:1   hydra15
 
 % squeue -o '%.5i %.2t %.4M %.5D %9c %11H %9I %11J'
 JOBID ST TIME NODES MIN_PROCS MIN_SOCKETS MIN_CORES MIN_THREADS
-   17 PD 0:00     1 1         4           2         1          
-   18 PD 0:00     1 1         4           2         1          
-   19 PD 0:00     1 1         4           2         1          
-   13  R 1:29     1 0         0           0         0          
-   14  R 1:28     1 0         0           0         0          
-   15  R 1:28     1 0         0           0         0          
-   16  R 1:28     1 0         0           0         0          
+   17 PD 0:00     1 1         4           2         1
+   18 PD 0:00     1 1         4           2         1
+   19 PD 0:00     1 1         4           2         1
+   13  R 1:29     1 0         0           0         0
+   14  R 1:28     1 0         0           0         0
+   15  R 1:28     1 0         0           0         0
+   16  R 1:28     1 0         0           0         0
 </PRE>
 
 <p>
@@ -859,7 +858,7 @@ the job starts running).
 
 <p>See also 'squeue --help' and 'man squeue'</p>
 
-<!- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --> 
+<!- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
 <h3>scontrol</h3>
 
 <p>The following job settings can be adjusted using scontrol:
@@ -885,13 +884,13 @@ Constraints:
 
 % squeue -o '%.5i %.2t %.4M %.5D %9c %11H %9I %11J'
 JOBID ST TIME NODES MIN_PROCS MIN_SOCKETS MIN_CORES MIN_THREADS
-   17 PD 0:00     1 1         4           2         1          
-   18 PD 0:00     1 1         8           4         2          
-   19 PD 0:00     1 1         4           2         1          
-   13  R 1:35     1 0         0           0         0          
-   14  R 1:34     1 0         0           0         0          
-   15  R 1:34     1 0         0           0         0          
-   16  R 1:34     1 0         0           0         0          
+   17 PD 0:00     1 1         4           2         1
+   18 PD 0:00     1 1         8           4         2
+   19 PD 0:00     1 1         4           2         1
+   13  R 1:35     1 0         0           0         0
+   14  R 1:34     1 0         0           0         0
+   15  R 1:34     1 0         0           0         0
+   16  R 1:34     1 0         0           0         0
 </PRE>
 
 <p>The 'scontrol show job' command can be used to display
@@ -935,7 +934,7 @@ via <a href="configurator.html">configurator.html</a>.
 task/affinity plugin must be first enabled in slurm.conf:
 
 <PRE>
-TaskPlugin=task/affinity          # enable task affinity   
+TaskPlugin=task/affinity          # enable task affinity
 </PRE>
 
 <p>This setting is part of the task launch specific parameters:</p>
@@ -943,11 +942,11 @@ TaskPlugin=task/affinity          # enable task affinity
 <PRE>
 # o Define task launch specific parameters
 #
-#    "TaskProlog" : Define a program to be executed as the user before each 
+#    "TaskProlog" : Define a program to be executed as the user before each
 #                   task begins execution.
-#    "TaskEpilog" : Define a program to be executed as the user after each 
+#    "TaskEpilog" : Define a program to be executed as the user after each
 #                   task terminates.
-#    "TaskPlugin" : Define a task launch plugin. This may be used to 
+#    "TaskPlugin" : Define a task launch plugin. This may be used to
 #                   provide resource management within a node (e.g. pinning
 #                   tasks to specific processors). Permissible values are:
 #      "task/none"     : no task launch actions, the default.
@@ -962,7 +961,7 @@ TaskPlugin=task/affinity          # enable task affinity
 
 <p>SLURM will automatically detect the architecture of the nodes used
 by examining /proc/cpuinfo.  If, for some reason, the administrator
-wishes to override the automatically selected architecture, the 
+wishes to override the automatically selected architecture, the
 NodeName parameter can be used in combination with FastSchedule:
 
 <PRE>
@@ -977,25 +976,25 @@ using NodeName:
 #
 #  o Node configuration
 #
-#    The configuration information of nodes (or machines) to be managed 
+#    The configuration information of nodes (or machines) to be managed
 #    by SLURM is described here. The only required value in this section
-#    of the config file is the "NodeName" field, which specifies the 
+#    of the config file is the "NodeName" field, which specifies the
 #    hostnames of the node or nodes to manage. It is recommended, however,
 #    that baseline values for the node configuration be established
-#    using the following parameters (see slurm.config(5) for more info): 
+#    using the following parameters (see slurm.config(5) for more info):
 #
 #     "NodeName"   : The only required node configuration parameter, NodeName
 #                    specifies a node or set of nodes to be managed by SLURM.
 #                    The special NodeName of "DEFAULT" may be used to establish
 #                    default node configuration parameters for subsequent node
-#                    records. Typically this would be the string that 
-#                    `/bin/hostname -s` would return on the node. However 
-#                    NodeName may be an arbitrary string if NodeHostname is 
+#                    records. Typically this would be the string that
+#                    `/bin/hostname -s` would return on the node. However
+#                    NodeName may be an arbitrary string if NodeHostname is
 #                    used (see below).
 #
-#     "Feature"    : comma separated list of "features" for the given node(s) 
+#     "Feature"    : comma separated list of "features" for the given node(s)
 #
-#     "NodeAddr"   : preferred address for contacting the node. This may be 
+#     "NodeAddr"   : preferred address for contacting the node. This may be
 #                    either a name or IP address.
 #
 #     "NodeHostname"
@@ -1030,7 +1029,7 @@ using NodeName:
 #     "Weight"     : Priority of node for scheduling purposes
 #
 #   If any of the above values are set for a node or group of nodes, and
-#   that node checks in to the slurm controller with less than the 
+#   that node checks in to the slurm controller with less than the
 #   configured resources, the node's state will be set to DOWN, in order
 #   to avoid scheduling any jobs on a possibly misconfigured machine.
 #
@@ -1045,7 +1044,7 @@ using NodeName:
 </PRE>
 
 <!-------------------------------------------------------------------------->
-<p style="text-align:center;">Last modified 2 February 2007</p>
+<p style="text-align:center;">Last modified 13 October 2009</p>
 
 <!--#include virtual="footer.txt"-->
 
