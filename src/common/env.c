@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/common/env.c - add an environment variable to environment vector
- *  $Id: env.c 12697 2007-11-27 22:02:29Z jette $
+ *  $Id: env.c 12884 2007-12-21 00:41:34Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1315,7 +1315,7 @@ char **env_array_user_default(const char *username, int timeout, int mode)
 		close(2);
 		open("/dev/null", O_WRONLY);
 		snprintf(cmdstr, sizeof(cmdstr),
-			 "echo; echo; echo; echo %s; env; echo %s",
+			 "/bin/echo; /bin/echo; /bin/echo; /bin/echo %s; /bin/env; /bin/echo %s",
 			 starttoken, stoptoken);
 		if      (mode == 1)
 			execl("/bin/su", "su", username, "-c", cmdstr, NULL);

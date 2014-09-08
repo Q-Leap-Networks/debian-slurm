@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  slurmctld.h - definitions of functions and structures for slurmcltd use
  *
- *  $Id: slurmctld.h 11795 2007-07-06 15:39:25Z jette $
+ *  $Id: slurmctld.h 12863 2007-12-19 23:14:45Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -301,7 +301,9 @@ struct job_details {
 	uint32_t total_procs;		/* number of allocated processors, 
 					   for accounting */
 	time_t submit_time;		/* time of submission */
-	time_t begin_time;		/* start after this time */
+	time_t begin_time;		/* start at this time (srun --being), 
+					 * resets to time first eligible
+					 * (all dependencies satisfied) */
 	char *work_dir;			/* pathname of working directory */
 	char **argv;			/* arguments for a batch job script */
 	uint16_t argc;			/* count of argv elements */
@@ -331,7 +333,7 @@ struct job_record {
 	char *nodes_completing;		/* nodes still in completing state
 					 * for this job, used to insure
 					 * epilog is not re-run for job */
-	uint32_t num_procs;		/* count of required/allocated processors */
+	uint32_t num_procs;		/* count of required processors */
 	uint32_t time_limit;		/* time_limit minutes or INFINITE,
 					 * NO_VAL implies partition max_time */
 	time_t start_time;		/* time execution begins, 
@@ -1200,6 +1202,12 @@ extern void save_all_state(void);
  *	order (by submit time), so the sorting should be pretty fast.
  */
 extern int schedule (void);
+
+/*
+ * set_job_elig_time - set the eligible time for pending jobs once their 
+ *	dependencies are lifted (in job->details->begin_time)
+ */
+extern void set_job_elig_time(void);
 
 /*
  * set_node_down - make the specified node's state DOWN if possible

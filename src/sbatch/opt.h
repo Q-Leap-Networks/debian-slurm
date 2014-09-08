@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  opt.h - definitions for srun option processing
- *  $Id: opt.h 12697 2007-11-27 22:02:29Z jette $
+ *  $Id: opt.h 12856 2007-12-19 00:18:44Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -74,6 +74,7 @@ typedef struct sbatch_options {
 	int nice;		/* --nice			*/
 	char *account;		/* --account, -U acct_name	*/
 	char *comment;		/* --comment			*/
+	char *propagate;	/* --propagate[=RLIMIT_CORE,...]*/
 
 	int immediate;		/* -i, --immediate      	*/
 

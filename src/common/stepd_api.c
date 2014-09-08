@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/common/stepd_api.c - slurmstepd message API
- *  $Id: stepd_api.c 11890 2007-07-30 16:03:53Z grondo $
+ *  $Id: stepd_api.c 12808 2007-12-11 17:25:08Z jette $
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -36,7 +36,10 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#define _GNU_SOURCE
+#ifndef   _GNU_SOURCE
+#  define _GNU_SOURCE
+#endif
+
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/socket.h>

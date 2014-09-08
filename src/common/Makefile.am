@@ -10,7 +10,7 @@ build_unsetenv_src = unsetenv.c unsetenv.h
 extra_unsetenv_src = 
 endif
 
-INCLUDES     = -I$(top_srcdir) $(SSL_CPPFLAGS) 
+INCLUDES     = -I$(top_srcdir) $(SSL_CPPFLAGS)
 
 noinst_LTLIBRARIES = 			\
 	libcommon.la 			\
