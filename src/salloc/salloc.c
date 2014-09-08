@@ -209,7 +209,8 @@ int main(int argc, char *argv[])
 	info("Granted job allocation %d", alloc->job_id);
 #ifdef HAVE_BG
 	if (!_wait_bluegene_block_ready(alloc)) {
-		error("Something is wrong with the boot of the block.");
+		if(!allocation_interrupted)
+			error("Something is wrong with the boot of the block.");
 		goto relinquish;
 	}
 
@@ -614,6 +615,7 @@ static int _wait_bluegene_block_ready(resource_allocation_response_msg_t *alloc)
 	int max_delay = BG_FREE_PREVIOUS_BLOCK + BG_MIN_BLOCK_BOOT +
 		(BG_INCR_BLOCK_BOOT * alloc->node_cnt);
 
+	pending_job_id = alloc->job_id;
 	select_g_get_jobinfo(alloc->select_jobinfo, SELECT_DATA_BLOCK_ID,
 			     &block_id);
 
@@ -642,12 +644,16 @@ static int _wait_bluegene_block_ready(resource_allocation_response_msg_t *alloc)
 			break;
 		}
 	}
-
 	if (is_ready)
      		info("Block %s is ready for job", block_id);
-	else
+	else if(!allocation_interrupted)
 		error("Block %s still not ready", block_id);
+	else /* this should never happen, but if allocation_intrrupted
+		send back not ready */
+		is_ready = 0;
+
 	xfree(block_id);
+	pending_job_id = 0;
 
 	return is_ready;
 }

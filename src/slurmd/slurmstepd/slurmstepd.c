@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/slurmstepd.c - SLURM job-step manager.
- *  $Id: slurmstepd.c 15819 2008-12-03 23:32:14Z jette $
+ *  $Id: slurmstepd.c 17040 2009-03-26 15:03:18Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -361,7 +361,7 @@ _step_setup(slurm_addr *cli, slurm_addr *self, slurm_msg_t *msg)
 	return job;
 }
 
-#ifdef MEMORY_LEAK_TEST
+#ifdef MEMORY_LEAK_DEBUG
 static void
 _step_cleanup(slurmd_job_t *job, slurm_msg_t *msg, int rc)
 {

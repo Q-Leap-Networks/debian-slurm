@@ -230,7 +230,7 @@ extern int setup_job_cond_limits(acct_job_cond_t *job_cond, char **extra)
 		while((object = list_next(itr))) {
 			if(set) 
 				xstrcat(*extra, " || ");
-			xstrfmtcat(*extra, "t1.gid=", object);
+			xstrfmtcat(*extra, "t1.gid='%s'", object);
 			set = 1;
 		}
 		list_iterator_destroy(itr);
@@ -283,6 +283,13 @@ extern int setup_job_cond_limits(acct_job_cond_t *job_cond, char **extra)
 			   "(t1.eligible < %d "
 			   "&& (t1.end >= %d || t1.end = 0)))",
 			   job_cond->usage_end, job_cond->usage_start);
+	} else if(job_cond->usage_end) {
+		if(*extra)
+			xstrcat(*extra, " && (");
+		else
+			xstrcat(*extra, " where (");
+		xstrfmtcat(*extra, 
+			   "(t1.eligible < %d))", job_cond->usage_end);
 	}
 
 	if(job_cond->state_list && list_count(job_cond->state_list)) {
@@ -600,7 +607,10 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn, uid_t uid,
 	   easy to look for duplicates 
 	*/
 	if(job_cond && !job_cond->duplicates) 
-		xstrcat(query, " order by jobid, submit desc");
+		xstrcat(query, " order by t1.cluster, jobid, submit desc");
+	else
+		xstrcat(query, " order by t1.cluster, submit desc");
+		
 
 	debug3("%d(%d) query\n%s", mysql_conn->conn, __LINE__, query);
 	if(!(result = mysql_db_query_ret(
@@ -735,6 +745,9 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn, uid_t uid,
 			job->elapsed -= job->suspended;
 		}
 
+		if((int)job->elapsed < 0)
+			job->elapsed = 0;
+
 		job->jobid = curr_id;
 		job->jobname = xstrdup(row[JOB_REQ_NAME]);
 		job->gid = atoi(row[JOB_REQ_GID]);
@@ -851,6 +864,10 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn, uid_t uid,
 				step->elapsed = step->end - step->start;
 			}
 			step->elapsed -= step->suspended;
+
+			if((int)step->elapsed < 0)
+				step->elapsed = 0;
+
 			step->user_cpu_sec = atoi(step_row[STEP_REQ_USER_SEC]);
 			step->user_cpu_usec =
 				atoi(step_row[STEP_REQ_USER_USEC]);
@@ -915,6 +932,8 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn, uid_t uid,
 					job->track_steps = 1;
 			}
                }
+		/* need to reset here to make the above test valid */
+		step = NULL;
 	}
 	mysql_free_result(result);
 
@@ -1246,10 +1265,11 @@ extern int mysql_jobacct_process_archive(mysql_conn_t *mysql_conn,
 			if (rc)
 				(void) unlink(new_file);
 			else {			/* file shuffle */
+				int ign;	/* avoid warning */
 				(void) unlink(old_file);
-				(void) link(reg_file, old_file);
+				ign =  link(reg_file, old_file);
 				(void) unlink(reg_file);
-				(void) link(new_file, reg_file);
+				ign =   link(new_file, reg_file);
 				(void) unlink(new_file);
 			}
 			xfree(old_file);
@@ -1432,10 +1452,11 @@ exit_steps:
 			if (rc)
 				(void) unlink(new_file);
 			else {			/* file shuffle */
+				int ign;	/* avoid warning */
 				(void) unlink(old_file);
-				(void) link(reg_file, old_file);
+				ign =  link(reg_file, old_file);
 				(void) unlink(reg_file);
-				(void) link(new_file, reg_file);
+				ign =  link(new_file, reg_file);
 				(void) unlink(new_file);
 			}
 			xfree(old_file);
@@ -1520,7 +1541,7 @@ extern int mysql_jobacct_process_archive_load(mysql_conn_t *mysql_conn,
 	}
 	
 	debug3("%d(%d) query\n%s", mysql_conn->conn, __LINE__, data);
-	error_code = mysql_db_query(mysql_conn->db_conn, data);
+	error_code = mysql_db_query_check_after(mysql_conn->db_conn, data);
 	xfree(data);
 	if(error_code != SLURM_SUCCESS) {
 		error("Couldn't load old data");

@@ -546,8 +546,10 @@ void set_options(const int argc, char **argv)
 		{"reboot",	  no_argument,       0, LONG_OPT_REBOOT},
 		{"blrts-image",   required_argument, 0, LONG_OPT_BLRTS_IMAGE},
 		{"linux-image",   required_argument, 0, LONG_OPT_LINUX_IMAGE},
+		{"cnload-image",  required_argument, 0, LONG_OPT_LINUX_IMAGE},
 		{"mloader-image", required_argument, 0, LONG_OPT_MLOADER_IMAGE},
 		{"ramdisk-image", required_argument, 0, LONG_OPT_RAMDISK_IMAGE},
+		{"ioload-image",  required_argument, 0, LONG_OPT_RAMDISK_IMAGE},
 		{"acctg-freq",    required_argument, 0, LONG_OPT_ACCTG_FREQ},
 		{"no-shell",      no_argument,       0, LONG_OPT_NOSHELL},
 		{"get-user-env",  optional_argument, 0, LONG_OPT_GET_USER_ENV},
@@ -1352,14 +1354,25 @@ static void _opt_list()
 	xfree(str);
 	info("reboot         : %s", opt.reboot ? "no" : "yes");
 	info("rotate         : %s", opt.no_rotate ? "yes" : "no");
+#ifdef HAVE_BGL
 	if (opt.blrtsimage)
 		info("BlrtsImage     : %s", opt.blrtsimage);
+#endif
 	if (opt.linuximage)
+#ifdef HAVE_BGL
 		info("LinuxImage     : %s", opt.linuximage);
+#else
+		info("CnloadImage    : %s", opt.linuximage);
+#endif
 	if (opt.mloaderimage)
 		info("MloaderImage   : %s", opt.mloaderimage);
 	if (opt.ramdiskimage)
+#ifdef HAVE_BGL
 		info("RamDiskImage   : %s", opt.ramdiskimage);
+#else
+		info("IoloadImage   : %s", opt.ramdiskimage);
+#endif
+
 	if (opt.begin) {
 		char time_str[32];
 		slurm_make_time_str(&opt.begin, time_str, sizeof(time_str));
@@ -1396,8 +1409,13 @@ static void _usage(void)
 "              [--account=name] [--dependency=type:jobid] [--comment=name]\n"
 #ifdef HAVE_BG		/* Blue gene specific options */
 "              [--geometry=XxYxZ] [--conn-type=type] [--no-rotate] [ --reboot]\n"
+#ifdef HAVE_BGL
 "              [--blrts-image=path] [--linux-image=path]\n"
 "              [--mloader-image=path] [--ramdisk-image=path]\n"
+#else
+"              [--cnload-image=path]\n"
+"              [--mloader-image=path] [--ioload-image=path]\n"
+#endif
 #endif
 "              [--mail-type=type] [--mail-user=user][--nice[=value]]\n"
 "              [--bell] [--no-bell] [--kill-command[=signal]]\n"
@@ -1490,24 +1508,34 @@ static void _help(void)
 
         printf("\n"
 #ifdef HAVE_AIX				/* AIX/Federation specific options */
-  "AIX related options:\n"
-  "  --network=type              communication protocol to be used\n"
-  "\n"
+"AIX related options:\n"
+"  --network=type              communication protocol to be used\n"
+"\n"
 #endif
 #ifdef HAVE_BG				/* Blue gene specific options */
 "\n"
-  "Blue Gene related options:\n"
-  "  -g, --geometry=XxYxZ        geometry constraints of the job\n"
-  "  -R, --no-rotate             disable geometry rotation\n"
-  "      --reboot                reboot nodes before starting job\n"
-  "      --conn-type=type        constraint on type of connection, MESH or TORUS\n"
-  "                              if not set, then tries to fit TORUS else MESH\n"
-  "      --blrts-image=path      path to blrts image for bluegene block.  Default if not set\n"
-  "      --linux-image=path      path to linux image for bluegene block.  Default if not set\n"
-  "      --mloader-image=path    path to mloader image for bluegene block.  Default if not set\n"
-  "      --ramdisk-image=path    path to ramdisk image for bluegene block.  Default if not set\n"
-  "\n"
+"Blue Gene related options:\n"
+"  -g, --geometry=XxYxZ        geometry constraints of the job\n"
+"  -R, --no-rotate             disable geometry rotation\n"
+"      --reboot                reboot nodes before starting job\n"
+"      --conn-type=type        constraint on type of connection, MESH or TORUS\n"
+"                              if not set, then tries to fit TORUS else MESH\n"
+#ifndef HAVE_BGL
+"                              If wanting to run in HTC mode (only for 1\n"
+"                              midplane and below).  You can use HTC_S for\n"
+"                              SMP, HTC_D for Dual, HTC_V for\n"
+"                              virtual node mode, and HTC_L for Linux mode.\n" 
+"      --cnload-image=path     path to compute node image for bluegene block.  Default if not set\n"
+"      --mloader-image=path    path to mloader image for bluegene block.  Default if not set\n"
+"      --ioload-image=path     path to ioload image for bluegene block.  Default if not set\n"
+#else
+"      --blrts-image=path      path to blrts image for bluegene block.  Default if not set\n"
+"      --linux-image=path      path to linux image for bluegene block.  Default if not set\n"
+"      --mloader-image=path    path to mloader image for bluegene block.  Default if not set\n"
+"      --ramdisk-image=path    path to ramdisk image for bluegene block.  Default if not set\n"
 #endif
+#endif
+"\n"
 "Help options:\n"
 "  -h, --help                  show this help message\n"
 "  -u, --usage                 display brief usage message\n"

@@ -39,6 +39,7 @@
 
 #include "sacct.h"
 #include "src/common/parse_time.h"
+#include "src/common/hostlist.h"
 #include "slurm.h"
 #define FORMAT_STRING_SIZE 34
 
@@ -69,16 +70,20 @@ void _elapsed_time(long secs, long usecs, char *str)
 
 	if (days) 
 		snprintf(str, FORMAT_STRING_SIZE,
-			 "%ld-%2.2ld:%2.2ld:%2.2ld",
+			 "%2.2ld-%2.2ld:%2.2ld:%2.2ld",
 		         days, hours, minutes, seconds);
 	else if (hours)
 		snprintf(str, FORMAT_STRING_SIZE,
-			 "%ld:%2.2ld:%2.2ld",
+			 "%2.2ld:%2.2ld:%2.2ld",
 		         hours, minutes, seconds);
+	else if(subsec)
+		snprintf(str, FORMAT_STRING_SIZE,
+			 "%2.2ld:%2.2ld.%3.3ld",
+		         minutes, seconds, subsec);
 	else
 		snprintf(str, FORMAT_STRING_SIZE,
-			 "%ld:%2.2ld.%3.3ld",
-		         minutes, seconds, subsec);
+			 "00:%2.2ld:%2.2ld",
+		         minutes, seconds);
 }
 
 void print_fields(type_t type, void *object)
@@ -406,25 +411,50 @@ void print_nodes(type_t type, void *object)
 
 void print_nnodes(type_t type, void *object)
 { 
+	jobacct_job_rec_t *job = (jobacct_job_rec_t *)object;
 	jobcomp_job_rec_t *jobcomp = (jobcomp_job_rec_t *)object;
-	char temp[FORMAT_STRING_SIZE];
+	jobacct_step_rec_t *step = (jobacct_step_rec_t *)object;
+	char *tmp_char = NULL;
+	int tmp_int = NO_VAL;
+	hostlist_t hl = NULL;
 
 	switch(type) {
 	case HEADLINE:
 		printf("%-8s", "Node Cnt");
+		tmp_int = INFINITE;
 		break;
 	case UNDERSCORE:
 		printf("%-8s", "--------");
+		tmp_int = INFINITE;
+		break;
+	case JOB:
+		tmp_char = job->nodes;
+		break;
+	case JOBSTEP:
+		tmp_char = step->nodes;
 		break;
 	case JOBCOMP:
-		convert_num_unit((float)jobcomp->node_cnt, temp, 
-				 sizeof(temp), UNIT_NONE);
-		printf("%-8s", temp);
+		tmp_int = jobcomp->node_cnt;
 		break;
 	default:
-		printf("%-8s", "n/a");
 		break;
-	} 
+	}
+	if(tmp_char) {
+		hl = hostlist_create(tmp_char);
+		tmp_int = hostlist_count(hl);
+		hostlist_destroy(hl);
+	}
+
+	if(tmp_int == INFINITE)
+		return;
+	else if(tmp_int == NO_VAL) 
+		printf("%-8s", "n/a");
+	else {
+		char outbuf[FORMAT_STRING_SIZE];
+		convert_num_unit((float)tmp_int, 
+				 outbuf, sizeof(outbuf), UNIT_NONE);
+		printf("%-8s", outbuf);
+	}
 }
 
 void print_ntasks(type_t type, void *object)
@@ -708,6 +738,37 @@ void print_submit(type_t type, void *object)
 		break;
 	case JOB:
 		slurm_make_time_str(&job->submit, 
+				    time_str, 
+				    sizeof(time_str));
+		printf("%-14s", time_str);
+		break;
+	case JOBSTEP:
+		slurm_make_time_str(&step->start, 
+				    time_str, 
+				    sizeof(time_str));
+		printf("%-14s", time_str);
+		break;
+	default:
+		printf("%-14s", "n/a");
+		break;
+	} 
+}
+
+void print_eligible(type_t type, void *object)
+{ 
+	jobacct_job_rec_t *job = (jobacct_job_rec_t *)object;
+	jobacct_step_rec_t *step = (jobacct_step_rec_t *)object;
+	char time_str[32];
+		
+	switch(type) {
+	case HEADLINE:
+		printf("%-14s", "Eligible Time");
+		break;
+	case UNDERSCORE:
+		printf("%-14.14s", "--------------");
+		break;
+	case JOB:
+		slurm_make_time_str(&job->eligible, 
 				    time_str, 
 				    sizeof(time_str));
 		printf("%-14s", time_str);

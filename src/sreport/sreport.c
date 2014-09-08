@@ -75,7 +75,7 @@ main (int argc, char *argv[])
 	int error_code = SLURM_SUCCESS, i, opt_char, input_field_count;
 	char **input_fields;
 	log_options_t opts = LOG_OPTS_STDERR_ONLY ;
-
+	char *temp = NULL;
 	int option_index;
 	static struct option long_options[] = {
 		{"all_clusters", 0, 0, 'a'},
@@ -98,6 +98,20 @@ main (int argc, char *argv[])
 	input_field_count = 0;
 	quiet_flag        = 0;
 	log_init("sreport", opts, SYSLOG_FACILITY_DAEMON, NULL);
+
+	/* Check to see if we are running a supported accounting plugin */
+	temp = slurm_get_accounting_storage_type();
+	if(strcasecmp(temp, "accounting_storage/slurmdbd")
+	   && strcasecmp(temp, "accounting_storage/mysql")) {
+		fprintf (stderr, "You are not running a supported "
+			 "accounting_storage plugin\n(%s).\n"
+			 "Only 'accounting_storage/slurmdbd' "
+			 "and 'accounting_storage/mysql' are supported.\n",
+			temp);
+		xfree(temp);
+		exit(1);
+	}
+	xfree(temp);
 
 	while((opt_char = getopt_long(argc, argv, "ahnpPqs:t:vV",
 			long_options, &option_index)) != -1) {
@@ -211,16 +225,22 @@ getline(const char *prompt)
 static void _job_rep (int argc, char *argv[]) 
 {
 	int error_code = SLURM_SUCCESS;
+	int command_len = strlen(argv[0]);
 
-	/* First identify the entity to add */
-	if (strncasecmp (argv[0], "Sizes", 1) == 0) {
+	/* For backwards compatibility we just look at the 1st char
+	 * by default since Sizes was the original name */
+	if (!strncasecmp (argv[0], "SizesByAccount", MAX(command_len, 1))) {
 		error_code = job_sizes_grouped_by_top_acct(
+			(argc - 1), &argv[1]);
+	} else if (!strncasecmp (argv[0], 
+				 "SizesByWcKey", MAX(command_len, 8))) {
+		error_code = job_sizes_grouped_by_wckey(
 			(argc - 1), &argv[1]);
 	} else {
 		exit_code = 1;
 		fprintf(stderr, "Not valid report %s\n", argv[0]);
 		fprintf(stderr, "Valid job reports are, ");
-		fprintf(stderr, "\"Sizes\"\n");
+		fprintf(stderr, "\"SizesByAccount, and SizesByWckey\"\n");
 	}
 	
 	if (error_code) {
@@ -519,13 +539,13 @@ static int _set_time_format(char *format)
 
 	if (strncasecmp (format, "SecPer", MAX(command_len, 6)) == 0) {
 		time_format = SREPORT_TIME_SECS_PER;
-		time_format_string = "Seconds/Percentange of Total";
+		time_format_string = "Seconds/Percentage of Total";
 	} else if (strncasecmp (format, "MinPer", MAX(command_len, 6)) == 0) {
 		time_format = SREPORT_TIME_MINS_PER;
-		time_format_string = "Minutes/Percentange of Total";
+		time_format_string = "Minutes/Percentage of Total";
 	} else if (strncasecmp (format, "HourPer", MAX(command_len, 6)) == 0) {
 		time_format = SREPORT_TIME_HOURS_PER;
-		time_format_string = "Hours/Percentange of Total";
+		time_format_string = "Hours/Percentage of Total";
 	} else if (strncasecmp (format, "Seconds", MAX(command_len, 1)) == 0) {
 		time_format = SREPORT_TIME_SECS;
 		time_format_string = "Seconds";
@@ -537,7 +557,7 @@ static int _set_time_format(char *format)
 		time_format_string = "Hours";
 	} else if (strncasecmp (format, "Percent", MAX(command_len, 1)) == 0) {
 		time_format = SREPORT_TIME_PERCENT;
-		time_format_string = "Percentange of Total";
+		time_format_string = "Percentage of Total";
 	} else {
 		fprintf (stderr, "unknown time format %s", format);	
 		return SLURM_ERROR;
@@ -602,7 +622,7 @@ sreport [<OPTION>] [<COMMAND>]                                             \n\
   <REPORT> is different for each report type.                              \n\
      cluster - AccountUtilizationByUser, UserUtilizationByAccount,         \n\
                UserUtilizationByWckey, Utilization, WCKeyUtilizationByUser \n\
-     job     - Sizes                                                       \n\
+     job     - SizesByAccount, SizesByWckey                                \n\
      user    - TopUsage                                                    \n\
                                                                            \n\
   <OPTIONS> are different for each report type.                            \n\
@@ -610,6 +630,8 @@ sreport [<OPTION>] [<COMMAND>]                                             \n\
      COMMON FOR ALL TYPES                                                  \n\
              - All_Clusters     - Use all monitored clusters default is    \n\
                                   local cluster.                           \n\
+             - Clusters=<OPT>   - List of clusters to include in report    \n\
+                                  Default is local cluster.                \n\
              - End=<OPT>        - Period ending for report.                \n\
                                   Default is 23:59:59 of previous day.     \n\
              - Format=<OPT>     - Comma separated list of fields to display\n\
@@ -617,17 +639,35 @@ sreport [<OPTION>] [<COMMAND>]                                             \n\
              - Start=<OPT>      - Period start for report.                 \n\
                                   Default is 00:00:00 of previous day.     \n\
                                                                            \n\
-     cluster - Names=<OPT>      - List of clusters to include in report    \n\
-                                  Default is local cluster.                \n\
+     cluster - Accounts=<OPT>   - When used with the UserUtilizationByAccount,\n\
+                                  or AccountUtilizationByUser, List of accounts\n\
+                                  to include in report.  Default is all.   \n\
              - Tree             - When used with the AccountUtilizationByUser\n\
                                   report will span the accounts as they    \n\
                                   in the hierarchy.                        \n\
+             - Users=<OPT>      - When used with any report other than     \n\
+                                  Utilization, List of users to include in \n\
+                                  report.  Default is all.                 \n\
+             - Wckeys=<OPT>     - When used with the UserUtilizationByWckey\n\
+                                  or WCKeyUtilizationByUser, List of wckeys\n\
+                                  to include in report.  Default is all.   \n\
                                                                            \n\
      job     - Accounts=<OPT>   - List of accounts to use for the report   \n\
-                                  Default is all.                          \n\
-             - Clusters=<OPT>   - List of clusters to include in report.   \n\
-                                  Default is local cluster.                \n\
-             - GID=<OPT>        - List of group ids to include in report   \n\
+                                  Default is all.  The SizesbyAccount      \n\
+                                  report only displays 1 hierarchical level.\n\
+                                  If accounts are specified the next layer \n\
+                                  of accounts under those specified will be\n\
+                                  displayed, not the accounts specified.   \n\
+                                  In the SizesByAccount reports the default\n\
+                                  for accounts is root.  This explanation  \n\
+                                  does not apply when ran with the FlatView\n\
+                                  option.                                  \n\
+             - FlatView         - When used with the SizesbyAccount        \n\
+                                  will not group accounts in a             \n\
+                                  hierarchical level, but print each       \n\
+                                  account where jobs ran on a separate     \n\
+                                  line without any hierarchy.              \n\
+             - GID=<OPT>        - List of group ids to include in report.  \n\
                                   Default is all.                          \n\
              - Grouping=<OPT>   - Comma separated list of size groupings.  \n\
                                   (i.e. 50,100,150 would group job cpu count\n\
@@ -636,15 +676,19 @@ sreport [<OPTION>] [<COMMAND>]                                             \n\
                                   Default is all.                          \n\
              - Partitions=<OPT> - List of partitions jobs ran on to include\n\
                                   in report.  Default is all.              \n\
-             - PrintJobCount    - When used with the Sizes report will print\n\
-                                  number of jobs ran instead of time used. \n\
+             - PrintJobCount    - When used with the any Sizes report      \n\
+                                  will print number of jobs ran instead of \n\
+                                  time used.                               \n\
              - Users=<OPT>      - List of users jobs to include in report. \n\
                                   Default is all.                          \n\
+             - Wckeys=<OPT>     - List of wckeys to use for the report.    \n\
+                                  Default is all.  The SizesbyWckey        \n\
+                                  report all users summed together.  If    \n\
+                                  you want only certain users specify them \n\
+                                  them with the Users= option.             \n\
                                                                            \n\
      user    - Accounts=<OPT>   - List of accounts to use for the report   \n\
                                   Default is all.                          \n\
-             - Clusters=<OPT>   - List of clusters to include in report.   \n\
-                                  Default is local cluster.                \n\
              - Group            - Group all accounts together for each user.\n\
                                   Default is a separate entry for each user\n\
                                   and account reference.                   \n\
@@ -652,6 +696,35 @@ sreport [<OPTION>] [<COMMAND>]                                             \n\
                                   number of users displayed.  Default is 10.\n\
              - Users=<OPT>      - List of users jobs to include in report. \n\
                                   Default is all.                          \n\
+                                                                           \n\
+                                                                           \n\
+  Below are the format options for each report.                            \n\
+                                                                           \n\
+       Cluster                                                             \n\
+       - AccountUtilizationByUser                                          \n\
+       - UserUtilizationByAccount                                          \n\
+             - Accounts, Cluster, CPUCount, Login, Proper, Used            \n\
+       - UserUtilizationByWckey                                            \n\
+       - WCKeyUtilizationByUser                                            \n\
+             - Cluster, CPUCount, Login, Proper, Used, Wckey               \n\
+       - Utilization                                                       \n\
+             - Allocated, Cluster, CPUCount, Down, Idle, Overcommited,     \n\
+               Reported, Reserved                                          \n\
+                                                                           \n\
+       Job                                                                 \n\
+       - Sizes                                                             \n\
+             - Account, Cluster                                            \n\
+                                                                           \n\
+       User                                                                \n\
+       - TopUsage                                                          \n\
+             - Account, Cluster, Login, Proper, Used                       \n\
+                                                                           \n\
+                                                                           \n\
+                                                                           \n\
+  Note, valid start/end time formats are...                                \n\
+       HH:MM[:SS] [AM|PM]                                                  \n\
+       MMDD[YY] or MM/DD[/YY] or MM.DD[.YY]                                \n\
+       MM/DD[/YY]-HH:MM[:SS]                                               \n\
                                                                            \n\
                                                                            \n\
   All commands and options are case-insensitive.                         \n\n");

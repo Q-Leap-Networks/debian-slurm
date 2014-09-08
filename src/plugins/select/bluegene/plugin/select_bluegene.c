@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  select_bluegene.c - node selection plugin for Blue Gene system.
  * 
- *  $Id: select_bluegene.c 16146 2009-01-06 18:20:48Z da $
+ *  $Id: select_bluegene.c 17175 2009-04-07 17:24:20Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -85,12 +85,12 @@ const char plugin_type[]       	= "select/bluegene";
 const uint32_t plugin_version	= 100;
 
 /* pthread stuff for updating BG node status */
-static pthread_t bluegene_thread = 0;
+static pthread_t block_thread = 0;
+static pthread_t state_thread = 0;
 static pthread_mutex_t thread_flag_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /** initialize the status pthread */
 static int _init_status_pthread(void);
-static int _wait_for_thread (pthread_t thread_id);
 static char *_block_state_str(int state);
 
 extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data);
@@ -108,22 +108,21 @@ extern int init ( void )
 	fatal("SYSTEM_DIMENSIONS value (%d) invalid for Blue Gene",
 		SYSTEM_DIMENSIONS);
 #endif
+
 #ifdef HAVE_BG_FILES
-	if (!getenv("CLASSPATH") || !getenv("DB2INSTANCE") 
-	||  !getenv("VWSPATH"))
-		fatal("db2profile has not been run to setup DB2 environment");
-
-	if ((SELECT_MESH  != RM_MESH)
-	||  (SELECT_TORUS != RM_TORUS)
-	||  (SELECT_NAV   != RM_NAV))
-		fatal("enum conn_type out of sync with rm_api.h");
-
 #ifdef HAVE_BGL
+	if (!getenv("CLASSPATH") || !getenv("DB2INSTANCE")
+	    || !getenv("VWSPATH"))
+		fatal("db2profile has not been run to setup DB2 environment");
+	
 	if ((SELECT_COPROCESSOR_MODE  != RM_PARTITION_COPROCESSOR_MODE)
-	||  (SELECT_VIRTUAL_NODE_MODE != RM_PARTITION_VIRTUAL_NODE_MODE))
+	    || (SELECT_VIRTUAL_NODE_MODE != RM_PARTITION_VIRTUAL_NODE_MODE))
 		fatal("enum node_use_type out of sync with rm_api.h");
 #endif
-	
+	if ((SELECT_MESH  != RM_MESH)
+	    || (SELECT_TORUS != RM_TORUS)
+	    || (SELECT_NAV   != RM_NAV))
+		fatal("enum conn_type out of sync with rm_api.h");
 #endif
 
 	verbose("%s loading...", plugin_name);
@@ -138,35 +137,27 @@ static int _init_status_pthread(void)
 	pthread_attr_t attr;
 
 	pthread_mutex_lock( &thread_flag_mutex );
-	if ( bluegene_thread ) {
-		debug2("Bluegene thread already running, not starting "
-			"another");
+	if ( block_thread ) {
+		debug2("Bluegene threads already running, not starting "
+		       "another");
 		pthread_mutex_unlock( &thread_flag_mutex );
 		return SLURM_ERROR;
 	}
 
 	slurm_attr_init( &attr );
-	pthread_attr_setdetachstate( &attr, PTHREAD_CREATE_DETACHED );
-	if (pthread_create( &bluegene_thread, &attr, bluegene_agent, NULL)
+	/* since we do a join on this later we don't make it detached */
+	if (pthread_create( &block_thread, &attr, block_agent, NULL)
 	    != 0)
-		error("Failed to create bluegene_agent thread");
+		error("Failed to create block_agent thread");
+	slurm_attr_init( &attr );
+	/* since we do a join on this later we don't make it detached */
+	if (pthread_create( &state_thread, &attr, state_agent, NULL)
+	    != 0)
+		error("Failed to create state_agent thread");
 	pthread_mutex_unlock( &thread_flag_mutex );
 	slurm_attr_destroy( &attr );
 
 	return SLURM_SUCCESS;
-}
-
-static int _wait_for_thread (pthread_t thread_id)
-{
-	int i;
-
-	for (i=0; i<4; i++) {
-		if (pthread_kill(thread_id, 0))
-			return SLURM_SUCCESS;
-		sleep(1);
-	}
-	error("Could not kill select script pthread");
-	return SLURM_ERROR;
 }
 
 static char *_block_state_str(int state)
@@ -190,15 +181,18 @@ extern int fini ( void )
 {
 	int rc = SLURM_SUCCESS;
 
-	pthread_mutex_lock( &thread_flag_mutex );
 	agent_fini = true;
-	if ( bluegene_thread ) {
+	pthread_mutex_lock( &thread_flag_mutex );
+	if ( block_thread ) {
 		verbose("Bluegene select plugin shutting down");
-		rc = _wait_for_thread(bluegene_thread);
-		bluegene_thread = 0;
+		pthread_join(block_thread, NULL);
+		block_thread = 0;
+	}
+	if ( state_thread ) {
+		pthread_join(state_thread, NULL);
+		state_thread = 0;
 	}
 	pthread_mutex_unlock( &thread_flag_mutex );
-
 	fini_bg();
 
 	return rc;
@@ -370,7 +364,7 @@ extern int select_p_job_init(List job_list)
 extern int select_p_node_init(struct node_record *node_ptr, int node_cnt)
 {
 	if(node_cnt>0)
-		if(node_ptr->cpus > 512)
+		if(node_ptr->cpus >= bluegene_bp_node_cnt)
 			procs_per_node = node_ptr->cpus;
 	return SLURM_SUCCESS;
 }
@@ -476,7 +470,7 @@ extern int select_p_pack_node_info(time_t last_query_time, Buf *buffer_ptr)
 		debug2("Node select info hasn't changed since %d", 
 			last_bg_update);
 		return SLURM_NO_CHANGE_IN_DATA;
-	} else {
+	} else if(blocks_are_created) {
 		*buffer_ptr = NULL;
 		buffer = init_buf(HUGE_BUF_SIZE);
 		pack32(blocks_packed, buffer);
@@ -485,10 +479,7 @@ extern int select_p_pack_node_info(time_t last_query_time, Buf *buffer_ptr)
 		if(bg_list) {
 			slurm_mutex_lock(&block_state_mutex);
 			itr = list_iterator_create(bg_list);
-			while ((bg_record = (bg_record_t *) list_next(itr)) 
-			       != NULL) {
-				xassert(bg_record->bg_block_id != NULL);
-				
+			while ((bg_record = list_next(itr))) {
 				pack_block(bg_record, buffer);
 				blocks_packed++;
 			}
@@ -521,6 +512,9 @@ extern int select_p_pack_node_info(time_t last_query_time, Buf *buffer_ptr)
 		set_buf_offset(buffer, tmp_offset);
 		
 		*buffer_ptr = buffer;
+	} else {
+		error("select_p_pack_node_info: bg_list not ready yet");
+		return SLURM_ERROR;
 	}
 
 	return SLURM_SUCCESS;
@@ -623,23 +617,9 @@ extern int select_p_update_block (update_part_msg_t *part_desc_ptr)
 	}
 
 	if(!part_desc_ptr->state_up) {
-		/* Since we are putting this block in an error state we need
-		   to wait for the job to be removed.  We don't really
-		   need to free the block though since we may just
-		   want it to be in an error state for some reason. */
-		while(bg_record->job_running > NO_JOB_RUNNING) 
-			sleep(1);
-		
-		slurm_mutex_lock(&block_state_mutex);
-		bg_record->job_running = BLOCK_ERROR_STATE;
-		bg_record->state = RM_PARTITION_ERROR;
-		slurm_mutex_unlock(&block_state_mutex);
-		trigger_block_error();
+		put_block_in_error_state(bg_record, BLOCK_ERROR_STATE);
 	} else if(part_desc_ptr->state_up){
-		slurm_mutex_lock(&block_state_mutex);
-		bg_record->job_running = NO_JOB_RUNNING;
-		bg_record->state = RM_PARTITION_FREE;
-		slurm_mutex_unlock(&block_state_mutex);
+		resume_block(bg_record);
 	} else {
 		return rc;
 	}
@@ -652,19 +632,12 @@ extern int select_p_update_block (update_part_msg_t *part_desc_ptr)
 extern int select_p_update_sub_node (update_part_msg_t *part_desc_ptr)
 {
 	int rc = SLURM_SUCCESS;
-	bg_record_t *bg_record = NULL, *found_record = NULL;
-	time_t now;
-	char reason[128], tmp[64], time_str[32];
-	blockreq_t blockreq; 
 	int i = 0, j = 0;
-	char coord[BA_SYSTEM_DIMENSIONS];
+	char coord[BA_SYSTEM_DIMENSIONS+1], *node_name = NULL;
 	char ionodes[128];
 	int set = 0;
-	int set_error = 0;
+	double nc_pos = 0, last_pos = -1;
 	bitstr_t *ionode_bitmap = NULL;
-	List requests = NULL;
-	List delete_list = NULL;
-	ListIterator itr;
 	
 	if(bluegene_layout_mode != LAYOUT_DYNAMIC) {
 		info("You can't use this call unless you are on a Dynamically "
@@ -673,19 +646,14 @@ extern int select_p_update_sub_node (update_part_msg_t *part_desc_ptr)
 		goto end_it;
 	}
 
-	memset(coord, -1, BA_SYSTEM_DIMENSIONS);
+	memset(coord, 0, sizeof(coord));
 	memset(ionodes, 0, 128);
 	if(!part_desc_ptr->name) {
 		error("update_sub_node: No name specified");
 		rc = SLURM_ERROR;
 		goto end_it;
-				
 	}
 
-	now = time(NULL);
-	slurm_make_time_str(&now, time_str, sizeof(time_str));
-	snprintf(tmp, sizeof(tmp), "[SLURM@%s]", time_str);
-			
 	while (part_desc_ptr->name[j] != '\0') {
 		if (part_desc_ptr->name[j] == '[') {
 			if(set<1) {
@@ -736,9 +704,9 @@ extern int select_p_update_sub_node (update_part_msg_t *part_desc_ptr)
 					goto end_it;
 				}
 			}
+			
 			strncpy(coord, part_desc_ptr->name+j,
 				BA_SYSTEM_DIMENSIONS); 
-			
 			j += BA_SYSTEM_DIMENSIONS-1;
 			set++;
 		}
@@ -752,165 +720,42 @@ extern int select_p_update_sub_node (update_part_msg_t *part_desc_ptr)
 		goto end_it;
 	}
 	ionode_bitmap = bit_alloc(bluegene_numpsets);
-	bit_unfmt(ionode_bitmap, ionodes);		
-
-	requests = list_create(destroy_bg_record);
-	memset(&blockreq, 0, sizeof(blockreq_t));
-
-	blockreq.block = coord;
-	blockreq.conn_type = SELECT_SMALL;
-	blockreq.small32 = bluegene_bp_nodecard_cnt;
-
-	add_bg_record(requests, NULL, &blockreq);
-	
-	delete_list = list_create(NULL);
-	while((bg_record = list_pop(requests))) {
-		set_error = 0;
-		if(bit_overlap(bg_record->ionode_bitmap, ionode_bitmap))
-			set_error = 1;
-		
-		slurm_mutex_lock(&block_state_mutex);
-		itr = list_iterator_create(bg_list);
-		while((found_record = list_next(itr))) {
-			if(!found_record || (bg_record == found_record))
-				continue;
-			if(bit_equal(bg_record->bitmap, found_record->bitmap)
-			   && bit_equal(bg_record->ionode_bitmap, 
-					found_record->ionode_bitmap)) {
-				debug2("block %s[%s] already there",
-				       found_record->nodes, 
-				       found_record->ionodes);
-				/* we don't need to set this error, it
-				   doesn't overlap
-				*/
-				if(!set_error)
-					break;
-				
-				snprintf(reason, sizeof(reason),
-					 "update_sub_node: "
-					 "Admin set block %s state to %s %s",
-					 found_record->bg_block_id, 
-					 _block_state_str(
-						 part_desc_ptr->state_up),
-					 tmp); 
-				info("%s",reason);
-				if(found_record->job_running 
-				   > NO_JOB_RUNNING) {
-					slurm_fail_job(
-						found_record->job_running);
-				}
-			
-				if(!part_desc_ptr->state_up) {
-					found_record->job_running =
-						BLOCK_ERROR_STATE;
-					found_record->state =
-						RM_PARTITION_ERROR;
-					trigger_block_error();
-				} else if(part_desc_ptr->state_up){
-					found_record->job_running =
-						NO_JOB_RUNNING;
-					found_record->state =
-						RM_PARTITION_FREE;
-				} else {
-					error("update_sub_node: "
-					      "Unknown state %d given",
-					      part_desc_ptr->state_up);
-					rc = SLURM_ERROR;
-					break;
-				}	
-				break;
-			} else if(!set_error
-				  && bit_equal(bg_record->bitmap,
-					       found_record->bitmap)
-				  && bit_overlap(
-					  bg_record->ionode_bitmap, 
-					  found_record->ionode_bitmap)) {
-				break;
-			}
-			
-		}
-		list_iterator_destroy(itr);
-		slurm_mutex_unlock(&block_state_mutex);
-		/* we already found an existing record */
-		if(found_record) {
-			destroy_bg_record(bg_record);
-			continue;
-		}
-		/* we need to add this record since it doesn't exist */
-		if(configure_block(bg_record) == SLURM_ERROR) {
-			destroy_bg_record(bg_record);
-			error("update_sub_node: "
-			      "unable to configure block in api");
-		}
-		debug2("adding block %s to fill in small blocks "
-		       "around bad blocks",
-		       bg_record->bg_block_id);
-		print_bg_record(bg_record);
-		slurm_mutex_lock(&block_state_mutex);
-		list_append(bg_list, bg_record);
-		slurm_mutex_unlock(&block_state_mutex);
-		
-		/* We are just adding the block not deleting any or
-		   setting this one to an error state.
-		*/
-		if(!set_error)
-			continue;
-				
-		if(!part_desc_ptr->state_up) {
-			bg_record->job_running = BLOCK_ERROR_STATE;
-			bg_record->state = RM_PARTITION_ERROR;
-			trigger_block_error();
-		} else if(part_desc_ptr->state_up){
-			bg_record->job_running = NO_JOB_RUNNING;
-			bg_record->state = RM_PARTITION_FREE;
-		} else {
-			error("update_sub_node: Unknown state %d given",
-			      part_desc_ptr->state_up);
-			rc = SLURM_ERROR;
-			continue;
-		}
-		snprintf(reason, sizeof(reason),
-			 "update_sub_node: "
-			 "Admin set block %s state to %s %s",
-			 bg_record->bg_block_id, 
-			 _block_state_str(part_desc_ptr->state_up),
-			 tmp); 
-		info("%s",reason);
-				
-		/* remove overlapping blocks */
-		slurm_mutex_lock(&block_state_mutex);
-		itr = list_iterator_create(bg_list);
-		while((found_record = list_next(itr))) {
-			if ((!found_record) || (bg_record == found_record))
-				continue;
-			if(!blocks_overlap(bg_record, found_record)) {
-				debug2("block %s isn't part of %s",
-				       found_record->bg_block_id, 
-				       bg_record->bg_block_id);
-				continue;
-			}
-			debug2("removing block %s because there is something "
-			       "wrong with part of the base partition",
-			       found_record->bg_block_id);
-			if(found_record->job_running > NO_JOB_RUNNING) {
-				slurm_fail_job(found_record->job_running);
-			}
-			list_push(delete_list, found_record);
-			list_remove(itr);
-			num_block_to_free++;
-		}		
-		list_iterator_destroy(itr);
-		free_block_list(delete_list);
-		slurm_mutex_unlock(&block_state_mutex);		
+	bit_unfmt(ionode_bitmap, ionodes);
+	if(bit_ffs(ionode_bitmap) == -1) {
+		error("update_sub_node: Invalid ionode '%s' given.", ionodes);
+		rc = SLURM_ERROR;
+		FREE_NULL_BITMAP(ionode_bitmap);
+		goto end_it;		
 	}
-	list_destroy(delete_list);
+	node_name = xstrdup_printf("%s%s", bg_slurm_node_prefix, coord);
+	/* find out how many nodecards to get for each ionode */
+	if(!part_desc_ptr->state_up) {
+		info("Admin setting %s[%s] in an error state",
+		     node_name, ionodes);
+		for(i = 0; i<bluegene_numpsets; i++) {
+			if(bit_test(ionode_bitmap, i)) {
+				if((int)nc_pos != (int)last_pos) {
+					down_nodecard(node_name, i);
+					last_pos = nc_pos;
+				}
+			}
+			nc_pos += bluegene_nc_ratio;
+		}
+	} else if(part_desc_ptr->state_up){
+		info("Admin setting %s[%s] in an free state",
+		     node_name, ionodes);
+		up_nodecard(node_name, ionode_bitmap);
+	} else {
+		error("update_sub_node: Unknown state %d", 
+		      part_desc_ptr->state_up);
+		rc = SLURM_ERROR;
+	}
+	
 	FREE_NULL_BITMAP(ionode_bitmap);
-		
-	/* This only works for the error state, not free */
+	xfree(node_name);
 	
 	last_bg_update = time(NULL);
-	
-end_it:	
+end_it:
 	return rc;
 }
 

@@ -1335,10 +1335,13 @@ extern void run_health_check(void);
 /* save_all_state - save entire slurmctld state for later recovery */
 extern void save_all_state(void);
 
+/* send all info for the controller to accounting */
+extern void send_all_to_accounting(time_t event_time);
+
 /* sends all jobs in eligible state to accounting.  Only needed at
  * first registration
  */
-extern int send_jobs_to_accounting(time_t event_time);
+extern int send_jobs_to_accounting();
 
 /* send all nodes in a down like state to accounting.  Only needed at
  * first registration
@@ -1480,6 +1483,16 @@ extern int update_job (job_desc_msg_t * job_specs, uid_t uid);
  */
 extern int update_job_account(char *module, struct job_record *job_ptr, 
 			      char *new_account);
+
+/*
+ * Modify the wckey associated with a pending job
+ * IN module - where this is called from
+ * IN job_ptr - pointer to job which should be modified
+ * IN new_wckey - desired wckey name
+ * RET SLURM_SUCCESS or error code
+ */
+extern int update_job_wckey(char *module, struct job_record *job_ptr, 
+			    char *new_wckey);
 
 /* Reset nodes_completing field for all jobs */
 extern void update_job_nodes_completing(void);

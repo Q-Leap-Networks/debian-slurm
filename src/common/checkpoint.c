@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  checkpoint.c - implementation-independent checkpoint functions
- *  $Id: checkpoint.c 14208 2008-06-06 19:15:24Z da $
+ *  $Id: checkpoint.c 17005 2009-03-24 21:57:43Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -119,13 +119,14 @@ _slurm_checkpoint_context_create( const char *checkpoint_type )
 static int
 _slurm_checkpoint_context_destroy( slurm_checkpoint_context_t c )
 {
+	int rc = SLURM_SUCCESS;
 	/*
 	 * Must check return code here because plugins might still
 	 * be loaded and active.
 	 */
 	if ( c->plugin_list ) {
 		if ( plugrack_destroy( c->plugin_list ) != SLURM_SUCCESS ) {
-			 return SLURM_ERROR;
+			 rc = SLURM_ERROR;
 		}
 	} else {
 		plugin_unload(c->cur_plugin);
@@ -134,7 +135,7 @@ _slurm_checkpoint_context_destroy( slurm_checkpoint_context_t c )
 	xfree( c->checkpoint_type );
 	xfree( c );
 
-	return SLURM_SUCCESS;
+	return rc;
 }
 
 /*

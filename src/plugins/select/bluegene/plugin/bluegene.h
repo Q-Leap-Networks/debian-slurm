@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  bluegene.h - header for blue gene configuration processing module. 
  *
- *  $Id: bluegene.h 16146 2009-01-06 18:20:48Z da $
+ *  $Id: bluegene.h 17102 2009-03-31 23:23:01Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -49,10 +49,7 @@ typedef enum bg_layout_type {
 	LAYOUT_DYNAMIC	/* slurm will make all blocks */
 } bg_layout_t;
 
-
 /* Global variables */
-
-extern my_bluegene_t *bg;
 #ifdef HAVE_BGL
 extern char *default_blrtsimage;
 #endif
@@ -74,6 +71,7 @@ extern uint16_t bluegene_nodecard_node_cnt;
 extern uint16_t bluegene_nodecard_ionode_cnt;
 extern uint16_t bluegene_quarter_node_cnt;
 extern uint16_t bluegene_quarter_ionode_cnt;
+
 extern ba_system_t *ba_system_ptr;
 extern time_t last_bg_update;
 
@@ -104,6 +102,7 @@ extern int num_unused_cpus;
 
 #define MAX_PTHREAD_RETRIES  1
 #define BLOCK_ERROR_STATE    -3
+#define ADMIN_ERROR_STATE    -4
 #define NO_JOB_RUNNING       -1
 #define MAX_AGENT_COUNT      30
 #define BUFSIZE 4096
@@ -145,15 +144,15 @@ extern char *convert_node_use(rm_partition_mode_t pt);
 /* sort a list of bg_records by size (node count) */
 extern void sort_bg_record_inc_size(List records);
 
-/* bluegene_agent - detached thread periodically tests status of bluegene 
- * nodes and switches */
-extern void *bluegene_agent(void *args);
+/* block_agent - detached thread periodically tests status of bluegene 
+ * blocks */
+extern void *block_agent(void *args);
+
+/* state_agent - thread periodically tests status of bluegene 
+ * nodes, nodecards, and switches */
+extern void *state_agent(void *args);
 
 extern int bg_free_block(bg_record_t *bg_record);
-
-#ifndef HAVE_BGL
-extern int bg_reboot_block(bg_record_t *bg_record);
-#endif
 
 extern int remove_from_bg_list(List my_bg_list, bg_record_t *bg_record);
 extern bg_record_t *find_and_remove_org_from_bg_list(List my_list, 

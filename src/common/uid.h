@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/common/uid.h - uid/gid lookup utility functions
- * $Id: uid.h 14795 2008-08-15 21:54:22Z jette $
+ * $Id: uid.h 17177 2009-04-07 18:09:43Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -58,6 +58,12 @@
  *  (uid_t) -1 on failure.
  */
 uid_t uid_from_string (char *name);
+
+/*
+ * Return the primary group id for a given user id, or 
+ * (gid_t) -1 on failure.
+ */
+gid_t gid_from_uid (uid_t uid);
 
 /*
  * Same as uid_from_name(), but for group name/id.

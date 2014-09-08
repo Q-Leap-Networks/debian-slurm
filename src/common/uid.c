@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/common/uid.c - uid/gid lookup utility functions
- * $Id: uid.c 14795 2008-08-15 21:54:22Z jette $
+ * $Id: uid.c 17177 2009-04-07 18:09:43Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -108,6 +108,24 @@ uid_to_string (uid_t uid)
 	else
 		ustring = xstrdup("nobody");
 	return ustring;
+}
+
+gid_t
+gid_from_uid (uid_t uid)
+{
+	struct passwd pwd, *result;
+	char buffer[PW_BUF_SIZE];
+	gid_t gid;
+	int rc;
+
+	rc = getpwuid_r(uid, &pwd, buffer, PW_BUF_SIZE, &result);
+	if (result == NULL) {
+		gid = (gid_t) -1;
+	} else {
+		gid = result->pw_gid;
+	}
+
+	return gid;
 }
 
 gid_t

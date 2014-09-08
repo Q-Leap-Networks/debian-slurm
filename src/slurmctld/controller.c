@@ -201,7 +201,8 @@ int main(int argc, char *argv[])
 	slurmctld_lock_t config_write_lock = {
 		WRITE_LOCK, WRITE_LOCK, WRITE_LOCK, WRITE_LOCK };
 	assoc_init_args_t assoc_init_arg;
-	pthread_t assoc_cache_thread;
+	pthread_t assoc_cache_thread = 0;
+	gid_t slurm_user_gid;
 
 	/*
 	 * Establish initial configuration
@@ -224,19 +225,43 @@ int main(int argc, char *argv[])
 	 */
 	_init_pidfile();
 
-	/* Initialize supplementary group ID list for SlurmUser */
-	if ((getuid() == 0)
-	&&  (slurmctld_conf.slurm_user_id != getuid())
-	&&  initgroups(slurmctld_conf.slurm_user_name,
-			gid_from_string(slurmctld_conf.slurm_user_name))) {
-		error("initgroups: %m");
+	/* Determine SlurmUser gid */
+	slurm_user_gid = gid_from_uid(slurmctld_conf.slurm_user_id);
+	if (slurm_user_gid == (gid_t) -1) {
+		fatal("Failed to determine gid of SlurmUser(%d)", 
+		      slurm_user_gid);
 	}
 
-	if ((slurmctld_conf.slurm_user_id != getuid())
-	&&  (setuid(slurmctld_conf.slurm_user_id))) {
-		fatal("Can not set uid to SlurmUser(%d): %m", 
-			slurmctld_conf.slurm_user_id);
+	/* Initialize supplementary groups ID list for SlurmUser */
+	if (getuid() == 0) {
+		/* root does not need supplementary groups */
+		if ((slurmctld_conf.slurm_user_id == 0) &&
+		    (setgroups(0, NULL) != 0)) {
+			fatal("Failed to drop supplementary groups, "
+			      "setgroups: %m");
+		} else if ((slurmctld_conf.slurm_user_id != getuid()) &&
+			   initgroups(slurmctld_conf.slurm_user_name, 
+				      slurm_user_gid)) {
+			fatal("Failed to set supplementary groups, "
+			      "initgroups: %m");
+		}
+	} else {
+		info("Not running as root. Can't drop supplementary groups");
 	}
+
+	/* Set GID to GID of SlurmUser */
+	if ((slurm_user_gid != getegid()) &&
+	    (setgid(slurm_user_gid))) {
+		fatal("Failed to set GID to %d", slurm_user_gid);
+	}
+
+	/* Set UID to UID of SlurmUser */
+	if ((slurmctld_conf.slurm_user_id != getuid()) &&
+	    (setuid(slurmctld_conf.slurm_user_id))) {
+		fatal("Can not set uid to SlurmUser(%d): %m", 
+		      slurmctld_conf.slurm_user_id);
+	}
+
 	if (stat(slurmctld_conf.mail_prog, &stat_buf) != 0)
 		error("Configured MailProg is invalid");
 
@@ -308,6 +333,21 @@ int main(int argc, char *argv[])
 	association_based_accounting =
 		slurm_get_is_association_based_accounting();
 	accounting_enforce = slurmctld_conf.accounting_storage_enforce;
+
+	if(accounting_enforce && !association_based_accounting) {
+		slurm_ctl_conf_t *conf = slurm_conf_lock();
+		conf->track_wckey = false;
+		conf->accounting_storage_enforce = 0;
+		accounting_enforce = 0;
+		slurmctld_conf.track_wckey = false;
+		slurmctld_conf.accounting_storage_enforce = 0;
+		slurm_conf_unlock();
+
+		error("You can not have AccountingStorageEnforce "
+		      "set for AccountingStorageType='%s'", 
+		      slurmctld_conf.accounting_storage_type);
+	}
+
 	acct_db_conn = acct_storage_g_get_connection(true, 0, false);
 
 	memset(&assoc_init_arg, 0, sizeof(assoc_init_args_t));
@@ -317,7 +357,7 @@ int main(int argc, char *argv[])
 		ASSOC_MGR_CACHE_USER | ASSOC_MGR_CACHE_QOS;
 
 	if (assoc_mgr_init(acct_db_conn, &assoc_init_arg)) {
-		if(accounting_enforce) 
+		if(accounting_enforce & ACCOUNTING_ENFORCE_ASSOCS) 
 			error("Association database appears down, "
 			      "reading from state file.");
 		else
@@ -325,7 +365,8 @@ int main(int argc, char *argv[])
 			      "reading from state file.");
 			
 		if ((load_assoc_mgr_state(slurmctld_conf.state_save_location)
-		     != SLURM_SUCCESS) && accounting_enforce) {
+		     != SLURM_SUCCESS) 
+		    && (accounting_enforce & ACCOUNTING_ENFORCE_ASSOCS)) {
 			error("Unable to get any information from "
 			      "the state file");
 			fatal("slurmdbd and/or database must be up at "
@@ -405,16 +446,9 @@ int main(int argc, char *argv[])
 			}
 			unlock_slurmctld(config_write_lock);
 			
-			if ((recover == 0) || 
-			    (!stat("/tmp/slurm_accounting_first", &stat_buf))) {
-				/* When first starting to write node state
-				 * information to Gold or SlurmDBD, create 
-				 * a file called "/tmp/slurm_accounting_first"  
-				 * to capture node initialization information */
-				
+			if (recover == 0) 
 				_accounting_mark_all_nodes_down("cold-start");
-				unlink("/tmp/slurm_accounting_first");
-			}
+			
 		} else {
 			error("this host (%s) not valid controller (%s or %s)",
 				node_name, slurmctld_conf.control_machine,
@@ -431,7 +465,8 @@ int main(int argc, char *argv[])
 			   NULL will just use those set before.
 			*/
 			if (assoc_mgr_init(acct_db_conn, NULL) &&
-			    accounting_enforce && !running_cache) {
+			    (accounting_enforce & ACCOUNTING_ENFORCE_ASSOCS)
+			    && !running_cache) {
 				error("assoc_mgr_init failure");
 				fatal("slurmdbd and/or database must be up at "
 				      "slurmctld start time");
@@ -546,6 +581,8 @@ int main(int argc, char *argv[])
 	if (i >= 10)
 		error("Left %d agent threads active", cnt);
 
+	slurm_sched_fini();
+
 	/* Purge our local data structures */
 	job_fini();
 	part_fini();	/* part_fini() must preceed node_fini() */
@@ -558,7 +595,6 @@ int main(int argc, char *argv[])
 	g_slurm_jobcomp_fini();
 	slurm_acct_storage_fini();
 	slurm_jobacct_gather_fini();
-	slurm_sched_fini();
 	slurm_select_fini();
 	checkpoint_fini();
 	slurm_auth_fini();
@@ -964,8 +1000,7 @@ static int _accounting_cluster_ready()
 		/* see if we are running directly to a database
 		 * instead of a slurmdbd.
 		 */
-		send_jobs_to_accounting(event_time);
-		send_nodes_to_accounting(event_time);
+		send_all_to_accounting(event_time);
 		rc = SLURM_SUCCESS;
 	}
 
@@ -1016,7 +1051,7 @@ static void _remove_assoc(acct_association_rec_t *rec)
 {
 	int cnt = 0;
 
-	if (accounting_enforce)
+	if (accounting_enforce & ACCOUNTING_ENFORCE_ASSOCS)
 		cnt = job_cancel_by_assoc_id(rec->id);
 
 	if (cnt) {
@@ -1269,6 +1304,18 @@ void save_all_state(void)
 	dump_assoc_mgr_state(slurmctld_conf.state_save_location);
 }
 
+/* send all info for the controller to accounting */
+extern void send_all_to_accounting(time_t event_time)
+{
+	/* ignore the rcs here because if there was an error we will
+	   push the requests on the queue and process them when the
+	   database server comes back up.
+	*/
+	debug2("send_all_to_accounting: called");
+	send_jobs_to_accounting();
+	send_nodes_to_accounting(event_time);
+}
+
 /* 
  * _report_locks_set - report any slurmctld locks left set 
  * RET count of locks currently set
@@ -1423,7 +1470,8 @@ static void _usage(char *prog_name)
 /*
  * Tell the backup_controller to relinquish control, primary control_machine 
  *	has resumed operation
- * wait_time - How long to wait for backup controller to write state, seconds
+ * wait_time - How long to wait for backup controller to write state, seconds.
+ *             Must be zero when called from _slurmctld_background() loop.
  * RET 0 or an error code
  * NOTE: READ lock_slurmctld config before entry (or be single-threaded)
  */
@@ -1452,9 +1500,17 @@ static int _shutdown_backup_controller(int wait_time)
 	}
 	if (rc == ESLURM_DISABLED)
 		debug("backup controller responding");
-	else if (rc == 0)
+	else if (rc == 0) {
 		debug("backup controller has relinquished control");
-	else {
+		if (wait_time == 0) {
+			/* In case primary controller really did not terminate,
+			 * but just temporarily became non-responsive */
+			clusteracct_storage_g_register_ctld(
+				acct_db_conn,
+				slurmctld_cluster_name, 
+				slurmctld_conf.slurmctld_port);
+		}
+	} else {
 		error("_shutdown_backup_controller: %s", slurm_strerror(rc));
 		return SLURM_ERROR;
 	}
@@ -1587,8 +1643,9 @@ static void *_assoc_cache_mgr(void *no_data)
 	ListIterator itr = NULL;
 	struct job_record *job_ptr = NULL;
 	acct_association_rec_t assoc_rec;
+	/* Write lock on jobs, read lock on nodes and partitions */
 	slurmctld_lock_t job_write_lock =
-		{ READ_LOCK, WRITE_LOCK, WRITE_LOCK, READ_LOCK };
+		{ NO_LOCK, WRITE_LOCK, READ_LOCK, READ_LOCK };
 
 	while(running_cache == 1) {
 		slurm_mutex_lock(&assoc_cache_mutex);
@@ -1636,5 +1693,8 @@ static void *_assoc_cache_mgr(void *no_data)
 	}
 	list_iterator_destroy(itr);
 	unlock_slurmctld(job_write_lock);
+	/* This needs to be after the lock and after we update the
+	   jobs so if we need to send them we are set. */
+	_accounting_cluster_ready();
 	return NULL;
 }

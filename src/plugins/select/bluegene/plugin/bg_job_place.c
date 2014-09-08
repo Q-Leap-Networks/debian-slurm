@@ -2,7 +2,7 @@
  *  bg_job_place.c - blue gene job placement (e.g. base block selection)
  *  functions.
  *
- *  $Id: bg_job_place.c 15759 2008-11-21 23:38:34Z da $ 
+ *  $Id: bg_job_place.c 17205 2009-04-09 17:24:11Z da $ 
  *****************************************************************************
  *  Copyright (C) 2004-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -137,13 +137,16 @@ static void _rotate_geo(uint16_t *req_geometry, int rot_cnt)
  */
 static int _bg_record_sort_aval_inc(bg_record_t* rec_a, bg_record_t* rec_b)
 {
-	int size_a = rec_a->node_cnt;
-	int size_b = rec_b->node_cnt;
-
-	if(rec_a->job_ptr && !rec_b->job_ptr)
+	if((rec_a->job_running == BLOCK_ERROR_STATE) 
+	   && (rec_b->job_running != BLOCK_ERROR_STATE))
+		return 1;
+	else if((rec_a->job_running != BLOCK_ERROR_STATE) 
+	   && (rec_b->job_running == BLOCK_ERROR_STATE))
 		return -1;
 	else if(!rec_a->job_ptr && rec_b->job_ptr)
 		return 1;
+	else if(rec_a->job_ptr && !rec_b->job_ptr)
+		return -1;
 	else if(rec_a->job_ptr && rec_b->job_ptr) {
 		if(rec_a->job_ptr->start_time > rec_b->job_ptr->start_time)
 			return 1;
@@ -151,29 +154,7 @@ static int _bg_record_sort_aval_inc(bg_record_t* rec_a, bg_record_t* rec_b)
 			return -1;
 	}
 
-	if (size_a < size_b)
-		return -1;
-	else if (size_a > size_b)
-		return 1;
-	if(rec_a->nodes && rec_b->nodes) {
-		size_a = strcmp(rec_a->nodes, rec_b->nodes);
-		if (size_a < 0)
-			return -1;
-		else if (size_a > 0)
-			return 1;
-	}
-#ifdef HAVE_BGL
-	if (rec_a->quarter < rec_b->quarter)
-		return -1;
-	else if (rec_a->quarter > rec_b->quarter)
-		return 1;
-
-	if(rec_a->nodecard < rec_b->nodecard)
-		return -1;
-	else if(rec_a->nodecard > rec_b->nodecard)
-		return 1;
-#endif
-	return 0;
+	return bg_record_cmpf_inc(rec_a, rec_b);
 }
 
 /* 
@@ -184,10 +165,16 @@ static int _bg_record_sort_aval_inc(bg_record_t* rec_a, bg_record_t* rec_b)
  */
 static int _bg_record_sort_aval_dec(bg_record_t* rec_a, bg_record_t* rec_b)
 {
-	if(rec_a->job_ptr && !rec_b->job_ptr)
+	if((rec_a->job_running == BLOCK_ERROR_STATE) 
+	   && (rec_b->job_running != BLOCK_ERROR_STATE))
+		return -1;
+	else if((rec_a->job_running != BLOCK_ERROR_STATE) 
+	   && (rec_b->job_running == BLOCK_ERROR_STATE))
 		return 1;
 	else if(!rec_a->job_ptr && rec_b->job_ptr)
 		return -1;
+	else if(rec_a->job_ptr && !rec_b->job_ptr)
+		return 1;
 	else if(rec_a->job_ptr && rec_b->job_ptr) {
 		if(rec_a->job_ptr->start_time > rec_b->job_ptr->start_time)
 			return -1;
@@ -363,7 +350,6 @@ static bg_record_t *_find_matching_block(List block_list,
 {
 	bg_record_t *bg_record = NULL;
 	ListIterator itr = NULL;
-	uint32_t proc_cnt = 0;
 	char tmp_char[256];
 	
 	debug("number of blocks to check: %d state %d", 
@@ -377,8 +363,10 @@ static bg_record_t *_find_matching_block(List block_list,
 		*/
 		debug3("%s job_running = %d", 
 		       bg_record->bg_block_id, bg_record->job_running);
-		/*block is messed up some how (BLOCK_ERROR_STATE) ignore it*/
-		if(bg_record->job_running == BLOCK_ERROR_STATE) {
+		/*block is messed up some how (BLOCK_ERROR_STATE)
+		 * ignore it or if state == RM_PARTITION_ERROR */
+		if((bg_record->job_running == BLOCK_ERROR_STATE)
+		   || (bg_record->state == RM_PARTITION_ERROR)) {
 			debug("block %s is in an error state (can't use)", 
 			      bg_record->bg_block_id);			
 			continue;
@@ -395,15 +383,15 @@ static bg_record_t *_find_matching_block(List block_list,
 		}
 
 		/* Check processor count */
-		proc_cnt = bg_record->bp_count * bg_record->cpus_per_bp;
 		debug3("asking for %u-%u looking at %d", 
-		       request->procs, max_procs, proc_cnt);
-		if ((proc_cnt < request->procs)
-		    || ((max_procs != NO_VAL) && (proc_cnt > max_procs))) {
+		       request->procs, max_procs, bg_record->cpu_cnt);
+		if ((bg_record->cpu_cnt < request->procs)
+		    || ((max_procs != NO_VAL)
+			&& (bg_record->cpu_cnt > max_procs))) {
 			/* We use the proccessor count per block here
 			   mostly to see if we can run on a smaller block. 
 			 */
-			convert_num_unit((float)proc_cnt, tmp_char, 
+			convert_num_unit((float)bg_record->cpu_cnt, tmp_char, 
 					 sizeof(tmp_char), UNIT_NONE);
 			debug("block %s CPU count (%s) not suitable",
 			      bg_record->bg_block_id, 
@@ -477,6 +465,21 @@ static bg_record_t *_find_matching_block(List block_list,
 		/***********************************************/
 		if ((request->conn_type != bg_record->conn_type)
 		    && (request->conn_type != SELECT_NAV)) {
+#ifndef HAVE_BGL
+			if(request->conn_type >= SELECT_SMALL) {
+				/* we only want to reboot blocks if
+				   they have to be so skip booted
+				   blocks if in small state
+				*/
+				if(check_image 
+				   && (bg_record->state
+				       == RM_PARTITION_READY)) {
+					*allow = 1;
+					continue;			
+				} 
+				goto good_conn_type;
+			} 
+#endif
 			debug("bg block %s conn-type not usable asking for %s "
 			      "bg_record is %s", 
 			      bg_record->bg_block_id,
@@ -484,7 +487,9 @@ static bg_record_t *_find_matching_block(List block_list,
 			      convert_conn_type(bg_record->conn_type));
 			continue;
 		} 
-
+#ifndef HAVE_BGL
+		good_conn_type:
+#endif
 		/*****************************************/
 		/* match up geometry as "best" possible  */
 		/*****************************************/
@@ -611,9 +616,12 @@ static int _check_for_booted_overlapping_blocks(
 				}
 			}
 
-			if(found_record->job_running != NO_JOB_RUNNING) {
-				if(found_record->job_running
-				   == BLOCK_ERROR_STATE)
+			if((found_record->job_running != NO_JOB_RUNNING) 
+			   || (found_record->state == RM_PARTITION_ERROR)) {
+				if((found_record->job_running
+				    == BLOCK_ERROR_STATE)
+				   || (found_record->state
+				       == RM_PARTITION_ERROR))
 					error("can't use %s, "
 					      "overlapping block %s "
 					      "is in an error state.",
@@ -651,12 +659,26 @@ static int _check_for_booted_overlapping_blocks(
 					}
 					destroy_bg_record(bg_record);
 					if(!found_record) {
-						debug2("This record wasn't "
-						       "found in the bg_list, "
-						       "no big deal, it "
-						       "probably wasn't added");
+						/* There may be a bug
+						   here where on a real
+						   system we don't go
+						   destroy this block
+						   in the real system.
+						   If that is the case we
+						   need to add the
+						   bg_record to the
+						   free_block_list
+						   instead of destroying
+						   it like above.
+						*/ 
+						debug("This record wasn't "
+						      "found in the bg_list, "
+						      "no big deal, it "
+						      "probably wasn't added");
 						//rc = SLURM_ERROR;
 					} else {
+						debug("removing the block "
+						      "from the system");
 						List temp_list =
 							list_create(NULL);
 						list_push(temp_list, 
@@ -728,7 +750,8 @@ static int _dynamically_request(List block_list, int *blocks_added,
 		*/
 		debug("trying with %d", create_try);
 		if((new_blocks = create_dynamic_block(block_list,
-						      request, temp_list))) {
+						      request, temp_list,
+						      true))) {
 			bg_record_t *bg_record = NULL;
 			while((bg_record = list_pop(new_blocks))) {
 				if(block_exist_in_list(block_list, bg_record))
@@ -942,12 +965,15 @@ static int _find_best_block_match(List block_list,
 	*found_bg_record = NULL;
 	allow = 0;
 
+	memset(&request, 0, sizeof(ba_request_t));
+
 	for(i=0; i<BA_SYSTEM_DIMENSIONS; i++) 
 		request.start[i] = start[i];
 	
 	for(i=0; i<BA_SYSTEM_DIMENSIONS; i++) 
 		request.geometry[i] = req_geometry[i];
-	
+
+	request.deny_pass = (uint16_t)NO_VAL;
 	request.save_name = NULL;
 	request.elongate_geos = NULL;
 	request.size = target_size;
@@ -1022,10 +1048,8 @@ static int _find_best_block_match(List block_list,
 					      "block %s in an error state "
 					      "because of bad bps.",
 					      bg_record->bg_block_id);
-					bg_record->job_running =
-						BLOCK_ERROR_STATE;
-					bg_record->state = RM_PARTITION_ERROR;
-					trigger_block_error();
+					put_block_in_error_state(
+						bg_record, BLOCK_ERROR_STATE);
 					continue;
 				}
 			}
@@ -1087,20 +1111,46 @@ static int _find_best_block_match(List block_list,
 			slurm_mutex_unlock(&block_state_mutex);
 			list_sort(job_list, (ListCmpF)_bg_record_sort_aval_inc);
 			while(1) {
+				bool track_down_nodes = true;
 				/* this gets altered in
 				 * create_dynamic_block so we reset it */
 				for(i=0; i<BA_SYSTEM_DIMENSIONS; i++) 
 					request.geometry[i] = req_geometry[i];
 
 				bg_record = list_pop(job_list);
-				if(bg_record)
-					debug2("taking off %d(%s) started at %d ends at %d",
-					       bg_record->job_running,
-					       bg_record->bg_block_id,
-					       bg_record->job_ptr->start_time,
-					       bg_record->job_ptr->end_time);
+				if(bg_record) {
+					if(bg_record->job_ptr)
+						debug2("taking off %d(%s) "
+						       "started at %d "
+						       "ends at %d",
+						       bg_record->job_running,
+						       bg_record->bg_block_id,
+						       bg_record->job_ptr->
+						       start_time,
+						       bg_record->job_ptr->
+						       end_time);
+					else if(bg_record->job_running 
+						== BLOCK_ERROR_STATE)
+						debug2("taking off (%s) "
+						       "which is in an error "
+						       "state",
+						       bg_record->job_running,
+						       bg_record->bg_block_id,
+						       bg_record->job_ptr->
+						       start_time,
+						       bg_record->job_ptr->
+						       end_time);
+				} else 
+					/* This means we didn't have
+					   any jobs to take off
+					   anymore so we are making
+					   sure we can look at every
+					   node on the system.
+					*/
+					track_down_nodes = false;
 				if(!(new_blocks = create_dynamic_block(
-					     block_list, &request, job_list))) {
+					     block_list, &request, job_list,
+					     track_down_nodes))) {
 					destroy_bg_record(bg_record);
 					if(errno == ESLURM_INTERCONNECT_FAILURE
 					   || !list_count(job_list)) {
@@ -1239,7 +1289,7 @@ extern int submit_job(struct job_record *job_ptr, bitstr_t *slurm_block_bitmap,
 #ifdef HAVE_BG
 	bg_record_t* bg_record = NULL;
 	char buf[100];
-	uint16_t tmp16 = (uint16_t)NO_VAL;
+	uint16_t conn_type = (uint16_t)NO_VAL;
 	List block_list = NULL;
 	int blocks_added = 0;
 	time_t starttime = time(NULL);
@@ -1257,6 +1307,33 @@ extern int submit_job(struct job_record *job_ptr, bitstr_t *slurm_block_bitmap,
 
 	job_block_test_list = bg_job_block_list;
 	
+	select_g_get_jobinfo(job_ptr->select_jobinfo,
+			     SELECT_DATA_CONN_TYPE, &conn_type);
+	if(conn_type == SELECT_NAV) {
+		uint32_t max_procs = (uint32_t)NO_VAL;
+		if(bluegene_bp_node_cnt == bluegene_nodecard_node_cnt)
+			conn_type = SELECT_SMALL;
+		else if(min_nodes > 1) {
+			conn_type = SELECT_TORUS;
+			/* make sure the max procs are set to NO_VAL */
+			select_g_set_jobinfo(job_ptr->select_jobinfo,
+					     SELECT_DATA_MAX_PROCS,
+					     &max_procs);
+
+		} else {
+			select_g_get_jobinfo(job_ptr->select_jobinfo,
+					     SELECT_DATA_MAX_PROCS,
+					     &max_procs);
+			if((max_procs > procs_per_node)
+			   || (max_procs == NO_VAL))
+				conn_type = SELECT_TORUS;
+			else
+				conn_type = SELECT_SMALL;
+		}
+		select_g_set_jobinfo(job_ptr->select_jobinfo,
+				     SELECT_DATA_CONN_TYPE,
+				     &conn_type);
+	}
 	select_g_sprint_jobinfo(job_ptr->select_jobinfo, buf, sizeof(buf), 
 				SELECT_PRINT_MIXED);
 	debug("bluegene:submit_job: %s nodes=%u-%u-%u", 
@@ -1311,7 +1388,8 @@ extern int submit_job(struct job_record *job_ptr, bitstr_t *slurm_block_bitmap,
 				else
 					starttime =
 						bg_record->job_ptr->end_time;
-			}
+			} else if(bg_record->job_running == BLOCK_ERROR_STATE)
+				starttime = INFINITE;
 						
 			job_ptr->start_time = starttime;
 			
@@ -1325,22 +1403,14 @@ extern int submit_job(struct job_record *job_ptr, bitstr_t *slurm_block_bitmap,
 			if(!bg_record->bg_block_id) {
 				uint16_t geo[BA_SYSTEM_DIMENSIONS];
 				
-				debug2("%d can start job at "
-				       "%u on %s on unmade block",
-				       test_only, starttime,
+				debug2("%d can start unassigned job %u at "
+				       "%u on %s",
+				       test_only, job_ptr->job_id, starttime,
 				       bg_record->nodes);
 				select_g_set_jobinfo(job_ptr->select_jobinfo,
 					     SELECT_DATA_BLOCK_ID,
 					     "unassigned");
-				/* if(job_ptr->num_procs < bluegene_bp_node_cnt  */
-/* 				   && job_ptr->num_procs > 0) { */
-/* 					i = procs_per_node/job_ptr->num_procs; */
-/* 					debug2("divide by %d", i); */
-/* 				} else  */
-/* 					i = 1; */
-/* 				min_nodes *= bluegene_bp_node_cnt/i; */
-				/* this seems to do the same thing as
-				 * above */
+
 				min_nodes = bg_record->node_cnt;
 				select_g_set_jobinfo(job_ptr->select_jobinfo,
 					     SELECT_DATA_NODE_CNT,
@@ -1360,10 +1430,11 @@ extern int submit_job(struct job_record *job_ptr, bitstr_t *slurm_block_bitmap,
 					error("Small block used in "
 					      "non-shared partition");
 				
-				debug2("%d can start job at %u on %s",
-				       test_only, starttime,
+				debug2("%d can start job %u at %u on %s(%s)",
+				       test_only, job_ptr->job_id, starttime,
+				       bg_record->bg_block_id,
 				       bg_record->nodes);
-
+				
 				select_g_set_jobinfo(job_ptr->select_jobinfo,
 						     SELECT_DATA_BLOCK_ID,
 						     bg_record->bg_block_id);
@@ -1374,10 +1445,10 @@ extern int submit_job(struct job_record *job_ptr, bitstr_t *slurm_block_bitmap,
 						     SELECT_DATA_GEOMETRY, 
 						     &bg_record->geo);
 
-				tmp16 = bg_record->conn_type;
-				select_g_set_jobinfo(job_ptr->select_jobinfo,
-						     SELECT_DATA_CONN_TYPE, 
-						     &tmp16);
+				/* tmp16 = bg_record->conn_type; */
+/* 				select_g_set_jobinfo(job_ptr->select_jobinfo, */
+/* 						     SELECT_DATA_CONN_TYPE,  */
+/* 						     &tmp16); */
 			}
 		} else {
 			error("we got a success, but no block back");
@@ -1424,12 +1495,41 @@ extern int test_job_list(List req_list)
 
 	itr = list_iterator_create(req_list);
 	while((will_run = list_next(itr))) {
+		uint16_t conn_type = (uint16_t)NO_VAL;
+
 		if(!will_run->job_ptr) {
 			error("test_job_list: you need to give me a job_ptr");
 			rc = SLURM_ERROR;
 			break;
 		}
 		
+		select_g_get_jobinfo(will_run->job_ptr->select_jobinfo,
+				     SELECT_DATA_CONN_TYPE, &conn_type);
+		if(conn_type == SELECT_NAV) {
+			uint32_t max_procs = (uint32_t)NO_VAL;
+			if(will_run->min_nodes > 1) {
+				conn_type = SELECT_TORUS;
+				/* make sure the max procs are set to NO_VAL */
+				select_g_set_jobinfo(
+					will_run->job_ptr->select_jobinfo,
+					SELECT_DATA_MAX_PROCS,
+					&max_procs);
+				
+			} else {
+				select_g_get_jobinfo(
+					will_run->job_ptr->select_jobinfo,
+					SELECT_DATA_MAX_PROCS,
+					&max_procs);
+				if((max_procs > procs_per_node)
+				   || (max_procs == NO_VAL))
+					conn_type = SELECT_TORUS;
+				else
+					conn_type = SELECT_SMALL;
+			}
+			select_g_set_jobinfo(will_run->job_ptr->select_jobinfo,
+					     SELECT_DATA_CONN_TYPE,
+					     &conn_type);
+		}
 		select_g_sprint_jobinfo(will_run->job_ptr->select_jobinfo,
 					buf, sizeof(buf), 
 					SELECT_PRINT_MIXED);
