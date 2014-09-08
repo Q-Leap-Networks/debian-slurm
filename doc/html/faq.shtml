@@ -178,13 +178,18 @@ launch a shell on a node in the job's allocation?</a></li>
 Free Open Source Software (FOSS) does not mean that it is without cost.
 It does mean that the you have access to the code so that you are free to
 use it, study it, and/or enhance it.
+These reasons contribute to Slurm (and FOSS in general) being subject to
+active research and development worldwide, displacing proprietary software
+in many environments.
 If the software is large and complex, like Slurm or the Linux kernel,
-then its use is not without cost.
-If your work is important, you'll want the leading Slurm experts at your
+then while there is no license fee, its use is not without cost.</p>
+<p>If your work is important, you'll want the leading Slurm experts at your
 disposal to keep your systems operating at peak efficiency.
 While Slurm has a global development community incorporating leading edge
 technology, <a href="http://www.schedmd.com">SchedMD</a> personnel have developed
 most of the code and can provide competitively priced commercial support.
+SchedMD works with various organizations to provide a range of support
+options ranging from remote level-3 support to 24x7 on-site personnel.
 Customers switching from commercial workload mangers to Slurm typically
 report higher scalability, better performance and lower costs.</p>
 
@@ -337,34 +342,12 @@ the same time limit (for example the partition's time limit), then backfill
 will not be effective. Note that partitions can have both default and maximum
 time limits, which can be helpful in configuring a system for effective
 backfill scheduling.</p>
-<p>In addition, there are significant limitations in the current backfill
-scheduler plugin.
-It was designed to perform backfill node scheduling for a homogeneous cluster.
-It does not manage scheduling on individual processors (or other consumable
-resources). It does not update the required or excluded node list of
-individual jobs. It does support job's with constraints/features unless
-the exclusive OR operator is used in the constraint expression.
-You can use the scontrol show command to check if these conditions apply.</p>
-<ul>
-<li>Partition: State=UP</li>
-<li>Partition: RootOnly=NO</li>
-<li>Partition: Shared=NO</li>
-<li>Job: ReqNodeList=NULL</li>
-<li>Job: ExcNodeList=NULL</li>
-<li>Job: Contiguous=0</li>
-<li>Job: Features=NULL</li>
-<li>Job: MinCPUs, MinMemory, and MinTmpDisk satisfied by all nodes in
-the partition</li>
-<li>Job: MinCPUs or MinNodes not to exceed partition's MaxNodes</li>
-</ul>
-<p>If the partitions specifications differ from those listed above,
-no jobs in that partition will be scheduled by the backfills scheduler.
-Their jobs will only be scheduled on a First-In-First-Out (FIFO) basis.</p>
-<p>Jobs failing to satisfy the requirements above (i.e. with specific
-node requirements) will not be considered candidates for backfill
-scheduling and other jobs may be scheduled ahead of these jobs.
-These jobs are subject to starvation, but will not block other
-jobs from running when sufficient resources are available for them.</p>
+
+<p>In addition, there are a multitude of backfill scheduling parameters
+which can impact which jobs are considered for backfill scheduling, such
+as the maximum number of jobs tested per user. For more information see
+the slurm.conf man page and check the configuration of SchedulingParameters
+on your system.</p>
 
 <p><a name="steps"><b>8. How can I run multiple jobs from within a
 single script?</b></a><br>
@@ -651,13 +634,13 @@ or <b>--distribution</b>' is 'arbitrary'.  This means you can tell slurm to
 layout your tasks in any fashion you want.  For instance if I had an
 allocation of 2 nodes and wanted to run 4 tasks on the first node and
 1 task on the second and my nodes allocated from SLURM_NODELIST
-where tux[0-1] my srun line would look like this.<p>
-<i>srun -n5 -m arbitrary -w tux[0,0,0,0,1] hostname</i><p>
+where tux[0-1] my srun line would look like this:<br><br>
+<i>srun -n5 -m arbitrary -w tux[0,0,0,0,1] hostname</i><br><br>
 If I wanted something similar but wanted the third task to be on tux 1
-I could run this...<p>
-<i>srun -n5 -m arbitrary -w tux[0,0,1,0,0] hostname</i><p>
+I could run this:<br><br>
+<i>srun -n5 -m arbitrary -w tux[0,0,1,0,0] hostname</i><br><br>
 Here is a simple perl script named arbitrary.pl that can be ran to easily lay
-out tasks on nodes as they are in SLURM_NODELIST<p>
+out tasks on nodes as they are in SLURM_NODELIST.</p>
 <pre>
 #!/usr/bin/perl
 my @tasks = split(',', $ARGV[0]);
@@ -685,9 +668,9 @@ foreach my $task (@tasks) {
 print $layout;
 </pre>
 
-We can now use this script in our srun line in this fashion.<p>
-<i>srun -m arbitrary -n5 -w `arbitrary.pl 4,1` -l hostname</i><p>
-This will layout 4 tasks on the first node in the allocation and 1
+<p>We can now use this script in our srun line in this fashion.<br><br>
+<i>srun -m arbitrary -n5 -w `arbitrary.pl 4,1` -l hostname</i><br><br>
+<p>This will layout 4 tasks on the first node in the allocation and 1
 task on the second node.</p>
 
 <p><a name="hold"><b>21. How can I temporarily prevent a job from running
@@ -948,11 +931,10 @@ $ srun -p mic ./hello.mic
 <br>
 <p>
 Slurm supports requeue jobs in done or failed state. Use the
-command:
+command:</p>
 <p align=left><b>scontrol requeue job_id</b></p>
 </head>
-</p>
-The job will be requeued back in PENDING state and scheduled again.
+<p>The job will be requeued back in PENDING state and scheduled again.
 See man(1) scontrol.
 </p>
 <p>Consider a simple job like this:</p>
@@ -979,12 +961,10 @@ $->squeue
     JOBID PARTITION   NAME     USER ST     TIME  NODES NODELIST(REASON)
       10      mira    zoppo    david  R    0:03    1      alanz1
 </pre>
-<p>
-Slurm supports requeuing jobs in hold state with the command:
+<p>Slurm supports requeuing jobs in hold state with the command:</p>
 <p align=left><b>'scontrol requeuehold job_id'</b></p>
-The job can be in state RUNNING, SUSPENDED, COMPLETED or FAILED
-before being requeued.
-</p>
+<p>The job can be in state RUNNING, SUSPENDED, COMPLETED or FAILED
+before being requeued.</p>
 <pre>
 $->scontrol requeuehold 10
 $->squeue
@@ -1801,10 +1781,19 @@ qstat, and qsub commands (see contribs/torque in the distribution and the
 "slurm-torque" RPM).
 There is also a wrapper for the showq command at
 <a href="https://github.com/pedmon/slurm_showq">
-https://github.com/pedmon/slurm_showq</a>.
-Slurm recognizes and translates the "#PBS" options in batch scripts.
-Most, but not all options are supported.
-Please share any enhancements that you make.</p>
+https://github.com/pedmon/slurm_showq</a>.</p>
+
+<p>Slurm recognizes and translates the "#PBS" options in batch scripts.
+Most, but not all options are supported.</p>
+
+<p>Slurm also includes a SPANK plugin that will set all of the PBS environment
+variables based upon the Slurm environment (e.g. PBS_JOBID, PBS_JOBNAME,
+PBS_WORKDIR, etc.).
+One environment not set by PBS_ENVIRONMENT, which if set would result in the
+failure of some MPI implementations.
+The plugin will be installed in<br>
+&lt;install_directory&gt;/lib/slurm/spank_pbs.so<br>
+See the SPANK man page for configuration details.</p>
 
 <p><a name="sssd"><b>53. I am having trouble using SSSD with Slurm.</b></a></br>
 SSSD or System Security Services Deamon does not allow enumeration of group
@@ -1854,7 +1843,7 @@ If you which to prevent this condition from setting the node into a DOWN state
 then configure ReturnToService to 2. See the slurm.conf man page for details.
 Otherwise use the scontrol or sview to manually return the node to service.</p>
 
-<p><a name="reqspec"><b>57.How can a job which has exited with a specific exit
+<p><a name="reqspec"><b>57. How can a job which has exited with a specific exit
   code be requeued?</b></a></br>
 Slurm supports requeue in hold with a <b>SPECIAL_EXIT</b> state using the
 command:</p>
@@ -1942,6 +1931,6 @@ sacctmgr delete user name=adam cluster=tux account=chemistry
 
 <p class="footer"><a href="#top">top</a></p>
 
-<p style="text-align:center;">Last modified 20 February 2014</p>
+<p style="text-align:center;">Last modified 30 April 2014</p>
 
 <!--#include virtual="footer.txt"-->

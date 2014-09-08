@@ -62,6 +62,9 @@ may be specified. Supported datatypes are as follows:
 where \fI<interval>\fR is the task sampling interval in seconds
 for the jobacct_gather plugins and for task
 profiling by the acct_gather_profile plugin.
+NOTE: This frequency is used to monitor memory usage. If memory limits
+are enforced the highest frequency a user can request is what is configured in
+the slurm.conf file.  They can not turn it off (=0) either.
 .TP
 \fBenergy=\fI<interval>\fR
 where \fI<interval>\fR is the sampling interval in seconds
@@ -406,7 +409,9 @@ sharing the same job name and user have terminated.
 
 .TP
 \fB\-D\fR, \fB\-\-chdir\fR=<\fIpath\fR>
-change directory to \fIpath\fR before beginning execution.
+Change directory to \fIpath\fR before beginning execution. The path
+can be specified as full path or relative path to the directory where
+the command is executed.
 
 .TP
 \fB\-\-exclusive\fR
@@ -807,16 +812,18 @@ In this configuration supported values include:
 .RS
 .TP 6
 \fBsystem\fR
-Use the system\-wide network performance counters. Because only one
-job can use this at a time this option will allocate every node in the
-cluster.  In steps inside the allocation wish to run on less than the
-full system they must specify the node count for each step.
+Use the system\-wide network performance counters. Only nodes requested
+will be marked in use for the job allocation.  If the job does not
+fill up the entire system the rest of the nodes are not
+able to be used by other jobs using NPC, if idle their state will appear as
+PerfCnts.  These nodes are still available for other jobs not using NPC.
 .TP
 \fBblade\fR
 Use the blade network performance counters. Only nodes requested
 will be marked in use for the job allocation.  If the job does not
 fill up the entire blade(s) allocated to the job those blade(s) are not
-able to be used by other jobs, but will appear in the state PerfCnts.
+able to be used by other jobs using NPC, if idle their state will appear as
+PerfCnts.  These nodes are still available for other jobs not using NPC.
 .TP
 .RE
 
@@ -1020,6 +1027,11 @@ defined in the file \fIslurm.h\fR and is not a variable, it is set at
 SLURM build time.
 
 .TP
+\fB\-\-priority\fR=<value>
+Request a specific job priority.
+May be subject to configuration specific constraints.
+
+.TP
 \fB\-\-profile\fR=<all|none|[energy[,|task[,|lustre[,|network]]]]>
 enables detailed data collection by the acct_gather_profile plugin.
 Detailed data are typically time-series that are stored in an HDF5 file for
@@ -1057,7 +1069,10 @@ Request a specific partition for the resource allocation.  If not specified,
 the default behavior is to allow the slurm controller to select the default
 partition as designated by the system administrator. If the job can use more
 than one partition, specify their names in a comma separate list and the one
-offering earliest initiation will be used.
+offering earliest initiation will be used with no regard given to the partition
+name ordering (although higher priority partitions will be considered first).
+When the job is initiated, the name of the partition used will be placed first
+in the job record partition string.
 
 .TP
 \fB\-Q\fR, \fB\-\-quiet\fR

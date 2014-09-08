@@ -86,6 +86,7 @@
 #include "src/common/uid.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
+#include "src/common/util-net.h"
 
 #include "src/sbatch/opt.h"
 
@@ -178,6 +179,7 @@
 #define LONG_OPT_IGNORE_PBS      0x155
 #define LONG_OPT_TEST_ONLY       0x156
 #define LONG_OPT_PARSABLE        0x157
+#define LONG_OPT_PRIORITY        0x160
 
 /*---- global variables, defined in opt.h ----*/
 opt_t opt;
@@ -393,6 +395,9 @@ static void _opt_default()
 	opt.ckpt_interval = 0;
 	opt.ckpt_interval_str = NULL;
 	opt.ckpt_dir = xstrdup(opt.cwd);
+
+	opt.nice = 0;
+	opt.priority = 0;
 
 	opt.test_only   = false;
 }
@@ -724,6 +729,7 @@ static struct option long_options[] = {
 	{"parsable",      optional_argument, 0, LONG_OPT_PARSABLE},
 	{"propagate",     optional_argument, 0, LONG_OPT_PROPAGATE},
 	{"profile",       required_argument, 0, LONG_OPT_PROFILE},
+	{"priority",      required_argument, 0, LONG_OPT_PRIORITY},
 	{"qos",		  required_argument, 0, LONG_OPT_QOS},
 	{"ramdisk-image", required_argument, 0, LONG_OPT_RAMDISK_IMAGE},
 	{"reboot",        no_argument,       0, LONG_OPT_REBOOT},
@@ -1178,7 +1184,10 @@ static void _set_options(int argc, char **argv)
 			break;
 		case 'D':
 			xfree(opt.cwd);
-			opt.cwd = xstrdup(optarg);
+			if (is_full_path(optarg))
+				opt.cwd = xstrdup(optarg);
+			else
+				opt.cwd = make_full_path(optarg);
 			break;
 		case 'e':
 			xfree(opt.efname);
@@ -1461,6 +1470,19 @@ static void _set_options(int argc, char **argv)
 				}
 			}
 			break;
+		case LONG_OPT_PRIORITY: {
+			long long priority = strtoll(optarg, NULL, 10);
+			if (priority < 0) {
+				error("Priority must be >= 0");
+				exit(error_exit);
+			}
+			if (priority >= NO_VAL) {
+				error("Priority must be < %i", NO_VAL);
+				exit(error_exit);
+			}
+			opt.priority = priority;
+			break;
+		}
 		case LONG_OPT_NO_REQUEUE:
 			opt.requeue = 0;
 			break;
@@ -2580,30 +2602,14 @@ static bool _opt_verify(void)
 
 static uint16_t _parse_pbs_mail_type(const char *arg)
 {
-	uint16_t rc;
+	uint16_t rc =  0;
 
-	if (strcasecmp(arg, "b") == 0)
-		rc = MAIL_JOB_BEGIN;
-	else if  (strcasecmp(arg, "e") == 0)
-		rc = MAIL_JOB_END;
-	else if (strcasecmp(arg, "a") == 0)
-		rc = MAIL_JOB_FAIL;
-	else if (strcasecmp(arg, "bea") == 0
-		|| strcasecmp(arg, "eba") == 0
-		|| strcasecmp(arg, "eab") == 0
-		|| strcasecmp(arg, "bae") == 0)
-		rc = MAIL_JOB_BEGIN | MAIL_JOB_END |  MAIL_JOB_FAIL;
-	else if (strcasecmp(arg, "be") == 0
-		|| strcasecmp(arg, "eb") == 0)
-		rc = MAIL_JOB_BEGIN | MAIL_JOB_END;
-	else if (strcasecmp(arg, "ba") == 0
-		|| strcasecmp(arg, "ab") == 0)
-		rc = MAIL_JOB_BEGIN | MAIL_JOB_FAIL;
-	else if (strcasecmp(arg, "ea") == 0
-		|| strcasecmp(arg, "ae") == 0)
-		rc = MAIL_JOB_END |  MAIL_JOB_FAIL;
-	else
-		rc = 0;		/* arg="n" or failure */
+	if (strchr(arg, 'b') || strchr(arg, 'B'))
+		rc |= MAIL_JOB_BEGIN;
+	if (strchr(arg, 'e') || strchr(arg, 'E'))
+		rc |= MAIL_JOB_END;
+	if (strchr(arg, 'a') || strchr(arg, 'A'))
+		rc |= MAIL_JOB_FAIL;
 
 	return rc;
 }
@@ -2992,6 +2998,7 @@ static void _help(void)
 "  -p, --partition=partition   partition requested\n"
 "      --parsable              outputs only the jobid and cluster name (if present),\n"
 "                              separated by semicolon, only on successful submission.\n"
+"      --priority=value        set the priority of the job to value\n"
 "      --profile=value         enable acct_gather_profile for detailed data\n"
 "                              value is all or none or any combination of\n"
 "                              energy, lustre, network or task\n"

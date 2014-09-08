@@ -3,6 +3,38 @@ documents those changes that are of interest to users and admins.
 
 * Changes in Slurm 14.03.2
 ==========================
+ -- Fix race condition if PrologFlags=Alloc,NoHold is used.
+ -- Cray - Make NPC only limit running other NPC jobs on shared blades instead
+    of limited non NPC jobs.
+ -- Fix for sbatch #PBS -m (mail) option parsing.
+ -- Fix job dependency bug. Jobs dependent upon multiple other jobs may start
+    prematurely.
+ -- Set "Reason" field for all elements of a job array on short-circuited
+    scheduling for job arrays.
+ -- Allow -D option of salloc/srun/sbatch to specify relative path.
+ -- Added SchedulerParameter of batch_sched_delay to permit many batch jobs
+    to be submitted between each scheduling attempt to reduce overhead of
+    scheduling logic.
+ -- Added job reason of "SchedTimeout" if the scheduler was not able to reach
+    the job to attempt scheduling it.
+ -- Add job's exit state and exit code to email message.
+ -- scontrol hold/release accepts job name option (in addition to job ID).
+ -- Handle when trying to cancel a step that hasn't started yet better.
+ -- Handle Max/GrpCPU limits better
+ -- Add --priority option to salloc, sbatch and srun commands.
+ -- Honor partition priorities over job priorities.
+ -- Fix sacct -c when using jobcomp/filetxt to read newer variables
+ -- Fix segfault of sacct -c if spaces are in the variables.
+ -- Release held job only with "scontrol release <jobid>" and not by resetting
+    the job's priority. This is needed to support job arrays better.
+ -- Correct squeue command not to merge jobs with state pending and completing
+    together.
+ -- Fix issue where user is requesting --acctg-freq=0 and no memory limits.
+ -- Fix issue with GrpCPURunMins if a job's timelimit is altered while the job
+    is running.
+ -- Temporary fix for handling our typemap for the perl api with newer perl.
+ -- Fix allowgroup on bad group seg fault with the controller.
+ -- Handle node ranges better when dealing with accounting max node limits.
 
 * Changes in Slurm 14.03.1-2
 ==========================
@@ -389,6 +421,10 @@ documents those changes that are of interest to users and admins.
 * Changes in Slurm 2.6.10
 =========================
  -- Switch/nrt - On switch resource allocation failure, free partial allocation.
+ -- Switch/nrt - Properly track usage of CAU and RDMA resources with multiple
+    tasks per compute node.
+ -- Fix issue where user is requesting --acctg-freq=0 and no memory limits.
+ -- BGQ - Temp fix issue where job could be left on job_list after it finished.
 
 * Changes in Slurm 2.6.9
 ========================
