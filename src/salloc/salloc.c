@@ -2,7 +2,7 @@
  *  salloc.c - Request a SLURM job allocation and
  *             launch a user-specified command.
  *
- *  $Id: salloc.c 12196 2007-08-31 21:28:28Z jette $
+ *  $Id: salloc.c 12536 2007-10-22 23:57:53Z jette $
  *****************************************************************************
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -277,6 +277,14 @@ static int fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->reboot = 1;
 	if (opt.no_rotate)
 		desc->rotate = 0;
+	if (opt.blrtsimage)
+		desc->blrtsimage = xstrdup(opt.blrtsimage);
+	if (opt.linuximage)
+		desc->linuximage = xstrdup(opt.linuximage);
+	if (opt.mloaderimage)
+		desc->mloaderimage = xstrdup(opt.mloaderimage);
+	if (opt.ramdiskimage)
+		desc->ramdiskimage = xstrdup(opt.ramdiskimage);
 	if (opt.mincpus > -1)
 		desc->job_min_procs = opt.mincpus;
 	if (opt.minsockets > -1)

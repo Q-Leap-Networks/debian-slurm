@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  print.c - squeue print job functions
- *  $Id: print.c 11734 2007-06-19 16:45:44Z jette $
+ *  $Id: print.c 12594 2007-10-31 22:27:56Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -95,17 +95,12 @@ int print_jobs_array(job_info_t * jobs, int size, List format)
 
 	/* Filter out the jobs of interest */
 	for (; i < size; i++) {
+		_adjust_completing(&jobs[i], &ni);
 		if (_filter_job(&jobs[i]))
 			continue;
 		list_append(l, (void *) &jobs[i]);
 	}
-
-
-	/* 
-	 * Adjust nodelists for any completing jobs
-	 */
 	sort_jobs_by_start_time (l);
-	list_for_each (l, (ListForF) _adjust_completing, (void *) &ni);
 	if (ni) 
 		slurm_free_node_info_msg (ni);
 
@@ -609,7 +604,16 @@ int _print_job_num_procs(job_info_t * job, int width, bool right, char* suffix)
 	if (job == NULL)	/* Print the Header instead */
 		_print_str("CPUS", width, right, true);
 	else {
-		convert_num_unit((float)job->num_procs, tmp_char, UNIT_NONE);
+		if (job->job_state == JOB_RUNNING) {
+			uint32_t cnt = 0, i;
+			for (i=0; i<job->num_cpu_groups; i++) {
+				cnt += job->cpus_per_node[i] * 
+				       job->cpu_count_reps[i];
+			}
+			convert_num_unit((float)cnt, tmp_char, UNIT_NONE);
+		} else {
+			convert_num_unit((float)job->num_procs, tmp_char, UNIT_NONE);
+		}
 		_print_str(tmp_char, width, right, true);
 	}
 	if (suffix)
@@ -985,6 +989,18 @@ int _print_job_account(job_info_t * job, int width, bool right_justify,
 	return SLURM_SUCCESS;
 }
 
+int _print_job_comment(job_info_t * job, int width, bool right_justify,
+			char* suffix)
+{
+	if (job == NULL)	 /* Print the Header instead */
+		_print_str("COMMENT", width, right_justify, true);
+	else
+		_print_str(job->comment, width, right_justify, true);
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
 int _print_job_dependency(job_info_t * job, int width, bool right_justify,
 			char* suffix) 
 {
@@ -1168,7 +1184,7 @@ int _print_step_name(job_step_info_t * step, int width, bool right,
 	if (step == NULL)	/* Print the Header instead */
 		_print_str("NAME", width, right, true);
 	else
-		_print_nodes(step->name, width, right, true);
+		_print_str(step->name, width, right, true);
 	if (suffix)
 		printf("%s", suffix);
 	return SLURM_SUCCESS;

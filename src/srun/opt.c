@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  opt.c - options processing for srun
- *  $Id: opt.c 12315 2007-09-13 23:56:02Z jette $
+ *  $Id: opt.c 12583 2007-10-30 17:01:31Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -83,8 +83,9 @@
 #include "src/common/optz.h"
 #include "src/api/pmi_server.h"
 
-#include "src/srun/opt.h"
 #include "src/srun/attach.h"
+#include "src/srun/multi_prog.h"
+#include "src/srun/opt.h"
 #include "src/common/mpi.h"
 
 /* generic OPT_ definitions -- mainly for use with env vars  */
@@ -1044,7 +1045,7 @@ static void _opt_default()
 		opt.msg_timeout     = 15;
 	}
 	
-	opt.get_user_env = false;
+	opt.get_user_env = -1;
 }
 
 /*---[ env var processing ]-----------------------------------------------*/
@@ -1419,7 +1420,7 @@ void set_options(const int argc, char **argv, int first)
 		{"mloader-image",    required_argument, 0, LONG_OPT_MLOADER_IMAGE},
 		{"ramdisk-image",    required_argument, 0, LONG_OPT_RAMDISK_IMAGE},
 		{"reboot",           no_argument,       0, LONG_OPT_REBOOT},            
-		{"get-user-env",     no_argument,       0, LONG_OPT_GET_USER_ENV},
+		{"get-user-env",     optional_argument, 0, LONG_OPT_GET_USER_ENV},
 		{NULL,               0,                 0, 0}
 	};
 	char *opt_string = "+a:AbB:c:C:d:D:e:g:Hi:IjJ:kKlm:n:N:"
@@ -1911,6 +1912,15 @@ void set_options(const int argc, char **argv, int first)
 				      "-%d and %d", NICE_OFFSET, NICE_OFFSET);
 				exit(1);
 			}
+			if (opt.nice < 0) {
+				uid_t my_uid = getuid();
+				if ((my_uid != 0) &&
+				    (my_uid != slurm_get_slurm_user_id())) {
+					error("Nice value must be non-negative, "
+					      "value ignored");
+					opt.nice = 0;
+				}
+			}
 			break;
 		case LONG_OPT_CTRL_COMM_IFHN:
 			xfree(opt.ctrl_comm_ifhn);
@@ -1995,7 +2005,10 @@ void set_options(const int argc, char **argv, int first)
 			opt.reboot = true;
 			break;
 		case LONG_OPT_GET_USER_ENV:
-			opt.get_user_env = true;
+			if (optarg)
+				opt.get_user_env = strtol(optarg, NULL, 10);
+			else
+				opt.get_user_env = 0;
 			break;
 		default:
 			if (spank_process_option (opt_char, optarg) < 0) {
@@ -2125,7 +2138,6 @@ static void _opt_args(int argc, char **argv)
 			exit(1);
 		}
 		_load_multi(&remote_argc, remote_argv);
-
 	}
 	else if (remote_argc > 0) {
 		char *fullpath;
@@ -2139,6 +2151,9 @@ static void _opt_args(int argc, char **argv)
 		} 
 	}
 	if (!_opt_verify())
+		exit(1);
+
+	if (opt.multi_prog && verify_multi_name(remote_argv[0], opt.nprocs))
 		exit(1);
 }
 
@@ -2504,14 +2519,15 @@ static List
 _create_path_list(void)
 {
 	List l = list_create(_freeF);
-	char *path = xstrdup(getenv("PATH"));
-	char *c, *lc;
+	char *path, *c, *lc;
 
-	if (!path) {
+	c = getenv("PATH");
+	if (!c) {
 		verbose("No PATH environment variable");
 		return l;
 	}
 
+	path = xstrdup(c);
 	c = lc = path;
 
 	while (*c != '\0') {

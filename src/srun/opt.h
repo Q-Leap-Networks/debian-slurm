@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  opt.h - definitions for srun option processing
- *  $Id: opt.h 11992 2007-08-10 18:59:15Z jette $
+ *  $Id: opt.h 12574 2007-10-26 17:00:52Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -212,7 +212,7 @@ typedef struct srun_options {
 	uint16_t mail_type;	/* --mail-type			*/
 	char *mail_user;	/* --mail-user			*/
 	char *ctrl_comm_ifhn;	/* --ctrl-comm-ifhn		*/
-	bool get_user_env;	/* --get-user-env		*/
+	int get_user_env;	/* --get-user-env[=secs]	*/
 } opt_t;
 
 extern opt_t opt;

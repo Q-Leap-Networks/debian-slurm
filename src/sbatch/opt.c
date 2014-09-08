@@ -446,7 +446,7 @@ static void _opt_default()
 	opt.ifname = xstrdup("/dev/null");
 	opt.ofname = NULL;
 	opt.efname = NULL;
-	opt.get_user_env = false;
+	opt.get_user_env = -1;
 }
 
 /*---[ env var processing ]-----------------------------------------------*/
@@ -466,6 +466,7 @@ struct env_vars {
 	void *arg;
 	void *set_flag;
 };
+
 
 env_vars_t env_vars[] = {
   {"SBATCH_ACCOUNT",       OPT_STRING,     &opt.account,       NULL           },
@@ -656,7 +657,7 @@ static struct option long_options[] = {
 	{"tasks-per-node",  required_argument,0,LONG_OPT_TASKSPERNODE},
 	{"ntasks-per-node", required_argument,0,LONG_OPT_TASKSPERNODE}, 
 	{"wrap",          required_argument, 0, LONG_OPT_WRAP},
-	{"get-user-env",  no_argument,       0, LONG_OPT_GET_USER_ENV},
+	{"get-user-env",  optional_argument, 0, LONG_OPT_GET_USER_ENV},
 	{NULL,            0,                 0, 0}
 };
 
@@ -900,31 +901,43 @@ static char *_get_argument(const char *line, int *skipped)
  */
 static void _opt_batch_script(const void *body, int size)
 {
-	char *magic_word = "#SBATCH";
-	int magic_word_len;
+	char *magic_word1 = "#SBATCH";
+	char *magic_word2 = "#SLURM";
+	int magic_word_len1, magic_word_len2;
 	int argc;
 	char **argv;
 	void *state = NULL;
 	char *line;
 	char *option;
 	char *ptr;
-	int skipped = 0;
+	int skipped = 0, warned = 0;
 	int i;
 
-	magic_word_len = strlen(magic_word);
+	magic_word_len1 = strlen(magic_word1);
+	magic_word_len2 = strlen(magic_word2);
+
 	/* getopt_long skips over the first argument, so fill it in */
 	argc = 1;
 	argv = xmalloc(sizeof(char *));
 	argv[0] = "sbatch";
 
 	while((line = _next_line(body, size, &state)) != NULL) {
-		if (strncmp(line, magic_word, magic_word_len) != 0) {
+		if (!strncmp(line, magic_word1, magic_word_len1))
+			ptr = line + magic_word_len1;
+		else if (!strncmp(line, magic_word2, magic_word_len2)) {
+			ptr = line + magic_word_len2;
+			if (!warned) {
+				error("Change from #SLURM to #SBATCH in your "
+				      "script and verify the options are "
+				      "valid in sbatch");
+				warned = 1;
+			}
+		} else {
 			xfree(line);
 			continue;
 		}
 
 		/* this line starts with the magic word */
-		ptr = line + magic_word_len;
 		while ((option = _get_argument(ptr, &skipped)) != NULL) {
 			debug2("Found in script, argument \"%s\"", option);
 			argc += 1;
@@ -1234,6 +1247,15 @@ static void _set_options(int argc, char **argv)
 				      "-%d and %d", NICE_OFFSET, NICE_OFFSET);
 				exit(1);
 			}
+			if (opt.nice < 0) {
+				uid_t my_uid = getuid();
+				if ((my_uid != 0) &&
+				    (my_uid != slurm_get_slurm_user_id())) {
+					error("Nice value must be non-negative, "
+					      "value ignored");
+					opt.nice = 0;
+				}
+			}
 			break;
 		case LONG_OPT_NO_REQUEUE:
 			opt.no_requeue = true;
@@ -1268,7 +1290,10 @@ static void _set_options(int argc, char **argv)
 			/* handled in process_options_first_pass() */
 			break;
 		case LONG_OPT_GET_USER_ENV:
-			opt.get_user_env = true;
+			if (optarg)
+				opt.get_user_env = strtol(optarg, NULL, 10);
+			else
+				opt.get_user_env = 0;
 			break;
 		default:
 			fatal("Unrecognized command line parameter %c",
@@ -1784,7 +1809,7 @@ static uint16_t _parse_pbs_mail_type(const char *arg)
 		|| strcasecmp(arg, "ae") == 0)
 		rc = MAIL_JOB_END |  MAIL_JOB_FAIL;
 	else
-		rc = 0;		/* failure */
+		rc = 0;		/* arg="n" or failure */
 
 	return rc;
 }
@@ -1816,17 +1841,16 @@ static List
 _create_path_list(void)
 {
 	List l = list_create(_freeF);
-	char *path = xstrdup(getenv("PATH"));
-	char *c, *lc;
+	char *path, *c, *lc;
 
-	if (!path) {
-		error("Error in PATH environment variable");
-		list_destroy(l);
-		return NULL;
+	c = getenv("PATH");
+	if (!c) {
+		verbose("No PATH environment variable");
+		return l;
 	}
 
+	path = xstrdup(c);
 	c = lc = path;
-
 	while (*c != '\0') {
 		if (*c == ':') {
 			/* nullify and push token onto list */

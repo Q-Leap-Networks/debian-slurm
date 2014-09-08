@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  opt.h - definitions for salloc option processing
- *  $Id: opt.h 12196 2007-08-31 21:28:28Z jette $
+ *  $Id: opt.h 12536 2007-10-22 23:57:53Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -98,10 +98,17 @@ typedef struct salloc_options {
 	char *nodelist;		/* --nodelist=node1,node2,...	*/
 	char *exc_nodes;	/* --exclude=node1,node2,... -x	*/
 
+	/* BLUEGENE SPECIFIC */
 	uint16_t geometry[SYSTEM_DIMENSIONS]; /* --geometry, -g	*/
 	bool reboot;		/* --reboot			*/
 	bool no_rotate;		/* --no_rotate, -R		*/
 	int16_t conn_type;	/* --conn-type 			*/
+	char *blrtsimage;       /* --blrts-image BlrtsImage for block */
+	char *linuximage;       /* --linux-image LinuxImage for block */
+	char *mloaderimage;     /* --mloader-image mloaderImage for block */
+	char *ramdiskimage;     /* --ramdisk-image RamDiskImage for block */
+	/*********************/
+
 	time_t begin;		/* --begin			*/
 	uint16_t mail_type;	/* --mail-type			*/
 	char *mail_user;	/* --mail-user			*/

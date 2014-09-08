@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  block_allocator.c - Assorted functions for layout of bglblocks, 
  *	 wiring, mapping for smap, etc.
- *  $Id: block_allocator.c 12412 2007-09-26 17:16:01Z da $
+ *  $Id: block_allocator.c 12543 2007-10-23 22:19:49Z jette $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -305,8 +305,8 @@ extern int parse_image(void **dest, slurm_parser_enum_t type,
 	s_p_get_string(&tmp, "Groups", tbl);
 	if(tmp) {
 		for(i=0; i<strlen(tmp); i++) {
-			if(tmp[i] == ':') {
-				image_group = xmalloc(sizeof(image_group));
+			if((tmp[i] == ':') || (tmp[i] == ',')) {
+				image_group = xmalloc(sizeof(image_group_t));
 				image_group->name = xmalloc(i-j+2);
 				snprintf(image_group->name,
 					 (i-j)+1, "%s", tmp+j);
@@ -320,12 +320,17 @@ extern int parse_image(void **dest, slurm_parser_enum_t type,
 			} 		
 		}
 		if(j != i) {
-			image_group = xmalloc(sizeof(image_group));
+			image_group = xmalloc(sizeof(image_group_t));
 			image_group->name = xmalloc(i-j+2);
 			snprintf(image_group->name, (i-j)+1, "%s", tmp+j);
 			image_group->gid = gid_from_string(image_group->name);
-			debug3("adding group %s %d", image_group->name,
-			       image_group->gid);
+			if (image_group->gid == (gid_t) -1) {
+				fatal("Invalid bluegene.conf parameter Groups=%s", 
+				      image_group->name);
+			} else {
+				debug3("adding group %s %d", image_group->name,
+				       image_group->gid);
+			}
 			list_append(n->groups, image_group);
 		}
 		xfree(tmp);

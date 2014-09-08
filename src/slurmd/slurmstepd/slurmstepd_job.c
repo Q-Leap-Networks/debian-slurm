@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/slurmd/slurmstepd/slurmstepd_job.c - slurmd_job_t routines
- * $Id: slurmstepd_job.c 10574 2006-12-15 23:38:29Z jette $
+ * $Id: slurmstepd_job.c 12580 2007-10-29 20:17:09Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -317,6 +317,7 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 	job->batch   = true;
 	job->multi_prog = 0;
 	job->overcommit = (bool) msg->overcommit;
+	job->node_name = xstrdup(conf->node_name);
 
 	job->uid     = (uid_t) msg->uid;
 	job->gid     = (gid_t) msg->gid;
