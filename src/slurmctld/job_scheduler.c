@@ -170,8 +170,11 @@ static bool _job_runnable_test1(struct job_record *job_ptr, bool clear_start)
 
 #ifdef HAVE_FRONT_END
 	/* At least one front-end node up at this point */
-	if (job_ptr->state_reason == WAIT_FRONT_END)
+	if (job_ptr->state_reason == WAIT_FRONT_END) {
 		job_ptr->state_reason = WAIT_NO_REASON;
+		xfree(job_ptr->state_desc);
+		last_job_update = time(NULL);
+	}
 #endif
 
 	job_indepen = job_independent(job_ptr, 0);
@@ -182,6 +185,7 @@ static bool _job_runnable_test1(struct job_record *job_ptr, bool clear_start)
 		    (job_ptr->state_reason != WAIT_HELD_USER)) {
 			job_ptr->state_reason = WAIT_HELD;
 			xfree(job_ptr->state_desc);
+			last_job_update = time(NULL);
 		}
 		debug3("sched: JobId=%u. State=%s. Reason=%s. Priority=%u.",
 		       job_ptr->job_id,
@@ -530,14 +534,16 @@ next_part:		part_ptr = (struct part_record *)
 						     (slurmdb_association_rec_t **)
 						     &job_ptr->assoc_ptr)) {
 				job_ptr->state_reason = WAIT_NO_REASON;
+				xfree(job_ptr->state_desc);
 				job_ptr->assoc_id = assoc_rec.id;
+				last_job_update = now;
 			} else {
 				continue;
 			}
 		}
 		if (job_ptr->qos_id) {
-			slurmdb_association_rec_t *assoc_ptr;
-			assoc_ptr = (slurmdb_association_rec_t *)job_ptr->assoc_ptr;
+			slurmdb_association_rec_t *assoc_ptr =
+				(slurmdb_association_rec_t *)job_ptr->assoc_ptr;
 			if (assoc_ptr &&
 			    !bit_test(assoc_ptr->usage->valid_qos,
 				      job_ptr->qos_id) &&
@@ -546,17 +552,22 @@ next_part:		part_ptr = (struct part_record *)
 					job_ptr->job_id);
 				xfree(job_ptr->state_desc);
 				job_ptr->state_reason = FAIL_QOS;
+				last_job_update = now;
 				continue;
 			} else if (job_ptr->state_reason == FAIL_QOS) {
 				xfree(job_ptr->state_desc);
 				job_ptr->state_reason = WAIT_NO_REASON;
+				last_job_update = now;
 			}
 		}
 
 		if ((job_ptr->state_reason == WAIT_QOS_JOB_LIMIT) ||
 		    (job_ptr->state_reason == WAIT_QOS_RESOURCE_LIMIT) ||
-		    (job_ptr->state_reason == WAIT_QOS_TIME_LIMIT))
+		    (job_ptr->state_reason == WAIT_QOS_TIME_LIMIT)) {
 			job_ptr->state_reason = WAIT_NO_REASON;
+			xfree(job_ptr->state_desc);
+			last_job_update = now;
+		}
 
 		if ((job_ptr->state_reason == WAIT_NODE_NOT_AVAIL) &&
 		    job_ptr->details && job_ptr->details->req_node_bitmap &&
@@ -574,6 +585,7 @@ next_part:		part_ptr = (struct part_record *)
 		if (license_job_test(job_ptr, now) != SLURM_SUCCESS) {
 			job_ptr->state_reason = WAIT_LICENSES;
 			xfree(job_ptr->state_desc);
+			last_job_update = now;
 			continue;
 		}
 
@@ -702,13 +714,14 @@ extern int schedule(uint32_t job_limit)
 #ifdef HAVE_BG
 	char *ionodes = NULL;
 	char tmp_char[256];
-	static bool backfill_sched = false;
 #endif
+	static bool backfill_sched = false;
 	static time_t sched_update = 0;
 	static bool wiki_sched = false;
 	static bool fifo_sched = false;
 	static int sched_timeout = 0;
 	static int def_job_limit = 100;
+	static int defer_rpc_cnt = 0;
 	time_t now = time(NULL), sched_start;
 
 	DEF_TIMERS;
@@ -718,11 +731,11 @@ extern int schedule(uint32_t job_limit)
 		char *sched_params, *tmp_ptr;
 		char *sched_type = slurm_get_sched_type();
 		char *prio_type = slurm_get_priority_type();
-#ifdef HAVE_BG
+
 		/* On BlueGene, do FIFO only with sched/backfill */
 		if (strcmp(sched_type, "sched/backfill") == 0)
 			backfill_sched = true;
-#endif
+
 		if ((strcmp(sched_type, "sched/builtin") == 0) &&
 		    (strcmp(prio_type, "priority/basic") == 0) &&
 		    _all_partition_priorities_same())
@@ -748,13 +761,34 @@ extern int schedule(uint32_t job_limit)
 				def_job_limit = i;
 			}
 		}
+
+		if (sched_params &&
+		    (tmp_ptr=strstr(sched_params, "max_rpc_cnt=")))
+			defer_rpc_cnt = atoi(tmp_ptr + 12);
+		if (defer_rpc_cnt < 0) {
+			error("Invalid max_rpc_cnt: %d", defer_rpc_cnt);
+			defer_rpc_cnt = 0;
+		}
+
 		xfree(sched_params);
 
 		sched_timeout = slurm_get_msg_timeout() / 2;
 		sched_timeout = MAX(sched_timeout, 1);
-		sched_timeout = MIN(sched_timeout, 10);
+		sched_timeout = MIN(sched_timeout, 4);
 		sched_update = slurmctld_conf.last_update;
 	}
+
+	if ((defer_rpc_cnt > 0) &&
+	    (slurmctld_config.server_thread_count >= defer_rpc_cnt)) {
+		debug("sched: schedule() returning, too many RPCs");
+		return 0;
+	}
+
+	/* Rather than periodicallly going to bottom of queue, let the
+	 * backfill scheduler do so since it can periodically relinquish
+	 * locks rather than blocking all RPCs. */
+	if ((job_limit == INFINITE) && backfill_sched)
+		job_limit = def_job_limit;
 	if (job_limit == 0)
 		job_limit = def_job_limit;
 
@@ -777,14 +811,14 @@ extern int schedule(uint32_t job_limit)
 		unlock_slurmctld(job_write_lock);
 		debug("sched: schedule() returning, no front end nodes are "
 		       "available");
-		return SLURM_SUCCESS;
+		return 0;
 	}
 	/* Avoid resource fragmentation if important */
 	if ((!wiki_sched) && job_is_completing()) {
 		unlock_slurmctld(job_write_lock);
 		debug("sched: schedule() returning, some job is still "
 		       "completing");
-		return SLURM_SUCCESS;
+		return 0;
 	}
 
 #ifdef HAVE_CRAY
@@ -832,6 +866,8 @@ extern int schedule(uint32_t job_limit)
 				break;
 			if (!avail_front_end(job_ptr)) {
 				job_ptr->state_reason = WAIT_FRONT_END;
+				xfree(job_ptr->state_desc);
+				last_job_update = now;
 				continue;
 			}
 			if (!_job_runnable_test1(job_ptr, false))
@@ -865,6 +901,8 @@ next_part:			part_ptr = (struct part_record *)
 			xfree(job_queue_rec);
 			if (!avail_front_end(job_ptr)) {
 				job_ptr->state_reason = WAIT_FRONT_END;
+				xfree(job_ptr->state_desc);
+				last_job_update = now;
 				continue;
 			}
 			if (!IS_JOB_PENDING(job_ptr))
@@ -880,20 +918,29 @@ next_part:			part_ptr = (struct part_record *)
 			       job_depth);
 			break;
 		}
+		if ((defer_rpc_cnt > 0) &&
+		     (slurmctld_config.server_thread_count >= defer_rpc_cnt)) {
+			debug("sched: schedule() returning, too many RPCs");
+			break;
+		}
 
 		slurmctld_diag_stats.schedule_cycle_depth++;
 
 		if ((job_ptr->resv_name == NULL) &&
 		    _failed_partition(job_ptr->part_ptr, failed_parts,
 				      failed_part_cnt)) {
-			if (job_ptr->state_reason == WAIT_NO_REASON) {
+			if ((job_ptr->state_reason == WAIT_NODE_NOT_AVAIL)
+			    || (job_ptr->state_reason == WAIT_NO_REASON)) {
 				job_ptr->state_reason = WAIT_PRIORITY;
 				xfree(job_ptr->state_desc);
+				last_job_update = now;
 			}
 			debug3("sched: JobId=%u. State=PENDING. "
-			       "Reason=Priority. Priority=%u. Partition=%s.",
-			       job_ptr->job_id, job_ptr->priority,
-			       job_ptr->partition);
+			       "Reason=%s(Priority), Priority=%u, "
+			       "Partition=%s.",
+			       job_ptr->job_id,
+			       job_reason_string(job_ptr->state_reason),
+			       job_ptr->priority, job_ptr->partition);
 			continue;
 		}
 
@@ -911,7 +958,9 @@ next_part:			part_ptr = (struct part_record *)
 						    (slurmdb_association_rec_t **)
 						    &job_ptr->assoc_ptr)) {
 				job_ptr->state_reason = WAIT_NO_REASON;
+				xfree(job_ptr->state_desc);
 				job_ptr->assoc_id = assoc_rec.id;
+				last_job_update = now;
 			} else {
 				continue;
 			}
@@ -927,10 +976,12 @@ next_part:			part_ptr = (struct part_record *)
 					job_ptr->job_id);
 				xfree(job_ptr->state_desc);
 				job_ptr->state_reason = FAIL_QOS;
+				last_job_update = now;
 				continue;
 			} else if (job_ptr->state_reason == FAIL_QOS) {
 				xfree(job_ptr->state_desc);
 				job_ptr->state_reason = WAIT_NO_REASON;
+				last_job_update = now;
 			}
 		}
 
@@ -954,6 +1005,8 @@ next_part:			part_ptr = (struct part_record *)
 			/* Too many nodes DRAIN, DOWN, or
 			 * reserved for jobs in higher priority partition */
 			job_ptr->state_reason = WAIT_RESOURCES;
+			xfree(job_ptr->state_desc);
+			last_job_update = now;
 			debug3("sched: JobId=%u. State=%s. Reason=%s. "
 			       "Priority=%u. Partition=%s.",
 			       job_ptr->job_id,
@@ -966,6 +1019,7 @@ next_part:			part_ptr = (struct part_record *)
 		if (license_job_test(job_ptr, time(NULL)) != SLURM_SUCCESS) {
 			job_ptr->state_reason = WAIT_LICENSES;
 			xfree(job_ptr->state_desc);
+			last_job_update = now;
 			debug3("sched: JobId=%u. State=%s. Reason=%s. "
 			       "Priority=%u.",
 			       job_ptr->job_id,
@@ -984,7 +1038,7 @@ next_part:			part_ptr = (struct part_record *)
 			 * very rare. */
 			info("sched: JobId=%u has invalid account",
 			     job_ptr->job_id);
-			last_job_update = time(NULL);
+			last_job_update = now;
 			job_ptr->state_reason = FAIL_ACCOUNT;
 			xfree(job_ptr->state_desc);
 			continue;
@@ -1472,10 +1526,10 @@ extern int test_job_dependency(struct job_record *job_ptr)
 	struct job_record *qjob_ptr, *djob_ptr;
 
 	if ((job_ptr->details == NULL) ||
-	    (job_ptr->details->depend_list == NULL))
+	    (job_ptr->details->depend_list == NULL) ||
+	    ((count = list_count(job_ptr->details->depend_list)) == 0))
 		return 0;
 
-	count = list_count(job_ptr->details->depend_list);
 	depend_iter = list_iterator_create(job_ptr->details->depend_list);
 	while ((dep_ptr = list_next(depend_iter))) {
 		bool clear_dep = false;
@@ -1731,7 +1785,7 @@ extern int update_job_dependency(struct job_record *job_ptr, char *new_depend)
 			if ((sep_ptr2 == NULL) ||
 			    (job_id == 0) || (job_id == job_ptr->job_id) ||
 			    ((sep_ptr2[0] != '\0') && (sep_ptr2[0] != ',') &&
-			     (sep_ptr2[0] != ':'))) {
+			     (sep_ptr2[0] != ':')  && (sep_ptr2[0] != '_'))) {
 				rc = ESLURM_DEPENDENCY;
 				break;
 			}
