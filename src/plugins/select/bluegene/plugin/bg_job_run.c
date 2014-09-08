@@ -2,7 +2,7 @@
  *  bg_job_run.c - blue gene job execution (e.g. initiation and termination)
  *  functions.
  *
- *  $Id: bg_job_run.c 19292 2010-01-21 01:17:17Z da $
+ *  $Id: bg_job_run.c 19700 2010-03-08 18:50:55Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -574,7 +574,7 @@ static void _start_agent(bg_update_t *bg_update_ptr)
 		sleep(2);
 		lock_slurmctld(job_write_lock);
 		if((rc = job_requeue(0, bg_update_ptr->job_ptr->job_id, -1))) {
-			error("couldn't requeue job %u, failing it: %s",
+			error("1 couldn't requeue job %u, failing it: %s",
 			      bg_update_ptr->job_ptr->job_id,
 			      slurm_strerror(rc));
 			job_fail(bg_update_ptr->job_ptr->job_id);
@@ -657,7 +657,7 @@ static void _start_agent(bg_update_t *bg_update_ptr)
 		sleep(2);
 		lock_slurmctld(job_write_lock);
 		if((rc = job_requeue(0, bg_update_ptr->job_ptr->job_id, -1))) {
-			error("couldn't requeue job %u, failing it: %s",
+			error("2 couldn't requeue job %u, failing it: %s",
 			      bg_update_ptr->job_ptr->job_id,
 			      slurm_strerror(rc));
 			job_fail(bg_update_ptr->job_ptr->job_id);
@@ -873,7 +873,8 @@ static void _start_agent(bg_update_t *bg_update_ptr)
 			lock_slurmctld(job_write_lock);
 			if((rc = job_requeue(
 				    0, bg_update_ptr->job_ptr->job_id, -1))) {
-				error("couldn't requeue job %u, failing it: %s",
+				error("3 couldn't requeue job %u, "
+				      "failing it: %s",
 				      bg_update_ptr->job_ptr->job_id,
 				      slurm_strerror(rc));
 				job_fail(bg_update_ptr->job_ptr->job_id);

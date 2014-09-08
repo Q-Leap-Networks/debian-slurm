@@ -324,6 +324,7 @@ int srun(int ac, char **av)
 		job = job_create_allocation(resp);
 
 		opt.exclusive = false;	/* not applicable for this step */
+		opt.time_limit = NO_VAL;/* not applicable for step, only job */
 		if (!opt.job_name_set_cmd && opt.job_name_set_env) {
 			/* use SLURM_JOB_NAME env var */
 			opt.job_name_set_cmd = true;
@@ -1273,7 +1274,7 @@ _task_finish(task_exit_msg_t *msg)
 	xfree(hosts);
 
 	_update_task_exit_state(msg->num_tasks, msg->task_id_list,
-			!normal_exit);
+				!normal_exit);
 
 	if (task_state_first_abnormal_exit(task_state) && _kill_on_bad_exit())
   		_terminate_job_step(job->step_ctx);

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  state_test.h - header for Blue Gene node and switch state test.
- *  $Id: state_test.h 19095 2009-12-01 22:59:18Z da $
+ *  $Id: state_test.h 19700 2010-03-08 18:50:55Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -54,6 +54,6 @@ extern void test_mmcs_failures(void);
  * Search MMCS for failed switches and nodes inside of block.
  * Failed resources are DRAINED in SLURM. This relies upon rm_get_partition(),
  */
-extern int check_block_bp_states(char *bg_block_id);
+extern int check_block_bp_states(char *bg_block_id, bool slurmctld_locked);
 
 #endif /* _STATE_TEST_H_ */

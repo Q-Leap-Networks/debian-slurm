@@ -2,7 +2,7 @@
  *  state_test.c - Test state of Bluegene base partitions and switches.
  *  DRAIN nodes in SLURM that are not usable.
  *
- *  $Id: state_test.c 19095 2009-12-01 22:59:18Z da $
+ *  $Id: state_test.c 19755 2010-03-16 19:15:43Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -141,11 +141,17 @@ static void _configure_node_down(rm_bp_id_t bp_id, my_bluegene_t *my_bg)
 	}
 }
 
-static int _test_down_nodecards(rm_BP_t *bp_ptr)
+/*
+ * This could potentially lock the node lock in the slurmctld with
+ * slurm_drain_node, so if nodes_locked is called we will call the
+ * drainning function without locking the lock again.
+ */
+static int _test_down_nodecards(rm_BP_t *bp_ptr, bool slurmctld_locked)
 {
 	rm_bp_id_t bp_id = NULL;
 	rm_nodecard_id_t nc_name = NULL;
 	int num = 0;
+	int marked_down = 0;
 	int i=0;
 	int rc = SLURM_SUCCESS;
 	rm_nodecard_list_t *ncard_list = NULL;
@@ -244,6 +250,11 @@ static int _test_down_nodecards(rm_BP_t *bp_ptr)
 		if(state == RM_NODECARD_UP)
 			continue;
 
+		/* Here we want to keep track of any nodecard that
+		   isn't up and return error if this is not 0 since
+		   we could be checking to see if we could run here. */
+		marked_down++;
+
 		if ((rc = bridge_get_data(ncard,
 					  RM_NodeCardID,
 					  &nc_name)) != STATUS_OK) {
@@ -298,7 +309,8 @@ static int _test_down_nodecards(rm_BP_t *bp_ptr)
 /* 		bit_nset(ionode_bitmap, io_start, io_start+io_cnt); */
 		/* we have to handle each nodecard separately to make
 		   sure we don't create holes in the system */
-		if(down_nodecard(node_name, io_start) == SLURM_SUCCESS) {
+		if(down_nodecard(node_name, io_start, slurmctld_locked)
+		   == SLURM_SUCCESS) {
 			debug("nodecard %s on %s is in an error state",
 			      nc_name, node_name);
 		}
@@ -359,6 +371,9 @@ clean_up:
 /* 		FREE_NULL_BITMAP(ionode_bitmap); */
 	free(bp_id);
 
+	/* If we marked any nodecard down we need to state it here */
+	if((rc == SLURM_SUCCESS) && marked_down)
+		rc = SLURM_ERROR;
 	return rc;
 }
 
@@ -390,7 +405,7 @@ static void _test_down_nodes(my_bluegene_t *my_bg)
 			}
 		}
 
-		_test_down_nodecards(my_bp);
+		_test_down_nodecards(my_bp, 0);
 	}
 }
 
@@ -496,7 +511,13 @@ extern void test_mmcs_failures(void)
 #endif
 }
 
-extern int check_block_bp_states(char *bg_block_id)
+
+/*
+ * This could potentially lock the node lock in the slurmctld with
+ * slurm_drain_node, so if slurmctld_locked is called we will call the
+ * drainning function without locking the lock again.
+ */
+extern int check_block_bp_states(char *bg_block_id, bool slurmctld_locked)
 {
 	int rc = SLURM_SUCCESS;
 #ifdef HAVE_BG_FILES
@@ -543,7 +564,13 @@ extern int check_block_bp_states(char *bg_block_id)
 			}
 		}
 
-		_test_down_nodecards(bp_ptr);
+		/* If we find any nodecards in an error state just
+		   break here since we are seeing if we can run.  If
+		   any nodecard is down this can't happen.
+		*/
+		if((rc = _test_down_nodecards(bp_ptr, slurmctld_locked))
+		   != SLURM_SUCCESS)
+			break;
 	}
 
 cleanup:

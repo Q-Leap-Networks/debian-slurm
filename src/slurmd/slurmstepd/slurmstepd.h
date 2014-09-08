@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/slurmd/slurmstepd/slurmstepd.h - slurmstepd general header file
- * $Id: slurmstepd.h 16867 2009-03-12 16:35:42Z jette $
+ * $Id: slurmstepd.h 19693 2010-03-06 00:36:35Z jette $
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -42,7 +42,7 @@
 
 #include "src/common/bitstring.h"
 
-#define STEPD_MESSAGE_COMP_WAIT 15 /* seconds */
+#define STEPD_MESSAGE_COMP_WAIT 3 /* seconds */
 #define MAX_RETRIES    3
 
 extern int slurmstepd_blocked_signals[];
