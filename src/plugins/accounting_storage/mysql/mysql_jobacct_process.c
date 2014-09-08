@@ -74,6 +74,8 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn, uid_t uid,
 		"t1.id",
 		"t1.jobid",
 		"t1.associd",
+		"t1.wckey",
+		"t1.wckeyid",
 		"t1.uid",
 		"t1.gid",
 		"t1.partition",
@@ -140,6 +142,8 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn, uid_t uid,
 		JOB_REQ_ID,
 		JOB_REQ_JOBID,
 		JOB_REQ_ASSOCID,
+		JOB_REQ_WCKEY,
+		JOB_REQ_WCKEYID,
 		JOB_REQ_UID,
 		JOB_REQ_GID,
 		JOB_REQ_PARTITION,
@@ -234,7 +238,7 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn, uid_t uid,
 	/* THIS ASSOCID CHECK ALWAYS NEEDS TO BE FIRST!!!!!!! */
 	if(job_cond->associd_list && list_count(job_cond->associd_list)) {
 		set = 0;
-		xstrfmtcat(extra, ", %s as t3 where (");
+		xstrfmtcat(extra, ", %s as t3 where (", assoc_table);
 		itr = list_iterator_create(job_cond->associd_list);
 		while((object = list_next(itr))) {
 			if(set) 
@@ -391,6 +395,25 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn, uid_t uid,
 		list_iterator_destroy(itr);
 		xstrcat(extra, ")");
 	} 
+
+	if(job_cond->wckey_list && list_count(job_cond->wckey_list)) {
+		set = 0;
+		if(extra)
+			xstrcat(extra, " && (");
+		else
+			xstrcat(extra, " where (");
+
+		itr = list_iterator_create(job_cond->wckey_list);
+		while((object = list_next(itr))) {
+			if(set) 
+				xstrcat(extra, " || ");
+			xstrfmtcat(extra, "t1.wckey='%s'", object);
+			set = 1;
+		}
+		list_iterator_destroy(itr);
+		xstrcat(extra, ")");
+	}
+
 no_cond:	
 
 	xfree(tmp);
@@ -487,6 +510,10 @@ no_cond:
 
 		job->alloc_cpus = atoi(row[JOB_REQ_ALLOC_CPUS]);
 		job->associd = atoi(row[JOB_REQ_ASSOCID]);
+
+		if(row[JOB_REQ_WCKEY] && row[JOB_REQ_WCKEY][0])
+			job->wckey = xstrdup(row[JOB_REQ_WCKEY]);
+		job->wckeyid = atoi(row[JOB_REQ_WCKEYID]);
 
 		if(row[JOB_REQ_CLUSTER] && row[JOB_REQ_CLUSTER][0])
 			job->cluster = xstrdup(row[JOB_REQ_CLUSTER]);

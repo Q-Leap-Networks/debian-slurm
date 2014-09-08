@@ -81,7 +81,6 @@
 #include "src/slurmctld/srun_comm.h"
 #include "src/slurmctld/trigger_mgr.h"
 
-#define BATCH_JOB_LAUNCH_TIME 1200	/* seconds for prolog & env var load */
 #define DETAILS_FLAG 0xdddd
 #define MAX_RETRIES  10
 #define SLURM_CREATE_JOB_FLAG_NO_ALLOCATE_0 0
@@ -2232,6 +2231,7 @@ static int _job_create(job_desc_msg_t * job_desc, int allocate, int will_run,
 	job_ptr = *job_pptr;
 	job_ptr->assoc_id = assoc_rec.id;
 	job_ptr->assoc_ptr = (void *) assoc_ptr;
+
 	if (update_job_dependency(job_ptr, job_desc->dependency)) {
 		error_code = ESLURM_DEPENDENCY;
 		goto cleanup_fail;
@@ -2285,7 +2285,7 @@ static int _job_create(job_desc_msg_t * job_desc, int allocate, int will_run,
 		job_ptr->priority = 1;      /* Move to end of queue */
 		job_ptr->state_reason = fail_reason;
 	}
-	
+
 cleanup:
 	if (license_list)
 		list_destroy(license_list);
@@ -2804,6 +2804,23 @@ _copy_job_desc_to_job_record(job_desc_msg_t * job_desc,
 
 	if (job_desc->name)
 		job_ptr->name = xstrdup(job_desc->name);
+	
+        if(slurm_get_track_wckey() 
+	   && (!job_ptr->name || !strchr(job_ptr->name, '\"'))) {
+		/* get the default wckey for this user since none was
+		 * given */
+		acct_user_rec_t user_rec;
+		memset(&user_rec, 0, sizeof(acct_user_rec_t));
+		user_rec.uid = job_desc->user_id;
+		assoc_mgr_fill_in_user(acct_db_conn, &user_rec,
+				       accounting_enforce);
+		if(user_rec.default_wckey)
+			xstrfmtcat(job_ptr->name, "\"*%s",
+				   user_rec.default_wckey);
+		else
+			xstrcat(job_ptr->name, "\"*");	
+	}
+
 	job_ptr->user_id    = (uid_t) job_desc->user_id;
 	job_ptr->group_id   = (gid_t) job_desc->group_id;
 	job_ptr->job_state  = JOB_PENDING;
@@ -3852,6 +3869,16 @@ static bool _top_priority(struct job_record *job_ptr)
 				continue;
 			if (!job_independent(job_ptr2))
 				continue;
+			if (job_ptr2->part_ptr == job_ptr->part_ptr) {
+				/* same partition */
+				if (job_ptr2->priority <= job_ptr->priority)
+					continue;
+				top = false;
+				break;
+			}
+			if (bit_overlap(job_ptr->part_ptr->node_bitmap,
+				        job_ptr2->part_ptr->node_bitmap) == 0)
+				continue;   /* no node overlap in partitions */
 			if ((job_ptr2->part_ptr->priority > 
 			     job_ptr ->part_ptr->priority) ||
 			    ((job_ptr2->part_ptr->priority ==
@@ -4274,11 +4301,61 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 	}
 
 	if (job_specs->name) {
-		xfree(job_ptr->name);
-		job_ptr->name = job_specs->name;
-		job_specs->name = NULL;		/* Nothing left to free */
-		info("update_job: setting name to %s for job_id %u",
-		     job_ptr->name, job_specs->job_id);
+		if (!IS_JOB_PENDING(job_ptr))
+			error_code = ESLURM_DISABLED;
+		else {
+			char *jname = NULL, *wckey = NULL;
+			char *jname_new = NULL;
+			char *temp = NULL;
+			
+			/* first set the jname to the job_ptr->name */
+			jname = xstrdup(job_ptr->name);
+			/* then grep for " since that is the delimiter for
+			   the wckey */
+			temp = strchr(jname, '\"');
+			if(temp) {
+				/* if we have a wckey set the " to NULL to
+				 * end the jname */
+				temp[0] = '\0';
+				/* increment and copy the remainder */
+				temp++;
+				wckey = xstrdup(temp);
+			}
+			
+			/* first set the jname to the job_specs->name */
+			jname_new = xstrdup(job_specs->name);
+			/* then grep for " since that is the delimiter for
+			   the wckey */
+			temp = strchr(jname_new, '\"');
+			if(temp) {
+				/* if we have a wckey set the " to NULL to
+				 * end the jname */
+				temp[0] = '\0';
+				/* increment and copy the remainder */
+				temp++;
+				xfree(wckey);
+				wckey = xstrdup(temp);
+			}
+			
+			if(jname_new && jname_new[0]) {
+				xfree(jname);
+				jname = jname_new;
+			}
+			
+			xfree(job_ptr->name);		
+			if(jname) {
+				xstrfmtcat(job_ptr->name, "%s", jname);
+				xfree(jname);
+			} 
+			
+			if(wckey) {
+				xstrfmtcat(job_ptr->name, "\"%s", wckey);
+				xfree(wckey);			
+			}
+
+			info("update_job: setting name to %s for job_id %u",
+			     job_ptr->name, job_specs->job_id);
+		}
 	}
 
 	if (job_specs->requeue != (uint16_t) NO_VAL) {
@@ -4683,7 +4760,8 @@ extern void validate_jobs_on_node(slurm_node_registration_status_msg_t *reg_msg)
 			error("Registered PENDING job %u.%u on node %s ",
 				reg_msg->job_id[i], reg_msg->step_id[i], 
 				reg_msg->node_name);
-			abort_job_on_node(reg_msg->job_id[i], job_ptr, node_ptr);
+			abort_job_on_node(reg_msg->job_id[i], job_ptr, 
+					  node_ptr);
 		}
 
 		else {		/* else job is supposed to be done */
@@ -4718,7 +4796,7 @@ static void _purge_lost_batch_jobs(int node_inx, time_t now)
 {
 	ListIterator job_iterator;
 	struct job_record *job_ptr;
-	time_t recent = now - BATCH_JOB_LAUNCH_TIME;
+	time_t recent = now - slurm_get_batch_start_timeout();
 
 	job_iterator = list_iterator_create(job_list);
 	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
@@ -4733,7 +4811,7 @@ static void _purge_lost_batch_jobs(int node_inx, time_t now)
 
 		info("Batch JobId=%u missing from master node, killing it", 
 			job_ptr->job_id);
-		job_complete(job_ptr->job_id, 0, false, 0);
+		job_complete(job_ptr->job_id, 0, false, NO_VAL);
 	}
 	list_iterator_destroy(job_iterator);
 }
@@ -5887,10 +5965,22 @@ extern int job_cancel_by_assoc_id(uint32_t assoc_id)
 
 	job_iterator = list_iterator_create(job_list);
 	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
-		if ((job_ptr->assoc_id != assoc_id) || 
-		    IS_JOB_FINISHED(job_ptr))
+		if (job_ptr->assoc_id != assoc_id)
 			continue;
-		job_ptr->assoc_ptr = NULL;
+
+		/* move up to the parent that should still exist */
+		if(job_ptr->assoc_ptr) {
+			job_ptr->assoc_ptr =
+				((acct_association_rec_t *)
+				 job_ptr->assoc_ptr)->parent_assoc_ptr;
+			if(job_ptr->assoc_ptr)
+				job_ptr->assoc_id = ((acct_association_rec_t *)
+						     job_ptr->assoc_ptr)->id;
+		} 
+
+		if(IS_JOB_FINISHED(job_ptr))
+			continue;
+
 		info("Association deleted, cancelling job %u", 
 		     job_ptr->job_id);
 		job_signal(job_ptr->job_id, SIGKILL, 0, 0);

@@ -157,6 +157,17 @@ While not essential, it is recommended that you specify a backup controller.
 See  the \fBRELOCATING CONTROLLERS\fR section if you change this.
 
 .TP
+\fBBatchStartTimeout\fR
+The maximum time (in seconds) that a batch job is permitted for 
+launching before being considered missing and releasing the 
+allocation. The default value is 10 (seconds). Larger values may 
+be required if more time is required to execute the \fBProlog\fR, 
+loading user environment variables (for Moab spawned jobs), or the 
+slurmd daemon gets paged from memory.
+NOTE: The value will not be reported by "scontrol show config" command 
+until SLURM version 1.4.
+
+.TP
 \fBCacheGroups\fR
 If set to 1, the slurmd daemon will  cache /etc/groups entries.
 This can improve performance for highly parallel jobs if NIS servers
@@ -1221,6 +1232,11 @@ space.
 The default value is "/tmp".
 
 .TP
+\fBTrackWCKey\fR
+Boolean yes or no.  Used to set display and track of the Workload  
+Characterization Key.  Must be set to track wckey usage.
+
+.TP
 \fBTreeWidth\fR
 \fBSlurmd\fR daemons use a virtual tree network for communications.
 \fBTreeWidth\fR specifies the width of the tree (i.e. the fanout).
@@ -1341,14 +1357,17 @@ separated by a "\-" (e.g. "linux[0\-64,128]", or "lx[15,18,32\-33]").
 Note that the numeric ranges can include one or more leading 
 zeros to indicate the numeric portion has a fixed number of digits 
 (e.g. "linux[0000\-1023]").
+Up to two numeric ranges can be included in the expression
+(e.g. "rack[0\-63]_blade[0\-41]").
+If one or more numeric expressions are included, one of them
+must be at the end of the name (e.g. "unit[0\-31]rack" is invalid),
+but arbitrary names can always be used in a comma separated list.
 .LP
 On BlueGene systems only, the square brackets should contain
 pairs of three digit numbers separated by a "x".
 These numbers indicate the boundaries of a rectangular prism
 (e.g. "bgl[000x144,400x544]").
 See BlueGene documentation for more details. 
-Presently the numeric range must be the last characters in the 
-node name (e.g. "unit[0\-31]rack1" is invalid). 
 The node configuration specified the following information:
 
 .TP

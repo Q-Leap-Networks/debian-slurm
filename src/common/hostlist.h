@@ -1,5 +1,5 @@
 /*****************************************************************************\
- *  $Id: hostlist.h 15445 2008-10-17 16:39:54Z jette $
+ *  $Id: hostlist.h 15870 2008-12-08 16:14:18Z jette $
  *****************************************************************************
  *  $LSDId: hostlist.h,v 1.4 2003/09/19 21:37:34 grondo Exp $
  *****************************************************************************
@@ -44,6 +44,12 @@
 
 /* max size of internal hostrange buffer */
 #define MAXHOSTRANGELEN 8192
+
+/* Since users can specify a numeric range in the prefix, we need to prevent
+ * expressions that can consume all of the memory on a system and crash the
+ * daemons (e.g. "a[0-999999999].b[0-9]", which generates 1 billion distinct
+ * prefix records in the hostlist) */
+#define MAX_PREFIX_CNT 1024
 
 #ifdef HAVE_BG
 #define HOSTLIST_BASE 36

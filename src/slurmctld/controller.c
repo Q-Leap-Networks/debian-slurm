@@ -313,7 +313,8 @@ int main(int argc, char *argv[])
 	memset(&assoc_init_arg, 0, sizeof(assoc_init_args_t));
 	assoc_init_arg.enforce = accounting_enforce;
 	assoc_init_arg.remove_assoc_notify = _remove_assoc;
-	assoc_init_arg.cache_level = ASSOC_MGR_CACHE_ALL;
+	assoc_init_arg.cache_level = ASSOC_MGR_CACHE_ASSOC |
+		ASSOC_MGR_CACHE_USER | ASSOC_MGR_CACHE_QOS;
 
 	if (assoc_mgr_init(acct_db_conn, &assoc_init_arg)) {
 		if(accounting_enforce) 
@@ -1611,7 +1612,10 @@ static void *_assoc_cache_mgr(void *no_data)
 		if(job_ptr->assoc_id) {
 			memset(&assoc_rec, 0, sizeof(acct_association_rec_t));
 			assoc_rec.id = job_ptr->assoc_id;
-
+			debug("assoc is %x (%d) for job %u", 
+			      job_ptr->assoc_ptr, job_ptr->assoc_id, 
+			      job_ptr->job_id);
+			
 			if (assoc_mgr_fill_in_assoc(
 				    acct_db_conn, &assoc_rec,
 				    accounting_enforce, 
@@ -1623,6 +1627,9 @@ static void *_assoc_cache_mgr(void *no_data)
 				/* not a fatal error, association could have
 				 * been removed */
 			}
+			debug("now assoc is %x (%d) for job %u", 
+			      job_ptr->assoc_ptr, job_ptr->assoc_id, 
+			      job_ptr->job_id);
 		}
 	}
 	list_iterator_destroy(itr);

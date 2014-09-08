@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  step_mgr.c - manage the job step information of slurm
- *  $Id: step_mgr.c 15728 2008-11-18 23:02:04Z da $
+ *  $Id: step_mgr.c 15827 2008-12-04 20:17:23Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -456,24 +456,65 @@ _pick_step_nodes (struct job_record  *job_ptr,
 		fatal("bit_copy malloc failure");
 	bit_and (nodes_avail, up_node_bitmap);
 
-	/* In exclusive mode, just satisfy the processor count.
+	/* In exclusive mode, satisfy the processor count.
 	 * Do not use nodes that have no unused CPUs */
 	if (step_spec->exclusive) {
 		int i, j=0, avail, tot_cpus = 0;
-		for (i=bit_ffs(job_ptr->node_bitmap); i<node_record_count; 
+		bitstr_t *selected_nodes = NULL;
+
+		if (step_spec->node_list) {
+			error_code = node_name2bitmap(step_spec->node_list, 
+						      false,
+						      &selected_nodes);
+			if (error_code) {
+				info("_pick_step_nodes: invalid node list %s",
+				     step_spec->node_list);
+				bit_free(selected_nodes);
+				goto cleanup;
+			}
+			if (!bit_super_set(selected_nodes,
+					   job_ptr->node_bitmap)) {
+				info("_pick_step_nodes: selected node is not "
+				     "in job %u", step_spec->node_list,
+				     job_ptr->job_id);
+				bit_free(selected_nodes);
+				goto cleanup;
+			}
+			if (!bit_super_set(selected_nodes, up_node_bitmap)) {
+				info("_pick_step_nodes: selected node is DOWN",
+				     step_spec->node_list);
+				bit_free(selected_nodes);
+				goto cleanup;
+			}
+		}
+		for (i=bit_ffs(job_ptr->node_bitmap); i<node_record_count;
 		     i++) {
 			if (!bit_test(job_ptr->node_bitmap, i))
 				continue;
-			avail = job_ptr->alloc_lps[j] - job_ptr->used_lps[j];
-			tot_cpus += job_ptr->alloc_lps[j];
+			if (selected_nodes && (!bit_test(selected_nodes, i)))
+				avail = 0;
+			else {
+				avail = job_ptr->alloc_lps[j] - 
+					job_ptr->used_lps[j];
+				tot_cpus += job_ptr->alloc_lps[j];
+			}
 			if ((avail <= 0) ||
-			    ((cpus_picked_cnt > 0) &&
+			    ((selected_nodes == NULL) &&
+			     (cpus_picked_cnt > 0) &&
 			     (cpus_picked_cnt >= step_spec->cpu_count)))
 				bit_clear(nodes_avail, i);
 			else
 				cpus_picked_cnt += avail;
 			if (++j >= job_ptr->node_cnt)
 				break;
+		}
+		if (selected_nodes) {
+			if (!bit_equal(selected_nodes, nodes_avail)) {
+				/* some required nodes have no available
+				 * processors, defer request */
+				cpus_picked_cnt = 0;
+			}
+			bit_free(selected_nodes);
 		}
 		if (cpus_picked_cnt >= step_spec->cpu_count)
 			return nodes_avail;
@@ -507,6 +548,12 @@ _pick_step_nodes (struct job_record  *job_ptr,
 			info ("_pick_step_nodes: requested nodes %s not part "
 				"of job %u", 
 				step_spec->node_list, job_ptr->job_id);
+			bit_free(selected_nodes);
+			goto cleanup;
+		}
+		if (!bit_super_set(selected_nodes, nodes_avail)) {
+			info ("_pick_step_nodes: requested nodes %s are DOWN",
+			      step_spec->node_list);
 			bit_free(selected_nodes);
 			goto cleanup;
 		}

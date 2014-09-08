@@ -4,7 +4,7 @@
  *	hash table (node_hash_table), time stamp (last_node_update) and 
  *	configuration list (config_list)
  *
- *  $Id: node_mgr.c 15793 2008-12-02 22:03:28Z jette $
+ *  $Id: node_mgr.c 15820 2008-12-04 01:16:52Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1148,8 +1148,13 @@ int update_node ( update_node_msg_t * update_node_msg )
 						slurmctld_cluster_name,
 						node_ptr, now, NULL);
 			}
+			else if (state_val == NODE_STATE_NO_RESPOND) {
+				node_ptr->node_state |= NODE_STATE_NO_RESPOND;
+				state_val = base_state;
+				bit_clear(avail_node_bitmap, node_inx);
+			}
 			else {
-				info ("Invalid node state specified %d", 
+				info ("Invalid node state specified %u", 
 					state_val);
 				err_code = 1;
 				error_code = ESLURM_INVALID_NODE_STATE;
@@ -1411,6 +1416,7 @@ static bool _valid_node_state_change(uint16_t old, uint16_t new)
 		case NODE_STATE_DOWN:
 		case NODE_STATE_DRAIN:
 		case NODE_STATE_FAIL:
+		case NODE_STATE_NO_RESPOND:
 			return true;
 			break;
 

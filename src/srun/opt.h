@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  opt.h - definitions for srun option processing
- *  $Id: opt.h 15204 2008-09-29 16:27:54Z jette $
+ *  $Id: opt.h 15808 2008-12-02 23:38:47Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -209,6 +209,7 @@ typedef struct srun_options {
 	bool pty;		/* --pty			*/
 	int argc;		/* length of argv array		*/
 	char **argv;		/* left over on command line	*/
+	char *wckey;            /* --wckey workload characterization key */
 } opt_t;
 
 extern opt_t opt;

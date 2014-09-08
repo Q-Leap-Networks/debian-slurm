@@ -135,6 +135,7 @@ s_p_options_t slurm_conf_options[] = {
 	{"AuthType", S_P_STRING},
 	{"BackupAddr", S_P_STRING},
 	{"BackupController", S_P_STRING},
+	{"BatchStartTimeout", S_P_UINT16},
 	{"CheckpointType", S_P_STRING},
 	{"CacheGroups", S_P_UINT16},
 	{"ClusterName", S_P_STRING},
@@ -235,6 +236,7 @@ s_p_options_t slurm_conf_options[] = {
 	{"TaskPlugin", S_P_STRING},
 	{"TaskPluginParam", S_P_STRING},
 	{"TmpFS", S_P_STRING},
+	{"TrackWCKey", S_P_BOOLEAN},
 	{"TreeWidth", S_P_UINT16},
 	{"UnkillableStepProgram", S_P_STRING},
 	{"UnkillableStepTimeout", S_P_UINT16},
@@ -242,7 +244,8 @@ s_p_options_t slurm_conf_options[] = {
 	{"WaitTime", S_P_UINT16},
 
 	{"NodeName", S_P_ARRAY, parse_nodename, destroy_nodename},
-	{"PartitionName", S_P_ARRAY, parse_partitionname, destroy_partitionname},
+	{"PartitionName", S_P_ARRAY, parse_partitionname,
+	 destroy_partitionname},
 	{"DownNodes", S_P_ARRAY, parse_downnodes, destroy_downnodes},
 
 	{NULL}
@@ -1218,6 +1221,7 @@ init_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr)
 	xfree (ctl_conf_ptr->authtype);
 	xfree (ctl_conf_ptr->backup_addr);
 	xfree (ctl_conf_ptr->backup_controller);
+	ctl_conf_ptr->batch_start_timeout	= 0;
 	ctl_conf_ptr->cache_groups		= 0;
 	xfree (ctl_conf_ptr->checkpoint_type);
 	xfree (ctl_conf_ptr->cluster_name);
@@ -1529,6 +1533,10 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 		if (conf->backup_controller != NULL)
 			conf->backup_addr = xstrdup(conf->backup_controller);
 	}
+
+	if (!s_p_get_uint16(&conf->batch_start_timeout, "BatchStartTimeout", 
+			    hashtbl))
+		conf->batch_start_timeout = DEFAULT_BATCH_START_TIMEOUT;
 
 	s_p_get_string(&conf->cluster_name, "ClusterName", hashtbl);
 
@@ -2032,6 +2040,10 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 	if (!s_p_get_uint16(&conf->wait_time, "WaitTime", hashtbl))
 		conf->wait_time = DEFAULT_WAIT_TIME;
 	
+	if(!s_p_get_boolean((bool *)&conf->track_wckey, 
+			    "TrackWCKey", hashtbl))
+		conf->track_wckey = false;
+
 	if (s_p_get_uint16(&conf->tree_width, "TreeWidth", hashtbl)) {
 		if (conf->tree_width == 0) {
 			error("TreeWidth=0 is invalid");

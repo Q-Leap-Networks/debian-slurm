@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/mgr.c - job manager functions for slurmstepd
- *  $Id: mgr.c 15660 2008-11-12 16:55:21Z jette $
+ *  $Id: mgr.c 15835 2008-12-04 23:59:29Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008 Lawrence Livermore National Security.
@@ -228,13 +228,16 @@ mgr_launch_tasks_setup(launch_tasks_request_msg_t *msg, slurm_addr *cli,
 	return job;
 }
 
-static void
-_batch_finish(slurmd_job_t *job, int rc)
+/*
+ * Send batch exit code to slurmctld. Non-zero rc will DRAIN the node.
+ */
+extern void
+batch_finish(slurmd_job_t *job, int rc)
 {
 	int i;
 	for (i = 0; i < job->ntasks; i++) {
 		/* If signalled we only need to check one and then
-		   break out of the loop */ 
+		 * break out of the loop */ 
 		if(WIFSIGNALED(job->task[i]->estatus)) {
 			switch(WTERMSIG(job->task[i]->estatus)) {
 			case SIGTERM:
@@ -687,8 +690,7 @@ _send_step_complete_msgs(slurmd_job_t *job)
  * initialization, etc.
  *
  * Returns 0 if job ran and completed successfully.
- * Returns errno if job startup failed.
- *
+ * Returns errno if job startup failed. NOTE: This will DRAIN the node.
  */
 int 
 job_manager(slurmd_job_t *job)
@@ -840,9 +842,7 @@ job_manager(slurmd_job_t *job)
 
 	if (job->aborted)
 		info("job_manager exiting with aborted job");
-	else if (job->batch) {
-		_batch_finish(job, rc); /* sends batch complete message */
-	} else if (step_complete.rank > -1) {
+	else if (!job->batch && (step_complete.rank > -1)) {
 		_wait_for_children_slurmstepd(job);
 		_send_step_complete_msgs(job);
 	}
@@ -1315,9 +1315,10 @@ _make_batch_dir(slurmd_job_t *job)
 
 	if (job->stepid == NO_VAL)
 		snprintf(path, 1024, "%s/job%05u", conf->spooldir, job->jobid);
-	else
-		snprintf(path, 1024, "%s/job%05u.%05u", conf->spooldir, job->jobid,
-			job->stepid);
+	else {
+		snprintf(path, 1024, "%s/job%05u.%05u", 
+			 conf->spooldir, job->jobid, job->stepid);
+	}
 
 	if ((mkdir(path, 0750) < 0) && (errno != EEXIST)) {
 		error("mkdir(%s): %m", path);
@@ -1440,7 +1441,7 @@ _send_launch_resp(slurmd_job_t *job, int rc)
 	resp.local_pids = xmalloc(job->ntasks * sizeof(*resp.local_pids));
 	resp.task_ids = xmalloc(job->ntasks * sizeof(*resp.task_ids));
 	for (i = 0; i < job->ntasks; i++) {
-		resp.local_pids[i] = job->task[i]->pid;  
+		resp.local_pids[i] = job->task[i]->pid;
 		resp.task_ids[i] = job->task[i]->gtid;
 	}
 
@@ -1467,7 +1468,7 @@ _send_complete_batch_script_msg(slurmd_job_t *job, int err, int status)
 	req.node_name	= job->node_name;
 	req_msg.msg_type= REQUEST_COMPLETE_BATCH_SCRIPT;
 	req_msg.data	= &req;	
-		
+
 	info("sending REQUEST_COMPLETE_BATCH_SCRIPT");
 
 	/* Note: these log messages don't go to slurmd.log from here */

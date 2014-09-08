@@ -84,7 +84,7 @@
  *	communicating with it (e.g. it will not accept messages with a
  *	version higher than SLURMDBD_VERSION).
  */
-#define SLURMDBD_VERSION	03
+#define SLURMDBD_VERSION	04
 #define SLURMDBD_VERSION_MIN	02
 
 /* SLURM DBD message types */
@@ -144,6 +144,13 @@ typedef enum {
 	DBD_GOT_QOS,		/* Got QOS information   	        */
 	DBD_REMOVE_QOS,		/* Remove QOS information   	        */
 	DBD_MODIFY_QOS,         /* Modify existing QOS                  */
+	DBD_ADD_WCKEYS,		/* Add WCKEY information   	        */
+	DBD_GET_WCKEYS,		/* Get WCKEY information   	        */
+	DBD_GOT_WCKEYS,		/* Got WCKEY information   	        */
+	DBD_REMOVE_WCKEYS,	/* Remove WCKEY information   	        */
+	DBD_MODIFY_WCKEYS,      /* Modify existing WCKEY                */
+	DBD_GET_WCKEY_USAGE,  	/* Get wckey usage information  	*/
+	DBD_GOT_WCKEY_USAGE,  	/* Get wckey usage information  	*/
 } slurmdbd_msg_type_t;
 
 /*****************************************************************************\

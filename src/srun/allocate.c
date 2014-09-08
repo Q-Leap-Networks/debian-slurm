@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/srun/allocate.c - srun functions for managing node allocations
- * $Id: allocate.c 15578 2008-11-04 01:04:21Z jette $
+ * $Id: allocate.c 15808 2008-12-02 23:38:47Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -344,9 +344,13 @@ job_desc_msg_create_from_opts ()
 	j->features       = opt.constraints;
 	j->immediate      = opt.immediate;
 	if (opt.job_name)
-		j->name   = opt.job_name;
+		j->name   = xstrdup(opt.job_name);
 	else
-		j->name   = opt.cmd_name;
+		j->name   = xstrdup(opt.cmd_name);
+
+	if (opt.wckey) 
+		xstrfmtcat(j->name, "\"%s", opt.wckey);
+	
 	j->req_nodes      = xstrdup(opt.nodelist);
 	
 	/* simplify the job allocation nodelist, 
