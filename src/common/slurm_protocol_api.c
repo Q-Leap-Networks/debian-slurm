@@ -2186,17 +2186,30 @@ static void _remap_slurmctld_errno(void)
 \**********************************************************************/
 
 /* In the socket implementation it creates a socket, binds to it, and
- *	listens for connections.
+ *	listens for connections. Retry if bind() or listen() fail
+ *      even if asked for an ephemeral port.
  *
  * IN  port     - port to bind the msg server to
  * RET slurm_fd_t - file descriptor of the connection created
  */
 slurm_fd_t slurm_init_msg_engine_port(uint16_t port)
 {
+	slurm_fd_t cc;
 	slurm_addr_t addr;
+	int cnt;
 
+	cnt = 0;
+eagain:
 	slurm_set_addr_any(&addr, port);
-	return _slurm_init_msg_engine(&addr);
+	cc = _slurm_init_msg_engine(&addr);
+	if (cc < 0 && port == 0) {
+		++cnt;
+		if (cnt <= 5) {
+			usleep(5000);
+			goto eagain;
+		}
+	}
+	return cc;
 }
 
 /* In the socket implementation it creates a socket, binds to it, and
@@ -3849,7 +3862,7 @@ List slurm_send_addr_recv_msgs(slurm_msg_t *msg, char *name, int timeout)
 	/* This connect retry logic permits Slurm hierarchical communications
 	 * to better survive slurmd restarts */
 	for (i = 0; i <= conn_timeout; i++) {
-		if (i > 0)
+		if (i)
 			sleep(1);
 		fd = slurm_open_msg_conn(&msg->address);
 		if ((fd >= 0) || (errno != ECONNREFUSED))

@@ -3514,6 +3514,15 @@ _validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 		if (conf->prolog_flags == (uint16_t) NO_VAL) {
 			fatal("PrologFlags invalid: %s", temp_str);
 		}
+		if (conf->prolog_flags & PROLOG_FLAG_NOHOLD) {
+			conf->prolog_flags |= PROLOG_FLAG_ALLOC;
+#ifdef HAVE_ALPS_CRAY
+			error("PrologFlags=NoHold is not compatible when "
+			      "running on ALPS/Cray systems");
+			conf->prolog_flags &= (~PROLOG_FLAG_NOHOLD);
+			return SLURM_ERROR;
+#endif
+		}
 		xfree(temp_str);
 	} else { /* Default: no Prolog Flags are set */
 		conf->prolog_flags = 0;
@@ -3977,6 +3986,12 @@ extern char * prolog_flags2str(uint16_t prolog_flags)
 		xstrcat(rc, "Alloc");
 	}
 
+	if (prolog_flags & PROLOG_FLAG_NOHOLD) {
+		if (rc)
+			xstrcat(rc, ",");
+		xstrcat(rc, "NoHold");
+	}
+
 	return rc;
 }
 
@@ -3998,6 +4013,8 @@ extern uint16_t prolog_str2flags(char *prolog_flags)
 	while (tok) {
 		if (strcasecmp(tok, "Alloc") == 0)
 			rc |= PROLOG_FLAG_ALLOC;
+		else if (strcasecmp(tok, "NoHold") == 0)
+			rc |= PROLOG_FLAG_NOHOLD;
 		else {
 			error("Invalid PrologFlag: %s", tok);
 			rc = (uint16_t)NO_VAL;
@@ -4152,6 +4169,8 @@ extern char * debug_flags2str(uint32_t debug_flags)
 			xstrcat(rc, ",");
 		xstrcat(rc, "Wiki");
 	}
+	if (debug_flags & DEBUG_FLAG_PROTOCOL) {
+	}
 	return rc;
 }
 
@@ -4225,6 +4244,8 @@ extern uint32_t debug_str2flags(char *debug_flags)
 			rc |= DEBUG_FLAG_TRIGGERS;
 		else if (strcasecmp(tok, "Wiki") == 0)
 			rc |= DEBUG_FLAG_WIKI;
+		else if (strcasecmp(tok, "Protocol") == 0)
+			rc |= DEBUG_FLAG_PROTOCOL;
 		else {
 			error("Invalid DebugFlag: %s", tok);
 			rc = NO_VAL;

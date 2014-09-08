@@ -476,6 +476,9 @@ Do not log when the slurm.conf files differs between SLURM daemons
 \fBPriority\fB
 Job prioritization
 .TP
+\fBProtocol\fR
+Communication protocol details
+.TP
 \fBReservation\fB
 Advanced reservations
 .TP
@@ -1550,6 +1553,13 @@ is started, no Prolog is executed. \fBAlloc\fR is useful for preparing things
 before a user starts to use any allocated resources.
 In particular, this flag is needed on a Cray system when cluster compatibility
 mode is enabled.
+.TP 6
+\fBNoHold\fR
+If set, Alloc is also set.  This will allow for salloc to not block until the
+prolog is finished on each node.  The blocking will happen when steps reach
+the slurmd and before any execution has happened in the step. This is a much
+faster way to work and if using srun to launch your tasks you should use this
+flag.
 .RE
 
 .TP
@@ -1907,7 +1917,8 @@ This option applies only to \fBSchedulerType=sched/backfill\fR.
 \fBdefault_queue_depth=#\fR
 The default number of jobs to attempt scheduling (i.e. the queue depth) when a
 running job completes or other routine actions occur. The full queue will be
-tested on a less frequent basis. The default value is 100.
+tested on a less frequent basis as defined by the \fBsched_interval\fR option
+described below. The default value is 100.
 See the \fBpartition_job_depth\fR option to limit depth by partition.
 In the case of large clusters (more than 1000 nodes), configuring a relatively
 small value may be desirable.
@@ -1930,6 +1941,26 @@ initiation time of individual jobs. Also see \fBdefault_queue_depth\fR above.
 Maximum number of jobs to test for a circular job dependency. Stop testing
 after this number of job dependencies have been tested. The default value is
 10 jobs.
+.TP
+\fBmax_rpc_cnt=#\fR
+If the number of active threads in the slurmctld daemon is equal to or
+larger than this value, defer scheduling of jobs.
+This can improve Slurm's ability to process requests at a cost of initiating
+new jobs less frequently.
+The default value is zero, which disables this option.
+If a value is set, then a value of 10 or higher is recommended.
+.TP
+\fBmax_sched_time=#\fR
+How long, in seconds, that the main scheduling loop will execute for before
+exiting.
+If a value is configured, be aware that all other Slurm operations will be
+deferred during this time period.
+Make certain the value is lower than \fBMessageTimeout\fR.
+If a value is not explicitly configured, the default value is half of
+\fBMessageTimeout\fR with a minimum default value of 1 second and a maximum
+default value of 4 seconds.
+For example if MessageTimeout=10, the time limit will be 4 seconds
+(i.e. MIN(10/2, 4) = 4).
 .TP
 \fBmax_switch_wait=#\fR
 Maximum number of seconds that a job can delay execution waiting for the
@@ -1957,6 +1988,11 @@ priority jobs.
 It may be desirable to set this configuration parameter when there are multiple
 priorities of preemptable jobs.
 The logic to support this option is only available in the select/cons_res plugin.
+.TP
+\fBsched_interval=#\fR
+How frequently, in seconds, the main scheduling loop will execute and test all
+pending jobs.
+The default value is 60 seconds.
 .RE
 
 .TP
@@ -2998,20 +3034,54 @@ The default value is 1.
 .TP
 \fBState\fR
 State of the node with respect to the initiation of user jobs.
-Acceptable values are "DOWN", "DRAIN", "FAIL", "FAILING" and "UNKNOWN".
-"DOWN" indicates the node failed and is unavailable to be allocated work.
-"DRAIN" indicates the node is unavailable to be allocated work.
-"FAIL" indicates the node is expected to fail soon, has
+Acceptable values are "CLOUD", "DOWN", "DRAIN", "FAIL", "FAILING", "FUTURE"
+and "UNKNOWN".
+Node states of "BUSY" and "IDLE" should not be specified in the node
+configuration, but set the node state to "UNKNOWN" instead.
+Setting the node state to "UNKNOWN" will result in the node state being set to
+"BUSY", "IDLE" or other appropriate state based upon recovered system state
+information.
+The default value is "UNKNOWN".
+Also see the \fBDownNodes\fR parameter below.
+.RS
+.TP 10
+\fBCLOUD\fP
+Indicates the node exists in the cloud.
+It's initial state will be treated as powered down.
+The node will be available for use after it's state is recovered from SLURM's
+state save file or the slurmd daemon starts on the compute node.
+.TP
+\fBDOWN\fP
+Indicates the node failed and is unavailable to be allocated work.
+.TP
+\fBDRAIN\fP
+Indicates the node is unavailable to be allocated work.on.
+.TP
+\fBFAIL\fP
+Indicates the node is expected to fail soon, has
 no jobs allocated to it, and will not be allocated
 to any new jobs.
-"FAILING" indicates the node is expected to fail soon, has
+.TP
+\fBFAILING\fP
+Indicates the node is expected to fail soon, has
 one or more jobs allocated to it, but will not be allocated
 to any new jobs.
-"UNKNOWN" indicates the node's state is undefined (BUSY or IDLE),
+.TP
+\fBFUTURE\fP
+Indicates the node is defined for future use and need not
+exist when the SLURM daemons are started. These nodes can be made available
+for use simply by updating the node state using the scontrol command rather
+than restarting the slurmctld daemon. After these nodes are made available,
+change their \fRState\fR in the slurm.conf file. Until these nodes are made
+available, they will not be seen using any SLURM commands or nor will
+any attempt be made to contact them.
+.TP
+\fBUNKNOWN\fP
+Indicates the node's state is undefined (BUSY or IDLE),
 but will be established when the \fBslurmd\fR daemon on that node
 registers.
 The default value is "UNKNOWN".
-Also see the \fBDownNodes\fR parameter below.
+.RE
 
 .TP
 \fBThreadsPerCore\fR
@@ -3085,16 +3155,15 @@ Identifies the reason for a node being in state "DOWN", "DRAIN",
 .TP
 \fBState\fR
 State of the node with respect to the initiation of user jobs.
-Acceptable values are "BUSY", "DOWN", "DRAIN", "FAIL",
-"FAILING, "IDLE", and "UNKNOWN".
+Acceptable values are "DOWN", "DRAIN", "FAIL", "FAILING" and "UNKNOWN".
+Node states of "BUSY" and "IDLE" should not be specified in the node
+configuration, but set the node state to "UNKNOWN" instead.
+Setting the node state to "UNKNOWN" will result in the node state being set to
+"BUSY", "IDLE" or other appropriate state based upon recovered system state
+information.
+The default value is "UNKNOWN".
 .RS
 .TP 10
-\fBCLOUD\fP
-Indicates the node exists in the cloud.
-It's initial state will be treated as powered down.
-The node will be available for use after it's state is recovered from SLURM's
-state save file or the slurmd daemon starts on the compute node.
-.TP
 \fBDOWN\fP
 Indicates the node failed and is unavailable to be allocated work.
 .TP
@@ -3110,15 +3179,6 @@ to any new jobs.
 Indicates the node is expected to fail soon, has
 one or more jobs allocated to it, but will not be allocated
 to any new jobs.
-.TP
-\fBFUTURE\fP
-Indicates the node is defined for future use and need not
-exist when the SLURM daemons are started. These nodes can be made available
-for use simply by updating the node state using the scontrol command rather
-than restarting the slurmctld daemon. After these nodes are made available,
-change their \fRState\fR in the slurm.conf file. Until these nodes are made
-available, they will not be seen using any SLURM commands or nor will
-any attempt be made to contact them.
 .TP
 \fBUNKNOWN\fP
 Indicates the node's state is undefined (BUSY or IDLE),

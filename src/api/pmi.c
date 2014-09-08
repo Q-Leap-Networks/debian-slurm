@@ -103,8 +103,9 @@
 #define KVS_STATE_LOCAL    0
 #define KVS_STATE_DEFUNCT  1
 
-#define KVS_KEY_STATE_GLOBAL   0
-#define KVS_KEY_STATE_LOCAL    1
+#define KVS_KEY_STATE_GLOBAL    0
+#define KVS_KEY_STATE_LOCAL     1
+#define KVS_KEY_STATE_DISABLED  2
 
 /* default key names form is jobid.stepid[.taskid.sequence] */
 struct kvs_rec {
@@ -139,6 +140,7 @@ inline static void _kvs_dump(void);
 static int  _kvs_put( const char kvsname[], const char key[],
 		const char value[], int local);
 static void _kvs_swap(struct kvs_rec *kvs_ptr, int inx1, int inx2);
+static void _kvs_disable_local_keys(void);
 
 /* Global variables */
 long pmi_jobid;
@@ -149,7 +151,10 @@ int pmi_size;
 int pmi_spawned;
 int pmi_rank;
 int pmi_debug;
-static int pmi_kvs_no_dup_keys = 0;
+/* By default PMI protocol does not allow
+ * for duplicate keys.
+ */
+static int pmi_kvs_no_dup_keys = 1;
 
 static pthread_mutex_t kvs_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -198,14 +203,13 @@ int PMI_Init( int *spawned )
 
 	/* In MPI implementations, there will be no duplicate
 	 * keys put into the KVS usually. Hence the checking
-	 * for duplicate keys can be skipped. That's the motivation
-	 * of the environment SLURM_PMI_KVS_NO_DUP_KEYS: for MPI to
-	 * tell PMI that there will be no duplicate keys at all.
+	 * for duplicate keys can be skipped. However if the
+	 * user wants to have duplicate keys he must set
+	 * this env variable. If a duplicate key is found
+	 * the previous value will be discarded.
 	 */
-	env = getenv("SLURM_PMI_KVS_NO_DUP_KEYS");
+	env = getenv("SLURM_PMI_KVS_DUP_KEYS");
 	if (env)
-		pmi_kvs_no_dup_keys = 1;
-	else
 		pmi_kvs_no_dup_keys = 0;
 
 	if (spawned == NULL)
@@ -673,6 +677,9 @@ int PMI_Barrier( void )
 		return PMI_SUCCESS;
 	if (pmi_debug)
 		fprintf(stderr, "Past PMI_Barrier\n");
+
+
+	_kvs_disable_local_keys();
 
 	for (i=0; i<kvs_set_ptr->kvs_comm_recs; i++) {
 		kvs_ptr = kvs_set_ptr->kvs_comm_ptr[i];
@@ -1419,6 +1426,7 @@ the values returned by 'PMI_KVS_Get_key_length_max()' and
 int PMI_KVS_Iter_first(const char kvsname[], char key[], int key_len, char val[], int val_len)
 {
 	int i, rc;
+	int j;
 
 	if (pmi_debug)
 		fprintf(stderr, "In: PMI_KVS_Iter_first\n");
@@ -1430,33 +1438,36 @@ int PMI_KVS_Iter_first(const char kvsname[], char key[], int key_len, char val[]
 	if (val == NULL)
 		return PMI_ERR_INVALID_VAL;
 
-	/* find the proper kvs record */
+	key[0] = '\0';
+	val[0] = '\0';
+	/* find the proper kvs record
+	 */
 	pthread_mutex_lock(&kvs_mutex);
 	for (i=0; i<kvs_rec_cnt; i++) {
+
 		if (kvs_recs[i].kvs_state == KVS_STATE_DEFUNCT)
 			continue;
+
 		if (strncmp(kvs_recs[i].kvs_name, kvsname, PMI_MAX_KVSNAME_LEN))
 			continue;
+
 		kvs_recs[i].kvs_inx = 0;
 		if (kvs_recs[i].kvs_inx >= kvs_recs[i].kvs_cnt) {
-			key[0] = '\0';
-			val[0] = '\0';
 			rc = PMI_SUCCESS;
-		} else if (strlen(kvs_recs[i].kvs_keys[kvs_recs[i].kvs_inx]) >
-				(key_len-1)) {
-			rc = PMI_ERR_INVALID_KEY_LENGTH;
-		} else if (strlen(kvs_recs[i].kvs_values[kvs_recs[i].kvs_inx]) >
-				(val_len-1)) {
-			rc = PMI_ERR_INVALID_VAL_LENGTH;
-		} else {
-			strncpy(key, kvs_recs[i].kvs_keys[kvs_recs[i].kvs_inx],
-				key_len);
-			strncpy(val,
-				kvs_recs[i].kvs_values[kvs_recs[i].kvs_inx],
-				val_len);
-			rc = PMI_SUCCESS;
+			goto fini;
 		}
-		goto fini;
+
+		for (j = 0; i < kvs_recs[i].kvs_cnt; j++) {
+
+			if (kvs_recs[i].kvs_key_states[j] == KVS_KEY_STATE_DISABLED)
+				continue;
+
+			strncpy(key, kvs_recs[i].kvs_keys[j], key_len);
+			strncpy(val, kvs_recs[i].kvs_values[j],	val_len);
+			kvs_recs[i].kvs_inx = j;
+			rc = PMI_SUCCESS;
+			goto fini;
+		}
 	}
 	rc = PMI_ERR_INVALID_KVS;
 
@@ -1496,7 +1507,9 @@ key and val, must be at least as long as the values returned by
 int PMI_KVS_Iter_next(const char kvsname[], char key[], int key_len,
 		char val[], int val_len)
 {
-	int i, rc;
+	int i;
+	int rc;
+	int j;
 
 	if (pmi_debug)
 		fprintf(stderr, "In: PMI_KVS_Iter_next\n");
@@ -1508,6 +1521,8 @@ int PMI_KVS_Iter_next(const char kvsname[], char key[], int key_len,
 	if (val == NULL)
 		return PMI_ERR_INVALID_VAL;
 
+	key[0] = '\0';
+	val[0] = '\0';
 	/* find the proper kvs record */
 	pthread_mutex_lock(&kvs_mutex);
 	for (i=0; i<kvs_rec_cnt; i++) {
@@ -1517,24 +1532,21 @@ int PMI_KVS_Iter_next(const char kvsname[], char key[], int key_len,
 			continue;
 		kvs_recs[i].kvs_inx++;
 		if (kvs_recs[i].kvs_inx >= kvs_recs[i].kvs_cnt) {
-			key[0] = '\0';
-			val[0] = '\0';
 			rc = PMI_SUCCESS;
-		} else if (strlen(kvs_recs[i].kvs_keys[kvs_recs[i].kvs_inx]) >
-				(key_len-1)) {
-			rc = PMI_ERR_INVALID_KEY_LENGTH;
-		} else if (strlen(kvs_recs[i].kvs_values[kvs_recs[i].kvs_inx]) >
-				(val_len-1)) {
-			rc = PMI_ERR_INVALID_VAL_LENGTH;
-		} else {
-			strncpy(key, kvs_recs[i].kvs_keys[kvs_recs[i].kvs_inx],
-				key_len);
-			strncpy(val,
-				kvs_recs[i].kvs_values[kvs_recs[i].kvs_inx],
-				val_len);
-			rc = PMI_SUCCESS;
+			goto fini;
 		}
-		goto fini;
+		for (j = kvs_recs[i].kvs_inx; j < kvs_recs[i].kvs_cnt; j++) {
+
+			if (kvs_recs[i].kvs_key_states[j] == KVS_KEY_STATE_DISABLED)
+				continue;
+
+			strncpy(key, kvs_recs[i].kvs_keys[j], key_len);
+			strncpy(val, kvs_recs[i].kvs_values[j],	val_len);
+			kvs_recs[i].kvs_inx = j;
+			rc = PMI_SUCCESS;
+			goto fini;
+		}
+
 	}
 	rc = PMI_ERR_INVALID_KVS;
 
@@ -1954,4 +1966,24 @@ inline static void _kvs_dump(void)
 		}
 	}
 #endif
+}
+
+/* _kvs_disable_local_keys()
+ *
+ * The PMI_Barrier() call returns all [key,val] from all
+ * ranks including myself. As such there are duplicated
+ * keys with state LOCAL and GLOBAL, disdable the LOCAL
+ * one so the iterator won't return duplicated keys.
+ */
+static void
+_kvs_disable_local_keys(void)
+{
+	int i;
+	int j;
+
+	for (i = 0; i < kvs_rec_cnt; i++) {
+		for (j = 0; j < kvs_recs[i].kvs_cnt; j++)
+			if (kvs_recs[i].kvs_key_states[j] == KVS_KEY_STATE_LOCAL)
+				kvs_recs[i].kvs_key_states[j] = KVS_KEY_STATE_DISABLED;
+	}
 }
