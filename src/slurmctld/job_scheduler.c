@@ -200,6 +200,10 @@ extern List build_job_queue(bool clear_start)
 				fatal("list_iterator_create malloc failure");
 			while ((part_ptr = (struct part_record *)
 					list_next(part_iterator))) {
+				job_ptr->part_ptr = part_ptr;
+				if (job_limits_check(&job_ptr) !=
+				    WAIT_NO_REASON)
+					continue;
 				_job_queue_append(job_queue, job_ptr, part_ptr);
 			}
 			list_iterator_destroy(part_iterator);
@@ -909,17 +913,14 @@ extern int test_job_dependency(struct job_record *job_ptr)
  		} else if ((dep_ptr->job_ptr->magic != JOB_MAGIC) ||
 			   (dep_ptr->job_ptr->job_id != dep_ptr->job_id)) {
 			/* job is gone, dependency lifted */
-			list_delete_item(depend_iter);
 			clear_dep = true;
 		} else if (dep_ptr->depend_type == SLURM_DEPEND_AFTER) {
 			if (!IS_JOB_PENDING(dep_ptr->job_ptr)) {
-				list_delete_item(depend_iter);
 				clear_dep = true;
 			} else
 				depends = true;
 		} else if (dep_ptr->depend_type == SLURM_DEPEND_AFTER_ANY) {
 			if (IS_JOB_FINISHED(dep_ptr->job_ptr)) {
-				list_delete_item(depend_iter);
 				clear_dep = true;
 			} else
 				depends = true;
@@ -927,7 +928,6 @@ extern int test_job_dependency(struct job_record *job_ptr)
 			if (!IS_JOB_FINISHED(dep_ptr->job_ptr))
 				depends = true;
 			else if (!IS_JOB_COMPLETE(dep_ptr->job_ptr)) {
-				list_delete_item(depend_iter);
 				clear_dep = true;
 			} else {
 				failure = true;
@@ -937,7 +937,6 @@ extern int test_job_dependency(struct job_record *job_ptr)
 			if (!IS_JOB_FINISHED(dep_ptr->job_ptr))
 				depends = true;
 			else if (IS_JOB_COMPLETE(dep_ptr->job_ptr)) {
-				list_delete_item(depend_iter);
 				clear_dep = true;
 			} else {
 				failure = true;
@@ -964,12 +963,12 @@ extern int test_job_dependency(struct job_record *job_ptr)
 		} else
 			failure = true;
 		if (clear_dep) {
- 			char *rmv_dep;
- 			rmv_dep = xstrdup_printf(":%u",
-						 dep_ptr->job_ptr->job_id);
+			char *rmv_dep = xstrdup_printf(
+				":%u", dep_ptr->job_ptr->job_id);
 			xstrsubstitute(job_ptr->details->dependency,
 				       rmv_dep, "");
 			xfree(rmv_dep);
+			list_delete_item(depend_iter);
 		}
 	}
 	list_iterator_destroy(depend_iter);

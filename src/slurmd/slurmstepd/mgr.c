@@ -196,6 +196,7 @@ static void _setargs(slurmd_job_t *job);
 static void _random_sleep(slurmd_job_t *job);
 static int  _run_script_as_user(const char *name, const char *path,
 				slurmd_job_t *job, int max_wait, char **env);
+static void _unblock_signals(void);
 
 /*
  * Batch job management prototypes:
@@ -997,7 +998,7 @@ job_manager(slurmd_job_t *job)
 
 	io_close_task_fds(job);
 
-	xsignal_block(mgr_sigarray);
+	xsignal_block (mgr_sigarray);
 	reattach_job = job;
 
 	job->state = SLURMSTEPD_STEP_RUNNING;
@@ -1192,7 +1193,7 @@ static int exec_wait_signal (struct exec_wait_info *e, slurmd_job_t *job)
 	return (0);
 }
 
-static void prepare_tty (slurmd_job_t *job, slurmd_task_info_t *task)
+static void prepare_stdio (slurmd_job_t *job, slurmd_task_info_t *task)
 {
 #ifdef HAVE_PTY_H
 	if (job->pty && (task->gtid == 0)) {
@@ -1200,9 +1201,25 @@ static void prepare_tty (slurmd_job_t *job, slurmd_task_info_t *task)
 			error("login_tty: %m");
 		else
 			debug3("login_tty good");
+		return;
 	}
 #endif
+	io_dup_stdio(task);
 	return;
+}
+
+static void _unblock_signals (void)
+{
+	sigset_t set;
+	int i;
+
+	for (i = 0; mgr_sigarray[i]; i++) {
+		/* eliminate pending signals, then set to default */
+		xsignal(mgr_sigarray[i], SIG_IGN);
+		xsignal(mgr_sigarray[i], SIG_DFL);
+	}
+	sigemptyset(&set);
+	xsignal_set_mask (&set);
 }
 
 /* fork and exec N tasks
@@ -1317,12 +1334,15 @@ _fork_all_tasks(slurmd_job_t *job)
 
 			/* log_fini(); */ /* note: moved into exec_task() */
 
-			xsignal_unblock(slurmstepd_blocked_signals);
+			_unblock_signals();
 
 			/*
-			 *  Setup tty before any setpgid() calls
+			 *  Need to setup stdio before setpgid() is called
+			 *   in case we are setting up a tty. (login_tty()
+			 *   must be called before setpgid() or it is
+			 *   effectively disabled).
 			 */
-			prepare_tty (job, job->task[i]);
+			prepare_stdio (job, job->task[i]);
 
 			/*
 			 *  Block until parent notifies us that it is ok to
