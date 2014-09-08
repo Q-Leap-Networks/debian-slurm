@@ -3,7 +3,7 @@
  *	Note: there is a global job list (job_list), time stamp 
  *	(last_job_update), and hash table (job_hash)
  *
- *  $Id: job_mgr.c 12861 2007-12-19 22:04:25Z jette $
+ *  $Id: job_mgr.c 13083 2008-01-24 16:28:23Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1073,13 +1073,13 @@ extern int kill_running_job_by_node_name(char *node_name, bool step_test)
 					job_ptr->end_time = job_ptr->suspend_time;
 				else
 					job_ptr->end_time = now;
-				deallocate_nodes(job_ptr, false, suspended);
-
+				
 				/* We want this job to look like it was cancelled in the
 				 * accounting logs. Set a new submit time so the restarted
 				 * job looks like a new job. */
 				save_state = job_ptr->job_state;
 				job_ptr->job_state  = JOB_CANCELLED;
+				deallocate_nodes(job_ptr, false, suspended);
 				job_completion_logger(job_ptr);
 				job_ptr->job_state = save_state;
 				job_ptr->details->submit_time = now;
@@ -1096,8 +1096,8 @@ extern int kill_running_job_by_node_name(char *node_name, bool step_test)
 						job_ptr->suspend_time;
 				else
 					job_ptr->end_time = time(NULL);
-				job_completion_logger(job_ptr);
 				deallocate_nodes(job_ptr, false, suspended);
+				job_completion_logger(job_ptr);
 			}
 		}
 
@@ -1418,11 +1418,7 @@ extern int job_allocate(job_desc_msg_t * job_specs, int immediate,
 		last_job_update = now;
 		slurm_sched_schedule();	/* work for external scheduler */
 	}
-	if (independent &&
-	    (job_ptr->details && (job_ptr->details->begin_time == 0)) &&
-	    ((error_code == SLURM_SUCCESS) || (error_code == ESLURM_NODES_BUSY)))
-		job_ptr->details->begin_time = now;
- 
+
 	if ((error_code == ESLURM_NODES_BUSY) ||
 	    (error_code == ESLURM_JOB_HELD) ||
 	    (error_code == ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE)) {
@@ -1999,7 +1995,7 @@ static int _job_create(job_desc_msg_t * job_desc, int allocate, int will_run,
 		job_ptr->priority = 1;      /* Move to end of queue */
 		job_ptr->state_reason = fail_reason;
 	}
-	jobacct_g_job_start_slurmctld(job_ptr);
+	
 	
 cleanup:
 	FREE_NULL_BITMAP(req_bitmap);
@@ -3776,6 +3772,21 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 		}
 	}
 
+	if (job_specs->ntasks_per_node != (uint16_t) NO_VAL) {
+		if ((!IS_JOB_PENDING(job_ptr)) || (detail_ptr == NULL))
+			error_code = ESLURM_DISABLED;
+		else if (super_user) {
+			detail_ptr->ntasks_per_node = job_specs->ntasks_per_node;
+			info("update_job: setting ntasks_per_node to %u for "
+			     "job_id %u", job_specs->ntasks_per_node,
+			     job_specs->job_id);
+		} else {
+			error("Not super user: setting ntasks_oper_node to job %u",
+			      job_specs->job_id);
+			error_code = ESLURM_ACCESS_DENIED;
+		}
+	}
+
 	if (job_specs->dependency != NO_VAL) {
 		if (!IS_JOB_PENDING(job_ptr))
 			error_code = ESLURM_DISABLED;
@@ -4392,7 +4403,6 @@ extern void job_completion_logger(struct job_record  *job_ptr)
 			mail_job_info(job_ptr, MAIL_JOB_FAIL);
 	}
 
-	jobacct_g_job_complete_slurmctld(job_ptr);
 	g_slurm_jobcomp_write(job_ptr);
 	srun_job_complete(job_ptr);
 }
@@ -4407,25 +4417,31 @@ extern bool job_independent(struct job_record *job_ptr)
 {
 	struct job_record *dep_ptr;
 	struct job_details *detail_ptr = job_ptr->details;
+	time_t now = time(NULL);
 
-	if (detail_ptr && (detail_ptr->begin_time > time(NULL))) {
+	if (detail_ptr && (detail_ptr->begin_time > now)) {
 		job_ptr->state_reason = WAIT_TIME;
 		return false;	/* not yet time */
 	}
-		
+
 	if (job_ptr->dependency == 0)
-		return true;
+		goto indi;
 
 	dep_ptr = find_job_record(job_ptr->dependency);
 	if (dep_ptr == NULL)
-		return true;
+		goto indi;
 
 	if (((dep_ptr->job_state & JOB_COMPLETING) == 0) &&
 	    (dep_ptr->job_state >= JOB_COMPLETE))
-		return true;
+		goto indi;
 
 	job_ptr->state_reason = WAIT_DEPENDENCY;
 	return false;	/* job exists and incomplete */
+
+ indi:	/* job is independent, set begin time as needed */
+	if (detail_ptr && (detail_ptr->begin_time == 0))
+		detail_ptr->begin_time = now;
+	return true;
 }
 /*
  * determine if job is ready to execute per the node select plugin
@@ -4807,14 +4823,14 @@ extern int job_requeue (uid_t uid, uint32_t job_id, slurm_fd conn_fd)
 		job_ptr->end_time = job_ptr->suspend_time;
 	else
 		job_ptr->end_time = now;
-	deallocate_nodes(job_ptr, false, suspended);
-	xfree(job_ptr->details->req_node_layout);
 
 	/* We want this job to look like it was cancelled in the
 	 * accounting logs. Set a new submit time so the restarted
 	 * job looks like a new job. */
 	save_state = job_ptr->job_state;
 	job_ptr->job_state  = JOB_CANCELLED;
+	deallocate_nodes(job_ptr, false, suspended);
+	xfree(job_ptr->details->req_node_layout);
 	job_completion_logger(job_ptr);
 	job_ptr->job_state = save_state;
 	job_ptr->details->submit_time = now;

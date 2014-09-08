@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  slurmctld.h - definitions of functions and structures for slurmcltd use
  *
- *  $Id: slurmctld.h 12863 2007-12-19 23:14:45Z jette $
+ *  $Id: slurmctld.h 13061 2008-01-22 21:23:56Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -115,6 +115,9 @@
 /* Process pending trigger events every TRIGGER_INTERVAL seconds */
 #define TRIGGER_INTERVAL 15
 
+/* Report current node accounting state every PERIODIC_NODE_ACCT seconds */
+#define PERIODIC_NODE_ACCT 300
+
 /* Pathname of group file record for checking update times */
 #define GROUP_FILE	"/etc/group"
 
@@ -219,6 +222,7 @@ extern time_t last_node_update;		/* time of last node record update */
 extern int node_record_count;		/* count in node_record_table_ptr */
 extern bitstr_t *avail_node_bitmap;	/* bitmap of available nodes, 
 					 * not DOWN, DRAINED or DRAINING */
+extern uint32_t total_cpus;		/* count of CPUs in the entire cluster */
 extern bitstr_t *idle_node_bitmap;	/* bitmap of idle nodes */
 extern bitstr_t *share_node_bitmap;	/* bitmap of sharable nodes */
 extern bitstr_t *up_node_bitmap;	/* bitmap of up nodes, not DOWN */
@@ -304,6 +308,8 @@ struct job_details {
 	time_t begin_time;		/* start at this time (srun --being), 
 					 * resets to time first eligible
 					 * (all dependencies satisfied) */
+	uint32_t reserved_resources;	/* CPU minutes of resources reserved
+					 * for this job while it was pending */
 	char *work_dir;			/* pathname of working directory */
 	char **argv;			/* arguments for a batch job script */
 	uint16_t argc;			/* count of argv elements */

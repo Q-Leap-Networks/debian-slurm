@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  print.c - squeue print job functions
- *  $Id: print.c 12627 2007-11-06 19:48:55Z jette $
+ *  $Id: print.c 12951 2008-01-04 00:29:45Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -210,7 +210,9 @@ int _print_secs(long time, int width, bool right, bool cut_output)
 	hours   = (time / 3600) % 24;
 	days    =  time / 86400;
 
-	if (days) 
+	if ((time < 0) || (time > (365 * 24 * 3600)))
+		snprintf(str, FORMAT_STRING_SIZE, "INVALID");
+	else if (days) 
 		snprintf(str, FORMAT_STRING_SIZE,
 			 "%ld-%2.2ld:%2.2ld:%2.2ld",
 		         days, hours, minutes, seconds);
