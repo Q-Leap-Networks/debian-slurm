@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  opt.c - options processing for srun
- *  $Id: opt.c 12098 2007-08-22 22:35:51Z da $
+ *  $Id: opt.c 12187 2007-08-31 16:07:57Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -2415,8 +2415,9 @@ static bool _opt_verify(void)
 			error("Invalid time limit specification");
 			exit(1);
 		}
-	} else
-		opt.time_limit = INFINITE;
+		if (opt.time_limit == 0)
+			opt.time_limit = INFINITE;
+	}
 
 	if ((opt.euid != (uid_t) -1) && (opt.euid != opt.uid)) 
 		opt.uid = opt.euid;
@@ -2684,7 +2685,7 @@ static void _opt_list()
 	info("threads        : %d", opt.max_threads);
 	if (opt.time_limit == INFINITE)
 		info("time_limit     : INFINITE");
-	else
+	else if (opt.time_limit != NO_VAL)
 		info("time_limit     : %d", opt.time_limit);
 	info("wait           : %d", opt.max_wait);
 	if (opt.nice)

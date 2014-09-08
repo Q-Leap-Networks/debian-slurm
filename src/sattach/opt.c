@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  opt.c - options processing for sattach
- *  $Id: opt.c 10574 2006-12-15 23:38:29Z jette $
+ *  $Id: opt.c 12143 2007-08-27 15:59:41Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -305,7 +305,7 @@ void set_options(const int argc, char **argv)
 		switch (opt_char) {
 			
 		case '?':
-			fprintf(stderr, "Try \"sbatch --help\" for more "
+			fprintf(stderr, "Try \"sattach --help\" for more "
 				"information\n");
 			exit(1);
 			break;

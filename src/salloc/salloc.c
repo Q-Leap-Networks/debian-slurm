@@ -2,7 +2,7 @@
  *  salloc.c - Request a SLURM job allocation and
  *             launch a user-specified command.
  *
- *  $Id: salloc.c 12002 2007-08-14 02:55:43Z morrone $
+ *  $Id: salloc.c 12187 2007-08-31 16:07:57Z jette $
  *****************************************************************************
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -292,7 +292,7 @@ static int fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->cpus_per_task = opt.cpus_per_task;
 	if (opt.no_kill)
 		desc->kill_on_node_fail = 0;
-	if (opt.time_limit > -1)
+	if (opt.time_limit  != NO_VAL)
 		desc->time_limit = opt.time_limit;
 	desc->shared = opt.shared;
 	desc->job_id = opt.jobid;

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  opt.h - definitions for srun option processing
- *  $Id: opt.h 11992 2007-08-10 18:59:15Z jette $
+ *  $Id: opt.h 12190 2007-08-31 19:05:18Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -80,6 +80,7 @@ typedef struct sbatch_options {
 	bool hold;		/* --hold, -H			*/
 	bool no_kill;		/* --no-kill, -k		*/
 	bool no_requeue;	/* --no-requeue			*/
+	bool overcommit;	/* --overcommit -O		*/
 	uint16_t shared;	/* --share,   -s		*/
 	int  quiet;
 	int  verbose;
