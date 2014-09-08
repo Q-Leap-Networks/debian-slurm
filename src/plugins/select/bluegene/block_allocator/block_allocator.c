@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  block_allocator.c - Assorted functions for layout of bluegene blocks,
  *	 wiring, mapping for smap, etc.
- *  $Id: block_allocator.c 19173 2009-12-15 22:36:32Z da $
+ *  $Id: block_allocator.c 19402 2010-02-04 01:02:41Z jette $
  *****************************************************************************
  *  Copyright (C) 2004-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -1877,13 +1877,10 @@ extern int set_all_bps_except(char *bps)
 		y = temp;
 		temp = start % HOSTLIST_BASE;
 		z = temp;
-		if((ba_system_ptr->grid[x][y][z].state == NODE_STATE_UNKNOWN)
-		   || (ba_system_ptr->grid[x][y][z].state == NODE_STATE_IDLE))
-			ba_system_ptr->grid[x][y][z].state = NODE_STATE_END;
+		/* mark with an impossible state bit */
+		ba_system_ptr->grid[x][y][z].state |= NODE_RESUME;
 #else
-		if((ba_system_ptr->grid[x].state == NODE_STATE_UNKNOWN)
-		   || (ba_system_ptr->grid[x].state == NODE_STATE_IDLE))
-			ba_system_ptr->grid[x].state = NODE_STATE_END;
+		ba_system_ptr->grid[x].state |= NODE_RESUME;
 #endif
 		free(host);
 	}
@@ -1894,19 +1891,18 @@ extern int set_all_bps_except(char *bps)
 		for (y = 0; y < DIM_SIZE[Y]; y++)
 			for (z = 0; z < DIM_SIZE[Z]; z++) {
 				if(ba_system_ptr->grid[x][y][z].state
-				   == NODE_STATE_END) {
-					ba_system_ptr->grid[x][y][z].state
-						= NODE_STATE_IDLE;
-					ba_system_ptr->grid[x][y][z].used =
-						false;
+				   & NODE_RESUME) {
+					/* clear the bit and mark as unused */
+					ba_system_ptr->grid[x][y][z].state &=
+						~NODE_RESUME;
 				} else if(!ba_system_ptr->grid[x][y][z].used) {
 					ba_system_ptr->grid[x][y][z].used = 2;
 				}
 			}
 #else
-		if(ba_system_ptr->grid[x].state == NODE_STATE_END) {
-			ba_system_ptr->grid[x].state = NODE_STATE_IDLE;
-			ba_system_ptr->grid[x].used = false;
+		if(ba_system_ptr->grid[x].state & NODE_RESUME) {
+			/* clear the bit and mark as unused */
+			ba_system_ptr->grid[x].state &= ~NODE_RESUME;
 		} else if(!ba_system_ptr->grid[x].used) {
 			ba_system_ptr->grid[x].used = 2;
 		}

@@ -241,6 +241,7 @@ PACKAGE_STRING = @PACKAGE_STRING@
 PACKAGE_TARNAME = @PACKAGE_TARNAME@
 PACKAGE_URL = @PACKAGE_URL@
 PACKAGE_VERSION = @PACKAGE_VERSION@
+PAM_DIR = @PAM_DIR@
 PAM_LIBS = @PAM_LIBS@
 PATH_SEPARATOR = @PATH_SEPARATOR@
 PGSQL_CFLAGS = @PGSQL_CFLAGS@
@@ -853,7 +854,7 @@ libslurm.o: $(libslurmhelper_la_OBJECTS) $(libslurm_o_LDADD)
 	$(LINK) $(libslurmhelper_la_OBJECTS) $(libslurm_o_LDADD)
 
 force:
-$(libslurm_o_LDADD) $(convenience_libs) : force
+$(libslurm_o_LDADD) $(convenience_libs) $(slurmapi_add) : force
 	@cd `dirname $@` && $(MAKE) `basename $@`
 
 # FIXME - don't export the client_io_handler_ symbols once srun is no longer

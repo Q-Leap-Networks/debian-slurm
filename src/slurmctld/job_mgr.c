@@ -109,6 +109,7 @@ static int      job_count = 0;		/* job's in the system */
 static uint32_t job_id_sequence = 0;	/* first job_id to assign new job */
 static struct   job_record **job_hash = NULL;
 static bool     wiki_sched = false;
+static bool     wiki2_sched = false;
 static bool     wiki_sched_test = false;
 
 /* Local functions */
@@ -2092,17 +2093,19 @@ extern int job_signal(uint32_t job_id, uint16_t signal, uint16_t batch_flag,
 	struct job_record *job_ptr;
 	time_t now = time(NULL);
 	bool super_user;
-	static bool wiki2_sched = false;
-	static bool wiki2_sched_test = false;
 
 	/* Jobs submitted using Moab command should be cancelled using
 	 * Moab command for accurate job records */
-	if (!wiki2_sched_test) {
+	if (!wiki_sched_test) {
 		char *sched_type = slurm_get_sched_type();
-		if (strcmp(sched_type, "sched/wiki2") == 0)
+		if (strcmp(sched_type, "sched/wiki") == 0)
+			wiki_sched  = true;
+		if (strcmp(sched_type, "sched/wiki2") == 0) {
+			wiki_sched  = true;
 			wiki2_sched = true;
+		}
 		xfree(sched_type);
-		wiki2_sched_test = true;
+		wiki_sched_test = true;
 	}
 
 	job_ptr = find_job_record(job_id);
@@ -3304,11 +3307,11 @@ _set_multi_core_data(job_desc_msg_t * job_desc)
 		mc_ptr->min_threads        = job_desc->min_threads;
 	else
 		mc_ptr->min_threads        = 1;
-	if (mc_ptr->ntasks_per_socket != (uint16_t) NO_VAL)
+	if (job_desc->ntasks_per_socket != (uint16_t) NO_VAL)
 		mc_ptr->ntasks_per_socket  = job_desc->ntasks_per_socket;
 	else
 		mc_ptr->ntasks_per_socket  = 0;
-	if (mc_ptr->ntasks_per_core != (uint16_t) NO_VAL)
+	if (job_desc->ntasks_per_core != (uint16_t) NO_VAL)
 		mc_ptr->ntasks_per_core    = job_desc->ntasks_per_core;
 	else
 		mc_ptr->ntasks_per_core    = 0;
@@ -3412,9 +3415,12 @@ _copy_job_desc_to_job_record(job_desc_msg_t * job_desc,
 	job_ptr->comment    = xstrdup(job_desc->comment);
 	if (!wiki_sched_test) {
 		char *sched_type = slurm_get_sched_type();
-		if ((strcmp(sched_type, "sched/wiki") == 0) ||
-		    (strcmp(sched_type, "sched/wiki2") == 0))
-			wiki_sched = true;
+		if (strcmp(sched_type, "sched/wiki") == 0)
+			wiki_sched  = true;
+		if (strcmp(sched_type, "sched/wiki2") == 0) {
+			wiki_sched  = true;
+			wiki2_sched = true;
+		}
 		xfree(sched_type);
 		wiki_sched_test = true;
 	}
@@ -4789,6 +4795,11 @@ static bool _top_priority(struct job_record *job_ptr)
 				continue;
 			if (!IS_JOB_PENDING(job_ptr2))
 				continue;
+			if (IS_JOB_COMPLETING(job_ptr2)) {
+				/* Job is hung in pending & completing state,
+				 * indicative of job requeue */
+				continue;
+			}
 			if (!job_independent(job_ptr2, 0))
 				continue;
 			if ((job_ptr2->resv_name && (!job_ptr->resv_name)) ||
@@ -4890,9 +4901,12 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 
 	if (!wiki_sched_test) {
 		char *sched_type = slurm_get_sched_type();
-		if ((strcmp(sched_type, "sched/wiki") == 0) ||
-		    (strcmp(sched_type, "sched/wiki2") == 0))
-			wiki_sched = true;
+		if (strcmp(sched_type, "sched/wiki") == 0)
+			wiki_sched  = true;
+		if (strcmp(sched_type, "sched/wiki2") == 0) {
+			wiki_sched  = true;
+			wiki2_sched = true;
+		}
 		xfree(sched_type);
 		wiki_sched_test = true;
 	}
@@ -6762,8 +6776,20 @@ extern int job_suspend(suspend_msg_t *sus_ptr, uid_t uid,
 		_set_job_prio(job_ptr);
 		job_ptr->tot_sus_time +=
 			difftime(now, job_ptr->suspend_time);
-		if (job_ptr->time_limit != INFINITE) {
-			/* adjust effective time_limit */
+		if (!wiki_sched_test) {
+			char *sched_type = slurm_get_sched_type();
+			if (strcmp(sched_type, "sched/wiki") == 0)
+				wiki_sched  = true;
+			if (strcmp(sched_type, "sched/wiki2") == 0) {
+				wiki_sched  = true;
+				wiki2_sched = true;
+			}
+			xfree(sched_type);
+			wiki_sched_test = true;
+		}
+		if ((job_ptr->time_limit != INFINITE) && (!wiki2_sched)) {
+ 			info("Job %u resumed, updating end_time", 
+ 			     job_ptr->job_id);
 			job_ptr->end_time = now +
 				(job_ptr->time_limit * 60)
 				- job_ptr->pre_sus_time;
@@ -8016,6 +8042,7 @@ extern int job_restart(checkpoint_msg_t *ckpt_ptr, uid_t uid, slurm_fd conn_fd)
 
  unpack_error:
 	free_buf(buffer);
+	xfree(ver_str);
 	xfree(image_dir);
 	xfree(alloc_nodes);
 	xfree(ckpt_file);
