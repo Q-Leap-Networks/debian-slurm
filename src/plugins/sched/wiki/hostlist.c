@@ -160,7 +160,7 @@ extern char * slurm_job2moab_task_list(struct job_record *job_ptr)
 /* Return task list in Moab format 1: tux0:tux0:tux1:tux1:tux2 */
 static char * _task_list(struct job_record *job_ptr)
 {
-	int i, j, task_cnt;
+	int i, j;
 	char *buf = NULL, *host;
 	hostlist_t hl = hostlist_create(job_ptr->nodes);
 
@@ -178,10 +178,7 @@ static char * _task_list(struct job_record *job_ptr)
 				job_ptr->alloc_lps_cnt);
 			break;
 		}
-		task_cnt = job_ptr->alloc_lps[i];
-		if (job_ptr->details && job_ptr->details->cpus_per_task)
-			task_cnt /= job_ptr->details->cpus_per_task;
-		for (j=0; j<task_cnt; j++) {
+		for (j=0; j<job_ptr->alloc_lps[i]; j++) {
 			if (buf)
 				xstrcat(buf, ":");
 			xstrcat(buf, host);
@@ -250,7 +247,7 @@ static void _append_hl_buf(char **buf, hostlist_t *hl_tmp, int *reps)
 /* Return task list in Moab format 2: tux[0-1]*2:tux2 */
 static char * _task_list_exp(struct job_record *job_ptr)
 {
-	int i, reps = -1, task_cnt;
+	int i, reps = -1;
 	char *buf = NULL, *host;
 	hostlist_t hl = hostlist_create(job_ptr->nodes);
 	hostlist_t hl_tmp = (hostlist_t) NULL;
@@ -270,10 +267,7 @@ static char * _task_list_exp(struct job_record *job_ptr)
 			break;
 		}
 
-		task_cnt = job_ptr->alloc_lps[i];
-		if (job_ptr->details && job_ptr->details->cpus_per_task)
-			task_cnt /= job_ptr->details->cpus_per_task;
-		if (reps == task_cnt) {
+		if (reps == job_ptr->alloc_lps[i]) {
 			/* append to existing hostlist record */
 			if (hostlist_push(hl_tmp, host) == 0)
 				error("hostlist_push failure");
@@ -284,7 +278,7 @@ static char * _task_list_exp(struct job_record *job_ptr)
 			/* start new hostlist record */
 			hl_tmp = hostlist_create(host);
 			if (hl_tmp)
-				reps = task_cnt;
+				reps = job_ptr->alloc_lps[i];
 			else
 				error("hostlist_create failure");
 		}

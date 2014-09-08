@@ -3,7 +3,7 @@
  *	Note: there is a global job list (job_list), time stamp 
  *	(last_job_update), and hash table (job_hash)
  *
- *  $Id: job_mgr.c 12460 2007-10-05 23:50:48Z jette $
+ *  $Id: job_mgr.c 12655 2007-11-20 21:02:43Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -3090,15 +3090,15 @@ void reset_job_bitmaps(void)
 		job_ptr->part_ptr = part_ptr;
 
 		FREE_NULL_BITMAP(job_ptr->node_bitmap);
-		if ((job_ptr->nodes_completing)
-		    &&  (node_name2bitmap(job_ptr->nodes_completing,
-					  false,  &job_ptr->node_bitmap))) {
+		if ((job_ptr->nodes_completing) &&
+		     (node_name2bitmap(job_ptr->nodes_completing,
+				     false,  &job_ptr->node_bitmap))) {
 			error("Invalid nodes (%s) for job_id %u",
 			      job_ptr->nodes_completing,
 			      job_ptr->job_id);
 			job_fail = true;
-		} else if ((job_ptr->nodes)
-			   &&  (node_name2bitmap(job_ptr->nodes, false,
+		} else if ((job_ptr->node_bitmap == NULL)  && job_ptr->nodes &&
+			   (node_name2bitmap(job_ptr->nodes, false,
 						 &job_ptr->node_bitmap))) {
 			error("Invalid nodes (%s) for job_id %u", 
 		    	      job_ptr->nodes, job_ptr->job_id);
@@ -4786,6 +4786,8 @@ extern int job_requeue (uid_t uid, uint32_t job_id, slurm_fd conn_fd)
 	else
 		job_ptr->end_time = now;
 	deallocate_nodes(job_ptr, false, suspended);
+	if (job_ptr->details)
+		xfree(job_ptr->details->req_node_layout);
 	job_completion_logger(job_ptr);
 //FIXME: Test accounting
 
@@ -4834,12 +4836,11 @@ extern void update_job_nodes_completing(void)
 
 	job_iterator = list_iterator_create(job_list);
 	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
-		if ((job_ptr->job_state & JOB_COMPLETING) == 0)
+		if (((job_ptr->job_state & JOB_COMPLETING) == 0) ||
+		    (job_ptr->node_bitmap == NULL))
 			continue;
-		if (job_ptr->nodes_completing)  /* no change */
-			continue;
-		node_name2bitmap(job_ptr->nodes_completing,
-				 false,  &job_ptr->node_bitmap);
+		xfree(job_ptr->nodes_completing);
+		job_ptr->nodes_completing = bitmap2node_name(job_ptr->node_bitmap);
 	}
 	list_iterator_destroy(job_iterator);
 }

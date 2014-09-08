@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  step_mgr.c - manage the job step information of slurm
- *  $Id: step_mgr.c 11969 2007-08-08 23:13:12Z da $
+ *  $Id: step_mgr.c 12681 2007-11-26 18:56:25Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -701,7 +701,7 @@ step_create(job_step_create_request_msg_t *step_specs,
 	if (job_ptr == NULL)
 		return ESLURM_INVALID_JOB_ID ;
 
-	if (job_ptr->job_state == JOB_SUSPENDED)
+	if ((job_ptr->job_state == JOB_SUSPENDED) || IS_JOB_PENDING(job_ptr))
 		return ESLURM_DISABLED;
 
 	if (batch_step) {
@@ -715,9 +715,6 @@ step_create(job_step_create_request_msg_t *step_specs,
 	if ((step_specs->user_id != job_ptr->user_id) &&
 	    (step_specs->user_id != 0))
 		return ESLURM_ACCESS_DENIED ;
-
-	if (IS_JOB_PENDING(job_ptr))
-		return ESLURM_INVALID_JOB_ID ;
 
 	if (IS_JOB_FINISHED(job_ptr) || 
 	    (job_ptr->end_time <= time(NULL)))

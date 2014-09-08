@@ -2,7 +2,7 @@
  *  bg_job_place.c - blue gene job placement (e.g. base block selection)
  *  functions.
  *
- *  $Id: bg_job_place.c 12533 2007-10-22 23:19:23Z jette $ 
+ *  $Id: bg_job_place.c 12627 2007-11-06 19:48:55Z jette $ 
  *****************************************************************************
  *  Copyright (C) 2004-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -474,7 +474,8 @@ try_again:
 			/* We use the proccessor count per partition here
 			   mostly to see if we can run on a smaller partition. 
 			 */
-			convert_num_unit((float)proc_cnt, tmp_char, UNIT_NONE);
+			convert_num_unit((float)proc_cnt, tmp_char, 
+					 sizeof(tmp_char), UNIT_NONE);
 			debug("block %s CPU count (%s) not suitable",
 			      record->bg_block_id, 
 			      tmp_char);
@@ -490,7 +491,7 @@ try_again:
 		    ||  (req_nodes != 0 && record->bp_count > req_nodes)
 		    ||  (record->bp_count < target_size)) {
 			convert_num_unit((float)record->node_cnt, tmp_char,
-					 UNIT_NONE);
+					 sizeof(tmp_char), UNIT_NONE);
 			debug("block %s node count (%s) not suitable",
 			      record->bg_block_id,
 			      tmp_char);
