@@ -2,7 +2,7 @@
  *  bg_job_place.c - blue gene job placement (e.g. base block selection)
  *  functions.
  *
- *  $Id: bg_job_place.c 13999 2008-05-07 22:08:58Z da $ 
+ *  $Id: bg_job_place.c 14295 2008-06-19 23:58:28Z da $ 
  *****************************************************************************
  *  Copyright (C) 2004-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -171,7 +171,7 @@ static int _bg_record_sort_aval_inc(bg_record_t* rec_a, bg_record_t* rec_b)
 /* 
  * Comparator used for sorting blocks smallest to largest
  * 
- * returns: -1: rec_a >rec_b   0: rec_a == rec_b   1: rec_a < rec_b
+ * returns: -1: rec_a > rec_b   0: rec_a == rec_b   1: rec_a < rec_b
  * 
  */
 static int _bg_record_sort_aval_dec(bg_record_t* rec_a, bg_record_t* rec_b)
@@ -1107,6 +1107,17 @@ static int _find_best_block_match(List block_list,
 				 * about it now 
 				 */
 				(*found_bg_record) = list_pop(new_blocks);
+				if(!(*found_bg_record)) {
+					error("got an empty list back");
+					list_destroy(new_blocks);
+					if(bg_record) {
+						destroy_bg_record(bg_record);
+						continue;
+					} else {
+						rc = SLURM_ERROR;
+						break;
+					}
+				}
 				bit_and(slurm_block_bitmap,
 					(*found_bg_record)->bitmap);
 

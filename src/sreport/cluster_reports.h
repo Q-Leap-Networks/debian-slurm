@@ -1,8 +1,9 @@
 /*****************************************************************************\
- *  print.h - definitions for all printing functions.
+ *  cluster_reports.h - functions for generating cluster reports
+ *                       from accounting infrastructure.
  *****************************************************************************
+ *
  *  Copyright (C) 2008 Lawrence Livermore National Security.
- *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *  LLNL-CODE-402394.
@@ -35,59 +36,12 @@
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
-#ifndef __SACCTMGR_PRINT_H__
-#define __SACCTMGR_PRINT_H__
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#endif
+#ifndef __SREPORT_CLUSTER_REPORTS_H
+#define __SREPORT_CLUSTER_REPORTS_H
 
-#if HAVE_GETOPT_H
-#  include <getopt.h>
-#else
-#  include "src/common/getopt.h"
-#endif
+#include "sreport.h"
 
-#include <ctype.h>
-#include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
-#ifdef HAVE_STRING_H
-#  include <string.h>
-#endif
-#ifdef HAVE_STRINGS_H
-#  include <strings.h>
-#endif
-#include <time.h>
-#include <unistd.h>
-
-#include <slurm/slurm.h>
-
-#include "src/common/xstring.h"
-#include "src/common/slurm_accounting_storage.h"
-#include "src/common/jobacct_common.h"
-
-typedef enum {
-	SLURM_PRINT_HEADLINE,
-	SLURM_PRINT_UNDERSCORE,
-	SLURM_PRINT_VALUE
-} type_t;
-
-typedef struct {
-	uint16_t len;  /* what is the width of the print */          
-	char *name;  /* name to be printed in header */
-	void (*print_routine) (); /* what is the function to print with  */
-	uint16_t type; /* defined in the local function */
-} print_field_t;
-
-extern int parsable_print;
-extern int have_header;
-
-extern void destroy_print_field(void *object);
-extern void print_header(List print_fields_list);
-extern void print_date(void);
-extern void print_str(type_t type, print_field_t *field, char *value);
-extern void print_uint(type_t type, print_field_t *field, uint32_t value);
-extern void print_time(type_t type, print_field_t *field, uint32_t value);
+extern int cluster_utilization(int argc, char *argv[]);
 
 #endif

@@ -1,4 +1,5 @@
-.TH "slurm.conf" "5" "May 2008" "slurm.conf 1.3" "Slurm configuration file"
+.TH "slurm.conf" "5" "June 2008" "slurm.conf 1.3" "Slurm configuration file"
+
 .SH "NAME"
 slurm.conf \- Slurm configuration file 
 .SH "DESCRIPTION"
@@ -242,14 +243,15 @@ Also see \fBAccountingStoragePort\fR and \fBJobCompPort\fR.
 
 .TP
 \fBDefaultStorageType\fR
-.ad l
 Define the accounting and job completion storage mechanism type.
 Acceptable values at present include 
 "filetxt", "gold", "mysql", "none", "pgsql", and "slurmdbd".
 The value "filetxt" indicates that records will be written to a the file.
 The value "gold" indicates that records will be written to Gold
 (http://www.clusterresources.com/pages/products/gold-allocation-manager.php),
+.na
 which maintains its own database.
+.ad
 The value "mysql" indicates that accounting records will be written to 
 a mysql database.
 The default value is "none", which means that records are not maintained. 
@@ -258,7 +260,6 @@ database.
 The value "slurmdbd" indicates that records will be written to SlurmDbd,
 which maintains its own database. See "man slurmdbd for more information".
 Also see \fBAccountingStorageType\fR  and \fBJobCompType\fR.
-.ad
 
 .TP
 \fBDefaultStorageUser\fR
@@ -272,6 +273,13 @@ Also see \fBAccountingStorageUser\fR and \fBJobCompUser\fR.
 If set to "YES" then user root will be prevented from running any jobs.
 The default value is "NO", meaning user root will be able to execute jobs.
 \fBDisableRootJobs\fR may also be set by partition.
+
+.TP
+\fBEnforcePartLimits\fR
+If set to "YES" then jobs which exceed a partition's size and/or time limits
+will be rejected at submission time. If set to "NO" then the job will be 
+accepted and remain queued until the partition limits are altered.
+The default value is "NO".
 
 \fBEpilog\fR
 Fully qualified pathname of a script to execute as user root on every 
@@ -332,7 +340,9 @@ The default value is 1.
 Used for Moab scheduled jobs only. Controls how long job should wait
 in seconds for loading the user's environment before attempting to 
 load it from a cache file. Applies when the srun or sbatch 
-\fI--get-user-env\fR option is used. Default value is 2 seconds.
+\fI--get-user-env\fR option is used. If set to 0 then always load 
+the user's environment from the cache file.
+The default value is 2 seconds.
 
 .TP
 \fBHealthCheckInterval\fR
@@ -847,6 +857,8 @@ NOTE: This implies \fIShared=YES\fR or \fIShared=FORCE\fR for all partitions.
 \fBSlurmUser\fR
 The name of the user that the \fBslurmctld\fR daemon executes as. 
 For security purposes, a user other than "root" is recommended.
+This user must exist on all nodes of the cluster for authentication 
+of communications between SLURM components.
 The default value is "root". 
 
 .TP
@@ -1246,9 +1258,13 @@ The node configuration specified the following information:
 \fBNodeName\fR
 Name that SLURM uses to refer to a node (or base partition for 
 BlueGene systems). 
-Typically this would be the string that "/bin/hostname \-s" 
-returns, however it may be an arbitrary string if 
-\fBNodeHostname\fR is specified.
+Typically this would be the string that "/bin/hostname \-s" returns.
+It may also be the fully qualified domane name as returned by "/bin/hostname \-f"
+(e.g. "foo1.bar.com"), although that may prevent use of hostlist expressions
+(the numeric portion in brackets must be at the end of the string).
+Fully qualified domain names are incompatible with the
+switch/elan and switch/federation plugins at this time.
+It may also be an arbitrary string if \fBNodeHostname\fR is specified.
 If the \fBNodeName\fR is "DEFAULT", the values specified 
 with that record will apply to subsequent node specifications   
 unless explicitly set to other values in that node record or 
@@ -1261,7 +1277,12 @@ considered adjacent in the computer.
 
 .TP
 \fBNodeHostname\fR
-The string that "/bin/hostname \-s" returns. 
+Typically this would be the string that "/bin/hostname \-s" returns. 
+It may also be the fully qualified domain name as returned by "/bin/hostname \-f"
+(e.g. "foo1.bar.com"), although that may prevent use of hostlist expressions
+(the numeric portion in brackets must be at the end of the string).
+Fully qualified domain names are incompatible with the
+switch/elan and switch/federation plugins at this time.
 A node range expression can be used to specify a set of nodes.
 If an expression is used, the number of nodes identified by 
 \fBNodeHostname\fR on a line in the configuration file must 
@@ -1542,7 +1563,9 @@ memory as a consumable resource and the \fB\-\-mem\fR option
 should be used for job allocations.
 For more information see the following web page:
 \fIhttps://computing.llnl.gov/linux/slurm/cons_res_share.html\fR.
+.na
 Possible values for \fBShared\fR are "EXCLUSIVE", "FORCE", "YES", and "NO".
+.ad
 .RS
 .TP 12
 \fBEXCLUSIVE\fR

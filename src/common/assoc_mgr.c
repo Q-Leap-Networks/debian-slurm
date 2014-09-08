@@ -47,8 +47,43 @@ static List local_association_list = NULL;
 static List local_user_list = NULL;
 static char *local_cluster_name = NULL;
 
+void (*remove_assoc_notify) (acct_association_rec_t *rec) = NULL;
+
 static pthread_mutex_t local_association_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t local_user_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* locks should be put in place before calling this function */
+static int _set_assoc_parent_and_user(acct_association_rec_t *assoc)
+{
+	if(!assoc) {
+		error("you didn't give me an association");
+		return SLURM_ERROR;
+	}
+
+	if(assoc->parent_id) {
+		acct_association_rec_t *assoc2 = NULL;
+		ListIterator itr = list_iterator_create(local_association_list);
+		while((assoc2 = list_next(itr))) {
+			if(assoc2->id == assoc->parent_id) {
+				assoc->parent_acct_ptr = assoc2;
+				break;
+			}
+		}
+		list_iterator_destroy(itr);
+	}
+	if(assoc->user) {
+		struct passwd *passwd_ptr = getpwnam(assoc->user);
+		if(passwd_ptr) 
+			assoc->uid = passwd_ptr->pw_uid;
+		else
+			assoc->uid = (uint32_t)NO_VAL;	
+	} else {
+		assoc->uid = (uint32_t)NO_VAL;	
+	}
+	//log_assoc_rec(assoc);
+
+	return SLURM_SUCCESS;
+}
 
 static int _get_local_association_list(void *db_conn, int enforce)
 {
@@ -97,31 +132,10 @@ static int _get_local_association_list(void *db_conn, int enforce)
 		}
 	} else {
 		acct_association_rec_t *assoc = NULL;
-		acct_association_rec_t *assoc2 = NULL;
-		struct passwd *passwd_ptr = NULL;
 		ListIterator itr = list_iterator_create(local_association_list);
-		ListIterator itr2 = 
-			list_iterator_create(local_association_list);
 		//START_TIMER;
-		while((assoc = list_next(itr))) {
-			if(assoc->parent_id) {
-				while((assoc2 = list_next(itr2))) {
-					if(assoc2->id == assoc->parent_id) {
-						assoc->parent_acct_ptr = assoc2;
-						break;
-					}
-				}
-				list_iterator_reset(itr2);
-			}
-			if(!assoc->user) {
-				continue;
-			}
-			passwd_ptr = getpwnam(assoc->user);
-			if(passwd_ptr) 
-				assoc->uid = passwd_ptr->pw_uid;
-			//log_assoc_rec(assoc);
-		}
-		list_iterator_destroy(itr2);
+		while((assoc = list_next(itr))) 
+			_set_assoc_parent_and_user(assoc);
 		list_iterator_destroy(itr);
 		//END_TIMER2("load_associations");
 	}
@@ -135,6 +149,7 @@ static int _get_local_user_list(void *db_conn, int enforce)
 	acct_user_cond_t user_q;
 
 	memset(&user_q, 0, sizeof(acct_user_cond_t));
+	user_q.with_coords = 1;
 
 	slurm_mutex_lock(&local_user_lock);
 	if(local_user_list)
@@ -150,14 +165,38 @@ static int _get_local_user_list(void *db_conn, int enforce)
 		} else {
 			return SLURM_SUCCESS;
 		}		
-	} 
+	} else {
+		acct_user_rec_t *user = NULL;
+		struct passwd *passwd_ptr = NULL;
+		ListIterator itr = list_iterator_create(local_user_list);
+		//START_TIMER;
+		while((user = list_next(itr))) {
+			passwd_ptr = getpwnam(user->name);
+			if(passwd_ptr) 
+				user->uid = passwd_ptr->pw_uid;
+			else
+				user->uid = (uint32_t)NO_VAL;
+		}
+		list_iterator_destroy(itr);
+		//END_TIMER2("load_users");
+	}
+	
+
 
 	slurm_mutex_unlock(&local_user_lock);
 	return SLURM_SUCCESS;
 }
 
-extern int assoc_mgr_init(void *db_conn, int enforce)
+extern int assoc_mgr_init(void *db_conn, assoc_init_args_t *args)
 {
+	int enforce = 0;
+
+	if(args) {
+		enforce = args->enforce;
+		if(args->remove_assoc_notify)
+			remove_assoc_notify = args->remove_assoc_notify;
+	}
+
 	if(!local_cluster_name && !slurmdbd_conf)
 		local_cluster_name = slurm_get_cluster_name();
 
@@ -172,7 +211,7 @@ extern int assoc_mgr_init(void *db_conn, int enforce)
 	return SLURM_SUCCESS;
 }
 
-extern int assoc_mgr_fini()
+extern int assoc_mgr_fini(void)
 {
 	if(local_association_list) 
 		list_destroy(local_association_list);
@@ -207,7 +246,7 @@ extern int assoc_mgr_fill_in_assoc(void *db_conn, acct_association_rec_t *assoc,
 		if(!assoc->acct) {
 			acct_user_rec_t user;
 
-			if(!assoc->uid) {
+			if(assoc->uid == (uint32_t)NO_VAL) {
 				if(enforce) {
 					error("get_assoc_id: "
 					      "Not enough info to "
@@ -248,7 +287,8 @@ extern int assoc_mgr_fill_in_assoc(void *db_conn, acct_association_rec_t *assoc,
 			}
 			continue;
 		} else {
-			if(!assoc->uid && found_assoc->uid) {
+			if(assoc->uid == (uint32_t)NO_VAL
+			   && found_assoc->uid != (uint32_t)NO_VAL) {
 				debug3("we are looking for a "
 				       "nonuser association");
 				continue;
@@ -260,8 +300,9 @@ extern int assoc_mgr_fill_in_assoc(void *db_conn, acct_association_rec_t *assoc,
 			
 			if(found_assoc->acct 
 			   && strcasecmp(assoc->acct, found_assoc->acct)) {
-				   debug3("not the right account");
-				   continue;
+				debug3("not the right account %s != %s",
+				       assoc->acct, found_assoc->acct);
+				continue;
 			}
 
 			/* only check for on the slurmdbd */
@@ -402,7 +443,7 @@ extern int assoc_mgr_is_user_acct_coord(void *db_conn,
 	}
 	list_iterator_destroy(itr);
 		
-	if(!found_user) {
+	if(!found_user || !found_user->coord_accts) {
 		slurm_mutex_unlock(&local_user_lock);
 		return 0;
 	}
@@ -536,12 +577,15 @@ extern int assoc_mgr_update_local_assocs(acct_update_object_t *update)
 				//rc = SLURM_ERROR;
 				break;
 			}
+			_set_assoc_parent_and_user(object);
 			list_append(local_association_list, object);
 		case ACCT_REMOVE_ASSOC:
 			if(!rec) {
 				//rc = SLURM_ERROR;
 				break;
 			}
+			if (remove_assoc_notify)
+				remove_assoc_notify(rec);
 			list_delete_item(itr);
 			break;
 		default:
@@ -581,8 +625,10 @@ extern int assoc_mgr_update_local_users(acct_update_object_t *update)
 {
 	acct_user_rec_t * rec = NULL;
 	acct_user_rec_t * object = NULL;
+		
 	ListIterator itr = NULL;
 	int rc = SLURM_SUCCESS;
+	struct passwd *passwd_ptr = NULL;
 
 	if(!local_user_list)
 		return SLURM_SUCCESS;
@@ -622,6 +668,12 @@ extern int assoc_mgr_update_local_users(acct_update_object_t *update)
 				//rc = SLURM_ERROR;
 				break;
 			}
+			passwd_ptr = getpwnam(object->name);
+			if(passwd_ptr) 
+				object->uid = passwd_ptr->pw_uid;
+			else
+				object->uid = (uint32_t)NO_VAL;
+
 			list_append(local_user_list, object);
 		case ACCT_REMOVE_USER:
 			if(!rec) {
@@ -629,6 +681,23 @@ extern int assoc_mgr_update_local_users(acct_update_object_t *update)
 				break;
 			}
 			list_delete_item(itr);
+			break;
+		case ACCT_ADD_COORD:
+		case ACCT_REMOVE_COORD:
+			if(!rec) {
+				//rc = SLURM_ERROR;
+				break;
+			}
+			/* We always get a complete list here */
+			if(!object->coord_accts) {
+				if(rec->coord_accts)
+					list_flush(rec->coord_accts);
+			} else {
+				if(rec->coord_accts)
+					list_destroy(rec->coord_accts);
+				rec->coord_accts = object->coord_accts;
+				object->coord_accts = NULL;
+			}
 			break;
 		default:
 			break;
@@ -671,5 +740,23 @@ extern int assoc_mgr_validate_assoc_id(void *db_conn,
 		return SLURM_SUCCESS;
 
 	return SLURM_ERROR;
+}
+
+extern void assoc_mgr_clear_used_info(void)
+{
+	ListIterator itr = NULL;
+	acct_association_rec_t * found_assoc = NULL;
+
+	if (!local_association_list)
+		return;
+
+	slurm_mutex_lock(&local_association_lock);
+	itr = list_iterator_create(local_association_list);
+	while((found_assoc = list_next(itr))) {
+		found_assoc->used_jobs  = 0;
+		found_assoc->used_share = 0;
+	}
+	list_iterator_destroy(itr);
+	slurm_mutex_unlock(&local_association_lock);
 }
 

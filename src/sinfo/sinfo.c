@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  sinfo.c - Report overall state the system
  *
- *  $Id: sinfo.c 13929 2008-04-23 16:11:29Z jette $
+ *  $Id: sinfo.c 14203 2008-06-06 16:58:44Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -101,8 +101,12 @@ int main(int argc, char *argv[])
 	List sinfo_list = NULL;
 	int rc = 0;
 
-	log_init(xbasename(argv[0]), opts, SYSLOG_FACILITY_DAEMON, NULL);
+	log_init(xbasename(argv[0]), opts, SYSLOG_FACILITY_USER, NULL);
 	parse_command_line(argc, argv);
+	if (params.verbose) {
+		opts.stderr_level += params.verbose;
+		log_alter(opts, SYSLOG_FACILITY_USER, NULL);
+	}
 
 	while (1) {
 		if ((!params.no_header)
@@ -254,7 +258,7 @@ _query_server(partition_info_msg_t ** part_pptr,
 		    slurm_load_partitions((time_t) NULL, &new_part_ptr,
 					  show_flags);
 	if (error_code) {
-		slurm_perror("slurm_load_part");
+		slurm_perror("slurm_load_partitions");
 		return error_code;
 	}
 

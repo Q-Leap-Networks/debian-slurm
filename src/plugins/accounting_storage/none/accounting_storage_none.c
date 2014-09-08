@@ -109,7 +109,7 @@ extern int acct_storage_p_add_users(void *db_conn, uint32_t uid,
 }
 
 extern int acct_storage_p_add_coord(void *db_conn, uint32_t uid,
-				    char *acct, acct_user_cond_t *user_q)
+				    List acct_list, acct_user_cond_t *user_q)
 {
 	return SLURM_SUCCESS;
 }
@@ -167,7 +167,8 @@ extern List acct_storage_p_remove_users(void *db_conn, uint32_t uid,
 }
 
 extern List acct_storage_p_remove_coord(void *db_conn, uint32_t uid,
-				       char *acct, acct_user_cond_t *user_q)
+					List acct_list, 
+					acct_user_cond_t *user_q)
 {
 	return SLURM_SUCCESS;
 }
@@ -322,6 +323,16 @@ extern List jobacct_storage_p_get_jobs(void *db_conn,
 				       List selected_steps,
 				       List selected_parts,
 				       void *params)
+{
+	return NULL;
+}
+
+/* 
+ * get info from the storage 
+ * returns List of jobacct_job_rec_t *
+ * note List needs to be freed when called
+ */
+extern List jobacct_storage_p_get_jobs_cond(void *db_conn, void *job_cond)
 {
 	return NULL;
 }

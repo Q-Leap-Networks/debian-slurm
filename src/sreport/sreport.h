@@ -81,8 +81,32 @@
 #include "src/common/parse_time.h"
 #include "src/common/slurm_accounting_storage.h"
 #include "src/common/xstring.h"
+#include "src/common/print_fields.h"
 
 #define CKPT_WAIT	10
 #define	MAX_INPUT_FIELDS 128
+
+typedef enum {
+	SREPORT_TIME_SECS,
+	SREPORT_TIME_PERCENT,
+	SREPORT_TIME_SECS_PER,
+} sreport_time_format_t;
+
+extern sreport_time_format_t time_format;
+extern char *command_name;
+extern int exit_code;	/* sacctmgr's exit code, =1 on any error at any time */
+extern int exit_flag;	/* program to terminate if =1 */
+extern int input_words;	/* number of words of input permitted */
+extern int quiet_flag;	/* quiet=1, verbose=-1, normal=0 */
+extern void *db_conn;
+extern uint32_t my_uid;
+extern int all_clusters_flag;
+
+extern void sreport_print_time(type_t type, print_field_t *field,
+			       uint64_t value, uint64_t total_time);
+extern int parse_option_end(char *option);
+extern char *strip_quotes(char *option, int *increased);
+extern void addto_char_list(List char_list, char *names);
+extern int set_start_end_time(time_t *start, time_t *end);
 
 #endif /* HAVE_SREPORT_H */

@@ -7,7 +7,12 @@ INCLUDES = -I$(top_srcdir)
 bin_PROGRAMS = sreport
 
 sreport_SOURCES =	\
-	sreport.c sreport.h	
+	sreport.c sreport.h \
+	cluster_reports.c cluster_reports.h \
+	assoc_reports.c assoc_reports.h	\
+	job_reports.c job_reports.h	\
+	user_reports.c user_reports.h	\
+	common.c
 
 sreport_LDADD =  \
 	$(top_builddir)/src/common/libcommon.o -ldl \

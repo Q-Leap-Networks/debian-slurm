@@ -37,7 +37,6 @@
 \*****************************************************************************/
 
 #include "src/sacctmgr/sacctmgr.h"
-#include "src/sacctmgr/print.h"
 
 static int _set_cond(int *start, int argc, char *argv[],
 		     acct_account_cond_t *acct_cond,
@@ -55,6 +54,8 @@ static int _set_cond(int *start, int argc, char *argv[],
 			break;
 		} else if (strncasecmp (argv[i], "WithAssoc", 4) == 0) {
 			acct_cond->with_assocs = 1;
+		} else if(!end && !strncasecmp(argv[i], "where", 5)) {
+			continue;
 		} else if(!end) {
 			addto_char_list(acct_cond->acct_list, argv[i]);
 			addto_char_list(acct_cond->assoc_cond->acct_list,
@@ -83,7 +84,7 @@ static int _set_cond(int *start, int argc, char *argv[],
 			u_set = 1;
 		} else if (strncasecmp (argv[i], "Parent", 1) == 0) {
 			acct_cond->assoc_cond->parent_acct =
-				xstrdup(argv[i]+end);
+				strip_quotes(argv[i]+end, NULL);
 			a_set = 1;
 		} else if (strncasecmp (argv[i], "QosLevel", 1) == 0) {
 			acct_cond->qos = str_2_acct_qos(argv[i]+end);
@@ -118,11 +119,13 @@ static int _set_rec(int *start, int argc, char *argv[],
 		if (strncasecmp (argv[i], "Where", 5) == 0) {
 			i--;
 			break;
+		} else if(!end && !strncasecmp(argv[i], "set", 3)) {
+			continue;
 		} else if(!end) {
 			printf(" Bad format on %s: End your option with "
 			       "an '=' sign\n", argv[i]);
 		} else if (strncasecmp (argv[i], "Description", 1) == 0) {
-			acct->description = xstrdup(argv[i]+end);
+			acct->description =  strip_quotes(argv[i]+end, NULL);
 			u_set = 1;
 		} else if (strncasecmp (argv[i], "FairShare", 1) == 0) {
 			if (get_uint(argv[i]+end, &assoc->fairshare, 
@@ -151,10 +154,10 @@ static int _set_rec(int *start, int argc, char *argv[],
 					argv[i]);
 			}
 		} else if (strncasecmp (argv[i], "Organization", 1) == 0) {
-			acct->organization = xstrdup(argv[i]+end);
+			acct->organization = strip_quotes(argv[i]+end, NULL);
 			u_set = 1;
 		} else if (strncasecmp (argv[i], "Parent", 1) == 0) {
-			assoc->parent_acct = xstrdup(argv[i]+end);
+			assoc->parent_acct = strip_quotes(argv[i]+end, NULL);
 			a_set = 1;
 		} else if (strncasecmp (argv[i], "QosLevel=", 1) == 0) {
 			acct->qos = str_2_acct_qos(argv[i]+end);
@@ -275,7 +278,7 @@ extern int sacctmgr_add_account(int argc, char *argv[])
 		} else if (strncasecmp (argv[i], "Cluster", 1) == 0) {
 			addto_char_list(cluster_list, argv[i]+end);
 		} else if (strncasecmp (argv[i], "Description", 1) == 0) {
-			description = xstrdup(argv[i]+end);
+			description = strip_quotes(argv[i]+end, NULL);
 		} else if (strncasecmp (argv[i], "FairShare", 1) == 0) {
 			if (get_uint(argv[i]+end, &fairshare, 
 			    "FairShare") == SLURM_SUCCESS)
@@ -304,9 +307,9 @@ extern int sacctmgr_add_account(int argc, char *argv[])
 		} else if (strncasecmp (argv[i], "Names", 1) == 0) {
 			addto_char_list(name_list, argv[i]+end);
 		} else if (strncasecmp (argv[i], "Organization", 1) == 0) {
-			organization = xstrdup(argv[i]+end);
+			organization = strip_quotes(argv[i]+end, NULL);
 		} else if (strncasecmp (argv[i], "Parent", 1) == 0) {
-			parent = xstrdup(argv[i]+end);
+			parent = strip_quotes(argv[i]+end, NULL);
 		} else if (strncasecmp (argv[i], "QosLevel", 1) == 0) {
 			qos = str_2_acct_qos(argv[i]+end);
 		} else {
@@ -686,6 +689,7 @@ extern int sacctmgr_list_account(int argc, char *argv[])
 	destroy_acct_account_cond(acct_cond);
 
 	if(!acct_list) {
+		printf(" Problem with query.\n");
 		list_destroy(format_list);
 		return SLURM_ERROR;
 	}
@@ -698,72 +702,72 @@ extern int sacctmgr_list_account(int argc, char *argv[])
 			field->type = PRINT_ACCOUNT;
 			field->name = xstrdup("Account");
 			field->len = 10;
-			field->print_routine = print_str;
+			field->print_routine = print_fields_str;
 		} else if(!strncasecmp("Cluster", object, 1)) {
 			field->type = PRINT_CLUSTER;
 			field->name = xstrdup("Cluster");
 			field->len = 10;
-			field->print_routine = print_str;
+			field->print_routine = print_fields_str;
 		} else if(!strncasecmp("Description", object, 1)) {
 			field->type = PRINT_DESC;
 			field->name = xstrdup("Descr");
 			field->len = 20;
-			field->print_routine = print_str;
+			field->print_routine = print_fields_str;
 		} else if(!strncasecmp("FairShare", object, 1)) {
 			field->type = PRINT_FAIRSHARE;
 			field->name = xstrdup("FairShare");
 			field->len = 9;
-			field->print_routine = print_uint;
+			field->print_routine = print_fields_uint;
 		} else if(!strncasecmp("ID", object, 1)) {
 			field->type = PRINT_ID;
 			field->name = xstrdup("ID");
 			field->len = 6;
-			field->print_routine = print_uint;
+			field->print_routine = print_fields_uint;
 		} else if(!strncasecmp("MaxCPUSecs", object, 4)) {
 			field->type = PRINT_MAXC;
 			field->name = xstrdup("MaxCPUSecs");
 			field->len = 11;
-			field->print_routine = print_uint;
+			field->print_routine = print_fields_uint;
 		} else if(!strncasecmp("MaxJobs", object, 4)) {
 			field->type = PRINT_MAXJ;
 			field->name = xstrdup("MaxJobs");
 			field->len = 7;
-			field->print_routine = print_uint;
+			field->print_routine = print_fields_uint;
 		} else if(!strncasecmp("MaxNodes", object, 4)) {
 			field->type = PRINT_MAXN;
 			field->name = xstrdup("MaxNodes");
 			field->len = 8;
-			field->print_routine = print_uint;
+			field->print_routine = print_fields_uint;
 		} else if(!strncasecmp("MaxWall", object, 4)) {
 			field->type = PRINT_MAXW;
 			field->name = xstrdup("MaxWall");
 			field->len = 11;
-			field->print_routine = print_time;
+			field->print_routine = print_fields_time;
 		} else if(!strncasecmp("Organization", object, 1)) {
 			field->type = PRINT_ORG;
 			field->name = xstrdup("Org");
 			field->len = 20;
-			field->print_routine = print_str;
+			field->print_routine = print_fields_str;
 		} else if(!strncasecmp("QOS", object, 1)) {
 			field->type = PRINT_QOS;
 			field->name = xstrdup("QOS");
 			field->len = 9;
-			field->print_routine = print_str;
+			field->print_routine = print_fields_str;
 		} else if(!strncasecmp("ParentID", object, 7)) {
 			field->type = PRINT_PID;
 			field->name = xstrdup("Par ID");
 			field->len = 6;
-			field->print_routine = print_uint;
+			field->print_routine = print_fields_uint;
 		} else if(!strncasecmp("ParentName", object, 7)) {
 			field->type = PRINT_PNAME;
 			field->name = xstrdup("Par Name");
 			field->len = 10;
-			field->print_routine = print_str;
+			field->print_routine = print_fields_str;
 		} else if(!strncasecmp("User", object, 1)) {
 			field->type = PRINT_USER;
 			field->name = xstrdup("User");
 			field->len = 10;
-			field->print_routine = print_str;
+			field->print_routine = print_fields_str;
 		} else {
 			printf("Unknown field '%s'\n", object);
 			xfree(field);
@@ -775,7 +779,7 @@ extern int sacctmgr_list_account(int argc, char *argv[])
 
 	itr = list_iterator_create(acct_list);
 	itr2 = list_iterator_create(print_fields_list);
-	print_header(print_fields_list);
+	print_fields_header(print_fields_list);
 
 	while((acct = list_next(itr))) {
 		if(acct->assoc_list && list_count(acct->assoc_list)) {
@@ -965,8 +969,6 @@ extern int sacctmgr_list_account(int argc, char *argv[])
 			printf("\n");
 		}
 	}
-
-	printf("\n");
 
 	list_iterator_destroy(itr2);
 	list_iterator_destroy(itr);

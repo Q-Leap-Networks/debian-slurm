@@ -37,6 +37,10 @@
 \*****************************************************************************/
 
 #include "src/sreport/sreport.h"
+#include "src/sreport/assoc_reports.h"
+#include "src/sreport/cluster_reports.h"
+#include "src/sreport/job_reports.h"
+#include "src/sreport/user_reports.h"
 #include "src/common/xsignal.h"
 
 #define OPT_LONG_HIDE   0x102
@@ -46,16 +50,20 @@ char *command_name;
 int exit_code;		/* sreport's exit code, =1 on any error at any time */
 int exit_flag;		/* program to terminate if =1 */
 int input_words;	/* number of words of input permitted */
-int one_liner;		/* one record per line if =1 */
 int quiet_flag;		/* quiet=1, verbose=-1, normal=0 */
-int rollback_flag;       /* immediate execute=1, else = 0 */
-int with_assoc_flag = 0;
+int all_clusters_flag = 0;
+sreport_time_format_t time_format = SREPORT_TIME_SECS;
 void *db_conn = NULL;
 uint32_t my_uid = 0;
 
+static void	_job_rep (int argc, char *argv[]);
+static void	_user_rep (int argc, char *argv[]);
+static void	_cluster_rep (int argc, char *argv[]);
+static void	_assoc_rep (int argc, char *argv[]);
 static int	_get_command (int *argc, char *argv[]);
 static void     _print_version( void );
 static int	_process_command (int argc, char *argv[]);
+static int      _set_time_format(char *format);
 static void	_usage ();
 
 int 
@@ -67,9 +75,9 @@ main (int argc, char *argv[])
 
 	int option_index;
 	static struct option long_options[] = {
+		{"all_clusters", 0, 0, 'a'},
 		{"help",     0, 0, 'h'},
 		{"immediate",0, 0, 'i'},
-		{"oneliner", 0, 0, 'o'},
 		{"no_header", 0, 0, 'n'},
 		{"parsable", 0, 0, 'p'},
 		{"quiet",    0, 0, 'q'},
@@ -80,18 +88,17 @@ main (int argc, char *argv[])
 	};
 
 	command_name      = argv[0];
-	rollback_flag     = 1;
 	exit_code         = 0;
 	exit_flag         = 0;
 	input_field_count = 0;
 	quiet_flag        = 0;
-	log_init("sacctmgr", opts, SYSLOG_FACILITY_DAEMON, NULL);
+	log_init("sreport", opts, SYSLOG_FACILITY_DAEMON, NULL);
 
-	while((opt_char = getopt_long(argc, argv, "hionpqsvV",
+	while((opt_char = getopt_long(argc, argv, "ahnpqt:vV",
 			long_options, &option_index)) != -1) {
 		switch (opt_char) {
 		case (int)'?':
-			fprintf(stderr, "Try \"sacctmgr --help\" "
+			fprintf(stderr, "Try \"sreport --help\" "
 				"for more information\n");
 			exit(1);
 			break;
@@ -99,23 +106,20 @@ main (int argc, char *argv[])
 			_usage ();
 			exit(exit_code);
 			break;
-		case (int)'i':
-			rollback_flag = 0;
+		case (int)'a':
+			all_clusters_flag = 1;
 			break;
-		case (int)'o':
-			one_liner = 1;
+		case (int)'n':
+			print_fields_have_header = 0;
 			break;
-/* 		case (int)'n': */
-/* 			have_header = 0; */
-/* 			break; */
-/* 		case (int)'p': */
-/* 			parsable_print = 1; */
-/* 			break; */
+		case (int)'p':
+			print_fields_parsable_print = 1;
+			break;
 		case (int)'q':
 			quiet_flag = 1;
 			break;
-		case (int)'s':
-			with_assoc_flag = 1;
+		case (int)'t':
+			_set_time_format(optarg);
 			break;
 		case (int)'v':
 			quiet_flag = -1;
@@ -143,7 +147,7 @@ main (int argc, char *argv[])
 		}	
 	}
 
-	db_conn = acct_storage_g_get_connection(false, rollback_flag);
+	db_conn = acct_storage_g_get_connection(false, false);
 	my_uid = getuid();
 
 	if (input_field_count)
@@ -160,7 +164,6 @@ main (int argc, char *argv[])
 
 	acct_storage_g_close_connection(&db_conn);
 	slurm_acct_storage_fini();
-	printf("\n");
 	exit(exit_code);
 }
 
@@ -186,6 +189,91 @@ getline(const char *prompt)
 	return strncpy(line, buf, len);
 }
 #endif
+
+/* 
+ * _job_rep - Reports having to do with jobs 
+ * IN argc - count of arguments
+ * IN argv - list of arguments
+ */
+static void _job_rep (int argc, char *argv[]) 
+{
+	int error_code = SLURM_SUCCESS;
+
+	/* First identify the entity to add */
+	if (strncasecmp (argv[0], "Sizes", 1) == 0) {
+		error_code = job_sizes_grouped_by_top_acct(
+			(argc - 1), &argv[1]);
+	} else {
+		exit_code = 1;
+		fprintf(stderr, "Not valid report %s\n", argv[0]);
+		fprintf(stderr, "Valid job reports are, ");
+		fprintf(stderr, "\"Sizes\"\n");
+	}
+	
+	if (error_code) {
+		exit_code = 1;
+	}
+}
+
+/* 
+ * _user_rep - Reports having to do with jobs 
+ * IN argc - count of arguments
+ * IN argv - list of arguments
+ */
+static void _user_rep (int argc, char *argv[]) 
+{
+	int error_code = SLURM_SUCCESS;
+
+	if (strncasecmp (argv[0], "Top", 1) == 0) {
+		error_code = user_top((argc - 1), &argv[1]);
+	} else {
+		exit_code = 1;
+		fprintf(stderr, "Not valid report %s\n", argv[0]);
+		fprintf(stderr, "Valid user reports are, ");
+		fprintf(stderr, "\"Top\"\n");
+	}	
+	
+	if (error_code) {
+		exit_code = 1;
+	}
+}
+
+/* 
+ * _cluster_rep - Reports having to do with jobs 
+ * IN argc - count of arguments
+ * IN argv - list of arguments
+ */
+static void _cluster_rep (int argc, char *argv[]) 
+{
+	int error_code = SLURM_SUCCESS;
+
+	if (strncasecmp (argv[0], "Utilization", 1) == 0) {
+		error_code = cluster_utilization((argc - 1), &argv[1]);
+	} else {
+		exit_code = 1;
+		fprintf(stderr, "Not valid report %s\n", argv[0]);
+		fprintf(stderr, "Valid cluster reports are, ");
+		fprintf(stderr, "\"Utilization\"\n");
+	}
+	
+	if (error_code) {
+		exit_code = 1;
+	}
+}
+
+/* 
+ * _assoc_rep - Reports having to do with jobs 
+ * IN argc - count of arguments
+ * IN argv - list of arguments
+ */
+static void _assoc_rep (int argc, char *argv[]) 
+{
+	int error_code = SLURM_SUCCESS;
+
+	if (error_code) {
+		exit_code = 1;
+	}
+}
 
 /*
  * _get_command - get a command from the user
@@ -287,6 +375,24 @@ _process_command (int argc, char *argv[])
 		exit_code = 1;
 		if (quiet_flag == -1)
 			fprintf(stderr, "no input");
+	} else if ((strncasecmp (argv[0], "association", 1) == 0)) {
+		if (argc < 2) {
+			exit_code = 1;
+			if (quiet_flag != 1)
+				fprintf(stderr, 
+				        "too few arguments for keyword:%s\n", 
+				        argv[0]);
+		} else 
+			_assoc_rep((argc - 1), &argv[1]);
+	} else if ((strncasecmp (argv[0], "cluster", 2) == 0)) {
+		if (argc < 2) {
+			exit_code = 1;
+			if (quiet_flag != 1)
+				fprintf(stderr, 
+				        "too few arguments for keyword:%s\n", 
+				        argv[0]);
+		} else 
+			_cluster_rep((argc - 1), &argv[1]);
 	} else if (strncasecmp (argv[0], "help", 2) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
@@ -295,14 +401,15 @@ _process_command (int argc, char *argv[])
 				 argv[0]);
 		}
 		_usage ();
-	} else if (strncasecmp (argv[0], "oneliner", 1) == 0) {
-		if (argc > 1) {
+	} else if ((strncasecmp (argv[0], "job", 1) == 0)) {
+		if (argc < 2) {
 			exit_code = 1;
-			fprintf (stderr, 
-				 "too many arguments for keyword:%s\n",
-				 argv[0]);
-		}
-		one_liner = 1;
+			if (quiet_flag != 1)
+				fprintf(stderr, 
+				        "too few arguments for keyword:%s\n", 
+				        argv[0]);
+		} else 
+			_job_rep((argc - 1), &argv[1]);
 	} else if (strncasecmp (argv[0], "quiet", 4) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
@@ -310,7 +417,8 @@ _process_command (int argc, char *argv[])
 				 argv[0]);
 		}
 		quiet_flag = 1;
-	} else if ((strncasecmp (argv[0], "exit", 4) == 0) ||
+	} else if ((strncasecmp (argv[0], "exit", 1) == 0) ||
+		   (strncasecmp (argv[0], "\\q", 2) == 0) ||
 		   (strncasecmp (argv[0], "quit", 4) == 0)) {
 		if (argc > 1) {
 			exit_code = 1;
@@ -319,6 +427,14 @@ _process_command (int argc, char *argv[])
 				 argv[0]);
 		}
 		exit_flag = 1;
+	} else if (strncasecmp (argv[0], "time", 1) == 0) {
+		if (argc < 2) {
+			exit_code = 1;
+			fprintf (stderr,
+				 "too few arguments for keyword:%s\n",
+				 argv[0]);
+		} else		
+			_set_time_format(argv[1]);
 	} else if (strncasecmp (argv[0], "verbose", 4) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
@@ -335,6 +451,15 @@ _process_command (int argc, char *argv[])
 				 argv[0]);
 		}		
 		_print_version();
+	} else if ((strncasecmp (argv[0], "user", 1) == 0)) {
+		if (argc < 2) {
+			exit_code = 1;
+			if (quiet_flag != 1)
+				fprintf(stderr, 
+				        "too few arguments for keyword:%s\n", 
+				        argv[0]);
+		} else 
+			_user_rep((argc - 1), &argv[1]);
 	} else {
 		exit_code = 1;
 		fprintf (stderr, "invalid keyword: %s\n", argv[0]);
@@ -342,6 +467,23 @@ _process_command (int argc, char *argv[])
 		
 	return 0;
 }
+
+static int _set_time_format(char *format)
+{
+	if (strncasecmp (format, "SecPer", 6) == 0) {
+		time_format = SREPORT_TIME_SECS_PER;
+	} else if (strncasecmp (format, "Sec", 1) == 0) {
+		time_format = SREPORT_TIME_SECS;
+	} else if (strncasecmp (format, "Percent", 1) == 0) {
+		time_format = SREPORT_TIME_PERCENT;
+	} else {
+		fprintf (stderr, "unknown time format %s", format);	
+		return SLURM_ERROR;
+	}
+
+	return SLURM_SUCCESS;
+}
+
 
 /* _usage - show the valid sreport commands */
 void _usage () {
@@ -373,7 +515,7 @@ sreport [<OPTION>] [<COMMAND>]                                             \n\
      !!                       Repeat the last command entered.             \n\
                                                                            \n\
                                                                            \n\
-  All commands entitys, and options are case-insensitive.               \n\n");
+  All commands, entities, and options are case-insensitive.              \n\n");
 	
 }
 

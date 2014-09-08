@@ -48,6 +48,7 @@ uint32_t cont_id = (uint32_t)NO_VAL;
 uint32_t acct_job_id = 0;
 uint32_t job_mem_limit = 0;
 bool pgid_plugin = false;
+uint32_t mult = 1000;
 
 static void _pack_jobacct_id(jobacct_id_t *jobacct_id, Buf buffer)
 {
@@ -67,7 +68,7 @@ unpack_error:
 static void _pack_sacct(sacct_t *sacct, Buf buffer)
 {
 	int i=0;
-	int mult = 1000000;
+	uint32_t temp;
 
 	if(!sacct) {
 		for(i=0; i<8; i++)
@@ -79,14 +80,20 @@ static void _pack_sacct(sacct_t *sacct, Buf buffer)
 		}
 		return;
 	} 
-	pack32((uint32_t)sacct->max_vsize, buffer);
-	pack32((uint32_t)(sacct->ave_vsize*mult), buffer);
-	pack32((uint32_t)sacct->max_rss, buffer);
-	pack32((uint32_t)(sacct->ave_rss*mult), buffer);
-	pack32((uint32_t)sacct->max_pages, buffer);
-	pack32((uint32_t)(sacct->ave_pages*mult), buffer);
-	pack32((uint32_t)(sacct->min_cpu*mult), buffer);
-	pack32((uint32_t)(sacct->ave_cpu*mult), buffer);
+
+	pack32(sacct->max_vsize, buffer);
+	temp = sacct->ave_vsize * mult;
+	pack32(temp, buffer);
+	pack32(sacct->max_rss, buffer);
+	temp = (uint32_t)sacct->ave_rss * mult;
+	pack32(temp, buffer);
+	pack32(sacct->max_pages, buffer);
+	temp = (uint32_t)sacct->ave_pages * mult;
+	pack32(temp, buffer);
+	temp = (uint32_t)sacct->min_cpu * mult;
+	pack32(temp, buffer);
+	temp = (uint32_t)sacct->ave_cpu * mult;
+	pack32(temp, buffer);
 
 	_pack_jobacct_id(&sacct->max_vsize_id, buffer);
 	_pack_jobacct_id(&sacct->max_rss_id, buffer);
@@ -97,21 +104,24 @@ static void _pack_sacct(sacct_t *sacct, Buf buffer)
 /* you need to xfree this */
 static int _unpack_sacct(sacct_t *sacct, Buf buffer)
 {
-	int mult = 1000000;
+	/* this is here to handle the floats since it appears sending
+	 * in a float with a typecast returns incorrect information
+	 */
+	uint32_t temp;
 
 	safe_unpack32(&sacct->max_vsize, buffer);
-	safe_unpack32((uint32_t *)&sacct->ave_vsize, buffer);
-	sacct->ave_vsize /= mult;
+	safe_unpack32(&temp, buffer);
+	sacct->ave_vsize = temp / mult;
 	safe_unpack32(&sacct->max_rss, buffer);
-	safe_unpack32((uint32_t *)&sacct->ave_rss, buffer);
-	sacct->ave_rss /= mult;
+	safe_unpack32(&temp, buffer);
+	sacct->ave_rss = temp / mult;
 	safe_unpack32(&sacct->max_pages, buffer);
-	safe_unpack32((uint32_t *)&sacct->ave_pages, buffer);
-	sacct->ave_pages /= mult;
-	safe_unpack32((uint32_t *)&sacct->min_cpu, buffer);
-	sacct->min_cpu /= mult;
-	safe_unpack32((uint32_t *)&sacct->ave_cpu, buffer);
-	sacct->ave_cpu /= mult;
+	safe_unpack32(&temp, buffer);
+	sacct->ave_pages = temp / mult;
+	safe_unpack32(&temp, buffer);
+	sacct->min_cpu = temp / mult;
+	safe_unpack32(&temp, buffer);
+	sacct->ave_cpu = temp / mult;
 	if(_unpack_jobacct_id(&sacct->max_vsize_id, buffer) != SLURM_SUCCESS)
 		goto unpack_error;
 	if(_unpack_jobacct_id(&sacct->max_rss_id, buffer) != SLURM_SUCCESS)
@@ -135,6 +145,7 @@ extern jobacct_job_rec_t *create_jobacct_job_rec()
 	job->state = JOB_PENDING;
 	job->steps = list_create(destroy_jobacct_step_rec);
 	job->requid = -1;
+	job->lft = (uint32_t)NO_VAL;
 
       	return job;
 }
@@ -212,6 +223,7 @@ extern void pack_jobacct_job_rec(void *object, Buf buffer)
 	pack32(job->gid, buffer);
 	pack32(job->jobid, buffer);
 	packstr(job->jobname, buffer);
+	pack32(job->lft, buffer);
 	packstr(job->partition, buffer);
 	packstr(job->nodes, buffer);
 	pack32(job->priority, buffer);
@@ -240,7 +252,7 @@ extern void pack_jobacct_job_rec(void *object, Buf buffer)
 	pack32(job->tot_cpu_usec, buffer);
 	pack16(job->track_steps, buffer);
 	pack32(job->uid, buffer);
-	//packstr(job->user, buffer);
+	packstr(job->user, buffer);
 	pack32(job->user_cpu_sec, buffer);
 	pack32(job->user_cpu_usec, buffer);
 }
@@ -267,6 +279,7 @@ extern int unpack_jobacct_job_rec(void **job, Buf buffer)
 	safe_unpack32(&job_ptr->gid, buffer);
 	safe_unpack32(&job_ptr->jobid, buffer);
 	safe_unpackstr_xmalloc(&job_ptr->jobname, &uint32_tmp, buffer);
+	safe_unpack32(&job_ptr->lft, buffer);
 	safe_unpackstr_xmalloc(&job_ptr->partition, &uint32_tmp, buffer);
 	safe_unpackstr_xmalloc(&job_ptr->nodes, &uint32_tmp, buffer);
 	safe_unpack32((uint32_t *)&job_ptr->priority, buffer);
@@ -294,23 +307,14 @@ extern int unpack_jobacct_job_rec(void **job, Buf buffer)
 	safe_unpack32(&job_ptr->tot_cpu_usec, buffer);
 	safe_unpack16(&job_ptr->track_steps, buffer);
 	safe_unpack32(&job_ptr->uid, buffer);
-	//safe_unpackstr_xmalloc(&job_ptr->user, &uint32_tmp, buffer);
+	safe_unpackstr_xmalloc(&job_ptr->user, &uint32_tmp, buffer);
 	safe_unpack32(&job_ptr->user_cpu_sec, buffer);
 	safe_unpack32(&job_ptr->user_cpu_usec, buffer);
 	
 	return SLURM_SUCCESS;
 
 unpack_error:
-	xfree(job_ptr->account);
-	xfree(job_ptr->blockid);
-	xfree(job_ptr->cluster);
-	xfree(job_ptr->jobname);
-	xfree(job_ptr->partition);
-	xfree(job_ptr->nodes);
-	if(job_ptr->steps)
-		list_destroy(job_ptr->steps);
-	xfree(job_ptr->user);
-	xfree(job_ptr);
+	destroy_jobacct_job_rec(job_ptr);
 	*job = NULL;
 	return SLURM_ERROR;
 }
@@ -368,9 +372,7 @@ extern int unpack_jobacct_step_rec(jobacct_step_rec_t **step, Buf buffer)
 	return SLURM_SUCCESS;
 
 unpack_error:
-	xfree(step_ptr->nodes);
-	xfree(step_ptr->stepname);
-	xfree(step_ptr);
+	destroy_jobacct_step_rec(step_ptr);
 	*step = NULL;
 	return SLURM_ERROR;
 } 
@@ -401,9 +403,7 @@ extern int unpack_jobacct_selected_step(jobacct_selected_step_t **step,
 	return SLURM_SUCCESS;
 
 unpack_error:
-	xfree(step_ptr->job);
-	xfree(step_ptr->step);
-	xfree(step_ptr);
+	destroy_jobacct_selected_step(step_ptr);
 	*step = NULL;
 	return SLURM_ERROR;
 }
@@ -527,7 +527,7 @@ rwfail:
 }
 
 extern int jobacct_common_getinfo(struct jobacctinfo *jobacct, 
-			  enum jobacct_data_type type, void *data)
+				  enum jobacct_data_type type, void *data)
 {
 	int rc = SLURM_SUCCESS;
 	int *fd = (int *)data;
@@ -744,6 +744,7 @@ extern int jobacct_common_unpack(struct jobacctinfo **jobacct, Buf buffer)
 	if(_unpack_jobacct_id(&(*jobacct)->min_cpu_id, buffer)
 	   != SLURM_SUCCESS)
 		goto unpack_error;
+
 	return SLURM_SUCCESS;
 
 unpack_error:

@@ -360,6 +360,7 @@ extern Buf pack_slurmdbd_msg(slurmdbd_msg_t *req)
 	case DBD_GET_ACCOUNTS:
 	case DBD_GET_ASSOCS:
 	case DBD_GET_CLUSTERS:
+	case DBD_GET_JOBS_COND:
 	case DBD_GET_USERS:
 	case DBD_REMOVE_ACCOUNTS:
 	case DBD_REMOVE_ASSOCS:
@@ -475,6 +476,7 @@ extern int unpack_slurmdbd_msg(slurmdbd_msg_t *resp, Buf buffer)
 	case DBD_GET_ACCOUNTS:
 	case DBD_GET_ASSOCS:
 	case DBD_GET_CLUSTERS:
+	case DBD_GET_JOBS_COND:
 	case DBD_GET_USERS:
 	case DBD_REMOVE_ACCOUNTS:
 	case DBD_REMOVE_ASSOCS:
@@ -1208,7 +1210,10 @@ static int _purge_job_start_req(void)
 void inline slurmdbd_free_acct_coord_msg(dbd_acct_coord_msg_t *msg)
 {
 	if(msg) {
-		xfree(msg->acct);
+		if(msg->acct_list) {
+			list_destroy(msg->acct_list);
+			msg->acct_list = NULL;
+		}
 		destroy_acct_user_cond(msg->cond);
 		xfree(msg);
 	}
@@ -1239,6 +1244,9 @@ void inline slurmdbd_free_cond_msg(slurmdbd_msg_type_t type,
 		case DBD_GET_CLUSTERS:
 		case DBD_REMOVE_CLUSTERS:
 			my_destroy = destroy_acct_cluster_cond;
+			break;
+		case DBD_GET_JOBS_COND:
+			my_destroy = destroy_acct_job_cond;
 			break;
 		case DBD_GET_USERS:
 		case DBD_REMOVE_USERS:
@@ -1432,7 +1440,23 @@ void inline slurmdbd_free_usage_msg(slurmdbd_msg_type_t type,
 void inline
 slurmdbd_pack_acct_coord_msg(dbd_acct_coord_msg_t *msg, Buf buffer)
 {
-	packstr(msg->acct, buffer);
+	char *acct = NULL;
+	ListIterator itr = NULL;
+	uint32_t count = 0;
+
+	if(msg->acct_list)
+		count = list_count(msg->acct_list);
+	
+	pack32(count, buffer);
+	if(count) {
+		itr = list_iterator_create(msg->acct_list);
+		while((acct = list_next(itr))) {
+			packstr(acct, buffer);
+		}
+		list_iterator_destroy(itr);
+	}
+	count = 0;
+
 	pack_acct_user_cond(msg->cond, buffer);
 }
 
@@ -1440,12 +1464,25 @@ int inline
 slurmdbd_unpack_acct_coord_msg(dbd_acct_coord_msg_t **msg, Buf buffer)
 {
 	uint32_t uint32_tmp;
+	int i;
+	char *acct = NULL;
+	uint32_t count = 0;
 	dbd_acct_coord_msg_t *msg_ptr = xmalloc(sizeof(dbd_acct_coord_msg_t));
 	*msg = msg_ptr;
 
-	safe_unpackstr_xmalloc(&msg_ptr->acct, &uint32_tmp, buffer);
+	safe_unpack32(&count, buffer);
+	if(count) {
+		msg_ptr->acct_list = list_create(slurm_destroy_char);
+		for(i=0; i<count; i++) {
+			safe_unpackstr_xmalloc(&acct, &uint32_tmp, buffer);
+			list_append(msg_ptr->acct_list, acct);
+		}
+	}
+
 	if(unpack_acct_user_cond((void *)&msg_ptr->cond, buffer) == SLURM_ERROR)
 		goto unpack_error;
+	return SLURM_SUCCESS;
+
 unpack_error:
 	slurmdbd_free_acct_coord_msg(msg_ptr);
 	*msg = NULL;
@@ -1497,6 +1534,9 @@ void inline slurmdbd_pack_cond_msg(slurmdbd_msg_type_t type,
 	case DBD_REMOVE_CLUSTERS:
 		my_function = pack_acct_cluster_cond;
 		break;
+	case DBD_GET_JOBS_COND:
+		my_function = pack_acct_job_cond;
+		break;
 	case DBD_GET_USERS:
 	case DBD_REMOVE_USERS:
 		my_function = pack_acct_user_cond;
@@ -1527,6 +1567,9 @@ int inline slurmdbd_unpack_cond_msg(slurmdbd_msg_type_t type,
 	case DBD_GET_CLUSTERS:
 	case DBD_REMOVE_CLUSTERS:
 		my_function = unpack_acct_cluster_cond;
+		break;
+	case DBD_GET_JOBS_COND:
+		my_function = unpack_acct_job_cond;
 		break;
 	case DBD_GET_USERS:
 	case DBD_REMOVE_USERS:
@@ -2166,6 +2209,7 @@ slurmdbd_pack_step_complete_msg(dbd_step_comp_msg_t *msg, Buf buffer)
 	pack32(msg->assoc_id, buffer);
 	pack32(msg->db_index, buffer);
 	pack_time(msg->end_time, buffer);
+	pack32(msg->exit_code, buffer);
 	jobacct_common_pack((struct jobacctinfo *)msg->jobacct, buffer);
 	pack32(msg->job_id, buffer);
 	pack32(msg->req_uid, buffer);
@@ -2183,6 +2227,7 @@ slurmdbd_unpack_step_complete_msg(dbd_step_comp_msg_t **msg, Buf buffer)
 	safe_unpack32(&msg_ptr->assoc_id, buffer);
 	safe_unpack32(&msg_ptr->db_index, buffer);
 	safe_unpack_time(&msg_ptr->end_time, buffer);
+	safe_unpack32(&msg_ptr->exit_code, buffer);
 	jobacct_common_unpack((struct jobacctinfo **)&msg_ptr->jobacct, buffer);
 	safe_unpack32(&msg_ptr->job_id, buffer);
 	safe_unpack32(&msg_ptr->req_uid, buffer);

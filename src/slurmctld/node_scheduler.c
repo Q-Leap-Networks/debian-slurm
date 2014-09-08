@@ -58,11 +58,12 @@
 #include "src/common/hostlist.h"
 #include "src/common/list.h"
 #include "src/common/node_select.h"
+#include "src/common/slurm_accounting_storage.h"
 #include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
-#include "src/common/slurm_accounting_storage.h"
 
+#include "src/slurmctld/acct_policy.h"
 #include "src/slurmctld/agent.h"
 #include "src/slurmctld/licenses.h"
 #include "src/slurmctld/node_scheduler.h"
@@ -110,7 +111,8 @@ static bitstr_t *_valid_features(struct job_details *detail_ptr,
 
 /*
  * allocate_nodes - change state of specified nodes to NODE_STATE_ALLOCATED
- *	also claim required licenses
+ *	also claim required licenses and resources reserved by accounting
+ *	policy association
  * IN job_ptr - job being allocated resources
  */
 extern void allocate_nodes(struct job_record *job_ptr)
@@ -125,14 +127,15 @@ extern void allocate_nodes(struct job_record *job_ptr)
 	}
 
 	license_job_get(job_ptr);
+	acct_policy_job_begin(job_ptr);
 	return;
 }
 
 
 /*
  * deallocate_nodes - for a given job, deallocate its nodes and make 
- *	their state NODE_STATE_COMPLETING
- *	also release the job's licenses
+ *	their state NODE_STATE_COMPLETING also release the job's licenses 
+ *	and resources reserved by accounting policy association
  * IN job_ptr - pointer to terminating job (already in some COMPLETING state)
  * IN timeout - true if job exhausted time limit, send REQUEST_KILL_TIMELIMIT
  *	RPC instead of REQUEST_TERMINATE_JOB
@@ -152,6 +155,7 @@ extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
 	xassert(job_ptr->details);
 
 	license_job_return(job_ptr);
+	acct_policy_job_fini(job_ptr);
 	if (slurm_sched_freealloc(job_ptr) != SLURM_SUCCESS)
 		error("slurm_sched_freealloc(%u): %m", job_ptr->job_id);
 	if (select_g_job_fini(job_ptr) != SLURM_SUCCESS)
@@ -659,9 +663,10 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 			avail_nodes = bit_set_count(avail_bitmap);
 			tried_sched = false;	/* need to test these nodes */
 
-			if (shared) {
+			if (shared && ((i+1) < node_set_size) && 
+			    (node_set_ptr[i].weight == node_set_ptr[i+1].weight)) {
 				/* Keep accumulating so we can pick the
-				 * most lighly loaded nodes */
+				 * most lightly loaded nodes */
 				continue;
 			}
 
@@ -795,7 +800,6 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 	return error_code;
 }
 
-
 /*
  * select_nodes - select and allocate nodes to a specific job
  * IN job_ptr - pointer to the job record
@@ -824,15 +828,17 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 	struct node_set *node_set_ptr = NULL;
 	struct part_record *part_ptr = job_ptr->part_ptr;
 	uint32_t min_nodes, max_nodes, req_nodes;
-	int super_user = false;
 	enum job_state_reason fail_reason;
 	time_t now = time(NULL);
 
 	xassert(job_ptr);
 	xassert(job_ptr->magic == JOB_MAGIC);
 
-	if ((job_ptr->user_id == 0) || (job_ptr->user_id == getuid()))
-		super_user = true;
+	if (!acct_policy_job_runnable(job_ptr)) {
+		job_ptr->state_reason = WAIT_ASSOC_LIMIT;
+		last_job_update = now;
+		return ESLURM_ACCOUNTING_POLICY;
+	}
 
 	/* identify partition */
 	if (part_ptr == NULL) {
@@ -849,8 +855,6 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 		fail_reason = WAIT_PART_STATE;
 	else if (job_ptr->priority == 0)	/* user or administrator hold */
 		fail_reason = WAIT_HELD;
-	else if (super_user)
-		;	/* ignore any time or node count limits */
 	else if ((job_ptr->time_limit != NO_VAL) &&
 		 (job_ptr->time_limit > part_ptr->max_time))
 		fail_reason = WAIT_PART_TIME_LIMIT;
@@ -886,19 +890,10 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 	/* enforce both user's and partition's node limits */
 	/* info("req: %u-%u, %u", job_ptr->details->min_nodes,
 	   job_ptr->details->max_nodes, part_ptr->max_nodes); */
-	if (super_user) {
-		min_nodes = job_ptr->details->min_nodes;
-	} else {
-		min_nodes = MAX(job_ptr->details->min_nodes, 
-				part_ptr->min_nodes);
-	}
-	if (job_ptr->details->max_nodes == 0) {
-		if (super_user)
-			max_nodes = INFINITE;
-		else
-			max_nodes = part_ptr->max_nodes;
-	} else if (super_user)
-		max_nodes = job_ptr->details->max_nodes;
+
+	min_nodes = MAX(job_ptr->details->min_nodes, part_ptr->min_nodes);
+	if (job_ptr->details->max_nodes == 0)
+		max_nodes = part_ptr->max_nodes;
 	else
 		max_nodes = MIN(job_ptr->details->max_nodes, 
 				part_ptr->max_nodes);

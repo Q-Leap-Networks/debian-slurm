@@ -2,7 +2,7 @@
  *  select_cons_res.c - node selection plugin supporting consumable 
  *  resources policies.
  *
- *  $Id: select_cons_res.c 13814 2008-04-07 15:46:55Z jette $
+ *  $Id: select_cons_res.c 14297 2008-06-20 15:41:06Z jette $
  *****************************************************************************\
  *
  *  The following example below illustrates how four jobs are allocated
@@ -530,9 +530,9 @@ static uint16_t _get_task_count(struct node_cr_record *select_node_ptr,
 					    if ((cr_type == CR_SOCKET) ||
 						(cr_type == CR_SOCKET_MEMORY)) {
 						if (p_ptr->alloc_cores[i])
-							alloc_cores[i] = cores;
+							alloc_cores[i] += cores;
 					    } else {
-						alloc_cores[i] =
+						alloc_cores[i] +=
 							p_ptr->alloc_cores[i];
 					    }
 					}
@@ -573,9 +573,10 @@ static uint16_t _get_task_count(struct node_cr_record *select_node_ptr,
 				}
 				if (try_partial_idle && (alloc_row > -1)) {
 					alloc_row *= sockets;
-					for (i = 0; i < sockets; i++)
-						alloc_cores[i] =
-						p_ptr->alloc_cores[alloc_row+i];
+					for (i = 0; i < sockets; i++) {
+						alloc_cores[i] += p_ptr->
+							alloc_cores[alloc_row+i];
+					}
 				}
 			}
 		}
@@ -1808,7 +1809,7 @@ static int _eval_nodes(struct job_record *job_ptr, bitstr_t * bitmap,
 				avail_cpus = _get_task_cnt(job_ptr, i,
 							   task_cnt, freq,
 							   array_size);
-				if(avail_cpus <= 0)
+				if (avail_cpus <= 0)
 					continue;
 				rem_cpus -= avail_cpus;
 				bit_set(bitmap, i);
@@ -1826,8 +1827,14 @@ static int _eval_nodes(struct job_record *job_ptr, bitstr_t * bitmap,
 				avail_cpus = _get_task_cnt(job_ptr, i,
 							   task_cnt, freq,
 							   array_size);
-				if(avail_cpus <= 0)
+				if (avail_cpus <= 0)
 					continue;
+				if ((max_nodes == 1) && 
+				    (avail_cpus < rem_cpus)) {
+					/* Job can only take one more node and
+					 * this one has insufficient CPU */
+					continue;
+				}
 				rem_cpus -= avail_cpus;
 				bit_set(bitmap, i);
 				rem_nodes--;
@@ -2623,6 +2630,7 @@ static int _job_test(struct job_record *job_ptr, bitstr_t *bitmap,
 		case SLURM_DIST_CYCLIC_BLOCK:
 			error_code = cr_dist(job, 0, cr_type); 
 			break;
+		case SLURM_DIST_ARBITRARY:
 		case SLURM_DIST_BLOCK:
 		case SLURM_DIST_CYCLIC:				
 		case SLURM_DIST_BLOCK_CYCLIC:
@@ -2633,12 +2641,9 @@ static int _job_test(struct job_record *job_ptr, bitstr_t *bitmap,
 		case SLURM_DIST_PLANE:
 			error_code = cr_plane_dist(job, mc_ptr->plane_size, cr_type); 
 			break;
-		case SLURM_DIST_ARBITRARY:
 		default:
-			error_code = compute_c_b_task_dist(job);
-			if (error_code != SLURM_SUCCESS) {
-				error(" Error in compute_c_b_task_dist");
-			}
+			error("select/cons_res: invalid dist_type");
+			error_code = SLURM_ERROR;
 			break;
 		}
 	}

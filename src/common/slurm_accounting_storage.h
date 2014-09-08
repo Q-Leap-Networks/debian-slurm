@@ -65,10 +65,12 @@ typedef enum {
 	ACCT_UPDATE_NOTSET,
 	ACCT_ADD_USER,
 	ACCT_ADD_ASSOC,
+	ACCT_ADD_COORD,
 	ACCT_MODIFY_USER,
 	ACCT_MODIFY_ASSOC,
 	ACCT_REMOVE_USER,
-	ACCT_REMOVE_ASSOC
+	ACCT_REMOVE_ASSOC,
+	ACCT_REMOVE_COORD
 } acct_update_type_t;
 
 /* Association conditions used for queries of the database */
@@ -87,7 +89,11 @@ typedef struct {
 					     * can run a job (seconds) */
 	List partition_list;	/* list of char * */
 	char *parent_acct;	/* name of parent account */
+	uint32_t usage_end; 
+	uint32_t usage_start; 
 	List user_list;		/* list of char * */
+	uint16_t with_usage; 
+	uint16_t with_deleted; 
 } acct_association_cond_t;
 
 typedef struct {
@@ -97,6 +103,7 @@ typedef struct {
 	List organization_list; /* list of char * */
 	acct_qos_level_t qos;	
 	uint16_t with_assocs; 
+	uint16_t with_deleted; 
 } acct_account_cond_t;
 
 typedef struct {
@@ -109,7 +116,8 @@ typedef struct {
 } acct_account_rec_t;
 
 typedef struct {
-	uint32_t alloc_secs; /* number of cpu seconds allocated */
+	uint64_t alloc_secs; /* number of cpu seconds allocated */
+	uint32_t assoc_id;	/* association ID		*/
 	time_t period_start; 
 } acct_accounting_rec_t;
 
@@ -120,6 +128,9 @@ typedef struct acct_association_rec {
 	uint32_t fairshare;	/* fairshare number */
 	uint32_t id;		/* id identifing a combination of
 				 * user-account-cluster(-partition) */
+	uint32_t lft;		/* lft used for grouping sub
+				 * associations and jobs as a left
+				 * most container used with rgt */
 	uint32_t max_cpu_secs_per_job; /* max number of cpu seconds this 
 					   * association can have per job */
 	uint32_t max_jobs;	/* max number of jobs this association can run
@@ -134,6 +145,9 @@ typedef struct acct_association_rec {
 	uint32_t parent_id;	/* id of parent account */
 	char *partition;	/* optional partition in a cluster 
 				 * associated to association */
+	uint32_t rgt;		/* rgt used for grouping sub
+				 * associations and jobs as a right
+				 * most container used with lft */
 	uint32_t uid;		/* user ID */
 	uint32_t used_jobs;	/* count of active jobs */
 	uint32_t used_share;	/* measure of resource usage */
@@ -142,6 +156,10 @@ typedef struct acct_association_rec {
 
 typedef struct {
 	List cluster_list; /* list of char * */
+	uint32_t usage_end; 
+	uint32_t usage_start; 
+	uint16_t with_usage; 
+	uint16_t with_deleted; 
 } acct_cluster_cond_t;
 
 typedef struct {
@@ -149,12 +167,13 @@ typedef struct {
 	char *control_host;
 	uint32_t control_port;
 	uint32_t default_fairshare;	/* fairshare number */
-	uint32_t default_max_cpu_secs_per_job; /* max number of cpu seconds this 
-					* association can have per job */
-	uint32_t default_max_jobs;	/* max number of jobs this association can run
-				 * at one time */
+	uint32_t default_max_cpu_secs_per_job;/* max number of cpu seconds this 
+					       * association can have per job */
+	uint32_t default_max_jobs;/* max number of jobs this association can run
+				   * at one time */
 	uint32_t default_max_nodes_per_job; /* max number of nodes this
-				     * association can allocate per job */
+					     * association can
+					     * allocate per job */
 	uint32_t default_max_wall_duration_per_job; /* longest time this
 					     * association can run a job */
 	char *name;
@@ -167,12 +186,28 @@ typedef struct {
 } acct_coord_rec_t;
 
 typedef struct {
+	List acct_list;		/* list of char * */
+	List associd_list;	/* list of char */
+	List cluster_list;	/* list of char * */
+	uint16_t completion;	/* get job completion records instead
+				 * of accounting record */
+	List groupid_list;	/* list of char * */
+	List partition_list;	/* list of char * */
+	List step_list;         /* list of jobacct_selected_step_t */
+	uint32_t usage_end; 
+	uint32_t usage_start; 
+	List user_list;		/* list of char * */
+} acct_job_cond_t;
+
+typedef struct {
 	acct_admin_level_t admin_level;
 	acct_association_cond_t *assoc_cond;
 	List def_acct_list; /* list of char * */
 	acct_qos_level_t qos;	
 	List user_list; /* list of char * */
 	uint16_t with_assocs; 
+	uint16_t with_coords; 
+	uint16_t with_deleted; 
 } acct_user_cond_t;
 
 typedef struct {
@@ -196,12 +231,13 @@ typedef struct {
 } shares_used_object_t;
 
 typedef struct {
-	uint32_t alloc_secs; /* number of cpu seconds allocated */
+	uint64_t alloc_secs; /* number of cpu seconds allocated */
 	uint32_t cpu_count; /* number of cpus during time period */
-	uint32_t down_secs; /* number of cpu seconds down */
-	uint32_t idle_secs; /* number of cpu seconds idle */
+	uint64_t down_secs; /* number of cpu seconds down */
+	uint64_t idle_secs; /* number of cpu seconds idle */
+	uint64_t over_secs; /* number of cpu seconds overcommitted */
 	time_t period_start; /* when this record was started */
-	uint32_t resv_secs; /* number of cpu seconds reserved */	
+	uint64_t resv_secs; /* number of cpu seconds reserved */	
 } cluster_accounting_rec_t;
 
 extern void destroy_acct_user_rec(void *object);
@@ -216,9 +252,11 @@ extern void destroy_acct_user_cond(void *object);
 extern void destroy_acct_account_cond(void *object);
 extern void destroy_acct_cluster_cond(void *object);
 extern void destroy_acct_association_cond(void *object);
+extern void destroy_acct_job_cond(void *object);
 
 extern void destroy_acct_update_object(void *object);
 extern void destroy_update_shares_rec(void *object);
+
 
 /* pack functions */
 extern void pack_acct_user_rec(void *object, Buf buffer);
@@ -244,6 +282,8 @@ extern void pack_acct_cluster_cond(void *object, Buf buffer);
 extern int unpack_acct_cluster_cond(void **object, Buf buffer);
 extern void pack_acct_association_cond(void *object, Buf buffer);
 extern int unpack_acct_association_cond(void **object, Buf buffer);
+extern void pack_acct_job_cond(void *object, Buf buffer);
+extern int unpack_acct_job_cond(void **object, Buf buffer);
 
 extern void pack_acct_update_object(acct_update_object_t *object, Buf buffer);
 extern int unpack_acct_update_object(acct_update_object_t **object, Buf buffer);
@@ -295,12 +335,12 @@ extern int acct_storage_g_add_users(void *db_conn, uint32_t uid,
 
 /* 
  * add users as account coordinators 
- * IN:  acct name of account
+ * IN: acct_list list of char *'s of names of accounts
  * IN:  acct_user_cond_t *user_q
  * RET: SLURM_SUCCESS on success SLURM_ERROR else
  */
 extern int acct_storage_g_add_coord(void *db_conn, uint32_t uid,
-				    char *acct, acct_user_cond_t *user_q);
+				    List acct_list, acct_user_cond_t *user_q);
 
 
 /* 
@@ -331,82 +371,83 @@ extern int acct_storage_g_add_associations(void *db_conn, uint32_t uid,
  * modify existing users in the accounting system 
  * IN:  acct_user_cond_t *user_q
  * IN:  acct_user_rec_t *user
- * RET: SLURM_SUCCESS on success SLURM_ERROR else
+ * RET: List containing (char *'s) else NULL on error
  */
 extern List acct_storage_g_modify_users(void *db_conn, uint32_t uid, 
-				       acct_user_cond_t *user_q,
-				       acct_user_rec_t *user);
+					acct_user_cond_t *user_q,
+					acct_user_rec_t *user);
 
 /* 
  * modify existing accounts in the accounting system 
  * IN:  acct_acct_cond_t *acct_q
  * IN:  acct_account_rec_t *acct
- * RET: SLURM_SUCCESS on success SLURM_ERROR else
+ * RET: List containing (char *'s) else NULL on error
  */
 extern List acct_storage_g_modify_accounts(void *db_conn, uint32_t uid, 
-					  acct_account_cond_t *acct_q,
-					  acct_account_rec_t *acct);
+					   acct_account_cond_t *acct_q,
+					   acct_account_rec_t *acct);
 
 /* 
  * modify existing clusters in the accounting system 
  * IN:  acct_cluster_cond_t *cluster_q
  * IN:  acct_cluster_rec_t *cluster
- * RET: SLURM_SUCCESS on success SLURM_ERROR else
+ * RET: List containing (char *'s) else NULL on error
  */
 extern List acct_storage_g_modify_clusters(void *db_conn, uint32_t uid, 
-					  acct_cluster_cond_t *cluster_q,
-					  acct_cluster_rec_t *cluster);
+					   acct_cluster_cond_t *cluster_q,
+					   acct_cluster_rec_t *cluster);
 
 /* 
  * modify existing associations in the accounting system 
  * IN:  acct_association_cond_t *assoc_q
  * IN:  acct_association_rec_t *assoc
- * RET: SLURM_SUCCESS on success SLURM_ERROR else
+ * RET: List containing (char *'s) else NULL on error
  */
 extern List acct_storage_g_modify_associations(void *db_conn, uint32_t uid, 
-					      acct_association_cond_t *assoc_q,
-					      acct_association_rec_t *assoc);
+					       acct_association_cond_t *assoc_q,
+					       acct_association_rec_t *assoc);
 
 /* 
  * remove users from accounting system 
  * IN:  acct_user_cond_t *user_q
- * RET: SLURM_SUCCESS on success SLURM_ERROR else
+ * RET: List containing (char *'s) else NULL on error
  */
 extern List acct_storage_g_remove_users(void *db_conn, uint32_t uid, 
-				       acct_user_cond_t *user_q);
+					acct_user_cond_t *user_q);
 
 /* 
  * remove users from being a coordinator of an account
- * IN: acct name of acct
+ * IN: acct_list list of char *'s of names of accounts
  * IN: acct_user_cond_t *user_q
- * RET: SLURM_SUCCESS on success SLURM_ERROR else
+ * RET: List containing (char *'s) else NULL on error
  */
 extern List acct_storage_g_remove_coord(void *db_conn, uint32_t uid, 
-				       char *acct, acct_user_cond_t *user_q);
+					List acct_list,
+					acct_user_cond_t *user_q);
 
 /* 
  * remove accounts from accounting system 
  * IN:  acct_account_cond_t *acct_q
- * RET: SLURM_SUCCESS on success SLURM_ERROR else
+ * RET: List containing (char *'s) else NULL on error
  */
 extern List acct_storage_g_remove_accounts(void *db_conn, uint32_t uid, 
-					  acct_account_cond_t *acct_q);
+					   acct_account_cond_t *acct_q);
 
 /* 
  * remove clusters from accounting system 
  * IN:  acct_cluster_cond_t *cluster_q
- * RET: SLURM_SUCCESS on success SLURM_ERROR else
+ * RET: List containing (char *'s) else NULL on error
  */
 extern List acct_storage_g_remove_clusters(void *db_conn, uint32_t uid, 
-					  acct_cluster_cond_t *cluster_q);
+					   acct_cluster_cond_t *cluster_q);
 
 /* 
  * remove associations from accounting system 
  * IN:  acct_association_cond_t *assoc_q
- * RET: SLURM_SUCCESS on success SLURM_ERROR else
+ * RET: List containing (char *'s) else NULL on error
  */
 extern List acct_storage_g_remove_associations(void *db_conn, uint32_t uid, 
-					      acct_association_cond_t *assoc_q);
+					       acct_association_cond_t *assoc_q);
 
 /* 
  * get info from the storage 
@@ -552,6 +593,14 @@ extern List jobacct_storage_g_get_jobs(void *db_conn,
 				       List selected_steps,
 				       List selected_parts,
 				       void *params);
+
+/* 
+ * get info from the storage 
+ * returns List of jobacct_job_rec_t *
+ * note List needs to be freed when called
+ */
+extern List jobacct_storage_g_get_jobs_cond(void *db_conn, 
+					    acct_job_cond_t *job_cond);
 
 /* 
  * expire old info from the storage 
