@@ -4,6 +4,29 @@ documents those changes that are of interest to users and admins.
 
 * Changes in SLURM 2.1.11
 =========================
+ -- BLUEGENE - fix sinfo to not get duplicate entries when running command
+    sinfo -e -o "%9P %6m %.4c %.22F %f"
+ -- Fix bug that caused segv when deleting a partition with pending jobs.
+ -- Better error message for when trying to modify an account's name with
+    sacctmgr.
+ -- Added back removal of #include "src/common/slurm_xlator.h" from
+    select/cons_res.
+ -- Fix incorrect logic in global_accounting in regression tests for
+    setting QOS.
+ -- BLUEGENE - Fixed issue where removing a small block in dynamic mode,
+    and other blocks also in that midplane needed to be removed and were in
+    and error state.  They all weren't removed correctly in accounting.
+ -- Prevent scontrol segv with "scontrol show node <name>" command with nodes
+    in a hidden partition.
+ -- Fixed sizing of popup grids in sview.
+ -- Fixed sacct when querying against a jobid the start time is not set.
+ -- Fix configure to get correct version of pkg-config if both 32bit and 64bit
+    libs are installed.
+ -- Fix issue with sshare not sorting correctly the tree of associations.
+ -- Update documentation for sreport.
+ -- BLUEGENE - fix regression in 2.1.10 on assigning multiple jobs to one block.
+ -- Minor memory leak fixed when killing job error happens.
+ -- Fix sacctmgr list assoc when talking to a 2.2 slurmdbd.
 
 * Changes in SLURM 2.1.10
 =========================
@@ -5133,4 +5156,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 20750 2010-07-16 21:32:31Z da $
+$Id: NEWS 20850 2010-07-30 16:33:18Z da $
