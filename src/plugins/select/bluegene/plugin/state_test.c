@@ -2,7 +2,7 @@
  *  state_test.c - Test state of Bluegene base partitions and switches.
  *  DRAIN nodes in SLURM that are not usable.
  *
- *  $Id: state_test.c 21904 2010-12-28 18:45:52Z da $
+ *  $Id: state_test.c 22130 2011-01-19 17:52:22Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -573,6 +573,12 @@ extern int check_block_bp_states(char *bg_block_id, bool slurmctld_locked)
 	int cnt = 0;
 	int i = 0;
 	bool small = false;
+
+	/* If no bg_record->bg_block_id we don't need to check this
+	   since this block isn't really created.
+	*/
+	if (!bg_block_id)
+		return SLURM_SUCCESS;
 
 	if ((rc = bridge_get_block(bg_block_id, &block_ptr)) != STATUS_OK) {
 		error("Block %s doesn't exist.", bg_block_id);

@@ -1,4 +1,4 @@
-# $Id: slurm.spec 21821 2010-12-17 16:43:16Z da $
+# $Id: slurm.spec 22107 2011-01-18 18:33:28Z da $
 #
 # Note that this package is not relocatable
 
@@ -86,14 +86,14 @@
 %endif
 
 Name:    slurm
-Version: 2.2.0
+Version: 2.2.1
 Release: 1%{?dist}
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL
 Group: System Environment/Base
-Source: slurm-2.2.0.tar.bz2
+Source: slurm-2.2.1.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: https://computing.llnl.gov/linux/slurm/
 
@@ -368,7 +368,7 @@ Gives the ability for SLURM to use Berkeley Lab Checkpoint/Restart
 #############################################################################
 
 %prep
-%setup -n slurm-2.2.0
+%setup -n slurm-2.2.1
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \
@@ -435,7 +435,6 @@ rm -f $RPM_BUILD_ROOT/%{_perldir}/auto/Slurm/.packlist
 rm -f $RPM_BUILD_ROOT/%{_perlarchlibdir}/perllocal.pod
 rm -f $RPM_BUILD_ROOT/%{_perldir}/perllocal.pod
 rm -f $RPM_BUILD_ROOT/%{_perldir}/auto/Slurmdb/.packlist
-rm -f $RPM_BUILD_ROOT/%{_perldir}/auto/Slurmdb/autosplit.ix
 
 %if ! %{slurm_with blcr}
 # remove these if they exist
@@ -619,6 +618,7 @@ rm -rf $RPM_BUILD_ROOT
 %{_perldir}/Slurmdb.pm
 %{_perldir}/auto/Slurmdb/Slurmdb.so
 %{_perldir}/auto/Slurmdb/Slurmdb.bs
+%{_perldir}/auto/Slurmdb/autosplit.ix
 %{_perlman3dir}/Slurm*
 
 #############################################################################

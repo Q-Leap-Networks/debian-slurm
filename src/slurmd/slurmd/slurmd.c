@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmd/slurmd.c - main slurm node server daemon
- *  $Id: slurmd.c 21754 2010-12-10 17:44:30Z da $
+ *  $Id: slurmd.c 21936 2010-12-29 22:11:02Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
@@ -1497,11 +1497,12 @@ Usage: %s [OPTIONS]\n\
    -C          Print node configuration information and exit.\n\
    -d stepd    Pathname to the slurmstepd program.\n\
    -D          Run daemon in foreground.\n\
-   -M          Use mlock() to lock slurmd pages into memory.\n\
-   -h          Print this help message.\n\
    -f config   Read configuration from the specified file.\n\
+   -h          Print this help message.\n\
    -L logfile  Log messages to the file `logfile'.\n\
+   -M          Use mlock() to lock slurmd pages into memory.\n\
    -n value    Run the daemon at the specified nice value.\n\
+   -N host     Run the daemon for specified hostname.\n\
    -v          Verbose mode. Multiple -v's increase verbosity.\n\
    -V          Print version information and exit.\n", conf->prog);
 	return;

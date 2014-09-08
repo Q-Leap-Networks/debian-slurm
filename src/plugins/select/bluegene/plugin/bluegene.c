@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  bluegene.c - blue gene node configuration processing module.
  *
- *  $Id: bluegene.c 21904 2010-12-28 18:45:52Z da $
+ *  $Id: bluegene.c 22165 2011-01-21 18:32:00Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -85,6 +85,7 @@ static int  _validate_config_nodes(List curr_block_list,
 static int _delete_old_blocks(List curr_block_list,
 			      List found_block_list);
 static int _post_block_free(bg_record_t *bg_record, bool restore);
+static void *_track_freeing_blocks(void *args);
 static void *_wait_and_destroy_block(void *args);
 static char *_get_bg_conf(void);
 static int  _reopen_bridge_log(void);
@@ -159,14 +160,16 @@ extern bool blocks_overlap(bg_record_t *rec_a, bg_record_t *rec_b)
 			return true;
 	}
 
-	if (!bit_overlap(rec_a->bitmap, rec_b->bitmap))
+	if (rec_a->bitmap && rec_b->bitmap
+	    && !bit_overlap(rec_a->bitmap, rec_b->bitmap))
 		return false;
 
 	if ((rec_a->node_cnt >= bg_conf->bp_node_cnt)
 	    || (rec_b->node_cnt >= bg_conf->bp_node_cnt))
 		return true;
 
-	if (!bit_overlap(rec_a->ionode_bitmap, rec_b->ionode_bitmap))
+	if (rec_a->ionode_bitmap && rec_b->ionode_bitmap
+	    && !bit_overlap(rec_a->ionode_bitmap, rec_b->ionode_bitmap))
 		return false;
 
 	return true;
@@ -537,8 +540,9 @@ extern int bg_free_block(bg_record_t *bg_record, bool wait, bool locked)
 				}
 			}
 #else
-			bg_record->state = RM_PARTITION_FREE;
-//			bg_record->state = RM_PARTITION_DEALLOCATING;
+//			bg_record->state = RM_PARTITION_FREE;
+			if (bg_record->state != RM_PARTITION_FREE)
+				bg_record->state = RM_PARTITION_DEALLOCATING;
 #endif
 		}
 
@@ -587,7 +591,7 @@ extern int bg_free_block(bg_record_t *bg_record, bool wait, bool locked)
 }
 
 /* block_state_mutex should be unlocked before calling this */
-extern int free_block_list(uint32_t job_id, List track_list,
+extern int free_block_list(uint32_t job_id, List track_in_list,
 			   bool destroy, bool wait)
 {
 	bg_record_t *bg_record = NULL;
@@ -595,11 +599,12 @@ extern int free_block_list(uint32_t job_id, List track_list,
 	ListIterator itr = NULL;
 	int track_cnt = 0, free_cnt = 0, retry_cnt = 0, rc = SLURM_SUCCESS;
 	bool restore = true;
-
-	if (!track_list || !(track_cnt = list_count(track_list)))
+	List track_list = list_create(NULL);
+	if (!track_in_list || !(track_cnt = list_count(track_in_list)))
 		return SLURM_SUCCESS;
 
 	slurm_mutex_lock(&block_state_mutex);
+	list_transfer(track_list, track_in_list);
 	itr = list_iterator_create(track_list);
 	while ((bg_record = list_next(itr))) {
 		if (bg_record->magic != BLOCK_MAGIC) {
@@ -616,6 +621,9 @@ extern int free_block_list(uint32_t job_id, List track_list,
 			     bg_record->bg_block_id,
 			     bg_record->job_ptr->job_id,
 			     bg_record->job_running);
+			/* This is not thread safe if called from
+			   bg_job_place.c anywhere from within
+			   submit_job() */
 			slurm_mutex_unlock(&block_state_mutex);
 			bg_requeue_job(bg_record->job_ptr->job_id, 0);
 			slurm_mutex_lock(&block_state_mutex);
@@ -650,9 +658,25 @@ extern int free_block_list(uint32_t job_id, List track_list,
 	}
 	slurm_mutex_unlock(&block_state_mutex);
 
-	/* _wait_and_destroy_block should handle cleanup so just return */
+	/* _wait_and_destroy_block should handle cleanup, but we
+	 * should start a thread just to make sure we have current
+	 * states, then just return */
 	if (!wait) {
+		pthread_attr_t attr_agent;
+		pthread_t thread_agent;
+		slurm_attr_init(&attr_agent);
 		list_iterator_destroy(itr);
+		retries = 0;
+		while (pthread_create(&thread_agent, &attr_agent,
+				      _track_freeing_blocks,
+				      track_list)) {
+			error("pthread_create error %m");
+			if (++retries > MAX_PTHREAD_RETRIES)
+				fatal("Can't create "
+				      "pthread");
+			/* sleep and retry */
+			usleep(1000);
+		}
 		return SLURM_SUCCESS;
 	}
 
@@ -662,13 +686,24 @@ extern int free_block_list(uint32_t job_id, List track_list,
 	while (retry_cnt < MAX_FREE_RETRIES) {
 		free_cnt = 0;
 		slurm_mutex_lock(&block_state_mutex);
-		if (!blocks_are_created)
-			update_block_list_state(track_list);
+		/* just to make sure state is updated */
+		update_block_list_state(track_list);
 		list_iterator_reset(itr);
+		/* just incase things change */
+		track_cnt = list_count(track_list);
 		while ((bg_record = list_next(itr))) {
+#ifndef HAVE_BG_FILES
+			/* Fake a free since we are n deallocating
+			   state before this.
+			*/
+			if (retry_cnt >= 3)
+				bg_record->state = RM_PARTITION_FREE;
+#endif
 			if ((bg_record->state == RM_PARTITION_FREE)
 			    || (bg_record->state == RM_PARTITION_ERROR))
 				free_cnt++;
+			else if (bg_record->state != RM_PARTITION_DEALLOCATING)
+				bg_free_block(bg_record, 0, 1);
 		}
 		slurm_mutex_unlock(&block_state_mutex);
 		if (free_cnt == track_cnt)
@@ -688,7 +723,7 @@ extern int free_block_list(uint32_t job_id, List track_list,
 	list_iterator_reset(itr);
 	while ((bg_record = list_next(itr))) {
 		/* block no longer exists */
-		if (bg_record->magic == 0)
+		if (bg_record->magic != BLOCK_MAGIC)
 			continue;
 		if (bg_record->state != RM_PARTITION_FREE) {
 			restore = true;
@@ -706,6 +741,7 @@ extern int free_block_list(uint32_t job_id, List track_list,
 	slurm_mutex_unlock(&block_state_mutex);
 	last_bg_update = time(NULL);
 	list_iterator_destroy(itr);
+	list_destroy(track_list);
 
 	return rc;
 }
@@ -1534,7 +1570,7 @@ static int _post_block_free(bg_record_t *bg_record, bool restore)
 #ifdef HAVE_BG_FILES
 	int rc = SLURM_SUCCESS;
 #endif
-	if (bg_record->magic == 0) {
+	if (bg_record->magic != BLOCK_MAGIC) {
 		error("block already destroyed");
 		return SLURM_ERROR;
 	}
@@ -1565,6 +1601,16 @@ static int _post_block_free(bg_record_t *bg_record, bool restore)
 		select_p_update_block(&block_msg);
 		slurm_mutex_lock(&block_state_mutex);
 		return SLURM_SUCCESS;
+	}
+
+	/* A bit of a sanity check to make sure blocks are being
+	   removed out of all the lists.
+	*/
+	if (blocks_are_created) {
+		remove_from_bg_list(bg_lists->booted, bg_record);
+		if (remove_from_bg_list(bg_lists->job_running, bg_record)
+		    == SLURM_SUCCESS)
+			num_unused_cpus += bg_record->cpu_cnt;
 	}
 
 	if (restore)
@@ -1607,6 +1653,50 @@ static int _post_block_free(bg_record_t *bg_record, bool restore)
 		info("_post_block_free: destroyed");
 
 	return SLURM_SUCCESS;
+}
+
+
+static void *_track_freeing_blocks(void *args)
+{
+	List track_list = (List)args;
+	int retry_cnt = 0;
+	int free_cnt = 0, track_cnt = list_count(track_list);
+	ListIterator itr = list_iterator_create(track_list);
+	bg_record_t *bg_record;
+
+	debug("_track_freeing_blocks: Going to free %d", track_cnt);
+	while (retry_cnt < MAX_FREE_RETRIES) {
+		free_cnt = 0;
+		slurm_mutex_lock(&block_state_mutex);
+		update_block_list_state(track_list);
+		list_iterator_reset(itr);
+		/* just incase this changes from the update function */
+		track_cnt = list_count(track_list);
+		while ((bg_record = list_next(itr))) {
+#ifndef HAVE_BG_FILES
+			/* Fake a free since we are n deallocating
+			   state before this.
+			*/
+			if (retry_cnt >= 3)
+				bg_record->state = RM_PARTITION_FREE;
+#endif
+			if ((bg_record->state == RM_PARTITION_FREE)
+			    || (bg_record->state == RM_PARTITION_ERROR))
+				free_cnt++;
+		}
+		slurm_mutex_unlock(&block_state_mutex);
+		if (free_cnt == track_cnt)
+			break;
+		debug("_track_freeing_blocks: freed %d of %d",
+		      free_cnt, track_cnt);
+		sleep(FREE_SLEEP_INTERVAL);
+		retry_cnt++;
+	}
+	debug("_track_freeing_blocks: Freed them all");
+
+	list_iterator_destroy(itr);
+	list_destroy(track_list);
+	return NULL;
 }
 
 /* This should only be called from a thread */

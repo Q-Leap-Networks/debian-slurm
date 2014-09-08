@@ -24,6 +24,12 @@ The intended mode of operation is to initiate the \fBsacctmgr\fR command,
 add, delete, modify, and/or list \fIassociation\fR records then
 commit the changes and exit.
 
+.TP "7"
+\f3Note: \fP\c
+The content's of SLURM's database are maintained in lower case. This may
+result in some \f3sacctmgr\fP output differing from that of other SLURM
+commands.
+
 .SH "OPTIONS"
 
 .TP
@@ -894,6 +900,14 @@ If set, and the QOS also has a UsageThreshold,
 any jobs submitted with this QOS that fall below the UsageThreshold
 will be held until their Fairshare Usage goes above the Threshold.
 .TP
+\fINoReserve\fP
+If set, and using backfill, jobs using this QOS will all be considered
+at the same level within this QOS meaning if a larger, higher priority
+job is unable to run a smaller job will run if possible even if the
+larger higher priority job will be delayed starting.
+NOTE: This could cause starvation on these larger jobs, but if that is
+ok, this flag most likely will increase utilization.
+.TP
 \fIPartitionMaxNodes\fP
 If set jobs using this QOS will be able to
 override the requested partition's MaxNodes limit.
@@ -1126,8 +1140,9 @@ Usage factor when running with this QOS.  This is a float that is
 factored into the time of running jobs.  e.g. if the usagefactor of a
 QOS was 2 for every cpu second a job ran it would count for 2.  Also
 if the usagefactor was .5 every second would only could for half the time.
+Setting this value to 0 will make it so any job running will not add
+time to fairshare or association/qos limits.
 To clear a previously set value use the modify command with a new value of \-1.
-
 
 .SH "SPECIFICATIONS FOR TRANSACTIONS"
 

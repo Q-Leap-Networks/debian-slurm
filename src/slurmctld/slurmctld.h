@@ -463,7 +463,8 @@ struct job_record {
 	time_t pre_sus_time;		/* time job ran prior to last suspend */
 	uint32_t priority;		/* relative priority of the job,
 					 * zero == held (don't initiate) */
-	double priority_fs;		/* cached value used by sprio command */
+	priority_factors_object_t *prio_factors; /* cached value used
+						  * by sprio command */
 	uint32_t qos_id;		/* quality of service id */
 	void *qos_ptr;	                /* pointer to the quality of
 					 * service record used for
@@ -1144,10 +1145,11 @@ extern int kill_running_job_by_node_name(char *node_name);
  *	is set on the step
  * IN job_ptr - pointer to an active job record
  * IN node_ptr - pointer to a node record
+ * IN node_fail - true of removed node has failed
  * RET count of killed job steps
  */
 extern int kill_step_on_node(struct job_record  *job_ptr,
-			     struct node_record *node_ptr);
+			     struct node_record *node_ptr, bool node_fail);
 
 /* list_compare_config - compare two entry from the config list based upon
  *	weight, see common/list.h for documentation */
