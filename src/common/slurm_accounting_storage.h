@@ -92,8 +92,11 @@ typedef struct {
 	uint32_t usage_end; 
 	uint32_t usage_start; 
 	List user_list;		/* list of char * */
-	uint16_t with_usage; 
-	uint16_t with_deleted; 
+	uint16_t with_usage;  /* fill in usage */
+	uint16_t with_deleted; /* return deleted associations */
+	uint16_t without_parent_info; /* don't give me parent id/name */
+	uint16_t without_parent_limits; /* don't give me limits from
+					 * parents */
 } acct_association_cond_t;
 
 typedef struct {
@@ -103,12 +106,13 @@ typedef struct {
 	List organization_list; /* list of char * */
 	acct_qos_level_t qos;	
 	uint16_t with_assocs; 
+	uint16_t with_coords; 
 	uint16_t with_deleted; 
 } acct_account_cond_t;
 
 typedef struct {
 	List assoc_list; /* list of acct_association_rec_t *'s */
-	List coordinators; /* list of char *'s */
+	List coordinators; /* list of acct_coord_rec_t *'s */
 	char *description;
 	char *name;
 	char *organization;
@@ -181,8 +185,8 @@ typedef struct {
 } acct_cluster_rec_t;
 
 typedef struct {
-	char *acct_name;
-	uint16_t sub_acct;
+	char *name;
+	uint16_t direct;
 } acct_coord_rec_t;
 
 typedef struct {

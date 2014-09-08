@@ -1,6 +1,6 @@
 /*****************************************************************************\
  **  federation.c - Library routines for initiating jobs on IBM Federation
- **  $Id: federation.c 13702 2008-03-22 00:13:35Z jette $
+ **  $Id: federation.c 14365 2008-06-26 19:17:00Z jette $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -2550,9 +2550,15 @@ _unpack_libstate(fed_libstate_t *lp, Buf buffer)
 	
 	safe_unpack32(&lp->magic, buffer);
 	safe_unpack32(&node_count, buffer);
-	for(i = 0; i < node_count; i++)
-		(void)_unpack_nodeinfo(NULL, buffer, false);
-	assert(lp->node_count == node_count);
+	for(i = 0; i < node_count; i++) {
+		if (_unpack_nodeinfo(NULL, buffer, false) != SLURM_SUCCESS)
+			goto unpack_error;
+	}
+	if(lp->node_count != node_count) {
+		error("Failed to recover switch state of all nodes (%d of %u)",
+		      lp->node_count, node_count);
+		return SLURM_ERROR;
+	}
 	safe_unpack16(&lp->key_index, buffer);
 	
 	return SLURM_SUCCESS;

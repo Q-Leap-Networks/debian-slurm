@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  sbatch.c - Submit a SLURM batch script.
  *
- *  $Id: sbatch.c 14226 2008-06-10 21:12:53Z jette $
+ *  $Id: sbatch.c 14420 2008-07-02 19:52:49Z jette $
  *****************************************************************************
  *  Copyright (C) 2006-2007 The Regents of the University of California.
  *  Copyright (C) 2008 Lawrence Livermore National Security.
@@ -179,6 +179,7 @@ static int fill_job_desc_from_opts(job_desc_msg_t *desc)
 	desc->task_dist  = opt.distribution;
 	if (opt.plane_size != NO_VAL)
 		desc->plane_size = opt.plane_size;
+	desc->network = opt.network;
 	if (opt.nice)
 		desc->nice = NICE_OFFSET + opt.nice;
 	desc->mail_type = opt.mail_type;

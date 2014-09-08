@@ -1,4 +1,4 @@
-# $Id: slurm.spec 14267 2008-06-16 18:13:01Z jette $
+# $Id: slurm.spec 14366 2008-06-26 20:04:12Z da $
 #
 # Note that this package is not relocatable
 
@@ -16,6 +16,8 @@
 # --without pam      %_without_pam      1    don't require pam-devel RPM to be installed
 # --without readline %_without_readline 1    don't require readline-devel RPM to be installed
 # --with sgijob      %_with_sgijob      1    build proctrack-sgi-job RPM
+# --with mysql       %_with_mysql       1    require mysql support
+# --with postgres    %_with_postgres    1    require postgresql support
 
 #
 #  Allow defining --with and --without build options or %_with and %without in .rpmmacors
@@ -36,6 +38,11 @@
 %slurm_without_opt auth_none
 %slurm_without_opt debug
 
+# These options are only here to force there to be these on the build.  
+# If they are not set they will still be compiled if the packages exist.
+%slurm_without_opt mysql
+%slurm_without_opt postgres
+
 # Build with munge by default on all platforms (disable using --without munge)
 %slurm_with_opt munge
 
@@ -55,23 +62,23 @@
 %slurm_with_opt aix
 %endif
 
-# Build with sgijob on CHAOS systems
-#  (add elan too when it is available)
+# Build with sgijob, elan, and mysql plugins on CHAOS systems
 %if %{?chaos}0
+%slurm_with_opt mysql
 %slurm_with_opt sgijob
 %else
 %slurm_without_opt sgijob
 %endif
 
 Name:    slurm
-Version: 1.3.4
+Version: 1.3.5
 Release: 1%{?dist}
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL 
 Group: System Environment/Base
-Source: slurm-1.3.4.tar.bz2
+Source: slurm-1.3.5.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: https://computing.llnl.gov/linux/slurm/
 
@@ -88,6 +95,14 @@ BuildRequires: readline-devel
 %endif
 %if %{slurm_with openssl}
 BuildRequires: openssl-devel >= 0.9.6 openssl >= 0.9.6
+%endif
+
+%if %{slurm_with mysql}
+BuildRequires: mysql-devel >= 5.0.0
+%endif
+
+%if %{slurm_with postgres}
+BuildRequires: postgresql-devel >= 8.0.0
 %endif
 
 %description 
@@ -158,12 +173,15 @@ Requires: slurm authd
 SLURM authentication module for Brent Chun's authd
 %endif
 
+# This is named munge instead of auth-munge since there are 2 plugins in the
+# package.  auth-munge and crypto-munge
 %if %{slurm_with munge}
 %package munge
 Summary: SLURM authentication and crypto implementation using Munge
 Group: System Environment/Base
 Requires: slurm munge
 BuildRequires: munge-devel munge-libs
+Obsoletes: slurm-auth-munge
 %description munge
 SLURM authentication module for Chris Dunlap's Munge
 %endif
@@ -231,7 +249,7 @@ SLURM process tracking plugin for SGI job containers.
 #############################################################################
 
 %prep
-%setup -n slurm-1.3.4
+%setup -n slurm-1.3.5
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \

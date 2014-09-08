@@ -52,7 +52,7 @@ static void *_print_lock_warn(void *no_data)
 	return NULL;
 }
 
-static void nonblock(int state)
+static void _nonblock(int state)
 {
 	struct termios ttystate;
 
@@ -73,6 +73,20 @@ static void nonblock(int state)
 	//set the terminal attributes.
 	tcsetattr(STDIN_FILENO, TCSANOW, &ttystate);
 
+}
+
+extern void destroy_sacctmgr_assoc(void *object)
+{
+	/* Most of this is pointers to something else that will be
+	 * destroyed elsewhere.
+	 */
+	sacctmgr_assoc_t *sacctmgr_assoc = (sacctmgr_assoc_t *)object;
+	if(sacctmgr_assoc) {
+		if(sacctmgr_assoc->childern) {
+			list_destroy(sacctmgr_assoc->childern);
+		}
+		xfree(sacctmgr_assoc);
+	}
 }
 
 extern int parse_option_end(char *option)
@@ -96,20 +110,26 @@ extern char *strip_quotes(char *option, int *increased)
 	int end = 0;
 	int i=0, start=0;
 	char *meat = NULL;
+	char quote_c = '\0';
+	int quote = 0;
 
 	if(!option)
 		return NULL;
 
 	/* first strip off the ("|')'s */
-	if (option[i] == '\"' || option[i] == '\'')
+	if (option[i] == '\"' || option[i] == '\'') {
+		quote_c = option[i];
+		quote = 1;
 		i++;
+	}
 	start = i;
 
 	while(option[i]) {
-		if(option[i] == '\"' || option[i] == '\'') {
+		if(quote && option[i] == quote_c) {
 			end++;
 			break;
-		}
+		} else if(option[i] == '\"' || option[i] == '\'')
+			option[i] = '`';
 		i++;
 	}
 	end += i;
@@ -202,7 +222,7 @@ extern int commit_check(char *warning)
 		return 1;
 
 	printf("%s (You have 30 seconds to decide)\n", warning);
-	nonblock(1);
+	_nonblock(1);
 	while(c != 'Y' && c != 'y'
 	      && c != 'N' && c != 'n'
 	      && c != '\n') {
@@ -222,7 +242,7 @@ extern int commit_check(char *warning)
 		c = getchar();
 		printf("\n");
 	}
-	nonblock(0);
+	_nonblock(0);
 	if(ans <= 0) 
 		printf("timeout\n");
 	else if(c == 'Y' || c == 'y') 
@@ -542,3 +562,71 @@ extern int get_uint(char *in_value, uint32_t *out_value, char *type)
 	return SLURM_SUCCESS;
 }
 
+extern void sacctmgr_print_coord_list(type_t type, print_field_t *field,
+				      List value)
+{
+	ListIterator itr = NULL;
+	char *print_this = NULL;
+	acct_coord_rec_t *object = NULL;
+	
+	switch(type) {
+	case SLURM_PRINT_HEADLINE:
+		if(print_fields_parsable_print)
+			printf("%s|", field->name);
+		else
+			printf("%-*.*s ", field->len, field->len, field->name);
+		break;
+	case SLURM_PRINT_UNDERSCORE:
+		if(!print_fields_parsable_print)
+			printf("%-*.*s ", field->len, field->len, 
+			       "---------------------------------------");
+		break;
+	case SLURM_PRINT_VALUE:
+		if(!value || !list_count(value)) {
+			if(print_fields_parsable_print)
+				print_this = xstrdup("");
+			else
+				print_this = xstrdup(" ");
+		} else {
+			list_sort(value, (ListCmpF)sort_coord_list);
+			itr = list_iterator_create(value);
+			while((object = list_next(itr))) {
+				if(print_this) 
+					xstrfmtcat(print_this, ",%s", 
+						   object->name);
+				else 
+					print_this = xstrdup(object->name);
+			}
+			list_iterator_destroy(itr);
+		}
+
+		if(print_fields_parsable_print)
+			printf("%s|", print_this);
+		else {
+			if(strlen(print_this) > field->len) 
+				print_this[field->len-1] = '+';
+			
+			printf("%-*.*s ", field->len, field->len, print_this);
+		}
+		xfree(print_this);
+		break;
+	default:
+		if(print_fields_parsable_print)
+			printf("%s|", "n/a");
+		else
+			printf("%-*s ", field->len, "n/a");
+		break;
+	}
+}
+
+extern int sort_coord_list(acct_coord_rec_t *coord_a, acct_coord_rec_t *coord_b)
+{
+	int diff = strcmp(coord_a->name, coord_b->name);
+
+	if (diff < 0)
+		return -1;
+	else if (diff > 0)
+		return 1;
+	
+	return 0;
+}
