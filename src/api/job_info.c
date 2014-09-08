@@ -1,8 +1,8 @@
 /*****************************************************************************\
  *  job_info.c - get/print the job state information of slurm
- *  $Id: job_info.c 14298 2008-06-20 16:45:30Z jette $
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
  *  LLNL-CODE-402394.
@@ -371,13 +371,18 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 		xstrcat(out, "\n   ");
 
 	/****** Line 10 ******/
+	if (job_ptr->job_min_memory & MEM_PER_CPU) {
+		job_ptr->job_min_memory &= (~MEM_PER_CPU);
+		tmp3_ptr = "CPU";
+	} else
+		tmp3_ptr = "Node";
 	convert_num_unit((float)job_ptr->job_min_memory, tmp1, sizeof(tmp1),
 			 UNIT_NONE);
 	convert_num_unit((float)job_ptr->job_min_tmp_disk, tmp2, sizeof(tmp2),
 			 UNIT_NONE);
 	snprintf(tmp_line, sizeof(tmp_line), 
-		"MinMemory=%s MinTmpDisk=%s Features=%s",
-		tmp1, tmp2, job_ptr->features);
+		"MinMemory%s=%s MinTmpDisk=%s Features=%s",
+		tmp3_ptr, tmp1, tmp2, job_ptr->features);
 	xstrcat(out, tmp_line);
 	if (one_liner)
 		xstrcat(out, " ");
@@ -551,8 +556,9 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	return out;
 
 }
+
 /*
- * slurm_load_jobs - issue RPC to get slurm all job configuration  
+ * slurm_load_jobs - issue RPC to get all job configuration  
  *	information if changed since update_time 
  * IN update_time - time of current configuration data
  * IN job_info_msg_pptr - place to store a job configuration pointer
@@ -598,6 +604,48 @@ slurm_load_jobs (time_t update_time, job_info_msg_t **resp,
 	return SLURM_PROTOCOL_SUCCESS ;
 }
 
+/*
+ * slurm_load_job - issue RPC to get job information for one job ID
+ * IN job_info_msg_pptr - place to store a job configuration pointer
+ * IN job_id -  ID of job we want information about 
+ * RET 0 or -1 on error
+ * NOTE: free the response using slurm_free_job_info_msg
+ */
+extern int
+slurm_load_job (job_info_msg_t **resp, uint32_t job_id)
+{
+	int rc;
+	slurm_msg_t resp_msg;
+	slurm_msg_t req_msg;
+	job_id_msg_t req;
+
+	slurm_msg_t_init(&req_msg);
+	slurm_msg_t_init(&resp_msg);
+
+	req.job_id = job_id;
+	req_msg.msg_type = REQUEST_JOB_INFO_SINGLE;
+	req_msg.data     = &req;
+
+	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg) < 0)
+		return SLURM_ERROR;
+
+	switch (resp_msg.msg_type) {
+	case RESPONSE_JOB_INFO:
+		*resp = (job_info_msg_t *)resp_msg.data;
+		break;
+	case RESPONSE_SLURM_RC:
+		rc = ((return_code_msg_t *) resp_msg.data)->return_code;
+		slurm_free_return_code_msg(resp_msg.data);	
+		if (rc) 
+			slurm_seterrno_ret(rc);
+		break;
+	default:
+		slurm_seterrno_ret(SLURM_UNEXPECTED_MSG_ERROR);
+		break;
+	}
+
+	return SLURM_PROTOCOL_SUCCESS ;
+}
 
 /*
  * slurm_pid2jobid - issue RPC to get the slurm job_id given a process_id 

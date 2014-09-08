@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/slurmd/slurmstepd/slurmstepd_job.c - slurmd_job_t routines
- * $Id: slurmstepd_job.c 13755 2008-04-01 19:12:53Z jette $
+ * $Id: slurmstepd_job.c 14546 2008-07-17 21:03:59Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -213,6 +213,7 @@ job_create(launch_tasks_request_msg_t *msg)
 	job->mem_bind_type = msg->mem_bind_type;
 	job->mem_bind = xstrdup(msg->mem_bind);
 	job->ckpt_path = xstrdup(msg->ckpt_path);
+	job->cpus_per_task = msg->cpus_per_task;
 
 	job->env     = _array_copy(msg->envc, msg->env);
 	job->eio     = eio_handle_create();
@@ -325,6 +326,7 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 	
 	job->state   = SLURMSTEPD_STEP_STARTING;
 	job->pwd     = pwd;
+	job->cpus    = msg->cpus_per_node[0];
 	job->ntasks  = 1; 
 	job->nprocs  = msg->nprocs;
 	job->jobid   = msg->job_id;
@@ -364,7 +366,8 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 	job->envtp->mem_bind_type = 0;
 	job->envtp->mem_bind = NULL;
 	job->envtp->ckpt_path = NULL;
-	
+	job->cpus_per_task = msg->cpus_per_node[0];
+
 	srun = srun_info_create(NULL, NULL, NULL);
 
 	list_append(job->sruns, (void *) srun);

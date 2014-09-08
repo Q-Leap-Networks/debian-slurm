@@ -146,7 +146,9 @@ s_p_options_t slurm_conf_options[] = {
 	{"DefaultStoragePort", S_P_UINT32},
 	{"DefaultStorageType", S_P_STRING},
 	{"DefaultStorageUser", S_P_STRING},
-	{"DefMemPerTask", S_P_UINT32},
+	{"DefMemPerCPU", S_P_UINT32},
+	{"DefMemPerNode", S_P_UINT32},
+	{"DefMemPerTask", S_P_UINT32},	/* defunct */
 	{"DisableRootJobs", S_P_BOOLEAN},
 	{"EnforcePartLimits", S_P_BOOLEAN},
 	{"Epilog", S_P_STRING},
@@ -179,14 +181,16 @@ s_p_options_t slurm_conf_options[] = {
 	{"Licenses", S_P_STRING},
 	{"MailProg", S_P_STRING},
 	{"MaxJobCount", S_P_UINT16},
-	{"MaxMemPerTask", S_P_UINT32},
+	{"MaxMemPerCPU", S_P_UINT32},
+	{"MaxMemPerNode", S_P_UINT32},
+	{"MaxMemPerTask", S_P_UINT32},	/* defunct */
 	{"MessageTimeout", S_P_UINT16},
 	{"MinJobAge", S_P_UINT16},
 	{"MpichGmDirectSupport", S_P_LONG, defunct_option},
 	{"MpiDefault", S_P_STRING},
 	{"PluginDir", S_P_STRING},
 	{"PlugStackConfig", S_P_STRING},
-	{"PrivateData", S_P_UINT16},
+	{"PrivateData", S_P_STRING},
 	{"ProctrackType", S_P_STRING},
 	{"Prolog", S_P_STRING},
 	{"PropagatePrioProcess", S_P_UINT16},
@@ -1551,7 +1555,7 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 	s_p_get_string(&default_storage_host, "DefaultStorageHost", hashtbl);
 	s_p_get_string(&default_storage_user, "DefaultStorageUser", hashtbl);
 	s_p_get_string(&default_storage_pass, "DefaultStoragePass", hashtbl);
-	s_p_get_string(&default_storage_loc, "DefaultStorageLoc", hashtbl);
+	s_p_get_string(&default_storage_loc,  "DefaultStorageLoc", hashtbl);
 	s_p_get_uint32(&default_storage_port, "DefaultStoragePort", hashtbl);
 
 	if (!s_p_get_string(&conf->job_credential_private_key,
@@ -1577,8 +1581,11 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 	if (!s_p_get_string(&conf->crypto_type, "CryptoType", hashtbl))
 		 conf->crypto_type = xstrdup(DEFAULT_CRYPTO_TYPE);
 
-	if (!s_p_get_uint32(&conf->def_mem_per_task, "DefMemPerTask", hashtbl))
-		conf->def_mem_per_task = DEFAULT_MEM_PER_TASK;
+	if ((s_p_get_uint32(&conf->def_mem_per_task, "DefMemPerCPU", hashtbl)) ||
+	    (s_p_get_uint32(&conf->def_mem_per_task, "DefMemPerTask", hashtbl)))
+		conf->def_mem_per_task |= MEM_PER_CPU;
+	else if (!s_p_get_uint32(&conf->def_mem_per_task, "DefMemPerNode", hashtbl))
+		conf->def_mem_per_task = DEFAULT_MEM_PER_CPU;
 
 	if (!s_p_get_boolean((bool *) &conf->disable_root_jobs, 
 			     "DisableRootJobs", hashtbl))
@@ -1586,7 +1593,7 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 
 	if (!s_p_get_boolean((bool *) &conf->enforce_part_limits, 
 			     "EnforcePartLimits", hashtbl))
-		conf->disable_root_jobs = DEFAULT_ENFORCE_PART_LIMITS;
+		conf->enforce_part_limits = DEFAULT_ENFORCE_PART_LIMITS;
 
 	s_p_get_string(&conf->epilog, "Epilog", hashtbl);
 
@@ -1640,11 +1647,21 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 			xstrdup(DEFAULT_JOB_ACCT_GATHER_TYPE);
 
 	if (!s_p_get_string(&conf->job_comp_type, "JobCompType", hashtbl)) {
-		if(default_storage_type)
-			conf->job_comp_type =
-				xstrdup_printf("jobcomp/%s",
-					       default_storage_type);
-		else
+		if(default_storage_type) {
+			if(!strcasecmp("slurmdbd", default_storage_type)) {
+				error("Can not use the default storage type "
+				      "specified for jobcomp since there is "
+				      "not slurmdbd type.  We are using %s "
+				      "as the type. To disable this message "
+				      "set JobCompType in your slurm.conf",
+				      DEFAULT_JOB_COMP_TYPE);
+				conf->job_comp_type =
+					xstrdup(DEFAULT_JOB_COMP_TYPE);
+			} else 
+				conf->job_comp_type =
+					xstrdup_printf("jobcomp/%s",
+						       default_storage_type);
+		} else
 			conf->job_comp_type = xstrdup(DEFAULT_JOB_COMP_TYPE);
 	}
 	if (!s_p_get_string(&conf->job_comp_loc, "JobCompLoc", hashtbl)) {
@@ -1708,8 +1725,11 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 	if (!s_p_get_uint16(&conf->max_job_cnt, "MaxJobCount", hashtbl))
 		conf->max_job_cnt = DEFAULT_MAX_JOB_COUNT;
 
-	if (!s_p_get_uint32(&conf->max_mem_per_task, "MaxMemPerTask", hashtbl))
-		conf->max_mem_per_task = DEFAULT_MAX_MEM_PER_TASK;
+	if ((s_p_get_uint32(&conf->max_mem_per_task, "MaxMemPerCPU", hashtbl)) ||
+	    (s_p_get_uint32(&conf->max_mem_per_task, "MaxMemPerTask", hashtbl)))
+		conf->max_mem_per_task |= MEM_PER_CPU;
+	else if (!s_p_get_uint32(&conf->max_mem_per_task, "MaxMemPerNode", hashtbl))
+		conf->max_mem_per_task = DEFAULT_MAX_MEM_PER_CPU;
 
 	if (!s_p_get_uint16(&conf->msg_timeout, "MessageTimeout", hashtbl))
 		conf->msg_timeout = DEFAULT_MSG_TIMEOUT;
@@ -1807,7 +1827,17 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 	    && (!strcmp(conf->proctrack_type,"proctrack/linuxproc")))
 		fatal("proctrack/linuxproc is incompatable with switch/elan");
 
-	s_p_get_uint16(&conf->private_data, "PrivateData", hashtbl);
+	if (s_p_get_string(&temp_str, "PrivateData", hashtbl)) {
+		if (strstr(temp_str, "job"))
+			conf->private_data |= PRIVATE_DATA_JOBS;
+		if (strstr(temp_str, "node"))
+			conf->private_data |= PRIVATE_DATA_NODES;
+		if (strstr(temp_str, "partition"))
+			conf->private_data |= PRIVATE_DATA_PARTITIONS;
+		if (strstr(temp_str, "all"))
+			conf->private_data = 0xffff;
+		xfree(temp_str);
+	}
 
 	s_p_get_string(&conf->prolog, "Prolog", hashtbl);
 

@@ -1,4 +1,4 @@
-.TH "slurm.conf" "5" "June 2008" "slurm.conf 1.3" "Slurm configuration file"
+.TH "slurm.conf" "5" "July 2008" "slurm.conf 1.3" "Slurm configuration file"
 
 .SH "NAME"
 slurm.conf \- Slurm configuration file 
@@ -136,7 +136,7 @@ Name that \fBBackupController\fR should be referred to in
 establishing a communications path. This name will 
 be used as an argument to the gethostbyname() function for 
 identification. For example, "elx0000" might be used to designate 
-the ethernet address for node "lx0000". 
+the Ethernet address for node "lx0000". 
 By default the \fBBackupAddr\fR will be identical in value to 
 \fBBackupController\fR.
 
@@ -182,7 +182,7 @@ Name that \fBControlMachine\fR should be referred to in
 establishing a communications path. This name will 
 be used as an argument to the gethostbyname() function for 
 identification. For example, "elx0000" might be used to designate 
-the ethernet address for node "lx0000". 
+the Ethernet address for node "lx0000". 
 By default the \fBControlAddr\fR will be identical in value to 
 \fBControlMachine\fR.
 
@@ -208,11 +208,25 @@ License (GPL).
 The default value is "crypto/openssl".
 
 .TP
-\fBDefMemPerTask\fR
-Default real memory size available per task in MegaBytes. 
+\fBDefMemPerCPU\fR
+Default real memory size available per allocated CPU in MegaBytes. 
 Used to avoid over\-subscribing memory and causing paging.
-Also see \fBMaxMemPerTask\fR.
+\fBDefMemPerCPU\fR would generally be used if individual processors
+are alocated to jobs (\fBSelectType=select/cons_res\fR). 
 The default value is 0 (unlimited).
+Also see \fBDefMemPerNode\fR and \fBMaxMemPerCPU\fR.
+\fBDefMemPerCPU\fR and \fBDefMemPerNode\fR are mutually exclusive.
+
+.TP
+\fBDefMemPerNode\fR
+Default real memory size available per allocated node in MegaBytes.
+Used to avoid over\-subscribing memory and causing paging.
+\fBDefMemPerNode\fR would generally be used if whole nodes
+are alocated to jobs (\fBSelectType=select/linear\fR) and 
+resources are shared (\fBShared=yes\fR or \fBShared=force\fR).
+The default value is 0 (unlimited).
+Also see \fBDefMemPerCPU\fR and \fBMaxMemPerNode\fR.
+\fBDefMemPerCPU\fR and \fBDefMemPerNode\fR are mutually exclusive.
 
 .TP
 \fBDefaultStorageHost\fR
@@ -431,9 +445,11 @@ Also see \fBDefaultStoragePort\fR.
 \fBJobCompType\fR
 Define the job completion logging mechanism type.
 Acceptable values at present include "jobcomp/none", "jobcomp/filetxt", 
-"jobcomp/mysql", "jobcomp/pgsql", "jobcomp/script"and "jobcomp/slurmdbd".
+"jobcomp/mysql", "jobcomp/pgsql", and "jobcomp/script"".
 The default value is "jobcomp/none", which means that upon job completion 
-the record of the job is purged from the system. 
+the record of the job is purged from the system.  If using the accounting 
+infrastructure this plugin may not be of interest since the information 
+here is redundant.
 The value "jobcomp/filetxt" indicates that a record of the job should be 
 written to a text file specified by the \fBJobCompLoc\fR parameter.
 The value "jobcomp/mysql" indicates that a record of the job should be 
@@ -443,10 +459,6 @@ written to a postgresql database specified by the \fBJobCompLoc\fR parameter.
 The value "jobcomp/script" indicates that a script specified by the 
 \fBJobCompLoc\fR parameter is to be executed with environment variables 
 indicating the job information.
-The value "jobcomp/slurmdbd" indicates that job completion records
-will be written to SlurmDbd, which maintains its own database. See 
-"man slurmdbd" for more information.
-Also see \fBDefaultStorageType\fR.
 
 .TP
 \fBJobCompUser\fR
@@ -525,11 +537,25 @@ of the slurmctld daemon.
 May not exceed 65533.
 
 .TP
-\fBMaxMemPerTask\fR
-Maximum real memory size available per task in MegaBytes. 
+\fBMaxMemPerCPU\fR
+Maximum real memory size available per allocated CPU in MegaBytes. 
 Used to avoid over\-subscribing memory and causing paging.
-Also see \fBDefMemPerTask\fR.
+\fBMaxMemPerCPU\fR would generally be used if individual processors
+are alocated to jobs (\fBSelectType=select/cons_res\fR).
 The default value is 0 (unlimited).
+Also see \fBDefMemPerCPU\fR and \fBMaxMemPerNode\fR.
+\fBMaxMemPerCPU\fR and \fBMaxMemPerNode\fR are mutually exclusive.
+
+.TP
+\fBMaxMemPerNode\fR
+Maximum real memory size available per allocated node in MegaBytes.
+Used to avoid over\-subscribing memory and causing paging.
+\fBMaxMemPerNode\fR would generally be used if whole nodes
+are alocated to jobs (\fBSelectType=select/linear\fR) and
+resources are shared (\fBShared=yes\fR or \fBShared=force\fR).
+The default value is 0 (unlimited).
+Also see \fBDefMemPerNode\fR and \fBMaxMemPerCPU\fR.
+\fBMaxMemPerCPU\fR and \fBMaxMemPerNode\fR are mutually exclusive.
 
 .TP
 \fBMessageTimeout\fR
@@ -576,10 +602,21 @@ on SPANK plugins, see the \fBspank\fR(8) manual.
 
 .TP
 \fBPrivateData\fR
-If non-zero then users are unable to view jobs or job steps belonging 
-to other users (except for SlurmUser or root, who can view all jobs).
-The default value is "0", permitting any user to view any jobs or 
-job steps.
+This controls what type of information is hidden from regular users.
+By default, all information is visible to all users.
+User \fBSlurmUser\fR and root can always view all information.
+Multiple values may be specified with a comma separator.
+Acceptable values include:
+.RS
+.TP
+\fBjobs\fR prevents users from viewing jobs or job steps belonging
+to other users.
+.TP
+\fBnodes\fR prevents users from viewing node state information.
+.TP
+\fBpartitions\fR prevents users from viewing partition state information.
+.RE
+
 
 .TP
 \fBProctrackType\fR
@@ -835,22 +872,26 @@ On single\-core systems, each CPUs will be considered a CPU.
 .TP
 \fBCR_CPU_Memory\fR
 CPUs and memory are consumable resources.
+Setting a value for \fBDefMemPerCPU\fR is strongly recommended.
 .TP
 \fBCR_Core\fR
 Cores are consumable resources.
 .TP
 \fBCR_Core_Memory\fR
 Cores and memory are consumable resources.
+Setting a value for \fBDefMemPerCPU\fR is strongly recommended.
 .TP
 \fBCR_Socket\fR
 Sockets are consumable resources.
 .TP
 \fBCR_Socket_Memory\fR
 Memory and CPUs are consumable resources.
+Setting a value for \fBDefMemPerCPU\fR is strongly recommended.
 .TP
 \fBCR_Memory\fR
 Memory is a consumable resource.
 NOTE: This implies \fIShared=YES\fR or \fIShared=FORCE\fR for all partitions.
+Setting a value for \fBDefMemPerCPU\fR is strongly recommended.
 .RE
 
 .TP
@@ -1405,7 +1446,16 @@ memory nodes if either will satisfy a job's requirements.
 The units of weight are arbitrary, but larger weights 
 should be assigned to nodes with more processors, memory, 
 disk space, higher processor speed, etc.
-Weight is an integer value with a default value of 1.
+Note that if a job allocation request can not be satisfied
+using the nodes with the lowest weight, the set of nodes
+with the next lowest weight is added to the set of nodes
+under consideration for use (repeat as needed for higher 
+weight values). If you absolutely want to minimize the number 
+of higher weight nodes allocated to a job (at a cost of higher 
+scheduling overhead), give each node a distinct \fBWeight\fR 
+value and they will be added to the pool of nodes being 
+considered for scheduling individually.
+The default value is 1.
 .LP
 The "DownNodes=" configuration permits you to mark certain nodes as in a 
 DOWN, DRAIN, FAIL, or FAILING state without altering the permanent 
@@ -1575,7 +1625,7 @@ Possible values for \fBShared\fR are "EXCLUSIVE", "FORCE", "YES", and "NO".
 .RS
 .TP 12
 \fBEXCLUSIVE\fR
-Aallocates entire nodes to jobs even with select/cons_res configured.
+Allocates entire nodes to jobs even with select/cons_res configured.
 This can be used to allocate whole nodes in some partitions 
 and individual processors in other partitions.
 .TP 
@@ -1592,7 +1642,7 @@ with gang scheduling (\fBSchedulerType=sched/gang\fR).
 .TP
 \fBYES\fR
 Make nodes in the partition available for sharing, but provides
-the user with a means of getting dediated resources.
+the user with a means of getting dedicated resources.
 If \fBSelectType=select/cons_res\fR, then resources will be 
 over\-subscribed unless explicitly disabled in the job submit 
 request using the "\-\-exclusive" option.

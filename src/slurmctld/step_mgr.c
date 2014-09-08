@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  step_mgr.c - manage the job step information of slurm
- *  $Id: step_mgr.c 13858 2008-04-11 19:29:30Z jette $
+ *  $Id: step_mgr.c 14548 2008-07-17 22:00:36Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1132,7 +1132,7 @@ extern int pack_ctld_job_step_info_response_msg(uint32_t job_id,
 			    (job_ptr->part_ptr->hidden))
 				continue;
 
-			if (slurmctld_conf.private_data
+			if ((slurmctld_conf.private_data & PRIVATE_DATA_JOBS)
 			&&  (job_ptr->user_id != uid) 
 			&&  !validate_super_user(uid))
 				continue;
@@ -1156,7 +1156,7 @@ extern int pack_ctld_job_step_info_response_msg(uint32_t job_id,
 		    (job_ptr->part_ptr) && 
 		    (job_ptr->part_ptr->hidden))
 			job_ptr = NULL;
-		else if (slurmctld_conf.private_data
+		else if ((slurmctld_conf.private_data & PRIVATE_DATA_JOBS)
 		&&  (job_ptr->user_id != uid) && !validate_super_user(uid))
 			job_ptr = NULL;
 
@@ -1180,7 +1180,7 @@ extern int pack_ctld_job_step_info_response_msg(uint32_t job_id,
 		&&  (job_ptr->part_ptr) 
 		&&  (job_ptr->part_ptr->hidden))
 			job_ptr = NULL;
-		else if (slurmctld_conf.private_data
+		else if ((slurmctld_conf.private_data & PRIVATE_DATA_JOBS)
 		&&  (job_ptr->user_id != uid) && !validate_super_user(uid))
 			job_ptr = NULL;
 

@@ -112,6 +112,109 @@ static void _destroy_cluster_grouping(void *object)
 	}
 }
 
+/* returns number of objects added to list */
+extern int _addto_uid_char_list(List char_list, char *names)
+{
+	int i=0, start=0;
+	char *name = NULL, *tmp_char = NULL;
+	ListIterator itr = NULL;
+	char quote_c = '\0';
+	int quote = 0;
+	int count = 0;
+
+	if(!char_list) {
+		error("No list was given to fill in");
+		return 0;
+	}
+
+	itr = list_iterator_create(char_list);
+	if(names) {
+		if (names[i] == '\"' || names[i] == '\'') {
+			quote_c = names[i];
+			quote = 1;
+			i++;
+		}
+		start = i;
+		while(names[i]) {
+			//info("got %d - %d = %d", i, start, i-start);
+			if(quote && names[i] == quote_c)
+				break;
+			else if (names[i] == '\"' || names[i] == '\'')
+				names[i] = '`';
+			else if(names[i] == ',') {
+				if((i-start) > 0) {
+					name = xmalloc((i-start+1));
+					memcpy(name, names+start, (i-start));
+					//info("got %s %d", name, i-start);
+					if (!isdigit((int) *name)) {
+						struct passwd *pwd;
+						if (!(pwd=getpwnam(name))) {
+							fprintf(stderr, 
+								"Invalid user "
+								"id: %s\n",
+								name);
+							exit(1);
+						}
+						xfree(name);
+						name = xstrdup_printf(
+							"%d", pwd->pw_uid);
+					}
+					
+					while((tmp_char = list_next(itr))) {
+						if(!strcasecmp(tmp_char, name))
+							break;
+					}
+
+					if(!tmp_char) {
+						list_append(char_list, name);
+						count++;
+					} else 
+						xfree(name);
+					list_iterator_reset(itr);
+				}
+				i++;
+				start = i;
+				if(!names[i]) {
+					info("There is a problem with "
+					     "your request.  It appears you "
+					     "have spaces inside your list.");
+					break;
+				}
+			}
+			i++;
+		}
+		if((i-start) > 0) {
+			name = xmalloc((i-start)+1);
+			memcpy(name, names+start, (i-start));
+			
+			if (!isdigit((int) *name)) {
+				struct passwd *pwd;
+				if (!(pwd=getpwnam(name))) {
+					fprintf(stderr, 
+						"Invalid user id: %s\n",
+						name);
+					exit(1);
+				}
+				xfree(name);
+				name = xstrdup_printf("%d", pwd->pw_uid);
+			}
+			
+			while((tmp_char = list_next(itr))) {
+				if(!strcasecmp(tmp_char, name))
+					break;
+			}
+			
+			if(!tmp_char) {
+				list_append(char_list, name);
+				count++;
+			} else 
+				xfree(name);
+		}
+	}	
+	list_iterator_destroy(itr);
+	return count;
+} 
+
 static int _set_cond(int *start, int argc, char *argv[],
 		     acct_job_cond_t *job_cond,
 		     List format_list, List grouping_list)
@@ -121,9 +224,12 @@ static int _set_cond(int *start, int argc, char *argv[],
 	int end = 0;
 	int local_cluster_flag = all_clusters_flag;
 
+	if(!job_cond->cluster_list)
+		job_cond->cluster_list = list_create(slurm_destroy_char);
+
 	for (i=(*start); i<argc; i++) {
 		end = parse_option_end(argv[i]);
-		if (strncasecmp (argv[i], "Set", 3) == 0) {
+		if (!strncasecmp (argv[i], "Set", 3)) {
 			i--;
 			break;
 		} else if(!end && !strncasecmp(argv[i], "where", 5)) {
@@ -131,38 +237,50 @@ static int _set_cond(int *start, int argc, char *argv[],
 		} else if(!end && !strncasecmp(argv[i], "all_clusters", 1)) {
 			local_cluster_flag = 1;
 			continue;
-		} else if(!end) {
-			addto_char_list(job_cond->cluster_list, argv[i]);
+		} else if(!end || !strncasecmp (argv[i], "Clusters", 1)) {
+			slurm_addto_char_list(job_cond->cluster_list, argv[i]);
 			set = 1;
-		} else if (strncasecmp (argv[i], "Accounts", 2) == 0) {
-			addto_char_list(job_cond->acct_list,
+		} else if (!strncasecmp (argv[i], "Accounts", 2)) {
+			if(!job_cond->acct_list)
+				job_cond->acct_list =
+					list_create(slurm_destroy_char);
+			slurm_addto_char_list(job_cond->acct_list,
 					argv[i]+end);
 			set = 1;
-		} else if (strncasecmp (argv[i], "Associations", 2) == 0) {
-			addto_char_list(job_cond->associd_list,
+		} else if (!strncasecmp (argv[i], "Associations", 2)) {
+			if(!job_cond->associd_list)
+				job_cond->associd_list =
+					list_create(slurm_destroy_char);
+			slurm_addto_char_list(job_cond->associd_list,
 					argv[i]+end);
 			set = 1;
-		} else if (strncasecmp (argv[i], "Clusters", 1) == 0) {
-			addto_char_list(job_cond->cluster_list,
+		} else if (!strncasecmp (argv[i], "Clusters", 1)) {
+			slurm_addto_char_list(job_cond->cluster_list,
 					argv[i]+end);
 			set = 1;
-		} else if (strncasecmp (argv[i], "End", 1) == 0) {
+		} else if (!strncasecmp (argv[i], "End", 1)) {
 			job_cond->usage_end = parse_time(argv[i]+end);
 			set = 1;
-		} else if (strncasecmp (argv[i], "Format", 1) == 0) {
+		} else if (!strncasecmp (argv[i], "Format", 1)) {
 			if(format_list)
-				addto_char_list(format_list, argv[i]+end);
-		} else if (strncasecmp (argv[i], "Gid", 2) == 0) {
-			addto_char_list(job_cond->groupid_list,
+				slurm_addto_char_list(format_list, argv[i]+end);
+		} else if (!strncasecmp (argv[i], "Gid", 2)) {
+			if(!job_cond->groupid_list)
+				job_cond->groupid_list =
+					list_create(slurm_destroy_char);
+			slurm_addto_char_list(job_cond->groupid_list,
 					argv[i]+end);
 			set = 1;
-		} else if (strncasecmp (argv[i], "grouping", 2) == 0) {
+		} else if (!strncasecmp (argv[i], "grouping", 2)) {
 			if(grouping_list)
-				addto_char_list(grouping_list, argv[i]+end);
-		} else if (strncasecmp (argv[i], "Jobs", 1) == 0) {
+				slurm_addto_char_list(grouping_list, argv[i]+end);
+		} else if (!strncasecmp (argv[i], "Jobs", 1)) {
 			char *end_char = NULL, *start_char = argv[i]+end;
 			jobacct_selected_step_t *selected_step = NULL;
 			char *dot = NULL;
+			if(!job_cond->step_list)
+				job_cond->step_list =
+					list_create(slurm_destroy_char);
 
 			while ((end_char = strstr(start_char, ",")) 
 			       && start_char) {
@@ -178,33 +296,36 @@ static int _set_cond(int *start, int argc, char *argv[],
 				dot = strstr(start_char, ".");
 				if (dot == NULL) {
 					debug2("No jobstep requested");
-					selected_step->step = NULL;
-					selected_step->stepid = 
-						(uint32_t)NO_VAL;
+					selected_step->stepid = NO_VAL;
 				} else {
 					*dot++ = 0;
-					selected_step->step = xstrdup(dot);
 					selected_step->stepid = atoi(dot);
 				}
-				selected_step->job = xstrdup(start_char);
 				selected_step->jobid = atoi(start_char);
 				start_char = end_char + 1;
 			}
 			
 			set = 1;
-		} else if (strncasecmp (argv[i], "Partitions", 1) == 0) {
-			addto_char_list(job_cond->partition_list,
+		} else if (!strncasecmp (argv[i], "Partitions", 1)) {
+			if(!job_cond->partition_list)
+				job_cond->partition_list =
+					list_create(slurm_destroy_char);
+			slurm_addto_char_list(job_cond->partition_list,
 					argv[i]+end);
 			set = 1;
-		} else if (strncasecmp (argv[i], "Start", 1) == 0) {
+		} else if (!strncasecmp (argv[i], "Start", 1)) {
 			job_cond->usage_start = parse_time(argv[i]+end);
 			set = 1;
-		} else if (strncasecmp (argv[i], "Users", 1) == 0) {
-			addto_char_list(job_cond->user_list,
-					argv[i]+end);
+		} else if (!strncasecmp (argv[i], "Users", 1)) {
+			if(!job_cond->userid_list)
+				job_cond->userid_list =
+					list_create(slurm_destroy_char);
+			_addto_uid_char_list(job_cond->userid_list,
+					     argv[i]+end);
 			set = 1;
 		} else {
-			printf(" Unknown condition: %s\n"
+			exit_code=1;
+			fprintf(stderr, " Unknown condition: %s\n"
 			       "Use keyword set to modify value\n", argv[i]);
 		}
 	}
@@ -230,7 +351,9 @@ static int _setup_print_fields_list(List format_list)
 	char *object = NULL;
 
 	if(!format_list || !list_count(format_list)) {
-		printf(" error: we need a format list to set up the print.\n");
+		exit_code=1;
+		fprintf(stderr, 
+			" We need a format list to set up the print.\n");
 		return SLURM_ERROR;
 	}
 
@@ -276,7 +399,8 @@ static int _setup_print_fields_list(List format_list)
 			field->len = 9;
 			field->print_routine = print_fields_str;
 		} else {
-			printf("Unknown field '%s'\n", object);
+			exit_code=1;
+			fprintf(stderr, " Unknown field '%s'\n", object);
 			xfree(field);
 			continue;
 		}
@@ -296,8 +420,9 @@ static int _setup_grouping_print_fields_list(List grouping_list)
 	uint32_t size = 0;
 
 	if(!grouping_list || !list_count(grouping_list)) {
-		printf(" error: we need a grouping list to "
-		       "set up the print.\n");
+		exit_code=1;
+		fprintf(stderr, " We need a grouping list to "
+			"set up the print.\n");
 		return SLURM_ERROR;
 	}
 
@@ -367,19 +492,12 @@ extern int job_sizes_grouped_by_top_acct(int argc, char *argv[])
 
 	print_fields_list = list_create(destroy_print_field);
 
-	job_cond->acct_list = list_create(slurm_destroy_char);
-	job_cond->associd_list = list_create(slurm_destroy_char);
-	job_cond->cluster_list = list_create(slurm_destroy_char);
-	job_cond->groupid_list = list_create(slurm_destroy_char);
-	job_cond->partition_list = list_create(slurm_destroy_char);
-	job_cond->step_list = list_create(slurm_destroy_char);
-
 	_set_cond(&i, argc, argv, job_cond, NULL, grouping_list);
 
-	addto_char_list(format_list, "Cl,a");
+	slurm_addto_char_list(format_list, "Cl,a");
 
 	if(!list_count(grouping_list)) 
-		addto_char_list(grouping_list, "50,250,500,1000");
+		slurm_addto_char_list(grouping_list, "50,250,500,1000");
 	
 	_setup_print_fields_list(format_list);
 	list_destroy(format_list);
@@ -388,7 +506,8 @@ extern int job_sizes_grouped_by_top_acct(int argc, char *argv[])
 
 	job_list = jobacct_storage_g_get_jobs_cond(db_conn, job_cond);
 	if(!job_list) {
-		printf(" Problem with job query.\n");
+		exit_code=1;
+		fprintf(stderr, " Problem with job query.\n");
 		goto end_it;
 	}
 
@@ -599,13 +718,11 @@ no_assocs:
 				switch(field->type) {
 				case PRINT_JOB_CLUSTER:
 					field->print_routine(
-						SLURM_PRINT_VALUE,
 						field,
 						cluster_group->cluster);
 					break;
 				case PRINT_JOB_ACCOUNT:
-					field->print_routine(SLURM_PRINT_VALUE,
-							     field,
+					field->print_routine(field,
 							     acct_group->acct);
 					break;
 				default:
@@ -619,7 +736,6 @@ no_assocs:
 				switch(field->type) {
 				case PRINT_JOB_SIZE:
 					field->print_routine(
-						SLURM_PRINT_VALUE,
 						field,
 						local_group->cpu_secs,
 						acct_group->cpu_secs);
@@ -630,8 +746,7 @@ no_assocs:
 			}
 			list_iterator_reset(itr2);
 			list_iterator_destroy(local_itr);
-			total_field.print_routine(SLURM_PRINT_VALUE,
-						  &total_field,
+			total_field.print_routine(&total_field,
 						  acct_group->cpu_secs,
 						  cluster_group->cpu_secs);
 			

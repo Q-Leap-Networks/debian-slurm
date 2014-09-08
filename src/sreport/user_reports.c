@@ -129,9 +129,6 @@ static int _set_cond(int *start, int argc, char *argv[],
 		return SLURM_ERROR;
 	}
 
-	if(!user_cond->user_list)
-		user_cond->user_list = list_create(slurm_destroy_char);
-
 	user_cond->with_deleted = 1;
 	user_cond->with_assocs = 1;
 	if(!user_cond->assoc_cond) {
@@ -140,14 +137,13 @@ static int _set_cond(int *start, int argc, char *argv[],
 		user_cond->assoc_cond->with_usage = 1;
 	}
 	assoc_cond = user_cond->assoc_cond;
-	if(!assoc_cond->acct_list)
-		assoc_cond->acct_list = list_create(slurm_destroy_char);
+
 	if(!assoc_cond->cluster_list)
 		assoc_cond->cluster_list = list_create(slurm_destroy_char);
 
 	for (i=(*start); i<argc; i++) {
 		end = parse_option_end(argv[i]);
-		if (strncasecmp (argv[i], "Set", 3) == 0) {
+		if (!strncasecmp (argv[i], "Set", 3)) {
 			i--;
 			break;
 		} else if(!end && !strncasecmp(argv[i], "where", 5)) {
@@ -157,32 +153,37 @@ static int _set_cond(int *start, int argc, char *argv[],
 			continue;
 		} else if (!end && !strncasecmp(argv[i], "group", 1)) {
 			group_accts = 1;
-		} else if(!end) {
-			addto_char_list(user_cond->user_list, argv[i]);
+		} else if(!end
+			  || !strncasecmp (argv[i], "Users", 1)) {
+			if(!assoc_cond->user_list)
+				assoc_cond->user_list = 
+					list_create(slurm_destroy_char);
+			slurm_addto_char_list(assoc_cond->user_list,
+					      argv[i]);
 			set = 1;
-		} else if (strncasecmp (argv[i], "Accounts", 2) == 0) {
-				addto_char_list(assoc_cond->acct_list,
+		} else if (!strncasecmp (argv[i], "Accounts", 2)) {
+			if(!assoc_cond->acct_list)
+				assoc_cond->acct_list =
+					list_create(slurm_destroy_char);
+			slurm_addto_char_list(assoc_cond->acct_list,
 					argv[i]+end);
 			set = 1;
-		} else if (strncasecmp (argv[i], "Clusters", 1) == 0) {
-			addto_char_list(assoc_cond->cluster_list,
+		} else if (!strncasecmp (argv[i], "Clusters", 1)) {
+			slurm_addto_char_list(assoc_cond->cluster_list,
 					argv[i]+end);
 			set = 1;
-		} else if (strncasecmp (argv[i], "End", 1) == 0) {
+		} else if (!strncasecmp (argv[i], "End", 1)) {
 			assoc_cond->usage_end = parse_time(argv[i]+end);
 			set = 1;
-		} else if (strncasecmp (argv[i], "Format", 1) == 0) {
+		} else if (!strncasecmp (argv[i], "Format", 1)) {
 			if(format_list)
-				addto_char_list(format_list, argv[i]+end);
-		} else if (strncasecmp (argv[i], "Start", 1) == 0) {
+				slurm_addto_char_list(format_list, argv[i]+end);
+		} else if (!strncasecmp (argv[i], "Start", 1)) {
 			assoc_cond->usage_start = parse_time(argv[i]+end);
 			set = 1;
-		} else if (strncasecmp (argv[i], "Users", 1) == 0) {
-			addto_char_list(user_cond->user_list,
-					argv[i]+end);
-			set = 1;
 		} else {
-			printf(" Unknown condition: %s\n"
+			exit_code=1;
+			fprintf(stderr, " Unknown condition: %s\n"
 			       "Use keyword set to modify value\n", argv[i]);
 		}
 	}
@@ -207,7 +208,9 @@ static int _setup_print_fields_list(List format_list)
 	char *object = NULL;
 
 	if(!format_list || !list_count(format_list)) {
-		printf(" error: we need a format list to set up the print.\n");
+		exit_code=1;
+		fprintf(stderr, 
+			" We need a format list to set up the print.\n");
 		return SLURM_ERROR;
 	}
 
@@ -246,7 +249,8 @@ static int _setup_print_fields_list(List format_list)
 				field->len = 10;
 			field->print_routine = sreport_print_time;
 		} else {
-			printf("Unknown field '%s'\n", object);
+			exit_code=1;
+			fprintf(stderr, " Unknown field '%s'\n", object);
 			xfree(field);
 			continue;
 		}
@@ -284,14 +288,15 @@ extern int user_top(int argc, char *argv[])
 	_set_cond(&i, argc, argv, user_cond, format_list);
 
 	if(!list_count(format_list)) 
-		addto_char_list(format_list, "Cl,L,P,A,U");
+		slurm_addto_char_list(format_list, "Cl,L,P,A,U");
 
 	_setup_print_fields_list(format_list);
 	list_destroy(format_list);
 
 	user_list = acct_storage_g_get_users(db_conn, user_cond);
 	if(!user_list) {
-		printf(" Problem with user query.\n");
+		exit_code=1;
+		fprintf(stderr, " Problem with user query.\n");
 		goto end_it;
 	}
 
@@ -443,20 +448,17 @@ extern int user_top(int argc, char *argv[])
 					}
 					list_iterator_destroy(itr3);
 					field->print_routine(
-						SLURM_PRINT_VALUE,
 						field,
 						tmp_char);
 					xfree(tmp_char);
 					break;
 				case PRINT_USER_CLUSTER:
 					field->print_routine(
-						SLURM_PRINT_VALUE,
 						field,
 						local_cluster->name);
 					break;
 				case PRINT_USER_LOGIN:
-					field->print_routine(SLURM_PRINT_VALUE,
-							     field,
+					field->print_routine(field,
 							     local_user->name);
 					break;
 				case PRINT_USER_PROPER:
@@ -468,13 +470,11 @@ extern int user_top(int argc, char *argv[])
 							tmp_char =
 								pwd->pw_gecos;
 					}
-					field->print_routine(SLURM_PRINT_VALUE,
-							     field,
+					field->print_routine(field,
 							     tmp_char);
 					break;
 				case PRINT_USER_USED:
 					field->print_routine(
-						SLURM_PRINT_VALUE,
 						field,
 						local_user->cpu_secs,
 						local_cluster->cpu_secs);

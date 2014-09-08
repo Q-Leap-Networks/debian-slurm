@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/common/slurm_cred.h  - SLURM job credential operations
- *  $Id: slurm_cred.h 14148 2008-05-28 23:35:40Z jette $
+ *  $Id: slurm_cred.h 14499 2008-07-11 22:54:48Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -164,6 +164,13 @@ slurm_cred_t slurm_cred_copy(slurm_cred_t cred);
  * (which normally signs creds)
  */
 slurm_cred_t slurm_cred_faker(slurm_cred_arg_t *arg);
+
+/* Free the credential arguments as loaded by either
+ * slurm_cred_get_args() or slurm_cred_verify() */
+void slurm_cred_free_args(slurm_cred_arg_t *arg);
+
+/* Make a copy of the credential's arguements */
+int slurm_cred_get_args(slurm_cred_t cred, slurm_cred_arg_t *arg);
 
 /*
  * Verify the signed credential `cred,' and return cred contents in

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/common/stepd_api.c - slurmstepd message API
- *  $Id: stepd_api.c 14314 2008-06-23 20:57:56Z jette $
+ *  $Id: stepd_api.c 14503 2008-07-14 17:27:40Z jette $
  *****************************************************************************
  *  Copyright (C) 2005-2007 The Regents of the University of California.
  *  Copyright (C) 2008 Lawrence Livermore National Security.
@@ -841,7 +841,7 @@ stepd_stat_jobacct(int fd, stat_jobacct_msg_t *sent, stat_jobacct_msg_t *resp)
 	resp->num_tasks = tasks;
 	return rc;
 rwfail:
-	error("an error occured %d", rc);
+	error("gathering job accounting: %d", rc);
 	jobacct_gather_g_destroy(resp->jobacct);
 	resp->jobacct = NULL;
 	return rc;

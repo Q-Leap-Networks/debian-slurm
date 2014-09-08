@@ -69,6 +69,7 @@ static void _slurm_free_partition_info_members (partition_info_t * part);
 
 static void _free_all_step_info (job_step_info_response_msg_t *msg);
 static void _slurm_free_job_step_info_members (job_step_info_t * msg);
+static void _make_lower(char *change);
 
 /*
  * slurm_msg_t_init - initialize a slurm message 
@@ -110,6 +111,84 @@ extern void slurm_destroy_char(void *object)
 	xfree(tmp);
 }
 
+/* returns number of objects added to list */
+extern int slurm_addto_char_list(List char_list, char *names)
+{
+	int i=0, start=0;
+	char *name = NULL, *tmp_char = NULL;
+	ListIterator itr = NULL;
+	char quote_c = '\0';
+	int quote = 0;
+	int count = 0;
+
+	if(!char_list) {
+		error("No list was given to fill in");
+		return 0;
+	}
+
+	itr = list_iterator_create(char_list);
+	if(names) {
+		if (names[i] == '\"' || names[i] == '\'') {
+			quote_c = names[i];
+			quote = 1;
+			i++;
+		}
+		start = i;
+		while(names[i]) {
+			//info("got %d - %d = %d", i, start, i-start);
+			if(quote && names[i] == quote_c)
+				break;
+			else if (names[i] == '\"' || names[i] == '\'')
+				names[i] = '`';
+			else if(names[i] == ',') {
+				if((i-start) > 0) {
+					name = xmalloc((i-start+1));
+					memcpy(name, names+start, (i-start));
+					//info("got %s %d", name, i-start);
+
+					while((tmp_char = list_next(itr))) {
+						if(!strcasecmp(tmp_char, name))
+							break;
+					}
+
+					if(!tmp_char) {
+						_make_lower(name);
+						list_append(char_list, name);
+						count++;
+					} else 
+						xfree(name);
+					list_iterator_reset(itr);
+				}
+				i++;
+				start = i;
+				if(!names[i]) {
+					info("There is a problem with "
+					     "your request.  It appears you "
+					     "have spaces inside your list.");
+					break;
+				}
+			}
+			i++;
+		}
+		if((i-start) > 0) {
+			name = xmalloc((i-start)+1);
+			memcpy(name, names+start, (i-start));
+			while((tmp_char = list_next(itr))) {
+				if(!strcasecmp(tmp_char, name))
+					break;
+			}
+			
+			if(!tmp_char) {
+				_make_lower(name);
+				list_append(char_list, name);
+				count++;
+			} else 
+				xfree(name);
+		}
+	}	
+	list_iterator_destroy(itr);
+	return count;
+} 
 
 void slurm_free_last_update_msg(last_update_msg_t * msg)
 {
@@ -635,6 +714,30 @@ void inline slurm_free_will_run_response_msg(will_run_response_msg_t *msg)
                 xfree(msg->node_list);
                 xfree(msg);
         }
+}
+
+extern void
+private_data_string(uint16_t private_data, char *str, int str_len)
+{
+	if (str_len > 0)
+		str[0] = '\0';
+	if (str_len < 22) {
+		error("private_data_string: output buffer too small");
+		return;
+	}
+
+	if (private_data & PRIVATE_DATA_JOBS)
+		strcat(str, "jobs");
+	if (private_data & PRIVATE_DATA_NODES) {
+		if (str[0])
+			strcat(str, ",");
+		strcat(str, "nodes");
+	}
+	if (private_data & PRIVATE_DATA_PARTITIONS) {
+		if (str[0])
+			strcat(str, ",");
+		strcat(str, "partitions");
+	}
 }
 
 char *job_state_string(enum job_states inx)
@@ -1254,6 +1357,8 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 		slurm_free_suspend_msg(data);
 		break;
 	case REQUEST_JOB_READY:
+	case REQUEST_JOB_REQUEUE:
+	case REQUEST_JOB_INFO_SINGLE:
 		slurm_free_job_id_msg(data);
 		break;
 	case REQUEST_NODE_SELECT_INFO:
@@ -1371,3 +1476,18 @@ void inline slurm_free_job_notify_msg(job_notify_msg_t * msg)
 		xfree(msg);
 	}
 }
+
+/* make everything lowercase should not be called on static char *'s */
+static void _make_lower(char *change)
+{
+	if(change) {
+		int j = 0;
+		while(change[j]) {
+			char lower = tolower(change[j]);
+			if(lower != change[j])
+				change[j] = lower;
+			j++;
+		}
+	}
+}
+

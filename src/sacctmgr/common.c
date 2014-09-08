@@ -92,14 +92,16 @@ extern void destroy_sacctmgr_assoc(void *object)
 extern int parse_option_end(char *option)
 {
 	int end = 0;
-	
+
 	if(!option)
 		return 0;
 
 	while(option[end] && option[end] != '=')
 		end++;
+
 	if(!option[end])
 		return 0;
+
 	end++;
 	return end;
 }
@@ -142,57 +144,6 @@ extern char *strip_quotes(char *option, int *increased)
 
 	return meat;
 }
-
-extern void addto_char_list(List char_list, char *names)
-{
-	int i=0, start=0;
-	char *name = NULL, *tmp_char = NULL;
-	ListIterator itr = list_iterator_create(char_list);
-
-	if(names && char_list) {
-		if (names[i] == '\"' || names[i] == '\'')
-			i++;
-		start = i;
-		while(names[i]) {
-			if(names[i] == '\"' || names[i] == '\'')
-				break;
-			else if(names[i] == ',') {
-				if((i-start) > 0) {
-					name = xmalloc((i-start+1));
-					memcpy(name, names+start, (i-start));
-
-					while((tmp_char = list_next(itr))) {
-						if(!strcasecmp(tmp_char, name))
-							break;
-					}
-
-					if(!tmp_char)
-						list_append(char_list, name);
-					else 
-						xfree(name);
-					list_iterator_reset(itr);
-				}
-				i++;
-				start = i;
-			}
-			i++;
-		}
-		if((i-start) > 0) {
-			name = xmalloc((i-start)+1);
-			memcpy(name, names+start, (i-start));
-			while((tmp_char = list_next(itr))) {
-				if(!strcasecmp(tmp_char, name))
-					break;
-			}
-			
-			if(!tmp_char)
-				list_append(char_list, name);
-			else 
-				xfree(name);
-		}
-	}	
-	list_iterator_destroy(itr);
-} 
 
 extern int notice_thread_init()
 {
@@ -353,18 +304,21 @@ extern acct_user_rec_t *sacctmgr_find_user(char *name)
 {
 	acct_user_rec_t *user = NULL;
 	acct_user_cond_t user_cond;
+	acct_association_cond_t assoc_cond;
 	List user_list = NULL;
 	
 	if(!name)
 		return NULL;
 	
 	memset(&user_cond, 0, sizeof(acct_user_cond_t));
-	user_cond.user_list = list_create(NULL);
-	list_append(user_cond.user_list, name);
+	memset(&assoc_cond, 0, sizeof(acct_association_cond_t));
+	assoc_cond.user_list = list_create(NULL);
+	list_append(assoc_cond.user_list, name);
+	user_cond.assoc_cond = &assoc_cond;
 
 	user_list = acct_storage_g_get_users(db_conn, &user_cond);
 
-	list_destroy(user_cond.user_list);
+	list_destroy(assoc_cond.user_list);
 
 	if(user_list)
 		user = list_pop(user_list);
@@ -378,18 +332,21 @@ extern acct_account_rec_t *sacctmgr_find_account(char *name)
 {
 	acct_account_rec_t *account = NULL;
 	acct_account_cond_t account_cond;
+	acct_association_cond_t assoc_cond;
 	List account_list = NULL;
 	
 	if(!name)
 		return NULL;
 
 	memset(&account_cond, 0, sizeof(acct_account_cond_t));
-	account_cond.acct_list = list_create(NULL);
-	list_append(account_cond.acct_list, name);
+	memset(&assoc_cond, 0, sizeof(acct_association_cond_t));
+	assoc_cond.acct_list = list_create(NULL);
+	list_append(assoc_cond.acct_list, name);
+	account_cond.assoc_cond = &assoc_cond;
 
 	account_list = acct_storage_g_get_accounts(db_conn, &account_cond);
 	
-	list_destroy(account_cond.acct_list);
+	list_destroy(assoc_cond.acct_list);
 
 	if(account_list)
 		account = list_pop(account_list);
@@ -480,6 +437,27 @@ extern acct_association_rec_t *sacctmgr_find_account_base_assoc_from_list(
 
 	return assoc;
 }
+
+extern acct_qos_rec_t *sacctmgr_find_qos_from_list(
+	List qos_list, char *name)
+{
+	ListIterator itr = NULL;
+	acct_qos_rec_t *qos = NULL;
+	
+	if(!name || !qos_list)
+		return NULL;
+	
+	itr = list_iterator_create(qos_list);
+	while((qos = list_next(itr))) {
+		if(!strcasecmp(name, qos->name))
+			break;
+	}
+	list_iterator_destroy(itr);
+	
+	return qos;
+
+}
+
 extern acct_user_rec_t *sacctmgr_find_user_from_list(
 	List user_list, char *name)
 {
@@ -562,61 +540,198 @@ extern int get_uint(char *in_value, uint32_t *out_value, char *type)
 	return SLURM_SUCCESS;
 }
 
-extern void sacctmgr_print_coord_list(type_t type, print_field_t *field,
-				      List value)
+extern int addto_qos_char_list(List char_list, List qos_list, char *names, 
+			       int option)
+{
+	int i=0, start=0;
+	char *name = NULL, *tmp_char = NULL;
+	ListIterator itr = NULL;
+	char quote_c = '\0';
+	int quote = 0;
+	uint32_t id=0;
+	int count = 0;
+
+	if(!char_list) {
+		error("No list was given to fill in");
+		return 0;
+	}
+
+	if(!qos_list || !list_count(qos_list)) {
+		debug2("No real qos_list");
+		return 0;
+	}
+
+	itr = list_iterator_create(char_list);
+	if(names) {
+		if (names[i] == '\"' || names[i] == '\'') {
+			quote_c = names[i];
+			quote = 1;
+			i++;
+		}
+		start = i;
+		while(names[i]) {
+			if(quote && names[i] == quote_c)
+				break;
+			else if (names[i] == '\"' || names[i] == '\'')
+				names[i] = '`';
+			else if(names[i] == ',') {
+				if((i-start) > 0) {
+					name = xmalloc((i-start+1));
+					memcpy(name, names+start, (i-start));
+					
+					id = str_2_acct_qos(qos_list, name);
+					xfree(name);
+					if(id == NO_VAL) 
+						goto bad;
+
+					if(option) {
+						name = xstrdup_printf(
+							"%c%u", option, id);
+					} else
+						name = xstrdup_printf("%u", id);
+					while((tmp_char = list_next(itr))) {
+						if(!strcasecmp(tmp_char, name))
+							break;
+					}
+					list_iterator_reset(itr);
+
+					if(!tmp_char) {
+						list_append(char_list, name);
+						count++;
+					} else 
+						xfree(name);
+				}
+			bad:
+				i++;
+				start = i;
+				if(!names[i]) {
+					info("There is a problem with "
+					     "your request.  It appears you "
+					     "have spaces inside your list.");
+					break;
+				}
+			}
+			i++;
+		}
+		if((i-start) > 0) {
+			name = xmalloc((i-start)+1);
+			memcpy(name, names+start, (i-start));
+			
+			id = str_2_acct_qos(qos_list, name);
+			xfree(name);
+			if(id == NO_VAL) 
+				goto end_it;
+			
+			if(option) {
+				name = xstrdup_printf(
+					"%c%u", option, id);
+			} else
+				name = xstrdup_printf("%u", id);
+			while((tmp_char = list_next(itr))) {
+				if(!strcasecmp(tmp_char, name))
+					break;
+			}
+			
+			if(!tmp_char) {
+				list_append(char_list, name);
+				count++;
+			} else 
+				xfree(name);
+		}
+	}	
+end_it:
+	list_iterator_destroy(itr);
+	return count;
+} 
+
+extern void sacctmgr_print_coord_list(print_field_t *field, List value)
 {
 	ListIterator itr = NULL;
 	char *print_this = NULL;
 	acct_coord_rec_t *object = NULL;
 	
-	switch(type) {
-	case SLURM_PRINT_HEADLINE:
+	if(!value || !list_count(value)) {
 		if(print_fields_parsable_print)
-			printf("%s|", field->name);
+			print_this = xstrdup("");
 		else
-			printf("%-*.*s ", field->len, field->len, field->name);
-		break;
-	case SLURM_PRINT_UNDERSCORE:
-		if(!print_fields_parsable_print)
-			printf("%-*.*s ", field->len, field->len, 
-			       "---------------------------------------");
-		break;
-	case SLURM_PRINT_VALUE:
-		if(!value || !list_count(value)) {
-			if(print_fields_parsable_print)
-				print_this = xstrdup("");
-			else
-				print_this = xstrdup(" ");
-		} else {
-			list_sort(value, (ListCmpF)sort_coord_list);
-			itr = list_iterator_create(value);
-			while((object = list_next(itr))) {
-				if(print_this) 
-					xstrfmtcat(print_this, ",%s", 
-						   object->name);
-				else 
-					print_this = xstrdup(object->name);
-			}
-			list_iterator_destroy(itr);
+			print_this = xstrdup(" ");
+	} else {
+		list_sort(value, (ListCmpF)sort_coord_list);
+		itr = list_iterator_create(value);
+		while((object = list_next(itr))) {
+			if(print_this) 
+				xstrfmtcat(print_this, ",%s", 
+					   object->name);
+			else 
+				print_this = xstrdup(object->name);
 		}
-
-		if(print_fields_parsable_print)
-			printf("%s|", print_this);
-		else {
-			if(strlen(print_this) > field->len) 
-				print_this[field->len-1] = '+';
-			
-			printf("%-*.*s ", field->len, field->len, print_this);
-		}
-		xfree(print_this);
-		break;
-	default:
-		if(print_fields_parsable_print)
-			printf("%s|", "n/a");
-		else
-			printf("%-*s ", field->len, "n/a");
-		break;
+		list_iterator_destroy(itr);
 	}
+	
+	if(print_fields_parsable_print)
+		printf("%s|", print_this);
+	else {
+		if(strlen(print_this) > field->len) 
+			print_this[field->len-1] = '+';
+		
+		printf("%-*.*s ", field->len, field->len, print_this);
+	}
+	xfree(print_this);
+}
+
+extern void sacctmgr_print_qos_list(print_field_t *field, List qos_list,
+				    List value)
+{
+	char *print_this = NULL;
+
+	print_this = get_qos_complete_str(qos_list, value);
+	
+	if(print_fields_parsable_print)
+		printf("%s|", print_this);
+	else {
+		if(strlen(print_this) > field->len) 
+			print_this[field->len-1] = '+';
+		
+		printf("%-*.*s ", field->len, field->len, print_this);
+	}
+	xfree(print_this);
+}
+
+extern char *get_qos_complete_str(List qos_list, List num_qos_list)
+{
+	List temp_list = NULL;
+	char *temp_char = NULL;
+	char *print_this = NULL;
+	ListIterator itr = NULL;
+
+	if(!qos_list || !list_count(qos_list)
+	   || !num_qos_list || !list_count(num_qos_list))
+		return xstrdup("normal");
+
+	temp_list = list_create(NULL);
+
+	itr = list_iterator_create(num_qos_list);
+	while((temp_char = list_next(itr))) {
+		temp_char = acct_qos_str(qos_list, atoi(temp_char));
+		if(temp_char)
+			list_append(temp_list, temp_char);
+	}
+	list_iterator_destroy(itr);
+	list_sort(temp_list, (ListCmpF)sort_char_list);
+	itr = list_iterator_create(temp_list);
+	while((temp_char = list_next(itr))) {
+		if(print_this) 
+			xstrfmtcat(print_this, ",%s", temp_char);
+		else 
+			print_this = xstrdup(temp_char);
+	}
+	list_iterator_destroy(itr);
+	list_destroy(temp_list);
+
+	if(!print_this)
+		return xstrdup("normal");
+
+	return print_this;
 }
 
 extern int sort_coord_list(acct_coord_rec_t *coord_a, acct_coord_rec_t *coord_b)
@@ -630,3 +745,16 @@ extern int sort_coord_list(acct_coord_rec_t *coord_a, acct_coord_rec_t *coord_b)
 	
 	return 0;
 }
+
+extern int sort_char_list(char *name_a, char *name_b)
+{
+	int diff = strcmp(name_a, name_b);
+
+	if (diff < 0)
+		return -1;
+	else if (diff > 0)
+		return 1;
+	
+	return 0;
+}
+

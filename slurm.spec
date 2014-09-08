@@ -1,4 +1,4 @@
-# $Id: slurm.spec 14366 2008-06-26 20:04:12Z da $
+# $Id: slurm.spec 14616 2008-07-23 22:28:22Z jette $
 #
 # Note that this package is not relocatable
 
@@ -62,7 +62,7 @@
 %slurm_with_opt aix
 %endif
 
-# Build with sgijob, elan, and mysql plugins on CHAOS systems
+# Build with sgijob, and mysql plugins on CHAOS systems
 %if %{?chaos}0
 %slurm_with_opt mysql
 %slurm_with_opt sgijob
@@ -71,14 +71,14 @@
 %endif
 
 Name:    slurm
-Version: 1.3.5
-Release: 1%{?dist}
+Version: 1.3.6
+Release: 1
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL 
 Group: System Environment/Base
-Source: slurm-1.3.5.tar.bz2
+Source: slurm-1.3.6.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: https://computing.llnl.gov/linux/slurm/
 
@@ -249,7 +249,7 @@ SLURM process tracking plugin for SGI job containers.
 #############################################################################
 
 %prep
-%setup -n slurm-1.3.5
+%setup -n slurm-1.3.6
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \
@@ -439,7 +439,6 @@ rm -rf $RPM_BUILD_ROOT
 %{_libdir}/slurm/jobcomp_mysql.so
 %{_libdir}/slurm/jobcomp_pgsql.so
 %{_libdir}/slurm/jobcomp_script.so
-%{_libdir}/slurm/jobcomp_slurmdbd.so
 %{_libdir}/slurm/proctrack_pgid.so
 %{_libdir}/slurm/proctrack_linuxproc.so
 %{_libdir}/slurm/sched_backfill.so

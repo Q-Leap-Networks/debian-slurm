@@ -75,8 +75,7 @@ am_sreport_OBJECTS = sreport.$(OBJEXT) cluster_reports.$(OBJEXT) \
 	user_reports.$(OBJEXT) common.$(OBJEXT)
 sreport_OBJECTS = $(am_sreport_OBJECTS)
 am__DEPENDENCIES_1 =
-sreport_DEPENDENCIES = $(top_builddir)/src/common/libcommon.o \
-	$(top_builddir)/src/api/libslurmhelper.la \
+sreport_DEPENDENCIES = $(top_builddir)/src/api/libslurm.o \
 	$(am__DEPENDENCIES_1)
 sreport_LINK = $(LIBTOOL) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) \
 	--mode=link $(CCLD) $(AM_CFLAGS) $(CFLAGS) $(sreport_LDFLAGS) \
@@ -266,6 +265,7 @@ target_vendor = @target_vendor@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 AUTOMAKE_OPTIONS = foreign
+CLEANFILES = core.*
 INCLUDES = -I$(top_srcdir)
 sreport_SOURCES = \
 	sreport.c sreport.h \
@@ -276,8 +276,7 @@ sreport_SOURCES = \
 	common.c
 
 sreport_LDADD = \
-	$(top_builddir)/src/common/libcommon.o -ldl \
-	$(top_builddir)/src/api/libslurmhelper.la \
+	$(top_builddir)/src/api/libslurm.o -ldl\
 	$(READLINE_LIBS)
 
 sreport_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
@@ -483,6 +482,7 @@ install-strip:
 mostlyclean-generic:
 
 clean-generic:
+	-test -z "$(CLEANFILES)" || rm -f $(CLEANFILES)
 
 distclean-generic:
 	-test -z "$(CONFIG_CLEAN_FILES)" || rm -f $(CONFIG_CLEAN_FILES)
@@ -566,7 +566,7 @@ uninstall-am: uninstall-binPROGRAMS
 
 
 force:
-$(convenience_libs) : force
+$(sreport_LDADD) : force
 	@cd `dirname $@` && $(MAKE) `basename $@`
 # Tell versions [3.59,3.63) of GNU make to not export all variables.
 # Otherwise a system limit (for SysV at least) may be exceeded.

@@ -342,6 +342,9 @@ extern Buf pack_slurmdbd_msg(slurmdbd_msg_t *req)
 	case DBD_GOT_CLUSTERS:
 	case DBD_GOT_JOBS:
 	case DBD_GOT_LIST:
+	case DBD_ADD_QOS:
+	case DBD_GOT_QOS:
+	case DBD_GOT_TXN:
 	case DBD_GOT_USERS:
 	case DBD_UPDATE_SHARES_USED:
 		slurmdbd_pack_list_msg(
@@ -361,10 +364,13 @@ extern Buf pack_slurmdbd_msg(slurmdbd_msg_t *req)
 	case DBD_GET_ASSOCS:
 	case DBD_GET_CLUSTERS:
 	case DBD_GET_JOBS_COND:
+	case DBD_GET_QOS:
+	case DBD_GET_TXN:
 	case DBD_GET_USERS:
 	case DBD_REMOVE_ACCOUNTS:
 	case DBD_REMOVE_ASSOCS:
 	case DBD_REMOVE_CLUSTERS:
+	case DBD_REMOVE_QOS:
 	case DBD_REMOVE_USERS:
 		slurmdbd_pack_cond_msg(
 			req->msg_type, (dbd_cond_msg_t *)req->data, buffer);
@@ -435,7 +441,9 @@ extern Buf pack_slurmdbd_msg(slurmdbd_msg_t *req)
 					     req->data, buffer);
 		break;
 	default:
-		error("slurmdbd: Invalid message type %u", req->msg_type);
+		error("slurmdbd: Invalid message type pack %u(%s)",
+		      req->msg_type,
+		      slurmdbd_msg_type_2_str(req->msg_type));
 		free_buf(buffer);
 		return NULL;
 	}
@@ -458,6 +466,9 @@ extern int unpack_slurmdbd_msg(slurmdbd_msg_t *resp, Buf buffer)
 	case DBD_GOT_CLUSTERS:
 	case DBD_GOT_JOBS:
 	case DBD_GOT_LIST:
+	case DBD_ADD_QOS:
+	case DBD_GOT_QOS:
+	case DBD_GOT_TXN:
 	case DBD_GOT_USERS:
 	case DBD_UPDATE_SHARES_USED:
 		rc = slurmdbd_unpack_list_msg(
@@ -478,9 +489,12 @@ extern int unpack_slurmdbd_msg(slurmdbd_msg_t *resp, Buf buffer)
 	case DBD_GET_CLUSTERS:
 	case DBD_GET_JOBS_COND:
 	case DBD_GET_USERS:
+	case DBD_GET_QOS:
+	case DBD_GET_TXN:
 	case DBD_REMOVE_ACCOUNTS:
 	case DBD_REMOVE_ASSOCS:
 	case DBD_REMOVE_CLUSTERS:
+	case DBD_REMOVE_QOS:
 	case DBD_REMOVE_USERS:
 		rc = slurmdbd_unpack_cond_msg(
 			resp->msg_type, (dbd_cond_msg_t **)&resp->data, buffer);
@@ -555,13 +569,292 @@ extern int unpack_slurmdbd_msg(slurmdbd_msg_t *resp, Buf buffer)
 			(dbd_roll_usage_msg_t **)&resp->data, buffer);
 		break;
 	default:
-		error("slurmdbd: Invalid message type %u", resp->msg_type);
+		error("slurmdbd: Invalid message type unpack %u(%s)",
+		      resp->msg_type,
+		      slurmdbd_msg_type_2_str(resp->msg_type));
 		return SLURM_ERROR;
 	}
 	return rc;
 
 unpack_error:
 	return SLURM_ERROR;
+}
+
+extern slurmdbd_msg_type_t str_2_slurmdbd_msg_type(char *msg_type)
+{
+	if(!msg_type) {
+		return NO_VAL;
+	} else if(!strcasecmp(msg_type, "Init")) {
+		return DBD_INIT;
+	} else if(!strcasecmp(msg_type, "Fini")) {
+		return DBD_FINI;
+	} else if(!strcasecmp(msg_type, "Add Accounts")) {
+		return DBD_ADD_ACCOUNTS;
+	} else if(!strcasecmp(msg_type, "Add Account Coord")) {
+		return DBD_ADD_ACCOUNT_COORDS;
+	} else if(!strcasecmp(msg_type, "Add Associations")) {
+		return DBD_ADD_ASSOCS;
+	} else if(!strcasecmp(msg_type, "Add Clusters")) {
+		return DBD_ADD_CLUSTERS;
+	} else if(!strcasecmp(msg_type, "Add Users")) {
+		return DBD_ADD_USERS;
+	} else if(!strcasecmp(msg_type, "Cluster Processors")) {
+		return DBD_CLUSTER_PROCS;
+	} else if(!strcasecmp(msg_type, "Flush Jobs")) {
+		return DBD_FLUSH_JOBS;
+	} else if(!strcasecmp(msg_type, "Get Accounts")) {
+		return DBD_GET_ACCOUNTS;
+	} else if(!strcasecmp(msg_type, "Get Associations")) {
+		return DBD_GET_ASSOCS;
+	} else if(!strcasecmp(msg_type, "Get Association Usage")) {
+		return DBD_GET_ASSOC_USAGE;
+	} else if(!strcasecmp(msg_type, "Get Clusters")) {
+		return DBD_GET_CLUSTERS;
+	} else if(!strcasecmp(msg_type, "Get Cluster Usage")) {
+		return DBD_GET_CLUSTER_USAGE;
+	} else if(!strcasecmp(msg_type, "Get Jobs")) {
+		return DBD_GET_JOBS;
+	} else if(!strcasecmp(msg_type, "Get Users")) {
+		return DBD_GET_USERS;
+	} else if(!strcasecmp(msg_type, "Got Accounts")) {
+		return DBD_GOT_ACCOUNTS;
+	} else if(!strcasecmp(msg_type, "Got Associations")) {
+		return DBD_GOT_ASSOCS;
+	} else if(!strcasecmp(msg_type, "Got Association Usage")) {
+		return DBD_GOT_ASSOC_USAGE;
+	} else if(!strcasecmp(msg_type, "Got Clusters")) {
+		return DBD_GOT_CLUSTERS;
+	} else if(!strcasecmp(msg_type, "Got Cluster Usage")) {
+		return DBD_GOT_CLUSTER_USAGE;
+	} else if(!strcasecmp(msg_type, "Got Jobs")) {
+		return DBD_GOT_JOBS;
+	} else if(!strcasecmp(msg_type, "Got List")) {
+		return DBD_GOT_LIST;
+	} else if(!strcasecmp(msg_type, "Got Users")) {
+		return DBD_GOT_USERS;
+	} else if(!strcasecmp(msg_type, "Job Complete")) {
+		return DBD_JOB_COMPLETE;
+	} else if(!strcasecmp(msg_type, "Job Start")) {
+		return DBD_JOB_START;
+	} else if(!strcasecmp(msg_type, "Job Start RC")) {
+		return DBD_JOB_START_RC;
+	} else if(!strcasecmp(msg_type, "Job Suspend")) {
+		return DBD_JOB_SUSPEND;
+	} else if(!strcasecmp(msg_type, "Modify Accounts")) {
+		return DBD_MODIFY_ACCOUNTS;
+	} else if(!strcasecmp(msg_type, "Modify Associations")) {
+		return DBD_MODIFY_ASSOCS;
+	} else if(!strcasecmp(msg_type, "Modify Clusters")) {
+		return DBD_MODIFY_CLUSTERS;
+	} else if(!strcasecmp(msg_type, "Modify Users")) {
+		return DBD_MODIFY_USERS;
+	} else if(!strcasecmp(msg_type, "Node State")) {
+		return DBD_NODE_STATE;
+	} else if(!strcasecmp(msg_type, "RC")) {
+		return DBD_RC;
+	} else if(!strcasecmp(msg_type, "Register Cluster")) {
+		return DBD_REGISTER_CTLD;
+	} else if(!strcasecmp(msg_type, "Remove Accounts")) {
+		return DBD_REMOVE_ACCOUNTS;
+	} else if(!strcasecmp(msg_type, "Remove Account Coords")) {
+		return DBD_REMOVE_ACCOUNT_COORDS;
+	} else if(!strcasecmp(msg_type, "Remove Associations")) {
+		return DBD_REMOVE_ASSOCS;
+	} else if(!strcasecmp(msg_type, "Remove Clusters")) {
+		return DBD_REMOVE_CLUSTERS;
+	} else if(!strcasecmp(msg_type, "Remove Users")) {
+		return DBD_REMOVE_USERS;
+	} else if(!strcasecmp(msg_type, "Roll Usage")) {
+		return DBD_ROLL_USAGE;
+	} else if(!strcasecmp(msg_type, "Step Complete")) {
+		return DBD_STEP_COMPLETE;
+	} else if(!strcasecmp(msg_type, "Step Start")) {
+		return DBD_STEP_START;
+	} else if(!strcasecmp(msg_type, "Update Shares Used")) {
+		return DBD_UPDATE_SHARES_USED;
+	} else if(!strcasecmp(msg_type, "Get Jobs Conditional")) {
+		return DBD_GET_JOBS_COND;
+	} else if(!strcasecmp(msg_type, "Get Transations")) {
+		return DBD_GET_TXN;
+	} else if(!strcasecmp(msg_type, "Got Transations")) {
+		return DBD_GOT_TXN;
+	} else if(!strcasecmp(msg_type, "Add QOS")) {
+		return DBD_ADD_QOS;
+	} else if(!strcasecmp(msg_type, "Get QOS")) {
+		return DBD_GET_QOS;
+	} else if(!strcasecmp(msg_type, "Got QOS")) {
+		return DBD_GOT_QOS;
+	} else if(!strcasecmp(msg_type, "Remove QOS")) {
+		return DBD_REMOVE_QOS;
+	} else {
+		return NO_VAL;		
+	}
+
+	return NO_VAL;
+}
+
+extern char *slurmdbd_msg_type_2_str(slurmdbd_msg_type_t msg_type)
+{
+	switch(msg_type) {
+	case DBD_INIT:
+		return "Init";
+		break;
+	case DBD_FINI:
+		return "Fini";
+		break;
+	case DBD_ADD_ACCOUNTS:
+		return "Add Accounts";
+		break;
+	case DBD_ADD_ACCOUNT_COORDS:
+		return "Add Account Coord";
+		break;
+	case DBD_ADD_ASSOCS:
+		return "Add Associations";
+		break;
+	case DBD_ADD_CLUSTERS:
+		return "Add Clusters";
+		break;
+	case DBD_ADD_USERS:
+		return "Add Users";
+		break;
+	case DBD_CLUSTER_PROCS:
+		return "Cluster Processors";
+		break;
+	case DBD_FLUSH_JOBS:
+		return "Flush Jobs";
+		break;
+	case DBD_GET_ACCOUNTS:
+		return "Get Accounts";
+		break;
+	case DBD_GET_ASSOCS:
+		return "Get Associations";
+		break;
+	case DBD_GET_ASSOC_USAGE:
+		return "Get Association Usage";
+		break;
+	case DBD_GET_CLUSTERS:
+		return "Get Clusters";
+		break;
+	case DBD_GET_CLUSTER_USAGE:
+		return "Get Cluster Usage";
+		break;
+	case DBD_GET_JOBS:
+		return "Get Jobs";
+		break;
+	case DBD_GET_USERS:
+		return "Get Users";
+		break;
+	case DBD_GOT_ACCOUNTS:
+		return "Got Accounts";
+		break;
+	case DBD_GOT_ASSOCS:
+		return "Got Associations";
+		break;
+	case DBD_GOT_ASSOC_USAGE:
+		return "Got Association Usage";
+		break;
+	case DBD_GOT_CLUSTERS:
+		return "Got Clusters";
+		break;
+	case DBD_GOT_CLUSTER_USAGE:
+		return "Got Cluster Usage";
+		break;
+	case DBD_GOT_JOBS:
+		return "Got Jobs";
+		break;
+	case DBD_GOT_LIST:
+		return "Got List";
+		break;
+	case DBD_GOT_USERS:
+		return "Got Users";
+		break;
+	case DBD_JOB_COMPLETE:
+		return "Job Complete";
+		break;
+	case DBD_JOB_START:
+		return "Job Start";
+		break;
+	case DBD_JOB_START_RC:
+		return "Job Start RC";
+		break;
+	case DBD_JOB_SUSPEND:
+		return "Job Suspend";
+		break;
+	case DBD_MODIFY_ACCOUNTS:
+		return "Modify Accounts";
+		break;
+	case DBD_MODIFY_ASSOCS:
+		return "Modify Associations";
+		break;
+	case DBD_MODIFY_CLUSTERS:
+		return "Modify Clusters";
+		break;
+	case DBD_MODIFY_USERS:
+		return "Modify Users";
+		break;
+	case DBD_NODE_STATE:
+		return "Node State";
+		break;
+	case DBD_RC:
+		return "RC";
+		break;
+	case DBD_REGISTER_CTLD:
+		return "Register Cluster";
+		break;
+	case DBD_REMOVE_ACCOUNTS:
+		return "Remove Accounts";
+		break;
+	case DBD_REMOVE_ACCOUNT_COORDS:
+		return "Remove Account Coords";
+		break;
+	case DBD_REMOVE_ASSOCS:
+		return "Remove Associations";
+		break;
+	case DBD_REMOVE_CLUSTERS:
+		return "Remove Clusters";
+		break;
+	case DBD_REMOVE_USERS:
+		return "Remove Users";
+		break;
+	case DBD_ROLL_USAGE:
+		return "Roll Usage";
+		break;
+	case DBD_STEP_COMPLETE:
+		return "Step Complete";
+		break;
+	case DBD_STEP_START:
+		return "Step Start";
+		break;
+	case DBD_UPDATE_SHARES_USED:
+		return "Update Shares Used";
+		break;
+	case DBD_GET_JOBS_COND:
+		return "Get Jobs Conditional";
+		break;
+	case DBD_GET_TXN:
+		return "Get Transations";
+		break;
+	case DBD_GOT_TXN:
+		return "Got Transations";
+		break;
+	case DBD_ADD_QOS:
+		return "Add QOS";
+		break;
+	case DBD_GET_QOS:
+		return "Get QOS";
+		break;
+	case DBD_GOT_QOS:
+		return "Got QOS";
+		break;
+	case DBD_REMOVE_QOS:
+		return "Remove QOS";
+		break;
+	default:
+		return "Unknown";
+		break;
+	}
+
+	return "Unknown";
 }
 
 static int _send_init_msg(void)
@@ -724,8 +1017,10 @@ static Buf _recv_msg(void)
 	if (msg_read != sizeof(nw_size))
 		return NULL;
 	msg_size = ntohl(nw_size);
-	if ((msg_size < 2) || (msg_size > 1000000)) {
-		error("slurmdbd: Invalid msg_size (%u)");
+	/* We don't error check for an upper limit here
+  	 * since size could possibly be massive */
+	if (msg_size < 2) {
+		error("slurmdbd: Invalid msg_size (%u)", msg_size);
 		return NULL;
 	}
 
@@ -1248,6 +1543,13 @@ void inline slurmdbd_free_cond_msg(slurmdbd_msg_type_t type,
 		case DBD_GET_JOBS_COND:
 			my_destroy = destroy_acct_job_cond;
 			break;
+		case DBD_GET_QOS:
+		case DBD_REMOVE_QOS:
+			my_destroy = destroy_acct_qos_cond;
+			break;
+		case DBD_GET_TXN:
+			my_destroy = destroy_acct_txn_cond;
+			break;
 		case DBD_GET_USERS:
 		case DBD_REMOVE_USERS:
 			my_destroy = destroy_acct_user_cond;
@@ -1537,9 +1839,16 @@ void inline slurmdbd_pack_cond_msg(slurmdbd_msg_type_t type,
 	case DBD_GET_JOBS_COND:
 		my_function = pack_acct_job_cond;
 		break;
+	case DBD_GET_QOS:
+	case DBD_REMOVE_QOS:
+		my_function = pack_acct_qos_cond;
+		break;
 	case DBD_GET_USERS:
 	case DBD_REMOVE_USERS:
 		my_function = pack_acct_user_cond;
+		break;
+	case DBD_GET_TXN:
+		my_function = pack_acct_txn_cond;
 		break;
 	default:
 		fatal("Unknown pack type");
@@ -1571,9 +1880,16 @@ int inline slurmdbd_unpack_cond_msg(slurmdbd_msg_type_t type,
 	case DBD_GET_JOBS_COND:
 		my_function = unpack_acct_job_cond;
 		break;
+	case DBD_GET_QOS:
+	case DBD_REMOVE_QOS:
+		my_function = unpack_acct_qos_cond;
+		break;
 	case DBD_GET_USERS:
 	case DBD_REMOVE_USERS:
 		my_function = unpack_acct_user_cond;
+		break;
+	case DBD_GET_TXN:
+		my_function = unpack_acct_txn_cond;
 		break;
 	default:
 		fatal("Unknown unpack type");
@@ -1926,9 +2242,16 @@ void inline slurmdbd_pack_list_msg(slurmdbd_msg_type_t type,
 	case DBD_GOT_LIST:
 		my_function = _slurmdbd_packstr;
 		break;
+	case DBD_ADD_QOS:
+	case DBD_GOT_QOS:
+		my_function = pack_acct_qos_rec;
+		break;
 	case DBD_ADD_USERS:
 	case DBD_GOT_USERS:
 		my_function = pack_acct_user_rec;
+		break;
+	case DBD_GOT_TXN:
+		my_function = pack_acct_txn_rec;
 		break;
 	case DBD_UPDATE_SHARES_USED:
 		my_function = pack_update_shares_used;
@@ -1987,10 +2310,19 @@ int inline slurmdbd_unpack_list_msg(slurmdbd_msg_type_t type,
 		my_function = _slurmdbd_unpackstr;
 		my_destroy = slurm_destroy_char;
 		break;
+	case DBD_ADD_QOS:
+	case DBD_GOT_QOS:
+		my_function = unpack_acct_qos_rec;
+		my_destroy = destroy_acct_qos_rec;
+		break;
 	case DBD_ADD_USERS:
 	case DBD_GOT_USERS:
 		my_function = unpack_acct_user_rec;
 		my_destroy = destroy_acct_user_rec;
+		break;
+	case DBD_GOT_TXN:
+		my_function = unpack_acct_txn_rec;
+		my_destroy = destroy_acct_txn_rec;
 		break;
 	case DBD_UPDATE_SHARES_USED:
 		my_function = unpack_update_shares_used;

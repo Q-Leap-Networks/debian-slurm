@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/common/slurm_cred.c - SLURM job credential functions
- *  $Id: slurm_cred.c 14208 2008-06-06 19:15:24Z da $
+ *  $Id: slurm_cred.c 14499 2008-07-11 22:54:48Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008 Lawrence Livermore National Security.
@@ -721,6 +721,40 @@ slurm_cred_faker(slurm_cred_arg_t *arg)
     	
 }
 
+void slurm_cred_free_args(slurm_cred_arg_t *arg)
+{
+	xfree(arg->hostlist);
+	xfree(arg->alloc_lps);
+	arg->alloc_lps_cnt = 0;
+}
+
+int
+slurm_cred_get_args(slurm_cred_t cred, slurm_cred_arg_t *arg)
+{
+	xassert(cred != NULL);
+	xassert(arg  != NULL);
+
+	/*
+	 * set arguments to cred contents
+	 */
+	slurm_mutex_lock(&cred->mutex);
+	arg->jobid    = cred->jobid;
+	arg->stepid   = cred->stepid;
+	arg->uid      = cred->uid;
+	arg->job_mem  = cred->job_mem;
+	arg->task_mem = cred->task_mem;
+	arg->hostlist = xstrdup(cred->nodes);
+	arg->alloc_lps_cnt = cred->alloc_lps_cnt;
+	if (arg->alloc_lps_cnt > 0) {
+		arg->alloc_lps = xmalloc(arg->alloc_lps_cnt * sizeof(uint32_t));
+		memcpy(arg->alloc_lps, cred->alloc_lps, 
+		       arg->alloc_lps_cnt * sizeof(uint32_t));
+	} else
+		arg->alloc_lps = NULL;
+	slurm_mutex_unlock(&cred->mutex);
+
+	return SLURM_SUCCESS;
+}
 
 int
 slurm_cred_verify(slurm_cred_ctx_t ctx, slurm_cred_t cred, 
@@ -775,13 +809,13 @@ slurm_cred_verify(slurm_cred_ctx_t ctx, slurm_cred_t cred,
 	arg->job_mem  = cred->job_mem;
 	arg->task_mem = cred->task_mem;
 	arg->hostlist = xstrdup(cred->nodes);
-        arg->alloc_lps_cnt = cred->alloc_lps_cnt;
-        arg->alloc_lps     = NULL;
-        if (arg->alloc_lps_cnt > 0) {
-                arg->alloc_lps =  xmalloc(arg->alloc_lps_cnt * sizeof(uint32_t));
-                memcpy(arg->alloc_lps, cred->alloc_lps, 
-			arg->alloc_lps_cnt * sizeof(uint32_t));
-        }
+	arg->alloc_lps_cnt = cred->alloc_lps_cnt;
+	if (arg->alloc_lps_cnt > 0) {
+		arg->alloc_lps = xmalloc(arg->alloc_lps_cnt * sizeof(uint32_t));
+		memcpy(arg->alloc_lps, cred->alloc_lps, 
+		       arg->alloc_lps_cnt * sizeof(uint32_t));
+	} else
+		arg->alloc_lps = NULL;
 
 	slurm_mutex_unlock(&cred->mutex);
 

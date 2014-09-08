@@ -65,44 +65,52 @@ typedef struct slurm_acct_storage_ops {
 				    List user_list);
 	int  (*add_coord)          (void *db_conn, uint32_t uid,
 				    List acct_list,
-				    acct_user_cond_t *user_q);
+				    acct_user_cond_t *user_cond);
 	int  (*add_accts)          (void *db_conn, uint32_t uid,
 				    List acct_list);
 	int  (*add_clusters)       (void *db_conn, uint32_t uid,
 				    List cluster_list);
 	int  (*add_associations)   (void *db_conn, uint32_t uid,
 				    List association_list);
+	int  (*add_qos)            (void *db_conn, uint32_t uid,
+				    List qos_list);
 	List (*modify_users)       (void *db_conn, uint32_t uid,
-				    acct_user_cond_t *user_q,
+				    acct_user_cond_t *user_cond,
 				    acct_user_rec_t *user);
 	List (*modify_accts)       (void *db_conn, uint32_t uid,
-				    acct_account_cond_t *acct_q,
+				    acct_account_cond_t *acct_cond,
 				    acct_account_rec_t *acct);
 	List (*modify_clusters)    (void *db_conn, uint32_t uid,
-				    acct_cluster_cond_t *cluster_q,
+				    acct_cluster_cond_t *cluster_cond,
 				    acct_cluster_rec_t *cluster);
 	List (*modify_associations)(void *db_conn, uint32_t uid,
-				    acct_association_cond_t *assoc_q,
+				    acct_association_cond_t *assoc_cond,
 				    acct_association_rec_t *assoc);
 	List (*remove_users)       (void *db_conn, uint32_t uid,
-				    acct_user_cond_t *user_q);
+				    acct_user_cond_t *user_cond);
 	List (*remove_coord)       (void *db_conn, uint32_t uid,
 				    List acct_list,
-				    acct_user_cond_t *user_q);
+				    acct_user_cond_t *user_cond);
 	List (*remove_accts)       (void *db_conn, uint32_t uid,
-				    acct_account_cond_t *acct_q);
+				    acct_account_cond_t *acct_cond);
 	List (*remove_clusters)    (void *db_conn, uint32_t uid,
-				    acct_cluster_cond_t *cluster_q);
+				    acct_cluster_cond_t *cluster_cond);
 	List (*remove_associations)(void *db_conn, uint32_t uid,
-				    acct_association_cond_t *assoc_q);
+				    acct_association_cond_t *assoc_cond);
+	List (*remove_qos)         (void *db_conn, uint32_t uid,
+				    acct_qos_cond_t *qos_cond);
 	List (*get_users)          (void *db_conn,
-				    acct_user_cond_t *user_q);
+				    acct_user_cond_t *user_cond);
 	List (*get_accts)          (void *db_conn,
-				    acct_account_cond_t *acct_q);
+				    acct_account_cond_t *acct_cond);
 	List (*get_clusters)       (void *db_conn,
-				    acct_cluster_cond_t *cluster_q);
+				    acct_cluster_cond_t *cluster_cond);
 	List (*get_associations)   (void *db_conn,
-				    acct_association_cond_t *assoc_q);
+				    acct_association_cond_t *assoc_cond);
+	List (*get_qos)            (void *db_conn,
+				    acct_qos_cond_t *qos_cond);
+	List (*get_txn)            (void *db_conn,
+				    acct_txn_cond_t *txn_cond);
 	int  (*get_usage)          (void *db_conn,
 				    void *acct_assoc,
 				    time_t start, 
@@ -160,7 +168,7 @@ typedef struct slurm_acct_storage_context {
 
 static slurm_acct_storage_context_t * g_acct_storage_context = NULL;
 static pthread_mutex_t		g_acct_storage_context_lock = 
-					PTHREAD_MUTEX_INITIALIZER;
+	PTHREAD_MUTEX_INITIALIZER;
 
 /*
  * Local functions
@@ -190,6 +198,7 @@ static slurm_acct_storage_ops_t * _acct_storage_get_ops(
 		"acct_storage_p_add_accts",
 		"acct_storage_p_add_clusters",
 		"acct_storage_p_add_associations",
+		"acct_storage_p_add_qos",
 		"acct_storage_p_modify_users",
 		"acct_storage_p_modify_accounts",
 		"acct_storage_p_modify_clusters",
@@ -199,10 +208,13 @@ static slurm_acct_storage_ops_t * _acct_storage_get_ops(
 		"acct_storage_p_remove_accts",
 		"acct_storage_p_remove_clusters",
 		"acct_storage_p_remove_associations",
+		"acct_storage_p_remove_qos",
 		"acct_storage_p_get_users",
 		"acct_storage_p_get_accts",
 		"acct_storage_p_get_clusters",
 		"acct_storage_p_get_associations",
+		"acct_storage_p_get_qos",
+		"acct_storage_p_get_txn",
 		"acct_storage_p_get_usage",
 		"acct_storage_p_roll_usage",
 		"clusteracct_storage_p_node_down",
@@ -254,7 +266,7 @@ static slurm_acct_storage_ops_t * _acct_storage_get_ops(
 					      c->acct_storage_type );
 	if ( c->cur_plugin == PLUGIN_INVALID_HANDLE ) {
 		error( "cannot find accounting_storage plugin for %s", 
-			c->acct_storage_type );
+		       c->acct_storage_type );
 		return NULL;
 	}
 
@@ -326,6 +338,8 @@ extern void destroy_acct_user_rec(void *object)
 			list_destroy(acct_user->coord_accts);
 		xfree(acct_user->default_acct);
 		xfree(acct_user->name);
+		if(acct_user->qos_list)
+			list_destroy(acct_user->qos_list);
 		xfree(acct_user);
 	}
 }
@@ -343,6 +357,8 @@ extern void destroy_acct_account_rec(void *object)
 		xfree(acct_account->description);
 		xfree(acct_account->name);
 		xfree(acct_account->organization);
+		if(acct_account->qos_list)
+			list_destroy(acct_account->qos_list);
 		xfree(acct_account);
 	}
 }
@@ -409,6 +425,27 @@ extern void destroy_acct_association_rec(void *object)
 	}
 }
 
+extern void destroy_acct_qos_rec(void *object)
+{
+	acct_qos_rec_t *acct_qos = (acct_qos_rec_t *)object;
+	if(acct_qos) {
+		xfree(acct_qos->description);
+		xfree(acct_qos->name);
+		xfree(acct_qos);
+	}
+}
+
+extern void destroy_acct_txn_rec(void *object)
+{
+	acct_txn_rec_t *acct_txn = (acct_txn_rec_t *)object;
+	if(acct_txn) {
+		xfree(acct_txn->actor_name);
+		xfree(acct_txn->set_info);
+		xfree(acct_txn->where_query);
+		xfree(acct_txn);
+	}
+}
+
 extern void destroy_acct_user_cond(void *object)
 {
 	acct_user_cond_t *acct_user = (acct_user_cond_t *)object;
@@ -417,8 +454,8 @@ extern void destroy_acct_user_cond(void *object)
 		destroy_acct_association_cond(acct_user->assoc_cond);
 		if(acct_user->def_acct_list)
 			list_destroy(acct_user->def_acct_list);
-		if(acct_user->user_list)
-			list_destroy(acct_user->user_list);
+		if(acct_user->qos_list)
+			list_destroy(acct_user->qos_list);
 		xfree(acct_user);
 	}
 }
@@ -429,13 +466,13 @@ extern void destroy_acct_account_cond(void *object)
 		(acct_account_cond_t *)object;
 
 	if(acct_account) {
-		if(acct_account->acct_list)
-			list_destroy(acct_account->acct_list);
 		destroy_acct_association_cond(acct_account->assoc_cond);
 		if(acct_account->description_list)
 			list_destroy(acct_account->description_list);
 		if(acct_account->organization_list)
 			list_destroy(acct_account->organization_list);
+		if(acct_account->qos_list)
+			list_destroy(acct_account->qos_list);
 		xfree(acct_account);
 	}
 }
@@ -491,9 +528,37 @@ extern void destroy_acct_job_cond(void *object)
 			list_destroy(job_cond->partition_list);
 		if(job_cond->step_list)
 			list_destroy(job_cond->step_list);
-		if(job_cond->user_list)
-			list_destroy(job_cond->user_list);
+		if(job_cond->state_list)
+			list_destroy(job_cond->state_list);
+		if(job_cond->userid_list)
+			list_destroy(job_cond->userid_list);
 		xfree(job_cond);
+	}
+}
+
+extern void destroy_acct_qos_cond(void *object)
+{
+	acct_qos_cond_t *acct_qos = (acct_qos_cond_t *)object;
+	if(acct_qos) {
+		if(acct_qos->id_list)
+			list_destroy(acct_qos->id_list);
+		if(acct_qos->name_list)
+			list_destroy(acct_qos->name_list);
+		xfree(acct_qos);
+	}
+}
+
+extern void destroy_acct_txn_cond(void *object)
+{
+	acct_txn_cond_t *acct_txn = (acct_txn_cond_t *)object;
+	if(acct_txn) {
+		if(acct_txn->action_list)
+			list_destroy(acct_txn->action_list);
+		if(acct_txn->actor_list)
+			list_destroy(acct_txn->actor_list);
+		if(acct_txn->id_list)
+			list_destroy(acct_txn->id_list);
+		xfree(acct_txn);
 	}
 }
 
@@ -524,6 +589,7 @@ extern void pack_acct_user_rec(void *in, Buf buffer)
 	uint32_t count = 0;
 	acct_coord_rec_t *coord = NULL;
 	acct_association_rec_t *assoc = NULL;
+	char *tmp_info = NULL;
 
 	if(!object) {
 		pack16(0, buffer);
@@ -531,7 +597,7 @@ extern void pack_acct_user_rec(void *in, Buf buffer)
 		pack32(0, buffer);
 		packnull(buffer);
 		packnull(buffer);
-		pack16(0, buffer);
+		pack32(0, buffer);
 		pack32(0, buffer);
 		return;
 	}
@@ -565,7 +631,20 @@ extern void pack_acct_user_rec(void *in, Buf buffer)
 
 	packstr(object->default_acct, buffer);
 	packstr(object->name, buffer);
-	pack16((uint16_t)object->qos, buffer);
+
+	if(object->qos_list)
+		count = list_count(object->qos_list);
+
+	pack32(count, buffer);
+
+	if(count) {
+		itr = list_iterator_create(object->qos_list);
+		while((tmp_info = list_next(itr))) {
+			packstr(tmp_info, buffer);
+		}
+		list_iterator_destroy(itr);
+	}
+	count = 0;
 	pack32(object->uid, buffer);
 }
 
@@ -577,6 +656,7 @@ extern int unpack_acct_user_rec(void **object, Buf buffer)
 	acct_coord_rec_t *coord = NULL;
 	acct_association_rec_t *assoc = NULL;
 	int i;
+	char *tmp_info = NULL;
 
 	*object = object_ptr;
 	safe_unpack16((uint16_t *)&object_ptr->admin_level, buffer);
@@ -603,7 +683,14 @@ extern int unpack_acct_user_rec(void **object, Buf buffer)
 	}
 	safe_unpackstr_xmalloc(&object_ptr->default_acct, &uint32_tmp, buffer);
 	safe_unpackstr_xmalloc(&object_ptr->name, &uint32_tmp, buffer);
-	safe_unpack16((uint16_t *)&object_ptr->qos, buffer);
+	safe_unpack32(&count, buffer);
+	if(count) {
+		object_ptr->qos_list = list_create(slurm_destroy_char);
+		for(i=0; i<count; i++) {
+			safe_unpackstr_xmalloc(&tmp_info, &uint32_tmp, buffer);
+			list_append(object_ptr->qos_list, tmp_info);
+		}
+	}
 	safe_unpack32(&object_ptr->uid, buffer);
 
 	return SLURM_SUCCESS;
@@ -614,11 +701,11 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
-extern void pack_update_shares_used(void *object, Buf buffer)
+extern void pack_update_shares_used(void *in, Buf buffer)
 {
-	shares_used_object_t *object_ptr = (shares_used_object_t *) object;
-	pack32(object_ptr->assoc_id, buffer);
-	pack32(object_ptr->shares_used, buffer);
+	shares_used_object_t *object = (shares_used_object_t *)in;
+	pack32(object->assoc_id, buffer);
+	pack32(object->shares_used, buffer);
 }
 
 extern int unpack_update_shares_used(void **object, Buf buffer)
@@ -643,6 +730,7 @@ extern void pack_acct_account_rec(void *in, Buf buffer)
 	uint32_t count = 0;
 	acct_account_rec_t *object = (acct_account_rec_t *)in;
 	acct_association_rec_t *assoc = NULL;
+	char *tmp_info = NULL;
 
 	if(!object) {
 		pack32(0, buffer);
@@ -650,7 +738,7 @@ extern void pack_acct_account_rec(void *in, Buf buffer)
 		packnull(buffer);
 		packnull(buffer);
 		packnull(buffer);
-		pack16(0, buffer);
+		pack32(0, buffer);
 		return;
 	}
  
@@ -683,7 +771,20 @@ extern void pack_acct_account_rec(void *in, Buf buffer)
 	packstr(object->description, buffer);
 	packstr(object->name, buffer);
 	packstr(object->organization, buffer);
-	pack16((uint16_t)object->qos, buffer);
+
+	if(object->qos_list)
+		count = list_count(object->qos_list);
+
+	pack32(count, buffer);
+
+	if(count) {
+		itr = list_iterator_create(object->qos_list);
+		while((tmp_info = list_next(itr))) {
+			packstr(tmp_info, buffer);
+		}
+		list_iterator_destroy(itr);
+	}
+	count = 0;
 }
 
 extern int unpack_acct_account_rec(void **object, Buf buffer)
@@ -694,6 +795,7 @@ extern int unpack_acct_account_rec(void **object, Buf buffer)
 	acct_coord_rec_t *coord = NULL;
 	acct_association_rec_t *assoc = NULL;
 	acct_account_rec_t *object_ptr = xmalloc(sizeof(acct_account_rec_t));
+	char *tmp_info = NULL;
 
 	*object = object_ptr;
 
@@ -721,7 +823,14 @@ extern int unpack_acct_account_rec(void **object, Buf buffer)
 	safe_unpackstr_xmalloc(&object_ptr->description, &uint32_tmp, buffer);
 	safe_unpackstr_xmalloc(&object_ptr->name, &uint32_tmp, buffer);
 	safe_unpackstr_xmalloc(&object_ptr->organization, &uint32_tmp, buffer);
-	safe_unpack16((uint16_t *)&object_ptr->qos, buffer);
+	safe_unpack32(&count, buffer);
+	if(count) {
+		object_ptr->qos_list = list_create(slurm_destroy_char);
+		for(i=0; i<count; i++) {
+			safe_unpackstr_xmalloc(&tmp_info, &uint32_tmp, buffer);
+			list_append(object_ptr->qos_list, tmp_info);
+		}
+	}
 
 	return SLURM_SUCCESS;
 
@@ -1031,6 +1140,81 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
+extern void pack_acct_qos_rec(void *in, Buf buffer)
+{
+	acct_qos_rec_t *object = (acct_qos_rec_t *)in;	
+	if(!object) {
+		packnull(buffer);
+		pack32(0, buffer);
+		packnull(buffer);
+		return;
+	}
+	packstr(object->description, buffer);	
+	pack32(object->id, buffer);
+	packstr(object->name, buffer);	
+}
+
+extern int unpack_acct_qos_rec(void **object, Buf buffer)
+{
+	uint32_t uint32_tmp;
+	acct_qos_rec_t *object_ptr = xmalloc(sizeof(acct_qos_rec_t));
+
+	*object = object_ptr;
+	safe_unpackstr_xmalloc(&object_ptr->description, &uint32_tmp, buffer);
+	safe_unpack32(&object_ptr->id, buffer);
+	safe_unpackstr_xmalloc(&object_ptr->name, &uint32_tmp, buffer);
+
+	return SLURM_SUCCESS;
+
+unpack_error:
+	destroy_acct_qos_rec(object_ptr);
+	*object = NULL;
+	return SLURM_ERROR;
+}
+
+extern void pack_acct_txn_rec(void *in, Buf buffer)
+{
+	acct_txn_rec_t *object = (acct_txn_rec_t *)in;	
+	if(!object) {
+		pack16(0, buffer);
+		packnull(buffer);
+		pack32(0, buffer);
+		packnull(buffer);
+		pack_time(0, buffer);
+		packnull(buffer);
+		return;
+	}
+	pack16(object->action, buffer);
+	packstr(object->actor_name, buffer);
+	pack32(object->id, buffer);
+	packstr(object->set_info, buffer);
+	pack_time(object->timestamp, buffer);
+	packstr(object->where_query, buffer);
+}
+
+extern int unpack_acct_txn_rec(void **object, Buf buffer)
+{
+	uint32_t uint32_tmp;
+	acct_txn_rec_t *object_ptr = xmalloc(sizeof(acct_txn_rec_t));
+
+	*object = object_ptr;
+
+	safe_unpack16(&object_ptr->action, buffer);
+	safe_unpackstr_xmalloc(&object_ptr->actor_name, &uint32_tmp, buffer);
+	safe_unpack32(&object_ptr->id, buffer);
+	safe_unpackstr_xmalloc(&object_ptr->set_info, &uint32_tmp, buffer);
+	safe_unpack_time(&object_ptr->timestamp, buffer);
+	safe_unpackstr_xmalloc(&object_ptr->where_query, &uint32_tmp, buffer);
+
+	return SLURM_SUCCESS;
+
+unpack_error:
+	destroy_acct_txn_rec(object_ptr);
+	*object = NULL;
+	return SLURM_ERROR;
+
+}
+
 extern void pack_acct_user_cond(void *in, Buf buffer)
 {
 	char *tmp_info = NULL;
@@ -1042,7 +1226,6 @@ extern void pack_acct_user_cond(void *in, Buf buffer)
 		pack16(0, buffer);
 		pack_acct_association_cond(NULL, buffer);
 		pack32(0, buffer);
-		pack16(0, buffer);
 		pack32(0, buffer);
 		pack16(0, buffer);
 		pack16(0, buffer);
@@ -1068,20 +1251,20 @@ extern void pack_acct_user_cond(void *in, Buf buffer)
 	}
 	count = 0;
 
-	pack16((uint16_t)object->qos, buffer);
-
-	if(object->user_list)
-		count = list_count(object->user_list);
+	if(object->qos_list)
+		count = list_count(object->qos_list);
 
 	pack32(count, buffer);
 
 	if(count) {
-		itr = list_iterator_create(object->user_list);
+		itr = list_iterator_create(object->qos_list);
 		while((tmp_info = list_next(itr))) {
 			packstr(tmp_info, buffer);
 		}
 		list_iterator_destroy(itr);
 	}
+	count = 0;
+
 	pack16((uint16_t)object->with_assocs, buffer);
 	pack16((uint16_t)object->with_coords, buffer);
 	pack16((uint16_t)object->with_deleted, buffer);
@@ -1112,13 +1295,12 @@ extern int unpack_acct_user_cond(void **object, Buf buffer)
 			list_append(object_ptr->def_acct_list, tmp_info);
 		}
 	}
-	safe_unpack16((uint16_t *)&object_ptr->qos, buffer);
 	safe_unpack32(&count, buffer);
 	if(count) {
-		object_ptr->user_list = list_create(slurm_destroy_char);
+		object_ptr->qos_list = list_create(slurm_destroy_char);
 		for(i=0; i<count; i++) {
 			safe_unpackstr_xmalloc(&tmp_info, &uint32_tmp, buffer);
-			list_append(object_ptr->user_list, tmp_info);
+			list_append(object_ptr->qos_list, tmp_info);
 		}
 	}
 	safe_unpack16((uint16_t *)&object_ptr->with_assocs, buffer);
@@ -1141,29 +1323,15 @@ extern void pack_acct_account_cond(void *in, Buf buffer)
 	uint32_t count = 0;
 
 	if(!object) {
-		pack32(0, buffer);
 		pack_acct_association_cond(NULL, buffer);
 		pack32(0, buffer);
 		pack32(0, buffer);
-		pack16(0, buffer);
+		pack32(0, buffer);
 		pack16(0, buffer);
 		pack16(0, buffer);
 		pack16(0, buffer);
 		return;
 	}
- 	if(object->acct_list)
-		count = list_count(object->acct_list);
-
-	pack32(count, buffer);
-
-	if(count) {
-		itr = list_iterator_create(object->acct_list);
-		while((tmp_info = list_next(itr))) {
-			packstr(tmp_info, buffer);
-		}
-		list_iterator_destroy(itr);
-	}
-
 	pack_acct_association_cond(object->assoc_cond, buffer);
 	
 	count = 0;
@@ -1192,8 +1360,23 @@ extern void pack_acct_account_cond(void *in, Buf buffer)
 			packstr(tmp_info, buffer);
 		}
 		list_iterator_destroy(itr);
+		count = 0;
 	}
-	pack16((uint16_t)object->qos, buffer);
+
+	if(object->qos_list)
+		count = list_count(object->qos_list);
+
+	pack32(count, buffer);
+
+	if(count) {
+		itr = list_iterator_create(object->qos_list);
+		while((tmp_info = list_next(itr))) {
+			packstr(tmp_info, buffer);
+		}
+		list_iterator_destroy(itr);
+		count = 0;
+	}
+
 	pack16((uint16_t)object->with_assocs, buffer);
 	pack16((uint16_t)object->with_coords, buffer);
 	pack16((uint16_t)object->with_deleted, buffer);
@@ -1208,15 +1391,6 @@ extern int unpack_acct_account_cond(void **object, Buf buffer)
 	char *tmp_info = NULL;
 
 	*object = object_ptr;
-	safe_unpack32(&count, buffer);
-	if(count) {
-		object_ptr->acct_list = list_create(slurm_destroy_char);
-		for(i=0; i<count; i++) {
-			safe_unpackstr_xmalloc(&tmp_info, &uint32_tmp, buffer);
-			list_append(object_ptr->acct_list, tmp_info);
-		}
-	}
-
 	if(unpack_acct_association_cond((void **)&object_ptr->assoc_cond,
 					buffer) == SLURM_ERROR)
 		goto unpack_error;
@@ -1237,7 +1411,14 @@ extern int unpack_acct_account_cond(void **object, Buf buffer)
 			list_append(object_ptr->organization_list, tmp_info);
 		}
 	}
-	safe_unpack16((uint16_t *)&object_ptr->qos, buffer);
+	safe_unpack32(&count, buffer);
+	if(count) {
+		object_ptr->qos_list = list_create(slurm_destroy_char);
+		for(i=0; i<count; i++) {
+			safe_unpackstr_xmalloc(&tmp_info, &uint32_tmp, buffer);
+			list_append(object_ptr->qos_list, tmp_info);
+		}
+	}
 	safe_unpack16((uint16_t *)&object_ptr->with_assocs, buffer);
 	safe_unpack16((uint16_t *)&object_ptr->with_coords, buffer);
 	safe_unpack16((uint16_t *)&object_ptr->with_deleted, buffer);
@@ -1520,12 +1701,15 @@ extern void pack_acct_job_cond(void *in, Buf buffer)
 		pack32(0, buffer);
 		pack32(0, buffer);
 		pack16(0, buffer);
+		pack16(0, buffer);
 		pack32(0, buffer);
 		pack32(0, buffer);
 		pack32(0, buffer);
 		pack32(0, buffer);
 		pack32(0, buffer);
 		pack32(0, buffer);
+		pack32(0, buffer);
+		pack16(0, buffer);
 		return;
 	}
 
@@ -1567,7 +1751,7 @@ extern void pack_acct_job_cond(void *in, Buf buffer)
 	}
 	count = 0;
 
-	pack16(object->completion, buffer);
+	pack16(object->duplicates, buffer);
 
 	if(object->groupid_list)
 		count = list_count(object->groupid_list);
@@ -1607,21 +1791,36 @@ extern void pack_acct_job_cond(void *in, Buf buffer)
 	}
 	count = 0;
 
-	pack32(object->usage_end, buffer);
-	pack32(object->usage_start, buffer);
-
-	if(object->user_list)
-		count = list_count(object->user_list);
+	if(object->state_list)
+		count = list_count(object->state_list);
 	
 	pack32(count, buffer);
 	if(count) {
-		itr = list_iterator_create(object->user_list);
+		itr = list_iterator_create(object->state_list);
 		while((tmp_info = list_next(itr))) {
 			packstr(tmp_info, buffer);
 		}
 		list_iterator_destroy(itr);
 	}
 	count = 0;
+
+	pack32(object->usage_end, buffer);
+	pack32(object->usage_start, buffer);
+
+	if(object->userid_list)
+		count = list_count(object->userid_list);
+	
+	pack32(count, buffer);
+	if(count) {
+		itr = list_iterator_create(object->userid_list);
+		while((tmp_info = list_next(itr))) {
+			packstr(tmp_info, buffer);
+		}
+		list_iterator_destroy(itr);
+	}
+	count = 0;
+
+	pack16(object->without_steps, buffer);
 }
 
 extern int unpack_acct_job_cond(void **object, Buf buffer)
@@ -1661,7 +1860,7 @@ extern int unpack_acct_job_cond(void **object, Buf buffer)
 		}
 	}
 
-	safe_unpack16(&object_ptr->completion, buffer);
+	safe_unpack16(&object_ptr->duplicates, buffer);
 
 	safe_unpack32(&count, buffer);
 	if(count) {
@@ -1692,22 +1891,242 @@ extern int unpack_acct_job_cond(void **object, Buf buffer)
 		}
 	}
 
+	safe_unpack32(&count, buffer);
+	if(count) {
+		object_ptr->state_list = list_create(slurm_destroy_char);
+		for(i=0; i<count; i++) {
+			safe_unpackstr_xmalloc(&tmp_info, &uint32_tmp, buffer);
+			list_append(object_ptr->state_list, tmp_info);
+		}
+	}
+	
 	safe_unpack32(&object_ptr->usage_end, buffer);
 	safe_unpack32(&object_ptr->usage_start, buffer);
 
 	safe_unpack32(&count, buffer);
 	if(count) {
-		object_ptr->user_list = list_create(slurm_destroy_char);
+		object_ptr->userid_list = list_create(slurm_destroy_char);
 		for(i=0; i<count; i++) {
 			safe_unpackstr_xmalloc(&tmp_info, &uint32_tmp, buffer);
-			list_append(object_ptr->user_list, tmp_info);
+			list_append(object_ptr->userid_list, tmp_info);
 		}
 	}
+
+	safe_unpack16(&object_ptr->without_steps, buffer);
 
 	return SLURM_SUCCESS;
 
 unpack_error:
 	destroy_acct_job_cond(object_ptr);
+	*object = NULL;
+	return SLURM_ERROR;
+}
+
+extern void pack_acct_qos_cond(void *in, Buf buffer)
+{
+	uint32_t count = 0;
+	char *tmp_info = NULL;
+	ListIterator itr = NULL;
+	acct_qos_cond_t *object = (acct_qos_cond_t *)in;
+
+	if(!object) {
+		pack32(0, buffer);
+		pack32(0, buffer);
+		pack32(0, buffer);
+		pack16(0, buffer);
+		return;
+	}
+
+	if(object->description_list)
+		count = list_count(object->description_list);
+	
+	pack32(count, buffer);
+	if(count) {
+		itr = list_iterator_create(object->description_list);
+		while((tmp_info = list_next(itr))) {
+			packstr(tmp_info, buffer);
+		}
+		list_iterator_destroy(itr);
+	}
+	count = 0;
+
+	if(object->id_list)
+		count = list_count(object->id_list);
+	
+	pack32(count, buffer);
+	if(count) {
+		itr = list_iterator_create(object->id_list);
+		while((tmp_info = list_next(itr))) {
+			packstr(tmp_info, buffer);
+		}
+		list_iterator_destroy(itr);
+	}
+	count = 0;
+
+	if(object->name_list) 
+		count = list_count(object->name_list);
+
+	pack32(count, buffer);
+	if(count) {
+		itr = list_iterator_create(object->name_list);
+		while((tmp_info = list_next(itr))) {
+			packstr(tmp_info, buffer);
+		}
+		list_iterator_destroy(itr); 
+	}
+	count = 0;
+
+	pack16(object->with_deleted, buffer);
+}
+
+extern int unpack_acct_qos_cond(void **object, Buf buffer)
+{
+	uint32_t uint32_tmp;
+	int i;
+	uint32_t count;
+	acct_qos_cond_t *object_ptr = xmalloc(sizeof(acct_qos_cond_t));
+	char *tmp_info = NULL;
+
+	*object = object_ptr;
+
+	safe_unpack32(&count, buffer);
+	if(count) {
+		object_ptr->description_list = list_create(slurm_destroy_char);
+		for(i=0; i<count; i++) {
+			safe_unpackstr_xmalloc(&tmp_info, &uint32_tmp, buffer);
+			list_append(object_ptr->description_list, tmp_info);
+		}
+	}
+
+	safe_unpack32(&count, buffer);
+	if(count) {
+		object_ptr->id_list = list_create(slurm_destroy_char);
+		for(i=0; i<count; i++) {
+			safe_unpackstr_xmalloc(&tmp_info, &uint32_tmp, buffer);
+			list_append(object_ptr->id_list, tmp_info);
+		}
+	}
+
+	safe_unpack32(&count, buffer);
+	if(count) {
+		object_ptr->name_list = list_create(slurm_destroy_char);
+		for(i=0; i<count; i++) {
+			safe_unpackstr_xmalloc(&tmp_info, &uint32_tmp, buffer);
+			list_append(object_ptr->name_list, tmp_info);
+		}
+	}
+
+	safe_unpack16(&object_ptr->with_deleted, buffer);
+	return SLURM_SUCCESS;
+
+unpack_error:
+	destroy_acct_qos_cond(object_ptr);
+	*object = NULL;
+	return SLURM_ERROR;
+}
+
+extern void pack_acct_txn_cond(void *in, Buf buffer)
+{
+	uint32_t count = 0;
+	char *tmp_info = NULL;
+	ListIterator itr = NULL;
+	acct_txn_cond_t *object = (acct_txn_cond_t *)in;
+
+	if(!object) {
+		pack32(0, buffer);
+		pack32(0, buffer);
+		pack32(0, buffer);
+		pack32(0, buffer);
+		pack32(0, buffer);
+		return;
+	}
+	if(object->action_list)
+		count = list_count(object->action_list);
+	
+	pack32(count, buffer);
+	if(count) {
+		itr = list_iterator_create(object->action_list);
+		while((tmp_info = list_next(itr))) {
+			packstr(tmp_info, buffer);
+		}
+		list_iterator_destroy(itr);
+	}
+	count = 0;
+
+	if(object->actor_list) 
+		count = list_count(object->actor_list);
+
+	pack32(count, buffer);
+	if(count) {
+		itr = list_iterator_create(object->actor_list);
+		while((tmp_info = list_next(itr))) {
+			packstr(tmp_info, buffer);
+		}
+		list_iterator_destroy(itr); 
+	}
+	count = 0;
+
+	if(object->id_list)
+		count = list_count(object->id_list);
+	 
+	pack32(count, buffer);
+	if(count) {
+		itr = list_iterator_create(object->id_list);
+		while((tmp_info = list_next(itr))) {
+			packstr(tmp_info, buffer);
+		} 
+		list_iterator_destroy(itr);
+	}
+	count = 0;
+
+	pack32(object->time_end, buffer);
+	pack32(object->time_start, buffer);
+
+}
+
+extern int unpack_acct_txn_cond(void **object, Buf buffer)
+{
+	uint32_t uint32_tmp;
+	int i;
+	uint32_t count;
+	acct_txn_cond_t *object_ptr = xmalloc(sizeof(acct_txn_cond_t));
+	char *tmp_info = NULL;
+
+	*object = object_ptr;
+	safe_unpack32(&count, buffer);
+	if(count) {
+		object_ptr->action_list = list_create(slurm_destroy_char);
+		for(i=0; i<count; i++) {
+			safe_unpackstr_xmalloc(&tmp_info, &uint32_tmp, buffer);
+			list_append(object_ptr->action_list, tmp_info);
+		}
+	}
+
+	safe_unpack32(&count, buffer);
+	if(count) {
+		object_ptr->actor_list = list_create(slurm_destroy_char);
+		for(i=0; i<count; i++) {
+			safe_unpackstr_xmalloc(&tmp_info, &uint32_tmp, buffer);
+			list_append(object_ptr->actor_list, tmp_info);
+		}
+	}
+
+	safe_unpack32(&count, buffer);
+	if(count) {
+		object_ptr->id_list = list_create(slurm_destroy_char);
+		for(i=0; i<count; i++) {
+			safe_unpackstr_xmalloc(&tmp_info, &uint32_tmp, buffer);
+			list_append(object_ptr->id_list, tmp_info);
+		}
+	}
+
+	safe_unpack32(&object_ptr->time_end, buffer);
+	safe_unpack32(&object_ptr->time_start, buffer);
+	
+	return SLURM_SUCCESS;
+
+unpack_error:
+	destroy_acct_txn_cond(object_ptr);
 	*object = NULL;
 	return SLURM_ERROR;
 }
@@ -1732,6 +2151,10 @@ extern void pack_acct_update_object(acct_update_object_t *object, Buf buffer)
 	case ACCT_MODIFY_ASSOC:
 	case ACCT_REMOVE_ASSOC:
 		my_function = pack_acct_association_rec;
+		break;
+	case ACCT_ADD_QOS:
+	case ACCT_REMOVE_QOS:
+		my_function = pack_acct_qos_rec;
 		break;
 	case ACCT_UPDATE_NOTSET:
 	default:
@@ -1779,6 +2202,11 @@ extern int unpack_acct_update_object(acct_update_object_t **object, Buf buffer)
 		my_function = unpack_acct_association_rec;
 		my_destroy = destroy_acct_association_rec;
 		break;
+	case ACCT_ADD_QOS:
+	case ACCT_REMOVE_QOS:
+		my_function = unpack_acct_qos_rec;
+		my_destroy = destroy_acct_qos_rec;
+		break;
 	case ACCT_UPDATE_NOTSET:
 	default:
 		error("unknown type set in update_object: %d",
@@ -1803,46 +2231,55 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
-extern char *acct_qos_str(acct_qos_level_t level)
+extern char *acct_qos_str(List qos_list, uint32_t level)
 {
-	switch(level) {
-	case ACCT_QOS_NOTSET:
-		return "Not Set";
-		break;
-	case ACCT_QOS_NORMAL:
-		return "Normal";
-		break;
-	case ACCT_QOS_EXPEDITE:
-		return "Expedite";
-		break;
-	case ACCT_QOS_STANDBY:
-		return "Standby";
-		break;
-	case ACCT_QOS_EXEMPT:
-		return "Exempt";
-		break;
-	default:
-		return "Unknown";
-		break;
+	ListIterator itr = NULL;
+	acct_qos_rec_t *qos = NULL;
+	
+	if(!qos_list) {
+		error("We need a qos list to translate");
+		return NULL;
+	} else if(!level) {
+		debug2("no level");
+		return "None";
 	}
-	return "Unknown";
+
+	itr = list_iterator_create(qos_list);
+	while((qos = list_next(itr))) {
+		if(level == qos->id)
+			break;
+	}
+	list_iterator_destroy(itr);
+	if(qos)
+		return qos->name;
+	else
+		return NULL;
 }
 
-extern acct_qos_level_t str_2_acct_qos(char *level)
+extern uint32_t str_2_acct_qos(List qos_list, char *level)
 {
-	if(!level) {
-		return ACCT_QOS_NOTSET;
-	} else if(!strncasecmp(level, "Normal", 1)) {
-		return ACCT_QOS_NORMAL;
-	} else if(!strncasecmp(level, "Expedite", 3)) {
-		return ACCT_QOS_EXPEDITE;
-	} else if(!strncasecmp(level, "Standby", 1)) {
-		return ACCT_QOS_STANDBY;
-	} else if(!strncasecmp(level, "Exempt", 3)) {
-		return ACCT_QOS_EXEMPT;
-	} else {
-		return ACCT_QOS_NOTSET;		
+	ListIterator itr = NULL;
+	acct_qos_rec_t *qos = NULL;
+	
+	if(!qos_list) {
+		error("We need a qos list to translate");
+		return NO_VAL;
+	} else if(!level) {
+		debug2("no level");
+		return 0;
 	}
+
+
+	itr = list_iterator_create(qos_list);
+	while((qos = list_next(itr))) {
+		if(!strncasecmp(level, qos->name, strlen(level)))
+			break;
+	}
+	list_iterator_destroy(itr);
+	if(qos)
+		return qos->id;
+	else
+		return NO_VAL;
 }
 
 extern char *acct_admin_level_str(acct_admin_level_t level)
@@ -1892,12 +2329,12 @@ extern void log_assoc_rec(acct_association_rec_t *assoc_ptr)
 		debug("  fairshare                 : NONE");
 	else
 		debug("  fairshare                 : %u",
-		       assoc_ptr->fairshare);
+		      assoc_ptr->fairshare);
 	if(assoc_ptr->max_cpu_secs_per_job == INFINITE)
 		debug("  max_cpu_secs_per_job      : NONE");
 	else
 		debug("  max_cpu_secs_per_job      : %d",
-		     assoc_ptr->max_cpu_secs_per_job);
+		      assoc_ptr->max_cpu_secs_per_job);
 	if(assoc_ptr->max_jobs == INFINITE)
 		debug("  max_jobs                  : NONE");
 	else
@@ -1906,12 +2343,12 @@ extern void log_assoc_rec(acct_association_rec_t *assoc_ptr)
 		debug("  max_nodes_per_job         : NONE");
 	else
 		debug("  max_nodes_per_job         : %d",
-		     assoc_ptr->max_nodes_per_job);
+		      assoc_ptr->max_nodes_per_job);
 	if(assoc_ptr->max_wall_duration_per_job == INFINITE)
 		debug("  max_wall_duration_per_job : NONE");
 	else
 		debug("  max_wall_duration_per_job : %d", 
-		     assoc_ptr->max_wall_duration_per_job);
+		      assoc_ptr->max_wall_duration_per_job);
 	debug("  parent_acct               : %s", assoc_ptr->parent_acct);
 	debug("  partition                 : %s", assoc_ptr->partition);
 	debug("  user                      : %s(%u)",
@@ -2005,12 +2442,12 @@ extern int acct_storage_g_add_users(void *db_conn, uint32_t uid,
 }
 
 extern int acct_storage_g_add_coord(void *db_conn, uint32_t uid,
-				    List acct_list, acct_user_cond_t *user_q)
+				    List acct_list, acct_user_cond_t *user_cond)
 {
 	if (slurm_acct_storage_init(NULL) < 0)
 		return SLURM_ERROR;
 	return (*(g_acct_storage_context->ops.add_coord))
-		(db_conn, uid, acct_list, user_q);
+		(db_conn, uid, acct_list, user_cond);
 }
 
 extern int acct_storage_g_add_accounts(void *db_conn, uint32_t uid,
@@ -2040,125 +2477,159 @@ extern int acct_storage_g_add_associations(void *db_conn, uint32_t uid,
 		(db_conn, uid, association_list);
 }
 
+extern int acct_storage_g_add_qos(void *db_conn, uint32_t uid,
+				  List qos_list)
+{
+	if (slurm_acct_storage_init(NULL) < 0)
+		return SLURM_ERROR;
+	return (*(g_acct_storage_context->ops.add_qos))
+		(db_conn, uid, qos_list);
+}
+
 extern List acct_storage_g_modify_users(void *db_conn, uint32_t uid,
-				       acct_user_cond_t *user_q,
-				       acct_user_rec_t *user)
+					acct_user_cond_t *user_cond,
+					acct_user_rec_t *user)
 {
 	if (slurm_acct_storage_init(NULL) < 0)
 		return NULL;
 	return (*(g_acct_storage_context->ops.modify_users))
-		(db_conn, uid, user_q, user);
+		(db_conn, uid, user_cond, user);
 }
 
 extern List acct_storage_g_modify_accounts(void *db_conn, uint32_t uid,
-					  acct_account_cond_t *acct_q,
-					  acct_account_rec_t *acct)
+					   acct_account_cond_t *acct_cond,
+					   acct_account_rec_t *acct)
 {
 	if (slurm_acct_storage_init(NULL) < 0)
 		return NULL;
 	return (*(g_acct_storage_context->ops.modify_accts))
-		(db_conn, uid, acct_q, acct);
+		(db_conn, uid, acct_cond, acct);
 }
 
 extern List acct_storage_g_modify_clusters(void *db_conn, uint32_t uid,
-					  acct_cluster_cond_t *cluster_q,
-					  acct_cluster_rec_t *cluster)
+					   acct_cluster_cond_t *cluster_cond,
+					   acct_cluster_rec_t *cluster)
 {
 	if (slurm_acct_storage_init(NULL) < 0)
 		return NULL;
 	return (*(g_acct_storage_context->ops.modify_clusters))
-		(db_conn, uid, cluster_q, cluster);
+		(db_conn, uid, cluster_cond, cluster);
 }
 
-extern List acct_storage_g_modify_associations(void *db_conn, uint32_t uid,
-					      acct_association_cond_t *assoc_q,
-					      acct_association_rec_t *assoc)
+extern List acct_storage_g_modify_associations(
+	void *db_conn, uint32_t uid,
+	acct_association_cond_t *assoc_cond,
+	acct_association_rec_t *assoc)
 {
 	if (slurm_acct_storage_init(NULL) < 0)
 		return NULL;
 	return (*(g_acct_storage_context->ops.modify_associations))
-		(db_conn, uid, assoc_q, assoc);
+		(db_conn, uid, assoc_cond, assoc);
 }
 
 extern List acct_storage_g_remove_users(void *db_conn, uint32_t uid,
-				       acct_user_cond_t *user_q)
+					acct_user_cond_t *user_cond)
 {
 	if (slurm_acct_storage_init(NULL) < 0)
 		return NULL;
 	return (*(g_acct_storage_context->ops.remove_users))
-		(db_conn, uid, user_q);
+		(db_conn, uid, user_cond);
 }
 
 extern List acct_storage_g_remove_coord(void *db_conn, uint32_t uid,
 					List acct_list,
-					acct_user_cond_t *user_q)
+					acct_user_cond_t *user_cond)
 {
 	if (slurm_acct_storage_init(NULL) < 0)
 		return NULL;
 	return (*(g_acct_storage_context->ops.remove_coord))
-		(db_conn, uid, acct_list, user_q);
+		(db_conn, uid, acct_list, user_cond);
 }
 
 extern List acct_storage_g_remove_accounts(void *db_conn, uint32_t uid,
-					  acct_account_cond_t *acct_q)
+					   acct_account_cond_t *acct_cond)
 {
 	if (slurm_acct_storage_init(NULL) < 0)
 		return NULL;
 	return (*(g_acct_storage_context->ops.remove_accts))
-		(db_conn, uid, acct_q);
+		(db_conn, uid, acct_cond);
 }
 
 extern List acct_storage_g_remove_clusters(void *db_conn, uint32_t uid,
-					  acct_cluster_cond_t *cluster_q)
+					   acct_cluster_cond_t *cluster_cond)
 {
 	if (slurm_acct_storage_init(NULL) < 0)
 		return NULL;
 	return (*(g_acct_storage_context->ops.remove_clusters))
-		(db_conn, uid, cluster_q);
+		(db_conn, uid, cluster_cond);
 }
 
-extern List acct_storage_g_remove_associations(void *db_conn, uint32_t uid,
-					      acct_association_cond_t *assoc_q)
+extern List acct_storage_g_remove_associations(
+	void *db_conn, uint32_t uid,
+	acct_association_cond_t *assoc_cond)
 {
 	if (slurm_acct_storage_init(NULL) < 0)
 		return NULL;
 	return (*(g_acct_storage_context->ops.remove_associations))
-		(db_conn, uid, assoc_q);
+		(db_conn, uid, assoc_cond);
 }
 
-extern List acct_storage_g_get_users(void *db_conn,
-				     acct_user_cond_t *user_q)
+extern List acct_storage_g_remove_qos(void *db_conn, uint32_t uid,
+				      acct_qos_cond_t *qos_cond)
 {
 	if (slurm_acct_storage_init(NULL) < 0)
 		return NULL;
-	return (*(g_acct_storage_context->ops.get_users))(db_conn, user_q);
+	return (*(g_acct_storage_context->ops.remove_qos))
+		(db_conn, uid, qos_cond);
+}
+
+extern List acct_storage_g_get_users(void *db_conn,
+				     acct_user_cond_t *user_cond)
+{
+	if (slurm_acct_storage_init(NULL) < 0)
+		return NULL;
+	return (*(g_acct_storage_context->ops.get_users))(db_conn, user_cond);
 }
 
 extern List acct_storage_g_get_accounts(void *db_conn,
-					acct_account_cond_t *acct_q)
+					acct_account_cond_t *acct_cond)
 {
 	if (slurm_acct_storage_init(NULL) < 0)
 		return NULL;
 	return (*(g_acct_storage_context->ops.get_accts))
-		(db_conn, acct_q);
+		(db_conn, acct_cond);
 }
 
 extern List acct_storage_g_get_clusters(void *db_conn,
-					acct_cluster_cond_t *cluster_q)
+					acct_cluster_cond_t *cluster_cond)
 {
 	if (slurm_acct_storage_init(NULL) < 0)
 		return NULL;
 	return (*(g_acct_storage_context->ops.get_clusters))
-		(db_conn, cluster_q);
+		(db_conn, cluster_cond);
 }
 
 extern List acct_storage_g_get_associations(void *db_conn,
-					    acct_association_cond_t *assoc_q)
+					    acct_association_cond_t *assoc_cond)
 {
 	if (slurm_acct_storage_init(NULL) < 0)
 		return NULL;
 	return (*(g_acct_storage_context->ops.get_associations))
-		(db_conn, assoc_q);
+		(db_conn, assoc_cond);
+}
+
+extern List acct_storage_g_get_qos(void *db_conn, acct_qos_cond_t *qos_cond)
+{
+	if (slurm_acct_storage_init(NULL) < 0)
+		return NULL;
+	return (*(g_acct_storage_context->ops.get_qos))(db_conn, qos_cond);
+}
+
+extern List acct_storage_g_get_txn(void *db_conn, acct_txn_cond_t *txn_cond)
+{
+	if (slurm_acct_storage_init(NULL) < 0)
+		return NULL;
+	return (*(g_acct_storage_context->ops.get_txn))(db_conn, txn_cond);
 }
 
 extern int acct_storage_g_get_usage(void *db_conn, 
@@ -2273,7 +2744,8 @@ extern int jobacct_storage_g_step_complete (void *db_conn,
 {
 	if (slurm_acct_storage_init(NULL) < 0)
 		return SLURM_ERROR;
-	return (*(g_acct_storage_context->ops.step_complete))(db_conn, step_ptr);
+	return (*(g_acct_storage_context->ops.step_complete))(db_conn, 
+							      step_ptr);
 }
 
 /* 

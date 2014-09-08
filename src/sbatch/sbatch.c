@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  sbatch.c - Submit a SLURM batch script.
  *
- *  $Id: sbatch.c 14420 2008-07-02 19:52:49Z jette $
+ *  $Id: sbatch.c 14469 2008-07-09 18:15:23Z jette $
  *****************************************************************************
  *  Copyright (C) 2006-2007 The Regents of the University of California.
  *  Copyright (C) 2008 Lawrence Livermore National Security.
@@ -227,6 +227,8 @@ static int fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->job_min_threads = opt.minthreads;
 	if (opt.realmem > -1)
 		desc->job_min_memory = opt.realmem;
+	else if (opt.mem_per_cpu > -1)
+		desc->job_min_memory = opt.mem_per_cpu | MEM_PER_CPU;
 	if (opt.tmpdisk > -1)
 		desc->job_min_tmp_disk = opt.tmpdisk;
 	if (opt.overcommit) {

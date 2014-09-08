@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/srun/allocate.h - node allocation functions for srun
- * $Id: allocate.h 13672 2008-03-19 23:10:58Z jette $
+ * $Id: allocate.h 14570 2008-07-18 22:06:26Z da $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -59,6 +59,9 @@ slurmctld_comm_addr_t slurmctld_comm_addr;
  * be freed with slurm_free_resource_allocation_response_msg()
  */
 resource_allocation_response_msg_t * allocate_nodes(void);
+
+/* dummy function to handle all signals we want to ignore */
+void ignore_signal(int signo);
 
 /* clean up the msg thread polling for information from the controller */
 int cleanup_allocation();

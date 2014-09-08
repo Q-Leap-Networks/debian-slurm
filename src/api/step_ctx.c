@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  step_ctx.c - step_ctx task functions for use by AIX/POE
  *
- *  $Id: step_ctx.c 13672 2008-03-19 23:10:58Z jette $
+ *  $Id: step_ctx.c 14469 2008-07-09 18:15:23Z jette $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -58,12 +58,14 @@ static void
 _job_fake_cred(struct slurm_step_ctx_struct *ctx)
 {
 	slurm_cred_arg_t arg;
-	arg.jobid    = ctx->job_id;
-	arg.stepid   = ctx->step_resp->job_step_id;
-	arg.uid      = ctx->user_id;
-	arg.hostlist = ctx->step_req->node_list;
-        arg.alloc_lps_cnt = 0;    
-        arg.alloc_lps     =  NULL; 
+	arg.alloc_lps_cnt = 0;
+	arg.alloc_lps     = NULL;
+	arg.hostlist      = ctx->step_req->node_list;
+	arg.job_mem       = 0;
+	arg.jobid         = ctx->job_id;
+	arg.stepid        = ctx->step_resp->job_step_id;
+	arg.task_mem      = 0;
+	arg.uid           = ctx->user_id;
 	ctx->step_resp->cred = slurm_cred_faker(&arg);
 }
 
