@@ -2616,10 +2616,12 @@ _unpack_job_step_info_members(job_step_info_t * step, Buf buffer)
 
 unpack_error:
 	xfree(step->partition);
+	xfree(step->resv_ports);
 	xfree(step->nodes);
 	xfree(step->name);
 	xfree(step->network);
 	xfree(step->node_inx);
+	xfree(step->ckpt_dir);
 	return SLURM_ERROR;
 }
 

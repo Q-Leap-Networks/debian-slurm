@@ -303,9 +303,13 @@ extern int select_p_state_save(char *dir_name)
 		(void) unlink(new_file);
 	else {			/* file shuffle */
 		(void) unlink(old_file);
-		(void) link(reg_file, old_file);
+		if(link(reg_file, old_file))
+			debug4("unable to create link for %s -> %s: %m",
+			       reg_file, old_file);
 		(void) unlink(reg_file);
-		(void) link(new_file, reg_file);
+		if(link(new_file, reg_file))
+			debug4("unable to create link for %s -> %s: %m",
+			       new_file, reg_file);
 		(void) unlink(new_file);
 	}
 	xfree(old_file);
@@ -735,6 +739,11 @@ extern int select_p_get_info_from_plugin (enum select_data_info info,
 			*tmp16 = 0;
 	}
 
+	return SLURM_SUCCESS;
+}
+
+extern int select_p_update_node_config (int index)
+{
 	return SLURM_SUCCESS;
 }
 

@@ -622,8 +622,12 @@ static int _setup_association_limits(acct_association_rec_t *assoc,
 		xstrcat(*extra, ", max_wall_duration_per_job=NULL");
 	}
 
-	if((qos_level != QOS_LEVEL_MODIFY)
-	   && assoc->qos_list && list_count(assoc->qos_list)) {
+	/* when modifying the qos it happens in the actual function
+	   since we have to wait until we hear about the parent first. */
+	if(qos_level == QOS_LEVEL_MODIFY) 
+		goto end_qos;
+
+	if(assoc->qos_list && list_count(assoc->qos_list)) {
 		char *qos_type = "qos";
 		char *qos_val = NULL;
 		char *tmp_char = NULL;
@@ -639,12 +643,10 @@ static int _setup_association_limits(acct_association_rec_t *assoc,
 			}
 			xstrfmtcat(qos_val, ",%s", tmp_char);
 		}
-
+		
 		list_iterator_destroy(qos_itr);
-
-		xstrfmtcat(*cols, ", %s", qos_type);
 		
-		
+		xstrfmtcat(*cols, ", %s", qos_type);		
 		xstrfmtcat(*vals, ", '%s'", qos_val); 		
 		xstrfmtcat(*extra, ", %s=\"%s\"", qos_type, qos_val); 
 		xfree(qos_val);
@@ -653,7 +655,13 @@ static int _setup_association_limits(acct_association_rec_t *assoc,
 		xstrcat(*cols, ", qos");
 		xstrfmtcat(*vals, ", '%s'", default_qos_str);
 		xstrfmtcat(*extra, ", qos=\"%s\"", default_qos_str);
+	} else {
+		/* clear the qos */
+		xstrcat(*cols, ", qos, delta_qos");
+		xstrcat(*vals, ", '', ''");
+		xstrcat(*extra, ", qos=\"\", delta_qos=\"\"");
 	}
+end_qos:
 
 	return SLURM_SUCCESS;
 
@@ -2984,7 +2992,7 @@ static int _mysql_acct_check_tables(MYSQL *db_conn)
 		{ "preemptees", "text not null default ''" },
 		{ "preemptors", "text not null default ''" },
 		{ "priority", "int default 0" },
-		{ "usage_factor", "float default 1.0 not null" },
+		{ "usage_factor", "double default 1.0 not null" },
 		{ NULL, NULL}		
 	};
 
@@ -3024,22 +3032,22 @@ static int _mysql_acct_check_tables(MYSQL *db_conn)
 		{ "user_usec", "int unsigned default 0 not null" },
 		{ "sys_sec", "int unsigned default 0 not null" },
 		{ "sys_usec", "int unsigned default 0 not null" },
-		{ "max_vsize", "int unsigned default 0 not null" },
+		{ "max_vsize", "bigint unsigned default 0 not null" },
 		{ "max_vsize_task", "smallint unsigned default 0 not null" },
 		{ "max_vsize_node", "int unsigned default 0 not null" },
-		{ "ave_vsize", "float default 0.0 not null" },
-		{ "max_rss", "int unsigned default 0 not null" },
+		{ "ave_vsize", "double default 0.0 not null" },
+		{ "max_rss", "bigint unsigned default 0 not null" },
 		{ "max_rss_task", "smallint unsigned default 0 not null" },
 		{ "max_rss_node", "int unsigned default 0 not null" },
-		{ "ave_rss", "float default 0.0 not null" },
+		{ "ave_rss", "double unsigned default 0.0 not null" },
 		{ "max_pages", "int unsigned default 0 not null" },
 		{ "max_pages_task", "smallint unsigned default 0 not null" },
 		{ "max_pages_node", "int unsigned default 0 not null" },
-		{ "ave_pages", "float default 0.0 not null" },
+		{ "ave_pages", "double unsigned default 0.0 not null" },
 		{ "min_cpu", "int unsigned default 0 not null" },
 		{ "min_cpu_task", "smallint unsigned default 0 not null" },
 		{ "min_cpu_node", "int unsigned default 0 not null" },
-		{ "ave_cpu", "float default 0.0 not null" },
+		{ "ave_cpu", "double unsigned default 0.0 not null" },
 		{ NULL, NULL}
 	};
 
@@ -7594,8 +7602,7 @@ empty:
 		 * different machine where this user may not exist or
 		 * may have a different uid
 		 */
-/* 		pw_uid = uid_from_string(user->name); */
-/* 		if(pw_uid == (uid_t) -1)  */
+/* 		if (uid_from_string (user->name, &pw_uid) < 0)  */
 /* 			user->uid = (uint32_t)NO_VAL; */
 /* 		else */
 /* 			user->uid = passwd_ptr->pw_uid; */
@@ -10963,13 +10970,13 @@ extern int jobacct_storage_p_step_complete(mysql_conn_t *mysql_conn,
 		"user_sec=%ld, user_usec=%ld, "
 		"sys_sec=%ld, sys_usec=%ld, "
 		"max_vsize=%u, max_vsize_task=%u, "
-		"max_vsize_node=%u, ave_vsize=%.2f, "
+		"max_vsize_node=%u, ave_vsize=%f, "
 		"max_rss=%u, max_rss_task=%u, "
-		"max_rss_node=%u, ave_rss=%.2f, "
+		"max_rss_node=%u, ave_rss=%f, "
 		"max_pages=%u, max_pages_task=%u, "
-		"max_pages_node=%u, ave_pages=%.2f, "
-		"min_cpu=%.2f, min_cpu_task=%u, "
-		"min_cpu_node=%u, ave_cpu=%.2f "
+		"max_pages_node=%u, ave_pages=%f, "
+		"min_cpu=%f, min_cpu_task=%u, "
+		"min_cpu_node=%u, ave_cpu=%f "
 		"where id=%d and stepid=%u",
 		step_table, (int)now,
 		comp_status,

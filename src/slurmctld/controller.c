@@ -176,10 +176,12 @@ static int controller_sigarray[] = {
 	SIGPIPE, SIGALRM, SIGABRT, SIGHUP, 0
 };
 
-static void         _default_sigaction(int sig);
-inline static void  _free_server_thread(void);
 static int          _accounting_cluster_ready();
 static int          _accounting_mark_all_nodes_down(char *reason);
+static void *       _assoc_cache_mgr(void *no_data);
+static void         _become_slurm_user(void);
+static void         _default_sigaction(int sig);
+inline static void  _free_server_thread(void);
 static void         _init_config(void);
 static void         _init_pidfile(void);
 static void         _kill_old_slurmctld(void);
@@ -194,8 +196,6 @@ static void *       _slurmctld_signal_hand(void *no_data);
 inline static void  _update_cred_key(void);
 inline static void  _usage(char *prog_name);
 static bool         _wait_for_server_thread(void);
-static void *       _assoc_cache_mgr(void *no_data);
-static void         _become_slurm_user(void);
 
 typedef struct connection_arg {
 	int newsockfd;
@@ -359,9 +359,11 @@ int main(int argc, char *argv[])
 	*/
 	if (running_cache) {
 		slurm_attr_init(&thread_attr);
-		if (pthread_create(&assoc_cache_thread, &thread_attr, 
-				  _assoc_cache_mgr, NULL))
-			fatal("pthread_create error %m");
+		while (pthread_create(&assoc_cache_thread, &thread_attr, 
+				      _assoc_cache_mgr, NULL)) {
+			error("pthread_create error %m");
+			sleep(1);
+		}
 		slurm_attr_destroy(&thread_attr);
 	}
 	
@@ -477,40 +479,42 @@ int main(int argc, char *argv[])
 		slurmctld_config.server_thread_count++;
 		slurm_mutex_unlock(&slurmctld_config.thread_count_lock);
 		slurm_attr_init(&thread_attr);
-		if (pthread_create(&slurmctld_config.thread_id_rpc, 
-				&thread_attr, _slurmctld_rpc_mgr, NULL))
-			fatal("pthread_create error %m");
+		while (pthread_create(&slurmctld_config.thread_id_rpc, 
+				      &thread_attr, _slurmctld_rpc_mgr, 
+				      NULL)) {
+			error("pthread_create error %m");
+			sleep(1);
+		}
 		slurm_attr_destroy(&thread_attr);
 
 		/*
 		 * create attached thread for signal handling
 		 */
 		slurm_attr_init(&thread_attr);
-		if (pthread_create(&slurmctld_config.thread_id_sig,
-				   &thread_attr, _slurmctld_signal_hand,
-				   NULL))
-			fatal("pthread_create %m");
+		while (pthread_create(&slurmctld_config.thread_id_sig,
+				      &thread_attr, _slurmctld_signal_hand,
+				      NULL)) {
+			error("pthread_create %m");
+			sleep(1);
+		}
 		slurm_attr_destroy(&thread_attr);
 
 		/*
 		 * create attached thread for state save
 		 */
 		slurm_attr_init(&thread_attr);
-		if (pthread_create(&slurmctld_config.thread_id_save,
-				   &thread_attr, slurmctld_state_save,
-				   NULL))
-			fatal("pthread_create %m");
+		while (pthread_create(&slurmctld_config.thread_id_save,
+				      &thread_attr, slurmctld_state_save,
+				      NULL)) {
+			error("pthread_create %m");
+			sleep(1);
+		}
 		slurm_attr_destroy(&thread_attr);
 
 		/*
 		 * create attached thread for node power management
 		 */
-		slurm_attr_init(&thread_attr);
-		if (pthread_create(&slurmctld_config.thread_id_power,
-				   &thread_attr, init_power_save,
-				   NULL))
-			fatal("pthread_create %m");
-		slurm_attr_destroy(&thread_attr);
+		start_power_mgr(&slurmctld_config.thread_id_power);
 
 		/*
 		 * process slurm background activities, could run as pthread
@@ -708,6 +712,7 @@ extern int slurm_reconfigure(void)
 		set_slurmctld_state_loc();
 	}
 	unlock_slurmctld(config_write_lock);
+	start_power_mgr(&slurmctld_config.thread_id_power);
 	trigger_reconfig();
 	slurm_sched_partition_change();	/* notify sched plugin */
 	select_g_reconfigure();		/* notify select plugin too */
@@ -1101,8 +1106,7 @@ static void _remove_assoc(acct_association_rec_t *rec)
 {
 	int cnt = 0;
 
-	if (accounting_enforce & ACCOUNTING_ENFORCE_ASSOCS)
-		cnt = job_cancel_by_assoc_id(rec->id);
+	cnt = job_cancel_by_assoc_id(rec->id);
 
 	if (cnt) {
 		info("Removed association id:%u user:%s, cancelled %u jobs",
@@ -1787,8 +1791,8 @@ static void _become_slurm_user(void)
 	/* Determine SlurmUser gid */
 	slurm_user_gid = gid_from_uid(slurmctld_conf.slurm_user_id);
 	if (slurm_user_gid == (gid_t) -1) {
-		fatal("Failed to determine gid of SlurmUser(%d)", 
-		      slurm_user_gid);
+		fatal("Failed to determine gid of SlurmUser(%u)", 
+		      slurmctld_conf.slurm_user_id);
 	}
 
 	/* Initialize supplementary groups ID list for SlurmUser */
@@ -1817,7 +1821,7 @@ static void _become_slurm_user(void)
 	/* Set UID to UID of SlurmUser */
 	if ((slurmctld_conf.slurm_user_id != getuid()) &&
 	    (setuid(slurmctld_conf.slurm_user_id))) {
-		fatal("Can not set uid to SlurmUser(%d): %m",
+		fatal("Can not set uid to SlurmUser(%u): %m",
 		      slurmctld_conf.slurm_user_id);
 	}
 }

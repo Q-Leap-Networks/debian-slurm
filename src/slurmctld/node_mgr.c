@@ -309,9 +309,13 @@ int dump_all_node_state ( void )
 		(void) unlink (new_file);
 	else {	/* file shuffle */
 		(void) unlink (old_file);
-		(void) link (reg_file, old_file);
+		if(link(reg_file, old_file))
+			debug4("unable to create link for %s -> %s: %m",
+			       reg_file, old_file);
 		(void) unlink (reg_file);
-		(void) link (new_file, reg_file);
+		if(link(new_file, reg_file))
+			debug4("unable to create link for %s -> %s: %m",
+			       new_file, reg_file);
 		(void) unlink (new_file);
 	}
 	xfree (old_file);
@@ -1858,6 +1862,7 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg)
 			last_node_update = now;
 			node_ptr->node_state &= (~NODE_STATE_COMPLETING);
 		}
+		select_g_update_node_config((node_ptr-node_record_table_ptr));
 		select_g_update_node_state((node_ptr - node_record_table_ptr),
 					   node_ptr->node_state);
 		_sync_bitmaps(node_ptr, reg_msg->job_count);

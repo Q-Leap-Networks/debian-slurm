@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/slurmstepd_job.c - slurmd_job_t routines
- *  $Id: slurmstepd_job.c 16867 2009-03-12 16:35:42Z jette $
+ *  $Id: slurmstepd_job.c 18092 2009-07-09 14:38:56Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -382,7 +382,7 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 		/* job script has not yet been written out to disk --
 		 * argv will be filled in later by _make_batch_script()
 		 */
-		job->argv    = (char **) xmalloc(sizeof(char *));
+		job->argv    = (char **) xmalloc(2 * sizeof(char *));
 	}
 
 	job->task = (slurmd_task_info_t **)

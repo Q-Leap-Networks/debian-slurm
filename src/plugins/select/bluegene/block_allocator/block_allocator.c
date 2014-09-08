@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  block_allocator.c - Assorted functions for layout of bluegene blocks, 
  *	 wiring, mapping for smap, etc.
- *  $Id: block_allocator.c 17643 2009-05-29 17:20:48Z da $
+ *  $Id: block_allocator.c 18102 2009-07-09 20:45:13Z jette $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -400,8 +400,8 @@ extern int parse_image(void **dest, slurm_parser_enum_t type,
 				image_group->name = xmalloc(i-j+2);
 				snprintf(image_group->name,
 					 (i-j)+1, "%s", tmp+j);
-				image_group->gid =
-					gid_from_string(image_group->name);
+				gid_from_string (image_group->name,
+						&image_group->gid);
 				debug3("adding group %s %d", image_group->name,
 				       image_group->gid);
 				list_append(n->groups, image_group);
@@ -413,15 +413,14 @@ extern int parse_image(void **dest, slurm_parser_enum_t type,
 			image_group = xmalloc(sizeof(image_group_t));
 			image_group->name = xmalloc(i-j+2);
 			snprintf(image_group->name, (i-j)+1, "%s", tmp+j);
-			image_group->gid = gid_from_string(image_group->name);
-			if (image_group->gid == (gid_t) -1) {
+			if (gid_from_string (image_group->name,
+			                     &image_group->gid) < 0)
 				fatal("Invalid bluegene.conf parameter "
 				      "Groups=%s", 
 				      image_group->name);
-			} else {
+			else
 				debug3("adding group %s %d", image_group->name,
 				       image_group->gid);
-			}
 			list_append(n->groups, image_group);
 		}
 		xfree(tmp);

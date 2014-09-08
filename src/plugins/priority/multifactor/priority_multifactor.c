@@ -138,6 +138,7 @@ static int _apply_decay(double decay_factor)
 		return SLURM_SUCCESS;
 
 	xassert(assoc_mgr_association_list);
+	xassert(assoc_mgr_qos_list);
 
 	slurm_mutex_lock(&assoc_mgr_association_lock);
 	itr = list_iterator_create(assoc_mgr_association_list);
@@ -163,7 +164,7 @@ static int _apply_decay(double decay_factor)
 }
 
 /*
- * reset usage_raw, and grp_used_cpu_mins on all associations 
+ * reset usage_raw, and grp_used_wall on all associations 
  * This should be called every PriorityUsageResetPeriod
  * RET: SLURM_SUCCESS on SUCCESS, SLURM_ERROR else.
  */
@@ -312,9 +313,13 @@ static int _write_last_decay_ran(time_t last_ran, time_t last_reset)
 		(void) unlink(new_file);
 	else {			/* file shuffle */
 		(void) unlink(old_file);
-		(void) link(state_file, old_file);
+		if(link(state_file, old_file))
+			debug4("unable to create link for %s -> %s: %m",
+			       state_file, old_file);
 		(void) unlink(state_file);
-		(void) link(new_file, state_file);
+		if(link(new_file, state_file))
+			debug4("unable to create link for %s -> %s: %m",
+			       new_file, state_file);
 		(void) unlink(new_file);
 	}
 	xfree(old_file);
@@ -934,7 +939,7 @@ int init ( void )
 		      temp);
 		calc_fairshare = 0;
 		weight_fs = 0;
-	} else {
+	} else if(assoc_mgr_root_assoc) {
 		if(!cluster_procs)
 			fatal("We need to have a cluster cpu count "
 			      "before we can init the priority/multifactor "
@@ -956,7 +961,17 @@ int init ( void )
 			fatal("pthread_create error %m");
 		
 		slurm_attr_destroy(&thread_attr);
+	} else {
+		if(weight_fs)
+			fatal("It appears you don't have any association "
+			      "data from your database.  "
+			      "The priority/multifactor plugin requires "
+			      "this information to run correctly.  Please "
+			      "check your database connection and try again.");
+		
+		calc_fairshare = 0;
 	}
+
 	xfree(temp);
 
 	verbose("%s loaded", plugin_name);

@@ -941,6 +941,11 @@ extern char *reservation_flags_string(uint16_t flags)
 			xstrcat(flag_str, ",");
 		xstrcat(flag_str, "NO_MAINT");
 	}
+	if (flags & RESERVE_FLAG_IGN_JOBS) {
+		if (flag_str[0])
+			xstrcat(flag_str, ",");
+		xstrcat(flag_str, "IGNORE_JOBS");
+	}
 	if (flags & RESERVE_FLAG_DAILY) {
 		if (flag_str[0])
 			xstrcat(flag_str, ",");
@@ -1353,7 +1358,11 @@ static void _slurm_free_job_step_info_members (job_step_info_t * msg)
 {
 	if (msg != NULL) {
 		xfree(msg->partition);
+		xfree(msg->resv_ports);
 		xfree(msg->nodes);
+		xfree(msg->name);
+		xfree(msg->network);
+		xfree(msg->node_inx);
 		xfree(msg->ckpt_dir);
 	}
 }
