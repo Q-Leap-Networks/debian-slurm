@@ -1,9 +1,9 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/slurmstepd_job.c - slurmd_job_t routines
- *  $Id: slurmstepd_job.c 19187 2009-12-23 20:11:00Z da $
+ *  $Id: slurmstepd_job.c 21423 2010-10-26 21:32:49Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
@@ -52,6 +52,7 @@
 
 #include "src/common/eio.h"
 #include "src/common/fd.h"
+#include "src/common/gres.h"
 #include "src/common/log.h"
 #include "src/common/node_select.h"
 #include "src/common/slurm_jobacct_gather.h"
@@ -159,8 +160,8 @@ job_create(launch_tasks_request_msg_t *msg)
 	struct passwd *pwd = NULL;
 	slurmd_job_t  *job = NULL;
 	srun_info_t   *srun = NULL;
-	slurm_addr     resp_addr;
-	slurm_addr     io_addr;
+	slurm_addr_t     resp_addr;
+	slurm_addr_t     io_addr;
 	int            nodeid = NO_VAL;
 
 	xassert(msg != NULL);
@@ -177,7 +178,7 @@ job_create(launch_tasks_request_msg_t *msg)
 		return NULL;
 	}
 
-	if(msg->job_mem && (msg->acctg_freq != (uint16_t) NO_VAL)
+	if (msg->job_mem_lim && (msg->acctg_freq != (uint16_t) NO_VAL)
 	   && (msg->acctg_freq > conf->job_acct_gather_freq)) {
 		error("Can't set frequency to %u, it is higher than %u.  "
 		      "We need it to be at least at this level to "
@@ -205,14 +206,10 @@ job_create(launch_tasks_request_msg_t *msg)
 
 	job->state	= SLURMSTEPD_STEP_STARTING;
 	job->pwd	= pwd;
-	job->ntasks	= msg->tasks_to_launch[nodeid];
-	job->nprocs	= msg->nprocs;
+	job->node_tasks	= msg->tasks_to_launch[nodeid];
+	job->ntasks	= msg->ntasks;
 	job->jobid	= msg->job_id;
 	job->stepid	= msg->job_step_id;
-
-	job->job_mem	= msg->job_mem;
-	if (job->job_mem)
-		jobacct_common_set_mem_limit(job->jobid, job->job_mem);
 
 	job->uid	= (uid_t) msg->uid;
 	job->gid	= (gid_t) msg->gid;
@@ -252,14 +249,15 @@ job_create(launch_tasks_request_msg_t *msg)
 	job->envtp->mem_bind_type = 0;
 	job->envtp->mem_bind = NULL;
 	job->envtp->ckpt_dir = NULL;
+	job->envtp->comm_port = msg->resp_port[nodeid % msg->num_resp_port];
 
-	memcpy(&resp_addr, &msg->orig_addr, sizeof(slurm_addr));
+	memcpy(&resp_addr, &msg->orig_addr, sizeof(slurm_addr_t));
 	slurm_set_addr(&resp_addr,
 		       msg->resp_port[nodeid % msg->num_resp_port],
 		       NULL);
 	job->user_managed_io = msg->user_managed_io;
 	if (!msg->user_managed_io) {
-		memcpy(&io_addr,   &msg->orig_addr, sizeof(slurm_addr));
+		memcpy(&io_addr,   &msg->orig_addr, sizeof(slurm_addr_t));
 		slurm_set_addr(&io_addr,
 			       msg->io_port[nodeid % msg->num_io_port],
 			       NULL);
@@ -289,7 +287,19 @@ job_create(launch_tasks_request_msg_t *msg)
 	job->pty         = msg->pty;
 	job->open_mode   = msg->open_mode;
 	job->options     = msg->options;
-	job->alloc_cores = format_core_allocs(msg->cred, conf->node_name);
+	format_core_allocs(msg->cred, conf->node_name,
+			   &job->job_alloc_cores, &job->step_alloc_cores,
+			   &job->job_mem, &job->step_mem);
+	if (job->step_mem) {
+		jobacct_common_set_mem_limit(job->jobid, job->stepid,
+					     job->step_mem);
+	} else if (job->job_mem) {
+		jobacct_common_set_mem_limit(job->jobid, job->stepid,
+					     job->job_mem);
+	}
+
+	get_cred_gres(msg->cred, conf->node_name,
+		      &job->job_gres_list, &job->step_gres_list);
 
 	list_append(job->sruns, (void *) srun);
 
@@ -349,14 +359,10 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 	job->state   = SLURMSTEPD_STEP_STARTING;
 	job->pwd     = pwd;
 	job->cpus    = msg->cpus_per_node[0];
-	job->ntasks  = 1;
-	job->nprocs  = msg->nprocs;
+	job->node_tasks  = 1;
+	job->ntasks  = msg->ntasks;
 	job->jobid   = msg->job_id;
 	job->stepid  = msg->step_id;
-
-	job->job_mem = msg->job_mem;
-	if (job->job_mem)
-		jobacct_common_set_mem_limit(job->jobid, job->job_mem);
 
 	job->batch   = true;
 	if (msg->acctg_freq != (uint16_t) NO_VAL)
@@ -392,7 +398,17 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 	job->envtp->restart_cnt = msg->restart_cnt;
 
 	job->cpus_per_task = msg->cpus_per_node[0];
-	job->alloc_cores = format_core_allocs(msg->cred, conf->node_name);
+	format_core_allocs(msg->cred, conf->node_name,
+			   &job->job_alloc_cores, &job->step_alloc_cores,
+			   &job->job_mem, &job->step_mem);
+	if (job->step_mem) {
+		jobacct_common_set_mem_limit(job->jobid, NO_VAL,
+					     job->step_mem);
+	} else if (job->job_mem)
+		jobacct_common_set_mem_limit(job->jobid, NO_VAL, job->job_mem);
+
+	get_cred_gres(msg->cred, conf->node_name,
+		      &job->job_gres_list, &job->step_gres_list);
 
 	srun = srun_info_create(NULL, NULL, NULL);
 
@@ -409,8 +425,7 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 		job->argv    = (char **) xmalloc(2 * sizeof(char *));
 	}
 
-	job->task = (slurmd_task_info_t **)
-		xmalloc(sizeof(slurmd_task_info_t *));
+	job->task = xmalloc(sizeof(slurmd_task_info_t *));
 	if (msg->std_err == NULL)
 		msg->std_err = xstrdup(msg->std_out);
 
@@ -426,9 +441,9 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 	job->task[0]->argc = job->argc;
 	job->task[0]->argv = job->argv;
 
-#ifdef HAVE_CRAY_XT
-	select_g_get_jobinfo(msg->select_jobinfo, SELECT_DATA_RESV_ID,
-			     &job->resv_id);
+#ifdef HAVE_CRAY
+	select_g_select_jobinfo_get(msg->select_jobinfo, SELECT_JOBDATA_RESV_ID,
+				    &job->resv_id);
 #endif
 
 	return job;
@@ -457,7 +472,7 @@ _expand_stdio_filename(char *filename, int gtaskid, slurmd_job_t *job)
 
 	if (id < 0)
 		return fname_create(job, filename, gtaskid);
-	if (id >= job->nprocs) {
+	if (id >= job->ntasks) {
 		error("Task ID in filename is invalid");
 		return NULL;
 	}
@@ -475,16 +490,16 @@ _job_init_task_info(slurmd_job_t *job, uint32_t *gtid,
 	int          i;
 	char        *in, *out, *err;
 
-	if (job->ntasks == 0) {
+	if (job->node_tasks == 0) {
 		error("User requested launch of zero tasks!");
 		job->task = NULL;
 		return;
 	}
 
 	job->task = (slurmd_task_info_t **)
-		xmalloc(job->ntasks * sizeof(slurmd_task_info_t *));
+		xmalloc(job->node_tasks * sizeof(slurmd_task_info_t *));
 
-	for (i = 0; i < job->ntasks; i++){
+	for (i = 0; i < job->node_tasks; i++){
 		in = _expand_stdio_filename(ifname, gtid[i], job);
 		out = _expand_stdio_filename(ofname, gtid[i], job);
 		err = _expand_stdio_filename(efname, gtid[i], job);
@@ -505,7 +520,7 @@ _job_init_task_info(slurmd_job_t *job, uint32_t *gtid,
 void
 job_signal_tasks(slurmd_job_t *job, int signal)
 {
-	int n = job->ntasks;
+	int n = job->node_tasks;
 	while (--n >= 0) {
 		if ((job->task[n]->pid > (pid_t) 0)
 		&&  (kill(job->task[n]->pid, signal) < 0)) {
@@ -527,14 +542,15 @@ job_destroy(slurmd_job_t *job)
 
 	_pwd_destroy(job->pwd);
 
-	for (i = 0; i < job->ntasks; i++)
+	for (i = 0; i < job->node_tasks; i++)
 		_task_info_destroy(job->task[i], job->multi_prog);
 	list_destroy(job->sruns);
 	xfree(job->envtp);
 	xfree(job->node_name);
 	xfree(job->task_prolog);
 	xfree(job->task_epilog);
-	xfree(job->alloc_cores);
+	xfree(job->job_alloc_cores);
+	xfree(job->step_alloc_cores);
 	xfree(job);
 }
 
@@ -564,7 +580,7 @@ _array_free(char ***array)
 
 
 struct srun_info *
-srun_info_create(slurm_cred_t *cred, slurm_addr *resp_addr, slurm_addr *ioaddr)
+srun_info_create(slurm_cred_t *cred, slurm_addr_t *resp_addr, slurm_addr_t *ioaddr)
 {
 	char             *data = NULL;
 	uint32_t          len  = 0;
@@ -660,4 +676,3 @@ _task_info_destroy(slurmd_task_info_t *t, uint16_t multi_prog)
 	} /* otherwise, t->argv is a pointer to job->argv */
 	xfree(t);
 }
-

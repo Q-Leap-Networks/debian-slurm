@@ -67,6 +67,7 @@
 #include "src/common/log.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/xmalloc.h"
+#include "src/common/slurmdb_defs.h"
 #include "src/squeue/print.h"
 
 struct job_step {
@@ -83,10 +84,12 @@ struct squeue_parameters {
 	bool long_list;
 	bool no_header;
 	int  iterate;
-	int  max_procs;
+	int  max_cpus;
 	int  verbose;
 
 	char* accounts;
+	List clusters;
+	uint32_t cluster_flags;
 	char* format;
 	char* jobs;
 	hostset_t nodes;

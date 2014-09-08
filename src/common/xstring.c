@@ -68,11 +68,15 @@
 
 #define XFGETS_CHUNKSIZE 64
 
+/* Static functions. */
+static char *_xstrdup_vprintf(const char *_fmt, va_list _ap);
+
 /*
  * Define slurm-specific aliases for use by plugins, see slurm_xlator.h
  * for details.
  */
 strong_alias(_xstrcat,		slurm_xstrcat);
+strong_alias(_xstrncat,		slurm_xstrncat);
 strong_alias(_xstrcatchar,	slurm_xstrcatchar);
 strong_alias(_xslurm_strerrorcat, slurm_xslurm_strerrorcat);
 strong_alias(_xstrftimecat,	slurm_xstrftimecat);
@@ -94,20 +98,23 @@ strong_alias(xstrtolower, slurm_xstrtolower);
  */
 static void makespace(char **str, int needed)
 {
-	int used;
-
 	if (*str == NULL)
 		*str = xmalloc(needed + 1);
 	else {
-		used = strlen(*str) + 1;
-		while (used + needed > xsize(*str)) {
-			int newsize = xsize(*str) + XFGETS_CHUNKSIZE;
-			int actualsize;
+		int actual_size;
+		int used = strlen(*str) + 1;
+		int min_new_size = used + needed;
+		int cur_size = xsize(*str);
+		if (min_new_size > cur_size) {
+			int new_size = min_new_size;
+			if (new_size < (cur_size + XFGETS_CHUNKSIZE))
+				new_size = cur_size + XFGETS_CHUNKSIZE;
+			if (new_size < (cur_size * 2))
+				new_size = cur_size * 2;
 
-			xrealloc(*str, newsize);
-			actualsize = xsize(*str);
-
-			xassert(actualsize == newsize);
+			xrealloc(*str, new_size);
+			actual_size = xsize(*str);
+			xassert(actual_size == new_size);
 		}
 	}
 }
@@ -127,6 +134,21 @@ void _xstrcat(char **str1, const char *str2)
 }
 
 /*
+ * Concatenate len of str2 onto str1, expanding str1 as needed.
+ *   str1 (IN/OUT)	target string (pointer to in case of expansion)
+ *   str2 (IN)		source string
+ *   len (IN)		len of str2 to concat
+ */
+void _xstrncat(char **str1, const char *str2, size_t len)
+{
+	if (str2 == NULL)
+		str2 = "(null)";
+
+	makespace(str1, len);
+	strncat(*str1, str2, len);
+}
+
+/*
  * append one char to str and null terminate
  */
 static void strcatchar(char *str, char c)
@@ -140,7 +162,6 @@ static void strcatchar(char *str, char c)
 /*
  * Add a character to str, expanding str1 as needed.
  *   str1 (IN/OUT)	target string (pointer to in case of expansion)
- *   size (IN/OUT)	size of str1 (pointer to in case of expansion)
  *   c (IN)		character to add
  */
 void _xstrcatchar(char **str, char c)
@@ -200,35 +221,19 @@ void _xstrftimecat(char **buf, const char *fmt)
  */
 int _xstrfmtcat(char **str, const char *fmt, ...)
 {
-	/* This code is the same as xstrdup_printf, but couldn't
-	 * figure out how to pass the ... so just copied the code
-	 */
-	/* Start out with a size of 100 bytes. */
-	int n, size = 100;
+	int n;
 	char *p = NULL;
 	va_list ap;
 
-	if((p = xmalloc(size)) == NULL)
+	va_start(ap, fmt);
+	p = _xstrdup_vprintf(fmt, ap);
+	va_end(ap);
+
+	if (p == NULL)
 		return 0;
-	while(1) {
-		/* Try to print in the allocated space. */
-		va_start(ap, fmt);
-		n = vsnprintf(p, size, fmt, ap);
-		va_end (ap);
-		/* If that worked, return the string. */
-		if (n > -1 && n < size)
-			break;
-		/* Else try again with more space. */
-		if (n > -1)               /* glibc 2.1 */
-			size = n + 1;           /* precisely what is needed */
-		else                      /* glibc 2.0 */
-			size *= 2;              /* twice the old size */
-		if ((p = xrealloc(p, size)) == NULL)
-			return 0;
-	}
 
+	n = strlen(p);
 	xstrcat(*str, p);
-
 	xfree(p);
 
 	return n;
@@ -302,29 +307,14 @@ char * xstrdup(const char *str)
  */
 char *xstrdup_printf(const char *fmt, ...)
 {
-	/* Start out with a size of 100 bytes. */
-	int n, size = 100;
-	char *p = NULL;
+	char *result;
 	va_list ap;
 
-	if((p = xmalloc(size)) == NULL)
-		return NULL;
-	while(1) {
-		/* Try to print in the allocated space. */
-		va_start(ap, fmt);
-		n = vsnprintf(p, size, fmt, ap);
-		va_end (ap);
-		/* If that worked, return the string. */
-		if (n > -1 && n < size)
-			return p;
-		/* Else try again with more space. */
-		if (n > -1)               /* glibc 2.1 */
-			size = n + 1;           /* precisely what is needed */
-		else                      /* glibc 2.0 */
-			size *= 2;              /* twice the old size */
-		if ((p = xrealloc(p, size)) == NULL)
-			return NULL;
-	}
+	va_start(ap, fmt);
+	result = _xstrdup_vprintf(fmt, ap);
+	va_end(ap);
+
+	return result;
 }
 
 /*
@@ -359,14 +349,13 @@ char * xstrndup(const char *str, size_t n)
 long int xstrntol(const char *str, char **endptr, size_t n, int base)
 {
 	long int number = 0;
-	char *new_str = xstrndup(str, n);
+	char new_str[n+1];
 
-	if(!new_str)
-		goto end_it;
+	memcpy(new_str, str, n);
+	new_str[n] = '\0';
 
 	number = strtol(new_str, endptr, base);
-	xfree(new_str);
-end_it:
+
 	return number;
 }
 
@@ -491,7 +480,7 @@ bool xstring_is_whitespace(const char *str)
 /*
  * If str make everything lowercase.  Should not be called on static char *'s
  */
-void xstrtolower(char *str)
+char *xstrtolower(char *str)
 {
 	if(str) {
 		int j = 0;
@@ -500,4 +489,41 @@ void xstrtolower(char *str)
 			j++;
 		}
 	}
+	return str;
+}
+
+/*
+ * Give me a copy of the string as if it were printf.
+ * This is stdarg-compatible routine, so vararg-compatible
+ * functions can do va_start() and invoke this function.
+ *
+ *   fmt (IN)		format of string and args if any
+ *   RETURN		copy of formated string
+ */
+static char *_xstrdup_vprintf(const char *fmt, va_list ap)
+{
+	/* Start out with a size of 100 bytes. */
+	int n, size = 100;
+	char *p = NULL;
+	va_list our_ap;
+
+	if((p = xmalloc(size)) == NULL)
+		return NULL;
+	while(1) {
+		/* Try to print in the allocated space. */
+		va_copy(our_ap, ap);
+		n = vsnprintf(p, size, fmt, our_ap);
+		va_end(our_ap);
+		/* If that worked, return the string. */
+		if (n > -1 && n < size)
+			return p;
+		/* Else try again with more space. */
+		if (n > -1)               /* glibc 2.1 */
+			size = n + 1;           /* precisely what is needed */
+		else                      /* glibc 2.0 */
+			size *= 2;              /* twice the old size */
+		if ((p = xrealloc(p, size)) == NULL)
+			return NULL;
+	}
+	/* NOTREACHED */
 }

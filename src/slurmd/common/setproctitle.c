@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/slurmd/common/setproctitle.c - argv manipulation 
- * $Id: setproctitle.c 17276 2009-04-17 17:03:49Z jette $
+ * $Id: setproctitle.c 20888 2010-08-04 21:30:08Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.

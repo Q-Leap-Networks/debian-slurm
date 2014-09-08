@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  checkpoint.c - implementation-independent checkpoint functions
- *  $Id: checkpoint.c 19095 2009-12-01 22:59:18Z da $
+ *  $Id: checkpoint.c 21270 2010-09-28 23:36:24Z jette $
  *****************************************************************************
  *  Copyright (C) 2004-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -72,8 +72,10 @@ typedef struct slurm_checkpoint_ops {
 
 	int	(*ckpt_alloc_jobinfo) (check_jobinfo_t *jobinfo);
 	int	(*ckpt_free_jobinfo) (check_jobinfo_t jobinfo);
-	int	(*ckpt_pack_jobinfo) (check_jobinfo_t jobinfo, Buf buffer);
-	int	(*ckpt_unpack_jobinfo) (check_jobinfo_t jobinfo, Buf buffer);
+	int	(*ckpt_pack_jobinfo) (check_jobinfo_t jobinfo, Buf buffer,
+				      uint16_t protocol_version);
+	int	(*ckpt_unpack_jobinfo) (check_jobinfo_t jobinfo, Buf buffer,
+					uint16_t protocol_version);
 	int     (*ckpt_stepd_prefork) (void *slurmd_job);
 	int     (*ckpt_signal_tasks) (void *slurmd_job, char *image_dir);
 	int     (*ckpt_restart_task) (void *slurmd_job, char *image_dir, int gtid);
@@ -175,6 +177,12 @@ _slurm_checkpoint_get_ops( slurm_checkpoint_context_t c )
 					     (void **) &c->ops);
         if ( c->cur_plugin != PLUGIN_INVALID_HANDLE )
         	return &c->ops;
+
+	if(errno != EPLUGIN_NOTFOUND) {
+		error("Couldn't load specified plugin name for %s: %s",
+		      c->checkpoint_type, plugin_strerror(errno));
+		return NULL;
+	}
 
 	error("Couldn't find the specified plugin name for %s "
 	      "looking at all files",
@@ -362,14 +370,15 @@ extern int checkpoint_free_jobinfo(check_jobinfo_t jobinfo)
 }
 
 /* un/pack a job step's checkpoint context */
-extern int  checkpoint_pack_jobinfo  (check_jobinfo_t jobinfo, Buf buffer)
+extern int  checkpoint_pack_jobinfo  (check_jobinfo_t jobinfo, Buf buffer,
+				      uint16_t protocol_version)
 {
 	int retval = SLURM_SUCCESS;
 
 	slurm_mutex_lock( &context_lock );
 	if ( g_context )
 		retval = (*(g_context->ops.ckpt_pack_jobinfo))(
-			jobinfo, buffer);
+			jobinfo, buffer, protocol_version);
 	else {
 		error ("slurm_checkpoint plugin context not initialized");
 		retval = ENOENT;
@@ -378,14 +387,15 @@ extern int  checkpoint_pack_jobinfo  (check_jobinfo_t jobinfo, Buf buffer)
 	return retval;
 }
 
-extern int  checkpoint_unpack_jobinfo  (check_jobinfo_t jobinfo, Buf buffer)
+extern int  checkpoint_unpack_jobinfo  (check_jobinfo_t jobinfo, Buf buffer,
+					uint16_t protocol_version)
 {
 	int retval = SLURM_SUCCESS;
 
 	slurm_mutex_lock( &context_lock );
 	if ( g_context )
 		retval = (*(g_context->ops.ckpt_unpack_jobinfo))(
-			jobinfo, buffer);
+			jobinfo, buffer, protocol_version);
 	else {
 		error ("slurm_checkpoint plugin context not initialized");
 		retval = ENOENT;
@@ -461,10 +471,10 @@ extern int checkpoint_tasks (uint32_t job_id, uint32_t step_id,
 
 	if ((ret_list = slurm_send_recv_msgs(nodelist, &req_msg, (wait*1000),
 					     false))) {
-		while((ret_data_info = list_pop(ret_list))) {
+		while ((ret_data_info = list_pop(ret_list))) {
                         temp_rc = slurm_get_return_code(ret_data_info->type,
                                                         ret_data_info->data);
-                        if(temp_rc)
+                        if (temp_rc)
                                 rc = temp_rc;
                 }
 	} else {

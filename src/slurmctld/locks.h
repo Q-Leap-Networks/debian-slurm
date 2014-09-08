@@ -136,16 +136,19 @@ extern void init_locks ( void );
 /* kill_locked_threads - Kill all threads waiting on semaphores */
 extern void kill_locked_threads ( void );
 
-/* lock_slurmctld - Issue the required lock requests in a well defined order
- * RET 0 on success, -1 on failure */
+/* lock_slurmctld - Issue the required lock requests in a well defined order */
 extern void lock_slurmctld (slurmctld_lock_t lock_levels);
+
+/* try_lock_slurmctld - equivalent to lock_slurmctld() except 
+ * RET 0 on success or -1 if the locks are currently not available */
+extern int try_lock_slurmctld (slurmctld_lock_t lock_levels);
 
 /* unlock_slurmctld - Issue the required unlock requests in a well
  *	defined order */
 extern void unlock_slurmctld (slurmctld_lock_t lock_levels);
 
 /* un/lock semaphore used for saving state of slurmctld */
-extern void inline lock_state_files ( void );
-extern void inline unlock_state_files ( void );
+inline extern void lock_state_files ( void );
+inline extern void unlock_state_files ( void );
 
 #endif

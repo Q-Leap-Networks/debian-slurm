@@ -65,6 +65,9 @@
 /* print this version of SLURM */
 void print_slurm_version(void);
 
+/* print the available gres options */
+void print_gres_help(void);
+
 /* verify the requested distribution type */
 task_dist_states_t verify_dist_type(const char *arg, uint32_t *plane_size);
 
@@ -77,8 +80,11 @@ int verify_geometry(const char *arg, uint16_t *geometry);
 /* return command name from its full path name */
 char * base_name(char* command);
 
-/* confirm and convert a str to it's presented numeric value */
-long str_to_bytes(const char *arg);
+/*
+ * str_to_mbytes(): verify that arg is numeric with optional "K", "M", "G"
+ * or "T" at end and return the number in mega-bytes
+ */
+long str_to_mbytes(const char *arg);
 
 /* verify that a node count in arg is of a known form (count or min-max) */
 bool verify_node_count(const char *arg, int *min_nodes, int *max_nodes);

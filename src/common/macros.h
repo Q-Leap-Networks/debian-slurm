@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/common/macros.h - some standard macros for slurm
- * $Id: macros.h 19095 2009-12-01 22:59:18Z da $
+ * $Id: macros.h 21570 2010-11-17 15:13:28Z da $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -244,6 +244,9 @@ typedef enum {false, true} bool;
 #  define slurm_attr_destroy(attr)
 
 #endif /* WITH_PTHREADS */
+
+#define slurm_atoul(str) strtoul(str, NULL, 10)
+#define slurm_atoull(str) strtoull(str, NULL, 10)
 
 #ifndef strong_alias
 #  if USE_ALIAS

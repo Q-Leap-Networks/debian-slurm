@@ -3,7 +3,7 @@
  *  file and work with the corresponding structures
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
@@ -73,8 +73,9 @@ struct config_record {
 	uint32_t tmp_disk;	/* MB total storage in TMP_FS file system */
 	uint32_t weight;	/* arbitrary priority of node for
 				 * scheduling work on */
-	char *feature;		/* arbitrary list of features associated */
+	char *feature;		/* arbitrary list of node's features */
 	char **feature_array;	/* array of feature names */
+	char *gres;		/* arbitrary list of node's generic resources */
 	char *nodes;		/* name of nodes with this configuration */
 	bitstr_t *node_bitmap;	/* bitmap of nodes with this configuration */
 };
@@ -95,6 +96,9 @@ struct node_record {
 					 * responding */
 	bool not_responding;		/* set if fails to respond,
 					 * clear after logging this */
+	time_t boot_time;		/* Time of node boot,
+					 * computed from up_time */
+	time_t slurmd_start_time;	/* Time of slurmd startup */
 	time_t last_response;		/* last response from the node */
 	time_t last_idle;		/* time node last become idle */
 	uint16_t cpus;			/* count of processors on the node */
@@ -110,27 +114,42 @@ struct node_record {
 					 * associated with this node*/
 	char *comm_name;		/* communications path name to node */
 	uint16_t port;			/* TCP port number of the slurmd */
-	slurm_addr slurm_addr;		/* network address */
+	slurm_addr_t slurm_addr;	/* network address */
 	uint16_t comp_job_cnt;		/* count of jobs completing on node */
 	uint16_t run_job_cnt;		/* count of jobs running on node */
+	uint16_t sus_job_cnt;		/* count of jobs suspended on node */
 	uint16_t no_share_job_cnt;	/* count of jobs running that will
 					 * not share nodes */
 	char *reason; 			/* why a node is DOWN or DRAINING */
-	char *features;			/* associated features, used only
+	time_t reason_time;		/* Time stamp when reason was
+					 * set, ignore if no reason is set. */
+	uint32_t reason_uid;		/* User that set the reason, ignore if
+					 * no reason is set. */
+	char *features;			/* node's features, used only
 					 * for state save/restore, DO NOT
 					 * use for scheduling purposes */
+	char *gres;			/* node's generic resources, used only
+					 * for state save/restore, DO NOT
+					 * use for scheduling purposes */
+	List gres_list;			/* list of gres state info managed by
+					 * plugins */
+	uint32_t weight;		/* orignal weight, used only for state
+					 * save/restore, DO NOT use for
+					 * scheduling purposes. */
 	char *arch;			/* computer architecture */
 	char *os;			/* operating system now running */
 	struct node_record *node_next;	/* next entry with same hash index */
-	uint32_t hilbert_integer;	/* Hilbert number based on node name,
+	uint32_t node_rank;		/* Hilbert number based on node name,
+					 * or other sequence number used to
+					 * order nodes by location,
 					 * no need to save/restore */
-#ifdef APBASIL_LOC
-	uint32_t basil_node_id;		/* Cray/BASIL node ID,
+#ifdef HAVE_CRAY
+	uint32_t basil_node_id;		/* Cray-XT BASIL node ID,
 					 * no need to save/restore */
-#endif	/* APBASIL_LOC */
-	select_nodeinfo_t *select_nodeinfo; /* opaque data structure,
-					     * use select_g_get_nodeinfo()
-					     * to access conents */
+#endif	/* HAVE_CRAY */
+	dynamic_plugin_data_t *select_nodeinfo; /* opaque data structure,
+						 * use select_g_get_nodeinfo()
+						 * to access contents */
 
 };
 extern struct node_record *node_record_table_ptr;  /* ptr to node records */

@@ -59,12 +59,18 @@
 #include "src/slurmdbd/rpc_mgr.h"
 #include "src/slurmdbd/slurmdbd.h"
 
-#define MAX_THREAD_COUNT 50
+#define MAX_THREAD_COUNT 100
+
+/*
+ *  Maximum message size. Messages larger than this value (in bytes)
+ *  will not be received.
+ */
+#define MAX_MSG_SIZE     (16*1024*1024)
 
 /* Local functions */
-static bool   _fd_readable(slurm_fd fd);
+static bool   _fd_readable(slurm_fd_t fd);
 static void   _free_server_thread(pthread_t my_tid);
-static int    _send_resp(slurm_fd fd, Buf buffer);
+static int    _send_resp(slurm_fd_t fd, Buf buffer);
 static void * _service_connection(void *arg);
 static void   _sig_handler(int signal);
 static int    _tot_wait (struct timeval *start_time);
@@ -82,9 +88,9 @@ static pthread_cond_t  thread_count_cond = PTHREAD_COND_INITIALIZER;
 extern void *rpc_mgr(void *no_data)
 {
 	pthread_attr_t thread_attr_rpc_req;
-	slurm_fd sockfd, newsockfd;
+	slurm_fd_t sockfd, newsockfd;
 	int i, retry_cnt, sigarray[] = {SIGUSR1, 0};
-	slurm_addr cli_addr;
+	slurm_addr_t cli_addr;
 	slurmdbd_conn_t *conn_arg = NULL;
 
 	slurm_mutex_lock(&thread_count_lock);
@@ -200,7 +206,7 @@ static void * _service_connection(void *arg)
 			break;
 		}
 		msg_size = ntohl(nw_size);
-		if ((msg_size < 2) || (msg_size > 1000000)) {
+		if ((msg_size < 2) || (msg_size > MAX_MSG_SIZE)) {
 			error("Invalid msg_size (%u) from "
 			      "connection %d(%s) uid(%d)",
 			      msg_size, conn->newsockfd, conn->ip, uid);
@@ -247,6 +253,7 @@ static void * _service_connection(void *arg)
 		error("close(%d): %m(%s)",  conn->newsockfd, conn->ip);
 	else
 		debug2("Closed connection %d uid(%d)", conn->newsockfd, uid);
+	xfree(conn->cluster_name);
 	xfree(conn);
 	_free_server_thread(pthread_self());
 	return NULL;
@@ -265,11 +272,11 @@ extern Buf make_dbd_rc_msg(uint16_t rpc_version,
 	msg.return_code  = rc;
 	msg.comment  = comment;
 	msg.sent_type  = sent_type;
-	slurmdbd_pack_rc_msg(rpc_version, &msg, buffer);
+	slurmdbd_pack_rc_msg(&msg, rpc_version, buffer);
 	return buffer;
 }
 
-static int _send_resp(slurm_fd fd, Buf buffer)
+static int _send_resp(slurm_fd_t fd, Buf buffer)
 {
 	uint32_t msg_size, nw_size;
 	ssize_t msg_wrote;
@@ -317,7 +324,7 @@ static int _tot_wait (struct timeval *start_time)
 }
 
 /* Wait until a file is readable, return false if can not be read */
-static bool _fd_readable(slurm_fd fd)
+static bool _fd_readable(slurm_fd_t fd)
 {
 	struct pollfd ufds;
 	int rc;
@@ -334,7 +341,8 @@ static bool _fd_readable(slurm_fd fd)
 			error("poll: %m");
 			return false;
 		}
-		if (ufds.revents & POLLHUP) {
+		if ((ufds.revents & POLLHUP) &&
+		    ((ufds.revents & POLLIN) == 0)) {
 			debug3("Read connection %d closed", fd);
 			return false;
 		}
@@ -357,7 +365,7 @@ static bool _fd_readable(slurm_fd fd)
 
 /* Wait until a file is writeable,
  * RET false if can not be written to within 5 seconds */
-extern bool fd_writeable(slurm_fd fd)
+extern bool fd_writeable(slurm_fd_t fd)
 {
 	struct pollfd ufds;
 	int msg_timeout = 5000;
@@ -518,8 +526,8 @@ static void _wait_for_thread_fini(void)
 		for (j=0; j<MAX_THREAD_COUNT; j++) {
 			if (slave_thread_id[j] == 0)
 				continue;
-			info("rpc_mgr sending SIGKILL to thread %u",
-			     slave_thread_id[j]);
+			info("rpc_mgr sending SIGKILL to thread %lu",
+			     (unsigned long) slave_thread_id[j]);
 			if (pthread_kill(slave_thread_id[j], SIGKILL)) {
 				slave_thread_id[j] = 0;
 				if (thread_count > 0)

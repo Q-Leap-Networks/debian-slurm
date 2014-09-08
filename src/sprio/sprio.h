@@ -66,6 +66,7 @@
 #include "src/common/log.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/xmalloc.h"
+#include "src/common/slurmdb_defs.h"
 #include "src/sprio/print.h"
 
 struct sprio_parameters {
@@ -76,6 +77,8 @@ struct sprio_parameters {
 	bool weights;
 
 	int  verbose;
+
+	List clusters;
 
 	char* format;
 	char* jobs;

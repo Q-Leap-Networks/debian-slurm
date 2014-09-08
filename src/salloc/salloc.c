@@ -3,7 +3,7 @@
  *             launch a user-specified command.
  *****************************************************************************
  *  Copyright (C) 2006-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -49,6 +49,7 @@
 #include <sys/param.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <termios.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -73,11 +74,16 @@
 #include "src/plugins/select/bluegene/wrap_rm_api.h"
 #endif
 
-#ifdef HAVE_CRAY_XT
+#ifdef HAVE_CRAY
 #include "src/common/node_select.h"
 #endif
 
-#define MAX_RETRIES 3
+#ifndef __USE_XOPEN_EXTENDED
+extern pid_t getsid(pid_t pid);		/* missing from <unistd.h> */
+#endif
+
+#define MAX_RETRIES	10
+#define POLL_SLEEP	3	/* retry interval in seconds  */
 
 char **command_argv;
 int command_argc;
@@ -91,34 +97,53 @@ static bool exit_flag = false;
 static bool allocation_interrupted = false;
 static uint32_t pending_job_id = 0;
 static time_t last_timeout = 0;
+static struct termios saved_tty_attributes;
 
-static int  _fill_job_desc_from_opts(job_desc_msg_t *desc);
-static void _ring_terminal_bell(void);
-static pid_t  _fork_command(char **command);
-static void _pending_callback(uint32_t job_id);
-static void _ignore_signal(int signo);
 static void _exit_on_signal(int signo);
-static void _signal_while_allocating(int signo);
+static int  _fill_job_desc_from_opts(job_desc_msg_t *desc);
+static pid_t  _fork_command(char **command);
+static void _forward_signal(int signo);
 static void _job_complete_handler(srun_job_complete_msg_t *msg);
+static void _node_fail_handler(srun_node_fail_msg_t *msg);
+static void _pending_callback(uint32_t job_id);
+static void _ping_handler(srun_ping_msg_t *msg);
+static void _ring_terminal_bell(void);
 static void _set_exit_code(void);
 static void _set_rlimits(char **env);
 static void _set_spank_env(void);
 static void _set_submit_dir_env(void);
+static void _signal_while_allocating(int signo);
 static void _timeout_handler(srun_timeout_msg_t *msg);
 static void _user_msg_handler(srun_user_msg_t *msg);
-static void _ping_handler(srun_ping_msg_t *msg);
-static void _node_fail_handler(srun_node_fail_msg_t *msg);
 
 #ifdef HAVE_BG
-#define POLL_SLEEP 3			/* retry interval in seconds  */
 static int _wait_bluegene_block_ready(
 			resource_allocation_response_msg_t *alloc);
 static int _blocks_dealloc(void);
+#else
+static int _wait_nodes_ready(resource_allocation_response_msg_t *alloc);
 #endif
 
-#ifdef HAVE_CRAY_XT
+#ifdef HAVE_CRAY
 static int  _claim_reservation(resource_allocation_response_msg_t *alloc);
 #endif
+
+bool salloc_shutdown = false;
+/* Signals that are considered terminal before resource allocation. */
+int sig_array[] = {
+	SIGHUP, SIGINT, SIGQUIT, SIGPIPE,
+	SIGTERM, SIGUSR1, SIGUSR2, 0
+};
+
+static void _reset_input_mode (void)
+{
+	/* SIGTTOU needs to be blocked per the POSIX spec:
+	 * http://pubs.opengroup.org/onlinepubs/009695399/functions/tcsetattr.html
+	 */
+	int sig_block[] = { SIGTTOU, SIGTTIN, 0 };
+	xsignal_block (sig_block);
+	tcsetattr (STDIN_FILENO, TCSANOW, &saved_tty_attributes);
+}
 
 int main(int argc, char *argv[])
 {
@@ -128,18 +153,38 @@ int main(int argc, char *argv[])
 	time_t before, after;
 	allocation_msg_thread_t *msg_thr;
 	char **env = NULL;
-	int status = 0;
-	int errnum = 0;
+	int status = 0, is_interactive;
 	int retries = 0;
-	pid_t pid;
+	pid_t pid = 0;
 	pid_t rc_pid = 0;
-	int rc = 0;
+	int i, rc = 0;
 	static char *msg = "Slurm job queue full, sleeping and retrying.";
 	slurm_allocation_callbacks_t callbacks;
 
-	log_init(xbasename(argv[0]), logopt, 0, NULL);
+	is_interactive = isatty(STDIN_FILENO);
+	if (is_interactive) {
+		bool sent_msg = false;
+		/* Wait as long as we are running in the background */
+		while (tcgetpgrp(STDIN_FILENO) != (pid = getpgrp())) {
+			if (!sent_msg) {
+				error("Waiting for program to be placed in "
+				      "the foreground");
+				sent_msg = true;
+			}
+			killpg(pid, SIGTTIN);
+		}
 
+		/*
+		 * Save tty attributes and reset at exit, in case a child
+		 * process died before properly resetting terminal.
+		 */
+		tcgetattr (STDIN_FILENO, &saved_tty_attributes);
+		atexit (_reset_input_mode);
+	}
+
+	log_init(xbasename(argv[0]), logopt, 0, NULL);
 	_set_exit_code();
+
 	if (spank_init_allocator() < 0) {
 		error("Failed to initialize plugin stack");
 		exit(error_exit);
@@ -213,13 +258,10 @@ int main(int argc, char *argv[])
 	msg_thr = slurm_allocation_msg_thr_create(&desc.other_port,
 						  &callbacks);
 
-	xsignal(SIGHUP, _signal_while_allocating);
-	xsignal(SIGINT, _signal_while_allocating);
-	xsignal(SIGQUIT, _signal_while_allocating);
-	xsignal(SIGPIPE, _signal_while_allocating);
-	xsignal(SIGTERM, _signal_while_allocating);
-	xsignal(SIGUSR1, _signal_while_allocating);
-	xsignal(SIGUSR2, _signal_while_allocating);
+	/* NOTE: Do not process signals in separate pthread. The signal will
+	 * cause slurm_allocate_resources_blocking() to exit immediately. */
+	for (i = 0; sig_array[i]; i++)
+		xsignal(sig_array[i], _signal_while_allocating);
 
 	before = time(NULL);
 	while ((alloc = slurm_allocate_resources_blocking(&desc, opt.immediate,
@@ -228,9 +270,9 @@ int main(int argc, char *argv[])
 		    (retries >= MAX_RETRIES))
 			break;
 		if (retries == 0)
-			error(msg);
+			error("%s", msg);
 		else
-			debug(msg);
+			debug("%s", msg);
 		sleep (++retries);
 	}
 
@@ -271,8 +313,15 @@ int main(int argc, char *argv[])
 				      "boot of the block.");
 			goto relinquish;
 		}
+#else
+		if (!_wait_nodes_ready(alloc)) {
+			if(!allocation_interrupted)
+				error("Something is wrong with the "
+				      "boot of the nodes.");
+			goto relinquish;
+		}	
 #endif
-#ifdef HAVE_CRAY_XT
+#ifdef HAVE_CRAY
 		if (!_claim_reservation(alloc)) {
 			if(!allocation_interrupted)
 				error("Something is wrong with the ALPS "
@@ -283,15 +332,6 @@ int main(int argc, char *argv[])
 	}
 
 	after = time(NULL);
-
-	xsignal(SIGHUP, _exit_on_signal);
-	xsignal(SIGINT, _ignore_signal);
-	xsignal(SIGQUIT, _ignore_signal);
-	xsignal(SIGPIPE, _ignore_signal);
-	xsignal(SIGTERM, _ignore_signal);
-	xsignal(SIGUSR1, _ignore_signal);
-	xsignal(SIGUSR2, _ignore_signal);
-
 	if (opt.bell == BELL_ALWAYS
 	    || (opt.bell == BELL_AFTER_DELAY
 		&& ((after - before) > DEFAULT_BELL_DELAY))) {
@@ -315,8 +355,11 @@ int main(int argc, char *argv[])
 		goto relinquish;
 
 	/* Add default task count for srun, if not already set */
-	if (opt.nprocs_set)
-		env_array_append_fmt(&env, "SLURM_NPROCS", "%d", opt.nprocs);
+	if (opt.ntasks_set) {
+		env_array_append_fmt(&env, "SLURM_NTASKS", "%d", opt.ntasks);
+		/* keep around for old scripts */
+		env_array_append_fmt(&env, "SLURM_NPROCS", "%d", opt.ntasks);
+	}
 	if (opt.cpus_per_task > 1) {
 		env_array_append_fmt(&env, "SLURM_CPUS_PER_TASK", "%d",
 				     opt.cpus_per_task);
@@ -344,27 +387,51 @@ int main(int argc, char *argv[])
 			      alloc->job_id);
 		}
 		return 1;
-	} else {
-		allocation_state = GRANTED;
-		pthread_mutex_unlock(&allocation_state_lock);
-		command_pid = pid = _fork_command(command_argv);
+ 	}
+	allocation_state = GRANTED;
+	pthread_mutex_unlock(&allocation_state_lock);
+
+	/*  Ensure that salloc has initial terminal foreground control.  */
+	if (is_interactive) {
+		/*
+		 * Ignore remaining job-control signals (other than those in
+		 * sig_array, which at this state act like SIG_IGN).
+		 */
+		xsignal(SIGTSTP, SIG_IGN);
+		xsignal(SIGTTIN, SIG_IGN);
+		xsignal(SIGTTOU, SIG_IGN);
+
+		pid = getpid();
+		setpgid(pid, pid);
+
+		tcsetpgrp(STDIN_FILENO, pid);
 	}
 
+	command_pid = _fork_command(command_argv);
 	/*
 	 * Wait for command to exit, OR for waitpid to be interrupted by a
 	 * signal.  Either way, we are going to release the allocation next.
 	 */
-	if (pid > 0) {
-		while ((rc_pid = waitpid(pid, &status, 0)) == -1) {
-			if (exit_flag)
-				break;
-			if (errno == EINTR)
-				continue;
-		}
-		errnum = errno;
-		if ((rc_pid == -1) && (errnum != EINTR))
+	if (command_pid > 0) {
+		setpgid(command_pid, command_pid);
+		if (is_interactive)
+			tcsetpgrp(STDIN_FILENO, command_pid);
+
+		/* NOTE: Do not process signals in separate pthread.
+		 * The signal will cause waitpid() to exit immediately. */
+		xsignal(SIGHUP,  _exit_on_signal);
+
+		/* Use WUNTRACED to treat stopped children like terminated ones */
+		do {
+			rc_pid = waitpid(command_pid, &status, WUNTRACED);
+		} while ((rc_pid == -1) && (!exit_flag));
+
+		if ((rc_pid == -1) && (errno != EINTR))
 			error("waitpid for %s failed: %m", command_argv[0]);
 	}
+
+	if (is_interactive)
+		tcsetpgrp(STDIN_FILENO, pid);
 
 	/*
 	 * Relinquish the job allocation (if not already revoked).
@@ -372,13 +439,15 @@ int main(int argc, char *argv[])
 relinquish:
 	pthread_mutex_lock(&allocation_state_lock);
 	if (allocation_state != REVOKED) {
+		pthread_mutex_unlock(&allocation_state_lock);
+
 		info("Relinquishing job allocation %d", alloc->job_id);
-		if (slurm_complete_job(alloc->job_id, status)
-		    != 0)
+		if ((slurm_complete_job(alloc->job_id, status) != 0) &&
+		    (slurm_get_errno() != ESLURM_ALREADY_DONE))
 			error("Unable to clean up job allocation %d: %m",
 			      alloc->job_id);
-		else
-			allocation_state = REVOKED;
+		pthread_mutex_lock(&allocation_state_lock);
+		allocation_state = REVOKED;
 	}
 	pthread_mutex_unlock(&allocation_state_lock);
 
@@ -387,7 +456,7 @@ relinquish:
 
 	/*
 	 * Figure out what return code we should use.  If the user's command
-	 * exitted normally, return the user's return code.
+	 * exited normally, return the user's return code.
 	 */
 	rc = 1;
 	if (rc_pid != -1) {
@@ -470,6 +539,7 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 {
 	desc->contiguous = opt.contiguous ? 1 : 0;
 	desc->features = opt.constraints;
+	desc->gres = opt.gres;
 	if (opt.immediate == 1)
 		desc->immediate = 1;
 	desc->name = xstrdup(opt.job_name);
@@ -551,23 +621,23 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 
 	/* job constraints */
 	if (opt.mincpus > -1)
-		desc->job_min_cpus = opt.mincpus;
+		desc->pn_min_cpus = opt.mincpus;
 	if (opt.realmem > -1)
-		desc->job_min_memory = opt.realmem;
+		desc->pn_min_memory = opt.realmem;
 	else if (opt.mem_per_cpu > -1)
-		desc->job_min_memory = opt.mem_per_cpu | MEM_PER_CPU;
+		desc->pn_min_memory = opt.mem_per_cpu | MEM_PER_CPU;
 	if (opt.tmpdisk > -1)
-		desc->job_min_tmp_disk = opt.tmpdisk;
+		desc->pn_min_tmp_disk = opt.tmpdisk;
 	if (opt.overcommit) {
-		desc->num_procs = opt.min_nodes;
+		desc->min_cpus = opt.min_nodes;
 		desc->overcommit = opt.overcommit;
 	} else
-		desc->num_procs = opt.nprocs * opt.cpus_per_task;
-	if (opt.nprocs_set)
-		desc->num_tasks = opt.nprocs;
+		desc->min_cpus = opt.ntasks * opt.cpus_per_task;
+	if (opt.ntasks_set)
+		desc->num_tasks = opt.ntasks;
 	if (opt.cpus_set)
 		desc->cpus_per_task = opt.cpus_per_task;
-	if (opt.ntasks_per_node > -1)
+	if (opt.ntasks_per_node)
 		desc->ntasks_per_node = opt.ntasks_per_node;
 	if (opt.ntasks_per_socket > -1)
 		desc->ntasks_per_socket = opt.ntasks_per_socket;
@@ -575,20 +645,23 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->ntasks_per_core = opt.ntasks_per_core;
 
 	/* node constraints */
-	if (opt.min_sockets_per_node != NO_VAL)
-		desc->min_sockets = opt.min_sockets_per_node;
-	if (opt.min_cores_per_socket != NO_VAL)
-		desc->min_cores = opt.min_cores_per_socket;
-	if (opt.min_threads_per_core != NO_VAL)
-		desc->min_threads = opt.min_threads_per_core;
+	if (opt.sockets_per_node != NO_VAL)
+		desc->sockets_per_node = opt.sockets_per_node;
+	if (opt.cores_per_socket != NO_VAL)
+		desc->cores_per_socket = opt.cores_per_socket;
+	if (opt.threads_per_core != NO_VAL)
+		desc->threads_per_core = opt.threads_per_core;
 
 	if (opt.no_kill)
 		desc->kill_on_node_fail = 0;
 	if (opt.time_limit  != NO_VAL)
 		desc->time_limit = opt.time_limit;
+	if (opt.time_min  != NO_VAL)
+		desc->time_min = opt.time_min;
 	desc->shared = opt.shared;
 	desc->job_id = opt.jobid;
 
+	desc->wait_all_nodes = opt.wait_all_nodes;
 	if (opt.warn_signal)
 		desc->warn_signal = opt.warn_signal;
 	if (opt.warn_time)
@@ -620,6 +693,21 @@ static pid_t _fork_command(char **command)
 		error("fork failed: %m");
 	} else if (pid == 0) {
 		/* child */
+		setpgid(getpid(), 0);
+
+		/*
+		 * Reset job control signals.
+		 * Suspend (TSTP) is not restored (ignored, as in the parent):
+		 * shells with job-control override this and look after their
+		 * processes.
+		 * Suspending single commands is more complex and would require
+		 * adding full shell-like job control to salloc.
+		 */
+		xsignal(SIGINT, SIG_DFL);
+		xsignal(SIGQUIT, SIG_DFL);
+		xsignal(SIGTTIN, SIG_DFL);
+		xsignal(SIGTTOU, SIG_DFL);
+
 		execvp(command[0], command);
 
 		/* should only get here if execvp failed */
@@ -636,22 +724,24 @@ static void _pending_callback(uint32_t job_id)
 	pending_job_id = job_id;
 }
 
+static void _exit_on_signal(int signo)
+{
+	_forward_signal(signo);
+	exit_flag = true;
+}
+
+static void _forward_signal(int signo)
+{
+	if (command_pid > 0)
+		killpg(command_pid, signo);
+}
+
 static void _signal_while_allocating(int signo)
 {
 	allocation_interrupted = true;
 	if (pending_job_id != 0) {
 		slurm_complete_job(pending_job_id, 0);
 	}
-}
-
-static void _ignore_signal(int signo)
-{
-	/* do nothing */
-}
-
-static void _exit_on_signal(int signo)
-{
-	exit_flag = true;
 }
 
 /* This typically signifies the job was cancelled by scancel */
@@ -679,16 +769,28 @@ static void _job_complete_handler(srun_job_complete_msg_t *comp)
 				     comp->job_id);
 			}
 		}
-		if (allocation_state == GRANTED
-		    && command_pid > -1
-		    && opt.kill_command_signal_set) {
-			verbose("Sending signal %d to command \"%s\", pid %d",
-				opt.kill_command_signal,
-				command_argv[0], command_pid);
-			kill(command_pid, opt.kill_command_signal);
-		}
 		allocation_state = REVOKED;
 		pthread_mutex_unlock(&allocation_state_lock);
+		/*
+		 * Clean up child process: only if the forked process has not
+		 * yet changed state (waitpid returning 0).
+		 */
+		if ((command_pid > -1) &&
+		    (waitpid(command_pid, NULL, WNOHANG) == 0)) {
+			int signal = 0;
+#if defined(HAVE_CRAY)
+			signal = SIGTERM;
+#else
+			if (opt.kill_command_signal_set)
+				signal = opt.kill_command_signal;
+#endif
+			if (signal) {
+				 verbose("Sending signal %d to command \"%s\","
+					 " pid %d",
+					 signal, command_argv[0], command_pid);
+				_forward_signal(signal);
+			}
+		}
 	} else {
 		verbose("Job step %u.%u is finished.",
 			comp->job_id, comp->step_id);
@@ -773,7 +875,7 @@ static int _wait_bluegene_block_ready(resource_allocation_response_msg_t *alloc)
 	char *block_id = NULL;
 	int cur_delay = 0;
 	int max_delay = BG_FREE_PREVIOUS_BLOCK + BG_MIN_BLOCK_BOOT +
-		(BG_INCR_BLOCK_BOOT * alloc->node_cnt);
+			(BG_INCR_BLOCK_BOOT * alloc->node_cnt);
 
 	pending_job_id = alloc->job_id;
 	select_g_select_jobinfo_get(alloc->select_jobinfo,
@@ -796,7 +898,7 @@ static int _wait_bluegene_block_ready(resource_allocation_response_msg_t *alloc)
 
 		if (rc == READY_JOB_FATAL)
 			break;				/* fatal error */
-		if (rc == READY_JOB_ERROR)		/* error */
+		if ((rc == READY_JOB_ERROR) || (rc == EAGAIN))
 			continue;			/* retry */
 		if ((rc & READY_JOB_STATE) == 0)	/* job killed */
 			break;
@@ -834,19 +936,20 @@ static int _blocks_dealloc(void)
 
 	if (bg_info_ptr) {
 		error_code = slurm_load_block_info(bg_info_ptr->last_update,
-						   &new_bg_ptr);
+						   &new_bg_ptr, SHOW_ALL);
 		if (error_code == SLURM_SUCCESS)
-			slurm_free_block_info_msg(&bg_info_ptr);
+			slurm_free_block_info_msg(bg_info_ptr);
 		else if (slurm_get_errno() == SLURM_NO_CHANGE_IN_DATA) {
 			error_code = SLURM_SUCCESS;
 			new_bg_ptr = bg_info_ptr;
 		}
 	} else {
-		error_code = slurm_load_block_info((time_t) NULL, &new_bg_ptr);
+		error_code = slurm_load_block_info((time_t) NULL,
+						   &new_bg_ptr, SHOW_ALL);
 	}
 
 	if (error_code) {
-		error("slurm_load_partitions: %s\n",
+		error("slurm_load_partitions: %s",
 		      slurm_strerror(slurm_get_errno()));
 		return -1;
 	}
@@ -860,19 +963,81 @@ static int _blocks_dealloc(void)
 	bg_info_ptr = new_bg_ptr;
 	return rc;
 }
+#else
+/* returns 1 if job and nodes are ready for job to begin, 0 otherwise */
+static int _wait_nodes_ready(resource_allocation_response_msg_t *alloc)
+{
+	int is_ready = 0, i, rc;
+	int cur_delay = 0;
+	int suspend_time, resume_time, max_delay;
+
+	suspend_time = slurm_get_suspend_timeout();
+	resume_time  = slurm_get_resume_timeout();
+	if ((suspend_time == 0) || (resume_time == 0))
+		return 1;	/* Power save mode disabled */
+	max_delay = suspend_time + resume_time;
+	max_delay *= 5;		/* Allow for ResumeRate support */
+
+	pending_job_id = alloc->job_id;
+
+	if (opt.wait_all_nodes == (uint16_t) NO_VAL)
+		opt.wait_all_nodes = DEFAULT_WAIT_ALL_NODES;
+
+	for (i=0; (cur_delay < max_delay); i++) {
+		if (i) {
+			if (i == 1)
+				info("Waiting for nodes to boot");
+			else
+				debug("still waiting");
+			sleep(POLL_SLEEP);
+			cur_delay += POLL_SLEEP;
+		}
+
+		if (opt.wait_all_nodes)
+			rc = slurm_job_node_ready(alloc->job_id);
+		else {
+			is_ready = 1;
+			break;
+		}
+
+		if (rc == READY_JOB_FATAL)
+			break;				/* fatal error */
+		if ((rc == READY_JOB_ERROR) || (rc == EAGAIN))
+			continue;			/* retry */
+		if ((rc & READY_JOB_STATE) == 0)	/* job killed */
+			break;
+		if (rc & READY_NODE_STATE) {		/* job and node ready */
+			is_ready = 1;
+			break;
+		}
+		if (allocation_interrupted)
+			break;
+	}
+	if (is_ready) {
+		if (i > 0)
+     			info ("Nodes %s are ready for job", alloc->node_list);
+	} else if (!allocation_interrupted)
+		error("Nodes %s are still not ready", alloc->node_list);
+	else	/* allocation_interrupted or slurmctld not responing */
+		is_ready = 0;
+
+	pending_job_id = 0;
+
+	return is_ready;
+}
 #endif	/* HAVE_BG */
 
-#ifdef HAVE_CRAY_XT
+#ifdef HAVE_CRAY
 /* returns 1 if job and nodes are ready for job to begin, 0 otherwise */
 static int _claim_reservation(resource_allocation_response_msg_t *alloc)
 {
 	int rc = 0;
-	char *resv_id = NULL;
+	uint32_t resv_id = 0;
 
 	select_g_select_jobinfo_get(alloc->select_jobinfo,
 				    SELECT_JOBDATA_RESV_ID,
 				    &resv_id);
-	if (resv_id == NULL)
+	if (!resv_id)
 		return rc;
 	if (basil_resv_conf(resv_id, alloc->job_id) == SLURM_SUCCESS)
 		rc = 1;

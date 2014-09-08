@@ -2,7 +2,8 @@
  *  opts.c - sinfo command line option processing functions
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
+ *  Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>, Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -96,6 +97,8 @@ extern void parse_command_line(int argc, char *argv[])
 		{"noheader",  no_argument,       0, 'h'},
 		{"iterate",   required_argument, 0, 'i'},
 		{"long",      no_argument,       0, 'l'},
+		{"cluster",   required_argument, 0, 'M'},
+		{"clusters",  required_argument, 0, 'M'},
 		{"nodes",     required_argument, 0, 'n'},
 		{"Node",      no_argument,       0, 'N'},
 		{"format",    required_argument, 0, 'o'},
@@ -121,9 +124,16 @@ extern void parse_command_line(int argc, char *argv[])
 	}
 	if ( ( env_val = getenv("SINFO_SORT") ) )
 		params.sort = xstrdup(env_val);
+	if ( ( env_val = getenv("SLURM_CLUSTERS") ) ) {
+		if (!(params.clusters = slurmdb_get_info_cluster(env_val))) {
+			error("'%s' invalid entry for SLURM_CLUSTERS",
+			      env_val);
+			exit(1);
+		}
+		working_cluster_rec = list_peek(params.clusters);
+	}
 
-
-	while((opt_char = getopt_long(argc, argv, "abdehi:ln:No:p:rRsS:t:vV",
+	while((opt_char = getopt_long(argc, argv, "abdehi:lM:n:No:p:rRsS:t:vV",
 			long_options, &option_index)) != -1) {
 		switch (opt_char) {
 		case (int)'?':
@@ -135,12 +145,16 @@ extern void parse_command_line(int argc, char *argv[])
 			params.all_flag = true;
 			break;
 		case (int)'b':
-#ifdef HAVE_BG
-			params.bg_flag = true;
-#else
-			error("must be on a BG system to use --bg option");
-			exit(1);
-#endif
+			params.cluster_flags = slurmdb_setup_cluster_flags();
+			if (params.cluster_flags & CLUSTER_FLAG_BG)
+				params.bg_flag = true;
+			else {
+				error("Must be on a BG system to use --bg "
+				      "option, if using --cluster option "
+				      "put the --bg option "
+				      "after the --cluster option.");
+				exit(1);
+			}
 			break;
 		case (int)'d':
 			params.dead_nodes = true;
@@ -161,6 +175,17 @@ extern void parse_command_line(int argc, char *argv[])
 			break;
 		case (int) 'l':
 			params.long_output = true;
+			break;
+		case (int) 'M':
+			if (params.clusters)
+				list_destroy(params.clusters);
+			if (!(params.clusters =
+			      slurmdb_get_info_cluster(optarg))) {
+				error("'%s' invalid entry for --cluster",
+				      optarg);
+				exit(1);
+			}
+			working_cluster_rec = list_peek(params.clusters);
 			break;
 		case (int) 'n':
 			xfree(params.nodes);
@@ -227,13 +252,14 @@ extern void parse_command_line(int argc, char *argv[])
 		}
 	}
 
+	params.cluster_flags = slurmdb_setup_cluster_flags();
+
 	if ( params.format == NULL ) {
 		if ( params.summarize ) {
-#ifdef HAVE_BG
-			params.format = "%9P %.5a %.10l %.32F  %N";
-#else
-			params.format = "%9P %.5a %.10l %.16F  %N";
-#endif
+			if(params.cluster_flags & CLUSTER_FLAG_BG)
+				params.format = "%9P %.5a %.10l %.32F  %N";
+			else
+				params.format = "%9P %.5a %.10l %.16F  %N";
 		} else if ( params.node_flag ) {
 			params.node_field_flag = true;	/* compute size later */
 			params.format = params.long_output ?
@@ -242,8 +268,8 @@ extern void parse_command_line(int argc, char *argv[])
 
 		} else if (params.list_reasons) {
 			params.format = params.long_output ?
-			  "%50R %6t %N" :
-			  "%50R %N";
+			  "%20R %12U %19H %6t %N" :
+			  "%20R %9u %19H %N";
 
 		} else if ((env_val = getenv ("SINFO_FORMAT"))) {
 			params.format = xstrdup(env_val);
@@ -520,12 +546,23 @@ _parse_format( char* format )
 					field_size,
 					right_justify,
 					suffix );
+		} else if (field[0] == 'G') {
+			params.match_flags.gres_flag = true;
+			format_add_gres( params.format_list,
+					field_size,
+					right_justify,
+					suffix );
 		} else if (field[0] == 'h') {
 			params.match_flags.share_flag = true;
 			format_add_share( params.format_list,
 					field_size,
 					right_justify,
 					suffix );
+		} else if (field[0] == 'H') {
+			format_add_timestamp( params.format_list,
+					      field_size,
+					      right_justify,
+					      suffix );
 		} else if (field[0] == 'l') {
 			params.match_flags.max_time_flag = true;
 			format_add_time( params.format_list,
@@ -541,6 +578,12 @@ _parse_format( char* format )
 		} else if (field[0] == 'm') {
 			params.match_flags.memory_flag = true;
 			format_add_memory( params.format_list,
+					field_size,
+					right_justify,
+					suffix );
+		} else if (field[0] == 'M') {
+			params.match_flags.preempt_mode_flag = true;
+			format_add_preempt_mode( params.format_list,
 					field_size,
 					right_justify,
 					suffix );
@@ -587,15 +630,25 @@ _parse_format( char* format )
 		} else if (field[0] == 't') {
 			params.match_flags.state_flag = true;
 			format_add_state_compact( params.format_list,
-					field_size,
-					right_justify,
-					suffix );
+						  field_size,
+						  right_justify,
+						  suffix );
 		} else if (field[0] == 'T') {
 			params.match_flags.state_flag = true;
 			format_add_state_long( params.format_list,
+					       field_size,
+					       right_justify,
+					       suffix );
+		} else if (field[0] == 'u') {
+			format_add_user( params.format_list,
 					field_size,
 					right_justify,
 					suffix );
+		} else if (field[0] == 'U') {
+			format_add_user_long( params.format_list,
+					      field_size,
+					      right_justify,
+					      suffix );
 		} else if (field[0] == 'w') {
 			params.match_flags.weight_flag = true;
 			format_add_weight( params.format_list,
@@ -738,6 +791,8 @@ void _print_options( void )
 			"true" : "false");
 	printf("groups_flag     = %s\n", params.match_flags.groups_flag ?
 					"true" : "false");
+	printf("gres_flag       = %s\n", params.match_flags.gres_flag ?
+			"true" : "false");
 	printf("job_size_flag   = %s\n", params.match_flags.job_size_flag ?
 					"true" : "false");
 	printf("max_time_flag   = %s\n", params.match_flags.max_time_flag ?
@@ -778,7 +833,7 @@ Usage: sinfo [OPTIONS]\n\
   -d, --dead                 show only non-responding nodes\n\
   -e, --exact                group nodes only on exact match of configuration\n\
   -h, --noheader             no headers on output\n\
-  -hide                      do not show hidden or non-accessible partitions\n\
+  --hide                     do not show hidden or non-accessible partitions\n\
   -i, --iterate=seconds      specify an iteration period\n\
   -l, --long                 long output - displays more information\n\
   -n, --nodes=NODES          report on specific node(s)\n\

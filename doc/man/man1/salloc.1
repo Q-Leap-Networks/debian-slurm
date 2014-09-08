@@ -1,4 +1,4 @@
-.TH "salloc" "1" "SLURM 2.1" "September 2009" "SLURM Commands"
+.TH "salloc" "1" "SLURM 2.2" "October 2010" "SLURM Commands"
 
 .SH "NAME"
 salloc \- Obtain a SLURM job allocation (a set of nodes), execute a command,
@@ -66,6 +66,7 @@ CR_Core, CR_Core_Memory, CR_Socket, or CR_Socket_Memory for this option
 to be honored.
 This option is not supported on BlueGene systems (select/bluegene plugin
 is configured).
+If not specified, the scontrol show job will display 'ReqS:C:T=*:*:*'.
 
 .TP
 \fB\-\-begin\fR=<\fItime\fR>
@@ -355,6 +356,27 @@ submit the job with \fIgroup\fR's group access permissions.  \fIgroup\fR
 may be the group name or the numerical group ID.
 
 .TP
+\fB\-\-gres\fR=<\fIlist\fR>
+Specifies a comma delimited list of generic consumable resources.
+The format of each entry on the list is "name[:count[*cpu]]".
+The name is that of the consumable resource.
+The count is the number of those resources with a default value of 1.
+The specified resources will be allocated to the job on each node
+allocated unless "*cpu" is appended, in which case the resources
+will be allocated on a per cpu basis.
+The available generic consumable resources is configurable by the system
+administrator.
+A list of available generic consumable resources will be printed and the
+command will exit if the option argument is "help".
+Examples of use include "\-\-gres=gpus:2*cpu,disk=40G" and "\-\-gres=help".
+
+.TP
+\fB\-H, \-\-hold\fR
+Specify the job is to be submitted in a held state (priority of zero).
+A held job can now be released using scontrol to reset its priority
+(e.g. "\fIscontrol update jobid=<id> priority=1\fR".
+
+.TP
 \fB\-h\fR, \fB\-\-help\fR
 Display help information and exit.
 
@@ -483,8 +505,8 @@ contain at minimum the number of hosts requested.  If requesting tasks
 .TP
 \fB\-\-mail\-type\fR=<\fItype\fR>
 Notify user by email when certain event types occur.
-Valid \fItype\fR values are BEGIN, END, FAIL, ALL (any state change).
-The user to be notified is indicated with \fB\-\-mail\-user\fR.
+Valid \fItype\fR values are BEGIN, END, FAIL, REQUEUE, and ALL (any state
+change). The user to be notified is indicated with \fB\-\-mail\-user\fR.
 
 .TP
 \fB\-\-mail\-user\fR=<\fIuser\fR>
@@ -506,9 +528,16 @@ Also see \fB\-\-mem\-per\-cpu\fR.
 .TP
 \fB\-\-mem\-per\-cpu\fR=<\fIMB\fR>
 Mimimum memory required per allocated CPU in MegaBytes.
-Default value is \fBDefMemPerCPU\fR and the maximum value is
-\fBMaxMemPerCPU\fR. If configured, both of parameters can be
+Default value is \fBDefMemPerCPU\fR and the maximum value is \fBMaxMemPerCPU\fR
+(see exception below). If configured, both of parameters can be
 seen using the \fBscontrol show config\fR command.
+Note that if the job's \fB\-\-mem\-per\-cpu\fR value exceeds the configured
+\fBMaxMemPerCPU\fR, then the user's limit will be treated as a memory limit
+per task; \fB\-\-mem\-per\-cpu\fR will be reduced to a value no larger than
+\fBMaxMemPerCPU\fR; \fB\-\-cpus\-per\-task\fR will be set and value of 
+\fB\-\-cpus\-per\-task\fR multiplied by the new \fB\-\-mem\-per\-cpu\fR
+value will equal the original \fB\-\-mem\-per\-cpu\fR value specified by
+the user.
 This parameter would generally be used if individual processors
 are allocated to jobs (\fBSelectType=select/cons_res\fR).
 Also see \fB\-\-mem\fR.
@@ -581,20 +610,8 @@ show this help message
 .RE
 
 .TP
-\fB\-\-mincores\fR=<\fIn\fR>
-Specify a minimum number of cores per socket.
-
-.TP
 \fB\-\-mincpus\fR=<\fIn\fR>
 Specify a minimum number of logical cpus/processors per node.
-
-.TP
-\fB\-\-minsockets\fR=<\fIn\fR>
-Specify a minimum number of sockets (physical processors) per node.
-
-.TP
-\fB\-\-minthreads\fR=<\fIn\fR>
-Specify a minimum number of threads per core.
 
 .TP
 \fB\-N\fR, \fB\-\-nodes\fR=<\fIminnodes\fR[\-\fImaxnodes\fR]>
@@ -721,10 +738,12 @@ allowing more than one task per processor.  However no more than
 \fBMAX_TASKS_PER_NODE\fR tasks are permitted to execute per node.
 
 .TP
-\fB\-p\fR, \fB\-\-partition\fR=<\fIpartition name\fR>
+\fB\-p\fR, \fB\-\-partition\fR=<\fIpartition_names\fR>
 Request a specific partition for the resource allocation.  If not specified,
 the default behaviour is to allow the slurm controller to select the default
-partition as designated by the system administrator.
+partition as designated by the system administrator. If the job can use more
+than one partition, specify their names in a comma separate list and the one
+offering earliest initiation will be used.
 
 .TP
 \fB\-Q\fR, \fB\-\-quiet\fR
@@ -776,6 +795,19 @@ limit be imposed.  Acceptable time formats include "minutes",
 "days\-hours:minutes" and "days\-hours:minutes:seconds".
 
 .TP
+\fB\-\-time\-min\fR=<\fItime\fR>
+Set a minimum time limit on the job allocation.
+If specified, the job may have it's \fB\-\-time\fR limit lowered to a value
+no lower than \fB\-\-time\-min\fR if doing so permits the job to begin
+execution earlier than otherwise possible. 
+The job's time limit will not be changed after the job is allocated resources.
+This is performed by a backfill scheduling algorithm to allocate resources 
+otherwise reserved for higher priority jobs.
+Acceptable time formats include "minutes", "minutes:seconds", 
+"hours:minutes:seconds", "days\-hours", "days\-hours:minutes" and 
+"days\-hours:minutes:seconds".
+
+.TP
 \fB\-\-tmp\fR=<\fIMB\fR>
 Specify a minimum amount of temporary disk space.
 
@@ -814,6 +846,20 @@ comma\-separated list of node names, or a range of node names
 (e.g. mynode[1\-5,7,...]).  Duplicate node names in the list will be ignored.
 The order of the node names in the list is not important; the node names
 will be sorted by SLURM.
+
+.TP
+\fB\-\-wait\-all\-nodes\fR=<\fIvalue\fR>
+Controls when the execution of the command begins.
+By default the job will begin execution as soon as the allocation is made.
+.RS
+.TP 5
+0
+Begin execution as soon as allocation can be made.
+Do not wait for all nodes to be ready for use (i.e. booted).
+.TP
+1
+Do not begin execution until all nodes are ready for use.
+.RE
 
 .TP
 \fB\-\-wckey\fR=<\fIwckey\fR>
@@ -967,6 +1013,9 @@ Same as \fB\-t, \-\-time\fR
 .TP
 \fBSALLOC_WAIT\fR
 Same as \fB\-W, \-\-wait\fR
+.TP
+\fBSALLOC_WAIT_ALL_NODES\fR
+Same as \fB\-\-wait\-all\-nodes\fR
 
 .SH "OUTPUT ENVIRONMENT VARIABLES"
 .PP
@@ -1025,14 +1074,20 @@ The block name on Blue Gene systems only.
 
 .SH "SIGNALS"
 .LP
-While salloc is waiting for a PENDING job allocation, most signals will cause salloc to revoke the allocation request and exit.
+While salloc is waiting for a PENDING job allocation, most signals will cause
+salloc to revoke the allocation request and exit.
 
-However, if the allocation has been granted and salloc has already started the command
-specified in its command line parameters salloc will ignore most signals.  salloc will not exit or release the allocation until the command exits.  The notable exception is SIGHUP; a HUP signal will cause salloc to release the allocation and exit without waiting for the command to finish.
+However if the allocation has been granted and salloc has already started the
+specified command, then salloc will ignore most signals.
+salloc will not exit or release the allocation until the command exits.
+One notable exception is SIGHUP. A SIGHUP signal will cause salloc to
+release the allocation and exit without waiting for the command to finish.
+Another exception is SIGTERM, which will be forwarded to the spawned process.
 
 .SH "EXAMPLES"
 .LP
-To get an allocation, and open a new xterm in which srun commands may be typed interactively:
+To get an allocation, and open a new xterm in which srun commands may be typed
+interactively:
 .IP
 $ salloc \-N16 xterm
 .br
@@ -1042,13 +1097,14 @@ salloc: Granted job allocation 65537
 .br
 salloc: Relinquishing job allocation 65537
 .LP
-To grab an allocation of nodes and launch a parallel application on one command line (See the \fBsalloc\fR man page for more examples):
+To grab an allocation of nodes and launch a parallel application on one command
+line (See the \fBsalloc\fR man page for more examples):
 .IP
 salloc \-N5 srun \-n10 myprogram
 
 .SH "COPYING"
 Copyright (C) 2006\-2007 The Regents of the University of California.
-Copyright (C) 2008\-2009 Lawrence Livermore National Security.
+Copyright (C) 2008\-2010 Lawrence Livermore National Security.
 Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 CODE\-OCEC\-09\-009. All rights reserved.
 .LP

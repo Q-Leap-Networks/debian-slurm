@@ -71,19 +71,29 @@
 #include <sys/types.h>
 #include <sys/utsname.h>
 
+#include "src/common/gres.h"
 #include "src/common/list.h"
+#include "src/common/proc_args.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
-
-#include "src/common/proc_args.h"
-
-
 
 
 /* print this version of SLURM */
 void print_slurm_version(void)
 {
 	printf("%s %s\n", PACKAGE, SLURM_VERSION_STRING);
+}
+
+/* print the available gres options */
+void print_gres_help(void)
+{
+	char help_msg[1024] = "";
+
+	gres_plugin_help_msg(help_msg, sizeof(help_msg));
+	if (help_msg[0])
+		printf("%s", help_msg);
+	else
+		printf("No gres help is available\n");
 }
 
 /*
@@ -145,8 +155,18 @@ task_dist_states_t verify_dist_type(const char *arg, uint32_t *plane_size)
  */
 uint16_t verify_conn_type(const char *arg)
 {
-#ifdef HAVE_BG
 	uint16_t len = strlen(arg);
+	bool no_bgl = 1;
+
+	if(working_cluster_rec) {
+		if(working_cluster_rec->flags & CLUSTER_FLAG_BGL)
+			no_bgl = 0;
+	} else {
+#ifdef HAVE_BGL
+		no_bgl = 0;
+#endif
+	}
+
 	if(!len) {
 		/* no input given */
 		error("no conn-type argument given.");
@@ -157,18 +177,17 @@ uint16_t verify_conn_type(const char *arg)
 		return SELECT_TORUS;
 	else if (!strncasecmp(arg, "NAV", len))
 		return SELECT_NAV;
-#ifndef HAVE_BGL
-	else if (!strncasecmp(arg, "HTC", len)
-		 || !strncasecmp(arg, "HTC_S", len))
-		return SELECT_HTC_S;
-	else if (!strncasecmp(arg, "HTC_D", len))
-		return SELECT_HTC_D;
-	else if (!strncasecmp(arg, "HTC_V", len))
-		return SELECT_HTC_V;
-	else if (!strncasecmp(arg, "HTC_L", len))
-		return SELECT_HTC_L;
-#endif
-#endif
+	else if (no_bgl) {
+		if(!strncasecmp(arg, "HTC", len)
+		   || !strncasecmp(arg, "HTC_S", len))
+			return SELECT_HTC_S;
+		else if (!strncasecmp(arg, "HTC_D", len))
+			return SELECT_HTC_D;
+		else if (!strncasecmp(arg, "HTC_V", len))
+			return SELECT_HTC_V;
+		else if (!strncasecmp(arg, "HTC_L", len))
+			return SELECT_HTC_L;
+	}
 	error("invalid conn-type argument '%s' ignored.", arg);
 	return (uint16_t)NO_VAL;
 }
@@ -183,9 +202,10 @@ int verify_geometry(const char *arg, uint16_t *geometry)
 	int i, rc = 0;
 	char* geometry_tmp = xstrdup(arg);
 	char* original_ptr = geometry_tmp;
+	int dims = slurmdb_setup_cluster_dims();
 
 	token = strtok_r(geometry_tmp, delimiter, &next_ptr);
-	for (i=0; i<SYSTEM_DIMENSIONS; i++) {
+	for (i=0; i<dims; i++) {
 		if (token == NULL) {
 			error("insufficient dimensions in --geometry");
 			rc = -1;
@@ -233,51 +253,30 @@ char * base_name(char* command)
 }
 
 /*
- * str_to_bytes(): verify that arg is numeric with optional "G" or "M" at end
- * if "G" or "M" is there, multiply by proper power of 2 and return
- * number in bytes
+ * str_to_mbytes(): verify that arg is numeric with optional "K", "M", "G"
+ * or "T" at end and return the number in mega-bytes
  */
-long str_to_bytes(const char *arg)
+long str_to_mbytes(const char *arg)
 {
-	char *buf;
-	char *endptr;
-	int end;
-	int multiplier = 1;
 	long result;
+	char *endptr;
 
-	buf = xstrdup(arg);
-
-	end = strlen(buf) - 1;
-
-	if (isdigit(buf[end])) {
-		result = strtol(buf, &endptr, 10);
-
-		if (*endptr != '\0')
-			result = -result;
-
-	} else {
-
-		switch (toupper(buf[end])) {
-
-		case 'G':
-			multiplier = 1024;
-			break;
-
-		case 'M':
-			/* do nothing */
-			break;
-
-		default:
-			multiplier = -1;
-		}
-
-		buf[end] = '\0';
-
-		result = multiplier * strtol(buf, &endptr, 10);
-
-		if (*endptr != '\0')
-			result = -result;
-	}
+	errno = 0;
+	result = strtol(arg, &endptr, 10);
+	if ((errno != 0) && ((result == LONG_MIN) || (result == LONG_MAX)))
+		result = -1;
+	else if (endptr[0] == '\0')
+		;
+	else if ((endptr[0] == 'k') || (endptr[0] == 'K'))
+		result = (result + 1023) / 1024;	/* round up */
+	else if ((endptr[0] == 'm') || (endptr[0] == 'M'))
+		;
+	else if ((endptr[0] == 'g') || (endptr[0] == 'G'))
+		result *= 1024;
+	else if ((endptr[0] == 't') || (endptr[0] == 'T'))
+		result *= (1024 * 1024);
+	else
+		result = -1;
 
 	return result;
 }
@@ -586,6 +585,8 @@ bool verify_hint(const char *arg, int *min_sockets, int *min_cores,
 		} else if (strcasecmp(tok, "multithread") == 0) {
 		        *min_threads = NO_VAL;
 			*cpu_bind_type |= CPU_BIND_TO_THREADS;
+			if (*ntasks_per_core == NO_VAL)
+				*ntasks_per_core = INFINITE;
 		} else if (strcasecmp(tok, "nomultithread") == 0) {
 		        *min_threads = 1;
 			*cpu_bind_type |= CPU_BIND_TO_THREADS;
@@ -611,8 +612,11 @@ uint16_t parse_mail_type(const char *arg)
 		rc = MAIL_JOB_END;
 	else if (strcasecmp(arg, "FAIL") == 0)
 		rc = MAIL_JOB_FAIL;
+	else if (strcasecmp(arg, "REQUEUE") == 0)
+		rc = MAIL_JOB_REQUEUE;
 	else if (strcasecmp(arg, "ALL") == 0)
-		rc = MAIL_JOB_BEGIN |  MAIL_JOB_END |  MAIL_JOB_FAIL;
+		rc = MAIL_JOB_BEGIN |  MAIL_JOB_END |  MAIL_JOB_FAIL | 
+		     MAIL_JOB_REQUEUE;
 	else
 		rc = 0;		/* failure */
 
@@ -629,7 +633,10 @@ char *print_mail_type(const uint16_t type)
 		return "END";
 	if (type == MAIL_JOB_FAIL)
 		return "FAIL";
-	if (type == (MAIL_JOB_BEGIN |  MAIL_JOB_END |  MAIL_JOB_FAIL))
+	if (type == MAIL_JOB_REQUEUE)
+		return "REQUEUE";
+	if (type == (MAIL_JOB_BEGIN |  MAIL_JOB_END |  MAIL_JOB_FAIL |
+		     MAIL_JOB_REQUEUE))
 		return "ALL";
 
 	return "MULTIPLE";
@@ -733,12 +740,13 @@ char *print_geometry(const uint16_t *geometry)
 {
 	int i;
 	char buf[32], *rc = NULL;
+	int dims = slurmdb_setup_cluster_dims();
 
-	if ((SYSTEM_DIMENSIONS == 0)
+	if ((dims == 0)
 	||  (geometry[0] == (uint16_t)NO_VAL))
 		return NULL;
 
-	for (i=0; i<SYSTEM_DIMENSIONS; i++) {
+	for (i=0; i<dims; i++) {
 		if (i > 0)
 			snprintf(buf, sizeof(buf), "x%u", geometry[i]);
 		else

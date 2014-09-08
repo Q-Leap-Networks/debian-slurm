@@ -7,7 +7,7 @@
 #          "FAILURE: ..." otherwise with an explanation of the failure, OR
 #          anything else indicates a failure mode that must be investigated.
 ############################################################################
-# Copyright (C) 2008 Lawrence Livermore National Security.
+# Copyright (C) 2008-2010 Lawrence Livermore National Security.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Joseph Donaghy <donaghy1@llnl.gov>
 # CODE-OCEC-09-009. All rights reserved.
@@ -38,11 +38,6 @@ set amatches    0
 set lmatches    0
 set dmatches    0
 set not_support 0
-set add		add
-set lis		list
-set del		delete
-set mod		modify
-set nams	Names
 set nam		Name
 set fs		Fairshare
 set gc		GrpCPUs
@@ -55,10 +50,9 @@ set mj		MaxJobs
 set ms		MaxSubmitJobs
 set mn		MaxNodes
 set mw		MaxWall
-set clu		cluster
-set tc1		tcluster1
-set tc2		tcluster2
-set tc3		tcluster3
+set tc1		slurm_test-cluster-1
+set tc2		slurm_test-cluster-2
+set tc3		slurm_test-cluster-3
 set fs1		2500
 set gc1		50
 set gj1		100
@@ -94,7 +88,7 @@ if { [string compare [check_accounting_admin_level] "Administrator"] } {
 	set nothing 0
 	set matches 0
 
-set my_pid [spawn $sacctmgr -i $del $clu $tc1,$tc2,$tc3]
+set my_pid [spawn $sacctmgr -i delete cluster $tc1,$tc2,$tc3]
 
 	expect {
 		-re "privilege to perform this action" {
@@ -152,9 +146,9 @@ set my_pid [spawn $sacctmgr -i $del $clu $tc1,$tc2,$tc3]
 #
 # Use sacctmgr to create a cluster
 #
-set sadd_pid [spawn $sacctmgr $add $clu $nams=$tc1,$tc2,$tc3 $fs=$fs1 \
-$gc=$gc1 $gj=$gj1 $gn=$gn1 $gs=$gs1 $mc=$mc1 $mm=$mm1 \
-$mj=$mj1 $ms=$ms1 $mn=$mn1 $mw=$mw1]
+set sadd_pid [spawn $sacctmgr add cluster name=$tc1,$tc2,$tc3 fairshare=$fs1 \
+GrpCPUs=$gc1 GrpJobs=$gj1 GrpNodes=$gn1 GrpSubmitJobs=$gs1 MaxCPUs=$mc1 MaxCPUMins=$mm1 \
+MaxJobs=$mj1 MaxSubmitJobs=$ms1 MaxNodes=$mn1 MaxWall=$mw1]
 
 expect {
 	-re "privilege to preform this action" {
@@ -231,7 +225,7 @@ expect {
 	}
 	-re "\\\(N\\\/y\\\):" {
 		incr amatches
-		send "Y\r"
+		send "Y"
 		exp_continue
 	}
 	timeout {
@@ -259,7 +253,7 @@ if { ![check_acct_associations] } {
 #
 # Use sacctmgr to delete the test cluster
 #
-set sadel_pid [spawn $sacctmgr $del $clu $tc1,$tc2,$tc3]
+set sadel_pid [spawn $sacctmgr delete cluster $tc1,$tc2,$tc3]
 expect {
 	-re "Deleting clusters" {
 		incr dmatches
@@ -275,7 +269,7 @@ expect {
 	}
 	-re "\\\(N\\\/y\\\):" {
 		incr dmatches
-		send "Y\r"
+		send "Y"
 		exp_continue
 	}
 	timeout {
@@ -298,7 +292,7 @@ if { ![check_acct_associations] } {
 }
 
 if {$exit_code == 0} {
-	send_user "\nSUCCESS\n"
+	print_success $test_id
 }
 
 exit $exit_code

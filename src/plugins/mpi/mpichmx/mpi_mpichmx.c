@@ -74,7 +74,7 @@
  * of the plugin.  If major and minor revisions are desired, the major
  * version number may be multiplied by a suitable magnitude constant such
  * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum versions for their plugins as this API matures.
+ * minimum version for their plugins as this API matures.
  */
 const char plugin_name[]        = "mpi MPICH-MX plugin";
 const char plugin_type[]        = "mpi/mpichmx";
@@ -106,7 +106,7 @@ int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t *job,
 	if (!getenv("MXMPI_RECV")) {
 		env_array_overwrite_fmt(env, "MXMPI_RECV",  "%s", "hybrid");
 	}
-	debug2("init for mpi rank %u\n", job->gtaskid);
+	debug2("init for mpi rank %u", job->gtaskid);
 
 	return SLURM_SUCCESS;
 }

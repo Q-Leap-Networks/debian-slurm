@@ -98,7 +98,7 @@ extern int pack_msg ( slurm_msg_t const * msg , Buf buffer );
  *			automatically updated
  * RET 0 or error code
  */
-extern int unpack_msg ( slurm_msg_t * msgi , Buf buffer );
+extern int unpack_msg ( slurm_msg_t * msg , Buf buffer );
 
 /***************************************************************************/
 /* specific case statement Pack / Unpack methods for slurm protocol bodies */
@@ -140,7 +140,11 @@ extern int unpack_msg ( slurm_msg_t * msgi , Buf buffer );
 /* 		char *partition, char *nodes, char *name, char *network, */
 /* 		Buf buffer ); */
 
-extern void pack_multi_core_data (multi_core_data_t *multi_core, Buf buffer);
-extern int unpack_multi_core_data (multi_core_data_t **multi_core, Buf buffer);
-
+extern void pack_multi_core_data (multi_core_data_t *multi_core, Buf buffer,
+				  uint16_t protocol_version);
+extern int unpack_multi_core_data (multi_core_data_t **multi_core, Buf buffer,
+				   uint16_t protocol_version);
+extern int slurm_unpack_block_info_msg(
+	block_info_msg_t **block_info_msg_pptr, Buf buffer,
+	uint16_t protocol_version);
 #endif

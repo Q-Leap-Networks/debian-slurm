@@ -55,11 +55,11 @@ int exit_flag;		/* program to terminate if =1 */
 int input_words;	/* number of words of input permitted */
 int quiet_flag;		/* quiet=1, verbose=-1, normal=0 */
 int all_clusters_flag = 0;
-sreport_time_format_t time_format = SREPORT_TIME_MINS;
+slurmdb_report_time_format_t time_format = SLURMDB_REPORT_TIME_MINS;
 char *time_format_string = "Minutes";
 void *db_conn = NULL;
 uint32_t my_uid = 0;
-sreport_sort_t sort_flag = SREPORT_SORT_TIME;
+slurmdb_report_sort_t sort_flag = SLURMDB_REPORT_SORT_TIME;
 
 static void	_job_rep (int argc, char *argv[]);
 static void	_user_rep (int argc, char *argv[]);
@@ -178,7 +178,8 @@ main (int argc, char *argv[])
 		}
 	}
 
-	db_conn = acct_storage_g_get_connection(false, 0, false);
+	db_conn = slurmdb_connection_get();
+
 	if(errno) {
 		error("Problem talking to the database: %m");
 		exit(1);
@@ -197,7 +198,7 @@ main (int argc, char *argv[])
 		error_code = _get_command (&input_field_count, input_fields);
 	}
 
-	acct_storage_g_close_connection(&db_conn);
+	slurmdb_connection_close(&db_conn);
 	slurm_acct_storage_fini();
 	exit(exit_code);
 }
@@ -245,11 +246,17 @@ static void _job_rep (int argc, char *argv[])
 				 "SizesByWcKey", MAX(command_len, 8))) {
 		error_code = job_sizes_grouped_by_wckey(
 			(argc - 1), &argv[1]);
+	} else if (!strncasecmp (argv[0],
+				"SizesByAccountAndWcKey",
+				MAX(command_len, 15))) {
+		error_code = job_sizes_grouped_by_top_acct_and_wckey(
+			(argc - 1), &argv[1]);
 	} else {
 		exit_code = 1;
 		fprintf(stderr, "Not valid report %s\n", argv[0]);
 		fprintf(stderr, "Valid job reports are, ");
-		fprintf(stderr, "\"SizesByAccount, and SizesByWckey\"\n");
+		fprintf(stderr, "\"SizesByAccount, SizesByAccountAndWcKey, ");
+		fprintf(stderr, "and  SizesByWckey\"\n");
 	}
 
 	if (error_code) {
@@ -606,25 +613,25 @@ static int _set_time_format(char *format)
 	int command_len = strlen(format);
 
 	if (strncasecmp (format, "SecPer", MAX(command_len, 6)) == 0) {
-		time_format = SREPORT_TIME_SECS_PER;
+		time_format = SLURMDB_REPORT_TIME_SECS_PER;
 		time_format_string = "Seconds/Percentage of Total";
 	} else if (strncasecmp (format, "MinPer", MAX(command_len, 6)) == 0) {
-		time_format = SREPORT_TIME_MINS_PER;
+		time_format = SLURMDB_REPORT_TIME_MINS_PER;
 		time_format_string = "Minutes/Percentage of Total";
 	} else if (strncasecmp (format, "HourPer", MAX(command_len, 6)) == 0) {
-		time_format = SREPORT_TIME_HOURS_PER;
+		time_format = SLURMDB_REPORT_TIME_HOURS_PER;
 		time_format_string = "Hours/Percentage of Total";
 	} else if (strncasecmp (format, "Seconds", MAX(command_len, 1)) == 0) {
-		time_format = SREPORT_TIME_SECS;
+		time_format = SLURMDB_REPORT_TIME_SECS;
 		time_format_string = "Seconds";
 	} else if (strncasecmp (format, "Minutes", MAX(command_len, 1)) == 0) {
-		time_format = SREPORT_TIME_MINS;
+		time_format = SLURMDB_REPORT_TIME_MINS;
 		time_format_string = "Minutes";
 	} else if (strncasecmp (format, "Hours", MAX(command_len, 1)) == 0) {
-		time_format = SREPORT_TIME_HOURS;
+		time_format = SLURMDB_REPORT_TIME_HOURS;
 		time_format_string = "Hours";
 	} else if (strncasecmp (format, "Percent", MAX(command_len, 1)) == 0) {
-		time_format = SREPORT_TIME_PERCENT;
+		time_format = SLURMDB_REPORT_TIME_PERCENT;
 		time_format_string = "Percentage of Total";
 	} else {
 		fprintf (stderr, "unknown time format %s", format);
@@ -639,9 +646,9 @@ static int _set_sort(char *format)
 	int command_len = strlen(format);
 
 	if (strncasecmp (format, "Name", MAX(command_len, 1)) == 0) {
-		sort_flag = SREPORT_SORT_NAME;
+		sort_flag = SLURMDB_REPORT_SORT_NAME;
 	} else if (strncasecmp (format, "Time", MAX(command_len, 6)) == 0) {
-		sort_flag = SREPORT_SORT_TIME;
+		sort_flag = SLURMDB_REPORT_SORT_TIME;
 	} else {
 		fprintf (stderr, "unknown timesort format %s", format);
 		return SLURM_ERROR;
@@ -691,7 +698,7 @@ sreport [<OPTION>] [<COMMAND>]                                             \n\
   <REPORT> is different for each report type.                              \n\
      cluster - AccountUtilizationByUser, UserUtilizationByAccount,         \n\
                UserUtilizationByWckey, Utilization, WCKeyUtilizationByUser \n\
-     job     - SizesByAccount, SizesByWckey                                \n\
+     job     - SizesByAccount, SizesByAccountAndWckey, SizesByWckey        \n\
      reservation                                                           \n\
              - Utilization                                                 \n\
      user    - TopUsage                                                    \n\
@@ -724,16 +731,16 @@ sreport [<OPTION>] [<COMMAND>]                                             \n\
                                   to include in report.  Default is all.   \n\
                                                                            \n\
      job     - Accounts=<OPT>   - List of accounts to use for the report   \n\
-                                  Default is all.  The SizesbyAccount      \n\
+                                  Default is all.  The SizesbyAccount(*)   \n\
                                   report only displays 1 hierarchical level.\n\
                                   If accounts are specified the next layer \n\
                                   of accounts under those specified will be\n\
                                   displayed, not the accounts specified.   \n\
-                                  In the SizesByAccount reports the default\n\
-                                  for accounts is root.  This explanation  \n\
-                                  does not apply when ran with the FlatView\n\
-                                  option.                                  \n\
-             - FlatView         - When used with the SizesbyAccount        \n\
+                                  In the SizesByAccount(*) reports the     \n\
+                                  default for accounts is root.  This      \n\
+                                  explanation does not apply when ran with \n\
+                                  the FlatView option.                     \n\
+             - FlatView         - When used with the SizesbyAccount(*)     \n\
                                   will not group accounts in a             \n\
                                   hierarchical level, but print each       \n\
                                   account where jobs ran on a separate     \n\
@@ -743,6 +750,8 @@ sreport [<OPTION>] [<COMMAND>]                                             \n\
              - Grouping=<OPT>   - Comma separated list of size groupings.  \n\
                                   (i.e. 50,100,150 would group job cpu count\n\
                                    1-49, 50-99, 100-149, > 150).           \n\
+                                  grouping=individual will result in a     \n\
+                                  single column for each job size found.   \n\
              - Jobs=<OPT>       - List of jobs/steps to include in report. \n\
                                   Default is all.                          \n\
              - Nodes=<OPT>      - Only show jobs that ran on these nodes.  \n\

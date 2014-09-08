@@ -2,6 +2,7 @@
  *  job_modify.c - Process Wiki job modify request
  *****************************************************************************
  *  Copyright (C) 2006-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -38,11 +39,12 @@
 
 #include "./msg.h"
 #include <strings.h>
+#include "src/common/gres.h"
+#include "src/common/node_select.h"
+#include "src/common/slurm_accounting_storage.h"
 #include "src/slurmctld/job_scheduler.h"
 #include "src/slurmctld/locks.h"
 #include "src/slurmctld/slurmctld.h"
-#include "src/common/slurm_accounting_storage.h"
-#include "src/common/node_select.h"
 
 /* Given a string, replace the first space found with '\0' */
 extern void	null_term(char *str)
@@ -63,7 +65,7 @@ static int	_job_modify(uint32_t jobid, char *bank_ptr,
 			uint32_t new_node_cnt, char *part_name_ptr,
 			uint32_t new_time_limit, char *name_ptr,
 			char *start_ptr, char *feature_ptr, char *env_ptr,
-			char *comment_ptr)
+			char *comment_ptr, char *gres_ptr, char *wckey_ptr)
 {
 	struct job_record *job_ptr;
 	time_t now = time(NULL);
@@ -241,7 +243,7 @@ static int	_job_modify(uint32_t jobid, char *bank_ptr,
 	}
 
 	if (new_hostlist) {
-		int i, rc = 0, task_cnt;
+		int rc = 0, task_cnt;
 		hostlist_t hl;
 		char *tasklist;
 
@@ -271,11 +273,10 @@ static int	_job_modify(uint32_t jobid, char *bank_ptr,
 		}
 		hostlist_uniq(hl);
 		hostlist_sort(hl);
-		i = strlen(new_hostlist) + 16;
-		job_ptr->details->req_nodes = xmalloc(i);
-		i = hostlist_ranged_string(hl, i, job_ptr->details->req_nodes);
+		job_ptr->details->req_nodes =
+			hostlist_ranged_string_xmalloc(hl);
 		hostlist_destroy(hl);
-		if (i < 0) {
+		if (job_ptr->details->req_nodes == NULL) {
 			rc = 1;
 			goto host_fini;
 		}
@@ -323,7 +324,19 @@ host_fini:	if (rc) {
 
 	if (new_node_cnt) {
 		job_desc_msg_t job_desc;
-
+#ifdef HAVE_BG
+		uint16_t geometry[SYSTEM_DIMENSIONS] = {(uint16_t) NO_VAL};
+		static uint16_t cpus_per_node = 0;
+		if (!cpus_per_node) {
+			select_g_alter_node_cnt(SELECT_GET_NODE_CPU_CNT,
+						&cpus_per_node);
+		}
+#endif
+		if(!IS_JOB_PENDING(job_ptr) || !job_ptr->details) {
+			error("wiki: MODIFYJOB node count of non-pending "
+			      "job %u", jobid);
+			return ESLURM_DISABLED;
+		}
 		memset(&job_desc, 0, sizeof(job_desc_msg_t));
 
 		job_desc.min_nodes = new_node_cnt;
@@ -334,56 +347,63 @@ host_fini:	if (rc) {
 
 		select_g_select_jobinfo_free(job_desc.select_jobinfo);
 
-		if (IS_JOB_PENDING(job_ptr) && job_ptr->details) {
-			job_ptr->details->min_nodes = job_desc.min_nodes;
-			if (job_ptr->details->max_nodes &&
-			   (job_ptr->details->max_nodes < job_desc.min_nodes))
-				job_ptr->details->max_nodes =
-					job_desc.min_nodes;
-			info("wiki: change job %u min_nodes to %u",
-				jobid, new_node_cnt);
+		job_ptr->details->min_nodes = job_desc.min_nodes;
+		if (job_ptr->details->max_nodes &&
+		    (job_ptr->details->max_nodes < job_desc.min_nodes))
+			job_ptr->details->max_nodes = job_desc.min_nodes;
+		info("wiki: change job %u min_nodes to %u",
+		     jobid, new_node_cnt);
 #ifdef HAVE_BG
-{
-			static uint16_t cpus_per_node = 0;
-			/* Set the block type to NAV here since if the
-			   job size changes from a small block to a
-			   regular size block the block types won't
-			   jive.
-			*/
-			uint16_t conn_type = (uint16_t)SELECT_NAV;
-			/* Also, if geometry is set we need to 0 out
-			   the first part of it so the bluegene plugin
-			   doesn't look at it any more.
-			*/
-			uint16_t req_geometry[SYSTEM_DIMENSIONS] = { 0 };
+		job_ptr->details->min_cpus = job_desc.min_cpus;
+		job_ptr->details->max_cpus = job_desc.max_cpus;
+		job_ptr->details->pn_min_cpus = job_desc.pn_min_cpus;
 
-			job_ptr->num_procs = job_desc.num_procs;
-			job_ptr->details->job_min_cpus = job_desc.job_min_cpus;
+		new_node_cnt = job_ptr->details->min_cpus;
+		if (cpus_per_node)
+			new_node_cnt /= cpus_per_node;
 
-			if (!cpus_per_node) {
-				select_g_alter_node_cnt(SELECT_GET_NODE_CPU_CNT,
-							&cpus_per_node);
-			}
-			new_node_cnt = job_ptr->num_procs;
-			if (cpus_per_node)
-				new_node_cnt /= cpus_per_node;
-			select_g_select_jobinfo_set(job_ptr->select_jobinfo,
-						    SELECT_JOBDATA_NODE_CNT,
-						    &new_node_cnt);
-			select_g_select_jobinfo_set(job_ptr->select_jobinfo,
-						    SELECT_JOBDATA_CONN_TYPE,
-						    &conn_type);
-			select_g_select_jobinfo_set(job_ptr->select_jobinfo,
-						    SELECT_JOBDATA_GEOMETRY,
-						    &req_geometry);
-}
+		/* This is only set up so accounting is set up correctly */
+		select_g_select_jobinfo_set(job_ptr->select_jobinfo,
+					    SELECT_JOBDATA_NODE_CNT,
+					    &new_node_cnt);
+		/* reset geo since changing this makes any geo
+		   potentially invalid */
+		select_g_select_jobinfo_set(job_ptr->select_jobinfo,
+					    SELECT_JOBDATA_GEOMETRY,
+					    geometry);
 #endif
-			last_job_update = now;
-			update_accounting = true;
-		} else {
-			error("wiki: MODIFYJOB node count of non-pending "
-				"job %u", jobid);
+		last_job_update = now;
+		update_accounting = true;
+	}
+
+	if (gres_ptr) {
+		char *orig_gres;
+
+		if (!IS_JOB_PENDING(job_ptr)) {
+			error("wiki: MODIFYJOB GRES of non-pending job %u",
+			      jobid);
 			return ESLURM_DISABLED;
+		}
+
+		orig_gres = job_ptr->gres;
+		job_ptr->gres = NULL;
+		if (gres_ptr[0])
+			job_ptr->gres = xstrdup(gres_ptr);
+		if (gres_plugin_job_state_validate(job_ptr->gres,
+						   &job_ptr->gres_list)) {
+			error("wiki: MODIFYJOB Invalid GRES=%s", gres_ptr);
+			xfree(job_ptr->gres);
+			job_ptr->gres = orig_gres;
+			return ESLURM_INVALID_GRES;
+		}
+		xfree(orig_gres);
+	}
+
+	if (wckey_ptr) {
+		int rc = update_job_wckey("update_job", job_ptr, wckey_ptr);
+		if (rc != SLURM_SUCCESS) {
+			error("wiki: MODIFYJOB Invalid WCKEY=%s", wckey_ptr);
+			return rc;
 		}
 	}
 
@@ -391,8 +411,7 @@ host_fini:	if (rc) {
 		if (job_ptr->details && job_ptr->details->begin_time) {
 			/* Update job record in accounting to reflect
 			 * the changes */
-			jobacct_storage_g_job_start(
-				acct_db_conn, slurmctld_cluster_name, job_ptr);
+			jobacct_storage_g_job_start(acct_db_conn, job_ptr);
 		}
 	}
 
@@ -401,23 +420,25 @@ host_fini:	if (rc) {
 
 /* Modify a job:
  *	CMD=MODIFYJOB ARG=<jobid>
- *		[BANK=<name>]
+ *		[BANK=<name>;]
  *		[COMMENT=<whatever>;]
- *		[DEPEND=afterany:<jobid>]
- *		[JOBNAME=<name>]
- *		[MINSTARTTIME=<uts>]
- *		[NODES=<number>]
- *		[PARTITION=<name>]
- *		[RFEATURES=<features>]
- *		[TIMELIMT=<seconds>]
- *		[VARIABLELIST=<env_vars>]
+ *		[DEPEND=afterany:<jobid>;]
+ *		[JOBNAME=<name>;]
+ *		[MINSTARTTIME=<uts>;]
+ *		[NODES=<number>;]
+ *		[PARTITION=<name>;]
+ *		[RFEATURES=<features>;]
+ *		[TIMELIMT=<seconds>;]
+ *		[VARIABLELIST=<env_vars>;]
+ *		[GRES=<name:value>;]
+ *		[WCKEY=<name>;]
  *
  * RET 0 on success, -1 on failure */
 extern int	job_modify_wiki(char *cmd_ptr, int *err_code, char **err_msg)
 {
 	char *arg_ptr, *bank_ptr, *depend_ptr, *nodes_ptr, *start_ptr;
 	char *host_ptr, *name_ptr, *part_ptr, *time_ptr, *tmp_char;
-	char *comment_ptr, *feature_ptr, *env_ptr;
+	char *comment_ptr, *feature_ptr, *env_ptr, *gres_ptr, *wckey_ptr;
 	int i, slurm_rc;
 	uint32_t jobid, new_node_cnt = 0, new_time_limit = 0;
 	static char reply_msg[128];
@@ -446,6 +467,7 @@ extern int	job_modify_wiki(char *cmd_ptr, int *err_code, char **err_msg)
 	bank_ptr    = strstr(cmd_ptr, "BANK=");
 	comment_ptr = strstr(cmd_ptr, "COMMENT=");
 	depend_ptr  = strstr(cmd_ptr, "DEPEND=");
+	gres_ptr    = strstr(cmd_ptr, "GRES=");
 	host_ptr    = strstr(cmd_ptr, "HOSTLIST=");
 	name_ptr    = strstr(cmd_ptr, "JOBNAME=");
 	start_ptr   = strstr(cmd_ptr, "MINSTARTTIME=");
@@ -454,6 +476,7 @@ extern int	job_modify_wiki(char *cmd_ptr, int *err_code, char **err_msg)
 	feature_ptr = strstr(cmd_ptr, "RFEATURES=");
 	time_ptr    = strstr(cmd_ptr, "TIMELIMIT=");
 	env_ptr     = strstr(cmd_ptr, "VARIABLELIST=");
+	wckey_ptr   = strstr(cmd_ptr, "WCKEY=");
 	if (bank_ptr) {
 		bank_ptr[4] = ':';
 		bank_ptr += 5;
@@ -494,6 +517,11 @@ extern int	job_modify_wiki(char *cmd_ptr, int *err_code, char **err_msg)
 		feature_ptr[9] = ':';
 		feature_ptr += 10;
 		null_term(feature_ptr);
+	}
+	if (gres_ptr) {
+		gres_ptr[4] = ':';
+		gres_ptr += 5;
+		null_term(gres_ptr);
 	}
 	if (host_ptr) {
 		host_ptr[8] = ':';
@@ -551,6 +579,11 @@ extern int	job_modify_wiki(char *cmd_ptr, int *err_code, char **err_msg)
 		env_ptr += 13;
 		null_term(env_ptr);
 	}
+	if (wckey_ptr) {
+		wckey_ptr[5] = ':';
+		wckey_ptr += 6;
+		null_term(wckey_ptr);
+	}
 
 	/* Look for any un-parsed "=" ignoring anything after VARIABLELIST
 	 * which is expected to contain "=" in its value*/
@@ -565,7 +598,8 @@ extern int	job_modify_wiki(char *cmd_ptr, int *err_code, char **err_msg)
 	lock_slurmctld(job_write_lock);
 	slurm_rc = _job_modify(jobid, bank_ptr, depend_ptr, host_ptr,
 			new_node_cnt, part_ptr, new_time_limit, name_ptr,
-			start_ptr, feature_ptr, env_ptr, comment_ptr);
+			start_ptr, feature_ptr, env_ptr, comment_ptr,
+			gres_ptr, wckey_ptr);
 	unlock_slurmctld(job_write_lock);
 	if (slurm_rc != SLURM_SUCCESS) {
 		*err_code = -700;

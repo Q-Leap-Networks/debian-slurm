@@ -2,7 +2,7 @@
  *  backup.c - backup slurm controller
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
@@ -66,6 +66,7 @@
 #include "src/slurmctld/locks.h"
 #include "src/slurmctld/read_config.h"
 #include "src/slurmctld/slurmctld.h"
+#include "src/slurmctld/trigger_mgr.h"
 
 #ifndef VOLATILE
 #if defined(__STDC__) || defined(__cplusplus)
@@ -83,6 +84,7 @@ static void *       _background_signal_hand(void *no_data);
 static int          _backup_reconfig(void);
 static int          _ping_controller(void);
 static int          _shutdown_primary_controller(int wait_time);
+static void	     _trigger_slurmctld_event(uint32_t trig_type);
 inline static void  _update_cred_key(void);
 
 /* Local variables */
@@ -104,6 +106,7 @@ static int backup_sigarray[] = {
  *	mode, assuming control when the primary controller stops responding */
 void run_backup(void)
 {
+	uint32_t trigger_type;
 	time_t last_ping = 0;
 	pthread_attr_t thread_attr_sig, thread_attr_rpc;
 	slurmctld_lock_t config_read_lock = {
@@ -142,6 +145,8 @@ void run_backup(void)
 		sleep(1);
 	}
 	slurm_attr_destroy(&thread_attr_sig);
+	trigger_type = TRIGGER_TYPE_BU_CTLD_RES_OP;
+	_trigger_slurmctld_event(trigger_type);
 
 	sleep(5);       /* Give the primary slurmctld set-up time */
 	/* repeatedly ping ControlMachine */
@@ -199,6 +204,9 @@ void run_backup(void)
 		slurmctld_conf.backup_controller);
 	unlock_slurmctld(config_read_lock);
 
+	trigger_primary_ctld_fail();
+	trigger_backup_ctld_as_ctrl();
+
 	pthread_kill(slurmctld_config.thread_id_sig, SIGTERM);
 	pthread_join(slurmctld_config.thread_id_sig, NULL);
 	pthread_join(slurmctld_config.thread_id_rpc, NULL);
@@ -210,7 +218,7 @@ void run_backup(void)
 		error("failed to restore switch state");
 		abort();
 	}
-	if (read_slurm_conf(2)) {	/* Recover all state */
+	if (read_slurm_conf(2, false)) {	/* Recover all state */
 		error("Unable to recover slurm state");
 		abort();
 	}
@@ -232,13 +240,6 @@ static void *_background_signal_hand(void *no_data)
 
 	(void) pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 	(void) pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
-
-	/* No need for slurmctld_conf lock yet */
-	while ( (create_pidfile(slurmctld_conf.slurmctld_pidfile) < 0) &&
-	        (errno == EAGAIN) ) {
-		verbose("Retrying create_pidfile: %m");
-		sleep(1);
-	}
 
 	while (slurmctld_config.shutdown_time == 0) {
 		xsignal_sigset_create(backup_sigarray, &set);
@@ -301,9 +302,9 @@ static void _sig_handler(int signal)
  *	controller (that's us) */
 static void *_background_rpc_mgr(void *no_data)
 {
-	slurm_fd newsockfd;
-	slurm_fd sockfd;
-	slurm_addr cli_addr;
+	slurm_fd_t newsockfd;
+	slurm_fd_t sockfd;
+	slurm_addr_t cli_addr;
 	slurm_msg_t *msg = NULL;
 	int error_code;
 	char* node_addr = NULL;
@@ -521,4 +522,20 @@ static int _shutdown_primary_controller(int wait_time)
 		sleep(wait_time);
 
 	return SLURM_SUCCESS;
+}
+
+static void _trigger_slurmctld_event(uint32_t trig_type)
+{
+	trigger_info_t ti;
+
+	memset(&ti, 0, sizeof(trigger_info_t));
+	ti.res_id = "*";
+	ti.res_type = TRIGGER_RES_TYPE_SLURMCTLD;
+	ti.trig_type = trig_type;
+	if (slurm_pull_trigger(&ti)) {
+		error("error from _trigger_slurmctld_event in backup.c");
+		return;
+	}
+	verbose("trigger pulled for SLURMCTLD event successful");
+	return;
 }

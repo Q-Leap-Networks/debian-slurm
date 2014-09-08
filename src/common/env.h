@@ -36,9 +36,9 @@
 #include "src/common/slurm_protocol_api.h"
 
 typedef struct env_options {
-	int nprocs;		/* --nprocs=n,      -n n	*/
+	int ntasks;		/* --ntasks=n,      -n n	*/
 	char *task_count;
-	bool nprocs_set;	/* true if nprocs explicitly set */
+	bool ntasks_set;	/* true if ntasks explicitly set */
 	bool cpus_set;		/* true if cpus_per_task explicitly set */
 	task_dist_states_t distribution; /* --distribution=, -m dist	*/
 	uint16_t plane_size;         /* plane_size for SLURM_DIST_PLANE */
@@ -51,13 +51,13 @@ typedef struct env_options {
 	bool overcommit;	/* --overcommit,   -O		*/
 	int  slurmd_debug;	/* --slurmd-debug, -D           */
 	bool labelio;		/* --label-output, -l		*/
-	select_jobinfo_t *select_jobinfo;
+	dynamic_plugin_data_t *select_jobinfo;
 	int nhosts;
 	char *nodelist;		/* nodelist in string form */
 	char **env;             /* job environment */
 	uint16_t comm_port;	/* srun's communication port */
-	slurm_addr *cli;	/* launch node address */
-	slurm_addr *self;
+	slurm_addr_t *cli;	/* launch node address */
+	slurm_addr_t *self;
 	int jobid;		/* assigned job id */
 	int stepid;	        /* assigned step id */
 	int procid;		/* global task id (across nodes) */
@@ -79,11 +79,14 @@ typedef struct env_options {
 } env_t;
 
 
-int     envcount (char **env);
-int     setenvfs(const char *fmt, ...);
-int     setenvf(char ***envp, const char *name, const char *fmt, ...);
-void	unsetenvp(char **env, const char *name);
+/* NOTE: These functions operate on the job's current environment
+ * if env is NULL, otherwise they operate on the argument array */
+int	envcount (char **env);
 char *	getenvp(char **env, const char *name);
+int	setenvf(char ***envp, const char *name, const char *fmt, ...);
+int	setenvfs(const char *fmt, ...);
+void	unsetenvp(char **env, const char *name);
+
 int	setup_env(env_t *env, bool preserve_env);
 
 /**********************************************************************
@@ -143,7 +146,7 @@ extern int env_array_for_batch_job(char ***dest,
  * pointed to by "dest" is NULL, memory will automatically be xmalloc'ed.
  * The array is terminated by a NULL pointer, and thus is suitable for
  * use by execle() and other env_array_* functions.  If preserve_env is
- * true, the variables SLURM_NNODES and SLURM_NPROCS remain unchanged.
+ * true, the variables SLURM_NNODES and SLURM_NTASKS remain unchanged.
  *
  * Sets variables:
  *	SLURM_STEP_ID
@@ -157,7 +160,7 @@ extern int env_array_for_batch_job(char ***dest,
  * Sets OBSOLETE variables:
  *	SLURM_STEPID
  *      SLURM_NNODES
- *	SLURM_NPROCS
+ *	SLURM_NTASKS
  *	SLURM_NODELIST
  *	SLURM_TASKS_PER_NODE
  *	SLURM_SRUN_COMM_HOST
@@ -214,7 +217,8 @@ int env_array_append(char ***array_ptr, const char *name,
  * Return 1 on success, and 0 on error.
  */
 int env_array_append_fmt(char ***array_ptr, const char *name,
-			 const char *value_fmt, ...);
+			 const char *value_fmt, ...)
+  __attribute__ ((format (printf, 3, 4)));
 
 /*
  * Append a single environment variable to an environment variable array
@@ -238,7 +242,8 @@ int env_array_overwrite(char ***array_ptr, const char *name,
  * Return 1 on success, and 0 on error.
  */
 int env_array_overwrite_fmt(char ***array_ptr, const char *name,
-			    const char *value_fmt, ...);
+			    const char *value_fmt, ...)
+  __attribute__ ((format (printf, 3, 4)));
 
 /*
  * Set in the running process's environment all of the environment

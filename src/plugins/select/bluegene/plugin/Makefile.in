@@ -63,6 +63,7 @@ am__aclocal_m4_deps = $(top_srcdir)/auxdir/acx_pthread.m4 \
 	$(top_srcdir)/auxdir/x_ac_env.m4 \
 	$(top_srcdir)/auxdir/x_ac_federation.m4 \
 	$(top_srcdir)/auxdir/x_ac_gpl_licensed.m4 \
+	$(top_srcdir)/auxdir/x_ac_hwloc.m4 \
 	$(top_srcdir)/auxdir/x_ac_iso.m4 \
 	$(top_srcdir)/auxdir/x_ac_lua.m4 \
 	$(top_srcdir)/auxdir/x_ac_munge.m4 \
@@ -127,14 +128,17 @@ libsched_if64_la_LINK = $(LIBTOOL) --tag=CC $(AM_LIBTOOLFLAGS) \
 @BGL_LOADED_TRUE@@BLUEGENE_LOADED_TRUE@am_libsched_if64_la_rpath =  \
 @BGL_LOADED_TRUE@@BLUEGENE_LOADED_TRUE@	-rpath $(pkglibdir)
 @BLUEGENE_LOADED_TRUE@select_bluegene_la_DEPENDENCIES = ../block_allocator/libbluegene_block_allocator.la
-am__select_bluegene_la_SOURCES_DIST = select_bluegene.c bg_boot_time.h \
-	bg_job_place.c bg_job_place.h bg_job_run.c bg_job_run.h \
-	bg_block_info.c bg_block_info.h bg_record_functions.c \
-	bg_record_functions.h bluegene.c bluegene.h state_test.c \
-	state_test.h bg_switch_connections.c block_sys.c \
-	dynamic_block.c dynamic_block.h defined_block.c \
-	defined_block.h jobinfo.c jobinfo.h nodeinfo.c nodeinfo.h \
-	../wrap_rm_api.h
+am__select_bluegene_la_SOURCES_DIST = select_bluegene.c jobinfo.c \
+	jobinfo.h nodeinfo.c nodeinfo.h ../wrap_rm_api.h \
+	bg_boot_time.h bg_job_place.c bg_job_place.h bg_job_run.c \
+	bg_job_run.h bg_block_info.c bg_block_info.h \
+	bg_record_functions.c bg_record_functions.h bluegene.c \
+	bluegene.h state_test.c state_test.h bg_switch_connections.c \
+	block_sys.c dynamic_block.c dynamic_block.h defined_block.c \
+	defined_block.h
+@BLUEGENE_LOADED_FALSE@am_select_bluegene_la_OBJECTS =  \
+@BLUEGENE_LOADED_FALSE@	select_bluegene.lo jobinfo.lo \
+@BLUEGENE_LOADED_FALSE@	nodeinfo.lo
 @BLUEGENE_LOADED_TRUE@am_select_bluegene_la_OBJECTS =  \
 @BLUEGENE_LOADED_TRUE@	select_bluegene.lo bg_job_place.lo \
 @BLUEGENE_LOADED_TRUE@	bg_job_run.lo bg_block_info.lo \
@@ -142,13 +146,6 @@ am__select_bluegene_la_SOURCES_DIST = select_bluegene.c bg_boot_time.h \
 @BLUEGENE_LOADED_TRUE@	state_test.lo bg_switch_connections.lo \
 @BLUEGENE_LOADED_TRUE@	block_sys.lo dynamic_block.lo \
 @BLUEGENE_LOADED_TRUE@	defined_block.lo jobinfo.lo nodeinfo.lo
-am__EXTRA_select_bluegene_la_SOURCES_DIST = select_bluegene.c \
-	bg_boot_time.h bg_job_place.c bg_job_place.h bg_job_run.c \
-	bg_job_run.h bg_block_info.c bg_block_info.h \
-	bg_record_functions.c bg_record_functions.h bluegene.c \
-	bluegene.h state_test.c state_test.h bg_switch_connections.c \
-	block_sys.c dynamic_block.c dynamic_block.h defined_block.c \
-	defined_block.h ../wrap_rm_api.h
 select_bluegene_la_OBJECTS = $(am_select_bluegene_la_OBJECTS)
 select_bluegene_la_LINK = $(LIBTOOL) --tag=CC $(AM_LIBTOOLFLAGS) \
 	$(LIBTOOLFLAGS) --mode=link $(CCLD) $(AM_CFLAGS) $(CFLAGS) \
@@ -157,6 +154,8 @@ select_bluegene_la_LINK = $(LIBTOOL) --tag=CC $(AM_LIBTOOLFLAGS) \
 @BGL_LOADED_FALSE@@BLUEGENE_LOADED_TRUE@	-rpath $(pkglibdir)
 @BGL_LOADED_TRUE@@BLUEGENE_LOADED_TRUE@am_select_bluegene_la_rpath =  \
 @BGL_LOADED_TRUE@@BLUEGENE_LOADED_TRUE@	-rpath $(pkglibdir)
+@BLUEGENE_LOADED_FALSE@am_select_bluegene_la_rpath = -rpath \
+@BLUEGENE_LOADED_FALSE@	$(pkglibdir)
 PROGRAMS = $(sbin_PROGRAMS)
 am__sfree_SOURCES_DIST = sfree.c sfree.h opts.c \
 	../block_allocator/bridge_linker.c \
@@ -164,7 +163,9 @@ am__sfree_SOURCES_DIST = sfree.c sfree.h opts.c \
 @BLUEGENE_LOADED_TRUE@am_sfree_OBJECTS = sfree.$(OBJEXT) \
 @BLUEGENE_LOADED_TRUE@	opts.$(OBJEXT) bridge_linker.$(OBJEXT)
 sfree_OBJECTS = $(am_sfree_OBJECTS)
-@BLUEGENE_LOADED_TRUE@sfree_DEPENDENCIES = $(top_builddir)/src/api/libslurmhelper.la
+@BLUEGENE_LOADED_TRUE@am__DEPENDENCIES_1 =  \
+@BLUEGENE_LOADED_TRUE@	$(top_builddir)/src/api/libslurm.o
+@BLUEGENE_LOADED_TRUE@sfree_DEPENDENCIES = $(am__DEPENDENCIES_1)
 sfree_LINK = $(LIBTOOL) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) \
 	--mode=link $(CCLD) $(AM_CFLAGS) $(CFLAGS) $(sfree_LDFLAGS) \
 	$(LDFLAGS) -o $@
@@ -172,7 +173,8 @@ am__slurm_epilog_SOURCES_DIST = slurm_epilog.c
 @BLUEGENE_LOADED_TRUE@am_slurm_epilog_OBJECTS =  \
 @BLUEGENE_LOADED_TRUE@	slurm_epilog.$(OBJEXT)
 slurm_epilog_OBJECTS = $(am_slurm_epilog_OBJECTS)
-@BLUEGENE_LOADED_TRUE@slurm_epilog_DEPENDENCIES = $(top_builddir)/src/api/libslurmhelper.la
+@BLUEGENE_LOADED_TRUE@slurm_epilog_DEPENDENCIES =  \
+@BLUEGENE_LOADED_TRUE@	$(am__DEPENDENCIES_1)
 slurm_epilog_LINK = $(LIBTOOL) --tag=CC $(AM_LIBTOOLFLAGS) \
 	$(LIBTOOLFLAGS) --mode=link $(CCLD) $(AM_CFLAGS) $(CFLAGS) \
 	$(slurm_epilog_LDFLAGS) $(LDFLAGS) -o $@
@@ -180,7 +182,8 @@ am__slurm_prolog_SOURCES_DIST = slurm_prolog.c
 @BLUEGENE_LOADED_TRUE@am_slurm_prolog_OBJECTS =  \
 @BLUEGENE_LOADED_TRUE@	slurm_prolog.$(OBJEXT)
 slurm_prolog_OBJECTS = $(am_slurm_prolog_OBJECTS)
-@BLUEGENE_LOADED_TRUE@slurm_prolog_DEPENDENCIES = $(top_builddir)/src/api/libslurmhelper.la
+@BLUEGENE_LOADED_TRUE@slurm_prolog_DEPENDENCIES =  \
+@BLUEGENE_LOADED_TRUE@	$(am__DEPENDENCIES_1)
 slurm_prolog_LINK = $(LIBTOOL) --tag=CC $(AM_LIBTOOLFLAGS) \
 	$(LIBTOOLFLAGS) --mode=link $(CCLD) $(AM_CFLAGS) $(CFLAGS) \
 	$(slurm_prolog_LDFLAGS) $(LDFLAGS) -o $@
@@ -198,13 +201,11 @@ LINK = $(LIBTOOL) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) \
 	--mode=link $(CCLD) $(AM_CFLAGS) $(CFLAGS) $(AM_LDFLAGS) \
 	$(LDFLAGS) -o $@
 SOURCES = $(libsched_if_la_SOURCES) $(libsched_if64_la_SOURCES) \
-	$(select_bluegene_la_SOURCES) \
-	$(EXTRA_select_bluegene_la_SOURCES) $(sfree_SOURCES) \
+	$(select_bluegene_la_SOURCES) $(sfree_SOURCES) \
 	$(slurm_epilog_SOURCES) $(slurm_prolog_SOURCES)
 DIST_SOURCES = $(am__libsched_if_la_SOURCES_DIST) \
 	$(am__libsched_if64_la_SOURCES_DIST) \
 	$(am__select_bluegene_la_SOURCES_DIST) \
-	$(am__EXTRA_select_bluegene_la_SOURCES_DIST) \
 	$(am__sfree_SOURCES_DIST) $(am__slurm_epilog_SOURCES_DIST) \
 	$(am__slurm_prolog_SOURCES_DIST)
 ETAGS = etags
@@ -259,6 +260,9 @@ HAVE_ELAN = @HAVE_ELAN@
 HAVE_FEDERATION = @HAVE_FEDERATION@
 HAVE_OPENSSL = @HAVE_OPENSSL@
 HAVE_SOME_CURSES = @HAVE_SOME_CURSES@
+HWLOC_CPPFLAGS = @HWLOC_CPPFLAGS@
+HWLOC_LDFLAGS = @HWLOC_LDFLAGS@
+HWLOC_LIBS = @HWLOC_LIBS@
 INSTALL = @INSTALL@
 INSTALL_DATA = @INSTALL_DATA@
 INSTALL_PROGRAM = @INSTALL_PROGRAM@
@@ -302,7 +306,8 @@ PATH_SEPARATOR = @PATH_SEPARATOR@
 PGSQL_CFLAGS = @PGSQL_CFLAGS@
 PGSQL_LIBS = @PGSQL_LIBS@
 PKG_CONFIG = @PKG_CONFIG@
-PLPA_LIBS = @PLPA_LIBS@
+PKG_CONFIG_LIBDIR = @PKG_CONFIG_LIBDIR@
+PKG_CONFIG_PATH = @PKG_CONFIG_PATH@
 PROCTRACKDIR = @PROCTRACKDIR@
 PROJECT = @PROJECT@
 PTHREAD_CC = @PTHREAD_CC@
@@ -317,6 +322,7 @@ SEMAPHORE_SOURCES = @SEMAPHORE_SOURCES@
 SET_MAKE = @SET_MAKE@
 SHELL = @SHELL@
 SLURMCTLD_PORT = @SLURMCTLD_PORT@
+SLURMCTLD_PORT_COUNT = @SLURMCTLD_PORT_COUNT@
 SLURMDBD_PORT = @SLURMDBD_PORT@
 SLURMD_PORT = @SLURMD_PORT@
 SLURM_API_AGE = @SLURM_API_AGE@
@@ -328,7 +334,7 @@ SLURM_MAJOR = @SLURM_MAJOR@
 SLURM_MICRO = @SLURM_MICRO@
 SLURM_MINOR = @SLURM_MINOR@
 SLURM_PREFIX = @SLURM_PREFIX@
-SLURM_VERSION = @SLURM_VERSION@
+SLURM_VERSION_NUMBER = @SLURM_VERSION_NUMBER@
 SLURM_VERSION_STRING = @SLURM_VERSION_STRING@
 SO_LDFLAGS = @SO_LDFLAGS@
 SSL_CPPFLAGS = @SSL_CPPFLAGS@
@@ -402,6 +408,14 @@ INCLUDES = -I$(top_srcdir) -I$(top_srcdir)/src/common $(BG_INCLUDES)
 @BGL_LOADED_FALSE@@BLUEGENE_LOADED_TRUE@pkglib_LTLIBRARIES = select_bluegene.la libsched_if.la
 @BGL_LOADED_TRUE@@BLUEGENE_LOADED_TRUE@pkglib_LTLIBRARIES = select_bluegene.la libsched_if64.la
 
+# These are needed for pack/unpack of structures for cross-cluster stuff
+@BLUEGENE_LOADED_FALSE@pkglib_LTLIBRARIES = select_bluegene.la
+@BLUEGENE_LOADED_FALSE@select_bluegene_la_SOURCES = select_bluegene.c \
+@BLUEGENE_LOADED_FALSE@			jobinfo.c jobinfo.h\
+@BLUEGENE_LOADED_FALSE@			nodeinfo.c nodeinfo.h\
+@BLUEGENE_LOADED_FALSE@			../wrap_rm_api.h
+
+
 # Blue Gene node selection plugin.
 @BLUEGENE_LOADED_TRUE@select_bluegene_la_SOURCES = select_bluegene.c \
 @BLUEGENE_LOADED_TRUE@				bg_boot_time.h \
@@ -419,6 +433,7 @@ INCLUDES = -I$(top_srcdir) -I$(top_srcdir)/src/common $(BG_INCLUDES)
 @BLUEGENE_LOADED_TRUE@				nodeinfo.c nodeinfo.h\
 @BLUEGENE_LOADED_TRUE@				../wrap_rm_api.h
 
+@BLUEGENE_LOADED_FALSE@select_bluegene_la_LDFLAGS = $(SO_LDFLAGS) $(PLUGIN_FLAGS)
 @BLUEGENE_LOADED_TRUE@select_bluegene_la_LDFLAGS = $(SO_LDFLAGS) $(PLUGIN_FLAGS)
 @BLUEGENE_LOADED_TRUE@select_bluegene_la_LIBADD = ../block_allocator/libbluegene_block_allocator.la
 
@@ -427,9 +442,12 @@ INCLUDES = -I$(top_srcdir) -I$(top_srcdir)/src/common $(BG_INCLUDES)
 @BGL_LOADED_TRUE@@BLUEGENE_LOADED_TRUE@libsched_if64_la_LDFLAGS = $(SO_LDFLAGS) $(PLUGIN_FLAGS)
 @BGL_LOADED_FALSE@@BLUEGENE_LOADED_TRUE@libsched_if_la_SOURCES = libsched_if64.c
 @BGL_LOADED_FALSE@@BLUEGENE_LOADED_TRUE@libsched_if_la_LDFLAGS = $(SO_LDFLAGS) $(PLUGIN_FLAGS)
-@BLUEGENE_LOADED_TRUE@sfree_LDADD = $(top_builddir)/src/api/libslurmhelper.la
-@BLUEGENE_LOADED_TRUE@slurm_prolog_LDADD = $(top_builddir)/src/api/libslurmhelper.la
-@BLUEGENE_LOADED_TRUE@slurm_epilog_LDADD = $(top_builddir)/src/api/libslurmhelper.la
+@BLUEGENE_LOADED_TRUE@convenience_libs = \
+@BLUEGENE_LOADED_TRUE@	$(top_builddir)/src/api/libslurm.o -ldl
+
+@BLUEGENE_LOADED_TRUE@sfree_LDADD = $(convenience_libs)
+@BLUEGENE_LOADED_TRUE@slurm_prolog_LDADD = $(convenience_libs)
+@BLUEGENE_LOADED_TRUE@slurm_epilog_LDADD = $(convenience_libs)
 @BLUEGENE_LOADED_TRUE@sfree_SOURCES = sfree.c sfree.h opts.c \
 @BLUEGENE_LOADED_TRUE@		../block_allocator/bridge_linker.c \
 @BLUEGENE_LOADED_TRUE@		../block_allocator/bridge_linker.h
@@ -439,20 +457,6 @@ INCLUDES = -I$(top_srcdir) -I$(top_srcdir)/src/common $(BG_INCLUDES)
 @BLUEGENE_LOADED_TRUE@sfree_LDFLAGS = -export-dynamic -lm $(CMD_LDFLAGS)
 @BLUEGENE_LOADED_TRUE@slurm_prolog_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
 @BLUEGENE_LOADED_TRUE@slurm_epilog_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
-@BLUEGENE_LOADED_FALSE@EXTRA_select_bluegene_la_SOURCES = select_bluegene.c \
-@BLUEGENE_LOADED_FALSE@				bg_boot_time.h \
-@BLUEGENE_LOADED_FALSE@				bg_job_place.c bg_job_place.h \
-@BLUEGENE_LOADED_FALSE@				bg_job_run.c bg_job_run.h \
-@BLUEGENE_LOADED_FALSE@				bg_block_info.c bg_block_info.h \
-@BLUEGENE_LOADED_FALSE@				bg_record_functions.c bg_record_functions.h \
-@BLUEGENE_LOADED_FALSE@				bluegene.c bluegene.h \
-@BLUEGENE_LOADED_FALSE@				state_test.c state_test.h \
-@BLUEGENE_LOADED_FALSE@				bg_switch_connections.c \
-@BLUEGENE_LOADED_FALSE@				block_sys.c \
-@BLUEGENE_LOADED_FALSE@				dynamic_block.c dynamic_block.h \
-@BLUEGENE_LOADED_FALSE@				defined_block.c defined_block.h \
-@BLUEGENE_LOADED_FALSE@				../wrap_rm_api.h
-
 all: all-am
 
 .SUFFIXES:

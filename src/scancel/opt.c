@@ -153,35 +153,20 @@ int initialize_and_process_args(int argc, char *argv[])
 static uint16_t
 _xlate_state_name(const char *state_name, bool env_var)
 {
-	enum job_states i;
+	int i = job_state_num(state_name);
 
-	for (i=0; i<JOB_END; i++) {
-		if ((strcasecmp(state_name,job_state_string(i)) == 0) ||
-		    (strcasecmp(state_name,job_state_string_compact(i)) == 0)){
-			return i;
-		}
-	}
-	if ((strcasecmp(state_name,
-			job_state_string(JOB_COMPLETING)) == 0) ||
-	    (strcasecmp(state_name,
-			job_state_string_compact(JOB_COMPLETING)) == 0)) {
-		return JOB_COMPLETING;
-	}
-	if ((strcasecmp(state_name,
-			job_state_string(JOB_CONFIGURING)) == 0) ||
-	    (strcasecmp(state_name,
-			job_state_string_compact(JOB_CONFIGURING)) == 0)) {
-		return JOB_CONFIGURING;
-	}
+	if (i >= 0)
+		return (uint16_t) i;
 
-	if (env_var)
+	if (env_var) {
 		fprintf(stderr, "Unrecognized SCANCEL_STATE value: %s\n",
 			state_name);
-	else
+	} else {
 		fprintf(stderr, "Invalid job state specified: %s\n",
 			state_name);
-
-	fprintf (stderr, "Valid job states are PENDING, RUNNING, and SUSPENDED\n");
+	}
+	fprintf(stderr,
+		"Valid job states are PENDING, RUNNING, and SUSPENDED\n");
 	exit (1);
 }
 
@@ -221,6 +206,7 @@ static void _opt_default()
 {
 	opt.account	= NULL;
 	opt.batch	= false;
+	opt.clusters    = NULL;
 	opt.ctld	= false;
 	opt.interactive	= false;
 	opt.job_cnt	= 0;
@@ -332,6 +318,8 @@ static void _opt_args(int argc, char **argv)
 		{"ctld",	no_argument,	   0, OPT_LONG_CTLD},
 		{"help",        no_argument,       0, OPT_LONG_HELP},
 		{"interactive", no_argument,       0, 'i'},
+		{"cluster",     required_argument, 0, 'M'},
+		{"clusters",    required_argument, 0, 'M'},
 		{"name",        required_argument, 0, 'n'},
 		{"nodelist",    required_argument, 0, 'w'},
 		{"partition",   required_argument, 0, 'p'},
@@ -347,66 +335,78 @@ static void _opt_args(int argc, char **argv)
 		{NULL,          0,                 0, 0}
 	};
 
-	while((opt_char = getopt_long(argc, argv, "A:bin:p:Qq:s:t:u:vVw:",
-			long_options, &option_index)) != -1) {
+	while((opt_char = getopt_long(argc, argv, "A:biM:n:p:Qq:s:t:u:vVw:",
+				      long_options, &option_index)) != -1) {
 		switch (opt_char) {
-			case (int)'?':
-				fprintf(stderr,
-					"Try \"scancel --help\" for more "
-					"information\n");
+		case (int)'?':
+			fprintf(stderr,
+				"Try \"scancel --help\" for more "
+				"information\n");
+			exit(1);
+			break;
+		case (int)'A':
+			opt.account = xstrdup(optarg);
+			break;
+		case (int)'b':
+			opt.batch = true;
+			break;
+		case OPT_LONG_CTLD:
+			opt.ctld = true;
+			break;
+		case (int)'i':
+			opt.interactive = true;
+			break;
+		case (int)'M':
+			opt.ctld = true;
+			if(opt.clusters)
+				list_destroy(opt.clusters);
+			if(!(opt.clusters =
+			     slurmdb_get_info_cluster(optarg))) {
+				error("'%s' invalid entry for --cluster",
+				      optarg);
 				exit(1);
-				break;
-			case (int)'A':
-				opt.account = xstrdup(optarg);
-				break;
-			case (int)'b':
-				opt.batch = true;
-				break;
-			case OPT_LONG_CTLD:
-				opt.ctld = true;
-				break;
-			case (int)'i':
-				opt.interactive = true;
-				break;
-			case (int)'n':
-				opt.job_name = xstrdup(optarg);
-				break;
-			case (int)'p':
-				opt.partition = xstrdup(optarg);
-				break;
-			case (int)'Q':
-				opt.verbose = -1;
-				break;
-			case (int)'q':
-				opt.qos = xstrdup(optarg);
-				break;
-			case (int)'s':
-				opt.signal = _xlate_signal_name(optarg);
-				break;
-			case (int)'t':
-				opt.state = _xlate_state_name(optarg, false);
-				break;
-			case (int)'u':
-				opt.user_name = xstrdup(optarg);
-				break;
-			case (int)'v':
-				opt.verbose++;
-				break;
-			case (int)'V':
-				print_slurm_version ();
-				exit(0);
-			case (int)'w':
-				opt.nodelist = xstrdup(optarg);
-				break;
-			case OPT_LONG_WCKEY:
-				opt.wckey = xstrdup(optarg);
-				break;
-			case OPT_LONG_HELP:
-				_help();
-				exit(0);
-			case OPT_LONG_USAGE:
-				_usage();
-				exit(0);
+			}
+			working_cluster_rec = list_peek(opt.clusters);
+			break;
+		case (int)'n':
+			opt.job_name = xstrdup(optarg);
+			break;
+		case (int)'p':
+			opt.partition = xstrdup(optarg);
+			break;
+		case (int)'Q':
+			opt.verbose = -1;
+			break;
+		case (int)'q':
+			opt.qos = xstrdup(optarg);
+			break;
+		case (int)'s':
+			opt.signal = _xlate_signal_name(optarg);
+			break;
+		case (int)'t':
+			opt.state = _xlate_state_name(optarg, false);
+			break;
+		case (int)'u':
+			opt.user_name = xstrdup(optarg);
+			break;
+		case (int)'v':
+			opt.verbose++;
+			break;
+		case (int)'V':
+			print_slurm_version ();
+			exit(0);
+		case (int)'w':
+			opt.nodelist = xstrdup(optarg);
+			break;
+		case OPT_LONG_WCKEY:
+			opt.wckey = xstrdup(optarg);
+			break;
+		case OPT_LONG_HELP:
+			_help();
+			exit(0);
+		case OPT_LONG_USAGE:
+			_usage();
+			exit(0);
 		}
 	}
 

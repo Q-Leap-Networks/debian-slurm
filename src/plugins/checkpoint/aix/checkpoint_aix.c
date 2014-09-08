@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  checkpoint_aix.c - AIX slurm checkpoint plugin.
- *  $Id: checkpoint_aix.c 19095 2009-12-01 22:59:18Z da $
+ *  $Id: checkpoint_aix.c 21270 2010-09-28 23:36:24Z jette $
  *****************************************************************************
  *  Copyright (C) 2004-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -86,7 +86,7 @@ struct check_job_info {
 };
 
 static void _send_sig(uint32_t job_id, uint32_t step_id, uint16_t signal,
-		char *node_name, slurm_addr node_addr);
+		char *node_name, slurm_addr_t node_addr);
 static int  _step_sig(struct step_record * step_ptr, uint16_t wait,
 		uint16_t signal, uint16_t sig_timeout);
 
@@ -101,12 +101,12 @@ struct ckpt_timeout_info {
 	time_t     start_time;
 	time_t     end_time;
 	char      *node_name;
-	slurm_addr node_addr;
+	slurm_addr_t node_addr;
 };
 static void *_ckpt_agent_thr(void *arg);
 static void  _ckpt_enqueue_timeout(uint32_t job_id, uint32_t step_id,
 		time_t start_time, uint16_t signal, uint16_t wait_time,
-		char *node_name, slurm_addr node_addr);
+		char *node_name, slurm_addr_t node_addr);
 static void  _ckpt_dequeue_timeout(uint32_t job_id, uint32_t step_id,
 		time_t start_time);
 static void  _ckpt_timeout_free(void *rec);
@@ -137,7 +137,7 @@ static void  _ckpt_signal_step(struct ckpt_timeout_info *rec);
  * of the plugin.  If major and minor revisions are desired, the major
  * version number may be multiplied by a suitable magnitude constant such
  * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum versions for their plugins as the checkpoint API matures.
+ * minimum version for their plugins as the checkpoint API matures.
  */
 const char plugin_name[]       	= "Checkpoint AIX plugin";
 const char plugin_type[]       	= "checkpoint/aix";
@@ -245,6 +245,7 @@ extern int slurm_ckpt_op (uint32_t job_id, uint32_t step_id,
 #endif
 			break;
 		case CHECK_RESTART:
+		case CHECK_REQUEUE:
 			rc = ESLURM_NOT_SUPPORTED;
 			break;
 		case CHECK_ERROR:
@@ -311,37 +312,44 @@ extern int slurm_ckpt_free_job(check_jobinfo_t jobinfo)
 	return SLURM_SUCCESS;
 }
 
-extern int slurm_ckpt_pack_job(check_jobinfo_t jobinfo, Buf buffer)
+extern int slurm_ckpt_pack_job(check_jobinfo_t jobinfo, Buf buffer,
+			       uint16_t protocol_version)
 {
 	struct check_job_info *check_ptr =
 		(struct check_job_info *)jobinfo;
 
-	pack16(check_ptr->disabled, buffer);
-	pack16(check_ptr->node_cnt, buffer);
-	pack16(check_ptr->reply_cnt, buffer);
-	pack16(check_ptr->wait_time, buffer);
+	if(protocol_version >= SLURM_2_1_PROTOCOL_VERSION) {
+		pack16(check_ptr->disabled, buffer);
+		pack16(check_ptr->node_cnt, buffer);
+		pack16(check_ptr->reply_cnt, buffer);
+		pack16(check_ptr->wait_time, buffer);
 
-	pack32(check_ptr->error_code, buffer);
-	packstr(check_ptr->error_msg, buffer);
-	pack_time(check_ptr->time_stamp, buffer);
+		pack32(check_ptr->error_code, buffer);
+		packstr(check_ptr->error_msg, buffer);
+		pack_time(check_ptr->time_stamp, buffer);
+	}
 
 	return SLURM_SUCCESS;
 }
 
-extern int slurm_ckpt_unpack_job(check_jobinfo_t jobinfo, Buf buffer)
+extern int slurm_ckpt_unpack_job(check_jobinfo_t jobinfo, Buf buffer,
+				 uint16_t protocol_version)
 {
 	uint32_t uint32_tmp;
 	struct check_job_info *check_ptr =
 		(struct check_job_info *)jobinfo;
 
-	safe_unpack16(&check_ptr->disabled, buffer);
-	safe_unpack16(&check_ptr->node_cnt, buffer);
-	safe_unpack16(&check_ptr->reply_cnt, buffer);
-	safe_unpack16(&check_ptr->wait_time, buffer);
+	if(protocol_version >= SLURM_2_1_PROTOCOL_VERSION) {
+		safe_unpack16(&check_ptr->disabled, buffer);
+		safe_unpack16(&check_ptr->node_cnt, buffer);
+		safe_unpack16(&check_ptr->reply_cnt, buffer);
+		safe_unpack16(&check_ptr->wait_time, buffer);
 
-	safe_unpack32(&check_ptr->error_code, buffer);
-	safe_unpackstr_xmalloc(&check_ptr->error_msg, &uint32_tmp, buffer);
-	safe_unpack_time(&check_ptr->time_stamp, buffer);
+		safe_unpack32(&check_ptr->error_code, buffer);
+		safe_unpackstr_xmalloc(&check_ptr->error_msg,
+				       &uint32_tmp, buffer);
+		safe_unpack_time(&check_ptr->time_stamp, buffer);
+	}
 
 	return SLURM_SUCCESS;
 
@@ -352,7 +360,7 @@ extern int slurm_ckpt_unpack_job(check_jobinfo_t jobinfo, Buf buffer)
 
 /* Send a signal RPC to a specific node */
 static void _send_sig(uint32_t job_id, uint32_t step_id, uint16_t signal,
-		char *node_name, slurm_addr node_addr)
+		char *node_name, slurm_addr_t node_addr)
 {
 	agent_arg_t *agent_args;
 	kill_tasks_msg_t *kill_tasks_msg;
@@ -462,7 +470,7 @@ static void _ckpt_signal_step(struct ckpt_timeout_info *rec)
 /* Queue a checkpoint request timeout */
 static void _ckpt_enqueue_timeout(uint32_t job_id, uint32_t step_id,
 		time_t start_time, uint16_t signal, uint16_t wait_time,
-		char *node_name, slurm_addr node_addr)
+		char *node_name, slurm_addr_t node_addr)
 {
 	struct ckpt_timeout_info *rec;
 

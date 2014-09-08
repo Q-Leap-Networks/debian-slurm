@@ -1,5 +1,5 @@
 # Makefile for common library
-# If you are linking to this lib any know you are not linking to
+# If you are linking to this lib and know you are not linking to
 # anything else that will need variables here link to
 # $(top_builddir)/src/common/libcommon.la
 # if you are linking to a stand alone program that needs all symbols link to
@@ -8,6 +8,7 @@
 # only be 1 address per symbol.  If you link to the libcommon.la in
 # a plugin you will get 2 addresses for one symbol which could lead to problems.
 
+CPPFLAGS = -DGRES_CONFIG_FILE=\"$(sysconfdir)/gres.conf\"
 AUTOMAKE_OPTIONS = foreign
 
 if HAVE_UNSETENV
@@ -73,7 +74,10 @@ libcommon_la_SOURCES = 			\
 	slurm_protocol_defs.h		\
 	slurm_rlimits_info.h		\
 	slurm_rlimits_info.c		\
+	slurmdb_defs.c slurmdb_defs.h   \
+	slurmdb_pack.c slurmdb_pack.h   \
 	slurmdbd_defs.c slurmdbd_defs.h	\
+	working_cluster.c working_cluster.h   \
 	uid.c uid.h			\
 	util-net.c util-net.h		\
 	slurm_auth.c slurm_auth.h	\
@@ -105,7 +109,8 @@ libcommon_la_SOURCES = 			\
 	write_labelled_message.h	\
 	proc_args.c proc_args.h		\
 	slurm_strcasestr.c slurm_strcasestr.h \
-	node_conf.h node_conf.c
+	node_conf.h node_conf.c		\
+	gres.h gres.c
 
 EXTRA_libcommon_la_SOURCES = 	\
 	$(extra_unsetenv_src)

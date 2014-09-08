@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  node_select_info.c - get the node select plugin state information of slurm
  *
- *  $Id: block_info.c 19214 2010-01-05 19:18:30Z da $
+ *  $Id: block_info.c 21397 2010-10-20 19:18:02Z da $
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -120,6 +120,7 @@ char *slurm_sprint_block_info(
 	char tmp1[16];
 	char *out = NULL;
 	char *line_end = "\n   ";
+	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
 
 	if (one_liner)
 		line_end = " ";
@@ -142,10 +143,10 @@ char *slurm_sprint_block_info(
 	xstrfmtcat(out, "User=%s ConnType=%s",
 		   block_ptr->owner_name,
 		   conn_type_string(block_ptr->conn_type));
-#ifdef HAVE_BGL
-	xstrfmtcat(out, " NodeUse=%s",
-		   node_use_string(block_ptr->node_use));
-#endif
+	if(cluster_flags & CLUSTER_FLAG_BGL)
+		xstrfmtcat(out, " NodeUse=%s",
+			   node_use_string(block_ptr->node_use));
+
 	xstrcat(out, line_end);
 
 	/****** Line 3 ******/
@@ -153,7 +154,8 @@ char *slurm_sprint_block_info(
 		xstrfmtcat(out, "BasePartitions=%s[%s] BPIndices=",
 			   block_ptr->nodes, block_ptr->ionodes);
 	else
-		xstrfmtcat(out, "BasePartitions=%s BPIndices=", block_ptr->nodes);
+		xstrfmtcat(out, "BasePartitions=%s BPIndices=",
+			   block_ptr->nodes);
 	for (j = 0;
 	     (block_ptr->bp_inx && (block_ptr->bp_inx[j] != -1));
 	     j+=2) {
@@ -168,19 +170,22 @@ char *slurm_sprint_block_info(
 	xstrfmtcat(out, "MloaderImage=%s%s",
 		   block_ptr->mloaderimage, line_end);
 
-#ifdef HAVE_BGL
-	/****** Line 5 ******/
-	xstrfmtcat(out, "BlrtsImage=%s%s", block_ptr->blrtsimage, line_end);
-	/****** Line 6 ******/
-	xstrfmtcat(out, "LinuxImage=%s%s", block_ptr->linuximage, line_end);
-	/****** Line 7 ******/
-	xstrfmtcat(out, "RamdiskImage=%s", block_ptr->ramdiskimage);
-#else
-	/****** Line 5 ******/
-	xstrfmtcat(out, "CnloadImage=%s%s", block_ptr->linuximage, line_end);
-	/****** Line 6 ******/
-	xstrfmtcat(out, "IoloadImage=%s", block_ptr->ramdiskimage);
-#endif
+	if(cluster_flags & CLUSTER_FLAG_BGL) {
+		/****** Line 5 ******/
+		xstrfmtcat(out, "BlrtsImage=%s%s", block_ptr->blrtsimage,
+			   line_end);
+		/****** Line 6 ******/
+		xstrfmtcat(out, "LinuxImage=%s%s", block_ptr->linuximage,
+			   line_end);
+		/****** Line 7 ******/
+		xstrfmtcat(out, "RamdiskImage=%s", block_ptr->ramdiskimage);
+	} else {
+		/****** Line 5 ******/
+		xstrfmtcat(out, "CnloadImage=%s%s", block_ptr->linuximage,
+			   line_end);
+		/****** Line 6 ******/
+		xstrfmtcat(out, "IoloadImage=%s", block_ptr->ramdiskimage);
+	}
 	if (one_liner)
 		xstrcat(out, "\n");
 	else
@@ -195,11 +200,13 @@ char *slurm_sprint_block_info(
  * IN update_time - time of current configuration data
  * IN block_info_msg_pptr - place to store a node select configuration
  *	pointer
+ * IN show_flags - controls output form or filtering, see SHOW_FLAGS in slurm.h
  * RET 0 or a slurm error code
  * NOTE: free the response using slurm_free_block_info_msg
  */
-extern int slurm_load_block_info (
-	time_t update_time, block_info_msg_t **block_info_msg_pptr)
+extern int slurm_load_block_info (time_t update_time,
+				  block_info_msg_t **block_info_msg_pptr,
+				  uint16_t show_flags)
 {
         int rc;
         slurm_msg_t req_msg;
@@ -210,6 +217,7 @@ extern int slurm_load_block_info (
 	slurm_msg_t_init(&resp_msg);
 
         req.last_update  = update_time;
+	req.show_flags   = show_flags;
         req_msg.msg_type = REQUEST_BLOCK_INFO;
         req_msg.data     = &req;
 
@@ -237,19 +245,14 @@ extern int slurm_load_block_info (
         return SLURM_SUCCESS;
 }
 
-extern int slurm_free_block_info_msg(block_info_msg_t **block_info_msg_pptr)
-{
-	return node_select_block_info_msg_free(block_info_msg_pptr);
-}
-
-extern int slurm_get_select_jobinfo(select_jobinfo_t *jobinfo,
+extern int slurm_get_select_jobinfo(dynamic_plugin_data_t *jobinfo,
 				    enum select_jobdata_type data_type,
 				    void *data)
 {
 	return select_g_select_jobinfo_get(jobinfo, data_type, data);
 }
 
-extern int slurm_get_select_nodeinfo(select_nodeinfo_t *nodeinfo,
+extern int slurm_get_select_nodeinfo(dynamic_plugin_data_t *nodeinfo,
 				     enum select_nodedata_type data_type,
 				     enum node_states state, void *data)
 {

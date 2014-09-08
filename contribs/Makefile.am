@@ -1,4 +1,4 @@
-SUBDIRS = pam perlapi torque slurmdb-direct
+SUBDIRS = pam perlapi torque sjobexit slurmdb-direct
 
 EXTRA_DIST = \
 	env_cache_builder.c	\
@@ -7,5 +7,6 @@ EXTRA_DIST = \
 	ptrace.patch		\
 	skilling.c		\
 	sjstat			\
+	spank_core.c		\
 	time_login.c		\
 	README

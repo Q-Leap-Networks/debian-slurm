@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  state_test.h - header for Blue Gene node and switch state test.
- *  $Id: state_test.h 19700 2010-03-08 18:50:55Z da $
+ *  $Id: state_test.h 19706 2010-03-08 21:28:44Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

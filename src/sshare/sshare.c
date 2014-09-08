@@ -51,6 +51,7 @@ int quiet_flag;		/* quiet=1, verbose=-1, normal=0 */
 int long_flag;		/* exceeds 80 character limit with more info */
 int verbosity;		/* count of -v options */
 uint32_t my_uid = 0;
+List clusters = NULL;
 
 static int      _get_info(shares_request_msg_t *shares_req,
 			  shares_response_msg_t **shares_resp);
@@ -74,6 +75,8 @@ main (int argc, char *argv[])
 		{"accounts", 1, 0, 'A'},
 		{"all",      0, 0, 'a'},
 		{"long",     0, 0, 'l'},
+		{"cluster",  1, 0, 'M'},
+		{"clusters", 1, 0, 'M'},
 		{"noheader", 0, 0, 'h'},
 		{"parsable", 0, 0, 'p'},
 		{"parsable2",0, 0, 'P'},
@@ -85,18 +88,6 @@ main (int argc, char *argv[])
 		{NULL,       0, 0, 0}
 	};
 
-	/* Check to see if we are running a supported accounting plugin */
-	temp = slurm_get_priority_type();
-	if(strcasecmp(temp, "priority/multifactor")) {
-		fprintf (stderr, "You are not running a supported "
-			 "priority plugin\n(%s).\n"
-			 "Only 'priority/multifactor' is supported.\n",
-			temp);
-		xfree(temp);
-		exit(1);
-	}
-	xfree(temp);
-
 	exit_code         = 0;
 	long_flag	  = 0;
 	quiet_flag        = 0;
@@ -104,7 +95,7 @@ main (int argc, char *argv[])
 	memset(&req_msg, 0, sizeof(shares_request_msg_t));
 	log_init("sshare", opts, SYSLOG_FACILITY_DAEMON, NULL);
 
-	while((opt_char = getopt_long(argc, argv, "aA:hlnpPqu:t:vV",
+	while((opt_char = getopt_long(argc, argv, "aA:hlM:npPqu:t:vV",
 			long_options, &option_index)) != -1) {
 		switch (opt_char) {
 		case (int)'?':
@@ -128,6 +119,17 @@ main (int argc, char *argv[])
 			break;
 		case 'l':
 			long_flag = 1;
+			break;
+		case 'M':
+			if(clusters)
+				list_destroy(clusters);
+			if(!(clusters =
+			     slurmdb_get_info_cluster(optarg))) {
+				error("'%s' invalid entry for --cluster",
+				      optarg);
+				exit(1);
+			}
+			working_cluster_rec = list_peek(clusters);
 			break;
 		case 'n':
 			print_fields_have_header = 0;
@@ -408,6 +410,9 @@ Usage:  sshare [OPTION]                                                    \n\
     -a or --all            list all users                                  \n\
     -A or --accounts=      display specific accounts (comma separated list)\n\
     -h or --noheader       omit header from output                         \n\
+    -M or --cluster=name   cluster to issue commands to.  Default is       \n\
+                           current cluster.  cluster with no name will     \n\
+                           reset to default.                               \n\
     -l or --long           include normalized usage in output              \n\
     -p or --parsable       '|' delimited output with a trailing '|'        \n\
     -P or --parsable2      '|' delimited output without a trailing '|'     \n\

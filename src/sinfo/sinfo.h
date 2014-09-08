@@ -1,9 +1,11 @@
 /****************************************************************************\
  *  sinfo.h - definitions used for sinfo data functions
  *
- *  $Id: sinfo.h 19095 2009-12-01 22:59:18Z da $
+ *  $Id: sinfo.h 20335 2010-05-26 15:56:08Z jette $
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
+ *  Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>, Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -68,6 +70,7 @@
 #include "src/common/macros.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/xmalloc.h"
+#include "src/common/slurmdb_defs.h"
 
 /* Collection of data for printing reports. Like data is combined here */
 typedef struct {
@@ -99,12 +102,14 @@ typedef struct {
 	uint32_t max_weight;
 
 	char *features;
+	char *gres;
 	char *reason;
+	time_t reason_time;
+	uint32_t reason_uid;
 
 	hostlist_t nodes;
-#ifdef HAVE_BG
 	hostlist_t ionodes;
-#endif
+
 	/* part_info contains partition, avail, max_time, job_size,
 	 * root, share, groups, priority */
 	partition_info_t* part_info;
@@ -123,11 +128,13 @@ struct sinfo_match_flags {
 	bool disk_flag;
 	bool features_flag;
 	bool groups_flag;
+	bool gres_flag;
 	bool job_size_flag;
 	bool default_time_flag;
 	bool max_time_flag;
 	bool memory_flag;
 	bool partition_flag;
+	bool preempt_mode_flag;
 	bool priority_flag;
 	bool reason_flag;
 	bool root_flag;
@@ -139,6 +146,8 @@ struct sinfo_match_flags {
 /* Input parameters */
 struct sinfo_parameters {
 	bool all_flag;
+	List clusters;
+	uint32_t cluster_flags;
 	bool bg_flag;
 	bool dead_nodes;
 	bool exact_match;

@@ -1,9 +1,9 @@
 /*****************************************************************************\
  *  src/common/stepd_api.c - slurmstepd message API
- *  $Id: stepd_api.c 19191 2009-12-30 18:04:13Z da $
+ *  $Id: stepd_api.c 21376 2010-10-15 17:11:54Z jette $
  *****************************************************************************
  *  Copyright (C) 2005-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Portions Copyright (C) 2008 Vijay Ramasubramanian
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher Morrone <morrone2@llnl.gov>
@@ -108,7 +108,7 @@ _handle_stray_socket(const char *socket_name)
 
 	if ((uid = getuid()) != buf.st_uid) {
 		debug3("_handle_stray_socket: socket %s is not owned by uid %d",
-		       uid);
+		       socket_name, uid);
 		return;
 	}
 
@@ -288,16 +288,31 @@ stepd_get_info(int fd)
 {
 	int req = REQUEST_INFO;
 	slurmstepd_info_t *info;
+	uint16_t protocol_version;
 
 	info = xmalloc(sizeof(slurmstepd_info_t));
 	safe_write(fd, &req, sizeof(int));
+
 	safe_read(fd, &info->uid, sizeof(uid_t));
 	safe_read(fd, &info->jobid, sizeof(uint32_t));
 	safe_read(fd, &info->stepid, sizeof(uint32_t));
-	safe_read(fd, &info->nodeid, sizeof(uint32_t));
-	safe_read(fd, &info->job_mem_limit, sizeof(uint32_t));
 
+	safe_read(fd, &protocol_version, sizeof(uint16_t));
+	if (protocol_version >= SLURM_2_2_PROTOCOL_VERSION) {
+		safe_read(fd, &info->nodeid, sizeof(uint32_t));
+		safe_read(fd, &info->job_mem_limit, sizeof(uint32_t));
+		safe_read(fd, &info->step_mem_limit, sizeof(uint32_t));
+	} else {
+		info->nodeid  = protocol_version << 16;
+		safe_read(fd, &protocol_version, sizeof(uint16_t));
+		info->nodeid |= protocol_version;
+		safe_read(fd, &info->job_mem_limit, sizeof(uint32_t));
+		info->step_mem_limit = info->job_mem_limit;
+		verbose("Old version slurmstepd for step %u.%u", 
+			info->jobid, info->stepid);
+	}
 	return info;
+
 rwfail:
 	xfree(info);
 	return NULL;
@@ -319,6 +334,32 @@ stepd_signal(int fd, int signal)
 	safe_read(fd, &rc, sizeof(int));
 	return rc;
 rwfail:
+	return -1;
+}
+
+/*
+ * Send job notification message to a batch job
+ */
+int
+stepd_notify_job(int fd, char *message)
+{
+	int req = REQUEST_JOB_NOTIFY;
+	int rc;
+
+	safe_write(fd, &req, sizeof(int));
+	if (message) {
+		rc = strlen(message) + 1;
+		safe_write(fd, &rc, sizeof(int));
+		safe_write(fd, message, rc);
+	} else {
+		rc = 0;
+		safe_write(fd, &rc, sizeof(int));
+	}
+
+	/* Receive the return code */
+	safe_read(fd, &rc, sizeof(int));
+	return rc;
+ rwfail:
 	return -1;
 }
 
@@ -401,15 +442,15 @@ rwfail:
  * resp->gtids, resp->ntasks, and resp->executable.
  */
 int
-stepd_attach(int fd, slurm_addr *ioaddr, slurm_addr *respaddr,
+stepd_attach(int fd, slurm_addr_t *ioaddr, slurm_addr_t *respaddr,
 	     void *job_cred_sig, reattach_tasks_response_msg_t *resp)
 {
 	int req = REQUEST_ATTACH;
 	int rc = SLURM_SUCCESS;
 
 	safe_write(fd, &req, sizeof(int));
-	safe_write(fd, ioaddr, sizeof(slurm_addr));
-	safe_write(fd, respaddr, sizeof(slurm_addr));
+	safe_write(fd, ioaddr, sizeof(slurm_addr_t));
+	safe_write(fd, respaddr, sizeof(slurm_addr_t));
 	safe_write(fd, job_cred_sig, SLURM_IO_KEY_SIZE);
 
 	/* Receive the return code */
@@ -464,7 +505,7 @@ _sockname_regex_init(regex_t *re, const char *nodename)
 	xstrcat(pattern, "_([[:digit:]]*)\\.([[:digit:]]*)$");
 
 	if (regcomp(re, pattern, REG_EXTENDED) != 0) {
-		error("sockname regex compilation failed\n");
+		error("sockname regex compilation failed");
 		return -1;
 	}
 
@@ -857,12 +898,13 @@ rwfail:
  * jobacctinfo_t must be freed after calling this function.
  */
 int
-stepd_stat_jobacct(int fd, stat_jobacct_msg_t *sent, stat_jobacct_msg_t *resp)
+stepd_stat_jobacct(int fd, job_step_id_msg_t *sent, job_step_stat_t *resp)
 {
-	int req = MESSAGE_STAT_JOBACCT;
+	int req = REQUEST_STEP_STAT;
 	int rc = SLURM_SUCCESS;
 	//jobacctinfo_t *jobacct = NULL;
 	int tasks = 0;
+
 	debug("Entering stepd_stat_jobacct for job %u.%u",
 	      sent->job_id, sent->step_id);
 	safe_write(fd, &req, sizeof(int));
@@ -874,6 +916,7 @@ stepd_stat_jobacct(int fd, stat_jobacct_msg_t *sent, stat_jobacct_msg_t *resp)
 
 	safe_read(fd, &tasks, sizeof(int));
 	resp->num_tasks = tasks;
+
 	return rc;
 rwfail:
 	error("gathering job accounting: %d", rc);
@@ -932,32 +975,31 @@ rwfail:
  * and sets errno.
  */
 int
-stepd_list_pids(int fd, pid_t **pids_array, int *pids_count)
+stepd_list_pids(int fd, uint32_t **pids_array, uint32_t *pids_count)
 {
 	int req = REQUEST_STEP_LIST_PIDS;
-	int npids;
-	pid_t *pids;
+	uint32_t npids;
+	uint32_t *pids = NULL;
 	int i;
 
 	safe_write(fd, &req, sizeof(int));
 
 	/* read the pid list */
-	safe_read(fd, &npids, sizeof(int));
-	pids = (pid_t *)xmalloc(npids * sizeof(pid_t));
+	safe_read(fd, &npids, sizeof(uint32_t));
+	pids = xmalloc(npids * sizeof(uint32_t));
 	for (i = 0; i < npids; i++) {
-		safe_read(fd, &pids[i], sizeof(pid_t));
+		safe_read(fd, &pids[i], sizeof(uint32_t));
 	}
 
-	if (npids == 0) {
-		*pids_count = 0;
-		*pids_array = NULL;
-	} else {
-		*pids_count = npids;
-		*pids_array = pids;
-	}
+	if (npids == 0)
+		xfree(pids);
 
+	*pids_count = npids;
+	*pids_array = pids;
 	return SLURM_SUCCESS;
+
 rwfail:
+	xfree(pids);
 	*pids_count = 0;
 	*pids_array = NULL;
 	return SLURM_ERROR;

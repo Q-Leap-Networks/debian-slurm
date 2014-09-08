@@ -300,6 +300,25 @@ modified on success, or<br>
 <span class="commandline">NULL</span> on failure.
 
 <p class="commandline">
+List acct_storage_p_modify_job(void *db_conn, uint32_t uid,
+acct_job_modify_cond_t *job_cond, acct_job_rec_t *job)
+<p style="margin-left:.2in"><b>Description</b>:<br>
+Used to modify two fields (the derived exit code and derived exit string) of an
+existing job in the storage type.  Can only modify one job at a time.
+<p style="margin-left:.2in"><b>Arguments</b>: <br>
+<span class="commandline">db_conn</span> (input) connection to
+the storage type.<br>
+<span class="commandline">uid</span> (input) uid of user calling the function.<br>
+<span class="commandline">job_cond</span> (input) conditional about
+which job need to change.<br>
+<span class="commandline">job</span> (input) what the changes
+should be on the job identified by the conditional.<br>
+<p style="margin-left:.2in"><b>Returns</b>: <br>
+<span class="commandline">List</span> containing ID of job
+modified on success, or<br>
+<span class="commandline">NULL</span> on failure.
+
+<p class="commandline">
 List acct_storage_p_modify_qos(void *db_conn, uint32_t uid,
 acct_qos_cond_t *qos_cond, acct_qos_rec_t *qos)
 <p style="margin-left:.2in"><b>Description</b>:<br>
@@ -567,6 +586,23 @@ on success, or<br>
 <span class="commandline">NULL</span> on failure.
 
 <p class="commandline">
+List acct_storage_p_get_events(void *db_conn, uint32_t uid,
+acct_event_cond_t *event_cond)
+<p style="margin-left:.2in"><b>Description</b>:<br>
+Get a list of acct_event_rec_t *'s based on the conditional sent.
+<p style="margin-left:.2in"><b>Arguments</b>: <br>
+<span class="commandline">db_conn</span> (input) connection to
+the storage type. <br>
+<span class="commandline">uid</span> (input) uid of user calling the
+function.<br>
+<span class="commandline">event_cond</span> (input) conditional about
+which events are to be returned.<br>
+<p style="margin-left:.2in"><b>Returns</b>: <br>
+<span class="commandline">List</span> containing acct_event_rec_t *'s
+on success, or<br>
+<span class="commandline">NULL</span> on failure.
+
+<p class="commandline">
 List acct_storage_p_get_qos(void *db_conn, uint32_t uid,
 acct_qos_cond_t *qos_cond)
 <p style="margin-left:.2in"><b>Description</b>:<br>
@@ -751,8 +787,12 @@ running on the host is grabbed from the connection.<br>
 <p class="commandline">
 int jobacct_storage_p_job_start(void *db_conn, struct job_record *job_ptr)
 <p style="margin-left:.2in"><b>Description</b>:<br>
-jobacct_storage_p_job_start() is called in the jobacct plugin when a
-job starts, inserting information into the database about the new job.
+Note that a job is about to begin execution or has just changed size.
+The job's state will include the JOB_RESIZING flag if and only if it has
+just changed size. Otherwise the job is beginning execution for the first time.
+Note the existance of <i>resize_time</i> in the job record if one wishes to
+record information about a job at each size (i.e. a history of the job as
+its size changes through time).</p>
 <p style="margin-left:.2in"><b>Arguments</b>: <br>
 <span class="commandline">db_conn</span> (input) connection to
 the storage type.<br>
@@ -765,8 +805,12 @@ slurmctld.
 <p class="commandline">
 int jobacct_storage_p_job_complete(void *db_conn, struct job_record *job_ptr)
 <p style="margin-left:.2in"><b>Description</b>:<br>
-jobacct_storage_p_job_complete() is called in the jobacct plugin when
-a job completes, this updates info about end of a job.
+Note that a job is about to terminate or change size.
+The job's state will include the JOB_RESIZING flag if and only if it is about
+to change size. Otherwise the job is terminating.
+Note the existance of <i>resize_time</i> in the job record if one wishes to
+record information about a job at each size (i.e. a history of the job as
+its size changes through time).</p>
 <p style="margin-left:.2in"><b>Arguments</b>: <br>
 <span class="commandline">db_conn</span> (input) connection to
 the storage type.<br>
@@ -923,6 +967,6 @@ ability to implement a particular API version using the mechanism outlined
 for SLURM plugins.
 <p class="footer"><a href="#top">top</a>
 
-<p style="text-align:center;">Last modified 2 March 2009</p>
+<p style="text-align:center;">Last modified 29 March 2010</p>
 
 <!--#include virtual="footer.txt"-->

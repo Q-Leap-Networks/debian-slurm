@@ -1,5 +1,5 @@
 ##*****************************************************************************
-## $Id: slurm.m4 19153 2009-12-10 22:47:09Z da $
+## $Id: slurm.m4 21220 2010-09-22 17:17:51Z jette $
 ##*****************************************************************************
 #  AUTHOR:
 #    Mark A. Grondona <mgrondona@llnl.gov>
@@ -24,7 +24,7 @@ AC_DEFUN([X_AC_SLURM_PORTS],
   AC_DEFINE_UNQUOTED(SLURMCTLD_PORT, [$slurmctldport],
                      [Define the default port number for slurmctld])
   AC_SUBST(SLURMCTLD_PORT)
-  
+
 
   AC_MSG_CHECKING(for slurmd default port)
   AC_ARG_WITH(slurmd-port,
@@ -38,7 +38,7 @@ AC_DEFUN([X_AC_SLURM_PORTS],
   AC_DEFINE_UNQUOTED(SLURMD_PORT, [$slurmdport],
                      [Define the default port number for slurmd])
   AC_SUBST(SLURMD_PORT)
-  
+
 
   AC_MSG_CHECKING(for slurmdbd default port)
   AC_ARG_WITH(slurmdbd-port,
@@ -52,7 +52,43 @@ AC_DEFUN([X_AC_SLURM_PORTS],
   AC_DEFINE_UNQUOTED(SLURMDBD_PORT, [$slurmdbdport],
                      [Define the default port number for slurmdbd])
   AC_SUBST(SLURMDBD_PORT)
+
+  AC_MSG_CHECKING(for slurmctld default port count)
+  AC_ARG_WITH(slurmctld-port-count,
+    AS_HELP_STRING(--with-slurmctld-port-count=N,set slurmctld default port count [[1]]),
+        [ if test `expr match "$withval" '[[0-9]]*$'` -gt 0; then
+             slurmctldportcount="$withval"
+          fi
+        ]
+  )
+  AC_MSG_RESULT(${slurmctldportcount=$4})
+  AC_DEFINE_UNQUOTED(SLURMCTLD_PORT_COUNT, [$slurmctldportcount],
+                     [Define the default port count for slurmctld])
+  AC_SUBST(SLURMCTLD_PORT_COUNT)
 ])
+
+dnl
+dnl Generic option for system dimensions
+dnl
+AC_DEFUN([X_AC_DIMENSIONS], [
+  AC_MSG_CHECKING([System dimensions])
+  AC_ARG_WITH(
+    [dimensions],
+    AS_HELP_STRING(--with-dimensions=N, set system dimension count for generic computer system),
+    [ if test `expr match "$withval" '[[0-9]]*$'` -gt 0; then
+        dimensions="$withval"
+        x_ac_dimensions=yes
+      fi
+    ]
+  )
+  if test "$x_ac_dimensions" = yes; then
+    if test $dimensions -lt 1; then
+      AC_MSG_ERROR([Invalid dimensions value $dimensions])
+    fi
+    AC_DEFINE_UNQUOTED(SYSTEM_DIMENSIONS, [$dimensions], [Define system dimension count])
+  fi
+])
+
 dnl
 dnl Check for program_invocation_name
 dnl
@@ -151,9 +187,12 @@ SLURM_MINOR="`perl -ne 'print,exit if s/^\s*MINOR:\s*(\S*).*/\1/i' $srcdir/META`
 SLURM_MICRO="`perl -ne 'print,exit if s/^\s*MICRO:\s*(\S*).*/\1/i' $srcdir/META`"
 RELEASE="`perl -ne 'print,exit if s/^\s*RELEASE:\s*(\S*).*/\1/i' $srcdir/META`"
 
-SLURM_VERSION="`printf "0x%02x%02x%02x" $SLURM_MAJOR $SLURM_MINOR $SLURM_MICRO`"
-AC_DEFINE_UNQUOTED(SLURM_VERSION, $SLURM_VERSION, [SLURM Version Number])
-AC_SUBST(SLURM_VERSION)
+# NOTE: SLURM_VERSION_NUMBER excludes any non-numeric component 
+# (e.g. "pre1" in the MICRO), but may be suitable for the user determining 
+# how to use the APIs or other differences. 
+SLURM_VERSION_NUMBER="`printf "0x%02x%02x%02x" $SLURM_MAJOR $SLURM_MINOR $SLURM_MICRO`"
+AC_DEFINE_UNQUOTED(SLURM_VERSION_NUMBER, $SLURM_VERSION_NUMBER, [SLURM Version Number])
+AC_SUBST(SLURM_VERSION_NUMBER)
 
 if test "$SLURM_MAJOR.$SLURM_MINOR.$SLURM_MICRO" != "$VERSION"; then
     AC_MSG_ERROR([META information is inconsistent: $VERSION != $SLURM_MAJOR.$SLURM_MINOR.$SLURM_MICRO!])

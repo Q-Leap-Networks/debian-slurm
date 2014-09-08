@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  daemonize.c - daemonization routine
- *  $Id: daemonize.c 19095 2009-12-01 22:59:18Z da $
+ *  $Id: daemonize.c 21754 2010-12-10 17:44:30Z da $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -166,9 +166,10 @@ read_pidfile(const char *pidfile, int *pidfd)
 
 
 int
-create_pidfile(const char *pidfile)
+create_pidfile(const char *pidfile, uid_t uid)
 {
 	FILE *fp;
+	int fd = -1;
 
 	xassert(pidfile != NULL);
 	xassert(pidfile[0] == '/');
@@ -178,23 +179,30 @@ create_pidfile(const char *pidfile)
 		return -1;
 	}
 
-	if (fd_get_write_lock(fileno(fp)) < 0) {
+	fd = fileno(fp);
+
+	if (fd_get_write_lock(fd) < 0) {
 		error ("Unable to lock pidfile `%s': %m", pidfile);
-		fclose(fp);
+		fd = -1;
 		goto error;
 	}
 
 	if (fprintf(fp, "%lu\n", (unsigned long) getpid()) == EOF) {
 		error("Unable to write to pidfile `%s': %m", pidfile);
-		fclose(fp);
+		fd = -1;
 		goto error;
 	}
 
 	fflush(fp);
 
-	return (fileno(fp));
+	if (uid && (fchown(fd, uid, -1) < 0))
+		error ("Unable to reset owner of pidfile: %m");
+
+	return fd;
 
   error:
+	(void)fclose(fp); /* Ignore errors */
+
 	if (unlink(pidfile) < 0)
 		error("Unable to remove pidfile `%s': %m", pidfile);
 	return -1;
@@ -210,8 +218,8 @@ test_core_limit(void)
 	else if (rlim->rlim_cur != RLIM_INFINITY) {
 		rlim->rlim_cur /= 1024;	/* bytes to KB */
 		if (rlim->rlim_cur < 2048) {
-			verbose("Warning: Core limit is only %u KB",
-				rlim->rlim_cur);
+			verbose("Warning: Core limit is only %ld KB",
+				(long int) rlim->rlim_cur);
 		}
 	}
 #endif

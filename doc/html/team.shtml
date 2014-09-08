@@ -3,6 +3,7 @@
 <h1>SLURM Team</h1>
 <p>SLURM development has been a joint effort of
 <a href="https://www.llnl.gov/">Lawrence Livermore National Laboratory</a> (LLNL),
+<a href="http://www.schedmd.com/">SchedMD</a>,
 <a href="http://www.hp.com/">HP</a>,
 <a href="http://www.bull.com/">Bull</a>,
 Linux NetworX and many other contributors.
@@ -24,6 +25,7 @@ Linux NetworX and many other contributors.
 <li>Anton Blanchard (Samba)</li>
 <li>Janne Blomqvist (Aalto University, Finland)</li>
 <li>David Bremer (LLNL)</li>
+<li>Bill Brophy (Bull)</li>
 <li>Hongjia Cao (National University of Defense Techonogy, China)</li>
 <li>Daniel Christians (HP)</li>
 <li>Gilles Civario (Bull)</li>
@@ -46,9 +48,10 @@ Linux NetworX and many other contributors.
 <li>David Jackson (Adaptive Computing)</li>
 <li>Klaus Joas (University Karlsruhe, Germany)</li>
 <li>Greg Johnson (LANL)</li>
-<li>Roman Kurakin (Institute of Natural Science and Ecology, Russia)</li>
 <li>Jason King (LLNL)</li>
+<li>Aaron Knister (Environmental Protection Agency)</li>
 <li>Nancy Kritkausky (Bull)</li>
+<li>Roman Kurakin (Institute of Natural Science and Ecology, Russia)</li>
 <li>Eric Lin (Bull)</li>
 <li>Puenlap Lee (Bull)</li>
 <li>Bernard Li (Genome Sciences Centre, Canada)</li>
@@ -68,11 +71,15 @@ Linux NetworX and many other contributors.
 <li>Vijay Ramasubramanian (University of Maryland)</li>
 <li>Krishnakumar Ravi[KK] (HP)</li>
 <li>Petter Reinholdtsen (University of Oslo, Norway)</li>
+<li>Gerrit Renker (Swiss National Computer Centre)</li>
 <li>Andy Riebs (HP)</li>
-<li>Asier Roa (Barcelona Supercomputer Center, Spain)<li>
-<li>Miguel Ros (Barcelona Supercomputer Center, Spain)<li>
+<li>Asier Roa (Barcelona Supercomputer Center, Spain)</li>
+<li>Miguel Ros (Barcelona Supercomputer Center, Spain)</li>
+<li>Beat Rubischon (DALCO AG, Switzerland)</li>
+<li>Dan Rusak (Bull)</li>
 <li>Eygene Ryabinkin (Kurchatov Institute, Russia)</li>
-<li>Federico Sacerdoti (D.E. Shaw)<li>
+<li>Federico Sacerdoti (D.E. Shaw)</li>
+<li>Rod Schultz (Bull)</li>
 <li>Jeff Squyres (LAM MPI)</li>
 <li>Prashanth Tamraparni (HP, India)</li>
 <li>Jimmy Tang (Trinity College, Ireland)</li>
@@ -84,6 +91,6 @@ Linux NetworX and many other contributors.
 <li>Anne-Marie Wunderlin (Bull)</li>
 </ul>
 
-<p style="text-align:center;">Last modified 21 September 2009</p>
+<p style="text-align:center;">Last modified 15 October 2010</p>
 
 <!--#include virtual="footer.txt"-->

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  qsw.c - Library routines for initiating jobs on QsNet.
- *  $Id: qsw.c 19095 2009-12-01 22:59:18Z da $
+ *  $Id: qsw.c 20467 2010-06-11 16:18:38Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -687,7 +687,7 @@ _alloc_hwcontext(bitstr_t *nodeset, uint32_t prognum, int num)
 			new = bit + QSW_CTX_START;
 		}
 		_unlock_qsw();
-		bit_free(busy_context);
+		FREE_NULL_BITMAP(busy_context);
 	} else {
 		_srand_if_needed();
 		new = lrand48() %

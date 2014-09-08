@@ -73,6 +73,9 @@ extern int send_resvs_to_accounting(void);
 /* Set or clear NODE_STATE_MAINT for node_state as needed */
 extern void set_node_maint_mode(void);
 
+/* After an assocation has been added or removed update the lists. */
+extern void update_assocs_in_resvs(void);
+
 /*
  * Load the reservation state from file, recover on slurmctld restart.
  *	Reset reservation pointers for all jobs.
@@ -132,6 +135,10 @@ extern int job_test_resv(struct job_record *job_ptr, time_t *when,
  * RET	SLURM_SUCCESS if runable now, otherwise an error code
  */
 extern int job_test_resv_now(struct job_record *job_ptr);
+
+/* Adjust a job's time_limit and end_time as needed to avoid using
+ *	reserved resources. Don't go below job's time_min value. */
+extern void job_time_adj_resv(struct job_record *job_ptr);
 
 /* Begin scan of all jobs for valid reservations */
 extern void begin_job_resv_check(void);

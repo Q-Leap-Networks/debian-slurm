@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  pmi.h - Global PMI data as maintained within srun
- *  $Id: pmi_server.h 19095 2009-12-01 22:59:18Z da $
+ *  $Id: pmi_server.h 20449 2010-06-09 19:20:17Z jette $
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -45,4 +45,6 @@ extern int pmi_kvs_get(kvs_get_msg_t *kvs_get_ptr);
  */
 extern void pmi_server_max_threads(int max_threads);
 
+/* free local kvs set */
+extern void pmi_kvs_free(void);
 #endif

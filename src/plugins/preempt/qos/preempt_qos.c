@@ -2,7 +2,8 @@
  *  preempt_qos.c - job preemption plugin that selects preemptable
  *  jobs based upon their Quality Of Service (QOS).
  *****************************************************************************
- *  Copyright (C) 2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2009-2010 Lawrence Livermore National Security.
+ *  Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -46,6 +47,7 @@
 #include "src/common/plugin.h"
 #include "src/common/slurm_accounting_storage.h"
 #include "src/slurmctld/slurmctld.h"
+#include "src/slurmctld/job_scheduler.h"
 
 const char	plugin_name[]	= "Preempt by Quality Of Service (QOS)";
 const char	plugin_type[]	= "preempt/qos";
@@ -115,7 +117,6 @@ extern List find_preemptable_jobs(struct job_record *job_ptr)
 		    (bit_overlap(job_p->node_bitmap,
 				 job_ptr->part_ptr->node_bitmap) == 0))
 			continue;
-
 		/* This job is a preemption candidate */
 		if (preemptee_job_list == NULL) {
 			preemptee_job_list = list_create(NULL);
@@ -134,14 +135,13 @@ extern List find_preemptable_jobs(struct job_record *job_ptr)
 static bool _qos_preemptable(struct job_record *preemptee,
 			     struct job_record *preemptor)
 {
-	acct_qos_rec_t *qos_ee = preemptee->qos_ptr;
-	acct_qos_rec_t *qos_or = preemptor->qos_ptr;
+	slurmdb_qos_rec_t *qos_ee = preemptee->qos_ptr;
+	slurmdb_qos_rec_t *qos_or = preemptor->qos_ptr;
 
 	if ((qos_ee == NULL) || (qos_or == NULL) ||
 	    (qos_or->preempt_bitstr == NULL) ||
 	    !bit_test(qos_or->preempt_bitstr, qos_ee->id))
 		return false;
-
 	return true;
 
 }
@@ -149,7 +149,7 @@ static bool _qos_preemptable(struct job_record *preemptee,
 static uint32_t _gen_job_prio(struct job_record *job_ptr)
 {
 	uint32_t job_prio;
-	acct_qos_rec_t *qos_ptr = job_ptr->qos_ptr;
+	slurmdb_qos_rec_t *qos_ptr = job_ptr->qos_ptr;
 
 	if (qos_ptr)
 		job_prio = (qos_ptr->priority & 0xffff) << 16;
@@ -180,4 +180,33 @@ static int _sort_by_prio (void *x, void *y)
 		rc = 0;
 
 	return rc;
+}
+
+/**************************************************************************/
+/* TAG(                 job_preempt_mode                                ) */
+/**************************************************************************/
+extern uint16_t job_preempt_mode(struct job_record *job_ptr)
+{
+	if (job_ptr->qos_ptr &&
+	    ((slurmdb_qos_rec_t *)job_ptr->qos_ptr)->preempt_mode)
+		return ((slurmdb_qos_rec_t *)job_ptr->qos_ptr)->preempt_mode;
+
+	return (slurm_get_preempt_mode() & (~PREEMPT_MODE_GANG));
+}
+
+/**************************************************************************/
+/* TAG(                 preemption_enabled                              ) */
+/**************************************************************************/
+extern bool preemption_enabled(void)
+{
+	return (slurm_get_preempt_mode() != PREEMPT_MODE_OFF);
+}
+
+/***************************************************************************/
+/* Return true if the preemptor can preempt the preemptee, otherwise false */
+/***************************************************************************/
+extern bool job_preempt_check(job_queue_rec_t *preemptor,
+			      job_queue_rec_t *preemptee)
+{
+	return _qos_preemptable(preemptee->job_ptr, preemptor->job_ptr);
 }

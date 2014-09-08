@@ -1,10 +1,8 @@
 /****************************************************************************\
- *  opts.c - srun command line option parsing
- *
- *  $Id: opts.c 21042 2010-08-30 15:49:44Z jette $
+ *  opts.c - squeue command line option parsing
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>, Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -80,7 +78,7 @@ static List  _build_step_list( char* str );
 static List  _build_user_list( char* str );
 static char *_get_prefix(char *token);
 static void  _help( void );
-static int   _max_procs_per_node(void);
+static int   _max_cpus_per_node(void);
 static int   _parse_state( char* str, enum job_states* states );
 static void  _parse_token( char *token, char *field, int *field_size,
 			   bool *right_justify, char **suffix);
@@ -105,6 +103,8 @@ parse_command_line( int argc, char* argv[] )
 		{"iterate",    required_argument, 0, 'i'},
 		{"jobs",       optional_argument, 0, 'j'},
 		{"long",       no_argument,       0, 'l'},
+		{"cluster",    required_argument, 0, 'M'},
+		{"clusters",   required_argument, 0, 'M'},
 		{"node",       required_argument, 0, 'n'},
 		{"nodes",      required_argument, 0, 'n'},
 		{"noheader",   no_argument,       0, 'h'},
@@ -128,119 +128,139 @@ parse_command_line( int argc, char* argv[] )
 		params.format = xstrdup(env_val);
 	if ( ( env_val = getenv("SQUEUE_SORT") ) )
 		params.sort = xstrdup(env_val);
+	if ( ( env_val = getenv("SLURM_CLUSTERS") ) ) {
+		if (!(params.clusters = slurmdb_get_info_cluster(env_val))) {
+			error("'%s' invalid entry for SLURM_CLUSTERS",
+			      env_val);
+			exit(1);
+		}
+		working_cluster_rec = list_peek(params.clusters);
+	}
 
-	while((opt_char = getopt_long(argc, argv,
-				      "A:ahi:j::ln:o:p:q:s::S:t:u:U:vV",
-				      long_options, &option_index)) != -1) {
+	while ((opt_char = getopt_long(argc, argv,
+				       "A:ahi:j::ln:M:o:p:q:s::S:t:u:U:vV",
+				       long_options, &option_index)) != -1) {
 		switch (opt_char) {
-			case (int)'?':
-				fprintf(stderr, "Try \"squeue --help\" "
-						"for more information\n");
+		case (int)'?':
+			fprintf(stderr, "Try \"squeue --help\" "
+				"for more information\n");
+			exit(1);
+		case (int) 'A':
+		case (int) 'U':	/* backwards compatibility */
+			xfree(params.accounts);
+		        params.accounts = xstrdup(optarg);
+			params.account_list =
+				_build_str_list( params.accounts );
+		break;
+		case (int)'a':
+			params.all_flag = true;
+			break;
+		case (int)'h':
+			params.no_header = true;
+			break;
+		case (int) 'i':
+			params.iterate= atoi(optarg);
+			if (params.iterate <= 0) {
+				error ("--iterate=%s\n", optarg);
 				exit(1);
-			case (int) 'A':
-			case (int) 'U':	/* backwards compatibility */
-				xfree(params.accounts);
-				params.accounts = xstrdup(optarg);
-				params.account_list =
-					_build_str_list( params.accounts );
-				break;
-			case (int)'a':
-				params.all_flag = true;
-				break;
-			case (int)'h':
-				params.no_header = true;
-				break;
-			case (int) 'i':
-				params.iterate= atoi(optarg);
-				if (params.iterate <= 0) {
-					error ("--iterate=%s\n", optarg);
-					exit(1);
-				}
-				break;
-			case (int) 'j':
-				if (optarg) {
-					params.jobs = xstrdup(optarg);
-					params.job_list =
-						_build_job_list(params.jobs);
-				}
-				params.job_flag = true;
-				break;
-			case (int) 'l':
-				params.long_list = true;
-				break;
-			case (int) 'n':
-				if (params.nodes)
-					hostset_destroy(params.nodes);
+			}
+			break;
+		case (int) 'j':
+			if (optarg) {
+				params.jobs = xstrdup(optarg);
+				params.job_list =
+					_build_job_list(params.jobs);
+			}
+			params.job_flag = true;
+			break;
+		case (int) 'l':
+			params.long_list = true;
+			break;
+		case (int) 'M':
+			if (params.clusters)
+				list_destroy(params.clusters);
+			if (!(params.clusters =
+			    slurmdb_get_info_cluster(optarg))) {
+				error("'%s' invalid entry for --cluster",
+				      optarg);
+				exit(1);
+			}
+			working_cluster_rec = list_peek(params.clusters);
+			break;
+		case (int) 'n':
+			if (params.nodes)
+				hostset_destroy(params.nodes);
 
-				params.nodes = hostset_create(optarg);
-				if (params.nodes == NULL) {
-					error("'%s' invalid entry for --nodes",
-					      optarg);
-					exit(1);
-				}
-				break;
-			case (int) 'o':
-				xfree(params.format);
-				params.format = xstrdup(optarg);
-				break;
-			case (int) 'p':
-				xfree(params.partitions);
-				params.partitions = xstrdup(optarg);
-				params.part_list =
-					_build_str_list( params.partitions );
-				params.all_flag = true;
-				break;
-			case (int) 'q':
-				xfree(params.qoss);
-				params.qoss = xstrdup(optarg);
-				params.qos_list =
-					_build_str_list( params.qoss );
-				break;
-			case (int) 's':
-				if (optarg) {
-					params.steps = xstrdup(optarg);
-					params.step_list =
-						_build_step_list(params.steps);
-				}
-				params.step_flag = true;
-				break;
-			case (int) 'S':
-				xfree(params.sort);
-				params.sort = xstrdup(optarg);
-				break;
-			case (int) 't':
-				xfree(params.states);
-				params.states = xstrdup(optarg);
-				params.state_list =
-					_build_state_list( params.states );
-				break;
-			case (int) 'u':
-				xfree(params.users);
-				params.users = xstrdup(optarg);
-				params.user_list =
-					_build_user_list( params.users );
-				break;
-			case (int) 'v':
-				params.verbose++;
-				break;
-			case (int) 'V':
-				print_slurm_version();
-				exit(0);
-			case OPT_LONG_HELP:
-				_help();
-				exit(0);
-			case OPT_LONG_HIDE:
-				params.all_flag = false;
-				break;
-			case OPT_LONG_START:
-				params.start_flag = true;
-				break;
-			case OPT_LONG_USAGE:
-				_usage();
-				exit(0);
+			params.nodes = hostset_create(optarg);
+			if (params.nodes == NULL) {
+				error("'%s' invalid entry for --nodes",
+				      optarg);
+				exit(1);
+			}
+			break;
+		case (int) 'o':
+			xfree(params.format);
+			params.format = xstrdup(optarg);
+			break;
+		case (int) 'p':
+			xfree(params.partitions);
+			params.partitions = xstrdup(optarg);
+			params.part_list =
+				_build_str_list( params.partitions );
+			params.all_flag = true;
+			break;
+		case (int) 'q':
+			xfree(params.qoss);
+			params.qoss = xstrdup(optarg);
+			params.qos_list =
+				_build_str_list( params.qoss );
+			break;
+		case (int) 's':
+			if (optarg) {
+				params.steps = xstrdup(optarg);
+				params.step_list =
+					_build_step_list(params.steps);
+			}
+			params.step_flag = true;
+			break;
+		case (int) 'S':
+			xfree(params.sort);
+			params.sort = xstrdup(optarg);
+			break;
+		case (int) 't':
+			xfree(params.states);
+			params.states = xstrdup(optarg);
+			params.state_list =
+				_build_state_list( params.states );
+			break;
+		case (int) 'u':
+			xfree(params.users);
+			params.users = xstrdup(optarg);
+			params.user_list =
+				_build_user_list( params.users );
+			break;
+		case (int) 'v':
+			params.verbose++;
+			break;
+		case (int) 'V':
+			print_slurm_version();
+			exit(0);
+		case OPT_LONG_HELP:
+			_help();
+			exit(0);
+		case OPT_LONG_HIDE:
+			params.all_flag = false;
+			break;
+		case OPT_LONG_START:
+			params.start_flag = true;
+			break;
+		case OPT_LONG_USAGE:
+			_usage();
+			exit(0);
 		}
 	}
 
+	params.cluster_flags = slurmdb_setup_cluster_flags();
 	if (optind < argc) {
 		if (params.job_flag) {
 			params.jobs = xstrdup(argv[optind++]);
@@ -341,30 +361,30 @@ parse_command_line( int argc, char* argv[] )
 		}
 	}
 
-	params.max_procs = _max_procs_per_node();
+	params.max_cpus = _max_cpus_per_node();
 
 	if ( params.verbose )
 		_print_options();
 }
 
 /* Return the maximum number of processors for any node in the cluster */
-static int   _max_procs_per_node(void)
+static int   _max_cpus_per_node(void)
 {
-	int error_code, max_procs = 1;
+	int error_code, max_cpus = 1;
 	node_info_msg_t *node_info_ptr = NULL;
 
 	error_code = slurm_load_node ((time_t) NULL, &node_info_ptr,
-			params.all_flag);
+				      params.all_flag);
 	if (error_code == SLURM_SUCCESS) {
 		int i;
 		node_info_t *node_ptr = node_info_ptr->node_array;
 		for (i=0; i<node_info_ptr->record_count; i++) {
-			max_procs = MAX(max_procs, node_ptr[i].cpus);
+			max_cpus = MAX(max_cpus, node_ptr[i].cpus);
 		}
 		slurm_free_node_info_msg (node_info_ptr);
 	}
 
-	return max_procs;
+	return max_cpus;
 }
 
 /*
@@ -379,24 +399,8 @@ _parse_state( char* str, enum job_states* states )
 	int i;
 	char *state_names;
 
-	for (i = 0; i<JOB_END; i++) {
-		if (strcasecmp (job_state_string(i), str) == 0) {
-			*states = i;
-			return SLURM_SUCCESS;
-		}
-		if (strcasecmp (job_state_string_compact(i), str) == 0) {
-			*states = i;
-			return SLURM_SUCCESS;
-		}
-	}
-	if ((strcasecmp(job_state_string(JOB_COMPLETING), str) == 0) ||
-	    (strcasecmp(job_state_string_compact(JOB_COMPLETING),str) == 0)) {
-		*states = JOB_COMPLETING;
-		return SLURM_SUCCESS;
-	}
-	if ((strcasecmp(job_state_string(JOB_CONFIGURING), str) == 0) ||
-	    (strcasecmp(job_state_string_compact(JOB_CONFIGURING),str) == 0)) {
-		*states = JOB_CONFIGURING;
+	if ((i = job_state_num(str)) >= 0) {
+		*states = i;
 		return SLURM_SUCCESS;
 	}
 
@@ -461,6 +465,10 @@ extern int parse_format( char* format )
 							   field_size,
 							   right_justify,
 							   suffix );
+			else if (field[0] == 'b')
+				step_format_add_gres( params.format_list,
+						      field_size,
+						      right_justify, suffix );
 			else if (field[0] == 'i')
 				step_format_add_id( params.format_list,
 						    field_size,
@@ -524,16 +532,20 @@ extern int parse_format( char* format )
 							field_size,
 							right_justify,
 							suffix  );
+			else if (field[0] == 'b')
+				job_format_add_gres( params.format_list,
+						     field_size, right_justify,
+						     suffix );
 			else if (field[0] == 'c')
-				job_format_add_min_procs( params.format_list,
-							  field_size,
-							  right_justify,
-							  suffix  );
+				job_format_add_min_cpus( params.format_list,
+							 field_size,
+							 right_justify,
+							 suffix  );
 			else if (field[0] == 'C')
-				job_format_add_num_procs( params.format_list,
-							  field_size,
-							  right_justify,
-							  suffix  );
+				job_format_add_num_cpus( params.format_list,
+							 field_size,
+							 right_justify,
+							 suffix  );
 			else if (field[0] == 'd')
 				job_format_add_min_tmp_disk(
 							  params.format_list,
@@ -560,45 +572,44 @@ extern int parse_format( char* format )
 							 field_size,
 							 right_justify,
 							 suffix );
-			else if (field[0] == 'G')
-				job_format_add_group_id( params.format_list,
-							 field_size,
-							 right_justify,
-							 suffix );
 			else if (field[0] == 'g')
 				job_format_add_group_name( params.format_list,
 							   field_size,
 							   right_justify,
 							   suffix );
+			else if (field[0] == 'G')
+				job_format_add_group_id( params.format_list,
+							 field_size,
+							 right_justify,
+							 suffix );
 			else if (field[0] == 'h')
 				job_format_add_shared( params.format_list,
 						       field_size,
 						       right_justify,
 						       suffix );
 			else if (field[0] == 'H')
-				job_format_add_min_sockets( params.format_list,
-							   field_size,
-							   right_justify,
-							   suffix );
+				job_format_add_sockets( params.format_list,
+							field_size,
+							right_justify,
+							suffix );
 			else if (field[0] == 'i')
 				job_format_add_job_id( params.format_list,
 						       field_size,
 						       right_justify,
 						       suffix );
 			else if (field[0] == 'I')
-				job_format_add_min_cores( params.format_list,
-							   field_size,
-							   right_justify,
-							   suffix );
+				job_format_add_cores( params.format_list,
+						      field_size,
+						      right_justify, suffix );
 			else if (field[0] == 'j')
 				job_format_add_name( params.format_list,
 						     field_size,
 						     right_justify, suffix );
 			else if (field[0] == 'J')
-				job_format_add_min_threads( params.format_list,
-							   field_size,
-							   right_justify,
-							   suffix );
+				job_format_add_threads( params.format_list,
+							field_size,
+							right_justify,
+							suffix );
 			else if (field[0] == 'k')
 				job_format_add_comment( params.format_list,
 							field_size,
@@ -822,7 +833,7 @@ _print_options()
 	printf( "iterate    = %d\n", params.iterate );
 	printf( "job_flag   = %d\n", params.job_flag );
 	printf( "jobs       = %s\n", params.jobs );
-	printf( "max_procs  = %d\n", params.max_procs ) ;
+	printf( "max_cpus   = %d\n", params.max_cpus ) ;
 	printf( "nodes      = %s\n", hostlist ) ;
 	printf( "partitions = %s\n", params.partitions ) ;
 	printf( "sort       = %s\n", params.sort ) ;
@@ -1105,6 +1116,9 @@ Usage: squeue [OPTIONS]\n\
   -j, --job=job(s)                comma separated list of jobs IDs\n\
 				  to view, default is all\n\
   -l, --long                      long report\n\
+  -M, --clusters=cluster_name     cluster to issue commands to.  Default is\n\
+                                  current cluster.  cluster with no name will\n\
+                                  reset to default.\n\
   -n, --nodes=hostlist            list of nodes to view, default is \n\
 				  all nodes\n\
   -o, --format=format             format specification\n\

@@ -1,7 +1,9 @@
 /*****************************************************************************\
  *  print.h - sinfo print job definitions
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
+ *  Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
@@ -87,6 +89,8 @@ int  print_sinfo_list(List sinfo_list);
 	format_add_function(list,wid,right,suffix,_print_features)
 #define format_add_groups(list,wid,right,suffix) \
 	format_add_function(list,wid,right,suffix,_print_groups)
+#define format_add_gres(list,wid,right,suffix) \
+	format_add_function(list,wid,right,suffix,_print_gres)
 #define format_add_memory(list,wid,right,suffix) \
 	format_add_function(list,wid,right,suffix,_print_memory)
 #define format_add_node_list(list,wid,right,suffix) \
@@ -101,6 +105,8 @@ int  print_sinfo_list(List sinfo_list);
 	format_add_function(list,wid,right,suffix,_print_partition)
 #define format_add_prefix(list,wid,right,suffix) \
 	format_add_function(list,wid,right,suffix,_print_prefix)
+#define format_add_preempt_mode(list,wid,right,suffix) \
+	format_add_function(list,wid,right,suffix,_print_preempt_mode)
 #define format_add_priority(list,wid,right,suffix) \
 	format_add_function(list,wid,right,suffix,_print_priority)
 #define format_add_reason(list,wid,right,suffix) \
@@ -117,6 +123,12 @@ int  print_sinfo_list(List sinfo_list);
 	format_add_function(list,wid,right,suffix,_print_state_long)
 #define format_add_time(list,wid,right,suffix) \
 	format_add_function(list,wid,right,suffix,_print_time)
+#define format_add_timestamp(list,wid,right,suffix)		\
+	format_add_function(list,wid,right,suffix,_print_timestamp)
+#define format_add_user(list,wid,right,suffix) \
+	format_add_function(list,wid,right,suffix,_print_user)
+#define format_add_user_long(list,wid,right,suffix) \
+	format_add_function(list,wid,right,suffix,_print_user_long)
 #define format_add_default_time(list,wid,right,suffix) \
 	format_add_function(list,wid,right,suffix,_print_default_time)
 #define format_add_weight(list,wid,right,suffix) \
@@ -150,6 +162,8 @@ int _print_features(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
 int _print_groups(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
+int _print_gres(sinfo_data_t * sinfo_data, int width,
+			bool right_justify, char *suffix);
 int _print_memory(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
 int _print_node_list(sinfo_data_t * sinfo_data, int width,
@@ -163,6 +177,8 @@ int _print_nodes_aiot(sinfo_data_t * sinfo_data, int width,
 int _print_partition(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
 int _print_prefix(sinfo_data_t * sinfo_data, int width,
+			bool right_justify, char *suffix);
+int _print_preempt_mode(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
 int _print_priority(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
@@ -179,6 +195,12 @@ int _print_state_compact(sinfo_data_t * sinfo_data, int width,
 int _print_state_long(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
 int _print_time(sinfo_data_t * sinfo_data, int width,
+			bool right_justify, char *suffix);
+int _print_timestamp(sinfo_data_t * sinfo_data, int width,
+			bool right_justify, char *suffix);
+int _print_user(sinfo_data_t * sinfo_data, int width,
+			bool right_justify, char *suffix);
+int _print_user_long(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);
 int _print_default_time(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix);

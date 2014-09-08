@@ -2,7 +2,7 @@
  *  opt.c - options processing for srun
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona1@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
@@ -101,7 +101,6 @@
 #define OPT_DISTRIB     0x04
 #define OPT_NODES       0x05
 #define OPT_OVERCOMMIT  0x06
-#define OPT_CORE        0x07
 #define OPT_CONN_TYPE	0x08
 #define OPT_RESV_PORTS	0x09
 #define OPT_NO_ROTATE	0x0a
@@ -134,7 +133,6 @@
 #define LONG_OPT_GID         0x10b
 #define LONG_OPT_MPI         0x10c
 #define LONG_OPT_RESV_PORTS  0x10d
-#define LONG_OPT_CORE        0x10e
 #define LONG_OPT_DEBUG_TS    0x110
 #define LONG_OPT_CONNTYPE    0x111
 #define LONG_OPT_TEST_ONLY   0x113
@@ -181,6 +179,8 @@
 #define LONG_OPT_RESTART_DIR     0x14d
 #define LONG_OPT_SIGNAL          0x14e
 #define LONG_OPT_DEBUG_SLURMD    0x14f
+#define LONG_OPT_TIME_MIN        0x150
+#define LONG_OPT_GRES            0x151
 
 extern char **environ;
 
@@ -259,8 +259,8 @@ static bool _valid_node_list(char **node_list_pptr)
 	   procs to use then we need exactly this many since we are
 	   saying, lay it out this way!  Same for max and min nodes.
 	   Other than that just read in as many in the hostfile */
-	if(opt.nprocs_set)
-		count = opt.nprocs;
+	if(opt.ntasks_set)
+		count = opt.ntasks;
 	else if(opt.nodes_set) {
 		if(opt.max_nodes)
 			count = opt.max_nodes;
@@ -276,6 +276,8 @@ static bool _valid_node_list(char **node_list_pptr)
  */
 #undef USE_ARGERROR
 #if USE_ARGERROR
+static void argerror(const char *msg, ...)
+  __attribute__ ((format (printf, 1, 2)));
 static void argerror(const char *msg, ...)
 {
 	va_list ap;
@@ -317,15 +319,15 @@ static void _opt_default()
 
 	opt.progname = NULL;
 
-	opt.nprocs = 1;
-	opt.nprocs_set = false;
+	opt.ntasks = 1;
+	opt.ntasks_set = false;
 	opt.cpus_per_task = 1;
 	opt.cpus_set = false;
 	opt.min_nodes = 1;
 	opt.max_nodes = 0;
-	opt.min_sockets_per_node = NO_VAL; /* requested min sockets */
-	opt.min_cores_per_socket = NO_VAL; /* requested min cores */
-	opt.min_threads_per_core = NO_VAL; /* requested min threads */
+	opt.sockets_per_node = NO_VAL; /* requested sockets */
+	opt.cores_per_socket = NO_VAL; /* requested cores */
+	opt.threads_per_core = NO_VAL; /* requested threads */
 	opt.ntasks_per_node      = NO_VAL; /* ntask max limits */
 	opt.ntasks_per_socket    = NO_VAL;
 	opt.ntasks_per_core      = NO_VAL;
@@ -338,6 +340,8 @@ static void _opt_default()
 	opt.mem_bind = NULL;
 	opt.time_limit = NO_VAL;
 	opt.time_limit_str = NULL;
+	opt.time_min = NO_VAL;
+	opt.time_min_str = NULL;
 	opt.ckpt_interval = 0;
 	opt.ckpt_interval_str = NULL;
 	opt.ckpt_dir = NULL;
@@ -367,8 +371,6 @@ static void _opt_default()
 	opt.ifname = NULL;
 	opt.efname = NULL;
 
-	opt.core_type = CORE_DEFAULT;
-
 	opt.labelio = false;
 	opt.unbuffered = false;
 	opt.overcommit = false;
@@ -393,13 +395,14 @@ static void _opt_default()
 	opt.warn_signal = 0;
 	opt.warn_time   = 0;
 
-	opt.job_min_cpus    = NO_VAL;
-	opt.job_min_memory  = NO_VAL;
+	opt.pn_min_cpus    = NO_VAL;
+	opt.pn_min_memory  = NO_VAL;
 	opt.mem_per_cpu     = NO_VAL;
-	opt.job_min_tmp_disk= NO_VAL;
+	opt.pn_min_tmp_disk= NO_VAL;
 
 	opt.hold	    = false;
 	opt.constraints	    = NULL;
+	opt.gres	    = NULL;
 	opt.contiguous	    = false;
 	opt.nodelist	    = NULL;
 	opt.exc_nodes	    = NULL;
@@ -474,7 +477,6 @@ env_vars_t env_vars[] = {
 {"SLURM_CHECKPOINT_DIR",OPT_STRING,     &opt.ckpt_dir,      NULL             },
 {"SLURM_CNLOAD_IMAGE",  OPT_STRING,     &opt.linuximage,    NULL             },
 {"SLURM_CONN_TYPE",     OPT_CONN_TYPE,  NULL,               NULL             },
-{"SLURM_CORE_FORMAT",   OPT_CORE,       NULL,               NULL             },
 {"SLURM_CPUS_PER_TASK", OPT_INT,        &opt.cpus_per_task, &opt.cpus_set    },
 {"SLURM_CPU_BIND",      OPT_CPU_BIND,   NULL,               NULL             },
 {"SLURM_DEPENDENCY",    OPT_STRING,     &opt.dependency,    NULL             },
@@ -500,7 +502,8 @@ env_vars_t env_vars[] = {
 {"SLURM_NNODES",        OPT_NODES,      NULL,               NULL             },
 {"SLURM_NODELIST",      OPT_STRING,     &opt.alloc_nodelist,NULL             },
 {"SLURM_NO_ROTATE",     OPT_NO_ROTATE,  NULL,               NULL             },
-{"SLURM_NPROCS",        OPT_INT,        &opt.nprocs,        &opt.nprocs_set  },
+{"SLURM_NTASKS",        OPT_INT,        &opt.ntasks,        &opt.ntasks_set  },
+{"SLURM_NPROCS",        OPT_INT,        &opt.ntasks,        &opt.ntasks_set  },
 {"SLURM_NSOCKETS_PER_NODE",OPT_NSOCKETS,NULL,               NULL             },
 {"SLURM_NTASKS_PER_NODE", OPT_INT,      &opt.ntasks_per_node, NULL           },
 {"SLURM_NTHREADS_PER_CORE",OPT_NTHREADS,NULL,               NULL             },
@@ -634,10 +637,6 @@ _process_env_var(env_vars_t *e, const char *val)
 			error("Invalid SLURM_OPEN_MODE: %s. Ignored", val);
 		break;
 
-	case OPT_CORE:
-		opt.core_type = core_format_type (val);
-		break;
-
 	case OPT_CONN_TYPE:
 		opt.conn_type = verify_conn_type(val);
 		break;
@@ -764,7 +763,6 @@ static void set_options(const int argc, char **argv)
 		{"comment",          required_argument, 0, LONG_OPT_COMMENT},
 		{"conn-type",        required_argument, 0, LONG_OPT_CONNTYPE},
 		{"contiguous",       no_argument,       0, LONG_OPT_CONT},
-		{"core",             required_argument, 0, LONG_OPT_CORE},
 		{"cores-per-socket", required_argument, 0, LONG_OPT_CORESPERSOCKET},
 		{"cpu_bind",         required_argument, 0, LONG_OPT_CPU_BIND},
 		{"debugger-test",    no_argument,       0, LONG_OPT_DEBUG_TS},
@@ -772,6 +770,7 @@ static void set_options(const int argc, char **argv)
 		{"exclusive",        no_argument,       0, LONG_OPT_EXCLUSIVE},
 		{"get-user-env",     optional_argument, 0, LONG_OPT_GET_USER_ENV},
 		{"gid",              required_argument, 0, LONG_OPT_GID},
+		{"gres",             required_argument, 0, LONG_OPT_GRES},
 		{"help",             no_argument,       0, LONG_OPT_HELP},
 		{"hint",             required_argument, 0, LONG_OPT_HINT},
 		{"ioload-image",     required_argument, 0, LONG_OPT_RAMDISK_IMAGE},
@@ -814,6 +813,7 @@ static void set_options(const int argc, char **argv)
 		{"task-prolog",      required_argument, 0, LONG_OPT_TASK_PROLOG},
 		{"tasks-per-node",   required_argument, 0, LONG_OPT_NTASKSPERNODE},
 		{"test-only",        no_argument,       0, LONG_OPT_TEST_ONLY},
+		{"time-min",         required_argument, 0, LONG_OPT_TIME_MIN},
 		{"threads-per-core", required_argument, 0, LONG_OPT_THREADSPERCORE},
 		{"tmp",              required_argument, 0, LONG_OPT_TMP},
 		{"uid",              required_argument, 0, LONG_OPT_UID},
@@ -863,9 +863,9 @@ static void set_options(const int argc, char **argv)
 		case (int)'B':
 			opt.extra_set = verify_socket_core_thread_count(
 						optarg,
-						&opt.min_sockets_per_node,
-						&opt.min_cores_per_socket,
-						&opt.min_threads_per_core,
+						&opt.sockets_per_node,
+						&opt.cores_per_socket,
+						&opt.threads_per_core,
 						&opt.cpu_bind_type);
 
 			if (opt.extra_set == false) {
@@ -963,8 +963,8 @@ static void set_options(const int argc, char **argv)
 			}
 			break;
 		case (int)'n':
-			opt.nprocs_set = true;
-			opt.nprocs =
+			opt.ntasks_set = true;
+			opt.ntasks =
 				_get_int(optarg, "number of tasks", true);
 			break;
 		case (int)'N':
@@ -1079,21 +1079,15 @@ static void set_options(const int argc, char **argv)
 						  &opt.mem_bind_type))
 				exit(error_exit);
 			break;
-		case LONG_OPT_CORE:
-			opt.core_type = core_format_type (optarg);
-			if (opt.core_type == CORE_INVALID)
-				error ("--core=\"%s\" Invalid -- ignoring.\n",
-				       optarg);
-			break;
 		case LONG_OPT_MINCPUS:
-			opt.job_min_cpus = _get_int(optarg, "mincpus", true);
+			opt.pn_min_cpus = _get_int(optarg, "mincpus", true);
 			break;
 		case LONG_OPT_MINCORES:
 			verbose("mincores option has been deprecated, use "
 				"cores-per-socket");
-			opt.min_cores_per_socket = _get_int(optarg,
-							    "mincores", true);
-			if (opt.min_cores_per_socket < 0) {
+			opt.cores_per_socket = _get_int(optarg,
+							"mincores", true);
+			if (opt.cores_per_socket < 0) {
 				error("invalid mincores constraint %s",
 				      optarg);
 				exit(error_exit);
@@ -1102,9 +1096,9 @@ static void set_options(const int argc, char **argv)
 		case LONG_OPT_MINSOCKETS:
 			verbose("minsockets option has been deprecated, use "
 				"sockets-per-node");
-			opt.min_sockets_per_node = _get_int(optarg,
-							    "minsockets",true);
-			if (opt.min_sockets_per_node < 0) {
+			opt.sockets_per_node = _get_int(optarg,
+							"minsockets",true);
+			if (opt.sockets_per_node < 0) {
 				error("invalid minsockets constraint %s",
 				      optarg);
 				exit(error_exit);
@@ -1113,24 +1107,24 @@ static void set_options(const int argc, char **argv)
 		case LONG_OPT_MINTHREADS:
 			verbose("minthreads option has been deprecated, use "
 				"threads-per-core");
-			opt.min_threads_per_core = _get_int(optarg,
-							    "minthreads",true);
-			if (opt.min_threads_per_core < 0) {
+			opt.threads_per_core = _get_int(optarg,
+							"minthreads",true);
+			if (opt.threads_per_core < 0) {
 				error("invalid minthreads constraint %s",
 				      optarg);
 				exit(error_exit);
 			}
 			break;
 		case LONG_OPT_MEM:
-			opt.job_min_memory = (int) str_to_bytes(optarg);
-			if (opt.job_min_memory < 0) {
+			opt.pn_min_memory = (int) str_to_mbytes(optarg);
+			if (opt.pn_min_memory < 0) {
 				error("invalid memory constraint %s",
 				      optarg);
 				exit(error_exit);
 			}
 			break;
 		case LONG_OPT_MEM_PER_CPU:
-			opt.mem_per_cpu = (int) str_to_bytes(optarg);
+			opt.mem_per_cpu = (int) str_to_mbytes(optarg);
 			if (opt.mem_per_cpu < 0) {
 				error("invalid memory constraint %s",
 				      optarg);
@@ -1153,8 +1147,8 @@ static void set_options(const int argc, char **argv)
 				opt.resv_port_cnt = 0;
 			break;
 		case LONG_OPT_TMP:
-			opt.job_min_tmp_disk = str_to_bytes(optarg);
-			if (opt.job_min_tmp_disk < 0) {
+			opt.pn_min_tmp_disk = str_to_mbytes(optarg);
+			if (opt.pn_min_tmp_disk < 0) {
 				error("invalid tmp value %s", optarg);
 				exit(error_exit);
 			}
@@ -1304,29 +1298,29 @@ static void set_options(const int argc, char **argv)
 		case LONG_OPT_SOCKETSPERNODE:
 			max_val = 0;
 			get_resource_arg_range( optarg, "sockets-per-node",
-						&opt.min_sockets_per_node,
+						&opt.sockets_per_node,
 						&max_val, true );
-			if ((opt.min_sockets_per_node == 1) &&
+			if ((opt.sockets_per_node == 1) &&
 			    (max_val == INT_MAX))
-				opt.min_sockets_per_node = NO_VAL;
+				opt.sockets_per_node = NO_VAL;
 			break;
 		case LONG_OPT_CORESPERSOCKET:
 			max_val = 0;
 			get_resource_arg_range( optarg, "cores-per-socket",
-						&opt.min_cores_per_socket,
+						&opt.cores_per_socket,
 						&max_val, true );
-			if ((opt.min_cores_per_socket == 1) &&
+			if ((opt.cores_per_socket == 1) &&
 			    (max_val == INT_MAX))
-				opt.min_cores_per_socket = NO_VAL;
+				opt.cores_per_socket = NO_VAL;
 			break;
 		case LONG_OPT_THREADSPERCORE:
 			max_val = 0;
 			get_resource_arg_range( optarg, "threads-per-core",
-						&opt.min_threads_per_core,
+						&opt.threads_per_core,
 						&max_val, true );
-			if ((opt.min_threads_per_core == 1) &&
+			if ((opt.threads_per_core == 1) &&
 			    (max_val == INT_MAX))
-				opt.min_threads_per_core = NO_VAL;
+				opt.threads_per_core = NO_VAL;
 			break;
 		case LONG_OPT_NTASKSPERNODE:
 			opt.ntasks_per_node = _get_int(optarg, "ntasks-per-node",
@@ -1343,9 +1337,9 @@ static void set_options(const int argc, char **argv)
 		case LONG_OPT_HINT:
 			/* Keep after other options filled in */
 			if (verify_hint(optarg,
-					&opt.min_sockets_per_node,
-					&opt.min_cores_per_socket,
-					&opt.min_threads_per_core,
+					&opt.sockets_per_node,
+					&opt.cores_per_socket,
+					&opt.threads_per_core,
 					&opt.ntasks_per_core,
 					&opt.cpu_bind_type)) {
 				exit(error_exit);
@@ -1438,6 +1432,19 @@ static void set_options(const int argc, char **argv)
 				exit(error_exit);
 			}
 			break;
+		case LONG_OPT_TIME_MIN:
+			xfree(opt.time_min_str);
+			opt.time_min_str = xstrdup(optarg);
+			break;
+		case LONG_OPT_GRES:
+			if (!strcasecmp(optarg, "help") ||
+			    !strcasecmp(optarg, "list")) {
+				print_gres_help();
+				exit(0);
+			}
+			xfree(opt.gres);
+			opt.gres = xstrdup(optarg);
+			break;
 		default:
 			if (spank_process_option (opt_char, optarg) < 0) {
 				exit(error_exit);
@@ -1499,11 +1506,11 @@ static void _opt_args(int argc, char **argv)
 
 	set_options(argc, argv);
 
-	if ((opt.job_min_memory > -1) && (opt.mem_per_cpu > -1)) {
-		if (opt.job_min_memory < opt.mem_per_cpu) {
+	if ((opt.pn_min_memory > -1) && (opt.mem_per_cpu > -1)) {
+		if (opt.pn_min_memory < opt.mem_per_cpu) {
 			info("mem < mem-per-cpu - resizing mem to be equal "
 			     "to mem-per-cpu");
-			opt.job_min_memory = opt.mem_per_cpu;
+			opt.pn_min_memory = opt.mem_per_cpu;
 		}
 	}
 
@@ -1517,13 +1524,13 @@ static void _opt_args(int argc, char **argv)
 	 * environment are more extensive and are documented in the
 	 * SLURM reference guide.  */
 	if (opt.distribution == SLURM_DIST_PLANE && opt.plane_size) {
-		if ((opt.nprocs/opt.plane_size) < opt.min_nodes) {
-			if (((opt.min_nodes-1)*opt.plane_size) >= opt.nprocs) {
+		if ((opt.ntasks/opt.plane_size) < opt.min_nodes) {
+			if (((opt.min_nodes-1)*opt.plane_size) >= opt.ntasks) {
 #if(0)
 				info("Too few processes ((n/plane_size) %d < N %d) "
 				     "and ((N-1)*(plane_size) %d >= n %d)) ",
-				     opt.nprocs/opt.plane_size, opt.min_nodes,
-				     (opt.min_nodes-1)*opt.plane_size, opt.nprocs);
+				     opt.ntasks/opt.plane_size, opt.min_nodes,
+				     (opt.min_nodes-1)*opt.plane_size, opt.ntasks);
 #endif
 				error("Too few processes for the requested "
 				      "{plane,node} distribution");
@@ -1579,7 +1586,7 @@ static void _opt_args(int argc, char **argv)
 		}
 	}
 
-	if (opt.multi_prog && verify_multi_name(opt.argv[0], opt.nprocs))
+	if (opt.multi_prog && verify_multi_name(opt.argv[0], opt.ntasks))
 		exit(error_exit);
 }
 
@@ -1631,8 +1638,8 @@ static bool _opt_verify(void)
 		verified = false;
 	}
 
-	if (opt.job_min_cpus < opt.cpus_per_task)
-		opt.job_min_cpus = opt.cpus_per_task;
+	if (opt.pn_min_cpus < opt.cpus_per_task)
+		opt.pn_min_cpus = opt.cpus_per_task;
 
 	if (opt.argc > 0)
 		opt.cmd_name = base_name(opt.argv[0]);
@@ -1666,11 +1673,11 @@ static bool _opt_verify(void)
 	/* set up the proc and node counts based on the arbitrary list
 	   of nodes */
 	if((opt.distribution == SLURM_DIST_ARBITRARY)
-	   && (!opt.nodes_set || !opt.nprocs_set)) {
+	   && (!opt.nodes_set || !opt.ntasks_set)) {
 		hostlist_t hl = hostlist_create(opt.nodelist);
-		if(!opt.nprocs_set) {
-			opt.nprocs_set = true;
-			opt.nprocs = hostlist_count(hl);
+		if(!opt.ntasks_set) {
+			opt.ntasks_set = true;
+			opt.ntasks = hostlist_count(hl);
 		}
 		if(!opt.nodes_set) {
 			opt.nodes_set = true;
@@ -1691,7 +1698,10 @@ static bool _opt_verify(void)
 		int count = hostlist_count(hl);
 		if(count > opt.max_nodes) {
 			int i = 0;
-			char buf[8192];
+			error("Required nodelist includes more nodes than "
+			      "permitted by max-node count (%d > %d). "
+			      "Eliminating nodes from the nodelist.",
+			      count, opt.max_nodes);
 			count -= opt.max_nodes;
 			while(i<count) {
 				char *name = hostlist_pop(hl);
@@ -1701,9 +1711,8 @@ static bool _opt_verify(void)
 					break;
 				i++;
 			}
-			hostlist_ranged_string(hl, sizeof(buf), buf);
 			xfree(opt.nodelist);
-			opt.nodelist = xstrdup(buf);
+			opt.nodelist = hostlist_ranged_string_xmalloc(hl);
 		}
 		hostlist_destroy(hl);
 	}
@@ -1715,20 +1724,20 @@ static bool _opt_verify(void)
 	}
 
 	/* check for realistic arguments */
-	if (opt.nprocs <= 0) {
-		error("invalid number of tasks (-n %d)", opt.nprocs);
+	if (opt.ntasks <= 0) {
+		error("invalid number of tasks (-n %d)", opt.ntasks);
 		verified = false;
 	}
 
 	if (opt.cpus_per_task < 0) {
-		error("invalid number of cpus per task (-c %d)\n",
+		error("invalid number of cpus per task (-c %d)",
 		      opt.cpus_per_task);
 		verified = false;
 	}
 
 	if ((opt.min_nodes <= 0) || (opt.max_nodes < 0) ||
 	    (opt.max_nodes && (opt.min_nodes > opt.max_nodes))) {
-		error("invalid number of nodes (-N %d-%d)\n",
+		error("invalid number of nodes (-N %d-%d)",
 		      opt.min_nodes, opt.max_nodes);
 		verified = false;
 	}
@@ -1787,8 +1796,6 @@ static bool _opt_verify(void)
 		}
 	}
 
-	core_format_enable (opt.core_type);
-
 	/* massage the numbers */
 	if (opt.nodelist) {
 		hl = hostlist_create(opt.nodelist);
@@ -1800,29 +1807,25 @@ static bool _opt_verify(void)
 		hl_cnt = hostlist_count(hl);
 		if (opt.nodes_set)
 			opt.min_nodes = MAX(hl_cnt, opt.min_nodes);
-		else {
+		else
 			opt.min_nodes = hl_cnt;
-			opt.nodes_set = true;
-			opt.nodes_set_opt = true;
-		}
 	}
 	if ((opt.nodes_set || opt.extra_set)				&&
 	    ((opt.min_nodes == opt.max_nodes) || (opt.max_nodes == 0))	&&
-	    !opt.nprocs_set) {
+	    !opt.ntasks_set) {
 		/* 1 proc / node default */
-		opt.nprocs = opt.min_nodes;
+		opt.ntasks = opt.min_nodes;
 
 		/* 1 proc / min_[socket * core * thread] default */
-		if ((opt.min_sockets_per_node != NO_VAL) &&
-		    (opt.min_cores_per_socket != NO_VAL) &&
-		    (opt.min_threads_per_core != NO_VAL)) {
-			opt.nprocs *= opt.min_sockets_per_node;
-			opt.nprocs *= opt.min_cores_per_socket;
-			opt.nprocs *= opt.min_threads_per_core;
-			opt.nprocs_set = true;
+		if ((opt.sockets_per_node != NO_VAL) &&
+		    (opt.cores_per_socket != NO_VAL) &&
+		    (opt.threads_per_core != NO_VAL)) {
+			opt.ntasks *= opt.sockets_per_node;
+			opt.ntasks *= opt.cores_per_socket;
+			opt.ntasks *= opt.threads_per_core;
+			opt.ntasks_set = true;
 		}
 
-		core_format_enable (opt.core_type);
 		/* massage the numbers */
 		if (opt.nodelist) {
 			if (hl)	/* possibly built above */
@@ -1833,40 +1836,35 @@ static bool _opt_verify(void)
 				exit(error_exit);
 			}
 			if(opt.distribution == SLURM_DIST_ARBITRARY
-			   && !opt.nprocs_set) {
-				opt.nprocs = hostlist_count(hl);
-				opt.nprocs_set = true;
+			   && !opt.ntasks_set) {
+				opt.ntasks = hostlist_count(hl);
+				opt.ntasks_set = true;
 			}
 			hostlist_uniq(hl);
 			hl_cnt = hostlist_count(hl);
 			if (opt.nodes_set)
 				opt.min_nodes = MAX(hl_cnt, opt.min_nodes);
-			else {
+			else
 				opt.min_nodes = hl_cnt;
-				opt.nodes_set = true;
-				opt.nodes_set_opt = true;
-			}
-			/* don't destroy hl here since it could be
-			   used later
-			*/
+			/* Don't destroy hl here since it may be used later */
 		}
-	} else if (opt.nodes_set && opt.nprocs_set) {
+	} else if (opt.nodes_set && opt.ntasks_set) {
 
 		/*
 		 * Make sure that the number of
 		 * max_nodes is <= number of tasks
 		 */
-		if (opt.nprocs < opt.max_nodes)
-			opt.max_nodes = opt.nprocs;
+		if (opt.ntasks < opt.max_nodes)
+			opt.max_nodes = opt.ntasks;
 
 		/*
 		 *  make sure # of procs >= min_nodes
 		 */
-		if ((opt.nprocs < opt.min_nodes) && (opt.nprocs > 0)) {
+		if ((opt.ntasks < opt.min_nodes) && (opt.ntasks > 0)) {
 			info ("Warning: can't run %d processes on %d "
 			      "nodes, setting nnodes to %d",
-			      opt.nprocs, opt.min_nodes, opt.nprocs);
-			opt.min_nodes = opt.nprocs;
+			      opt.ntasks, opt.min_nodes, opt.ntasks);
+			opt.min_nodes = opt.ntasks;
 			opt.nodes_set_opt = true;
 			if (opt.max_nodes
 			    &&  (opt.min_nodes > opt.max_nodes) )
@@ -1879,13 +1877,13 @@ static bool _opt_verify(void)
 					host = hostlist_pop(hl);
 					free(host);
 				}
-				hostlist_ranged_string(hl,
-						       strlen(opt.nodelist)+1,
-						       opt.nodelist);
+				xfree(opt.nodelist);
+				opt.nodelist =
+					hostlist_ranged_string_xmalloc(hl);
 			}
 		}
 
-	} /* else if (opt.nprocs_set && !opt.nodes_set) */
+	} /* else if (opt.ntasks_set && !opt.nodes_set) */
 
 	if (hl)
 		hostlist_destroy(hl);
@@ -1919,6 +1917,15 @@ static bool _opt_verify(void)
 		}
 		if (opt.time_limit == 0)
 			opt.time_limit = INFINITE;
+	}
+	if (opt.time_min_str) {
+		opt.time_min = time_str2mins(opt.time_min_str);
+		if ((opt.time_min < 0) && (opt.time_min != INFINITE)) {
+			error("Invalid time-min specification");
+			exit(error_exit);
+		}
+		if (opt.time_min == 0)
+			opt.time_min = INFINITE;
 	}
 
 	if (opt.ckpt_interval_str) {
@@ -2073,17 +2080,17 @@ static char *print_constraints()
 {
 	char *buf = xstrdup("");
 
-	if (opt.job_min_cpus > 0)
-		xstrfmtcat(buf, "mincpus=%d ", opt.job_min_cpus);
+	if (opt.pn_min_cpus > 0)
+		xstrfmtcat(buf, "mincpus-per-node=%d ", opt.pn_min_cpus);
 
-	if (opt.job_min_memory > 0)
-		xstrfmtcat(buf, "mem=%dM ", opt.job_min_memory);
+	if (opt.pn_min_memory > 0)
+		xstrfmtcat(buf, "mem-per-node=%dM ", opt.pn_min_memory);
 
 	if (opt.mem_per_cpu > 0)
 		xstrfmtcat(buf, "mem-per-cpu=%dM ", opt.mem_per_cpu);
 
-	if (opt.job_min_tmp_disk > 0)
-		xstrfmtcat(buf, "tmp=%ld ", opt.job_min_tmp_disk);
+	if (opt.pn_min_tmp_disk > 0)
+		xstrfmtcat(buf, "tmp-per-node=%ld ", opt.pn_min_tmp_disk);
 
 	if (opt.contiguous == true)
 		xstrcat(buf, "contiguous ");
@@ -2113,8 +2120,8 @@ static void _opt_list()
 	info("uid            : %ld", (long) opt.uid);
 	info("gid            : %ld", (long) opt.gid);
 	info("cwd            : %s", opt.cwd);
-	info("nprocs         : %d %s", opt.nprocs,
-	     opt.nprocs_set ? "(set)" : "(default)");
+	info("ntasks         : %d %s", opt.ntasks,
+	     opt.ntasks_set ? "(set)" : "(default)");
 	info("cpus_per_task  : %d %s", opt.cpus_per_task,
 	     opt.cpus_set ? "(set)" : "(default)");
 	if (opt.max_nodes)
@@ -2137,7 +2144,6 @@ static void _opt_list()
 	     opt.cpu_bind == NULL ? "default" : opt.cpu_bind);
 	info("mem_bind       : %s",
 	     opt.mem_bind == NULL ? "default" : opt.mem_bind);
-	info("core format    : %s", core_format_name (opt.core_type));
 	info("verbose        : %d", _verbose);
 	info("slurmd_debug   : %d", opt.slurmd_debug);
 	if (opt.immediate <= 1)
@@ -2152,6 +2158,8 @@ static void _opt_list()
 		info("time_limit     : INFINITE");
 	else if (opt.time_limit != NO_VAL)
 		info("time_limit     : %d", opt.time_limit);
+	if (opt.time_min != NO_VAL)
+		info("time_min       : %d", opt.time_min);
 	if (opt.ckpt_interval)
 		info("checkpoint     : %d mins", opt.ckpt_interval);
 	info("checkpoint_dir : %s", opt.ckpt_dir);
@@ -2164,6 +2172,8 @@ static void _opt_list()
 	info("comment        : %s", opt.comment);
 
 	info("dependency     : %s", opt.dependency);
+	if (opt.gres)
+		info("gres           : %s", opt.gres);
 	info("exclusive      : %s", tf_(opt.exclusive));
 	info("qos            : %s", opt.qos);
 	if (opt.shared != (uint16_t) NO_VAL)
@@ -2214,9 +2224,9 @@ static void _opt_list()
 	info("task_prolog    : %s", opt.task_prolog);
 	info("task_epilog    : %s", opt.task_epilog);
 	info("multi_prog     : %s", opt.multi_prog ? "yes" : "no");
-	info("sockets-per-node  : %d", opt.min_sockets_per_node);
-	info("cores-per-socket  : %d", opt.min_cores_per_socket);
-	info("threads-per-core  : %d", opt.min_threads_per_core);
+	info("sockets-per-node  : %d", opt.sockets_per_node);
+	info("cores-per-socket  : %d", opt.cores_per_socket);
+	info("threads-per-core  : %d", opt.threads_per_core);
 	info("ntasks-per-node   : %d", opt.ntasks_per_node);
 	info("ntasks-per-socket : %d", opt.ntasks_per_socket);
 	info("ntasks-per-core   : %d", opt.ntasks_per_core);
@@ -2243,10 +2253,10 @@ static void _usage(void)
 "            [-c ncpus] [-r n] [-p partition] [--hold] [-t minutes]\n"
 "            [-D path] [--immediate[=secs]] [--overcommit] [--no-kill]\n"
 "            [--share] [--label] [--unbuffered] [-m dist] [-J jobname]\n"
-"            [--jobid=id] [--verbose] [--slurmd_debug=#]\n"
-"            [--core=type] [-T threads] [-W sec] [--checkpoint=time]\n"
+"            [--jobid=id] [--verbose] [--slurmd_debug=#] [--gres=list]\n"
+"            [-T threads] [-W sec] [--checkpoint=time]\n"
 "            [--checkpoint-dir=dir]  [--licenses=names]\n"
-"            [--restart-dir=dir] [--qos=qos]\n"
+"            [--restart-dir=dir] [--qos=qos] [--time-min=minutes]\n"
 "            [--contiguous] [--mincpus=n] [--mem=MB] [--tmp=MB] [-C list]\n"
 "            [--mpi=type] [--account=name] [--dependency=type:jobid]\n"
 "            [--kill-on-bad-exit] [--propagate[=rlimits] [--comment=name]\n"
@@ -2279,14 +2289,12 @@ static void _help(void)
 "\n"
 "Parallel run options:\n"
 "  -A, --account=name          charge job to specified account\n"
-"      --begin=time            defer job until HH:MM DD/MM/YY\n"
+"      --begin=time            defer job until HH:MM MM/DD/YY\n"
 "  -c, --cpus-per-task=ncpus   number of cpus required per task\n"
 "      --checkpoint=time       job step checkpoint interval\n"
 "      --checkpoint-dir=dir    directory to store job step checkpoint image \n"
 "                              files\n"
 "      --comment=name          arbitrary comment\n"
-"      --core=type             change default corefile format type\n"
-"                              (type=\"list\" to list of valid formats)\n"
 "  -d, --dependency=type:jobid defer job until condition on jobid is satisfied\n"
 "  -D, --chdir=path            change remote current working directory\n"
 "  -e, --error=err             location of stderr redirection\n"
@@ -2294,6 +2302,7 @@ static void _help(void)
 "  -E, --preserve-env          env vars for node and task counts override\n"
 "                              command-line flags\n"
 "      --get-user-env          used by Moab.  See srun man page.\n"
+"      --gres=list             required generic resources\n"
 "  -H, --hold                  submit job in held state\n"
 "  -i, --input=in              location of stdin redirection\n"
 "  -I, --immediate[=secs]      exit if resources not available in \"secs\"\n"
@@ -2332,10 +2341,11 @@ static void _help(void)
 "                              from\n"
 "  -s, --share                 share nodes with other jobs\n"
 "      --slurmd-debug=level    slurmd debug level\n"
-"  -t, --time=minutes          time limit\n"
 "      --task-epilog=program   run \"program\" after launching task\n"
 "      --task-prolog=program   run \"program\" before launching task\n"
 "  -T, --threads=threads       set srun launch fanout\n"
+"  -t, --time=minutes          time limit\n"
+"      --time-min=minutes      minimum time limit (if distinct)\n"
 "  -u, --unbuffered            do not line-buffer stdout/err\n"
 "  -v, --verbose               verbose mode (multiple -v's increase verbosity)\n"
 "  -W, --wait=sec              seconds to wait after first task exits\n"

@@ -50,12 +50,12 @@ bool primary_resumed = false;
 bool backup = false;
 bool have_control = false;
 
-static slurm_fd  slurmdbd_fd         = -1;
+static slurm_fd_t  slurmdbd_fd         = -1;
 
 /* Open a connection to the Slurm DBD and set slurmdbd_fd */
-static void _open_slurmdbd_fd(slurm_addr dbd_addr)
+static void _open_slurmdbd_fd(slurm_addr_t dbd_addr)
 {
-	if(dbd_addr.sin_port == 0) {
+	if (dbd_addr.sin_port == 0) {
 		error("sin_port == 0 in the slurmdbd backup");
 		return;
 	}
@@ -76,7 +76,7 @@ static void _close_slurmdbd_fd(void)
 }
 
 /* Reopen the Slurm DBD connection due to some error */
-static void _reopen_slurmdbd_fd(slurm_addr dbd_addr)
+static void _reopen_slurmdbd_fd(slurm_addr_t dbd_addr)
 {
 	_close_slurmdbd_fd();
 	_open_slurmdbd_fd(dbd_addr);
@@ -86,7 +86,7 @@ static void _reopen_slurmdbd_fd(slurm_addr dbd_addr)
  *	mode, assuming control when the primary controller stops responding */
 extern void run_backup(void)
 {
-	slurm_addr dbd_addr;
+	slurm_addr_t dbd_addr;
 
 	primary_resumed = false;
 
@@ -112,14 +112,14 @@ extern void run_backup(void)
 			shutdown_threads();
 			have_control = false;
 			break;
-		} else if(!have_control && !writeable) {
+		} else if (!have_control && !writeable) {
 			have_control = true;
 			info("Taking Control");
 			break;
 		}
 
 		sleep(1);
-		if(!writeable)
+		if (!writeable)
 			_reopen_slurmdbd_fd(dbd_addr);
 	}
 

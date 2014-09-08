@@ -1,4 +1,4 @@
-/*****************************************************************************\
+ /*****************************************************************************\
  *  jobacct_gather_aix.c - slurm job accounting gather plugin for AIX.
  *****************************************************************************
  *
@@ -53,6 +53,15 @@
 #define NPROCS 5000
 #endif
 
+/* These are defined here so when we link with something other than
+ * the slurmd we will have these symbols defined.  They will get
+ * overwritten when linking with the slurmd.
+ */
+uint32_t jobacct_job_id;
+pthread_mutex_t jobacct_lock;
+uint32_t jobacct_mem_limit;
+uint32_t jobacct_step_id;
+uint32_t jobacct_vmem_limit;
 
 /*
  * These variables are required by the generic plugin interface.  If they
@@ -80,7 +89,7 @@
  * of the plugin.  If major and minor revisions are desired, the major
  * version number may be multiplied by a suitable magnitude constant such
  * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum versions for their plugins as the job accounting API
+ * minimum version for their plugins as the job accounting API
  * matures.
  */
 const char plugin_name[] = "Job accounting gather AIX plugin";
@@ -110,7 +119,7 @@ static int pagesize = 0;
 
 /* Finally, pre-define all the routines. */
 
-static void _acct_kill_job(void);
+static void _acct_kill_step(void);
 static void _get_offspring_data(List prec_list, prec_t *ancestor, pid_t pid);
 static void _get_process_data();
 static void *_watch_tasks(void *arg);
@@ -183,13 +192,13 @@ static void _get_offspring_data(List prec_list, prec_t *ancestor, pid_t pid)
  *    is a Linux-style stat entry. We disregard the data if they look
  *    wrong.
  */
-static void _get_process_data()
+static void _get_process_data(void)
 {
 	struct procsinfo proc;
 	pid_t *pids = NULL;
 	int npids = 0;
 	int i;
-	uint32_t total_job_mem = 0;
+	uint32_t total_job_mem = 0, total_job_vsize = 0;
 	int pid = 0;
 	static int processing = 0;
 	prec_t *prec = NULL;
@@ -284,6 +293,7 @@ static void _get_process_data()
 				jobacct->max_vsize = jobacct->tot_vsize =
 					MAX(jobacct->max_vsize,
 					    (int)prec->vsize);
+				total_job_vsize += prec->vsize;
 				jobacct->max_pages = jobacct->tot_pages =
 					MAX(jobacct->max_pages, prec->pages);
 				jobacct->min_cpu = jobacct->tot_cpu =
@@ -302,14 +312,33 @@ static void _get_process_data()
 	slurm_mutex_unlock(&jobacct_lock);
 
 	if (jobacct_mem_limit) {
-		debug("Job %u memory used:%u limit:%u KB",
-		      jobacct_job_id, total_job_mem, jobacct_mem_limit);
+		debug("Step %u.%u memory used:%u limit:%u KB",
+		      jobacct_job_id, jobacct_step_id, 
+		      total_job_mem, jobacct_mem_limit);
 	}
 	if (jobacct_job_id && jobacct_mem_limit &&
 	    (total_job_mem > jobacct_mem_limit)) {
-		error("Job %u exceeded %u KB memory limit, being killed",
-		       jobacct_job_id, jobacct_mem_limit);
-		_acct_kill_job();
+		if (jobacct_step_id == NO_VAL) {
+			error("Job %u exceeded %u KB memory limit, being "
+ 			      "killed", jobacct_job_id, jobacct_mem_limit);
+		} else {
+			error("Step %u.%u exceeded %u KB memory limit, being "
+			      "killed", jobacct_job_id, jobacct_step_id, 
+			      jobacct_mem_limit);
+		}
+		_acct_kill_step();
+	} else if (jobacct_job_id && jobacct_vmem_limit &&
+	    (total_job_vsize > jobacct_vmem_limit)) {
+		if (jobacct_step_id == NO_VAL) {
+			error("Job %u exceeded %u KB virtual memory limit, "
+			      "being killed", jobacct_job_id, 
+			      jobacct_vmem_limit);
+		} else {
+			error("Step %u.%u exceeded %u KB virtual memory "
+			      "limit, being killed", jobacct_job_id, 
+			      jobacct_step_id, jobacct_vmem_limit);
+		}
+		_acct_kill_step();
 	}
 
 finished:
@@ -319,8 +348,8 @@ finished:
 	return;
 }
 
-/* _acct_kill_job() issue RPC to kill a slurm job */
-static void _acct_kill_job(void)
+/* _acct_kill_step() issue RPC to kill a slurm job step */
+static void _acct_kill_step(void)
 {
 	slurm_msg_t msg;
 	job_step_kill_msg_t req;
@@ -330,7 +359,7 @@ static void _acct_kill_job(void)
 	 * Request message:
 	 */
 	req.job_id      = jobacct_job_id;
-	req.job_step_id = NO_VAL;
+	req.job_step_id = jobacct_step_id;
 	req.signal      = SIGKILL;
 	req.batch_flag  = 0;
 	msg.msg_type    = REQUEST_CANCEL_JOB_STEP;
@@ -347,8 +376,8 @@ static void _acct_kill_job(void)
 static void *_watch_tasks(void *arg)
 {
 
-	while(!jobacct_shutdown) { /* Do this until shutdown is requested */
-		if(!jobacct_suspended) {
+	while (!jobacct_shutdown) { /* Do this until shutdown is requested */
+		if (!jobacct_suspended) {
 			_get_process_data();	/* Update the data */
 		}
 		sleep(freq);
@@ -489,6 +518,7 @@ extern int jobacct_gather_p_startpoll(uint16_t frequency)
 
 extern int jobacct_gather_p_endpoll()
 {
+	jobacct_shutdown = true;
 #ifdef HAVE_AIX
 	slurm_mutex_lock(&jobacct_lock);
 	if(task_list)
@@ -496,7 +526,6 @@ extern int jobacct_gather_p_endpoll()
 	task_list = NULL;
 	slurm_mutex_unlock(&jobacct_lock);
 #endif
-	jobacct_shutdown = true;
 
 	return SLURM_SUCCESS;
 }
@@ -563,11 +592,16 @@ extern int jobacct_gather_p_set_proctrack_container_id(uint32_t id)
 
 extern int jobacct_gather_p_add_task(pid_t pid, jobacct_id_t *jobacct_id)
 {
+	if (jobacct_shutdown)
+		return SLURM_ERROR;
 	return jobacct_common_add_task(pid, jobacct_id, task_list);
 }
 
 extern struct jobacctinfo *jobacct_gather_p_stat_task(pid_t pid)
 {
+	if (jobacct_shutdown)
+		return NULL;
+
 #ifdef HAVE_AIX
 	_get_process_data();
 #endif
@@ -579,11 +613,13 @@ extern struct jobacctinfo *jobacct_gather_p_stat_task(pid_t pid)
 
 extern struct jobacctinfo *jobacct_gather_p_remove_task(pid_t pid)
 {
+	if (jobacct_shutdown)
+		return NULL;
 	return jobacct_common_remove_task(pid, task_list);
 }
 
-extern void jobacct_gather_p_2_sacct(sacct_t *sacct,
+extern void jobacct_gather_p_2_stats(slurmdb_stats_t *stats,
 				     struct jobacctinfo *jobacct)
 {
-	jobacct_common_2_sacct(sacct, jobacct);
+	jobacct_common_2_stats(stats, jobacct);
 }

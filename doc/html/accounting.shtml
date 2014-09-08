@@ -81,11 +81,13 @@ The configuration required to use SlurmDBD will be described below.
 Storing information directly into database would be similar.</p>
 
 <p>Note that SlurmDBD relies upon existing SLURM plugins
-for authentication and database use, but the other SLURM
+for authentication and SLURM sql for database use, but the other SLURM
 commands and daemons are not required on the host where
-SlurmDBD is installed. Install the <i>slurmdbd</i> and
-<i>slurm-plugins</i> RPMs on the computer when SlurmDBD
-is to execute.</p>
+SlurmDBD is installed. Install the <i>slurmdbd</i>,
+<i>slurm-plugins</i>, and <i>slurm-sql</i> RPMs on the computer when SlurmDBD
+is to execute.  If you want munge authentication, which is highly
+recommended, you will also need to install
+the <i>slurm-munge</i> RPM.</p>
 
 <p>If SlurmDBD is configured for use but not responding then <i>slurmctld</i> 
 will utilize an interal cache until SlurmDBD is returned to service.
@@ -122,16 +124,16 @@ users should have consistent names and IDs.</p>
 
 <p>The best way to insure security of the data is by authenticating
 communications to the SlurmDBD and we recommend
-<a href="http://home.gna.org/munge/">Munge</a> for that purpose.
+<a href="http://munge.googlecode.com/">MUNGE</a> for that purpose.
 If you have one cluster managed by SLURM and execute the SlurmDBD
-on that one cluster, the normal Munge configuration will suffice.
-Otherwise Munge should then be installed on all nodes of all
+on that one cluster, the normal MUNGE configuration will suffice.
+Otherwise MUNGE should then be installed on all nodes of all
 SLURM managed clusters, plus the machine where SlurmDBD executes.
-You then have a choice of either having a single Munge key for
+You then have a choice of either having a single MUNGE key for
 all of these computers or maintaining a unique key for each of the
 clusters plus a second key for communications between the clusters
 for better security.
-Munge enhancements are planned to support two keys within a single
+MUNGE enhancements are planned to support two keys within a single
 configuration file, but presently two different daemons must be
 started with different configurations to support two different keys
 (create two key files and start the daemons with the
@@ -143,11 +145,11 @@ respectively, more details are provided below).</p>
 
 <p?Whether you use any authentication module or not you will need to have
 a way for the SlurmDBD to get uid's for users and/or admin.  If using
-Munge, it is ideal for your users to have the same id on all your
+MUNGE, it is ideal for your users to have the same id on all your
 clusters.  If this is the case you should have a combination of every clusters
 /etc/passwd file on the database server to allow the DBD to resolve
-names for authentication.  If using Munge and a users name is not in
-the passwd file the action will fail.  If not using Munge, you should
+names for authentication.  If using MUNGE and a users name is not in
+the passwd file the action will fail.  If not using MUNGE, you should
 add anyone you want to be an administrator or operator to the passwd file.
 If they plan on running sacctmgr or any of the accounting tools they
 should have the same uid, or they will not authentic correctly.  An
@@ -236,17 +238,19 @@ This option contains a comma separated list of options you may want to
 their <i>association</i> is not in the database. This option will
 prevent users from accessing invalid accounts.
 </li>
-<li>limits - This will enforce limits set to associations.  By setting
-  this option, the 'associations' option is also set.
+<li>limits - This will enforce limits set to associations and if a qos
+  is used and has limits those as well.  By setting
+  this option, the 'associations' option is automatically set.
 </li>
 <li>qos - This will require all jobs to specify (either overtly or by
-default) a valid qos (Quality of Service).  QOS values are defined for
-each association in the database.  By setting this option, the
-'associations' option is also set.
+  default) a valid qos (Quality of Service).  QOS values are defined for
+  each association in the database.  By setting this option, the
+  'associations' option is automatically set.  If you want QOS limits to be
+  enforced you need to use the 'limits' option.
 </li>
 <li>wckeys - This will prevent users from running jobs under a wckey
   that they don't have access to.  By using this option, the
-  'associations' option is also set.  The 'TrackWCKey' option is also
+  'associations' option is automatically set.  The 'TrackWCKey' option is also
   set to true.
 </li>
 </ul>
@@ -264,9 +268,9 @@ time their limits per association.</li>
 <li><b>AccountingStorageHost</b>: The name or address of the host where
 SlurmDBD executes</li>
 
-<li><b>AccountingStoragePass</b>: If using SlurmDBD with a second Munge
-daemon, store the pathname of the named socket used by Munge to provide
-enterprise-wide. Otherwise the default Munge daemon will be used.</li>
+<li><b>AccountingStoragePass</b>: If using SlurmDBD with a second MUNGE
+daemon, store the pathname of the named socket used by MUNGE to provide
+enterprise-wide. Otherwise the default MUNGE daemon will be used.</li>
 
 <li><b>AccountingStoragePort</b>:
 The network port that SlurmDBD accepts communication on.</li>
@@ -299,9 +303,9 @@ Some of the more important parameters include:</p>
 
 <ul>
 <li><b>AuthInfo</b>:
-If using SlurmDBD with a second Munge daemon, store the pathname of
-the named socket used by Munge to provide enterprise-wide.
-Otherwise the default Munge daemon will be used.</li>
+If using SlurmDBD with a second MUNGE daemon, store the pathname of
+the named socket used by MUNGE to provide enterprise-wide.
+Otherwise the default MUNGE daemon will be used.</li>
 
 <li><b>AuthType</b>:
 Define the authentication method for communications between SLURM
@@ -649,26 +653,24 @@ If the cluster doesn't have the limit set no limit will be enforced.
 
 <ul>
 
-<li><b>Fairshare=</b> Used for determining priority.  Essentially
-  this is the amount of claim this association and it's children have
-  to the above system.</li>
+<li><b>Fairshare=</b> Integer value used for determining priority.
+  Essentially this is the amount of claim this association and it's
+  children have to the above system. Can also be the string "parent",
+  this means that the parent association is used for fairshare.
+  </li>
 </li>
 
-<!-- For future use
 <li><b>GrpCPUMins=</b> A hard limit of cpu minutes to be used by jobs
   running from this association and its children.  If this limit is
   reached all jobs running in this group will be killed, and no new
   jobs will be allowed to run.
 </li>
--->
 
-<!-- For future use
 <li><b>GrpCPUs=</b> The total count of cpus able to be used at any given
   time from jobs running from this association and its children.  If
   this limit is reached new jobs will be queued but only allowed to
   run after resources have been relinquished from this group.
 </li>
--->
 
 <li><b>GrpJobs=</b> The total number of jobs able to run at any given
   time from this association and its children.  If
@@ -693,19 +695,15 @@ If the cluster doesn't have the limit set no limit will be enforced.
   will be denied.
 </li>
 
-<!-- For future use
 <li><b>MaxCPUMinsPerJob=</b> A limit of cpu minutes to be used by jobs
   running from this association.  If this limit is
   reached the job will be killed will be allowed to run.
 </li>
--->
 
-<!-- For future use
 <li><b>MaxCPUsPerJob=</b> The maximum size in cpus any given job can
   have from this association.  If this limit is reached the job will
   be denied at submission.
 </li>
--->
 
 <li><b>MaxJobs=</b> The total number of jobs able to run at any given
   time from this association.  If this limit is reached new jobs will
@@ -766,7 +764,7 @@ as deleted.
 If an entity has existed for less than 1 day, the entity will be removed
 completely. This is meant to clean up after typographic errors.</p>
 
-<p style="text-align: center;">Last modified 25 January 2010</p>
+<p style="text-align: center;">Last modified 27 January 2010</p>
 
 <!--#include virtual="footer.txt"-->
 

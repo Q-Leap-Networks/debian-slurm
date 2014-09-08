@@ -80,14 +80,10 @@ void task_state_destroy (task_state_t ts)
 {
 	if (ts == NULL)
 		return;
-	if (ts->start_failed)
-		bit_free (ts->start_failed);
-	if (ts->running)
-		bit_free (ts->running);
-	if (ts->normal_exit)
-		bit_free (ts->normal_exit);
-	if (ts->abnormal_exit)
-		bit_free (ts->abnormal_exit);
+	FREE_NULL_BITMAP(ts->start_failed);
+	FREE_NULL_BITMAP(ts->running);
+	FREE_NULL_BITMAP(ts->normal_exit);
+	FREE_NULL_BITMAP(ts->abnormal_exit);
 	xfree (ts);
 }
 
@@ -126,7 +122,8 @@ void task_state_update (task_state_t ts, int taskid, task_state_type_t t)
 	case TS_NORMAL_EXIT:
 		bit_clear (ts->running, taskid);
 		if (bit_test(ts->normal_exit, taskid)) {
-			error("Task %d reported exit for a second time.");
+			error("Task %d reported exit for a second time.",
+			       taskid);
 		} else {
 			bit_set (ts->normal_exit, taskid);
 			ts->n_exited++;
@@ -135,7 +132,8 @@ void task_state_update (task_state_t ts, int taskid, task_state_type_t t)
 	case TS_ABNORMAL_EXIT:
 		bit_clear (ts->running, taskid);
 		if (bit_test(ts->abnormal_exit, taskid)) {
-			error("Task %d reported exit for a second time.");
+			error("Task %d reported exit for a second time.",
+			      taskid);
 		} else {
 			bit_set (ts->abnormal_exit, taskid);
 			ts->n_exited++;
@@ -170,7 +168,7 @@ static void _do_log_msg (bitstr_t *b, log_f fn, const char *msg)
 {
 	char buf [65536];
 	char *s = bit_set_count (b) == 1 ? "" : "s";
-	(*fn) ("task%s %s: %s\n", s, bit_fmt (buf, sizeof(buf), b), msg);
+	(*fn) ("task%s %s: %s", s, bit_fmt (buf, sizeof(buf), b), msg);
 }
 
 void task_state_print (task_state_t ts, log_f fn)
@@ -196,6 +194,6 @@ void task_state_print (task_state_t ts, log_f fn)
 	bit_not (unseen);
 	if (bit_set_count (unseen))
 		_do_log_msg (unseen, fn, "unknown");
-	bit_free (unseen);
+	FREE_NULL_BITMAP(unseen);
 }
 

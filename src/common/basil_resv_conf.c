@@ -64,22 +64,11 @@
  * IN job_id - SLURM job ID
  * RET 0 or error code
  */
-extern int basil_resv_conf(char *reservation_id, uint32_t job_id)
+extern int basil_resv_conf(uint32_t reservation_id, uint32_t job_id)
 {
 	int error_code = SLURM_SUCCESS;
-#ifdef HAVE_CRAY_XT
-#ifdef APBASIL_LOC
-	/* Issue the BASIL CONFIRM request */
-	if (request_failure) {
-		error("basil confirm of %s error: %s", reservation_id, "TBD");
-		return SLURM_ERROR;
-	}
-	debug("basil confirm of reservation %s by job %u complete",
-	      reservation_id, job_id);
-#else
-	debug("basil confirm of reservation %s by job %u complete",
-	      reservation_id, job_id);
-#endif	/* APBASIL_LOC */
-#endif	/* HAVE_CRAY_XT */
+#ifdef HAVE_CRAY
+	/* Issue the BASIL CONFIRM request  - To Be Done */
+#endif
 	return error_code;
 }

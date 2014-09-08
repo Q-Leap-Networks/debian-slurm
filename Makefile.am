@@ -10,6 +10,8 @@ EXTRA_DIST =			\
 	etc/slurm.epilog.clean	\
 	etc/init.d.slurm	\
 	etc/init.d.slurmdbd	\
+	etc/cgroup.conf.example	\
+	etc/cgroup.release_agent \
 	autogen.sh		\
 	slurm.spec		\
 	README			\
@@ -27,6 +29,7 @@ EXTRA_DIST =			\
 pkginclude_HEADERS =		\
 	slurm/pmi.h		\
 	slurm/slurm.h 		\
+	slurm/slurmdb.h 		\
 	slurm/slurm_errno.h	\
 	slurm/spank.h
 

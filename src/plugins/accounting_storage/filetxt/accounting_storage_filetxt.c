@@ -68,7 +68,7 @@
  * of the plugin.  If major and minor revisions are desired, the major
  * version number may be multiplied by a suitable magnitude constant such
  * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum versions for their plugins as the job accounting API
+ * minimum version for their plugins as the job accounting API
  * matures.
  */
 const char plugin_name[] = "Accounting storage FileTxt plugin";
@@ -190,11 +190,11 @@ extern int init ( void )
 
 	/* This check for the slurm user id is a quick and dirty patch
 	 * to see if the controller is calling this, since we open the
-	 * file in append mode sacct could fail on it if the file
+	 * file in append mode stats could fail on it if the file
 	 * isn't world writable.
 	 */
 	if(first && (getuid() == slurm_get_slurm_user_id())) {
-		debug2("jobacct_init() called");
+		debug2("slurmdb_init() called");
 		log_file = slurm_get_accounting_storage_loc();
 		if(!log_file)
 			log_file = xstrdup(DEFAULT_STORAGE_LOC);
@@ -242,8 +242,9 @@ extern int fini ( void )
 	return SLURM_SUCCESS;
 }
 
-extern void * acct_storage_p_get_connection(bool make_agent, int conn_num,
-					    bool rollback)
+extern void * acct_storage_p_get_connection(const slurm_trigger_callbacks_t *cb, 
+                                            int conn_num, bool rollback, 
+                                            char *cluster_name)
 {
 	return NULL;
 }
@@ -265,7 +266,7 @@ extern int acct_storage_p_add_users(void *db_conn, uint32_t uid,
 }
 
 extern int acct_storage_p_add_coord(void *db_conn, uint32_t uid,
-				    List acct_list, acct_user_cond_t *user_q)
+				    List acct_list, slurmdb_user_cond_t *user_q)
 {
 	return SLURM_SUCCESS;
 }
@@ -301,122 +302,129 @@ extern int acct_storage_p_add_wckeys(void *db_conn, uint32_t uid,
 }
 
 extern int acct_storage_p_add_reservation(void *db_conn,
-					  acct_reservation_rec_t *resv)
+					  slurmdb_reservation_rec_t *resv)
 {
 	return SLURM_SUCCESS;
 }
 
 extern List acct_storage_p_modify_users(void *db_conn, uint32_t uid,
-				       acct_user_cond_t *user_q,
-				       acct_user_rec_t *user)
+				       slurmdb_user_cond_t *user_q,
+				       slurmdb_user_rec_t *user)
 {
 	return SLURM_SUCCESS;
 }
 
-extern List acct_storage_p_modify_accounts(void *db_conn, uint32_t uid,
-					   acct_account_cond_t *acct_q,
-					   acct_account_rec_t *acct)
+extern List acct_storage_p_modify_accts(void *db_conn, uint32_t uid,
+					   slurmdb_account_cond_t *acct_q,
+					   slurmdb_account_rec_t *acct)
 {
 	return SLURM_SUCCESS;
 }
 
 extern List acct_storage_p_modify_clusters(void *db_conn, uint32_t uid,
-					  acct_cluster_cond_t *cluster_q,
-					  acct_cluster_rec_t *cluster)
+					  slurmdb_cluster_cond_t *cluster_q,
+					  slurmdb_cluster_rec_t *cluster)
 {
 	return SLURM_SUCCESS;
 }
 
 extern List acct_storage_p_modify_associations(void *db_conn, uint32_t uid,
-					      acct_association_cond_t *assoc_q,
-					      acct_association_rec_t *assoc)
+					      slurmdb_association_cond_t *assoc_q,
+					      slurmdb_association_rec_t *assoc)
+{
+	return SLURM_SUCCESS;
+}
+
+extern List acct_storage_p_modify_job(void *db_conn, uint32_t uid,
+				      slurmdb_job_modify_cond_t *job_cond,
+				      slurmdb_job_rec_t *job)
 {
 	return SLURM_SUCCESS;
 }
 
 extern List acct_storage_p_modify_qos(void *db_conn, uint32_t uid,
-				      acct_qos_cond_t *qos_cond,
-				      acct_qos_rec_t *qos)
+				      slurmdb_qos_cond_t *qos_cond,
+				      slurmdb_qos_rec_t *qos)
 {
 	return SLURM_SUCCESS;
 }
 
 extern List acct_storage_p_modify_wckeys(void *db_conn, uint32_t uid,
-				      acct_wckey_cond_t *wckey_cond,
-				      acct_wckey_rec_t *wckey)
+				      slurmdb_wckey_cond_t *wckey_cond,
+				      slurmdb_wckey_rec_t *wckey)
 {
 	return SLURM_SUCCESS;
 }
 
 extern int acct_storage_p_modify_reservation(void *db_conn,
-					     acct_reservation_rec_t *resv)
+					     slurmdb_reservation_rec_t *resv)
 {
 	return SLURM_SUCCESS;
 }
 
 extern List acct_storage_p_remove_users(void *db_conn, uint32_t uid,
-				       acct_user_cond_t *user_q)
+				       slurmdb_user_cond_t *user_q)
 {
 	return SLURM_SUCCESS;
 }
 
 extern List acct_storage_p_remove_coord(void *db_conn, uint32_t uid,
 					List acct_list,
-					acct_user_cond_t *user_q)
+					slurmdb_user_cond_t *user_q)
 {
 	return SLURM_SUCCESS;
 }
 
 extern List acct_storage_p_remove_accts(void *db_conn, uint32_t uid,
-				       acct_account_cond_t *acct_q)
+				       slurmdb_account_cond_t *acct_q)
 {
 	return SLURM_SUCCESS;
 }
 
 extern List acct_storage_p_remove_clusters(void *db_conn, uint32_t uid,
-					  acct_account_cond_t *cluster_q)
+					  slurmdb_account_cond_t *cluster_q)
 {
 	return SLURM_SUCCESS;
 }
 
 extern List acct_storage_p_remove_associations(void *db_conn, uint32_t uid,
-					      acct_association_cond_t *assoc_q)
+					      slurmdb_association_cond_t *assoc_q)
 {
 	return SLURM_SUCCESS;
 }
 
 extern List acct_storage_p_remove_qos(void *db_conn, uint32_t uid,
-				      acct_qos_cond_t *qos_cond)
+				      slurmdb_qos_cond_t *qos_cond)
 {
 	return NULL;
 }
 
 extern List acct_storage_p_remove_wckeys(void *db_conn, uint32_t uid,
-				      acct_wckey_cond_t *wckey_cond)
+				      slurmdb_wckey_cond_t *wckey_cond)
 {
 	return NULL;
 }
 
 extern int acct_storage_p_remove_reservation(void *db_conn,
-					     acct_reservation_rec_t *resv)
+					     slurmdb_reservation_rec_t *resv)
 {
 	return SLURM_SUCCESS;
 }
 
 extern List acct_storage_p_get_users(void *db_conn, uid_t uid,
-				     acct_user_cond_t *user_q)
+				     slurmdb_user_cond_t *user_q)
 {
 	return NULL;
 }
 
 extern List acct_storage_p_get_accts(void *db_conn, uid_t uid,
-				     acct_account_cond_t *acct_q)
+				     slurmdb_account_cond_t *acct_q)
 {
 	return NULL;
 }
 
 extern List acct_storage_p_get_clusters(void *db_conn, uid_t uid,
-					acct_account_cond_t *cluster_q)
+					slurmdb_account_cond_t *cluster_q)
 {
 	return NULL;
 }
@@ -427,37 +435,43 @@ extern List acct_storage_p_get_config(void *db_conn)
 }
 
 extern List acct_storage_p_get_associations(void *db_conn, uid_t uid,
-					    acct_association_cond_t *assoc_q)
+					    slurmdb_association_cond_t *assoc_q)
+{
+	return NULL;
+}
+
+extern List acct_storage_p_get_events(void *db_conn, uint32_t uid,
+				      slurmdb_event_cond_t *event_cond)
 {
 	return NULL;
 }
 
 extern List acct_storage_p_get_problems(void *db_conn, uid_t uid,
-					acct_association_cond_t *assoc_q)
+					slurmdb_association_cond_t *assoc_q)
 {
 	return NULL;
 }
 
 extern List acct_storage_p_get_qos(void *db_conn, uid_t uid,
-				   acct_qos_cond_t *qos_cond)
+				   slurmdb_qos_cond_t *qos_cond)
 {
 	return NULL;
 }
 
 extern List acct_storage_p_get_wckeys(void *db_conn, uid_t uid,
-				      acct_wckey_cond_t *wckey_cond)
+				      slurmdb_wckey_cond_t *wckey_cond)
 {
 	return NULL;
 }
 
 extern List acct_storage_p_get_reservations(void *mysql_conn, uid_t uid,
-					    acct_reservation_cond_t *resv_cond)
+					    slurmdb_reservation_cond_t *resv_cond)
 {
 	return NULL;
 }
 
 extern List acct_storage_p_get_txn(void *db_conn, uid_t uid,
-				   acct_txn_cond_t *txn_cond)
+				   slurmdb_txn_cond_t *txn_cond)
 {
 	return NULL;
 }
@@ -481,48 +495,36 @@ extern int acct_storage_p_roll_usage(void *db_conn,
 }
 
 extern int clusteracct_storage_p_node_down(void *db_conn,
-					   char *cluster,
 					   struct node_record *node_ptr,
-					   time_t event_time, char *reason)
+					   time_t event_time, char *reason,
+					   uint32_t reason_uid)
 {
 	return SLURM_SUCCESS;
 }
 extern int clusteracct_storage_p_node_up(void *db_conn,
-					 char *cluster,
 					 struct node_record *node_ptr,
 					 time_t event_time)
 {
 	return SLURM_SUCCESS;
 }
 
-extern int clusteracct_storage_p_register_ctld(void *db_conn,
-					       char *cluster,
-					       uint16_t port)
+extern int clusteracct_storage_p_register_ctld(void *db_conn, uint16_t port)
 {
 	return SLURM_SUCCESS;
 }
 
-extern int clusteracct_storage_p_cluster_procs(void *db_conn,
-					       char *cluster,
-					       char *cluster_nodes,
-					       uint32_t procs,
-					       time_t event_time)
+extern int clusteracct_storage_p_cluster_cpus(void *db_conn,
+					      char *cluster_nodes,
+					      uint32_t cpus,
+					      time_t event_time)
 {
-	return SLURM_SUCCESS;
-}
-
-extern int clusteracct_storage_p_get_usage(
-	void *db_conn, uid_t uid,
-	acct_cluster_rec_t *cluster_rec, int type, time_t start, time_t end)
-{
-
 	return SLURM_SUCCESS;
 }
 
 /*
  * load into the storage the start of a job
  */
-extern int jobacct_storage_p_job_start(void *db_conn, char *cluster_name,
+extern int jobacct_storage_p_job_start(void *db_conn,
 				       struct job_record *job_ptr)
 {
 	int	i,
@@ -537,7 +539,7 @@ extern int jobacct_storage_p_job_start(void *db_conn, char *cluster_name,
 		return SLURM_ERROR;
 	}
 
-	debug2("jobacct_job_start() called");
+	debug2("slurmdb_job_start() called");
 
 	if (job_ptr->start_time == 0) {
 		/* This function is called when a job becomes elligible to run
@@ -572,13 +574,13 @@ extern int jobacct_storage_p_job_start(void *db_conn, char *cluster_name,
 	if(job_ptr->batch_flag)
 		track_steps = 1;
 
-	job_ptr->requid = -1; /* force to -1 for sacct to know this
+	job_ptr->requid = -1; /* force to -1 for stats to know this
 			       * hasn't been set yet */
 
 	snprintf(buf, BUFFER_SIZE,
 		 "%d %s %d %ld %u %s %s",
 		 JOB_START, jname,
-		 track_steps, priority, job_ptr->total_procs,
+		 track_steps, priority, job_ptr->total_cpus,
 		 nodes, account);
 
 	rc = _print_record(job_ptr, job_ptr->start_time, buf);
@@ -594,23 +596,38 @@ extern int jobacct_storage_p_job_complete(void *db_conn,
 					  struct job_record *job_ptr)
 {
 	char buf[BUFFER_SIZE];
+	uint16_t job_state;
+	int duration;
+
 	if(!storage_init) {
 		debug("jobacct init was not called or it failed");
 		return SLURM_ERROR;
 	}
 
-	debug2("jobacct_job_complete() called");
-	if (job_ptr->end_time == 0) {
-		debug("jobacct: job %u never started", job_ptr->job_id);
-		return SLURM_ERROR;
+	debug2("slurmdb_job_complete() called");
+	if (IS_JOB_RESIZING(job_ptr)) {
+		job_state = JOB_RESIZING;
+		if (job_ptr->resize_time)
+			duration = time(NULL) - job_ptr->resize_time;
+		else
+			duration = time(NULL) - job_ptr->start_time;
+	} else {
+		if (job_ptr->end_time == 0) {
+			debug("jobacct: job %u never started", job_ptr->job_id);
+			return SLURM_ERROR;
+		}
+		job_state = job_ptr->job_state & JOB_STATE_BASE;
+		if (job_ptr->resize_time)
+			duration = job_ptr->end_time - job_ptr->resize_time;
+		else
+			duration = job_ptr->end_time - job_ptr->start_time;
 	}
+
 	/* leave the requid as a %d since we want to see if it is -1
-	   in sacct */
-	snprintf(buf, BUFFER_SIZE, "%d %d %d %u %u",
-		 JOB_TERMINATED,
-		 (int) (job_ptr->end_time - job_ptr->start_time),
-		 job_ptr->job_state & JOB_STATE_BASE,
-		 job_ptr->requid, job_ptr->exit_code);
+	   in stats */
+	snprintf(buf, BUFFER_SIZE, "%d %d %u %u %u",
+		 JOB_TERMINATED, duration,
+		 job_state, job_ptr->requid, job_ptr->exit_code);
 
 	return  _print_record(job_ptr, job_ptr->end_time, buf);
 }
@@ -636,7 +653,10 @@ extern int jobacct_storage_p_step_start(void *db_conn,
 	}
 
 #ifdef HAVE_BG
-	cpus = step_ptr->job_ptr->num_procs;
+	if(step_ptr->job_ptr->details)
+		cpus = step_ptr->job_ptr->details->min_cpus;
+	else
+		cpus = step_ptr->job_ptr->cpu_cnt;
 	select_g_select_jobinfo_get(step_ptr->job_ptr->select_jobinfo,
 			     SELECT_JOBDATA_IONODES,
 			     &ionodes);
@@ -650,7 +670,7 @@ extern int jobacct_storage_p_step_start(void *db_conn,
 
 #else
 	if(!step_ptr->step_layout || !step_ptr->step_layout->task_cnt) {
-		cpus = step_ptr->job_ptr->total_procs;
+		cpus = step_ptr->job_ptr->total_cpus;
 		snprintf(node_list, BUFFER_SIZE, "%s", step_ptr->job_ptr->nodes);
 	} else {
 		cpus = step_ptr->step_layout->task_cnt;
@@ -663,7 +683,7 @@ extern int jobacct_storage_p_step_start(void *db_conn,
 	else
 		account = "(null)";
 
-	step_ptr->job_ptr->requid = -1; /* force to -1 for sacct to know this
+	step_ptr->job_ptr->requid = -1; /* force to -1 for stats to know this
 				     * hasn't been set yet  */
 
 	snprintf(buf, BUFFER_SIZE, _jobstep_format,
@@ -749,7 +769,7 @@ extern int jobacct_storage_p_step_complete(void *db_conn,
 	now = time(NULL);
 
 	if (jobacct == NULL) {
-		/* JobAcctGather=jobacct_gather/none, no data to process */
+		/* JobAcctGather=slurmdb_gather/none, no data to process */
 		memset(&dummy_jobacct, 0, sizeof(dummy_jobacct));
 		jobacct = &dummy_jobacct;
 	}
@@ -767,7 +787,10 @@ extern int jobacct_storage_p_step_complete(void *db_conn,
 		comp_status = JOB_COMPLETE;
 
 #ifdef HAVE_BG
-	cpus = step_ptr->job_ptr->num_procs;
+	if(step_ptr->job_ptr->details)
+		cpus = step_ptr->job_ptr->details->min_cpus;
+	else
+		cpus = step_ptr->job_ptr->cpu_cnt;
 	select_g_select_jobinfo_get(step_ptr->job_ptr->select_jobinfo,
 			     SELECT_JOBDATA_IONODES,
 			     &ionodes);
@@ -781,7 +804,7 @@ extern int jobacct_storage_p_step_complete(void *db_conn,
 
 #else
 	if(!step_ptr->step_layout || !step_ptr->step_layout->task_cnt) {
-		cpus = step_ptr->job_ptr->total_procs;
+		cpus = step_ptr->job_ptr->total_cpus;
 		snprintf(node_list, BUFFER_SIZE, "%s", step_ptr->job_ptr->nodes);
 
 	} else {
@@ -800,12 +823,10 @@ extern int jobacct_storage_p_step_complete(void *db_conn,
 		ave_pages /= cpus;
 		ave_cpu = jobacct->tot_cpu;
 		ave_cpu /= cpus;
-		ave_cpu /= 100;
 	}
 
 	if(jobacct->min_cpu != (uint32_t)NO_VAL) {
 		ave_cpu2 = jobacct->min_cpu;
-		ave_cpu2 /= 100;
 	}
 
 	if (step_ptr->job_ptr->account && step_ptr->job_ptr->account[0])
@@ -907,11 +928,11 @@ extern int jobacct_storage_p_suspend(void *db_conn,
 
 /*
  * get info from the storage
- * returns List of jobacct_job_rec_t *
+ * returns List of slurmdb_job_rec_t *
  * note List needs to be freed when called
  */
 extern List jobacct_storage_p_get_jobs_cond(void *db_conn, uid_t uid,
-					    acct_job_cond_t *job_cond)
+					    slurmdb_job_cond_t *job_cond)
 {
 	return filetxt_jobacct_process_get_jobs(job_cond);
 }
@@ -920,7 +941,7 @@ extern List jobacct_storage_p_get_jobs_cond(void *db_conn, uid_t uid,
  * expire old info from the storage
  */
 extern int jobacct_storage_p_archive(void *db_conn,
-				      acct_archive_cond_t *arch_cond)
+				      slurmdb_archive_cond_t *arch_cond)
 {
 	return filetxt_jobacct_process_archive(arch_cond);
 
@@ -930,7 +951,7 @@ extern int jobacct_storage_p_archive(void *db_conn,
  * load old info into the storage
  */
 extern int jobacct_storage_p_archive_load(void *db_conn,
-					  acct_archive_rec_t *arch_rec)
+					  slurmdb_archive_rec_t *arch_rec)
 {
 	return SLURM_ERROR;
 }
@@ -942,7 +963,7 @@ extern int acct_storage_p_update_shares_used(void *db_conn,
 }
 
 extern int acct_storage_p_flush_jobs_on_cluster(
-	void *db_conn, char *cluster, time_t event_time)
+	void *db_conn, time_t event_time)
 {
 	/* put end times for a clean start */
 	return SLURM_SUCCESS;

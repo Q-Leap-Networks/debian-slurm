@@ -7,7 +7,7 @@
  *	configuration list (config_list)
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
@@ -82,7 +82,8 @@ List config_list  = NULL;		/* list of config_record entries */
 List feature_list = NULL;		/* list of features_record entries */
 time_t last_node_update = (time_t) 0;	/* time of last update */
 struct node_record *node_record_table_ptr = NULL;	/* node records */
-struct node_record **node_hash_table = NULL;	/* node_record hash table */int node_record_count = 0;	/* count in node_record_table_ptr */
+struct node_record **node_hash_table = NULL;	/* node_record hash table */
+int node_record_count = 0;		/* count in node_record_table_ptr */
 
 static void	_add_config_feature(char *feature, bitstr_t *node_bitmap);
 static int	_build_single_nodeline_info(slurm_conf_node_t *node_ptr,
@@ -214,9 +215,10 @@ static int _build_single_nodeline_info(slurm_conf_node_t *node_ptr,
 				node_rec->node_state = state_val;
 			node_rec->last_response = (time_t) 0;
 			node_rec->comm_name = xstrdup(address);
-
-			node_rec->port = node_ptr->port;
-			node_rec->reason = xstrdup(node_ptr->reason);
+			node_rec->port      = node_ptr->port;
+			node_rec->weight    = node_ptr->weight;
+			node_rec->features  = xstrdup(node_ptr->feature);
+			node_rec->reason    = xstrdup(node_ptr->reason);
 		} else {
 			/* FIXME - maybe should be fatal? */
 			error("reconfiguration for node %s, ignoring!", alias);
@@ -370,7 +372,8 @@ static void _list_delete_config (void *config_entry)
 
 	xassert(config_ptr);
 	xassert(config_ptr->magic == CONFIG_MAGIC);
-	xfree (config_ptr->feature);
+	xfree(config_ptr->feature);
+	xfree(config_ptr->gres);
 	build_config_feature_list(config_ptr);
 	xfree (config_ptr->nodes);
 	FREE_NULL_BITMAP (config_ptr->node_bitmap);
@@ -416,7 +419,7 @@ char * bitmap2node_name (bitstr_t *bitmap)
 {
 	int i, first, last;
 	hostlist_t hl;
-	char buf[8192];
+	char *buf;
 
 	if (bitmap == NULL)
 		return xstrdup("");
@@ -435,10 +438,10 @@ char * bitmap2node_name (bitstr_t *bitmap)
 		hostlist_push(hl, node_record_table_ptr[i].name);
 	}
 	hostlist_uniq(hl);
-	hostlist_ranged_string(hl, sizeof(buf), buf);
+	buf = hostlist_ranged_string_xmalloc(hl);
 	hostlist_destroy(hl);
 
-	return xstrdup(buf);
+	return buf;
 }
 
 /*
@@ -461,7 +464,7 @@ static int _list_find_feature (void *feature_entry, void *key)
 }
 
 /*
- * _build_all_nodeline_info - get a array of slurm_conf_node_t structures
+ * build_all_nodeline_info - get a array of slurm_conf_node_t structures
  *	from the slurm.conf reader, build table, and set values
  * IN set_bitmap - if true, set node_bitmap in config record (used by slurmd)
  * RET 0 if no error, error code otherwise
@@ -489,8 +492,10 @@ extern int build_all_nodeline_info (bool set_bitmap)
 		config_ptr->real_memory = node->real_memory;
 		config_ptr->tmp_disk = node->tmp_disk;
 		config_ptr->weight = node->weight;
-		if (node->feature)
+		if (node->feature && node->feature[0])
 			config_ptr->feature = xstrdup(node->feature);
+		if (node->gres && node->gres[0])
+			config_ptr->gres = xstrdup(node->gres);
 
 		rc = _build_single_nodeline_info(node, config_ptr);
 		max_rc = MAX(max_rc, rc);
@@ -739,7 +744,7 @@ extern void node_fini2 (void)
  * IN best_effort - if set don't return an error on invalid node name entries
  * OUT bitmap     - set to bitmap, may not have all bits set on error
  * RET 0 if no error, otherwise EINVAL
- * NOTE: the caller must bit_free() memory at bitmap when no longer required
+ * NOTE: call FREE_NULL_BITMAP() to free bitmap memory when no longer required
  */
 extern int node_name2bitmap (char *node_names, bool best_effort,
 			     bitstr_t **bitmap)
@@ -772,7 +777,7 @@ extern int node_name2bitmap (char *node_names, bool best_effort,
 		node_ptr = find_node_record (this_node_name);
 		if (node_ptr) {
 			bit_set (my_bitmap, (bitoff_t) (node_ptr -
-						node_record_table_ptr));
+							node_record_table_ptr));
 		} else {
 			error ("node_name2bitmap: invalid node specified %s",
 			       this_node_name);
@@ -793,6 +798,9 @@ extern void purge_node_rec (struct node_record *node_ptr)
 	xfree(node_ptr->arch);
 	xfree(node_ptr->comm_name);
 	xfree(node_ptr->features);
+	xfree(node_ptr->gres);
+	if (node_ptr->gres_list)
+		list_destroy(node_ptr->gres_list);
 	xfree(node_ptr->name);
 	xfree(node_ptr->os);
 	xfree(node_ptr->part_pptr);

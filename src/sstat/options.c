@@ -57,7 +57,7 @@ void _help_fields_msg(void)
 			printf("  ");
 		else if(i)
 			printf("\n");
-		printf("%-12s", fields[i].name);
+		printf("%-13s", fields[i].name);
 	}
 	printf("\n");
 	return;
@@ -75,13 +75,17 @@ sstat [<OPTION>] -j <job(.stepid)>                                          \n\
 	           Print a list of fields that can be specified with the    \n\
 	           '--format' option                                        \n\
      -h, --help:   Print this description of use.                           \n\
+     -i, --pidformat:                                                       \n\
+                   Predefined format to list the pids running for each      \n\
+                   job step.  (JobId,Nodes,Pids)                            \n\
      -j, --jobs:                                                            \n\
 	           Format is <job(.step)>. Stat this job step               \n\
                    or comma-separated list of job steps. This option is     \n\
-                   required.  The step portion will default to step 0 if not\n\
-                   specified, unless the --allsteps flag is set where not   \n\
-                   specifying a step will result in all running steps to be  \n\
-                   displayed.                                               \n\
+                   required.  The step portion will default to lowest step  \n\
+                   running if not specified, unless the --allsteps flag is  \n\
+                   set where not specifying a step will result in all       \n\
+                   running steps to be displayed.  A step id of 'batch'     \n\
+                   will display the information about the batch step.       \n\
      -n, --noheader:                                                        \n\
 	           No header will be added to the beginning of output.      \n\
                    The default is to print a header.                        \n\
@@ -120,7 +124,7 @@ void _do_help(void)
 		_usage();
 		break;
 	default:
-		fprintf(stderr, "sacct bug: params.opt_help=%d\n",
+		fprintf(stderr, "stats bug: params.opt_help=%d\n",
 			params.opt_help);
 	}
 }
@@ -135,8 +139,8 @@ static int _addto_job_list(List job_list, char *names)
 {
 	int i=0, start=0;
 	char *name = NULL, *dot = NULL;
-	jobacct_selected_step_t *selected_step = NULL;
-	jobacct_selected_step_t *curr_step = NULL;
+	slurmdb_selected_step_t *selected_step = NULL;
+	slurmdb_selected_step_t *curr_step = NULL;
 
 	ListIterator itr = NULL;
 	char quote_c = '\0';
@@ -169,15 +173,21 @@ static int _addto_job_list(List job_list, char *names)
 					memcpy(name, names+start, (i-start));
 
 					selected_step = xmalloc(
-						sizeof(jobacct_selected_step_t));
+						sizeof(slurmdb_selected_step_t));
 					dot = strstr(name, ".");
 					if (dot == NULL) {
 						debug2("No jobstep requested");
 						selected_step->stepid = NO_VAL;
 					} else {
 						*dot++ = 0;
-						selected_step->stepid =
-							atoi(dot);
+						/* can't use NO_VAL
+						 * since that means all */
+						if (!strcmp(dot, "batch"))
+							selected_step->stepid =
+								INFINITE;
+						else
+							selected_step->stepid =
+								atoi(dot);
 					}
 					selected_step->jobid = atoi(name);
 					xfree(name);
@@ -196,7 +206,7 @@ static int _addto_job_list(List job_list, char *names)
 							    selected_step);
 						count++;
 					} else
-						destroy_jobacct_selected_step(
+						slurmdb_destroy_selected_step(
 							selected_step);
 					list_iterator_reset(itr);
 				}
@@ -210,14 +220,18 @@ static int _addto_job_list(List job_list, char *names)
 			memcpy(name, names+start, (i-start));
 
 			selected_step =
-				xmalloc(sizeof(jobacct_selected_step_t));
+				xmalloc(sizeof(slurmdb_selected_step_t));
 			dot = strstr(name, ".");
 			if (dot == NULL) {
 				debug2("No jobstep requested");
 				selected_step->stepid = NO_VAL;
 			} else {
 				*dot++ = 0;
-				selected_step->stepid = atoi(dot);
+				/* can't use NO_VAL since that means all */
+				if (!strcmp(dot, "batch"))
+					selected_step->stepid = INFINITE;
+				else
+					selected_step->stepid = atoi(dot);
 			}
 			selected_step->jobid = atoi(name);
 			xfree(name);
@@ -233,7 +247,7 @@ static int _addto_job_list(List job_list, char *names)
 				list_append(job_list, selected_step);
 				count++;
 			} else
-				destroy_jobacct_selected_step(
+				slurmdb_destroy_selected_step(
 					selected_step);
 		}
 	}
@@ -268,7 +282,7 @@ void parse_command_line(int argc, char **argv)
 	extern int optind;
 	int c, i, optionIndex = 0;
 	char *end = NULL, *start = NULL;
-	jobacct_selected_step_t *selected_step = NULL;
+	slurmdb_selected_step_t *selected_step = NULL;
 	ListIterator itr = NULL;
 	log_options_t logopt = LOG_OPTS_STDERR_ONLY;
 
@@ -280,6 +294,7 @@ void parse_command_line(int argc, char **argv)
 		{"noheader", 0, 0, 'n'},
 		{"fields", 1, 0, 'o'},
 		{"format", 1, 0, 'o'},
+		{"pidformat", 0, 0, 'i'},
 		{"parsable", 0, 0, 'p'},
 		{"parsable2", 0, 0, 'P'},
 		{"usage", 0, &params.opt_help, 3},
@@ -294,7 +309,7 @@ void parse_command_line(int argc, char **argv)
 	opterr = 1;		/* Let getopt report problems to the user */
 
 	while (1) {		/* now cycle through the command line */
-		c = getopt_long(argc, argv, "aehj:no:pPvV",
+		c = getopt_long(argc, argv, "aehij:no:pPvV",
 				long_options, &optionIndex);
 		if (c == -1)
 			break;
@@ -308,9 +323,14 @@ void parse_command_line(int argc, char **argv)
 		case 'h':
 			params.opt_help = 1;
 			break;
+		case 'i':
+			params.pid_format = 1;
+			xstrfmtcat(params.opt_field_list, "%s,",
+				   STAT_FIELDS_PID);
+			break;
 		case 'j':
 			if ((strspn(optarg, "0123456789, ") < strlen(optarg))
-			    && (strspn(optarg, ".0123456789, ")
+			    && (strspn(optarg, ".batch0123456789, ")
 				< strlen(optarg))) {
 				fprintf(stderr, "Invalid jobs list: %s\n",
 					optarg);
@@ -318,7 +338,7 @@ void parse_command_line(int argc, char **argv)
 			}
 			if(!params.opt_job_list)
 				params.opt_job_list = list_create(
-					destroy_jobacct_selected_step);
+					slurmdb_destroy_selected_step);
 			_addto_job_list(params.opt_job_list, optarg);
 			break;
 		case 'n':
@@ -363,7 +383,7 @@ void parse_command_line(int argc, char **argv)
 	if (optind < argc) {
 		optarg = argv[optind];
 		if ((strspn(optarg, "0123456789, ") < strlen(optarg))
-		    && (strspn(optarg, ".0123456789, ")
+		    && (strspn(optarg, ".batch0123456789, ")
 			< strlen(optarg))) {
 			fprintf(stderr, "Invalid jobs list: %s\n",
 				optarg);
@@ -371,7 +391,7 @@ void parse_command_line(int argc, char **argv)
 		}
 		if(!params.opt_job_list)
 			params.opt_job_list = list_create(
-				destroy_jobacct_selected_step);
+				slurmdb_destroy_selected_step);
 		_addto_job_list(params.opt_job_list, optarg);
 	}
 
@@ -403,18 +423,32 @@ void parse_command_line(int argc, char **argv)
 
 	start = params.opt_field_list;
 	while ((end = strstr(start, ","))) {
+		char *tmp_char = NULL;
+		int command_len = 0;
+		int newlen = 0;
+
 		*end = 0;
 		while (isspace(*start))
 			start++;	/* discard whitespace */
 		if(!(int)*start)
 			continue;
+
+		if((tmp_char = strstr(start, "\%"))) {
+			newlen = atoi(tmp_char+1);
+			tmp_char[0] = '\0';
+		}
+
+		command_len = strlen(start);
+
 		for (i = 0; fields[i].name; i++) {
-			if (!strcasecmp(fields[i].name, start))
+			if (!strncasecmp(fields[i].name, start, command_len))
 				goto foundfield;
 		}
 		error("Invalid field requested: \"%s\"", start);
 		exit(1);
 	foundfield:
+		if(newlen)
+			fields[i].len = newlen;
 		list_append(print_fields_list, &fields[i]);
 		start = end + 1;
 	}

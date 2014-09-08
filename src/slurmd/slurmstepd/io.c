@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/slurmd/slurmstepd/io.c - Standard I/O handling routines for slurmstepd
- * $Id: io.c 19754 2010-03-16 17:05:43Z jette $
+ * $Id: io.c 21149 2010-09-14 22:04:42Z da $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -197,7 +197,7 @@ struct task_read_info {
 struct window_info {
 	slurmd_task_info_t *task;
 	slurmd_job_t *job;
-	slurm_fd pty_fd;
+	slurm_fd_t pty_fd;
 };
 #ifdef HAVE_PTY_H
 static void  _spawn_window_manager(slurmd_task_info_t *task, slurmd_job_t *job);
@@ -412,7 +412,7 @@ _client_read(eio_obj_t *obj, List objs)
 
 		client->in_msg->ref_count = 0;
 		if (client->header.type == SLURM_IO_ALLSTDIN) {
-			for (i = 0; i < client->job->ntasks; i++) {
+			for (i = 0; i < client->job->node_tasks; i++) {
 				task = client->job->task[i];
 				io = (struct task_write_info *)task->in->arg;
 				client->in_msg->ref_count++;
@@ -420,7 +420,7 @@ _client_read(eio_obj_t *obj, List objs)
 			}
 			debug5("  message ref_count = %d", client->in_msg->ref_count);
 		} else {
-			for (i = 0; i < client->job->ntasks; i++) {
+			for (i = 0; i < client->job->node_tasks; i++) {
 				task = client->job->task[i];
 				if (task->in == NULL)
 					continue;
@@ -771,7 +771,7 @@ _task_read(eio_obj_t *obj, List objs)
 
 	xassert(out->magic == TASK_OUT_MAGIC);
 
-	debug4("Entering _task_read for obj %x", obj);
+	debug4("Entering _task_read for obj %zx", (size_t)obj);
 	len = cbuf_free(out->buf);
 	if (len > 0 && !out->eof) {
 again:
@@ -851,7 +851,7 @@ static void *_window_manager(void *arg)
 		ws.ws_row = ntohs(winsz.rows);
 		debug("new pty size %u:%u", ws.ws_row, ws.ws_col);
 		if (ioctl(win_info->task->to_stdin, TIOCSWINSZ, &ws))
-			error("ioctl(TIOCSWINSZ): %s");
+			error("ioctl(TIOCSWINSZ): %s", strerror(errno));
 		if (kill(win_info->task->pid, SIGWINCH)) {
 			if (errno == ESRCH)
 				break;
@@ -866,8 +866,8 @@ static void
 _spawn_window_manager(slurmd_task_info_t *task, slurmd_job_t *job)
 {
 	char *host, *port, *rows, *cols;
-	slurm_fd pty_fd;
-	slurm_addr pty_addr;
+	slurm_fd_t pty_fd;
+	slurm_addr_t pty_addr;
 	uint16_t port_u;
 	struct window_info *win_info;
 	pthread_attr_t attr;
@@ -899,7 +899,7 @@ _spawn_window_manager(slurmd_task_info_t *task, slurmd_job_t *job)
 		ws.ws_row = atoi(rows);
 		debug("init pty size %u:%u", ws.ws_row, ws.ws_col);
 		if (ioctl(task->to_stdin, TIOCSWINSZ, &ws))
-			error("ioctl(TIOCSWINSZ): %s");
+			error("ioctl(TIOCSWINSZ): %s", strerror(errno));
 	}
 
 	port_u = atoi(port);
@@ -1121,7 +1121,7 @@ io_init_tasks_stdio(slurmd_job_t *job)
 {
 	int i, rc = SLURM_SUCCESS, tmprc;
 
-	for (i = 0; i < job->ntasks; i++) {
+	for (i = 0; i < job->node_tasks; i++) {
 		tmprc = _init_task_stdio_fds(job->task[i], job);
 		if (tmprc != SLURM_SUCCESS)
 			rc = tmprc;
@@ -1327,7 +1327,7 @@ _free_outgoing_msg(struct io_buf *msg, slurmd_job_t *job)
 		/* Try packing messages from tasks' output cbufs */
 		if (job->task == NULL)
 			return;
-		for (i = 0; i < job->ntasks; i++) {
+		for (i = 0; i < job->node_tasks; i++) {
 			if (job->task[i]->err != NULL) {
 				_route_msg_task_to_client(job->task[i]->err);
 				if (!_outgoing_buf_free(job))
@@ -1364,7 +1364,7 @@ io_close_task_fds(slurmd_job_t *job)
 {
 	int i;
 
-	for (i = 0; i < job->ntasks; i++) {
+	for (i = 0; i < job->node_tasks; i++) {
 		close(job->task[i]->stdin_fd);
 		close(job->task[i]->stdout_fd);
 		close(job->task[i]->stderr_fd);
@@ -1377,7 +1377,7 @@ io_close_all(slurmd_job_t *job)
 	int devnull;
 #if 0
 	int i;
-	for (i = 0; i < job->ntasks; i++)
+	for (i = 0; i < job->node_tasks; i++)
 		_io_finalize(job->task[i]);
 #endif
 
@@ -1393,7 +1393,7 @@ io_close_all(slurmd_job_t *job)
 		error("Could not open /dev/null: %m");
 	} else {
 		if (dup2(devnull, STDERR_FILENO) < 0)
-			error("Unable to dup /dev/null onto stderr\n");
+			error("Unable to dup /dev/null onto stderr");
 	}
 
 	/* Signal IO thread to close appropriate
@@ -1490,7 +1490,7 @@ io_create_local_client(const char *filename, int file_flags,
 	client->is_local_file = true;
 
 	client->label_width = 1;
-	tmp = job->ntasks-1;
+	tmp = job->node_tasks-1;
 	while ((tmp /= 10) > 0)
 		client->label_width++;
 
@@ -1928,13 +1928,13 @@ _user_managed_io_connect(srun_info_t *srun, uint32_t gtid)
  * file descriptors.
  */
 int
-user_managed_io_client_connect(int ntasks, srun_info_t *srun,
+user_managed_io_client_connect(int node_tasks, srun_info_t *srun,
 			       slurmd_task_info_t **tasks)
 {
 	int fd;
 	int i;
 
-	for (i = 0; i < ntasks; i++) {
+	for (i = 0; i < node_tasks; i++) {
 		fd = _user_managed_io_connect(srun, tasks[i]->gtid);
 		if (fd == -1)
 			return SLURM_ERROR;
@@ -1968,7 +1968,7 @@ io_find_filename_pattern( slurmd_job_t *job,
 	*errpattern = SLURMD_UNKNOWN;
 	*same_out_err_files = false;
 
-	for (ii = 0; ii < job->ntasks; ii++) {
+	for (ii = 0; ii < job->node_tasks; ii++) {
 		if (job->task[ii]->ofname == NULL) {
 			of_num_null++;
 			of_lastnull = ii;
@@ -1983,16 +1983,16 @@ io_find_filename_pattern( slurmd_job_t *job,
 			ef_num_devnull++;
 		}
 	}
-	if (of_num_null == job->ntasks)
+	if (of_num_null == job->node_tasks)
 		*outpattern = SLURMD_ALL_NULL;
 
-	if (ef_num_null == job->ntasks)
+	if (ef_num_null == job->node_tasks)
 		*errpattern = SLURMD_ALL_NULL;
 
-	if (of_num_null == 1 && of_num_devnull == job->ntasks-1)
+	if (of_num_null == 1 && of_num_devnull == job->node_tasks-1)
 		*outpattern = SLURMD_ONE_NULL;
 
-	if (ef_num_null == 1 && ef_num_devnull == job->ntasks-1)
+	if (ef_num_null == 1 && ef_num_devnull == job->node_tasks-1)
 		*errpattern = SLURMD_ONE_NULL;
 
 	if (*outpattern == SLURMD_ALL_NULL && *errpattern == SLURMD_ALL_NULL)
@@ -2005,7 +2005,7 @@ io_find_filename_pattern( slurmd_job_t *job,
 	if (*outpattern != SLURMD_UNKNOWN && *errpattern != SLURMD_UNKNOWN)
 		return;
 
-	for (ii = 1; ii < job->ntasks; ii++) {
+	for (ii = 1; ii < job->node_tasks; ii++) {
 		if (!job->task[ii]->ofname || !job->task[0]->ofname ||
 		    strcmp(job->task[ii]->ofname, job->task[0]->ofname) != 0)
 			of_all_same = false;
@@ -2028,8 +2028,8 @@ io_find_filename_pattern( slurmd_job_t *job,
 	if (*outpattern != SLURMD_UNKNOWN && *errpattern != SLURMD_UNKNOWN)
 		return;
 
-	for (ii = 0; ii < job->ntasks-1; ii++) {
-		for (jj = ii+1; jj < job->ntasks; jj++) {
+	for (ii = 0; ii < job->node_tasks-1; ii++) {
+		for (jj = ii+1; jj < job->node_tasks; jj++) {
 
 			if (!job->task[ii]->ofname || !job->task[jj]->ofname ||
 			    strcmp(job->task[ii]->ofname,
@@ -2051,7 +2051,7 @@ io_find_filename_pattern( slurmd_job_t *job,
 
 	if (of_all_unique && ef_all_unique) {
 		*same_out_err_files = true;
-		for (ii = 0; ii < job->ntasks; ii++) {
+		for (ii = 0; ii < job->node_tasks; ii++) {
 			if (job->task[ii]->ofname &&
 			    job->task[ii]->efname &&
 			    strcmp(job->task[ii]->ofname,

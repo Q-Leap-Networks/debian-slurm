@@ -17,14 +17,15 @@ Optional plugins can be used for
 <a href="reservations.html">advanced reservation</a>,
 <a href="gang_scheduling.html">gang scheduling</a> (time sharing for
 parallel jobs), backfill scheduling,
+<a href="topology.html">topology optimized resource selection</a>,
 <a href="resource_limits.html">resource limits</a> by user or bank account,
 and sophisticated <a href="priority_multifactor.html"> multifactor job
-  prioritization</a> algorithms.
-
+prioritization</a> algorithms.
 
 <p>SLURM has been developed through the collaborative efforts of
 <a href="https://www.llnl.gov/">Lawrence Livermore National Laboratory (LLNL)</a>,
 <a href="http://www.hp.com/">Hewlett-Packard</a>,
+<a href="http://www.schedmd.com/">SchedMD</a>,
 <a href="http://www.bull.com/">Bull</a>,
 Linux NetworX and many other contributors.</p>
 
@@ -66,12 +67,12 @@ MySQL, PGSQL, SlurmDBD (Slurm Database Daemon) or none</li>
 
 <li><a href="authplugins.html">Authentication of communications</a>:
 <a href="http://www.theether.org/authd/">authd</a>,
-<a href="http://home.gna.org/munge/">munge</a>, or none (default).</li>
+<a href="http://munge.googlecode.com/">munge</a>, or none (default).</li>
 
 <li><a href="checkpoint_plugins.html">Checkpoint</a>: AIX, OpenMPI, XLCH, or none.</li>
 
 <li><a href="crypto_plugins.html">Cryptography (Digital Signature Generation)</a>:
-<a href="http://home.gna.org/munge/">munge</a> (default) or
+<a href="http://munge.googlecode.com/">munge</a> (default) or
 <a href="http://www.openssl.org/">OpenSSL</a>.</li>
 
 <li><a href="jobacct_gatherplugins.html">Job Accounting Gather</a>: AIX, Linux, or none(default)</li>

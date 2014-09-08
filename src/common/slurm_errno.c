@@ -2,7 +2,7 @@
  *  slurm_errno.c - error codes and functions for slurm
  ******************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jim Garlick <garlick@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
@@ -213,7 +213,7 @@ static slurm_errtab_t slurm_errtab[] = {
 	{ ESLURM_INVALID_TASK_MEMORY,
 	  "Memory required by task is not available"		},
 	{ ESLURM_INVALID_ACCOUNT,
-	  "Invalid account specified"				},
+	  "Invalid account or account/partition combination specified"},
 	{ ESLURM_INVALID_PARENT_ACCOUNT,
 	  "Invalid parent account specified"			},
 	{ ESLURM_SAME_PARENT_ACCOUNT,
@@ -231,7 +231,7 @@ static slurm_errtab_t slurm_errtab[] = {
 	  "Job violates accounting policy (job submit limit, user's "
 	  "size and/or time limits)"},
 	{ ESLURM_INVALID_TIME_LIMIT,
-	  "Requested time limit exceeds partition limit"	},
+	  "Requested time limit is invalid (exceeds some limit)"},
 	{ ESLURM_RESERVATION_ACCESS,
 	  "Access denied to requested reservation"		},
 	{ ESLURM_RESERVATION_INVALID,
@@ -262,6 +262,18 @@ static slurm_errtab_t slurm_errtab[] = {
 	  "QOS Preemption loop detected"                	},
 	{ ESLURM_NODE_NOT_AVAIL,
 	  "Required node not available (down or drained)"	},
+	{ ESLURM_INVALID_CPU_COUNT,
+	  "CPU count specification invalid"             	},
+	{ ESLURM_PARTITION_NOT_AVAIL,
+	  "Required partition not available (inactive or drain)"},
+	{ ESLURM_CIRCULAR_DEPENDENCY,
+	  "Circular job dependency"				},
+	{ ESLURM_INVALID_GRES,
+	  "Invalid generic resource (gres) specification"	},
+	{ ESLURM_JOB_NOT_PENDING,
+	  "Job is no longer pending execution"			},
+	{ ESLURM_QOS_THRES,
+	  "Requested account has breached requested QOS usage threshold"},
 
 	/* slurmd error codes */
 
@@ -359,7 +371,15 @@ static slurm_errtab_t slurm_errtab[] = {
 
 	/* accounting errors */
 	{ ESLURM_DB_CONNECTION,
-	  "Unable to connect to database"			}
+	  "Unable to connect to database"			},
+	{ ESLURM_JOBS_RUNNING_ON_ASSOC,
+	  "Job(s) running, cancel job(s) before remove"         },
+	{ ESLURM_CLUSTER_DELETED,
+	  "Cluster deleted, commit/rollback immediately"        },
+	{ ESLURM_ONE_CHANGE,
+	  "Can only change one at a time"                       },
+	{ ESLURM_BAD_NAME,
+	  "Unacceptable name given. (No '.' in name allowed)"   }
 };
 
 /*

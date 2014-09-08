@@ -3,7 +3,7 @@
  *  mode of smap.
  *****************************************************************************
  *  Copyright (C) 2004-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
@@ -49,9 +49,7 @@
 typedef struct {
 	char *bg_block_name;
 	enum connection_type bg_conn_type;
-#ifdef HAVE_BGL
 	enum node_use_type bg_node_use;
-#endif
 	char *bg_user_name;
 	char *ionodes;
 	int job_running;
@@ -65,36 +63,36 @@ typedef struct {
 	rm_partition_state_t state;
 } db2_block_info_t;
 
-#ifdef HAVE_BG
 static List block_list = NULL;
-#endif
 
-#ifdef HAVE_BG
 static int _marknodes(db2_block_info_t *block_ptr, int count);
-#endif
 static void _print_header_part(void);
 static int  _print_text_part(partition_info_t *part_ptr,
 			     db2_block_info_t *db2_info_ptr);
-#ifdef HAVE_BG
 static void _block_list_del(void *object);
 static void _nodelist_del(void *object);
 static int _list_match_all(void *object, void *key);
 static int _in_slurm_partition(List slurm_nodes, List bg_nodes);
 static int _print_rest(db2_block_info_t *block_ptr);
 static int _make_nodelist(char *nodes, List nodelist);
-#endif
 
 extern void get_slurm_part()
 {
-	int error_code, i, j, recs, count = 0;
+	int error_code, i, recs, count = 0;
 	static partition_info_msg_t *part_info_ptr = NULL;
 	static partition_info_msg_t *new_part_ptr = NULL;
 	partition_info_t part;
+	uint16_t show_flags = 0;
 	bitstr_t *nodes_req = NULL;
+	static uint16_t last_flags = 0;
 
+	if(params.all_flag)
+		show_flags |= SHOW_ALL;
 	if (part_info_ptr) {
+		if(show_flags != last_flags)
+			part_info_ptr->last_update = 0;
 		error_code = slurm_load_partitions(part_info_ptr->last_update,
-						   &new_part_ptr, SHOW_ALL);
+						   &new_part_ptr, show_flags);
 		if (error_code == SLURM_SUCCESS)
 			slurm_free_partition_info_msg(part_info_ptr);
 		else if (slurm_get_errno() == SLURM_NO_CHANGE_IN_DATA) {
@@ -103,8 +101,10 @@ extern void get_slurm_part()
 		}
 	} else {
 		error_code = slurm_load_partitions((time_t) NULL,
-						   &new_part_ptr, SHOW_ALL);
+						   &new_part_ptr, show_flags);
 	}
+
+	last_flags = show_flags;
 	if (error_code) {
 		if (quiet_flag != 1) {
 			if(!params.commandline) {
@@ -135,7 +135,6 @@ extern void get_slurm_part()
 	if(params.hl)
 		nodes_req = get_requested_node_bitmap();
 	for (i = 0; i < recs; i++) {
-		j = 0;
 		part = new_part_ptr->partition_array[i];
 
 		if(nodes_req) {
@@ -147,14 +146,21 @@ extern void get_slurm_part()
 			if(!overlap)
 				continue;
 		}
-		while (part.node_inx[j] >= 0) {
-			set_grid_inx(part.node_inx[j],
-				     part.node_inx[j + 1], count);
-			j += 2;
+		if (((params.cluster_flags & CLUSTER_FLAG_BG) == 0) &&
+		    (params.cluster_dims == 3)) {
+			set_grid_inx2(part.nodes, count);
+		} else {
+			int j = 0;
+			while (part.node_inx[j] >= 0) {
+				set_grid_inx(part.node_inx[j],
+					     part.node_inx[j + 1], count);
+				j += 2;
+			}
 		}
+
 		if(!params.commandline) {
 			if(i>=text_line_cnt) {
-				part.root_only = (int) letters[count%62];
+				part.flags = (int) letters[count%62];
 				wattron(text_win,
 					COLOR_PAIR(colors[count%6]));
 				_print_text_part(&part, NULL);
@@ -162,7 +168,7 @@ extern void get_slurm_part()
 					 COLOR_PAIR(colors[count%6]));
 			}
 		} else {
-			part.root_only = (int) letters[count%62];
+			part.flags = (int) letters[count%62];
 			_print_text_part(&part, NULL);
 		}
 		count++;
@@ -179,13 +185,12 @@ extern void get_slurm_part()
 
 extern void get_bg_part()
 {
-#ifdef HAVE_BG
 	int error_code, i, j, recs=0, count = 0, last_count = -1;
 	static partition_info_msg_t *part_info_ptr = NULL;
 	static partition_info_msg_t *new_part_ptr = NULL;
 	static block_info_msg_t *bg_info_ptr = NULL;
 	static block_info_msg_t *new_bg_ptr = NULL;
-
+	uint16_t show_flags = 0;
 	partition_info_t part;
 	db2_block_info_t *block_ptr = NULL;
 	db2_block_info_t *found_block = NULL;
@@ -193,9 +198,14 @@ extern void get_bg_part()
 	List nodelist = NULL;
 	bitstr_t *nodes_req = NULL;
 
+	if(!(params.cluster_flags & CLUSTER_FLAG_BG))
+		return;
+
+	if (params.all_flag)
+		show_flags |= SHOW_ALL;
 	if (part_info_ptr) {
 		error_code = slurm_load_partitions(part_info_ptr->last_update,
-						   &new_part_ptr, SHOW_ALL);
+						   &new_part_ptr, show_flags);
 		if (error_code == SLURM_SUCCESS)
 			slurm_free_partition_info_msg(part_info_ptr);
 		else if (slurm_get_errno() == SLURM_NO_CHANGE_IN_DATA) {
@@ -204,7 +214,7 @@ extern void get_bg_part()
 		}
 	} else {
 		error_code = slurm_load_partitions((time_t) NULL,
-						   &new_part_ptr, SHOW_ALL);
+						   &new_part_ptr, show_flags);
 	}
 
 	if (error_code) {
@@ -224,16 +234,16 @@ extern void get_bg_part()
 	}
 	if (bg_info_ptr) {
 		error_code = slurm_load_block_info(bg_info_ptr->last_update,
-						   &new_bg_ptr);
+						   &new_bg_ptr, show_flags);
 		if (error_code == SLURM_SUCCESS)
-			slurm_free_block_info_msg(&bg_info_ptr);
+			slurm_free_block_info_msg(bg_info_ptr);
 		else if (slurm_get_errno() == SLURM_NO_CHANGE_IN_DATA) {
 			error_code = SLURM_SUCCESS;
 			new_bg_ptr = bg_info_ptr;
 		}
 	} else {
 		error_code = slurm_load_block_info((time_t) NULL,
-						   &new_bg_ptr);
+						   &new_bg_ptr, show_flags);
 	}
 	if (error_code) {
 		if (quiet_flag != 1) {
@@ -245,7 +255,7 @@ extern void get_bg_part()
 				main_ycord++;
 			} else {
 				printf("slurm_load_block: %s\n",
-					  slurm_strerror(slurm_get_errno()));
+				       slurm_strerror(slurm_get_errno()));
 			}
 		}
 		return;
@@ -302,9 +312,10 @@ extern void get_bg_part()
 			= xstrdup(new_bg_ptr->block_array[i].owner_name);
 		block_ptr->state = new_bg_ptr->block_array[i].state;
 		block_ptr->bg_conn_type	= new_bg_ptr->block_array[i].conn_type;
-#ifdef HAVE_BGL
-		block_ptr->bg_node_use = new_bg_ptr->block_array[i].node_use;
-#endif
+		if(params.cluster_flags & CLUSTER_FLAG_BGL)
+			block_ptr->bg_node_use =
+				new_bg_ptr->block_array[i].node_use;
+
 		block_ptr->ionodes
 			= xstrdup(new_bg_ptr->block_array[i].ionodes);
 		block_ptr->node_cnt = new_bg_ptr->block_array[i].node_cnt;
@@ -388,17 +399,16 @@ extern void get_bg_part()
 
 	part_info_ptr = new_part_ptr;
 	bg_info_ptr = new_bg_ptr;
-#endif /* HAVE_BG */
 	return;
 }
 
-#ifdef HAVE_BG
 static int _marknodes(db2_block_info_t *block_ptr, int count)
 {
 	int j=0;
-	int start[BA_SYSTEM_DIMENSIONS];
-	int end[BA_SYSTEM_DIMENSIONS];
+	int start[params.cluster_dims];
+	int end[params.cluster_dims];
 	int number = 0;
+	char *p = '\0';
 
 	block_ptr->letter_num = count;
 	while (block_ptr->nodes[j] != '\0') {
@@ -409,33 +419,25 @@ static int _marknodes(db2_block_info_t *block_ptr, int count)
 		    && (block_ptr->nodes[j+4] == 'x'
 			|| block_ptr->nodes[j+4] == '-')) {
 			j++;
-			number = xstrntol(block_ptr->nodes + j,
-					  NULL, BA_SYSTEM_DIMENSIONS,
-					  HOSTLIST_BASE);
-			start[X] = number / (HOSTLIST_BASE * HOSTLIST_BASE);
-			start[Y] = (number % (HOSTLIST_BASE * HOSTLIST_BASE))
-				/ HOSTLIST_BASE;
-			start[Z] = (number % HOSTLIST_BASE);
+			number = strtoul(block_ptr->nodes + j, &p,
+					 params.cluster_base);
+			hostlist_parse_int_to_array(
+				number, start, params.cluster_dims,
+				params.cluster_base);
 			j += 4;
-			number = xstrntol(block_ptr->nodes + j,
-					  NULL, BA_SYSTEM_DIMENSIONS,
-					  HOSTLIST_BASE);
-			end[X] = number / (HOSTLIST_BASE * HOSTLIST_BASE);
-			end[Y] = (number % (HOSTLIST_BASE * HOSTLIST_BASE))
-				/ HOSTLIST_BASE;
-			end[Z] = (number % HOSTLIST_BASE);
+			number = strtoul(block_ptr->nodes + j, &p,
+					 params.cluster_base);
+			hostlist_parse_int_to_array(
+				number, end, params.cluster_dims,
+				params.cluster_base);
 			j += 3;
 
 			if(block_ptr->state != RM_PARTITION_FREE)
-				block_ptr->size += set_grid_bg(start,
-							       end,
-							       count,
-							       1);
+				block_ptr->size += set_grid_bg(
+					start, end, count, 1);
 			else
-				block_ptr->size += set_grid_bg(start,
-							       end,
-							       count,
-							       0);
+				block_ptr->size += set_grid_bg(
+					start, end, count, 0);
 			if(block_ptr->nodes[j] != ',')
 				break;
 			j--;
@@ -444,18 +446,14 @@ static int _marknodes(db2_block_info_t *block_ptr, int count)
 			  || (block_ptr->nodes[j] >= 'A'
 			      && block_ptr->nodes[j] <= 'Z')) {
 
-			number = xstrntol(block_ptr->nodes + j,
-					  NULL, BA_SYSTEM_DIMENSIONS,
-					  HOSTLIST_BASE);
-			start[X] = number / (HOSTLIST_BASE * HOSTLIST_BASE);
-			start[Y] = (number % (HOSTLIST_BASE * HOSTLIST_BASE))
-				/ HOSTLIST_BASE;
-			start[Z] = (number % HOSTLIST_BASE);
+			number = strtoul(block_ptr->nodes + j, &p,
+					 params.cluster_base);
+			hostlist_parse_int_to_array(
+				number, start, params.cluster_dims,
+				params.cluster_base);
 			j+=3;
-			block_ptr->size += set_grid_bg(start,
-							start,
-							count,
-							0);
+			block_ptr->size += set_grid_bg(
+				start, start, count, 0);
 			if(block_ptr->nodes[j] != ',')
 				break;
 			j--;
@@ -464,7 +462,6 @@ static int _marknodes(db2_block_info_t *block_ptr, int count)
 	}
 	return SLURM_SUCCESS;
 }
-#endif
 
 static void _print_header_part(void)
 {
@@ -506,24 +503,23 @@ static void _print_header_part(void)
 				  main_ycord,
 				  main_xcord, "CONN");
 			main_xcord += 7;
-#ifdef HAVE_BGL
-			mvwprintw(text_win,
-				  main_ycord,
-				  main_xcord, "NODE_USE");
-			main_xcord += 10;
-#endif
+			if(params.cluster_flags & CLUSTER_FLAG_BGL) {
+				mvwprintw(text_win,
+					  main_ycord,
+					  main_xcord, "NODE_USE");
+				main_xcord += 10;
+			}
 		}
 
 		mvwprintw(text_win, main_ycord,
 			  main_xcord, "NODES");
 		main_xcord += 7;
-#ifdef HAVE_BG
-		mvwprintw(text_win, main_ycord,
-			  main_xcord, "BP_LIST");
-#else
-		mvwprintw(text_win, main_ycord,
-			  main_xcord, "NODELIST");
-#endif
+		if(params.cluster_flags & CLUSTER_FLAG_BG)
+			mvwprintw(text_win, main_ycord,
+				  main_xcord, "BP_LIST");
+		else
+			mvwprintw(text_win, main_ycord,
+				  main_xcord, "NODELIST");
 		main_xcord = 1;
 		main_ycord++;
 	} else {
@@ -537,17 +533,15 @@ static void _print_header_part(void)
 			printf("   JOBID ");
 			printf("    USER ");
 			printf(" CONN ");
-#ifdef HAVE_BGL
-			printf(" NODE_USE ");
-#endif
+			if(params.cluster_flags & CLUSTER_FLAG_BGL)
+				printf(" NODE_USE ");
 		}
 
 		printf("NODES ");
-#ifdef HAVE_BG
-		printf("BP_LIST\n");
-#else
-		printf("NODELIST\n");
-#endif
+		if(params.cluster_flags & CLUSTER_FLAG_BG)
+			printf("BP_LIST\n");
+		else
+			printf("NODELIST\n");
 	}
 }
 
@@ -563,18 +557,20 @@ static int _print_text_part(partition_info_t *part_ptr,
 	char tmp_cnt[8];
 	char tmp_char[8];
 
-#ifdef HAVE_BG
-	convert_num_unit((float)part_ptr->total_nodes, tmp_cnt,
-			 sizeof(tmp_cnt), UNIT_NONE);
-#else
-	snprintf(tmp_cnt, sizeof(tmp_cnt), "%u", part_ptr->total_nodes);
-#endif
+	if(params.cluster_flags & CLUSTER_FLAG_BG)
+		convert_num_unit((float)part_ptr->total_nodes, tmp_cnt,
+				 sizeof(tmp_cnt), UNIT_NONE);
+	else
+		snprintf(tmp_cnt, sizeof(tmp_cnt), "%u", part_ptr->total_nodes);
 
 	if(!params.commandline) {
+		uint16_t root_only = 0;
+		if (part_ptr->flags & PART_FLAG_ROOT_ONLY)
+			root_only = 1;
 		mvwprintw(text_win,
 			  main_ycord,
 			  main_xcord, "%c",
-			  part_ptr->root_only);
+			  root_only);
 		main_xcord += 4;
 
 		if (part_ptr->name) {
@@ -584,16 +580,19 @@ static int _print_text_part(partition_info_t *part_ptr,
 				  part_ptr->name);
 			main_xcord += 10;
 			if (params.display != BGPART) {
-				if (part_ptr->state_up)
-					mvwprintw(text_win,
-						  main_ycord,
-						  main_xcord,
-						  "up");
+				char *tmp_state;
+				if (part_ptr->state_up == PARTITION_INACTIVE)
+					tmp_state = "inact";
+				else if (part_ptr->state_up == PARTITION_UP)
+					tmp_state = "up";
+				else if (part_ptr->state_up == PARTITION_DOWN)
+					tmp_state = "down";
+				else if (part_ptr->state_up == PARTITION_DRAIN)
+					tmp_state = "drain";
 				else
-					mvwprintw(text_win,
-						  main_ycord,
-						  main_xcord,
-						  "down");
+					tmp_state = "unk";
+				mvwprintw(text_win, main_ycord, main_xcord,
+					  tmp_state);
 				main_xcord += 7;
 
 				if (part_ptr->max_time == INFINITE)
@@ -658,14 +657,15 @@ static int _print_text_part(partition_info_t *part_ptr,
 						  db2_info_ptr->
 						  bg_conn_type));
 				main_xcord += 7;
-#ifdef HAVE_BGL
-				mvwprintw(text_win,
-					  main_ycord,
-					  main_xcord, "%.9s",
-					  node_use_string(
-						  db2_info_ptr->bg_node_use));
-				main_xcord += 10;
-#endif
+				if(params.cluster_flags & CLUSTER_FLAG_BGL) {
+					mvwprintw(text_win,
+						  main_ycord,
+						  main_xcord, "%.9s",
+						  node_use_string(
+							  db2_info_ptr->
+							  bg_node_use));
+					main_xcord += 10;
+				}
 			} else {
 				mvwprintw(text_win,
 					  main_ycord,
@@ -749,10 +749,16 @@ static int _print_text_part(partition_info_t *part_ptr,
 			printf("%9.9s ", part_ptr->name);
 
 			if (params.display != BGPART) {
-				if (part_ptr->state_up)
+				if (part_ptr->state_up == PARTITION_INACTIVE)
+					printf(" inact ");
+				else if (part_ptr->state_up == PARTITION_UP)
 					printf("   up ");
-				else
+				else if (part_ptr->state_up == PARTITION_DOWN)
 					printf(" down ");
+				else if (part_ptr->state_up == PARTITION_DRAIN)
+					printf(" drain ");
+				else
+					printf(" unk ");
 
 				if (part_ptr->max_time == INFINITE)
 					snprintf(time_buf, sizeof(time_buf),
@@ -790,10 +796,10 @@ static int _print_text_part(partition_info_t *part_ptr,
 
 				printf("%5.5s ", conn_type_string(
 					       db2_info_ptr->bg_conn_type));
-#ifdef HAVE_BGL
-				printf("%9.9s ",  node_use_string(
-					       db2_info_ptr->bg_node_use));
-#endif
+				if(params.cluster_flags & CLUSTER_FLAG_BGL)
+					printf("%9.9s ", node_use_string(
+						       db2_info_ptr->
+						       bg_node_use));
 			}
 		}
 
@@ -813,7 +819,6 @@ static int _print_text_part(partition_info_t *part_ptr,
 	return printed;
 }
 
-#ifdef HAVE_BG
 static void _block_list_del(void *object)
 {
 	db2_block_info_t *block_ptr = (db2_block_info_t *)object;
@@ -895,7 +900,7 @@ static int _print_rest(db2_block_info_t *block_ptr)
 	if (!block_ptr->printed)
 		return SLURM_SUCCESS;
 	part.allow_groups = block_ptr->nodes;
-	part.root_only = (int) letters[block_ptr->letter_num%62];
+	part.flags = (int) letters[block_ptr->letter_num%62];
 	if(!params.commandline) {
 		wattron(text_win,
 			COLOR_PAIR(colors[block_ptr->letter_num%6]));
@@ -912,7 +917,6 @@ static int _addto_nodelist(List nodelist, int *start, int *end)
 {
 	int *coord = NULL;
 	int x,y,z;
-
 	if(end[X] >= DIM_SIZE[X]
 	   || end[Y] >= DIM_SIZE[Y]
 	   || end[Z] >= DIM_SIZE[Z]) {
@@ -943,8 +947,9 @@ static int _make_nodelist(char *nodes, List nodelist)
 {
 	int j = 0;
 	int number;
-	int start[BA_SYSTEM_DIMENSIONS];
-	int end[BA_SYSTEM_DIMENSIONS];
+	int start[params.cluster_dims];
+	int end[params.cluster_dims];
+	char *p = '\0';
 
 	if(!nodelist)
 		nodelist = list_create(_nodelist_del);
@@ -956,21 +961,17 @@ static int _make_nodelist(char *nodes, List nodelist)
 		    && (nodes[j+4] == 'x'
 			|| nodes[j+4] == '-')) {
 			j++;
-			number = xstrntol(nodes + j, NULL,
-					  BA_SYSTEM_DIMENSIONS, HOSTLIST_BASE);
-			start[X] = number / (HOSTLIST_BASE * HOSTLIST_BASE);
-			start[Y] = (number % (HOSTLIST_BASE * HOSTLIST_BASE))
-				/ HOSTLIST_BASE;
-			start[Z] = (number % HOSTLIST_BASE);
-
+			number = xstrntol(nodes + j, &p, params.cluster_dims,
+					  params.cluster_base);
+			hostlist_parse_int_to_array(
+				number, start, params.cluster_dims,
+				params.cluster_base);
 			j += 4;
-			number = xstrntol(nodes + j, NULL,
-					  BA_SYSTEM_DIMENSIONS, HOSTLIST_BASE);
-			end[X] = number / (HOSTLIST_BASE * HOSTLIST_BASE);
-			end[Y] = (number % (HOSTLIST_BASE * HOSTLIST_BASE))
-				/ HOSTLIST_BASE;
-			end[Z] = (number % HOSTLIST_BASE);
-
+			number = xstrntol(nodes + j, &p, params.cluster_dims,
+					  params.cluster_base);
+			hostlist_parse_int_to_array(
+				number, end, params.cluster_dims,
+				params.cluster_base);
 			j += 3;
 			_addto_nodelist(nodelist, start, end);
 			if(nodes[j] != ',')
@@ -979,12 +980,11 @@ static int _make_nodelist(char *nodes, List nodelist)
 		} else if((nodes[j] >= '0' && nodes[j] <= '9')
 			  || (nodes[j] >= 'A' && nodes[j] <= 'Z')) {
 
-			number = xstrntol(nodes + j, NULL,
-					  BA_SYSTEM_DIMENSIONS, HOSTLIST_BASE);
-			start[X] = number / (HOSTLIST_BASE * HOSTLIST_BASE);
-			start[Y] = (number % (HOSTLIST_BASE * HOSTLIST_BASE))
-				/ HOSTLIST_BASE;
-			start[Z] = (number % HOSTLIST_BASE);
+			number = xstrntol(nodes + j, &p, params.cluster_dims,
+					  params.cluster_base);
+			hostlist_parse_int_to_array(
+				number, start, params.cluster_dims,
+				params.cluster_base);
 			j+=3;
 			_addto_nodelist(nodelist, start, start);
 			if(nodes[j] != ',')
@@ -995,5 +995,3 @@ static int _make_nodelist(char *nodes, List nodelist)
 	}
 	return 1;
 }
-
-#endif

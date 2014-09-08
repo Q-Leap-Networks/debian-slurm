@@ -194,8 +194,10 @@ int slurm_step_launch (slurm_step_ctx_t *ctx,
 	}
 
 	/* Create message receiving sockets and handler thread */
-	_msg_thr_create(ctx->launch_state,
-			ctx->step_resp->step_layout->node_cnt);
+	rc = _msg_thr_create(ctx->launch_state,
+			     ctx->step_resp->step_layout->node_cnt);
+	if (rc != SLURM_SUCCESS)
+		return rc;
 
 	/* Start tasks on compute nodes */
 	launch.job_id = ctx->step_req->job_id;
@@ -228,7 +230,7 @@ int slurm_step_launch (slurm_step_ctx_t *ctx,
 		launch.cwd = _lookup_cwd();
 	}
 	launch.nnodes		= ctx->step_resp->step_layout->node_cnt;
-	launch.nprocs		= ctx->step_resp->step_layout->task_cnt;
+	launch.ntasks		= ctx->step_resp->step_layout->task_cnt;
 	launch.slurmd_debug	= params->slurmd_debug;
 	launch.switch_job	= ctx->step_resp->switch_job;
 	launch.task_prolog	= params->task_prolog;
@@ -486,6 +488,7 @@ void slurm_step_launch_wait_finish(slurm_step_ctx_t *ctx)
 	pthread_mutex_unlock(&sls->lock);
 	pthread_join(sls->msg_thread, NULL);
 	pthread_mutex_lock(&sls->lock);
+	pmi_kvs_free();
 
 	eio_handle_destroy(sls->msg_handle);
 
@@ -521,8 +524,10 @@ void slurm_step_launch_abort(slurm_step_ctx_t *ctx)
 {
 	struct step_launch_state *sls = ctx->launch_state;
 
+	pthread_mutex_lock(&sls->lock);
 	sls->abort = true;
 	pthread_cond_broadcast(&sls->cond);
+	pthread_mutex_unlock(&sls->lock);
 }
 
 /*
@@ -535,7 +540,6 @@ void slurm_step_launch_fwd_signal(slurm_step_ctx_t *ctx, int signo)
 	kill_tasks_msg_t msg;
 	hostlist_t hl;
 	char *name = NULL;
-	char buf[8192];
 	List ret_list = NULL;
 	ListIterator itr;
 	ret_data_info_t *ret_data_info = NULL;
@@ -582,9 +586,8 @@ void slurm_step_launch_fwd_signal(slurm_step_ctx_t *ctx, int signo)
 		hostlist_destroy(hl);
 		goto nothing_left;
 	}
-	hostlist_ranged_string(hl, sizeof(buf), buf);
+	name = hostlist_ranged_string_xmalloc(hl);
 	hostlist_destroy(hl);
-	name = xstrdup(buf);
 
 	slurm_msg_t_init(&req);
 	req.msg_type = REQUEST_SIGNAL_TASKS;
@@ -672,9 +675,9 @@ void step_launch_state_destroy(struct step_launch_state *sls)
 	/* First undo anything created in step_launch_state_create() */
 	pthread_mutex_destroy(&sls->lock);
 	pthread_cond_destroy(&sls->cond);
-	bit_free(sls->tasks_started);
-	bit_free(sls->tasks_exited);
-	bit_free(sls->node_io_error);
+	FREE_NULL_BITMAP(sls->tasks_started);
+	FREE_NULL_BITMAP(sls->tasks_exited);
+	FREE_NULL_BITMAP(sls->node_io_error);
 	xfree(sls->io_deadline);
 
 	/* Now clean up anything created by slurm_step_launch() */
@@ -822,7 +825,8 @@ static int _msg_thr_create(struct step_launch_state *sls, int num_nodes)
 	if (pthread_create(&sls->msg_thread, &attr,
 			   _msg_thr_internal, (void *)sls) != 0) {
 		error("pthread_create of message thread: %m");
-
+		/* make sure msg_thread is 0 so we don't wait on it. */
+		sls->msg_thread = 0;
 		rc = SLURM_ERROR;
 	}
 	slurm_attr_destroy(&attr);
@@ -836,6 +840,13 @@ _launch_handler(struct step_launch_state *sls, slurm_msg_t *resp)
 	int i;
 
 	pthread_mutex_lock(&sls->lock);
+	if ((msg->count_of_pids > 0) &&
+	    bit_test(sls->tasks_started, msg->task_ids[0])) {
+		debug3("duplicate launch response received from node %s. "
+		       "this is not an error", msg->node_name);
+		pthread_mutex_unlock(&sls->lock);
+		return;
+	}
 
 	if (msg->return_code) {
 		for (i = 0; i < msg->count_of_pids; i++) {
@@ -1213,6 +1224,10 @@ _handle_msg(void *arg, slurm_msg_t *msg)
 	case SRUN_JOB_COMPLETE:
 		debug2("received job step complete message");
 		force_terminated_job = true;
+		pthread_mutex_lock(&sls->lock);
+		sls->abort = true;
+		pthread_cond_broadcast(&sls->cond);
+		pthread_mutex_unlock(&sls->lock);
 		_job_complete_handler(sls, msg);
 		slurm_free_srun_job_complete_msg(msg->data);
 		break;
@@ -1274,8 +1289,14 @@ static int _fail_step_tasks(slurm_step_ctx_t *ctx, char *node, int ret_code)
 	step_complete_msg_t msg;
 	int rc = -1;
 	int nodeid = NO_VAL;
+	struct step_launch_state *sls = ctx->launch_state;
 
 	nodeid = nodelist_find(ctx->step_resp->step_layout->node_list, node);
+
+	pthread_mutex_lock(&sls->lock);
+	sls->abort = true;
+	pthread_cond_broadcast(&sls->cond);
+	pthread_mutex_unlock(&sls->lock);
 
 	memset(&msg, 0, sizeof(step_complete_msg_t));
 	msg.job_id = ctx->job_id;
@@ -1343,7 +1364,8 @@ static int _launch_tasks(slurm_step_ctx_t *ctx,
 
 			errno = tot_rc;
 			tot_rc = SLURM_ERROR;
-			error("Task launch for %u.%u failed on node %s: %m",
+			error("Task launch for %u.%u failed on "
+			      "node %s: %m",
 			      ctx->job_id, ctx->step_resp->job_step_id,
 			      ret_data->node_name);
 		} else {
@@ -1378,19 +1400,20 @@ static void _print_launch_msg(launch_tasks_request_msg_t *msg,
 			      char *hostname, int nodeid)
 {
 	int i;
-	char tmp_str[10], task_list[4096];
+	char tmp_str[10], *task_list = NULL;
 	hostlist_t hl = hostlist_create("");
 
 	for (i=0; i<msg->tasks_to_launch[nodeid]; i++) {
 		sprintf(tmp_str, "%u", msg->global_task_ids[nodeid][i]);
 		hostlist_push(hl, tmp_str);
 	}
-	hostlist_ranged_string(hl, 4096, task_list);
+	task_list = hostlist_ranged_string_xmalloc(hl);
 	hostlist_destroy(hl);
 
 	info("launching %u.%u on host %s, %u tasks: %s",
 	     msg->job_id, msg->job_step_id, hostname,
 	     msg->tasks_to_launch[nodeid], task_list);
+	xfree(task_list);
 
 	debug3("uid:%ld gid:%ld cwd:%s %d", (long) msg->uid,
 		(long) msg->gid, msg->cwd, nodeid);
@@ -1551,6 +1574,7 @@ _start_io_timeout_thread(step_launch_state_t *sls)
 	if (pthread_create(&sls->io_timeout_thread, &attr,
 			   _check_io_timeout, (void *)sls) != 0) {
 		error("pthread_create of io timeout thread: %m");
+		sls->io_timeout_thread = 0;
 		rc = SLURM_ERROR;
 	} else {
 		sls->io_timeout_thread_created = true;
@@ -1603,8 +1627,8 @@ _check_io_timeout(void *_sls)
 			      "sleeping indefinitely");
 			pthread_cond_wait(&sls->cond, &sls->lock);
 		} else {
-			debug("io timeout thread: sleeping %ds until deadline",
-			       next_deadline - time(NULL));
+			debug("io timeout thread: sleeping %lds until deadline",
+			       (long)(next_deadline - time(NULL)));
 			ts.tv_sec = next_deadline;
 			pthread_cond_timedwait(&sls->cond, &sls->lock, &ts);
 		}

@@ -87,6 +87,95 @@
 #define CKPT_WAIT	10
 #define	MAX_INPUT_FIELDS 128
 
+typedef enum {
+	/* COMMON */
+	PRINT_ACCT,
+	PRINT_CLUSTER,
+	PRINT_COORDS,
+	PRINT_DESC,
+	PRINT_FLAGS,
+	PRINT_NAME,
+	PRINT_PART,
+	PRINT_QOS,
+	PRINT_QOS_RAW,
+	PRINT_USER,
+	PRINT_WCKEYS,
+
+	/* LIMITS */
+	PRINT_FAIRSHARE = 1000,
+	PRINT_GRPCM,
+	PRINT_GRPCRM,
+	PRINT_GRPC,
+	PRINT_GRPJ,
+	PRINT_GRPN,
+	PRINT_GRPS,
+	PRINT_GRPW,
+	PRINT_MAXCM,
+	PRINT_MAXCRM,
+	PRINT_MAXC,
+	PRINT_MAXJ,
+	PRINT_MAXN,
+	PRINT_MAXS,
+	PRINT_MAXW,
+
+	/* ASSOCIATION */
+	PRINT_DQOS = 2000,
+	PRINT_ID,
+	PRINT_LFT,
+	PRINT_PID,
+	PRINT_PNAME,
+	PRINT_RGT,
+
+	/* CLUSTER */
+	PRINT_CHOST = 3000,
+	PRINT_CPORT,
+	PRINT_CLASS,
+	PRINT_CPUS,
+	PRINT_NODECNT,
+	PRINT_CLUSTER_NODES,
+	PRINT_RPC_VERSION,
+	PRINT_SELECT,
+
+	/* ACCT */
+	PRINT_ORG = 4000,
+
+	/* USER */
+	PRINT_ADMIN = 5000,
+	PRINT_DACCT,
+	PRINT_DWCKEY,
+
+	/* QOS */
+	PRINT_PREE = 6000,
+	PRINT_PREEM,
+	PRINT_PRIO,
+	PRINT_UF,
+	PRINT_UT,
+
+	/* PROBLEM */
+	PRINT_PROBLEM = 7000,
+
+	/* TXN */
+	PRINT_ACTIONRAW = 8000,
+	PRINT_ACTION,
+	PRINT_ACTOR,
+	PRINT_INFO,
+	PRINT_TS,
+	PRINT_WHERE,
+
+	/* EVENT */
+	PRINT_DURATION,
+	PRINT_END,
+	PRINT_EVENTRAW,
+	PRINT_EVENT,
+	PRINT_NODENAME,
+	PRINT_REASON,
+	PRINT_START,
+	PRINT_STATERAW,
+	PRINT_STATE,
+
+} sacctmgr_print_t;
+
+
 extern char *command_name;
 extern int exit_code;	/* sacctmgr's exit code, =1 on any error at any time */
 extern int exit_flag;	/* program to terminate if =1 */
@@ -99,6 +188,20 @@ extern int readonly_flag; /* make it so you can only run list commands */
 extern void *db_conn;
 extern uint32_t my_uid;
 extern List g_qos_list;
+extern bool tree_display;
+
+extern bool sacctmgr_check_default_qos(uint32_t qos_id,
+				       slurmdb_association_cond_t *assoc_cond);
+
+extern int sacctmgr_set_association_cond(slurmdb_association_cond_t *assoc_cond,
+					 char *type, char *value,
+					 int command_len, int option);
+extern int sacctmgr_set_association_rec(slurmdb_association_rec_t *assoc_rec,
+					char *type, char *value,
+					int command_len, int option);
+extern void sacctmgr_print_association_rec(slurmdb_association_rec_t *assoc,
+					   print_field_t *field, List tree_list,
+					   bool last);
 
 extern int sacctmgr_add_association(int argc, char *argv[]);
 extern int sacctmgr_add_user(int argc, char *argv[]);
@@ -112,6 +215,7 @@ extern int sacctmgr_list_user(int argc, char *argv[]);
 extern int sacctmgr_list_account(int argc, char *argv[]);
 extern int sacctmgr_list_cluster(int argc, char *argv[]);
 extern int sacctmgr_list_config(bool have_db_conn);
+extern int sacctmgr_list_event(int argc, char *argv[]);
 extern int sacctmgr_list_problem(int argc, char *argv[]);
 extern int sacctmgr_list_qos(int argc, char *argv[]);
 extern int sacctmgr_list_wckey(int argc, char *argv[]);
@@ -120,6 +224,7 @@ extern int sacctmgr_modify_association(int argc, char *argv[]);
 extern int sacctmgr_modify_user(int argc, char *argv[]);
 extern int sacctmgr_modify_account(int argc, char *argv[]);
 extern int sacctmgr_modify_cluster(int argc, char *argv[]);
+extern int sacctmgr_modify_job(int argc, char *argv[]);
 extern int sacctmgr_modify_qos(int argc, char *argv[]);
 
 extern int sacctmgr_delete_association(int argc, char *argv[]);
@@ -155,50 +260,48 @@ extern void sacctmgr_print_qos_list(print_field_t *field, List qos_list,
 extern void sacctmgr_print_qos_bitstr(print_field_t *field, List qos_list,
 				      bitstr_t *value, int last);
 
-extern void sacctmgr_print_assoc_limits(acct_association_rec_t *assoc);
-extern void sacctmgr_print_qos_limits(acct_qos_rec_t *qos);
-extern int sort_coord_list(acct_coord_rec_t *coord_a,
-			   acct_coord_rec_t *coord_b);
+extern void sacctmgr_print_assoc_limits(slurmdb_association_rec_t *assoc);
+extern void sacctmgr_print_qos_limits(slurmdb_qos_rec_t *qos);
+extern int sacctmgr_remove_assoc_usage(slurmdb_association_cond_t *assoc_cond);
+extern int sort_coord_list(slurmdb_coord_rec_t *coord_a,
+			   slurmdb_coord_rec_t *coord_b);
+extern List sacctmgr_process_format_list(List format_list);
 
 /* you need to free the objects returned from these functions */
-extern acct_association_rec_t *sacctmgr_find_association(char *user,
-							 char *account,
-							 char *cluster,
-							 char *partition);
-extern acct_association_rec_t *sacctmgr_find_account_base_assoc(
+extern slurmdb_association_rec_t *sacctmgr_find_account_base_assoc(
 	char *account, char *cluster);
-extern acct_association_rec_t *sacctmgr_find_root_assoc(char *cluster);
-extern acct_user_rec_t *sacctmgr_find_user(char *name);
-extern acct_account_rec_t *sacctmgr_find_account(char *name);
-extern acct_cluster_rec_t *sacctmgr_find_cluster(char *name);
+extern slurmdb_association_rec_t *sacctmgr_find_root_assoc(char *cluster);
+extern slurmdb_user_rec_t *sacctmgr_find_user(char *name);
+extern slurmdb_account_rec_t *sacctmgr_find_account(char *name);
+extern slurmdb_cluster_rec_t *sacctmgr_find_cluster(char *name);
 
 /* do not free any of the object returned from these functions since
  * they are pointing to an object in the list given
  */
 
-extern acct_association_rec_t *sacctmgr_find_association_from_list(
+extern slurmdb_association_rec_t *sacctmgr_find_association_from_list(
 	List assoc_list, char *user, char *account,
 	char *cluster, char *partition);
-extern acct_association_rec_t *sacctmgr_find_account_base_assoc_from_list(
+extern slurmdb_association_rec_t *sacctmgr_find_account_base_assoc_from_list(
 	List assoc_list, char *account, char *cluster);
-extern acct_qos_rec_t *sacctmgr_find_qos_from_list(
+extern slurmdb_qos_rec_t *sacctmgr_find_qos_from_list(
 	List qos_list, char *name);
-extern acct_user_rec_t *sacctmgr_find_user_from_list(
+extern slurmdb_user_rec_t *sacctmgr_find_user_from_list(
 	List user_list, char *name);
-extern acct_account_rec_t *sacctmgr_find_account_from_list(
+extern slurmdb_account_rec_t *sacctmgr_find_account_from_list(
 	List acct_list, char *name);
-extern acct_cluster_rec_t *sacctmgr_find_cluster_from_list(
+extern slurmdb_cluster_rec_t *sacctmgr_find_cluster_from_list(
 	List cluster_list, char *name);
-extern acct_wckey_rec_t *sacctmgr_find_wckey_from_list(
+extern slurmdb_wckey_rec_t *sacctmgr_find_wckey_from_list(
 	List wckey_list, char *user, char *name, char *cluster);
 
 
 /* file_functions.c */
 extern int print_file_add_limits_to_line(char **line,
-					 acct_association_rec_t *assoc);
+					 slurmdb_association_rec_t *assoc);
 
-extern int print_file_acct_hierarchical_rec_list(FILE *fd,
-					  List acct_hierarchical_rec_list,
+extern int print_file_slurmdb_hierarchical_rec_list(FILE *fd,
+					  List slurmdb_hierarchical_rec_list,
 					  List user_list,
 					  List acct_list);
 

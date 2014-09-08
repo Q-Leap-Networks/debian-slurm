@@ -67,7 +67,7 @@ int init( void )
 {
 	pthread_attr_t attr;
 
-	verbose( "Backfill scheduler plugin loaded" );
+	verbose( "sched: Backfill scheduler plugin loaded" );
 
 	pthread_mutex_lock( &thread_flag_mutex );
 	if ( backfill_thread ) {
@@ -107,7 +107,8 @@ void fini( void )
 /**************************************************************************/
 int slurm_sched_plugin_reconfig( void )
 {
-       return SLURM_SUCCESS;
+	backfill_reconfig();
+	return SLURM_SUCCESS;
 }
 
 /***************************************************************************/
@@ -153,7 +154,7 @@ slurm_sched_plugin_initial_priority( uint32_t last_prio,
 /**************************************************************************/
 void slurm_sched_plugin_job_is_pending( void )
 {
-	run_backfill();
+	/* Empty. */
 }
 
 /**************************************************************************/

@@ -43,6 +43,7 @@
 #include "src/common/macros.h"
 
 #define xstrcat(__p, __q)		_xstrcat(&(__p), __q)
+#define xstrncat(__p, __q, __l)		_xstrncat(&(__p), __q, __l)
 #define xstrcatchar(__p, __c)		_xstrcatchar(&(__p), __c)
 #define xslurm_strerrorcat(__p)		_xslurm_strerrorcat(&(__p))
 #define xstrftimecat(__p, __fmt)	_xstrftimecat(&(__p), __fmt)
@@ -67,6 +68,11 @@
 void _xstrcat(char **str1, const char *str2);
 
 /*
+** cat len of str2 onto str1, expanding str1 as necessary
+*/
+void _xstrncat(char **str1, const char *str2, size_t len);
+
+/*
 ** concatenate one char, `c', onto str1, expanding str1 as needed
 */
 void _xstrcatchar(char **str1, char c);
@@ -86,7 +92,8 @@ void _xstrftimecat(char **str, const char *fmt);
 ** concatenate printf-style formatted string onto str
 ** return value is result from vsnprintf(3)
 */
-int _xstrfmtcat(char **str, const char *fmt, ...);
+int _xstrfmtcat(char **str, const char *fmt, ...)
+  __attribute__ ((format (printf, 2, 3)));
 
 /*
 ** concatenate range of memory from start to end (not including end)
@@ -102,7 +109,8 @@ char *xstrdup(const char *str);
 /*
 ** strdup formatted which uses xmalloc routines
 */
-char *xstrdup_printf(const char *fmt, ...);
+char *xstrdup_printf(const char *fmt, ...)
+  __attribute__ ((format (printf, 1, 2)));
 
 /*
 ** strndup which uses xmalloc routines
@@ -151,7 +159,8 @@ bool xstring_is_whitespace(const char *str);
 
 /*
  * If str make everything lowercase.  Should not be called on static char *'s
+ * Returns the lowered string which is the same pointer that is sent in.
  */
-void xstrtolower(char *str);
+char *xstrtolower(char *str);
 
 #endif /* !_XSTRING_H */

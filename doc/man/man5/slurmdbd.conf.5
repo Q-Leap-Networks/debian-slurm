@@ -1,4 +1,4 @@
-.TH "slurmdbd.conf" "5" "February 2009" "slurmdbd.conf 2.0" "Slurm configuration file"
+.TH "slurmdbd.conf" "19" "August 2010" "slurmdbd.conf 2.2" "Slurm configuration file"
 .SH "NAME"
 slurmdbd.conf \- Slurm Database Daemon (SlurmDBD) configuration file
 
@@ -23,23 +23,30 @@ The overall configuration parameters available include:
 
 .TP
 \fBArchiveDir\fR
-If ArchiveScript is not set the slurmdbd will generate a text file that can be
+If ArchiveScript is not set the slurmdbd will generate a file that can be
 read in anytime with sacctmgr load filename.  This directory is where the
-file will be placed archive has ran.  Default is /tmp.
+file will be placed archive has ran.  Default is /tmp.  The format for this
+files name is
+$ArchiveDir/$ClusterName_$ArchiveObject_archive_$BeginTimeStamp_$endTimeStamp
 
 .TP
 \fBArchiveEvents\fR
-Boolean, yes to archive event data, no other wise.  Default is no.
+When purging events also achive them.  Boolean, yes to archive event data,
+no other wise.  Default is no.
 
 .TP
 \fBArchiveJobs\fR
-Boolean, yes to archive job data, no other wise.  Default is no.
+When purging jobs also achive them.  Boolean, yes to archive job data,
+no other wise.  Default is no.
 
 .TP
 \fBArchiveScript\fR
-This script is executed periodically in order to transfer accounting
-records out of the database into an archive. The script is executed
-with a no arguments, The following environment variables are set.
+This script can be executed every time a rollup happens (every hour,
+day and month), depending on the Purge*After options.  This script is used
+to transfer accounting records out of the database into an archive.  It is
+used in place of the internal process used to acrhive objects.
+The script is executed with a no arguments, The following environment
+variables are set.
 .RS
 .TP
 \fBSLURM_ARCHIVE_EVENTS\fR
@@ -70,11 +77,13 @@ Time of last suspend start to archive.
 
 .TP
 \fBArchiveSteps\fR
-Boolean, yes to archive step data, no other wise.  Default is no.
+When purging steps also achive them.  Boolean, yes to archive step data,
+no other wise.  Default is no.
 
 .TP
 \fBArchiveSuspend\fR
-Boolean, yes to archive suspend data, no other wise.  Default is no.
+When purging suspend data also achive it.  Boolean, yes to archive
+suspend data, no other wise.  Default is no.
 
 .TP
 \fBAuthInfo\fR
@@ -202,33 +211,45 @@ but can only see themselves when listing users.
 .RE
 
 .TP
-\fBPurgeEventMonths\fR
+\fBPurgeEventAfter\fR
 Events happening on the cluster over this age are purged from the database.
-This includeds node down times and such.
-The time is a numeric value and is a number of months.
-If zero (default), then job step records are never purged.
+This includes node down times and such.
+The time is a numeric value and is a number of months.  If you want to purge
+more often you can include hours, or days behind the numeric value to get
+those more frequent purges. (i.e. a value of '12hours' would purge
+everything older than 12 hours.)
+If not set (default), then job step records are never purged.
 
 .TP
-\fBPurgeJobMonths\fR
+\fBPurgeJobAfter\fR
 Individual job records over this age are purged from the database.
 Aggregated information will be preserved indefinitely.
-The time is a numeric value and is a number of months.
-If zero (default), then job records are never purged.
+The time is a numeric value and is a number of months.  If you want to purge
+more often you can include hours, or days behind the numeric value to get
+those more frequent purges. (i.e. a value of '12hours' would purge
+everything older than 12 hours.)
+If not set (default), then job records are never purged.
 
 .TP
-\fBPurgeStepMonths\fR
+\fBPurgeStepAfter\fR
 Individual job step records over this age are purged from the database.
 Aggregated information will be preserved indefinitely.
-The time is a numeric value and is a number of months.
-If zero (default), then job step records are never purged.
+The time is a numeric value and is a number of months.  If you want to purge
+more often you can include hours, or days behind the numeric value to get
+those more frequent purges. (i.e. a value of '12hours' would purge
+everything older than 12 hours.)
+If not set (default), then job step records are never purged.
 
 .TP
-\fBPurgeSuspendMonths\fR
+\fBPurgeSuspendAfter\fR
 Records of individual suspend times for jobs over this age are purged from the
 database.
 Aggregated information will be preserved indefinitely.
-The time is a numeric value and is a number of months.
-If zero (default), then job step records are never purged.
+The time is a numeric value and is a number of months.  If you want to purge
+more often you can include hours, or days behind the numeric value to get
+those more frequent purges. (i.e. a value of '12hours' would purge
+everything older than 12 hours.)
+If not set (default), then job step records are never purged.
 
 .TP
 \fBSlurmUser\fR
@@ -250,7 +271,7 @@ Define the name of the backup host the database is running where we are going
 to store the data.  This can be viewed as a backup solution when the
 StorageHost is not responding.  It is up to the backup solution to enforce the
 coherency of the accounting information between the two hosts. With clustered
-database solutions (acitve/passive HA), you would not need to use this feature.
+database solutions (active/passive HA), you would not need to use this feature.
 Default is none.
 
 .TP
@@ -325,13 +346,13 @@ DbdHost=db_host
 .br
 DebugLevel=4
 .br
-PurgeEventMonths=1
+PurgeEventAfter=1month
 .br
-PurgeJobMonths=12
+PurgeJobAfter=12month
 .br
-PurgeStepMonths=1
+PurgeStepAfter=1month
 .br
-PurgeSuspendMonths=1
+PurgeSuspendAfter=1month
 .br
 LogFile=/var/log/slurmdbd.log
 .br
@@ -346,7 +367,7 @@ StorageType=accounting_storage/mysql
 StorageUser=database_mgr
 
 .SH "COPYING"
-Copyright (C) 2008 Lawrence Livermore National Security.
+Copyright (C) 2008-2010 Lawrence Livermore National Security.
 Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 CODE\-OCEC\-09\-009. All rights reserved.
 .LP

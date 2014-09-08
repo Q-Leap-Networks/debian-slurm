@@ -85,7 +85,7 @@
  * of the plugin.  If major and minor revisions are desired, the major
  * version number may be multiplied by a suitable magnitude constant such
  * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum versions for their plugins as the job completion logging API
+ * minimum version for their plugins as the job completion logging API
  * matures.
  */
 const char plugin_name[]       	= "Job completion text file logging plugin";
@@ -247,7 +247,7 @@ extern int slurm_jobcomp_log_record ( struct job_record *job_ptr )
 	int rc = SLURM_SUCCESS;
 	char job_rec[1024];
 	char usr_str[32], grp_str[32], start_str[32], end_str[32], lim_str[32];
-	char select_buf[128], *work_dir;
+	char select_buf[128], *state_string, *work_dir;
 	size_t offset = 0, tot_size, wrote;
 	enum job_states job_state;
 	uint32_t time_limit;
@@ -272,13 +272,32 @@ extern int slurm_jobcomp_log_record ( struct job_record *job_ptr )
 			 (unsigned long) time_limit);
 	}
 
-	/* Job will typically be COMPLETING when this is called.
-	 * We remove the flags to get the eventual completion state:
-	 * JOB_FAILED, JOB_TIMEOUT, etc. */
-	job_state = job_ptr->job_state & JOB_STATE_BASE;
-
-	_make_time_str(&(job_ptr->start_time), start_str, sizeof(start_str));
-	_make_time_str(&(job_ptr->end_time), end_str, sizeof(end_str));
+	if (job_ptr->job_state & JOB_RESIZING) {
+		time_t now = time(NULL);
+		state_string = job_state_string(job_ptr->job_state);
+		if (job_ptr->resize_time) {
+			_make_time_str(&job_ptr->resize_time, start_str,
+				       sizeof(start_str));
+		} else {
+			_make_time_str(&job_ptr->start_time, start_str,
+				       sizeof(start_str));
+		}
+		_make_time_str(&now, end_str, sizeof(end_str));
+	} else {
+		/* Job state will typically have JOB_COMPLETING or JOB_RESIZING
+		 * flag set when called. We remove the flags to get the eventual
+		 * completion state: JOB_FAILED, JOB_TIMEOUT, etc. */
+		job_state = job_ptr->job_state & JOB_STATE_BASE;
+		state_string = job_state_string(job_state);
+		if (job_ptr->resize_time) {
+			_make_time_str(&job_ptr->resize_time, start_str,
+				       sizeof(start_str));
+		} else {
+			_make_time_str(&job_ptr->start_time, start_str,
+				       sizeof(start_str));
+		}
+		_make_time_str(&job_ptr->end_time, end_str, sizeof(end_str));
+	}
 
 	if (job_ptr->details && job_ptr->details->work_dir)
 		work_dir = job_ptr->details->work_dir;
@@ -292,10 +311,9 @@ extern int slurm_jobcomp_log_record ( struct job_record *job_ptr )
 		 (unsigned long) job_ptr->job_id, usr_str,
 		 (unsigned long) job_ptr->user_id, grp_str,
 		 (unsigned long) job_ptr->group_id, job_ptr->name,
-		 job_state_string(job_state),
-		 job_ptr->partition, lim_str, start_str,
+		 state_string, job_ptr->partition, lim_str, start_str,
 		 end_str, job_ptr->nodes, job_ptr->node_cnt,
-		 job_ptr->total_procs, work_dir,
+		 job_ptr->total_cpus, work_dir,
 		 select_buf);
 	tot_size = strlen(job_rec);
 
@@ -333,7 +351,7 @@ extern char *slurm_jobcomp_strerror( int errnum )
  * in/out job_list List of job_rec_t *
  * note List needs to be freed when called
  */
-extern List slurm_jobcomp_get_jobs(acct_job_cond_t *job_cond)
+extern List slurm_jobcomp_get_jobs(slurmdb_job_cond_t *job_cond)
 {
 	return filetxt_jobcomp_process_get_jobs(job_cond);
 }
@@ -341,7 +359,7 @@ extern List slurm_jobcomp_get_jobs(acct_job_cond_t *job_cond)
 /*
  * expire old info from the database
  */
-extern int slurm_jobcomp_archive(acct_archive_cond_t *arch_cond)
+extern int slurm_jobcomp_archive(slurmdb_archive_cond_t *arch_cond)
 {
 	return filetxt_jobcomp_process_archive(arch_cond);
 }

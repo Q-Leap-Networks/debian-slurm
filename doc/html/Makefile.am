@@ -3,6 +3,7 @@ htmldir = ${prefix}/share/doc/@PACKAGE@-@VERSION@/html
 
 generated_html = \
 	accounting.html \
+	accounting_storageplugins.html \
 	api.html \
 	authplugins.html \
 	big_sys.html \
@@ -18,10 +19,14 @@ generated_html = \
 	download.html \
 	faq.html \
 	gang_scheduling.html \
+	gres.html \
+	gres_plugins.html \
 	help.html \
+	high_throughput.html \
 	ibm.html \
 	jobacct_gatherplugins.html \
-	accounting_storageplugins.html \
+	job_exit_code.html \
+	job_submit_plugins.html \
 	jobcompplugins.html \
 	mail.html \
 	maui.html \
@@ -36,9 +41,9 @@ generated_html = \
 	power_save.html \
 	preempt.html \
 	preemption_plugins.html \
-	proctrack_plugins.html \
 	priority_multifactor.html \
 	priority_plugins.html \
+	proctrack_plugins.html \
 	programmer_guide.html \
 	publications.html \
 	qos.html \
@@ -60,13 +65,12 @@ generated_html = \
 
 html_DATA = \
 	${generated_html} \
-	AllocationPies.gif \
+	allocation_pies.gif \
 	arch.gif \
 	configurator.html \
 	coding_style.pdf \
 	entities.gif \
-	ExampleUsage.gif \
-	lci.7.tutorial.pdf \
+	example_usage.gif \
 	lll.gif \
 	mc_support.gif \
 	plane_ex1.gif \
@@ -83,7 +87,7 @@ html_DATA = \
 	topo_ex1.gif \
 	topo_ex2.gif \
 	linuxstyles.css \
-	UsagePies.gif
+	usage_pies.gif
 
 MOSTLYCLEANFILES = ${generated_html}
 

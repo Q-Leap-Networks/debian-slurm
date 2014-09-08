@@ -3,7 +3,7 @@
  *					     based upon sockets.
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
@@ -108,17 +108,17 @@ static int _tot_wait (struct timeval *start_time)
 	return msec_delay;
 }
 
-slurm_fd _slurm_init_msg_engine ( slurm_addr * slurm_address )
+slurm_fd_t _slurm_init_msg_engine ( slurm_addr_t * slurm_address )
 {
 	return _slurm_listen_stream ( slurm_address ) ;
 }
 
-slurm_fd _slurm_open_msg_conn ( slurm_addr * slurm_address )
+slurm_fd_t _slurm_open_msg_conn ( slurm_addr_t * slurm_address )
 {
 	return _slurm_open_stream ( slurm_address, false ) ;
 }
 
-slurm_fd _slurm_accept_msg_conn (slurm_fd fd, slurm_addr *addr)
+slurm_fd_t _slurm_accept_msg_conn (slurm_fd_t fd, slurm_addr_t *addr)
 {
 	return _slurm_accept_stream(fd, addr);
 }
@@ -132,7 +132,7 @@ slurm_fd _slurm_accept_msg_conn (slurm_fd fd, slurm_addr *addr)
 static void _sock_bind_wild(int sockfd)
 {
 	int rc, retry;
-	slurm_addr sin;
+	slurm_addr_t sin;
 	static bool seeded = false;
 
 	if (!seeded) {
@@ -157,19 +157,19 @@ static void _sock_bind_wild(int sockfd)
 /*
  * This would be a no-op in a message implementation
  */
-int _slurm_close_accepted_conn (slurm_fd fd)
+int _slurm_close_accepted_conn (slurm_fd_t fd)
 {
 	return _slurm_close (fd);
 }
 
-ssize_t _slurm_msg_recvfrom(slurm_fd fd, char **pbuf, size_t *lenp,
+ssize_t _slurm_msg_recvfrom(slurm_fd_t fd, char **pbuf, size_t *lenp,
 			    uint32_t flags)
 {
 	return _slurm_msg_recvfrom_timeout(fd, pbuf, lenp, flags,
 				(slurm_get_msg_timeout() * 1000));
 }
 
-ssize_t _slurm_msg_recvfrom_timeout(slurm_fd fd, char **pbuf, size_t *lenp,
+ssize_t _slurm_msg_recvfrom_timeout(slurm_fd_t fd, char **pbuf, size_t *lenp,
 				    uint32_t flags, int tmout)
 {
 	ssize_t  len;
@@ -202,14 +202,14 @@ ssize_t _slurm_msg_recvfrom_timeout(slurm_fd fd, char **pbuf, size_t *lenp,
 	return (ssize_t) msglen;
 }
 
-ssize_t _slurm_msg_sendto(slurm_fd fd, char *buffer, size_t size,
+ssize_t _slurm_msg_sendto(slurm_fd_t fd, char *buffer, size_t size,
 			  uint32_t flags)
 {
 	return _slurm_msg_sendto_timeout( fd, buffer, size, flags,
 				(slurm_get_msg_timeout() * 1000));
 }
 
-ssize_t _slurm_msg_sendto_timeout(slurm_fd fd, char *buffer, size_t size,
+ssize_t _slurm_msg_sendto_timeout(slurm_fd_t fd, char *buffer, size_t size,
 				  uint32_t flags, int timeout)
 {
 	int   len;
@@ -240,7 +240,7 @@ ssize_t _slurm_msg_sendto_timeout(slurm_fd fd, char *buffer, size_t size,
 
 /* Send slurm message with timeout
  * RET message size (as specified in argument) or SLURM_ERROR on error */
-int _slurm_send_timeout(slurm_fd fd, char *buf, size_t size,
+int _slurm_send_timeout(slurm_fd_t fd, char *buf, size_t size,
 			uint32_t flags, int timeout)
 {
 	int rc;
@@ -262,7 +262,7 @@ int _slurm_send_timeout(slurm_fd fd, char *buf, size_t size,
 	while (sent < size) {
 		timeleft = timeout - _tot_wait(&tstart);
 		if (timeleft <= 0) {
-			debug("_slurm_send_timeout at %d of %d, timeout",
+			debug("_slurm_send_timeout at %d of %zd, timeout",
 				sent, size);
 			slurm_seterrno(SLURM_PROTOCOL_SOCKET_IMPL_TIMEOUT);
 			sent = SLURM_ERROR;
@@ -273,7 +273,7 @@ int _slurm_send_timeout(slurm_fd fd, char *buf, size_t size,
 			if ((rc == 0) || (errno == EINTR) || (errno == EAGAIN))
  				continue;
 			else {
-				debug("_slurm_send_timeout at %d of %d, "
+				debug("_slurm_send_timeout at %d of %zd, "
 					"poll error: %s",
 					sent, size, strerror(errno));
 				slurm_seterrno(SLURM_COMMUNICATIONS_SEND_ERROR);
@@ -311,7 +311,7 @@ int _slurm_send_timeout(slurm_fd fd, char *buf, size_t size,
 		if (rc < 0) {
  			if (errno == EINTR)
 				continue;
-			debug("_slurm_send_timeout at %d of %d, "
+			debug("_slurm_send_timeout at %d of %zd, "
 				"send error: %s",
 				sent, size, strerror(errno));
  			if (errno == EAGAIN) {	/* poll() lied to us */
@@ -323,7 +323,7 @@ int _slurm_send_timeout(slurm_fd fd, char *buf, size_t size,
 			goto done;
 		}
 		if (rc == 0) {
-			debug("_slurm_send_timeout at %d of %d, "
+			debug("_slurm_send_timeout at %d of %zd, "
 				"sent zero bytes", sent, size);
 			slurm_seterrno(SLURM_PROTOCOL_SOCKET_ZERO_BYTES_SENT);
 			sent = SLURM_ERROR;
@@ -347,7 +347,7 @@ int _slurm_send_timeout(slurm_fd fd, char *buf, size_t size,
 
 /* Get slurm message with timeout
  * RET message size (as specified in argument) or SLURM_ERROR on error */
-int _slurm_recv_timeout(slurm_fd fd, char *buffer, size_t size,
+int _slurm_recv_timeout(slurm_fd_t fd, char *buffer, size_t size,
 			uint32_t flags, int timeout )
 {
 	int rc;
@@ -368,7 +368,7 @@ int _slurm_recv_timeout(slurm_fd fd, char *buffer, size_t size,
 	while (recvlen < size) {
 		timeleft = timeout - _tot_wait(&tstart);
 		if (timeleft <= 0) {
-			debug("_slurm_recv_timeout at %d of %d, timeout",
+			debug("_slurm_recv_timeout at %d of %zd, timeout",
 				recvlen, size);
 			slurm_seterrno(SLURM_PROTOCOL_SOCKET_IMPL_TIMEOUT);
 			recvlen = SLURM_ERROR;
@@ -379,7 +379,7 @@ int _slurm_recv_timeout(slurm_fd fd, char *buffer, size_t size,
 			if ((errno == EINTR) || (errno == EAGAIN) || (rc == 0))
 				continue;
 			else {
-				debug("_slurm_recv_timeout at %d of %d, "
+				debug("_slurm_recv_timeout at %d of %zd, "
 					"poll error: %s",
 					recvlen, size, strerror(errno));
  				slurm_seterrno(
@@ -395,7 +395,9 @@ int _slurm_recv_timeout(slurm_fd fd, char *buffer, size_t size,
 			recvlen = SLURM_ERROR;
 			goto done;
 		}
-		if ((ufds.revents & POLLHUP) || (ufds.revents & POLLNVAL)) {
+		if ((ufds.revents & POLLNVAL) ||
+		    ((ufds.revents & POLLHUP) &&
+		     ((ufds.revents & POLLIN) == 0))) {
 			debug2("_slurm_recv_timeout: Socket no longer there");
 			slurm_seterrno(ENOTCONN);
 			recvlen = SLURM_ERROR;
@@ -412,7 +414,7 @@ int _slurm_recv_timeout(slurm_fd fd, char *buffer, size_t size,
 			if (errno == EINTR)
 				continue;
 			else {
-				debug("_slurm_recv_timeout at %d of %d, "
+				debug("_slurm_recv_timeout at %d of %zd, "
 					"recv error: %s",
 					recvlen, size, strerror(errno));
 				slurm_seterrno(
@@ -422,7 +424,7 @@ int _slurm_recv_timeout(slurm_fd fd, char *buffer, size_t size,
 			}
 		}
 		if (rc == 0) {
-			debug("_slurm_recv_timeout at %d of %d, "
+			debug("_slurm_recv_timeout at %d of %zd, "
 				"recv zero bytes", recvlen, size);
 			slurm_seterrno(SLURM_PROTOCOL_SOCKET_ZERO_BYTES_SENT);
 			recvlen = SLURM_ERROR;
@@ -443,15 +445,15 @@ int _slurm_recv_timeout(slurm_fd fd, char *buffer, size_t size,
 	return recvlen;
 }
 
-int _slurm_shutdown_msg_engine ( slurm_fd open_fd )
+int _slurm_shutdown_msg_engine ( slurm_fd_t open_fd )
 {
 	return _slurm_close ( open_fd ) ;
 }
 
-slurm_fd _slurm_listen_stream(slurm_addr *addr)
+slurm_fd_t _slurm_listen_stream(slurm_addr_t *addr)
 {
 	int rc;
-	slurm_fd fd;
+	slurm_fd_t fd;
 	const int one = 1;
 	const size_t sz1 = sizeof(one);
 
@@ -487,16 +489,16 @@ slurm_fd _slurm_listen_stream(slurm_addr *addr)
 
 }
 
-slurm_fd _slurm_accept_stream(slurm_fd fd, slurm_addr *addr)
+slurm_fd_t _slurm_accept_stream(slurm_fd_t fd, slurm_addr_t *addr)
 {
-	socklen_t len = sizeof(slurm_addr);
+	socklen_t len = sizeof(slurm_addr_t);
 	return _slurm_accept(fd, (struct sockaddr *)addr, &len);
 }
 
-slurm_fd _slurm_open_stream(slurm_addr *addr, bool retry)
+slurm_fd_t _slurm_open_stream(slurm_addr_t *addr, bool retry)
 {
 	int retry_cnt;
-	slurm_fd fd;
+	slurm_fd_t fd;
 	uint16_t port;
 	char ip[32];
 
@@ -547,25 +549,25 @@ slurm_fd _slurm_open_stream(slurm_addr *addr, bool retry)
 	return SLURM_SOCKET_ERROR;
 }
 
-int _slurm_get_stream_addr(slurm_fd fd, slurm_addr *addr )
+int _slurm_get_stream_addr(slurm_fd_t fd, slurm_addr_t *addr )
 {
 	socklen_t size = sizeof(addr);
 	return _slurm_getsockname(fd, (struct sockaddr *)addr, &size);
 }
 
-int _slurm_close_stream ( slurm_fd open_fd )
+int _slurm_close_stream ( slurm_fd_t open_fd )
 {
 	return _slurm_close ( open_fd ) ;
 }
 
 
-int _slurm_set_stream_non_blocking(slurm_fd fd)
+int _slurm_set_stream_non_blocking(slurm_fd_t fd)
 {
 	fd_set_nonblocking(fd);
 	return SLURM_SUCCESS;
 }
 
-int _slurm_set_stream_blocking(slurm_fd fd)
+int _slurm_set_stream_blocking(slurm_fd_t fd)
 {
 	fd_set_blocking(fd);
 	return SLURM_SUCCESS;
@@ -576,7 +578,7 @@ extern int _slurm_socket (int __domain, int __type, int __protocol)
 	return socket ( __domain, __type, __protocol ) ;
 }
 
-extern slurm_fd _slurm_create_socket ( slurm_socket_type_t type )
+extern slurm_fd_t _slurm_create_socket ( slurm_socket_type_t type )
 {
 	switch ( type )
 	{
@@ -633,6 +635,7 @@ extern int _slurm_connect (int __fd, struct sockaddr const * __addr,
 	 * Timeouts in excess of 3 minutes have been observed, resulting
 	 * in serious problems for slurmctld. Making the connect call
 	 * non-blocking and polling seems to fix the problem. */
+	static int timeout = 0;
 	int rc, flags, err;
 	socklen_t len;
 	struct pollfd ufds;
@@ -651,7 +654,10 @@ extern int _slurm_connect (int __fd, struct sockaddr const * __addr,
 	ufds.events = POLLIN | POLLOUT;
 	ufds.revents = 0;
 
-again:	rc = poll(&ufds, 1, 5000);
+	if (timeout == 0)
+		timeout = slurm_get_msg_timeout() * 1000 / 2;
+
+again:	rc = poll(&ufds, 1, timeout);
 	if (rc == -1) {
 		/* poll failed */
 		if (errno == EINTR) {
@@ -836,8 +842,8 @@ extern int _slurm_vfcntl(int fd, int cmd, va_list va )
 	}
 }
 
-/* sets the fields of a slurm_addr */
-void _slurm_set_addr_uint (slurm_addr *addr, uint16_t port, uint32_t ipaddr)
+/* sets the fields of a slurm_addr_t */
+void _slurm_set_addr_uint (slurm_addr_t *addr, uint16_t port, uint32_t ipaddr)
 {
 	addr->sin_family      = AF_SLURM ;
 	addr->sin_port	= htons(port);
@@ -845,12 +851,12 @@ void _slurm_set_addr_uint (slurm_addr *addr, uint16_t port, uint32_t ipaddr)
 }
 
 /* resets the address field of a slurm_addr, port and family are unchanged */
-void _reset_slurm_addr (slurm_addr *addr, slurm_addr new_addr)
+void _reset_slurm_addr (slurm_addr_t *addr, slurm_addr_t new_addr)
 {
 	addr->sin_addr.s_addr = new_addr.sin_addr.s_addr;
 }
 
-void _slurm_set_addr_char (slurm_addr * addr, uint16_t port, char *host)
+void _slurm_set_addr_char (slurm_addr_t * addr, uint16_t port, char *host)
 {
 	struct hostent * he    = NULL;
 	int	   h_err = 0;
@@ -877,7 +883,7 @@ void _slurm_set_addr_char (slurm_addr * addr, uint16_t port, char *host)
 	return;
 }
 
-void _slurm_get_addr (slurm_addr *addr, uint16_t *port, char *host,
+void _slurm_get_addr (slurm_addr_t *addr, uint16_t *port, char *host,
 		      unsigned int buflen )
 {
 	struct hostent *he;
@@ -900,7 +906,7 @@ void _slurm_get_addr (slurm_addr *addr, uint16_t *port, char *host,
 	return;
 }
 
-void _slurm_print_slurm_addr ( slurm_addr * address, char *buf, size_t n )
+void _slurm_print_slurm_addr ( slurm_addr_t * address, char *buf, size_t n )
 {
 	char addrbuf[INET_ADDRSTRLEN];
 	inet_ntop(AF_INET, &address->sin_addr, addrbuf, INET_ADDRSTRLEN);
@@ -908,13 +914,13 @@ void _slurm_print_slurm_addr ( slurm_addr * address, char *buf, size_t n )
 	snprintf(buf, n, "%s:%d", addrbuf, ntohs(address->sin_port));
 }
 
-void _slurm_pack_slurm_addr(slurm_addr *addr, Buf buffer)
+void _slurm_pack_slurm_addr(slurm_addr_t *addr, Buf buffer)
 {
 	pack32( ntohl( addr->sin_addr.s_addr ), buffer );
 	pack16( ntohs( addr->sin_port ), buffer );
 }
 
-int _slurm_unpack_slurm_addr_no_alloc(slurm_addr *addr, Buf buffer)
+int _slurm_unpack_slurm_addr_no_alloc(slurm_addr_t *addr, Buf buffer)
 {
 	addr->sin_family = AF_SLURM ;
 	safe_unpack32(&addr->sin_addr.s_addr, buffer);

@@ -2,7 +2,7 @@
  *  state_test.c - Test state of Bluegene base partitions and switches.
  *  DRAIN nodes in SLURM that are not usable.
  *
- *  $Id: state_test.c 20152 2010-04-27 18:01:39Z da $
+ *  $Id: state_test.c 21904 2010-12-28 18:45:52Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -64,8 +64,7 @@ static void _configure_node_down(rm_bp_id_t bp_id, my_bluegene_t *my_bg)
 	rm_BP_t *my_bp;
 	rm_location_t bp_loc;
 	rm_BP_state_t bp_state;
-	char bg_down_node[128], reason[128], time_str[32];
-	time_t now = time(NULL);
+	char bg_down_node[128];
 
 	if ((rc = bridge_get_data(my_bg, RM_BPNum, &bp_num)) != STATUS_OK) {
 		error("bridge_get_data(RM_BPNum): %s", bg_err_str(rc));
@@ -96,7 +95,7 @@ static void _configure_node_down(rm_bp_id_t bp_id, my_bluegene_t *my_bg)
 			continue;
 		}
 
-		if(!bpid) {
+		if (!bpid) {
 			error("No BPID was returned from database");
 			continue;
 		}
@@ -123,9 +122,9 @@ static void _configure_node_down(rm_bp_id_t bp_id, my_bluegene_t *my_bg)
 		}
 
 		/* make sure we have this midplane in the system */
-		if(bp_loc.X >= DIM_SIZE[X]
-		   || bp_loc.Y >= DIM_SIZE[Y]
-		   || bp_loc.Z >= DIM_SIZE[Z]) {
+		if (bp_loc.X >= DIM_SIZE[X]
+		    || bp_loc.Y >= DIM_SIZE[Y]
+		    || bp_loc.Z >= DIM_SIZE[Z]) {
 			debug4("node %s%c%c%c isn't configured",
 			       bg_conf->slurm_node_prefix,
 			       alpha_num[bp_loc.X], alpha_num[bp_loc.Y],
@@ -143,11 +142,9 @@ static void _configure_node_down(rm_bp_id_t bp_id, my_bluegene_t *my_bg)
 			break;
 
 		error("switch for node %s is bad", bg_down_node);
-		slurm_make_time_str(&now, time_str, sizeof(time_str));
-		snprintf(reason, sizeof(reason),
-			 "select_bluegene: MMCS switch not UP [SLURM@%s]",
-			 time_str);
-		slurm_drain_nodes(bg_down_node, reason);
+		slurm_drain_nodes(bg_down_node,
+				  "select_bluegene: MMCS switch not UP",
+				  slurm_get_slurm_user_id());
 		break;
 	}
 }
@@ -167,9 +164,9 @@ static char *_get_bp_node_name(rm_BP_t *bp_ptr)
 	}
 
 	/* make sure we have this midplane in the system */
-	if(bp_loc.X >= DIM_SIZE[X]
-	   || bp_loc.Y >= DIM_SIZE[Y]
-	   || bp_loc.Z >= DIM_SIZE[Z]) {
+	if (bp_loc.X >= DIM_SIZE[X]
+	    || bp_loc.Y >= DIM_SIZE[Y]
+	    || bp_loc.Z >= DIM_SIZE[Z]) {
 		debug4("node %s%c%c%c isn't configured",
 		       bg_conf->slurm_node_prefix,
 		       alpha_num[bp_loc.X], alpha_num[bp_loc.Y],
@@ -184,9 +181,9 @@ static char *_get_bp_node_name(rm_BP_t *bp_ptr)
 }
 
 /* To fake a nodecard down do this on the service node.
-db2 "update bg{l|p}nodecard set status = 'E' where location =
-'Rxx-Mx-Nx' and status='A'"
-Reverse the A, and E to bring it back up.
+   db2 "update bg{l|p}nodecard set status = 'E' where location =
+   'Rxx-Mx-Nx' and status='A'"
+   Reverse the A, and E to bring it back up.
 */
 static int _test_nodecard_state(rm_nodecard_t *ncard, int nc_id,
 				char *node_name, bool slurmctld_locked)
@@ -199,22 +196,22 @@ static int _test_nodecard_state(rm_nodecard_t *ncard, int nc_id,
 	if ((rc = bridge_get_data(ncard,
 				  RM_NodeCardState,
 				  &state)) != STATUS_OK) {
-		error("bridge_get_data(RM_NodeCardState: %s",
-		      rc);
+		error("bridge_get_data(RM_NodeCardState): %s",
+		      bg_err_str(rc));
 		return SLURM_ERROR;
 	}
 
-	if(state == RM_NODECARD_UP)
+	if (state == RM_NODECARD_UP)
 		return SLURM_SUCCESS;
 
 	if ((rc = bridge_get_data(ncard,
 				  RM_NodeCardID,
 				  &nc_name)) != STATUS_OK) {
-		error("bridge_get_data(RM_NodeCardID): %d", rc);
+		error("bridge_get_data(RM_NodeCardID): %s", bg_err_str(rc));
 		return SLURM_ERROR;
 	}
 
-	if(!nc_name) {
+	if (!nc_name) {
 		error("We didn't get an RM_NodeCardID but rc was STATUS_OK?");
 		return SLURM_ERROR;
 	}
@@ -223,7 +220,7 @@ static int _test_nodecard_state(rm_nodecard_t *ncard, int nc_id,
 	if ((rc = bridge_get_data(ncard,
 				  RM_NodeCardQuarter,
 				  &io_start)) != STATUS_OK) {
-		error("bridge_get_data(CardQuarter): %d", rc);
+		error("bridge_get_data(CardQuarter): %s", bg_err_str(rc));
 		rc = SLURM_ERROR;
 		goto clean_up;
 	}
@@ -241,9 +238,9 @@ static int _test_nodecard_state(rm_nodecard_t *ncard, int nc_id,
 	   state.  To avoid getting a bunch of warnings here just
 	   skip over the ones missing.
 	*/
-	if(io_start >= bg_conf->numpsets) {
+	if (io_start >= bg_conf->numpsets) {
 		rc = SLURM_SUCCESS;
-		if(state == RM_NODECARD_MISSING) {
+		if (state == RM_NODECARD_MISSING) {
 			debug3("Nodecard %s is missing",
 			       nc_name);
 		} else {
@@ -255,7 +252,7 @@ static int _test_nodecard_state(rm_nodecard_t *ncard, int nc_id,
 		goto clean_up;
 	}
 
-	/* if(!ionode_bitmap) */
+	/* if (!ionode_bitmap) */
 	/* 	ionode_bitmap = bit_alloc(bg_conf->numpsets); */
 	/* info("setting %s start %d of %d", */
 	/*      nc_name,  io_start, bg_conf->numpsets); */
@@ -263,8 +260,8 @@ static int _test_nodecard_state(rm_nodecard_t *ncard, int nc_id,
 
 	/* we have to handle each nodecard separately to make
 	   sure we don't create holes in the system */
-	if(down_nodecard(node_name, io_start, slurmctld_locked)
-	   == SLURM_SUCCESS) {
+	if (down_nodecard(node_name, io_start, slurmctld_locked)
+	    == SLURM_SUCCESS) {
 		debug("nodecard %s on %s is in an error state",
 		      nc_name, node_name);
 	} else
@@ -303,7 +300,7 @@ static int _test_down_nodecards(rm_BP_t *bp_ptr, bool slurmctld_locked)
 	//int io_cnt = 1;
 
 	/* Translate 1 nodecard count to ionode count */
-/* 	if((io_cnt *= bg_conf->io_ratio)) */
+/* 	if ((io_cnt *= bg_conf->io_ratio)) */
 /* 		io_cnt--; */
 
 	if ((rc = bridge_get_data(bp_ptr, RM_BPID, &bp_id))
@@ -324,13 +321,13 @@ static int _test_down_nodecards(rm_BP_t *bp_ptr, bool slurmctld_locked)
 	/* The node_name will only be NULL if this system doesn't
 	   really have the node.
 	*/
-	if(!(node_name = _get_bp_node_name(bp_ptr))) {
+	if (!(node_name = _get_bp_node_name(bp_ptr))) {
 		rc = SLURM_ERROR;
 		goto clean_up;
 	}
 
-	if((rc = bridge_get_data(ncard_list, RM_NodeCardListSize, &num))
-	   != STATUS_OK) {
+	if ((rc = bridge_get_data(ncard_list, RM_NodeCardListSize, &num))
+	    != STATUS_OK) {
 		error("bridge_get_data(RM_NodeCardListSize): %s",
 		      bg_err_str(rc));
 		rc = SLURM_ERROR;
@@ -344,7 +341,7 @@ static int _test_down_nodecards(rm_BP_t *bp_ptr, bool slurmctld_locked)
 						  &ncard)) != STATUS_OK) {
 				error("bridge_get_data"
 				      "(RM_NodeCardListNext): %s",
-				      rc);
+				      bg_err_str(rc));
 				rc = SLURM_ERROR;
 				goto clean_up;
 			}
@@ -354,14 +351,14 @@ static int _test_down_nodecards(rm_BP_t *bp_ptr, bool slurmctld_locked)
 						  &ncard)) != STATUS_OK) {
 				error("bridge_get_data"
 				      "(RM_NodeCardListFirst: %s",
-				      rc);
+				      bg_err_str(rc));
 				rc = SLURM_ERROR;
 				goto clean_up;
 			}
 		}
 
-		if(_test_nodecard_state(ncard, i, node_name, slurmctld_locked)
-		   != SLURM_SUCCESS)
+		if (_test_nodecard_state(ncard, i, node_name, slurmctld_locked)
+		    != SLURM_SUCCESS)
 			marked_down++;
 	}
 
@@ -372,7 +369,7 @@ static int _test_down_nodecards(rm_BP_t *bp_ptr, bool slurmctld_locked)
 	   bluegene.conf file that gives you an option as to have this
 	   happen or not automatically.
 	*/
-/* 	if(ionode_bitmap) { */
+/* 	if (ionode_bitmap) { */
 /* 		info("got ionode_bitmap"); */
 
 /* 		bit_not(ionode_bitmap); */
@@ -384,10 +381,10 @@ static int _test_down_nodecards(rm_BP_t *bp_ptr, bool slurmctld_locked)
 /* 		slurm_mutex_lock(&block_state_mutex); */
 /* 		itr = list_iterator_create(bg_lists->main); */
 /* 		while ((bg_record = list_next(itr))) { */
-/* 			if(bg_record->job_running != BLOCK_ERROR_STATE) */
+/* 			if (bg_record->job_running != BLOCK_ERROR_STATE) */
 /* 				continue; */
 
-/* 			if(!bit_test(bg_record->bitmap, bp_bit)) */
+/* 			if (!bit_test(bg_record->bitmap, bp_bit)) */
 /* 				continue; */
 /* 			info("bringing %s back to service", */
 /* 			     bg_record->bg_block_id); */
@@ -401,10 +398,11 @@ static int _test_down_nodecards(rm_BP_t *bp_ptr, bool slurmctld_locked)
 /* 		/\* FIX ME: This needs to call the opposite of */
 /* 		   slurm_drain_nodes which does not yet exist. */
 /* 		*\/ */
-/* 		if((ret = node_already_down(node_name))) { */
+/* 		if ((ret = node_already_down(node_name))) { */
 /* 			/\* means it was drained *\/ */
-/* 			if(ret == 2) { */
-/* 				/\* debug("node %s put back into service after " *\/ */
+/* 			if (ret == 2) { */
+/* 				/\* debug("node %s put back into
+ * 				service after " *\/ */
 /* /\* 				      "being in an error state", *\/ */
 /* /\* 				      node_name); *\/ */
 /* 			} */
@@ -412,15 +410,15 @@ static int _test_down_nodecards(rm_BP_t *bp_ptr, bool slurmctld_locked)
 /* 	} */
 
 clean_up:
-	if(ncard_list)
+	if (ncard_list)
 		bridge_free_nodecard_list(ncard_list);
 	xfree(node_name);
-/* 	if(ionode_bitmap) */
+/* 	if (ionode_bitmap) */
 /* 		FREE_NULL_BITMAP(ionode_bitmap); */
 	free(bp_id);
 
 	/* If we marked any nodecard down we need to state it here */
-	if((rc == SLURM_SUCCESS) && marked_down)
+	if ((rc == SLURM_SUCCESS) && marked_down)
 		rc = SLURM_ERROR;
 
 	return rc;
@@ -507,7 +505,7 @@ static void _test_down_switches(my_bluegene_t *my_bg)
 			continue;
 		}
 
-		if(!bp_id) {
+		if (!bp_id) {
 			error("No BPID was returned from database");
 			continue;
 		}
@@ -524,7 +522,7 @@ extern int node_already_down(char *node_name)
 	struct node_record *node_ptr = find_node_record(node_name);
 
 	if (node_ptr) {
-		if(IS_NODE_DRAIN(node_ptr))
+		if (IS_NODE_DRAIN(node_ptr))
 			return 2;
 		else if (IS_NODE_DOWN(node_ptr))
 			return 1;
@@ -593,17 +591,17 @@ extern int check_block_bp_states(char *bg_block_id, bool slurmctld_locked)
 		goto cleanup;
 	}
 
-	if(small) {
+	if (small) {
 		rm_nodecard_t *ncard = NULL;
 		char *node_name = NULL;
 
 		/* If this is a small block we can just check the
 		   nodecard list of the block.
 		*/
-		if((rc = bridge_get_data(block_ptr,
-					 RM_PartitionNodeCardNum,
-					 &cnt))
-		   != STATUS_OK) {
+		if ((rc = bridge_get_data(block_ptr,
+					  RM_PartitionNodeCardNum,
+					  &cnt))
+		    != STATUS_OK) {
 			error("bridge_get_data(RM_PartitionNodeCardNum): %s",
 			      bg_err_str(rc));
 			rc = SLURM_ERROR;
@@ -620,14 +618,14 @@ extern int check_block_bp_states(char *bg_block_id, bool slurmctld_locked)
 			goto cleanup;
 		}
 
-		if(!(node_name = _get_bp_node_name(bp_ptr))) {
+		if (!(node_name = _get_bp_node_name(bp_ptr))) {
 			rc = errno;
 			goto cleanup;
 		}
 
 		for(i=0; i<cnt; i++) {
 			int nc_id = 0;
-			if(i) {
+			if (i) {
 				if ((rc = bridge_get_data(
 					     block_ptr,
 					     RM_PartitionNextNodeCard,
@@ -659,9 +657,9 @@ extern int check_block_bp_states(char *bg_block_id, bool slurmctld_locked)
 			   break here since we are seeing if we can run.  If
 			   any nodecard is down this can't happen.
 			*/
-			if(_test_nodecard_state(
-				   ncard, nc_id, node_name, slurmctld_locked)
-			   != SLURM_SUCCESS) {
+			if (_test_nodecard_state(
+				    ncard, nc_id, node_name, slurmctld_locked)
+			    != SLURM_SUCCESS) {
 				rc = SLURM_ERROR;
 				break;
 			}
@@ -681,7 +679,7 @@ extern int check_block_bp_states(char *bg_block_id, bool slurmctld_locked)
 	}
 
 	for(i=0; i<cnt; i++) {
-		if(i) {
+		if (i) {
 			if ((rc = bridge_get_data(block_ptr,
 						  RM_PartitionNextBP,
 						  &bp_ptr))
@@ -707,8 +705,8 @@ extern int check_block_bp_states(char *bg_block_id, bool slurmctld_locked)
 		   break here since we are seeing if we can run.  If
 		   any nodecard is down this can't happen.
 		*/
-		if(_test_down_nodecards(bp_ptr, slurmctld_locked)
-		   != SLURM_SUCCESS) {
+		if (_test_down_nodecards(bp_ptr, slurmctld_locked)
+		    != SLURM_SUCCESS) {
 			rc = SLURM_ERROR;
 			break;
 		}

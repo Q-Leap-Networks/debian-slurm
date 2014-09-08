@@ -1,4 +1,4 @@
-# $Id: configure.ac 20908 2010-08-06 17:51:35Z da $
+# $Id: configure.ac 21467 2010-11-02 16:14:11Z jette $
 # This file is to be processed with autoconf to generate a configure script
 
 dnl Prologue
@@ -33,6 +33,7 @@ AM_CONDITIONAL(BGL_LOADED, test "x$ac_bluegene_loaded" = "xyes")
 AC_SUBST(BGL_LOADED)
 
 X_AC_BGP
+X_AC_BGQ
 
 dnl ok now check if bluegene was loaded at all
 AM_CONDITIONAL(BLUEGENE_LOADED, test "x$ac_bluegene_loaded" = "xyes")
@@ -46,9 +47,9 @@ dnl aliases for plugins.
 dnl
 case "$host" in
 	*-*-aix*) AC_DEFINE(USE_ALIAS, 0,
-                 	[Define slurm_ prefix function aliases for plusins]) ;;
+                 	[Define slurm_ prefix function aliases for plugins]) ;;
 	*darwin*) AC_DEFINE(USE_ALIAS, 0,
-                  	[Define slurm_ prefix function aliases for plusins]) ;;
+                  	[Define slurm_ prefix function aliases for plugins]) ;;
 	*)        AC_DEFINE(USE_ALIAS, 1,
 			[Define slurm_ prefix function aliases for plugins]) ;;
 esac
@@ -89,7 +90,7 @@ AC_CHECK_HEADERS(mcheck.h values.h socket.h sys/socket.h  \
                  sys/systemcfg.h ncurses.h curses.h sys/dr.h sys/vfs.h \
                  pam/pam_appl.h security/pam_appl.h sys/sysctl.h \
                  pty.h utmp.h \
-		 sys/syslog.h \
+		 sys/syslog.h linux/sched.h \
 		 kstat.h paths.h limits.h sys/statfs.h sys/ptrace.h sys/termios.h \
 		)
 AC_HEADER_SYS_WAIT
@@ -173,8 +174,10 @@ LIBS="$PTHREAD_LIBS $LIBS"
 
 X_AC_CRAY
 X_AC_SUN_CONST
+X_AC_DIMENSIONS
 
 X_AC_CFLAGS
+X_AC_HWLOC
 X_AC_XCPU
 X_AC_SLURM_SEMAPHORE
 
@@ -206,6 +209,10 @@ if test ${gtk_config_minor_version=0} -gt 12 ; then
        AC_DEFINE([GTK2_USE_TOOLTIP], 1, [Define to 1 if using gtk+-2.12.0 or higher])
 fi
 
+if test ${gtk_config_minor_version=0} -gt 14 ; then
+       AC_DEFINE([GTK2_USE_GET_FOCUS], 1, [Define to 1 if using gtk+-2.14.0 or higher])
+fi
+
 
 X_AC_DATABASES
 
@@ -226,9 +233,10 @@ X_AC_DEBUG
 AM_CONDITIONAL(DEBUG_MODULES, test "x$ac_debug" = "xtrue")
 
 
-dnl check for slurmctld, slurmd and slurmdbd default ports
+dnl check for slurmctld, slurmd and slurmdbd default ports,
+dnl and default number of slurmctld ports
 dnl
-X_AC_SLURM_PORTS([6817], [6818], [6819])
+X_AC_SLURM_PORTS([6817], [6818], [6819], [1])
 
 
 dnl add SLURM_PREFIX to config.h
@@ -336,14 +344,19 @@ AC_CONFIG_FILES([Makefile
 		 contribs/Makefile
 		 contribs/pam/Makefile
 		 contribs/perlapi/Makefile
-		 contribs/perlapi/libslurm-perl/Makefile.PL
+		 contribs/perlapi/libslurm/Makefile
+		 contribs/perlapi/libslurm/perl/Makefile.PL
+		 contribs/perlapi/libslurmdb/Makefile
+		 contribs/perlapi/libslurmdb/perl/Makefile.PL
 		 contribs/torque/Makefile
 		 contribs/phpext/Makefile
 		 contribs/phpext/slurm_php/config.m4
+		 contribs/sjobexit/Makefile
 		 contribs/slurmdb-direct/Makefile
 		 src/Makefile
 		 src/api/Makefile
 		 src/common/Makefile
+		 src/db_api/Makefile
 		 src/database/Makefile
 		 src/sacct/Makefile
 		 src/sacctmgr/Makefile
@@ -371,6 +384,7 @@ AC_CONFIG_FILES([Makefile
 		 src/sview/Makefile
 		 src/plugins/Makefile
 		 src/plugins/accounting_storage/Makefile
+		 src/plugins/accounting_storage/common/Makefile
 		 src/plugins/accounting_storage/filetxt/Makefile
 		 src/plugins/accounting_storage/mysql/Makefile
 		 src/plugins/accounting_storage/pgsql/Makefile
@@ -391,6 +405,9 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/crypto/Makefile
 		 src/plugins/crypto/munge/Makefile
 		 src/plugins/crypto/openssl/Makefile
+		 src/plugins/gres/Makefile
+		 src/plugins/gres/gpu/Makefile
+		 src/plugins/gres/nic/Makefile
 		 src/plugins/jobacct_gather/Makefile
 		 src/plugins/jobacct_gather/linux/Makefile
 		 src/plugins/jobacct_gather/aix/Makefile
@@ -401,6 +418,11 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/jobcomp/script/Makefile
 		 src/plugins/jobcomp/mysql/Makefile
 		 src/plugins/jobcomp/pgsql/Makefile
+		 src/plugins/job_submit/Makefile
+		 src/plugins/job_submit/defaults/Makefile
+		 src/plugins/job_submit/logging/Makefile
+		 src/plugins/job_submit/lua/Makefile
+		 src/plugins/job_submit/partition/Makefile
 		 src/plugins/preempt/Makefile
 		 src/plugins/preempt/none/Makefile
 		 src/plugins/preempt/partition_prio/Makefile
@@ -414,6 +436,7 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/proctrack/linuxproc/Makefile
 		 src/plugins/proctrack/rms/Makefile
 		 src/plugins/proctrack/sgi_job/Makefile
+		 src/plugins/proctrack/cgroup/Makefile
 		 src/plugins/proctrack/lua/Makefile
 		 src/plugins/sched/Makefile
 		 src/plugins/sched/backfill/Makefile
@@ -422,10 +445,12 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/sched/wiki/Makefile
 		 src/plugins/sched/wiki2/Makefile
 		 src/plugins/select/Makefile
+		 src/plugins/select/bgq/Makefile
 		 src/plugins/select/bluegene/Makefile
 		 src/plugins/select/bluegene/block_allocator/Makefile
 		 src/plugins/select/bluegene/plugin/Makefile
 		 src/plugins/select/cons_res/Makefile
+		 src/plugins/select/cray/Makefile
 		 src/plugins/select/linear/Makefile
 		 src/plugins/switch/Makefile
 		 src/plugins/switch/elan/Makefile
@@ -445,6 +470,7 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/task/none/Makefile
 		 src/plugins/topology/Makefile
 		 src/plugins/topology/3d_torus/Makefile
+		 src/plugins/topology/node_rank/Makefile
 		 src/plugins/topology/none/Makefile
 		 src/plugins/topology/tree/Makefile
 		 doc/Makefile
@@ -457,9 +483,6 @@ AC_CONFIG_FILES([Makefile
 		 testsuite/slurm_unit/api/Makefile
 		 testsuite/slurm_unit/api/manual/Makefile
 		 testsuite/slurm_unit/common/Makefile
-		 testsuite/slurm_unit/slurmctld/Makefile
-		 testsuite/slurm_unit/slurmd/Makefile
-		 testsuite/slurm_unit/slurmdbd/Makefile
 		 ]
 )
 

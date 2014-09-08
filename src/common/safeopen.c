@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  safeopen.c - safer interface to open()
- *  $Id: safeopen.c 19095 2009-12-01 22:59:18Z da $
+ *  $Id: safeopen.c 20888 2010-08-04 21:30:08Z da $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

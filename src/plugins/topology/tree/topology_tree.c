@@ -77,7 +77,7 @@
  * of the plugin.  If major and minor revisions are desired, the major
  * version number may be multiplied by a suitable magnitude constant such
  * as 100 or 1000.  Various SLURM versions will likely require a certain
- * minimum versions for their plugins as this API matures.
+ * minimum version for their plugins as this API matures.
  */
 const char plugin_name[]        = "topology tree plugin";
 const char plugin_type[]        = "topology/tree";
@@ -154,7 +154,6 @@ extern int topo_get_node_addr(char* node_name, char** paddr, char** ppattern)
 	int node_inx;
 	hostlist_t sl = NULL;
 
-	char buf[8192];
 	int s_max_level = 0;
 	int i, j;
 
@@ -199,8 +198,9 @@ extern int topo_get_node_addr(char* node_name, char** paddr, char** ppattern)
 			}
 		}
 		if ( sl ) {
-			hostlist_ranged_string(sl, sizeof(buf), buf);
+			char *buf = hostlist_ranged_string_xmalloc(sl);
 			xstrcat(*paddr,buf);
+			xfree(buf);
 			hostlist_destroy(sl);
 			sl = NULL;
 		}
@@ -257,7 +257,7 @@ static void _validate_switches(void)
 				tmp_bitmap = bit_copy(switch_ptr->node_bitmap);
 				bit_and(tmp_bitmap, switches_bitmap);
 				bit_or(multi_homed_bitmap, tmp_bitmap);
-				bit_free(tmp_bitmap);
+				FREE_NULL_BITMAP(tmp_bitmap);
 				bit_or(switches_bitmap,
 				       switch_ptr->node_bitmap);
 			} else {
@@ -335,15 +335,16 @@ static void _validate_switches(void)
 			      i, child);
 			xfree(child);
 		}
-		bit_free(switches_bitmap);
+		FREE_NULL_BITMAP(switches_bitmap);
 	} else
 		fatal("switches contain no nodes");
 
 	if (invalid_hl) {
-		char buf[128];
-		hostlist_ranged_string(invalid_hl, sizeof(buf), buf);
+		char *buf;
+		buf = hostlist_ranged_string_xmalloc(invalid_hl);
 		error("WARNING: Invalid hostnames in switch configuration: %s",
 		      buf);
+		xfree(buf);
 		hostlist_destroy(invalid_hl);
 	}
 
@@ -356,7 +357,7 @@ static void _validate_switches(void)
 		      child);
 		xfree(child);
 	}
-	bit_free(multi_homed_bitmap);
+	FREE_NULL_BITMAP(multi_homed_bitmap);
 
 	s_p_hashtbl_destroy(conf_hashtbl);
 	_log_switches();
@@ -448,7 +449,7 @@ extern int  _read_topo_file(slurm_conf_switches_t **ptr_array[])
 		topo_conf = _get_topo_conf();
 
 	conf_hashtbl = s_p_hashtbl_create(switch_options);
-	if (s_p_parse_file(conf_hashtbl, topo_conf) == SLURM_ERROR) {
+	if (s_p_parse_file(conf_hashtbl, NULL, topo_conf) == SLURM_ERROR) {
 		fatal("something wrong with opening/reading %s: %m",
 		      topo_conf);
 	}
@@ -520,7 +521,7 @@ static void _destroy_switches(void *ptr)
  * OUT bitmap     - set to bitmap, may not have all bits set on error
  * IN/OUT invalid_hostlist - hostlist of invalid host names, initialize to NULL
  * RET 0 if no error, otherwise EINVAL
- * NOTE: call bit_free(bitmap) and hostlist_destroy(invalid_hostlist)
+ * NOTE: call FREE_NULL_BITMAP(bitmap) and hostlist_destroy(invalid_hostlist)
  *       to free memory when variables are no longer required
  */
 static int _node_name2bitmap(char *node_names, bitstr_t **bitmap, 

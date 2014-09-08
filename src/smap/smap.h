@@ -96,6 +96,7 @@
 #include "src/common/hostlist.h"
 #include "src/common/list.h"
 #include "src/common/macros.h"
+#include "src/common/slurmdb_defs.h"
 #include "src/plugins/select/bluegene/block_allocator/block_allocator.h"
 #include "src/common/slurm_protocol_api.h"
 
@@ -113,6 +114,10 @@ enum { JOBS, RESERVATIONS, SLURMPART, BGPART, COMMANDS };
 /* Input parameters */
 typedef struct {
 	bool all_flag;
+	List clusters;
+	int cluster_base;
+	uint16_t cluster_dims;
+	uint32_t cluster_flags;
 	bool commandline;
 	int display;
 	int iterate;
@@ -137,10 +142,9 @@ extern void parse_command_line(int argc, char *argv[]);
 extern ba_system_t *ba_system_ptr;
 extern int quiet_flag;
 
-
 extern void init_grid(node_info_msg_t *node_info_ptr);
 extern int set_grid_inx(int start, int end, int count);
-extern int set_grid_name(char *nodes, int count);
+extern int set_grid_inx2(char *node_names, int count);
 extern int set_grid_bg(int *start, int *end, int count, int set);
 extern void print_grid(int dir);
 bitstr_t *get_requested_node_bitmap();

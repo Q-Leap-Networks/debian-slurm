@@ -1,30 +1,30 @@
 /*****************************************************************************\
- *  $Id: pam_slurm.c 19468 2010-02-10 18:08:42Z jette $
+ *  $Id: pam_slurm.c 20260 2010-05-13 21:59:53Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  UCRL-CODE-2002-040.
- *  
+ *
  *  Written by Chris Dunlap <cdunlap@llnl.gov>
  *         and Jim Garlick  <garlick@llnl.gov>
  *         modified for SLURM by Moe Jette <jette@llnl.gov>.
- *  
+ *
  *  This file is part of pam_slurm, a PAM module for restricting access to
  *  the compute nodes within a cluster based on information obtained from
  *  Simple Linux Utility for Resource Managment (SLURM).  For details, see
  *  <http://www.llnl.gov/linux/slurm/>.
- *  
+ *
  *  pam_slurm is free software; you can redistribute it and/or modify it
  *  under the terms of the GNU General Public License as published by the
  *  Free Software Foundation; either version 2 of the License, or (at your
  *  option) any later version.
- *  
+ *
  *  pam_slurm is distributed in the hope that it will be useful, but WITHOUT
  *  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
  *  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
  *  for more details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with pam_slurm; if not, write to the Free Software Foundation, Inc.,
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA.
@@ -55,6 +55,7 @@
 
 
 struct _options {
+	int disable_sys_info;
 	int enable_debug;
 	int enable_silence;
 	const char *msg_prefix;
@@ -135,6 +136,11 @@ pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc, const char **argv)
 
 	if ((auth != PAM_SUCCESS) && (!opts.enable_silence))
 		_send_denial_msg(pamh, &opts, user, uid);
+	if ((auth != PAM_SUCCESS) || (!opts.disable_sys_info)) {
+		_log_msg(LOG_INFO, "access %s for user %s (uid=%d)",
+			 (auth == PAM_SUCCESS) ? "granted" : "denied",
+			 user, uid);
+	}
 	_log_msg(LOG_INFO, "access %s for user %s (uid=%d)",
 		 (auth == PAM_SUCCESS) ? "granted" : "denied", user, uid);
 
@@ -170,6 +176,7 @@ _parse_args(struct _options *opts, int argc, const char **argv)
 {
 	int i;
 
+	opts->disable_sys_info = 0;
 	opts->enable_debug = 0;
 	opts->enable_silence = 0;
 	opts->msg_prefix = "";
@@ -199,6 +206,8 @@ _parse_args(struct _options *opts, int argc, const char **argv)
 	for (i=0; i<argc; i++) {
 		if (!strcmp(argv[i], "debug"))
 			opts->enable_debug = debug = 1;
+		else if (!strcmp(argv[i], "no_sys_info"))
+			opts->disable_sys_info = 1;
 		else if (!strcmp(argv[i], "no_warn"))
 			opts->enable_silence = 1;
 		else if (!strcmp(argv[i], "rsh_kludge"))
@@ -211,8 +220,8 @@ _parse_args(struct _options *opts, int argc, const char **argv)
 	return;
 }
 
-/* 
- *  Return 1 if 'hostname' is a member of 'str', a SLURM-style host list as 
+/*
+ *  Return 1 if 'hostname' is a member of 'str', a SLURM-style host list as
  *  returned by SLURM datatbase queries, else 0.  The 'str' argument is
  *  truncated to the base prefix as a side-effect.
  */
@@ -237,11 +246,11 @@ _hostrange_member(char *hostname, char *str)
 }
 
 /*
- *  Query the SLURM database to find out if 'uid' has been allocated 
- *  this node. If so, return 1 indicating that 'uid' is authorized to 
- *  this node else return 0.  
+ *  Query the SLURM database to find out if 'uid' has been allocated
+ *  this node. If so, return 1 indicating that 'uid' is authorized to
+ *  this node else return 0.
  */
-static int 
+static int
 _slurm_match_allocation(uid_t uid)
 {
 	int authorized = 0, i;
@@ -273,7 +282,7 @@ _slurm_match_allocation(uid_t uid)
 			DBG ("jobid %ld: nodes=\"%s\"", j->job_id, j->nodes);
 
 			if (_hostrange_member(hostname, j->nodes) ) {
-				DBG ("user %ld allocated node %s in job %ld", 
+				DBG ("user %ld allocated node %s in job %ld",
 				     uid, hostname, j->job_id);
 				authorized = 1;
 				break;
@@ -292,7 +301,7 @@ _slurm_match_allocation(uid_t uid)
  */
 static void
 _send_denial_msg(pam_handle_t *pamh, struct _options *opts,
-                 const char *user, uid_t uid)
+		 const char *user, uid_t uid)
 {
 	int retval;
 	struct pam_conv *conv;
@@ -339,7 +348,7 @@ _send_denial_msg(pam_handle_t *pamh, struct _options *opts,
 	return;
 }
 
-/* 
+/*
  * Dynamically open system's libslurm.so with RTLD_GLOBAL flag.
  *  This allows subsequently loaded modules access to libslurm symbols.
  */
@@ -348,7 +357,7 @@ extern void libpam_slurm_init (void)
 	if (slurm_h)
 		return;
 
-	if (!(slurm_h = dlopen("libslurm.so", RTLD_NOW|RTLD_GLOBAL))) 
+	if (!(slurm_h = dlopen("libslurm.so", RTLD_NOW|RTLD_GLOBAL)))
 		_log_msg (LOG_ERR, "Unable to dlopen libslurm: %s\n",
 			  dlerror ());
 
@@ -378,4 +387,3 @@ struct pam_module _pam_rms_modstruct = {
 	NULL,
 };
 #endif /* PAM_STATIC */
-

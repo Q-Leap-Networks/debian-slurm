@@ -61,8 +61,6 @@ proc scontrol_test { node proc_cnt } {
 			if {$proc_cnt != $num_alloc} {
 				send_user "\nFAILURE: requested $proc_cnt but got $num_alloc instead\n"
 				set rc 1
-			} else {
-				send_user "SUCCESS\n"
 			}
 			exp_continue
 		}
@@ -129,8 +127,6 @@ proc sinfo_test_1 { node proc_cnt total_procs idle_cpus } {
 			} elseif { $num_total != $total_procs } {
 				send_user "\nFAILURE: sinfo 1 total cpus wrong, got $num_total but needed $total_procs\n"
 				set rc 1
-			} else {
-				send_user "SUCCESS\n"
 			}
 			exp_continue
 		}
@@ -436,7 +432,9 @@ if {![string compare $select_type "bluegene"]} {
 
 set exit_code [allocate_and_quit $inode_name $smallest $inode_procs]
 if {!$exit_code && $smallest != $inode_procs} {
-		set exit_code [allocate_and_quit $inode_name $inode_procs $inode_procs]
+	# just to make sure we get a clean state we will sleep a bit
+	sleep 1
+	set exit_code [allocate_and_quit $inode_name $inode_procs $inode_procs]
 }
 if {$exit_code == 0} {
 	send_user "\nSUCCESS\n"

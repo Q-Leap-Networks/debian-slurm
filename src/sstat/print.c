@@ -80,7 +80,7 @@ char *_elapsed_time(long secs, long usecs)
 	return str;
 }
 
-void print_fields(jobacct_step_rec_t *step)
+void print_fields(slurmdb_step_rec_t *step)
 {
 	print_field_t *field = NULL;
 	int curr_inx = 1;
@@ -93,7 +93,7 @@ void print_fields(jobacct_step_rec_t *step)
 		switch(field->type) {
 		case PRINT_AVECPU:
 
-			tmp_char = _elapsed_time((long)step->sacct.ave_cpu, 0);
+			tmp_char = _elapsed_time((long)step->stats.cpu_ave, 0);
 
 			field->print_routine(field,
 					     tmp_char,
@@ -101,7 +101,7 @@ void print_fields(jobacct_step_rec_t *step)
 			xfree(tmp_char);
 			break;
 		case PRINT_AVEPAGES:
-			convert_num_unit((float)step->sacct.ave_pages,
+			convert_num_unit((float)step->stats.pages_ave,
 					 outbuf, sizeof(outbuf),
 					 UNIT_KILO);
 
@@ -110,7 +110,7 @@ void print_fields(jobacct_step_rec_t *step)
 					     (curr_inx == field_count));
 			break;
 		case PRINT_AVERSS:
-			convert_num_unit((float)step->sacct.ave_rss,
+			convert_num_unit((float)step->stats.rss_ave,
 					 outbuf, sizeof(outbuf),
 					 UNIT_KILO);
 
@@ -119,7 +119,7 @@ void print_fields(jobacct_step_rec_t *step)
 					     (curr_inx == field_count));
 			break;
 		case PRINT_AVEVSIZE:
-			convert_num_unit((float)step->sacct.ave_vsize,
+			convert_num_unit((float)step->stats.vsize_ave,
 					 outbuf, sizeof(outbuf),
 					 UNIT_KILO);
 
@@ -128,16 +128,20 @@ void print_fields(jobacct_step_rec_t *step)
 					     (curr_inx == field_count));
 			break;
 		case PRINT_JOBID:
-			snprintf(outbuf, sizeof(outbuf), "%u.%u",
-				 step->job_ptr->jobid,
-				 step->stepid);
+			if (step->stepid == NO_VAL)
+				snprintf(outbuf, sizeof(outbuf), "%u.batch",
+					 step->job_ptr->jobid);
+			else
+				snprintf(outbuf, sizeof(outbuf), "%u.%u",
+					 step->job_ptr->jobid,
+					 step->stepid);
 
 			field->print_routine(field,
 					     outbuf,
 					     (curr_inx == field_count));
 			break;
 		case PRINT_MAXPAGES:
-			convert_num_unit((float)step->sacct.max_pages,
+			convert_num_unit((float)step->stats.pages_max,
 					 outbuf, sizeof(outbuf),
 					 UNIT_KILO);
 
@@ -147,7 +151,7 @@ void print_fields(jobacct_step_rec_t *step)
 			break;
 		case PRINT_MAXPAGESNODE:
 			tmp_char = find_hostname(
-					step->sacct.max_pages_id.nodeid,
+					step->stats.pages_max_nodeid,
 					step->nodes);
 			field->print_routine(field,
 					     tmp_char,
@@ -156,11 +160,11 @@ void print_fields(jobacct_step_rec_t *step)
 			break;
 		case PRINT_MAXPAGESTASK:
 			field->print_routine(field,
-					     step->sacct.max_pages_id.taskid,
+					     step->stats.pages_max_taskid,
 					     (curr_inx == field_count));
 			break;
 		case PRINT_MAXRSS:
-			convert_num_unit((float)step->sacct.max_rss,
+			convert_num_unit((float)step->stats.rss_max,
 					 outbuf, sizeof(outbuf),
 					 UNIT_KILO);
 
@@ -170,7 +174,7 @@ void print_fields(jobacct_step_rec_t *step)
 			break;
 		case PRINT_MAXRSSNODE:
 			tmp_char = find_hostname(
-					step->sacct.max_rss_id.nodeid,
+					step->stats.rss_max_nodeid,
 					step->nodes);
 			field->print_routine(field,
 					     tmp_char,
@@ -179,11 +183,11 @@ void print_fields(jobacct_step_rec_t *step)
 			break;
 		case PRINT_MAXRSSTASK:
 			field->print_routine(field,
-					     step->sacct.max_rss_id.taskid,
+					     step->stats.rss_max_taskid,
 					     (curr_inx == field_count));
 			break;
 		case PRINT_MAXVSIZE:
-			convert_num_unit((float)step->sacct.max_vsize,
+			convert_num_unit((float)step->stats.vsize_max,
 					 outbuf, sizeof(outbuf),
 					 UNIT_KILO);
 
@@ -193,7 +197,7 @@ void print_fields(jobacct_step_rec_t *step)
 			break;
 		case PRINT_MAXVSIZENODE:
 			tmp_char = find_hostname(
-					step->sacct.max_vsize_id.nodeid,
+					step->stats.vsize_max_nodeid,
 					step->nodes);
 			field->print_routine(field,
 					     tmp_char,
@@ -202,11 +206,12 @@ void print_fields(jobacct_step_rec_t *step)
 			break;
 		case PRINT_MAXVSIZETASK:
 			field->print_routine(field,
-					     step->sacct.max_vsize_id.taskid,
+					     step->stats.vsize_max_taskid,
 					     (curr_inx == field_count));
 			break;
 		case PRINT_MINCPU:
-			tmp_char = _elapsed_time((long)step->sacct.min_cpu, 0);
+			tmp_char = _elapsed_time((long)step->stats.cpu_min, 0);
+
 			field->print_routine(field,
 					     tmp_char,
 					     (curr_inx == field_count));
@@ -214,7 +219,7 @@ void print_fields(jobacct_step_rec_t *step)
 			break;
 		case PRINT_MINCPUNODE:
 			tmp_char = find_hostname(
-					step->sacct.min_cpu_id.nodeid,
+					step->stats.cpu_min_nodeid,
 					step->nodes);
 			field->print_routine(field,
 					     tmp_char,
@@ -223,7 +228,12 @@ void print_fields(jobacct_step_rec_t *step)
 			break;
 		case PRINT_MINCPUTASK:
 			field->print_routine(field,
-					     step->sacct.min_cpu_id.taskid,
+					     step->stats.cpu_min_taskid,
+					     (curr_inx == field_count));
+			break;
+		case PRINT_NODELIST:
+			field->print_routine(field,
+					     step->nodes,
 					     (curr_inx == field_count));
 			break;
 		case PRINT_NTASKS:
@@ -231,24 +241,11 @@ void print_fields(jobacct_step_rec_t *step)
 					     step->ntasks,
 					     (curr_inx == field_count));
 			break;
-		case PRINT_SYSTEMCPU:
-			tmp_char = _elapsed_time(step->sys_cpu_sec,
-						 step->sys_cpu_usec);
-
-			field->print_routine(field,
-					     tmp_char,
-					     (curr_inx == field_count));
-			xfree(tmp_char);
-			break;
-		case PRINT_TOTALCPU:
-			tmp_char = _elapsed_time(step->tot_cpu_sec,
-						 step->tot_cpu_usec);
-
-			field->print_routine(field,
-					     tmp_char,
-					     (curr_inx == field_count));
-			xfree(tmp_char);
-			break;
+		case PRINT_PIDS:
+                        field->print_routine(field,
+                                             step->pid_str,
+                                             (curr_inx == field_count));
+                        break;
 		default:
 			break;
 		}
