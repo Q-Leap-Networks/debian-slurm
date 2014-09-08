@@ -87,7 +87,7 @@ extern int	get_nodes(char *cmd_ptr, int *err_code, char **err_msg)
 		NO_LOCK, NO_LOCK, READ_LOCK, READ_LOCK };
 	int node_rec_cnt = 0, buf_size = 0;
 
-#ifdef HAVE_CRAY
+#ifdef HAVE_ALPS_CRAY
 	/* Locks: write node */
 	slurmctld_lock_t node_write_lock = {
 		NO_LOCK, NO_LOCK, WRITE_LOCK, NO_LOCK };
@@ -195,7 +195,7 @@ static char *	_dump_all_nodes(int *node_cnt, time_t update_time)
 			if (rc == 0) {
 				uniq_node_ptr = node_ptr;
 				if (hl) {
-					hostlist_push(hl, node_ptr->name);
+					hostlist_push_host(hl, node_ptr->name);
 				} else {
 					hl = hostlist_create(node_ptr->name);
 					if (!hl) {

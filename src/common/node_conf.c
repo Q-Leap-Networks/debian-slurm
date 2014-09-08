@@ -502,11 +502,11 @@ char * bitmap2node_name_sortable (bitstr_t *bitmap, bool sort)
 		return xstrdup("");
 
 	last  = bit_fls(bitmap);
-	hl = hostlist_create("");
+	hl = hostlist_create(NULL);
 	for (i = first; i <= last; i++) {
 		if (bit_test(bitmap, i) == 0)
 			continue;
-		hostlist_push(hl, node_record_table_ptr[i].name);
+		hostlist_push_host(hl, node_record_table_ptr[i].name);
 	}
 	if (sort)
 		hostlist_sort(hl);
@@ -999,6 +999,7 @@ extern void purge_node_rec (struct node_record *node_ptr)
 	xfree(node_ptr->os);
 	xfree(node_ptr->part_pptr);
 	xfree(node_ptr->reason);
+	xfree(node_ptr->version);
 	acct_gather_energy_destroy(node_ptr->energy);
 	ext_sensors_destroy(node_ptr->ext_sensors);
 	select_g_select_nodeinfo_free(node_ptr->select_nodeinfo);

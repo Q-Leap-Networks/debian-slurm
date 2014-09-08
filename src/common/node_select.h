@@ -164,7 +164,9 @@ typedef struct slurm_select_ops {
 						 bool indf_susp);
 	bitstr_t *      (*step_pick_nodes)      (struct job_record *job_ptr,
 						 select_jobinfo_t *step_jobinfo,
-						 uint32_t node_count);
+						 uint32_t node_count,
+						 bitstr_t **avail_nodes);
+	int             (*step_start)           (struct step_record *step_ptr);
 	int             (*step_finish)          (struct step_record *step_ptr);
 	int		(*pack_select_info)	(time_t last_query_time,
 						 uint16_t show_flags,
@@ -224,7 +226,8 @@ typedef struct slurm_select_ops {
 	bitstr_t *      (*resv_test)            (bitstr_t *avail_bitmap,
 						 uint32_t node_cnt,
 						 uint32_t *core_cnt,
-						 bitstr_t **core_bitmap);
+						 bitstr_t **core_bitmap,
+						 uint32_t flags);
 	void            (*ba_init)              (node_info_msg_t *node_info_ptr,
 						 bool sanity_check);
 	void            (*ba_fini)              (void);
@@ -234,8 +237,8 @@ typedef struct slurm_select_ops {
 
 /*
  * Defined in node_select.c Must be synchronized with slurm_select_ops_t above.
- * Also must be synchronized with the other_plugin.c in
- * the select/cray plugin.
+ * Also must be synchronized with the other_select.c in
+ * the select/other lib.
  */
 extern const char *node_select_syms[];
 
@@ -643,8 +646,10 @@ extern int select_g_job_resized(struct job_record *job_ptr,
  * OUT step_jobinfo - Fill in the resources to be used if not
  *                    full size of job.
  * IN node_count  - How many nodes we are looking for.
+ * OUT avail_nodes - bitmap of available nodes according to the plugin
+ *                  (not always set).
  * RET map of slurm nodes to be used for step, NULL if resources not selected
-*
+ *
  * NOTE: Most select plugins return NULL and use common code slurmctld to
  * select resources for a job step. Only on IBM Bluegene systems does the
  * select plugin need to select resources and take system topology into
@@ -652,10 +657,17 @@ extern int select_g_job_resized(struct job_record *job_ptr,
  */
 extern bitstr_t * select_g_step_pick_nodes(struct job_record *job_ptr,
 					   dynamic_plugin_data_t *step_jobinfo,
-					   uint32_t node_count);
+					   uint32_t node_count,
+					   bitstr_t **avail_nodes);
 /*
- * clear what happened in select_g_step_pick_nodes
- * IN/OUT step_ptr - Flush the resources from the job and step.
+ * Post pick_nodes operations for the step.
+ * IN/OUT step_ptr - step pointer to operate on.
+ */
+extern int select_g_step_start(struct step_record *step_ptr);
+
+/*
+ * clear what happened in select_g_step_pick_nodes and/or select_g_step_start
+ * IN/OUT step_ptr - step pointer to operate on.
  */
 extern int select_g_step_finish(struct step_record *step_ptr);
 
@@ -668,15 +680,16 @@ extern int select_g_step_finish(struct step_record *step_ptr);
  *	request. "best" is defined as either single set of consecutive nodes
  *	satisfying the request and leaving the minimum number of unused nodes
  *	OR the fewest number of consecutive node sets
- * IN avail_bitmap - nodes available for the reservation
+ * IN/OUT avail_bitmap - nodes available for the reservation
  * IN node_cnt - count of required nodes
- * IN core_cnt - count of required cores
- * IN core_bitmap - cores to exclude for this reservation
+ * IN core_cnt - count of required cores per node
+ * IN/OUT core_bitmap - cores which can not be used for this reservation
+ * IN flags - reservation request flags
  * RET - nodes selected for use by the reservation
  */
 extern bitstr_t * select_g_resv_test(bitstr_t *avail_bitmap, uint32_t node_cnt,
-				     uint32_t *core_cnt,
-				     bitstr_t **core_bitmap);
+				     uint32_t *core_cnt, bitstr_t **core_bitmap,
+				     uint32_t flags);
 
 /*****************************\
  * GET INFORMATION FUNCTIONS *

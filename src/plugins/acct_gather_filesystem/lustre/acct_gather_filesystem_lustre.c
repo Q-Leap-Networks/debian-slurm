@@ -248,6 +248,14 @@ static int _read_lustre_counters(void)
 		lustre_se.all_lustre_read_bytes += lustre_se.lustre_read_bytes;
 		lustre_se.all_lustre_nb_writes += lustre_se.lustre_nb_writes;
 		lustre_se.all_lustre_nb_reads += lustre_se.lustre_nb_reads;
+		debug3("%s: all_lustre_write_bytes %"PRIu64" "
+		       "all_lustre_read_bytes %"PRIu64"",
+		       __func__, lustre_se.all_lustre_write_bytes,
+		       lustre_se.all_lustre_read_bytes);
+		debug3("%s: all_lustre_nb_writes %"PRIu64" "
+		       "all_lustre_nb_reads %"PRIu64"",
+		       __func__, lustre_se.all_lustre_nb_writes,
+		       lustre_se.all_lustre_nb_reads);
 
 	} /* while ((entry = readdir(proc_dir)))  */
 	closedir(proc_dir);

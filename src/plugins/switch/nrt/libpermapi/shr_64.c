@@ -779,8 +779,13 @@ static bool _multi_prog_parse(char *line, int length, int step_id, int task_id)
 
 		_parse_prog_line(total_tasks, line, cmd, args, protocol);
 		return true;
+	}
 
-	} else if (task_id >= total_tasks) {
+	xassert(args);
+	xassert(cmd);
+	xassert(protocol);
+
+	if (task_id >= total_tasks) {
 		for (i = 0; i < total_tasks; i++) {
 			xfree(args[i]);
 			xfree(cmd[i]);
@@ -790,7 +795,9 @@ static bool _multi_prog_parse(char *line, int length, int step_id, int task_id)
 		xfree(protocol);
 		total_tasks = 0;
 		return false;
-	} else if (!cmd[task_id]) {
+	}
+
+	if (!cmd[task_id]) {
 		error("Configuration file invalid, no record for task id %d",
 		      task_id);
 		return true;
@@ -1053,7 +1060,11 @@ extern int pe_rm_connect(rmhandle_t resource_mgr,
 	ii = 0;
 	for (i=orig_task_num; i<fd_cnt; i++)
 		rm_sockfds[ii++] = ctx_sockfds[i];
-
+	/* Since opt is a global variable we need to remove the
+	   dangling reference set here.  This shouldn't matter, but
+	   Clang reported it so we are making things quite here.
+	*/
+	opt.argv = NULL;
 	return 0;
 }
 
@@ -1500,6 +1511,10 @@ extern int pe_rm_init(int *rmapi_version, rmhandle_t *resource_mgr, char *rm_id,
 	char *srun_debug = NULL, *tmp_char = NULL;
 	char *myargv[3] = { "poe", NULL, NULL };
 	int debug_level = log_opts.logfile_level;
+
+	if (geteuid() == 0)
+		error("POE will not run as user root");
+
 	/* SLURM was originally written against 1300, so we will
 	 * return that, no matter what comes in so we always work.
 	 */
@@ -1870,12 +1885,6 @@ int pe_rm_submit_job(rmhandle_t resource_mgr, job_command_t job_cmd,
 	debug2("usage_mode\t= %d", pe_job_req->node_usage);
 	debug2("network_usage protocols\t= %s",
 	       pe_job_req->network_usage.protocols);
-	if (!opt.network)
-		xstrcat(opt.network, pe_job_req->network_usage.protocols);
-	else if (!strstr(opt.network, pe_job_req->network_usage.protocols)) {
-		xstrcat(opt.network, ",");
-		xstrcat(opt.network, pe_job_req->network_usage.protocols);
-	}
 	debug2("network_usage adapter_usage\t= %s",
 	       pe_job_req->network_usage.adapter_usage);
 	debug2("network_usage adapter_type\t= %s",

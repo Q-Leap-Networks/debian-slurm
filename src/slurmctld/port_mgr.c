@@ -149,7 +149,7 @@ static void _make_all_resv(void)
 		step_iterator = list_iterator_create(job_ptr->step_list);
 		while ((step_ptr = (struct step_record *)
 				   list_next(step_iterator))) {
-			if (step_ptr->state != JOB_RUNNING)
+			if (step_ptr->state < JOB_RUNNING)
 				continue;
 			_make_step_resv(step_ptr);
 		}
@@ -257,13 +257,11 @@ extern int resv_port_alloc(struct step_record *step_ptr)
 	/* Reserve selected ports */
 	hl = hostlist_create(NULL);
 	for (i=0; i<port_inx; i++) {
-		/* NOTE: We give the port a name like "[1234]" rather than
-		 * just "1234" to avoid hostlists of the form "1[234-236]" */
 		bit_or(port_resv_table[port_array[i]],
 		       step_ptr->step_node_bitmap);
 		port_array[i] += port_resv_min;
-		snprintf(port_str, sizeof(port_str), "[%d]", port_array[i]);
-		hostlist_push(hl, port_str);
+		snprintf(port_str, sizeof(port_str), "%d", port_array[i]);
+		hostlist_push_host(hl, port_str);
 	}
 	hostlist_sort(hl);
 	step_ptr->resv_ports = hostlist_ranged_string_xmalloc(hl);

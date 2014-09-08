@@ -185,7 +185,7 @@ Users can specify which of these \fBfeatures\fR are required by their job
 using the constraint option.
 Only nodes having features matching the job constraints will be used to
 satisfy the request.
-Multiple constraints may be specified with AND, OR, exclusive OR,
+Multiple constraints may be specified with AND, OR, matching OR,
 resource counts, etc.
 Supported \fbconstraint\fR options include:
 .PD 1
@@ -212,7 +212,7 @@ If only nodes with at least one of specified features will be used.
 The vertical bar is used for an OR operator.
 For example, \fB\-\-constraint="intel|amd"\fR
 .TP
-\fBExclusive OR\fR
+\fBMatching OR\fR
 If only one of a set of possible options should be used for all allocated
 nodes, then use the OR operator and enclose the options within square brackets.
 For example: "\fB\-\-constraint=[rack1|rack2|rack3|rack4]"\fR might
@@ -319,7 +319,8 @@ Not supported unless the entire node is allocated to the job.
 Bind by setting CPU masks on tasks as specified
 where <list> is <mask1>,<mask2>,...<maskN>.
 CPU masks are \fBalways\fR interpreted as hexadecimal values but can be
-preceded with an optional '0x'.
+preceded with an optional '0x'. Not supported unless the entire node is
+allocated to the job.
 .TP
 .B sockets
 Automatically generate masks binding tasks to sockets.
@@ -341,6 +342,12 @@ this can result in sub\-optimal binding.
 Automatically generate masks binding tasks to NUMA locality domains.
 If the number of tasks differs from the number of allocated locality domains
 this can result in sub\-optimal binding.
+.TP
+.B boards
+Automatically generate masks binding tasks to boards.
+If the number of tasks differs from the number of allocated boards
+this can result in sub\-optimal binding. This option is supported by the
+task/cgroup plugin only.
 .TP
 .B help
 Show this help message
@@ -790,9 +797,43 @@ that the \fB\-\-cpus\-per\-task\fR option will change this default.
 
 .TP
 \fB\-\-network\fR=<\fItype\fR>
-Specify the communication protocol to be used.
+Specify information pertaining to the switch or network.
 The interpretation of \fItype\fR is system dependent.
-This option is current supported on systems with IBM's Parallel Environment (PE).
+This option is supported when running Slurm on a Cray natively.  It is
+used to request using Network Performace Counters.
+Only one value per request is valid.
+All options are case in\-sensitive.
+In this configuration supported values include:
+.RS
+.TP 6
+\fBsystem\fR
+Use the system\-wide network performance counters. Because only one
+job can use this at a time this option will allocate every node in the
+cluster.  In steps inside the allocation wish to run on less than the
+full system they must specify the node count for each step.
+.TP
+\fBblade\fR
+Use the blade network performance counters. Only nodes requested
+will be marked in use for the job allocation.  If the job does not
+fill up the entire blade(s) allocated to the job those blade(s) are not
+able to be used by other jobs, but will appear in the state PerfCnts.
+.TP
+.RE
+
+.br
+.br
+In all cases the job allocation request \fBmust specify the
+--exclusive option\fR.  Otherwise the request will be denied.
+
+.br
+.br
+Also with any of these options steps are not allowed to share blades,
+so resources would remain idle inside an allocation if the step
+running on a blade does not take up all the nodes on the blade.
+
+.br
+.br
+The \fBnetwork\fR option is also supported on systems with IBM's Parallel Environment (PE).
 See IBM's LoadLeveler job command keyword documentation about the keyword
 "network" for more information.
 Multiple values may be specified in a comma separated list.
@@ -1046,6 +1087,12 @@ option was not set and allow higher system utilization, but application
 performance will likely suffer due to competition for resources within a node.
 
 .TP
+\fB\-S\fR, \fB\-\-core\-spec\fR=<\fInum\fR>
+Count of specialized cores per nodereserved by the job for system operations
+and not used by the application. The application will not use these cores,
+but will be charged for their allocation. Default value is zero.
+
+.TP
 \fB\-\-signal\fR=<\fIsig_num\fR>[@<\fIsig_time\fR>]
 When a job is within \fIsig_time\fR seconds of its end time,
 send it the signal \fIsig_num\fR.
@@ -1148,9 +1195,18 @@ This option has been replaced by \fB\-\-immediate\fR=<\fIseconds\fR>.
 
 .TP
 \fB\-w\fR, \fB\-\-nodelist\fR=<\fInode name list\fR>
-Request a specific list of node names.  The list may be specified as a
-comma\-separated list of node names, or a range of node names
-(e.g. mynode[1\-5,7,...]).  Duplicate node names in the list will be ignored.
+Request a specific list of hosts.
+Unless constrained by the maximum node count, the job will contain
+\fIall\fR of these hosts.
+The list may be specified as a comma\-separated list of hosts, a range of hosts
+(host[1\-5,7,...] for example), or a filename.
+The host list will be assumed to be a filename if it contains a "/" character.
+If you specify a maximum node count and the host list contains more nodes, the
+extra node names will be silently ignored.
+If you specify a minimum node or processor count larger than can be satisfied
+by the supplied host list, additional resources will be allocated on other
+nodes as needed.
+Duplicate node names in the list will be ignored.
 The order of the node names in the list is not important; the node names
 will be sorted by SLURM.
 
@@ -1264,6 +1320,9 @@ Same as \fB\-\-bell\fR
 .TP
 \fBSALLOC_CONN_TYPE\fR
 Same as \fB\-\-conn\-type\fR
+.TP
+\fBSALLOC_CORE_SPEC\fR
+Same as \fB\-\-core\-spec\fR
 .TP
 \fBSALLOC_CPU_BIND\fR
 Same as \fB\-\-cpu_bind\fR
@@ -1386,6 +1445,9 @@ List of nodes allocated to the job.
 .TP
 \fBSLURM_JOB_NUM_NODES\fR (and \fBSLURM_NNODES\fR for backwards compatibility)
 Total number of nodes in the job allocation.
+.TP
+\fBSLURM_JOB_PARTITION\fR
+Name of the partition in which the job is running.
 .TP
 \fBSLURM_MEM_BIND\fR
 Set to value of the \-\-mem_bind\fR option.

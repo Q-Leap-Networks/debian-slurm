@@ -75,6 +75,7 @@ typedef struct slurmd_config {
 	char         *prog;		/* Program basename		   */
 	char         ***argv;           /* pointer to argument vector      */
 	int          *argc;             /* pointer to argument count       */
+	char         *cluster_name; 	/* conf ClusterName		   */
 	char         *hostname;	 	/* local hostname		   */
 	uint16_t     cpus;              /* lowest-level logical processors */
 	uint16_t     boards;            /* total boards count              */
@@ -122,6 +123,7 @@ typedef struct slurmd_config {
 	slurm_fd_t      lfd;		/* slurmd listen file descriptor   */
 	pid_t         pid;		/* server pid                      */
 	log_options_t log_opts;         /* current logging options         */
+	uint16_t      log_fmt;          /* Log file timestamp format flag  */
 	int           debug_level;	/* logging detail level            */
 	uint16_t      debug_level_set;	/* debug_level set on command line */
 	uint32_t      debug_flags;	/* DebugFlags configured           */
@@ -137,6 +139,7 @@ typedef struct slurmd_config {
 	uint16_t        acct_freq_task;
 	char           *job_acct_gather_freq;
 	char           *job_acct_gather_type; /* job accounting gather type */
+	char           *job_acct_gather_params; /* job accounting gather params */
 	char           *acct_gather_energy_type; /*  */
 	char           *acct_gather_filesystem_type; /*  */
 	char           *acct_gather_infiniband_type; /*  */

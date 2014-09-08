@@ -323,6 +323,7 @@ void *_fwd_tree_thread(void *arg)
 	slurm_msg_t_init(&send_msg);
 	send_msg.msg_type = fwd_tree->orig_msg->msg_type;
 	send_msg.data = fwd_tree->orig_msg->data;
+	send_msg.protocol_version = fwd_tree->orig_msg->protocol_version;
 
 	/* repeat until we are sure the message was sent */
 	while ((name = hostlist_shift(fwd_tree->tree_hl))) {
@@ -460,7 +461,7 @@ extern void forward_init(forward_t *forward, forward_t *from)
  *
  * IN: forward_struct - forward_struct_t *   - holds information about message
  *                                             that needs to be forwarded to
- *                                             childern processes
+ *                                             children processes
  * IN: header         - header_t             - header from message that came in
  *                                             needing to be forwarded.
  * RET: SLURM_SUCCESS - int
@@ -527,7 +528,7 @@ extern int forward_msg(forward_struct_t *forward_struct,
 			name = hostlist_shift(hl);
 			if (!name)
 				break;
-			hostlist_push(forward_hl, name);
+			hostlist_push_host(forward_hl, name);
 			free(name);
 		}
 
@@ -541,7 +542,7 @@ extern int forward_msg(forward_struct_t *forward_struct,
 			error("pthread_create error %m");
 			if (++retries > MAX_RETRIES)
 				fatal("Can't create pthread");
-			usleep(100000);	/* sleep and try again */
+			sleep(1);	/* sleep and try again */
 		}
 		slurm_attr_destroy(&attr_agent);
 		thr_count++;
@@ -559,7 +560,7 @@ extern int forward_msg(forward_struct_t *forward_struct,
  * IN: hl          - hostlist_t   - list of every node to send message to
  * IN: msg         - slurm_msg_t  - message to send.
  * IN: timeout     - int          - how long to wait in milliseconds.
- * RET List 	   - List containing the responses of the childern
+ * RET List 	   - List containing the responses of the children
  *		     (if any) we forwarded the message to. List
  *		     containing type (ret_data_info_t).
  */
@@ -617,7 +618,7 @@ extern List start_msg_tree(hostlist_t hl, slurm_msg_t *msg, int timeout)
 			name = hostlist_shift(hl);
 			if (!name)
 				break;
-			hostlist_push(fwd_tree->tree_hl, name);
+			hostlist_push_host(fwd_tree->tree_hl, name);
 			free(name);
 		}
 
@@ -637,7 +638,7 @@ extern List start_msg_tree(hostlist_t hl, slurm_msg_t *msg, int timeout)
 			error("pthread_create error %m");
 			if (++retries > MAX_RETRIES)
 				fatal("Can't create pthread");
-			usleep(100000);	/* sleep and try again */
+			sleep(1);	/* sleep and try again */
 		}
 		slurm_attr_destroy(&attr_agent);
 

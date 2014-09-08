@@ -54,9 +54,11 @@
 #include "src/common/forward.h"
 #include "src/common/hostlist.h"
 #include "src/common/log.h"
+#include "src/common/read_config.h"
 #include "src/common/slurm_cred.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_interface.h"
+#include "src/common/uid.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 #include "src/sbcast/sbcast.h"
@@ -76,7 +78,7 @@ int main(int argc, char *argv[])
 	log_options_t opts = LOG_OPTS_STDERR_ONLY;
 	log_init("sbcast", opts, SYSLOG_FACILITY_DAEMON, NULL);
 
-#ifdef HAVE_CRAY
+#ifdef HAVE_ALPS_CRAY
 	error("The sbcast command is not supported on Cray systems");
 	return 1;
 #endif
@@ -84,6 +86,7 @@ int main(int argc, char *argv[])
 	error("The sbcast command is not supported on IBM BlueGene systems");
 	return 1;
 #endif
+	slurm_conf_init(NULL);
 	parse_command_line(argc, argv);
 	if (params.verbose) {
 		opts.stderr_level += params.verbose;
@@ -104,9 +107,9 @@ int main(int argc, char *argv[])
 	verbose("modes    = %o", (unsigned int) f_stat.st_mode);
 	verbose("uid      = %d", (int) f_stat.st_uid);
 	verbose("gid      = %d", (int) f_stat.st_gid);
-	verbose("atime    = %s", ctime(&f_stat.st_atime));
-	verbose("mtime    = %s", ctime(&f_stat.st_mtime));
-	verbose("ctime    = %s", ctime(&f_stat.st_ctime));
+	verbose("atime    = %s", slurm_ctime(&f_stat.st_atime));
+	verbose("mtime    = %s", slurm_ctime(&f_stat.st_mtime));
+	verbose("ctime    = %s", slurm_ctime(&f_stat.st_ctime));
 	verbose("size     = %ld", (long) f_stat.st_size);
 	verbose("-----------------------------");
 
@@ -123,20 +126,13 @@ int main(int argc, char *argv[])
 /* get details about this slurm job: jobid and allocated node */
 static void _get_job_info(void)
 {
-	char *jobid_str;
-	uint32_t jobid;
+	xassert(params.jobid != NO_VAL);
 
-	jobid_str = getenv("SLURM_JOB_ID");
-	if (!jobid_str) {
-		error("Command only valid from within SLURM job");
-		exit(1);
-	}
-	jobid = (uint32_t) atol(jobid_str);
-	verbose("jobid      = %u", jobid);
+	verbose("jobid      = %u", params.jobid);
 
-	if (slurm_sbcast_lookup(jobid, &sbcast_cred) != SLURM_SUCCESS) {
-		error("SLURM jobid %u lookup error: %s",
-		      jobid, slurm_strerror(slurm_get_errno()));
+	if (slurm_sbcast_lookup(params.jobid, &sbcast_cred) != SLURM_SUCCESS) {
+		error("Slurm jobid %u lookup error: %s",
+		      params.jobid, slurm_strerror(slurm_get_errno()));
 		exit(1);
 	}
 
@@ -206,6 +202,7 @@ static void _bcast_file(void)
 	bcast_msg.force		= params.force;
 	bcast_msg.modes		= f_stat.st_mode;
 	bcast_msg.uid		= f_stat.st_uid;
+	bcast_msg.user_name	= uid_to_string(f_stat.st_uid);
 	bcast_msg.gid		= f_stat.st_gid;
 	buffer			= xmalloc(buf_size);
 	bcast_msg.block		= buffer;
@@ -233,6 +230,6 @@ static void _bcast_file(void)
 			break;	/* end of file */
 		bcast_msg.block_no++;
 	}
-
+	xfree(bcast_msg.user_name);
 	xfree(buffer);
 }

@@ -4,6 +4,7 @@
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
+ *  Copyright (C) 2013      Intel, Inc.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
@@ -124,6 +125,11 @@ uint32_t slurm_get_suspend_time(void);
  */
 uint16_t slurm_get_complete_wait(void);
 
+/* slurm_get_prolog_flags
+ * RET PrologFlags value from slurm.conf
+ */
+uint32_t slurm_get_prolog_flags(void);
+
 /* slurm_get_debug_flags
  * RET DebugFlags value from slurm.conf
  */
@@ -175,12 +181,6 @@ char *slurm_get_mpi_params(void);
  */
 extern uint16_t slurm_get_msg_timeout(void);
 
-/* slurm_api_set_conf_file
- *      set slurm configuration file to a non-default value
- * pathname IN - pathname of slurm configuration file to be used
- */
-extern void slurm_api_set_conf_file(char *pathname);
-
 /* slurm_api_set_default_config
  *	called by the send_controller_msg function to insure that at least
  *	the compiled in default slurm_protocol_config object is initialized
@@ -226,6 +226,13 @@ char *slurm_get_job_submit_plugins(void);
  * RET char *   - slurmctld_plugstack, MUST be xfreed by caller
  */
 char *slurm_get_slurmctld_plugstack(void);
+
+/* slurm_get_slurmd_plugstack
+ * get slurmd_plugstack from slurmctld_conf object from
+ * slurmd_conf object
+ * RET char *   - slurmd_plugstack, MUST be xfreed by caller
+ */
+char *slurm_get_slurmd_plugstack(void);
 
 /* slurm_get_plugin_dir
  * get plugin directory from slurmctld_conf object from slurmctld_conf object
@@ -280,6 +287,12 @@ uint32_t slurm_get_priority_weight_age(void);
  * RET uint32_t - factor weight.
  */
 uint32_t slurm_get_priority_weight_fairshare(void);
+
+/* slurm_get_fs_dampening_factor
+ * returns the dampening factor for fairshare from slurmctld_conf object
+ * RET uint32_t - factor.
+ */
+uint16_t slurm_get_fs_dampening_factor(void);
 
 /* slurm_get_priority_weight_job_size
  * returns the priority weight for job size from slurmctld_conf object
@@ -473,6 +486,12 @@ uint16_t slurm_get_preempt_mode(void);
  * RET char *    - job accounting type,  MUST be xfreed by caller
  */
 char *slurm_get_jobacct_gather_type(void);
+
+/* slurm_get_jobacct_gather_params
+ * returns the job accounting params from the slurmctld_conf object
+ * RET char *    - job accounting params,  MUST be xfreed by caller
+ */
+char *slurm_get_jobacct_gather_params(void);
 
 /* slurm_get_jobacct_gather_freq
  * returns the job accounting poll frequency from the slurmctld_conf object
@@ -686,6 +705,14 @@ char *slurm_get_task_plugin(void);
 /* slurm_get_task_plugin_param */
 uint16_t slurm_get_task_plugin_param(void);
 
+/* slurm_get_core_spec_plugin
+ * RET core_spec plugin name, must be xfreed by caller */
+char *slurm_get_core_spec_plugin(void);
+
+/* slurm_get_job_container_plugin
+ * RET job_container plugin name, must be xfreed by caller */
+char *slurm_get_job_container_plugin(void);
+
 /**********************************************************************\
  * general message management functions used by slurmctld, slurmd
 \**********************************************************************/
@@ -766,7 +793,7 @@ int slurm_receive_msg(slurm_fd_t fd, slurm_msg_t *msg, int timeout);
  * IN open_fd	- file descriptor to receive msg on
  * IN steps	- how many steps down the tree we have to wait for
  * IN timeout	- how long to wait in milliseconds
- * RET List	- List containing the responses of the childern (if any) we
+ * RET List	- List containing the responses of the children (if any) we
  *                forwarded the message to. List containing type
  *                (ret_data_info_t). NULL is returned on failure. and
  *                errno set.
@@ -779,8 +806,8 @@ List slurm_receive_msgs(slurm_fd_t fd, int steps, int timeout);
  *    forward the message to the nodes contained in the forward_t
  *    structure inside the header of the message.  If timeout is
  *    zero, a default timeout is used. The 'resp' is the actual message
- *    received and contains the ret_list of it's childern and the
- *    forward_structure_t containing information about it's childern
+ *    received and contains the ret_list of it's children and the
+ *    forward_structure_t containing information about it's children
  *    also. Memory is allocated for the returned msg and the returned
  *    list both must be freed at some point using the
  *    slurm_free_functions and list_destroy function.
@@ -1052,6 +1079,15 @@ extern int slurm_unpack_slurm_addr_array(slurm_addr_t ** slurm_address,
  */
 int slurm_send_rc_msg(slurm_msg_t * request_msg, int rc);
 
+/* slurm_send_rc_err_msg
+ * given the original request message this function sends a
+ *	slurm_return_code message back to the client that made the request
+ * IN request_msg	- slurm_msg the request msg
+ * IN rc		- the return_code to send back to the client
+ * IN err_msg		- message for user
+ */
+int slurm_send_rc_err_msg(slurm_msg_t *msg, int rc, char *err_msg);
+
 /* slurm_send_recv_controller_msg
  * opens a connection to the controller, sends the controller a message,
  * listens for the response, then closes the connection
@@ -1081,7 +1117,7 @@ int slurm_send_recv_node_msg(slurm_msg_t * request_msg,
  * IN msg           - a slurm_msg struct to be sent by the function
  * IN timeout	    - how long to wait in milliseconds
  * IN quiet         - if set, reduce logging details
- * RET List	    - List containing the responses of the childern
+ * RET List	    - List containing the responses of the children
  *                    (if any) we forwarded the message to. List
  *                    containing type (ret_types_t).
  */
@@ -1094,7 +1130,7 @@ List slurm_send_recv_msgs(const char *nodelist, slurm_msg_t *msg, int timeout,
  * IN msg           - a slurm_msg struct to be sent by the function
  * IN name          - the name of the node the message is being sent to
  * IN timeout	    - how long to wait in milliseconds
- * RET List	    - List containing the responses of the childern
+ * RET List	    - List containing the responses of the children
  *                    (if any) we forwarded the message to. List
  *                    containing type (ret_types_t).
  */
@@ -1143,9 +1179,10 @@ extern void slurm_free_msg(slurm_msg_t * msg);
 /* must free this memory with free not xfree */
 extern char *nodelist_nth_host(const char *nodelist, int inx);
 extern int nodelist_find(const char *nodelist, const char *name);
-extern void convert_num_unit2(float num, char *buf, int buf_size, int orig_type,
-			      int divisor, bool exact);
-extern void convert_num_unit(float num, char *buf, int buf_size, int orig_type);
+extern void convert_num_unit2(double num, char *buf, int buf_size,
+			      int orig_type, int divisor, bool exact);
+extern void convert_num_unit(double num, char *buf, int buf_size,
+			     int orig_type);
 extern int revert_num_unit(const char *buf);
 extern void parse_int_to_array(int in, int *out);
 
@@ -1171,7 +1208,7 @@ extern int slurm_job_step_create (
  * IN data: real data
  * RET: error code
  */
-extern int slurm_forward_data(char *nodelist, char *address, uint32_t len, 
+extern int slurm_forward_data(char *nodelist, char *address, uint32_t len,
 	char *data);
 
 #endif

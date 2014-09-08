@@ -3,7 +3,8 @@
 
 dnl Prologue
 dnl
-AC_INIT
+
+AC_INIT(slurm, m4_esyscmd([perl -ne 'print,exit if s/^\s*VERSION:\s*(\S*).*/\1/i' ./META | sed 's/^v//' | tr '-' '_' | tr -d '\n']), [slurm-dev@schedmd.com], [], [http://slurm.schedmd.com])
 AC_PREREQ(2.59)
 AC_CONFIG_SRCDIR([configure.ac])
 AC_CONFIG_AUX_DIR([auxdir])
@@ -14,15 +15,13 @@ AM_CONDITIONAL(DONT_BUILD, test "1" = "0")
 
 X_AC_GPL_LICENSED
 
-#
 # Determine project/version from META file.
 # Sets PACKAGE, VERSION, SLURM_VERSION
 X_AC_SLURM_VERSION
 
-
 dnl Initialize Automake
 dnl
-AM_INIT_AUTOMAKE(slurm, $VERSION)
+AM_INIT_AUTOMAKE(no-define)
 AM_MAINTAINER_MODE
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_HEADERS([slurm/slurm.h])
@@ -161,10 +160,6 @@ X_AC_AFFINITY
 dnl
 dnl Check for PAM module support
 X_AC_PAM
-
-dnl
-dnl Check whether RFC 5424 time format should be used
-X_AC_RFC5424_TIME
 
 dnl
 dnl Check for ISO compliance
@@ -417,6 +412,7 @@ AC_CONFIG_FILES([Makefile
 		 contribs/Makefile
 		 contribs/cray/Makefile
 		 contribs/cray/opt_modulefiles_slurm
+		 contribs/cray/slurmconfgen.py
 		 contribs/lua/Makefile
 		 contribs/mic/Makefile
 		 contribs/pam/Makefile
@@ -428,6 +424,7 @@ AC_CONFIG_FILES([Makefile
 		 contribs/torque/Makefile
 		 contribs/phpext/Makefile
 		 contribs/phpext/slurm_php/config.m4
+		 contribs/sgather/Makefile
 		 contribs/sjobexit/Makefile
 		 contribs/slurmdb-direct/Makefile
 		 contribs/pmi2/Makefile
@@ -450,28 +447,29 @@ AC_CONFIG_FILES([Makefile
 		 src/sacct/Makefile
 		 src/sacctmgr/Makefile
 		 src/sreport/Makefile
-		 src/sstat/Makefile
-		 src/sshare/Makefile
 		 src/salloc/Makefile
 		 src/sbatch/Makefile
+		 src/sbcast/Makefile
 		 src/sattach/Makefile
+		 src/scancel/Makefile
+		 src/scontrol/Makefile
 		 src/sdiag/Makefile
-		 src/sprio/Makefile
-		 src/srun/Makefile
-		 src/srun/libsrun/Makefile
-		 src/srun_cr/Makefile
+		 src/sinfo/Makefile
+		 src/slurmctld/Makefile
 		 src/slurmd/Makefile
 		 src/slurmd/common/Makefile
 		 src/slurmd/slurmd/Makefile
 		 src/slurmd/slurmstepd/Makefile
 		 src/slurmdbd/Makefile
-		 src/slurmctld/Makefile
-		 src/sbcast/Makefile
-		 src/scontrol/Makefile
-		 src/scancel/Makefile
-		 src/squeue/Makefile
-		 src/sinfo/Makefile
 		 src/smap/Makefile
+		 src/smd/Makefile
+		 src/sprio/Makefile
+		 src/squeue/Makefile
+		 src/srun/Makefile
+		 src/srun/libsrun/Makefile
+		 src/srun_cr/Makefile
+		 src/sshare/Makefile
+		 src/sstat/Makefile
 		 src/strigger/Makefile
 		 src/sview/Makefile
 		 src/plugins/Makefile
@@ -479,7 +477,6 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/accounting_storage/common/Makefile
 		 src/plugins/accounting_storage/filetxt/Makefile
 		 src/plugins/accounting_storage/mysql/Makefile
-		 src/plugins/accounting_storage/pgsql/Makefile
 		 src/plugins/accounting_storage/none/Makefile
 		 src/plugins/accounting_storage/slurmdbd/Makefile
 		 src/plugins/auth/Makefile
@@ -494,6 +491,9 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/checkpoint/none/Makefile
 		 src/plugins/checkpoint/ompi/Makefile
 		 src/plugins/checkpoint/poe/Makefile
+		 src/plugins/core_spec/Makefile
+		 src/plugins/core_spec/cray/Makefile
+		 src/plugins/core_spec/none/Makefile
 		 src/plugins/crypto/Makefile
 		 src/plugins/crypto/munge/Makefile
 		 src/plugins/crypto/openssl/Makefile
@@ -505,6 +505,7 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/gres/nic/Makefile
 		 src/plugins/gres/mic/Makefile
 		 src/plugins/jobacct_gather/Makefile
+		 src/plugins/jobacct_gather/common/Makefile
 		 src/plugins/jobacct_gather/linux/Makefile
 		 src/plugins/jobacct_gather/aix/Makefile
 		 src/plugins/jobacct_gather/cgroup/Makefile
@@ -528,16 +529,20 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/jobcomp/none/Makefile
 		 src/plugins/jobcomp/script/Makefile
 		 src/plugins/jobcomp/mysql/Makefile
-		 src/plugins/jobcomp/pgsql/Makefile
+		 src/plugins/job_container/Makefile
+		 src/plugins/job_container/cncu/Makefile
+		 src/plugins/job_container/none/Makefile
 		 src/plugins/job_submit/Makefile
 		 src/plugins/job_submit/all_partitions/Makefile
 		 src/plugins/job_submit/cnode/Makefile
+		 src/plugins/job_submit/cray/Makefile
 		 src/plugins/job_submit/defaults/Makefile
 		 src/plugins/job_submit/logging/Makefile
 		 src/plugins/job_submit/lua/Makefile
 		 src/plugins/job_submit/partition/Makefile
 		 src/plugins/job_submit/pbs/Makefile
 		 src/plugins/job_submit/require_timelimit/Makefile
+		 src/plugins/job_submit/throttle/Makefile
 		 src/plugins/launch/Makefile
 		 src/plugins/launch/aprun/Makefile
 		 src/plugins/launch/poe/Makefile
@@ -552,6 +557,7 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/priority/multifactor/Makefile
 		 src/plugins/proctrack/Makefile
 		 src/plugins/proctrack/aix/Makefile
+		 src/plugins/proctrack/cray/Makefile
 		 src/plugins/proctrack/cgroup/Makefile
 		 src/plugins/proctrack/pgid/Makefile
 		 src/plugins/proctrack/linuxproc/Makefile
@@ -564,6 +570,9 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/sched/wiki/Makefile
 		 src/plugins/sched/wiki2/Makefile
 		 src/plugins/select/Makefile
+		 src/plugins/select/alps/Makefile
+		 src/plugins/select/alps/libalps/Makefile
+		 src/plugins/select/alps/libemulate/Makefile
 		 src/plugins/select/bluegene/Makefile
 		 src/plugins/select/bluegene/ba/Makefile
 		 src/plugins/select/bluegene/ba_bgq/Makefile
@@ -572,13 +581,16 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/select/bluegene/sfree/Makefile
 		 src/plugins/select/cons_res/Makefile
 		 src/plugins/select/cray/Makefile
-		 src/plugins/select/cray/libalps/Makefile
-		 src/plugins/select/cray/libemulate/Makefile
 		 src/plugins/select/linear/Makefile
+		 src/plugins/select/other/Makefile
 		 src/plugins/select/serial/Makefile
 		 src/plugins/slurmctld/Makefile
 		 src/plugins/slurmctld/dynalloc/Makefile
+		 src/plugins/slurmctld/nonstop/Makefile
+		 src/plugins/slurmd/Makefile
 		 src/plugins/switch/Makefile
+		 src/plugins/switch/cray/Makefile
+		 src/plugins/switch/generic/Makefile
 		 src/plugins/switch/none/Makefile
 		 src/plugins/switch/nrt/Makefile
 		 src/plugins/switch/nrt/libpermapi/Makefile
@@ -595,6 +607,7 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/task/Makefile
 		 src/plugins/task/affinity/Makefile
 		 src/plugins/task/cgroup/Makefile
+		 src/plugins/task/cray/Makefile
 		 src/plugins/task/none/Makefile
 		 src/plugins/topology/Makefile
 		 src/plugins/topology/3d_torus/Makefile

@@ -15,8 +15,10 @@ Lead Slurm developers are:
 <li><a href="http://www.bsc.es">Barcelona Supercomputing Center</a></li>
 <li><a href="http://www.bull.com">Bull</a></li>
 <li><a href="http://www.cea.fr">CEA</a></li>
+<li><a href="http://www.cray.com">Cray</a></li>
 <li><a href="http://www.fhcrc.org">Fred Hutchinson Cancer Research Center</a></li>
 <li><a href="http://www.hp.com">HP</a></li>
+<li><a href="http://www.intel.com">Intel</a></li>
 <li><a href="http://www.llnl.gov">Lawrence Livermore National Laboratory</a></li>
 <li><a href="http://www.lanl.gov">Los Alamos National Laboratory</a></li>
 <li><a href="http://english.nudt.edu.cn">National University of Defense Technology (NUDT, China)</a></li>
@@ -32,6 +34,8 @@ Lead Slurm developers are:
 <li>Ernest Artiaga (Barcelona Supercomputing Center, Spain)</li>
 <br>
 <li>Jason W. Bacon</li>
+<li>Leith Bade (Australian National University)</li>
+<li>Troy Baer (The University of Tennessee, Knoxville)</li>
 <li>Susanne Balle (HP)</li>
 <li>Dominik Bartkiewicz (University of Warsaw, Poland)</li>
 <li>Ralph Bean (Rochester Institute of Technology)</li>
@@ -58,11 +62,13 @@ Lead Slurm developers are:
 <br>
 <li>Yuri D'Elia (Center for Biomedicine, EURAC Research, Italy)</li>
 <li>Francois Diakhate (CEA, France)</li>
+<li>Daniele Didomizio (EURAC Research, Italy)</li>
 <li>Joseph Donaghy (Lawrence Livermore National Laboratory)</li>
 <li>Chris Dunlap (Lawrence Livermore National Laboratory)</li>
 <br>
 <li>Phil Eckert (Lawrence Livermore National Laboratory)</li>
 <li>Joey Ekstrom (Lawrence Livermore National Laboratory/Bringham Young University)</li>
+<li>Andrew Elwell</li>
 <li>Josh England (TGS Management Corporation)</li>
 <li>Kent Engstr&ouml;m  (National Supercomputer Centre, Sweden)</li>
 <br>
@@ -87,12 +93,16 @@ Lead Slurm developers are:
 <li>David H&ouml;ppner</li>
 <li>Nathan Huff (North Dakota State University)</li>
 <li>Doug Hughes (D. E. Shaw Research)</li>
+<li>Michel Hummel (Thales Group)</li>
+<br>
+<li>Martins Innus (University of Buffalo)</li>
 <br>
 <li>David Jackson (Adaptive Computing)</li>
 <li>Alec Jensen (SchedMD)</li>
 <li>Klaus Joas (University Karlsruhe, Germany)</li>
 <li>Greg Johnson (Los Alamos National Laboratory)</li>
 <li>Magnus Jonsson (Ume&aring; University, Sweden)</li>
+<li>Matthias Jurenz (ZIH, TU Dresden, Germany)</li>
 <br>
 <li>Jason King (Lawrence Livermore National Laboratory)</li>
 <li>Yury Kiryanov (Intel)</li>
@@ -182,6 +192,6 @@ Lead Slurm developers are:
 <!-- INDIVIDUALS, PLEASE KEEP IN ALPHABETICAL ORDER -->
 </ul>
 
-<p style="text-align:center;">Last modified 5 February 2014</p>
+<p style="text-align:center;">Last modified 14 February 2014</p>
 
 <!--#include virtual="footer.txt"-->

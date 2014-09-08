@@ -88,7 +88,7 @@ and commands are denoted below.
 		  library is installed. MUNGE is used as the default
 		  authentication mechanism.</li>
 <li> <b>Authd</b> The auth/authd plugin will be built and installed if
-		  the libauth library and its dependency libe are installed.
+		  the libauth library and its dependency libs are installed.
 		  </li>
 <li> <b>sview</b> The sview command will be built only if and <i>gtk+-2.0</i>
 		  is installed</li>
@@ -291,7 +291,7 @@ is operational. </p>
 
 <h3>Accounting</h3>
 <p>SLURM supports accounting records being written to a simple text file,
-directly to a database (MySQL or PostgreSQL), or to a daemon securely
+directly to a database (MySQL or MariaDB), or to a daemon securely
 managing accounting data for multiple clusters. For more information
 see <a href="accounting.html">Accounting</a>. </p>
 
@@ -733,7 +733,7 @@ cd /usr/ports/sysutils/slurm-hpc && make install
 
 <p>The binary package installs a minimal slurm configuration suitable for
 typical compute nodes.  Installing from source allows the user to enable
-options such as mysql, postgresql, and gui tools via a configuration menu.</p>
+options such as mysql and gui tools via a configuration menu.</p>
 
 </pre> <p class="footer"><a href="#top">top</a></p>
 

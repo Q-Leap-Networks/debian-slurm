@@ -61,6 +61,7 @@ void slurm_init_job_desc_msg(job_desc_msg_t * job_desc_msg)
 	job_desc_msg->alloc_sid		= NO_VAL;
 	job_desc_msg->conn_type[0]	= (uint16_t) NO_VAL;
 	job_desc_msg->contiguous	= (uint16_t) NO_VAL;
+	job_desc_msg->core_spec		= (uint16_t) NO_VAL;
 	job_desc_msg->cores_per_socket	= (uint16_t) NO_VAL;
 	job_desc_msg->cpu_bind_type	= (uint16_t) NO_VAL;
 	job_desc_msg->cpus_per_task	= (uint16_t) NO_VAL;
@@ -144,7 +145,7 @@ void slurm_init_resv_desc_msg (resv_desc_msg_t * resv_msg)
 	memset(resv_msg, 0, sizeof(resv_desc_msg_t));
 	resv_msg->duration	= NO_VAL;
 	resv_msg->end_time	= (time_t) NO_VAL;
-	resv_msg->flags		= (uint16_t) NO_VAL;
+	resv_msg->flags		= NO_VAL;
 	resv_msg->start_time	= (time_t) NO_VAL;
 }
 

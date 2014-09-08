@@ -140,6 +140,7 @@ static pthread_mutex_t decay_lock = PTHREAD_MUTEX_INITIALIZER;
 static bool running_decay = 0, reconfig = 0,
 	calc_fairshare = 1, priority_debug = 0;
 static bool favor_small; /* favor small jobs over large */
+static uint16_t damp_factor = 1;  /* weight for age factor */
 static uint32_t max_age; /* time when not to add any more
 			  * priority to a job if reached */
 static uint16_t enforce;     /* AccountingStorageEnforce */
@@ -415,7 +416,7 @@ static void _set_usage_efctv(slurmdb_association_rec_t *assoc)
 }
 
 
-/* This should initially get the childern list from
+/* This should initially get the children list from
  * assoc_mgr_root_assoc.  Since our algorythm goes from top down we
  * calculate all the non-user associations now.  When a user submits a
  * job, that norm_fairshare is calculated.  Here we will set the
@@ -424,22 +425,22 @@ static void _set_usage_efctv(slurmdb_association_rec_t *assoc)
  *
  * NOTE: acct_mgr_association_lock must be locked before this is called.
  */
-static int _set_children_usage_efctv(List childern_list)
+static int _set_children_usage_efctv(List children_list)
 {
 	slurmdb_association_rec_t *assoc = NULL;
 	ListIterator itr = NULL;
 
-	if (!childern_list || !list_count(childern_list))
+	if (!children_list || !list_count(children_list))
 		return SLURM_SUCCESS;
 
-	itr = list_iterator_create(childern_list);
+	itr = list_iterator_create(children_list);
 	while ((assoc = list_next(itr))) {
 		if (assoc->user) {
 			assoc->usage->usage_efctv = (long double)NO_VAL;
 			continue;
 		}
 		priority_p_set_assoc_usage(assoc);
-		_set_children_usage_efctv(assoc->usage->childern_list);
+		_set_children_usage_efctv(assoc->usage->children_list);
 	}
 	list_iterator_destroy(itr);
 	return SLURM_SUCCESS;
@@ -450,16 +451,16 @@ static int _set_children_usage_efctv(List childern_list)
  *
  * NOTE: acct_mgr_association_lock must be locked before this is called.
  */
-static int _distribute_tickets(List childern_list, uint32_t tickets)
+static int _distribute_tickets(List children_list, uint32_t tickets)
 {
 	ListIterator itr;
 	slurmdb_association_rec_t *assoc;
 	double sfsum = 0, fs;
 
-	if (!childern_list || !list_count(childern_list))
+	if (!children_list || !list_count(children_list))
 		return SLURM_SUCCESS;
 
-	itr = list_iterator_create(childern_list);
+	itr = list_iterator_create(children_list);
 	while ((assoc = list_next(itr))) {
 		if (assoc->usage->active_seqno
 		    != assoc_mgr_root_assoc->usage->active_seqno)
@@ -472,7 +473,7 @@ static int _distribute_tickets(List childern_list, uint32_t tickets)
 	}
 	list_iterator_destroy(itr);
 
-	itr = list_iterator_create(childern_list);
+	itr = list_iterator_create(children_list);
 	while ((assoc = list_next(itr))) {
 		if (assoc->usage->active_seqno
 		    != assoc_mgr_root_assoc->usage->active_seqno)
@@ -492,7 +493,7 @@ static int _distribute_tickets(List childern_list, uint32_t tickets)
 		}
 		if (assoc->user && assoc->usage->tickets > max_tickets)
 			max_tickets = assoc->usage->tickets;
-		_distribute_tickets(assoc->usage->childern_list,
+		_distribute_tickets(assoc->usage->children_list,
 				    assoc->usage->tickets);
 	}
 	list_iterator_destroy(itr);
@@ -637,7 +638,7 @@ static void _get_priority_factors(time_t start_time, struct job_record *job_ptr)
 			uint32_t time_limit = 1;
 			/* Job size in CPUs (based upon average CPUs/Node */
 			job_ptr->prio_factors->priority_js =
-				(double)job_ptr->details->min_nodes *
+				(double)min_nodes *
 				(double)cluster_cpus /
 				(double)node_record_count;
 			if (cpu_cnt > job_ptr->prio_factors->priority_js) {
@@ -1254,7 +1255,7 @@ static void *_decay_thread(void *no_data)
 		/* now calculate all the normalized usage here */
 		assoc_mgr_lock(&locks);
 		_set_children_usage_efctv(
-			assoc_mgr_root_assoc->usage->childern_list);
+			assoc_mgr_root_assoc->usage->children_list);
 		assoc_mgr_unlock(&locks);
 
 		if (!g_last_ran)
@@ -1374,7 +1375,7 @@ static void *_decay_thread(void *no_data)
 			max_tickets = 0;
 			assoc_mgr_root_assoc->usage->tickets = (uint32_t) -1;
 			_distribute_tickets(
-				assoc_mgr_root_assoc->usage->childern_list,
+				assoc_mgr_root_assoc->usage->children_list,
 				(uint32_t) -1);
 			assoc_mgr_unlock(&locks);
 
@@ -1483,7 +1484,7 @@ static void _internal_setup(void)
 		priority_debug = 0;
 
 	favor_small = slurm_get_priority_favor_small();
-
+	damp_factor = (long double)slurm_get_fs_dampening_factor();
 	enforce = slurm_get_accounting_storage_enforce();
 	max_age = slurm_get_priority_max_age();
 	weight_age = slurm_get_priority_weight_age();
@@ -1494,6 +1495,7 @@ static void _internal_setup(void)
 	flags = slurmctld_conf.priority_flags;
 
 	if (priority_debug) {
+		info("priority: Damp Factor is %u", damp_factor);
 		info("priority: AccountingStorageEnforce is %u", enforce);
 		info("priority: Max Age is %u", max_age);
 		info("priority: Weight Age is %u", weight_age);
@@ -1515,8 +1517,10 @@ int init ( void )
 	char *temp = NULL;
 
 	/* This means we aren't running from the controller so skip setup. */
-	if (cluster_cpus == NO_VAL)
+	if (cluster_cpus == NO_VAL) {
+		damp_factor = (long double)slurm_get_fs_dampening_factor();
 		return SLURM_SUCCESS;
+	}
 
 	_internal_setup();
 
@@ -1674,13 +1678,119 @@ extern void priority_p_set_assoc_usage(slurmdb_association_rec_t *assoc)
 			     assoc->usage->parent_assoc_ptr->acct,
 			     assoc->usage->usage_efctv);
 		}
+	} else if (assoc->shares_raw == SLURMDB_FS_USE_PARENT) {
+		slurmdb_association_rec_t *parent_assoc =
+			assoc->usage->parent_assoc_ptr;
+
+		assoc->usage->usage_efctv =
+			parent_assoc->usage->usage_efctv;
+		if (priority_debug) {
+			info("Effective usage for %s %s off %s %Lf",
+			     child, child_str,
+			     parent_assoc->acct,
+			     parent_assoc->usage->usage_efctv);
+		}
+	} else if (flags & PRIORITY_FLAGS_DEPTH_OBLIVIOUS) {
+		long double ratio_p, ratio_l, k, f, ratio_s;
+		slurmdb_association_rec_t *parent_assoc = NULL;
+		ListIterator sib_itr = NULL;
+		slurmdb_association_rec_t *sibling = NULL;
+
+		/* We want priority_fs = pow(2.0, -R); where
+		   R = ratio_p * ratio_l^k
+		*/
+
+		/* ratio_p is R for our parent */
+
+		/* ratio_l is our usage ratio r divided by ratio_s,
+		 * the usage ratio of our siblings (including
+		 * ourselves). In the standard case where everything
+		 * is consumed at the leaf accounts ratio_s=ratio_p
+		 */
+
+		/* k is a factor which tends towards 0 when ratio_p
+		   diverges from 1 and ratio_l would bring back R
+		   towards 1
+		*/
+
+		/* Effective usage is now computed to be R*shares_norm
+		   so that the general formula of
+		   priority_fs = pow(2.0, -(usage_efctv / shares_norm))
+		   gives what we want: priority_fs = pow(2.0, -R);
+		*/
+
+		f = 5.0; /* FIXME: This could be a tunable parameter
+			    (higher f means more impact when parent consumption
+			    is inadequate) */
+		parent_assoc =  assoc->usage->parent_assoc_ptr;
+
+		if (assoc->usage->shares_norm &&
+		    parent_assoc->usage->shares_norm &&
+		    parent_assoc->usage->usage_efctv &&
+		    assoc->usage->usage_norm) {
+			ratio_p = (parent_assoc->usage->usage_efctv /
+			      parent_assoc->usage->shares_norm);
+
+			ratio_s = 0;
+			sib_itr = list_iterator_create(
+				parent_assoc->usage->children_list);
+			while ((sibling = list_next(sib_itr))) {
+				if(sibling->shares_raw != SLURMDB_FS_USE_PARENT)
+					ratio_s += sibling->usage->usage_norm;
+			}
+			list_iterator_destroy(sib_itr);
+			ratio_s /= parent_assoc->usage->shares_norm;
+
+			ratio_l = (assoc->usage->usage_norm /
+			      assoc->usage->shares_norm) / ratio_s;
+#if defined(__FreeBSD__)
+			if (!ratio_p || !ratio_l
+			    || log(ratio_p) * log(ratio_l) >= 0) {
+				k = 1;
+			} else {
+				k = 1 / (1 + pow(f * log(ratio_p), 2));
+			}
+
+			assoc->usage->usage_efctv =
+				ratio_p * pow(ratio_l, k) *
+				assoc->usage->shares_norm;
+#else
+			if (!ratio_p || !ratio_l
+			    || logl(ratio_p) * logl(ratio_l) >= 0) {
+				k = 1;
+			} else {
+				k = 1 / (1 + powl(f * logl(ratio_p), 2));
+			}
+
+			assoc->usage->usage_efctv =
+				ratio_p * pow(ratio_l, k) *
+				assoc->usage->shares_norm;
+#endif
+
+			if (priority_debug) {
+				info("Effective usage for %s %s off %s "
+				     "(%Lf * %Lf ^ %Lf) * %f  = %Lf",
+				     child, child_str,
+				     assoc->usage->parent_assoc_ptr->acct,
+				     ratio_p, ratio_l, k,
+				     assoc->usage->shares_norm,
+				     assoc->usage->usage_efctv);
+			}
+		} else {
+			assoc->usage->usage_efctv = assoc->usage->usage_norm;
+			if (priority_debug) {
+				info("Effective usage for %s %s off %s %Lf",
+				     child, child_str,
+				     assoc->usage->parent_assoc_ptr->acct,
+				     assoc->usage->usage_efctv);
+			}
+		}
 	} else {
 		assoc->usage->usage_efctv = assoc->usage->usage_norm +
 			((assoc->usage->parent_assoc_ptr->usage->usage_efctv -
 			  assoc->usage->usage_norm) *
-			 (assoc->shares_raw == SLURMDB_FS_USE_PARENT ?
-			  0 : (assoc->shares_raw /
-			       (long double)assoc->usage->level_shares)));
+			 (assoc->shares_raw /
+			  (long double)assoc->usage->level_shares));
 		if (priority_debug) {
 			info("Effective usage for %s %s off %s "
 			     "%Lf + ((%Lf - %Lf) * %d / %d) = %Lf",
@@ -1689,8 +1799,7 @@ extern void priority_p_set_assoc_usage(slurmdb_association_rec_t *assoc)
 			     assoc->usage->usage_norm,
 			     assoc->usage->parent_assoc_ptr->usage->usage_efctv,
 			     assoc->usage->usage_norm,
-			     (assoc->shares_raw == SLURMDB_FS_USE_PARENT ?
-			      0 : assoc->shares_raw),
+			     assoc->shares_raw,
 			     assoc->usage->level_shares,
 			     assoc->usage->usage_efctv);
 		}
@@ -1713,7 +1822,7 @@ extern double priority_p_calc_fs_factor(long double usage_efctv,
 			usage_efctv = MIN_USAGE_FACTOR * shares_norm;
 		priority_fs = shares_norm / usage_efctv;
 	} else {
-		priority_fs = pow(2.0, -(usage_efctv / shares_norm));
+		priority_fs = pow(2.0,-((usage_efctv/shares_norm)/damp_factor));
 	}
 
 	return priority_fs;

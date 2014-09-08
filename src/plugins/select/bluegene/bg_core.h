@@ -52,10 +52,9 @@
 #include "bg_status.h"
 
 /* Change BLOCK_STATE_VERSION value when changing the state save
- * format i.e. pack_block() */
-#define BLOCK_STATE_VERSION      "VER005"
-#define BLOCK_2_2_STATE_VERSION  "VER004" /*Slurm 2.2's version*/
-#define BLOCK_2_1_STATE_VERSION  "VER003" /*Slurm 2.1's version*/
+ * format i.e. pack_block()
+ */
+#define BLOCK_STATE_VERSION      "PROTOCOL_VERSION"
 
 /* Global variables */
 /* extern bg_config_t *bg_conf; */
@@ -70,7 +69,8 @@
 extern bool blocks_overlap(bg_record_t *rec_a, bg_record_t *rec_b);
 extern bool block_mp_passthrough(bg_record_t *bg_record, int mp_bit);
 extern void bg_requeue_job(uint32_t job_id, bool wait_for_start,
-			   bool slurmctld_locked);
+			   bool slurmctld_locked, uint16_t job_state,
+			   bool preempted);
 
 /* sort a list of bg_records by size (node count) */
 extern void sort_bg_record_inc_size(List records);

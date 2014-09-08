@@ -86,6 +86,8 @@ typedef struct slurm_acct_storage_ops {
 				    List association_list);
 	int  (*add_qos)            (void *db_conn, uint32_t uid,
 				    List qos_list);
+	int  (*add_res)            (void *db_conn, uint32_t uid,
+				    List res_list);
 	int  (*add_wckeys)         (void *db_conn, uint32_t uid,
 				    List wckey_list);
 	int  (*add_reservation)    (void *db_conn,
@@ -108,6 +110,9 @@ typedef struct slurm_acct_storage_ops {
 	List (*modify_qos)         (void *db_conn, uint32_t uid,
 				    slurmdb_qos_cond_t *qos_cond,
 				    slurmdb_qos_rec_t *qos);
+	List (*modify_res)         (void *db_conn, uint32_t uid,
+				    slurmdb_res_cond_t *res_cond,
+				    slurmdb_res_rec_t *res);
 	List (*modify_wckeys)      (void *db_conn, uint32_t uid,
 				    slurmdb_wckey_cond_t *wckey_cond,
 				    slurmdb_wckey_rec_t *wckey);
@@ -126,6 +131,8 @@ typedef struct slurm_acct_storage_ops {
 				    slurmdb_association_cond_t *assoc_cond);
 	List (*remove_qos)         (void *db_conn, uint32_t uid,
 				    slurmdb_qos_cond_t *qos_cond);
+	List (*remove_res)         (void *db_conn, uint32_t uid,
+				    slurmdb_res_cond_t *res_cond);
 	List (*remove_wckeys)      (void *db_conn, uint32_t uid,
 				    slurmdb_wckey_cond_t *wckey_cond);
 	int  (*remove_reservation) (void *db_conn,
@@ -145,6 +152,8 @@ typedef struct slurm_acct_storage_ops {
 				    slurmdb_association_cond_t *assoc_cond);
 	List (*get_qos)            (void *db_conn, uint32_t uid,
 				    slurmdb_qos_cond_t *qos_cond);
+	List (*get_res)            (void *db_conn, uint32_t uid,
+				    slurmdb_res_cond_t *res_cond);
 	List (*get_wckeys)         (void *db_conn, uint32_t uid,
 				    slurmdb_wckey_cond_t *wckey_cond);
 	List (*get_resvs)          (void *db_conn, uint32_t uid,
@@ -165,8 +174,8 @@ typedef struct slurm_acct_storage_ops {
 	int  (*node_up)            (void *db_conn,
 				    struct node_record *node_ptr,
 				    time_t event_time);
-	int  (*cluster_cpus)      (void *db_conn, char *cluster_nodes,
-				   uint32_t cpus, time_t event_time);
+	int  (*cluster_cpus)       (void *db_conn, char *cluster_nodes,
+				    uint32_t cpus, time_t event_time);
 	int  (*register_ctld)      (void *db_conn, uint16_t port);
 	int  (*register_disconn_ctld)(void *db_conn, char *control_host);
 	int  (*fini_ctld)          (void *db_conn,
@@ -204,6 +213,7 @@ static const char *syms[] = {
 	"acct_storage_p_add_clusters",
 	"acct_storage_p_add_associations",
 	"acct_storage_p_add_qos",
+	"acct_storage_p_add_res",
 	"acct_storage_p_add_wckeys",
 	"acct_storage_p_add_reservation",
 	"acct_storage_p_modify_users",
@@ -212,6 +222,7 @@ static const char *syms[] = {
 	"acct_storage_p_modify_associations",
 	"acct_storage_p_modify_job",
 	"acct_storage_p_modify_qos",
+	"acct_storage_p_modify_res",
 	"acct_storage_p_modify_wckeys",
 	"acct_storage_p_modify_reservation",
 	"acct_storage_p_remove_users",
@@ -220,6 +231,7 @@ static const char *syms[] = {
 	"acct_storage_p_remove_clusters",
 	"acct_storage_p_remove_associations",
 	"acct_storage_p_remove_qos",
+	"acct_storage_p_remove_res",
 	"acct_storage_p_remove_wckeys",
 	"acct_storage_p_remove_reservation",
 	"acct_storage_p_get_users",
@@ -230,6 +242,7 @@ static const char *syms[] = {
 	"acct_storage_p_get_events",
 	"acct_storage_p_get_problems",
 	"acct_storage_p_get_qos",
+	"acct_storage_p_get_res",
 	"acct_storage_p_get_wckeys",
 	"acct_storage_p_get_reservations",
 	"acct_storage_p_get_txn",
@@ -385,6 +398,13 @@ extern int acct_storage_g_add_qos(void *db_conn, uint32_t uid,
 	return (*(ops.add_qos))(db_conn, uid, qos_list);
 }
 
+extern int acct_storage_g_add_res(void *db_conn, uint32_t uid,
+				  List res_list)
+{
+	if (slurm_acct_storage_init(NULL) < 0)
+		return SLURM_ERROR;
+	return (*(ops.add_res))(db_conn, uid, res_list);
+}
 extern int acct_storage_g_add_wckeys(void *db_conn, uint32_t uid,
 				     List wckey_list)
 {
@@ -457,6 +477,15 @@ extern List acct_storage_g_modify_qos(void *db_conn, uint32_t uid,
 	return (*(ops.modify_qos))(db_conn, uid, qos_cond, qos);
 }
 
+extern List acct_storage_g_modify_res(void *db_conn, uint32_t uid,
+				      slurmdb_res_cond_t *res_cond,
+				      slurmdb_res_rec_t *res)
+{
+	if (slurm_acct_storage_init(NULL) < 0)
+		return NULL;
+	return (*(ops.modify_res))(db_conn, uid, res_cond, res);
+}
+
 extern List acct_storage_g_modify_wckeys(void *db_conn, uint32_t uid,
 					 slurmdb_wckey_cond_t *wckey_cond,
 					 slurmdb_wckey_rec_t *wckey)
@@ -522,6 +551,14 @@ extern List acct_storage_g_remove_qos(void *db_conn, uint32_t uid,
 	if (slurm_acct_storage_init(NULL) < 0)
 		return NULL;
 	return (*(ops.remove_qos))(db_conn, uid, qos_cond);
+}
+
+extern List acct_storage_g_remove_res(void *db_conn, uint32_t uid,
+				      slurmdb_res_cond_t *res_cond)
+{
+	if (slurm_acct_storage_init(NULL) < 0)
+		return NULL;
+	return (*(ops.remove_res))(db_conn, uid, res_cond);
 }
 
 extern List acct_storage_g_remove_wckeys(void *db_conn, uint32_t uid,
@@ -602,6 +639,14 @@ extern List acct_storage_g_get_qos(void *db_conn, uint32_t uid,
 	if (slurm_acct_storage_init(NULL) < 0)
 		return NULL;
 	return (*(ops.get_qos))(db_conn, uid, qos_cond);
+}
+
+extern List acct_storage_g_get_res(void *db_conn, uint32_t uid,
+				   slurmdb_res_cond_t *res_cond)
+{
+	if (slurm_acct_storage_init(NULL) < 0)
+		return NULL;
+	return (*(ops.get_res))(db_conn, uid, res_cond);
 }
 
 extern List acct_storage_g_get_wckeys(void *db_conn, uint32_t uid,

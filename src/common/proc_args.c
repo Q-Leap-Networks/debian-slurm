@@ -85,7 +85,7 @@
 /* print this version of SLURM */
 void print_slurm_version(void)
 {
-	printf("%s %s\n", PACKAGE, SLURM_VERSION_STRING);
+	printf("%s\n", PACKAGE_STRING);
 }
 
 /* print the available gres options */
@@ -406,7 +406,7 @@ bool verify_node_count(const char *arg, int *min_nodes, int *max_nodes)
 			return false;
 		}
 		xfree(min_str);
-#ifdef HAVE_CRAY
+#ifdef HAVE_ALPS_CRAY
 		if (*min_nodes < 0) {
 #else
 		if (*min_nodes == 0) {
@@ -428,7 +428,7 @@ bool verify_node_count(const char *arg, int *min_nodes, int *max_nodes)
 			error("\"%s\" is not a valid node count", arg);
 			return false;
 		}
-#ifdef HAVE_CRAY
+#ifdef HAVE_ALPS_CRAY
 		if (*min_nodes < 0) {
 #else
 		if (*min_nodes == 0) {
@@ -852,13 +852,19 @@ char *print_geometry(const uint16_t *geometry)
 /* Translate a signal option string "--signal=<int>[@<time>]" into
  * it's warn_signal and warn_time components.
  * RET 0 on success, -1 on failure */
-int get_signal_opts(char *optarg, uint16_t *warn_signal, uint16_t *warn_time)
+int get_signal_opts(char *optarg, uint16_t *warn_signal, uint16_t *warn_time,
+		    uint16_t *warn_flags)
 {
 	char *endptr;
 	long num;
 
 	if (optarg == NULL)
 		return -1;
+
+	if (!strncasecmp(optarg, "B:", 2)) {
+		*warn_flags = KILL_JOB_BATCH;
+		optarg += 2;
+	}
 
 	endptr = strchr(optarg, '@');
 	if (endptr)

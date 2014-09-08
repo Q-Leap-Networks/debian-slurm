@@ -48,7 +48,13 @@
 /* Define to 1 for AIX operating system */
 #undef HAVE_AIX
 
-/* Define to 1 if running against an Alps emulation */
+/* Define to 1 for Cray XT/XE systems using ALPS */
+#undef HAVE_ALPS_CRAY
+
+/* Define to 1 for emulating a Cray XT/XE system using ALPS */
+#undef HAVE_ALPS_CRAY_EMULATION
+
+/* Define to 1 if running against an ALPS emulation */
 #undef HAVE_ALPS_EMULATION
 
 /* Define to 1 if emulating or running on Blue Gene system */
@@ -77,12 +83,6 @@
 
 /* Define to 1 if you have the `cfmakeraw' function. */
 #undef HAVE_CFMAKERAW
-
-/* Define to 1 for Cray XT/XE systems */
-#undef HAVE_CRAY
-
-/* Define to 1 for emulating a Cray XT/XE system */
-#undef HAVE_CRAY_EMULATION
 
 /* Define to 1 if you have the <curses.h> header file. */
 #undef HAVE_CURSES_H
@@ -182,6 +182,12 @@
 /* Define to 1 if using MySQL libaries */
 #undef HAVE_MYSQL
 
+/* Define to 1 for running on a Cray in native mode without ALPS */
+#undef HAVE_NATIVE_CRAY
+
+/* Define to 1 if alpscomm functions new to CLE 5.2UP01 are defined */
+#undef HAVE_NATIVE_CRAY_GA
+
 /* Define to 1 if you have the <ncurses.h> header file. */
 #undef HAVE_NCURSES_H
 
@@ -215,9 +221,6 @@
 /* define if you have permapi_h */
 #undef HAVE_PERMAPI_H
 
-/* Define to 1 if using PostgreSQL libaries */
-#undef HAVE_PGSQL
-
 /* Define if you have Posix semaphores. */
 #undef HAVE_POSIX_SEMS
 
@@ -233,6 +236,9 @@
 /* Define to 1 if you have the <pthread.h> header file. */
 #undef HAVE_PTHREAD_H
 
+/* Have PTHREAD_PRIO_INHERIT. */
+#undef HAVE_PTHREAD_PRIO_INHERIT
+
 /* Define to 1 if you have the `ptrace64' function. */
 #undef HAVE_PTRACE64
 
@@ -242,7 +248,7 @@
 /* Define if you are compiling with readline. */
 #undef HAVE_READLINE
 
-/* Define to 1 for running on a real Cray XT/XE system */
+/* Define to 1 for running on a real Cray system */
 #undef HAVE_REAL_CRAY
 
 /* Define to 1 if you have the `sched_setaffinity' function. */
@@ -378,9 +384,6 @@
 /* Define to 1 for --get-user-env to load user environment without .login */
 #undef LOAD_ENV_NO_LOGIN
 
-/* log timestamps to millisecond resolution */
-#undef LOG_TIME_MSEC
-
 /* Define to the sub-directory in which libtool stores uninstalled libraries.
    */
 #undef LT_OBJDIR
@@ -396,9 +399,6 @@
 
 /* Define to 1 if you are building a production release. */
 #undef NDEBUG
-
-/* Name of package */
-#undef PACKAGE
 
 /* Define to the address where bug reports for this package should be sent. */
 #undef PACKAGE_BUGREPORT
@@ -424,7 +424,7 @@
 /* Define the project's name. */
 #undef PROJECT
 
-/* Define to the necessary symbol if this constant uses a non-standard name on
+/* Define to necessary symbol if this constant uses a non-standard name on
    your system. */
 #undef PTHREAD_CREATE_JOINABLE
 
@@ -497,6 +497,9 @@
 /* Define Slurm installation prefix */
 #undef SLURM_PREFIX
 
+/* Define to 1 if running slurm simulator */
+#undef SLURM_SIMULATOR
+
 /* SLURM Version Number */
 #undef SLURM_VERSION_NUMBER
 
@@ -521,10 +524,7 @@
 /* define if using ISO 8601 time format */
 #undef USE_ISO_8601
 
-/* define if using RFC 5424 time format */
-#undef USE_RFC5424_TIME
-
-/* Version number of package */
+/* Define the project's version. */
 #undef VERSION
 
 /* Define if you have pthreads. */

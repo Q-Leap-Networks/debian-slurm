@@ -49,7 +49,7 @@
 static int _set_block_nodes_accounting(bg_record_t *bg_record, char *reason);
 static void _addto_mp_list(bg_record_t *bg_record,
 			   uint16_t *start, uint16_t *end);
-static int _ba_mp_cmpf_inc(ba_mp_t *node_a, ba_mp_t *node_b);
+static int _ba_mp_cmpf_inc(void *r1, void *r2);
 static void _set_block_avail(bg_record_t *bg_record);
 
 extern void print_bg_record(bg_record_t* bg_record)
@@ -456,10 +456,15 @@ extern void copy_bg_record(bg_record_t *fir_record, bg_record_t *sec_record)
  * returns: -1: rec_a > rec_b   0: rec_a == rec_b   1: rec_a < rec_b
  *
  */
-extern int bg_record_cmpf_inc(bg_record_t* rec_a, bg_record_t* rec_b)
+extern int bg_record_cmpf_inc(void *r1, void *r2)
 {
-	int size_a = rec_a->cnode_cnt;
-	int size_b = rec_b->cnode_cnt;
+	bg_record_t *rec_a = *(bg_record_t **)r1;
+	bg_record_t *rec_b = *(bg_record_t **)r2;
+	int size_a;
+	int size_b;
+
+	size_a = rec_a->cnode_cnt;
+	size_b = rec_b->cnode_cnt;
 
 	/* We only look at this if we are ordering blocks larger than
 	 * a midplane, order of ionodes is how we order otherwise. */
@@ -496,8 +501,11 @@ extern int bg_record_cmpf_inc(bg_record_t* rec_a, bg_record_t* rec_b)
  * returns: -1: rec_a < rec_b   0: rec_a == rec_b   1: rec_a > rec_b
  *
  */
-extern int bg_record_sort_aval_inc(bg_record_t* rec_a, bg_record_t* rec_b)
+extern int bg_record_sort_aval_inc(void *r1, void *r2)
 {
+	bg_record_t* rec_a = *(bg_record_t **)r1;
+	bg_record_t* rec_b = *(bg_record_t **)r2;
+
 	if ((rec_a->job_running == BLOCK_ERROR_STATE)
 	    && (rec_b->job_running != BLOCK_ERROR_STATE))
 		return 1;
@@ -546,7 +554,7 @@ extern int bg_record_sort_aval_inc(bg_record_t* rec_a, bg_record_t* rec_b)
 	/* 		return -1; */
 	/* } */
 
-	return bg_record_cmpf_inc(rec_a, rec_b);
+	return bg_record_cmpf_inc(&rec_a, &rec_b);
 }
 
 /* set up structures needed for sub block jobs. */
@@ -626,7 +634,7 @@ extern void requeue_and_error(bg_record_t *bg_record, char *reason)
 	slurm_mutex_unlock(&block_state_mutex);
 
 	if (kill_job_list) {
-		bg_status_process_kill_job_list(kill_job_list, 0);
+		bg_status_process_kill_job_list(kill_job_list, JOB_FAILED, 0);
 		list_destroy(kill_job_list);
 	}
 
@@ -998,7 +1006,7 @@ extern int down_nodecard(char *mp_name, bitoff_t io_start,
 			 bool slurmctld_locked, char *reason)
 {
 	List requests = NULL;
-	List delete_list = NULL, pass_list = NULL;
+	List delete_list = NULL, pass_list = NULL, kill_list = NULL;
 	ListIterator itr = NULL;
 	bg_record_t *bg_record = NULL, *found_record = NULL,
 		tmp_record, *error_bg_record = NULL;
@@ -1094,14 +1102,15 @@ extern int down_nodecard(char *mp_name, bitoff_t io_start,
 			continue;
 
 		if (bg_record->job_running > NO_JOB_RUNNING) {
-			job_fail(bg_record->job_running);
+			bg_status_add_job_kill_list(bg_record->job_ptr,
+						    &kill_list);
 		} else if (bg_record->job_list) {
 			ListIterator job_itr = list_iterator_create(
 				bg_record->job_list);
 			struct job_record *job_ptr;
-			while ((job_ptr = list_next(job_itr))) {
-				job_fail(job_ptr->job_id);
-			}
+			while ((job_ptr = list_next(job_itr)))
+				bg_status_add_job_kill_list(job_ptr,
+							    &kill_list);
 			list_iterator_destroy(job_itr);
 		}
 		/* If Running Dynamic mode and the block is
@@ -1400,6 +1409,11 @@ extern int down_nodecard(char *mp_name, bitoff_t io_start,
 	slurm_mutex_unlock(&block_state_mutex);
 
 cleanup:
+	if (kill_list) {
+		bg_status_process_kill_job_list(kill_list, JOB_NODE_FAIL, 1);
+		list_destroy(kill_list);
+	}
+
 	if (!slurmctld_locked)
 		unlock_slurmctld(job_write_lock);
 	FREE_NULL_BITMAP(tmp_record.mp_bitmap);
@@ -1699,6 +1713,139 @@ extern int bg_reset_block(bg_record_t *bg_record, struct job_record *job_ptr)
 	return rc;
 }
 
+/* block_state_mutex must be locked when coming in */
+extern void bg_record_hw_failure(bg_record_t *bg_record, List *ret_kill_list)
+{
+	List	kill_list = NULL;
+	ListIterator itr = NULL;
+	slurmdb_qos_rec_t *qos_ptr = NULL;
+	struct job_record *found_job_ptr;
+	select_jobinfo_t *jobinfo;
+
+	xassert(ret_kill_list);
+
+	if (!bg_record) {
+		error("bg_record_hw_failure: no block pointer");
+		return;
+	}
+
+	/* Don't wait to reboot a bad, single midplane block if there
+	 * are other jobs still running that have a preemptable qos
+	 * that is in the RebootQOSList */
+	if (!bg_conf->sub_blocks || !bg_conf->reboot_qos_bitmap
+	    || (bit_ffs(bg_conf->reboot_qos_bitmap) == -1)
+	    || (bg_record->mp_count > 1))
+		return;
+
+	/* Any block in these states can be ignored */
+	if (bg_record->free_cnt
+	    || ((!bg_record->err_ratio
+		|| (bg_record->err_ratio < bg_conf->max_block_err))
+		&& bg_record->action != BG_BLOCK_ACTION_FREE)
+	    || !bg_record->job_list
+	    || (list_count(bg_record->job_list) <= 1))
+		return;
+
+	/* Make sure all jobs still running in this bad block
+	 * all have a preemptable qos */
+	itr = list_iterator_create(bg_record->job_list);
+	while ((found_job_ptr = list_next(itr))) {
+		if (found_job_ptr->magic != JOB_MAGIC) {
+			error("bg_record_hw_failure: "
+			      "bad magic found when "
+			      "looking at block %s",
+			      bg_record->bg_block_id);
+			list_delete_item(itr);
+			continue;
+		}
+
+		jobinfo = found_job_ptr->select_jobinfo->data;
+
+		if (jobinfo->cleaning || !IS_JOB_RUNNING(found_job_ptr))
+			continue;
+
+		qos_ptr = (slurmdb_qos_rec_t *)found_job_ptr->qos_ptr;
+		if (qos_ptr) {
+			/* If we ever get one that
+			   isn't set correctly then we
+			   just exit.
+			*/
+			if (!bit_test(bg_conf->reboot_qos_bitmap,
+				      qos_ptr->id)) {
+				if (kill_list) {
+					list_destroy(kill_list);
+					kill_list = NULL;
+				}
+				break;
+			}
+			if (!kill_list)
+				kill_list = list_create(NULL);
+			list_append(kill_list, found_job_ptr);
+		}
+	}
+	list_iterator_destroy(itr);
+
+	if (kill_list) {
+		if (!*ret_kill_list) {
+			*ret_kill_list = kill_list;
+		} else {
+			list_transfer(*ret_kill_list, kill_list);
+			list_destroy(kill_list);
+		}
+		kill_list = NULL;
+	}
+	return;
+}
+
+/* block_state_mutex must be unlocked when coming in */
+extern void bg_record_post_hw_failure(
+	List *kill_list, bool slurmctld_locked)
+{
+	slurmdb_qos_rec_t *qos_ptr = NULL;
+	struct job_record *found_job_ptr;
+	select_jobinfo_t *jobinfo;
+	ListIterator itr;
+	slurmctld_lock_t job_write_lock = {
+		NO_LOCK, WRITE_LOCK, WRITE_LOCK, NO_LOCK };
+
+	if (!*kill_list)
+		return;
+
+	if (!slurmctld_locked)
+		lock_slurmctld(job_write_lock);
+
+	/* The necessary conditions have been met.
+	 * Now, kill or requeue the preemptable
+	 * jobs */
+	itr = list_iterator_create(*kill_list);
+	/* Setting cleaning needs to be done before
+	   bg_requeue_job is called or we could have
+	   an issue where the jobs are requeued over and
+	   over again.
+	*/
+	while ((found_job_ptr = list_next(itr))) {
+		jobinfo = found_job_ptr->select_jobinfo->data;
+		jobinfo->cleaning = 1;
+	}
+	list_iterator_reset(itr);
+	while ((found_job_ptr = list_next(itr))) {
+		qos_ptr = (slurmdb_qos_rec_t*)found_job_ptr->qos_ptr;
+
+		debug("Attempting to requeue %s job %u due "
+		      "to excessive node errors",
+		      qos_ptr->name, found_job_ptr->job_id);
+		bg_requeue_job(found_job_ptr->job_id, 0, 1,
+			       JOB_NODE_FAIL, 1);
+	}
+	list_iterator_destroy(itr);
+	list_destroy(*kill_list);
+	*kill_list = NULL;
+	if (!slurmctld_locked)
+		unlock_slurmctld(job_write_lock);
+}
+
+
+
 /************************* local functions ***************************/
 
 /* block_state_mutex should be locked before calling */
@@ -1882,8 +2029,11 @@ static int _coord_cmpf_inc(uint16_t *coord_a, uint16_t *coord_b, int dim)
 
 }
 
-static int _ba_mp_cmpf_inc(ba_mp_t *mp_a, ba_mp_t *mp_b)
+static int _ba_mp_cmpf_inc(void *r1, void *r2)
 {
+	ba_mp_t *mp_a = *(ba_mp_t **)r1;
+	ba_mp_t *mp_b = *(ba_mp_t **)r2;
+
 	int rc = _coord_cmpf_inc(mp_a->coord, mp_b->coord, 0);
 
 	if (!rc) {

@@ -3,7 +3,7 @@
 
 AUTOMAKE_OPTIONS = foreign
 
-INCLUDES = -I$(top_srcdir)
+AM_CPPFLAGS = -I$(top_srcdir)
 
 if WITH_GNU_LD
 VERSION_SCRIPT = \
@@ -65,6 +65,7 @@ libslurmdb_la_SOURCES =	\
 	extra_get_functions.c \
 	job_report_functions.c \
 	qos_functions.c \
+	resource_functions.c \
 	resv_report_functions.c \
 	usage_functions.c \
 	user_functions.c \
@@ -83,7 +84,7 @@ libslurmdb_o_SOURCES =
 
 libslurmdb_o_LDADD = $(top_builddir)/src/api/libslurm.o
 
-libslurmdb.o: $(libslurmdb_la_OBJECTS) $(libslurmdb_o_LDADD)
+libslurmdb.o$(EXEEXT): $(libslurmdb_la_OBJECTS) $(libslurmdb_o_LDADD)
 	$(LINK) $(libslurmdb_la_OBJECTS) $(libslurmdb_o_LDADD)
 
 force:

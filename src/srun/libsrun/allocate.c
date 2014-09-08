@@ -67,7 +67,7 @@
 #include "src/plugins/select/bluegene/bg_enums.h"
 #endif
 
-#ifdef HAVE_REAL_CRAY
+#if defined HAVE_ALPS_CRAY && defined HAVE_REAL_CRAY
 /*
  * On Cray installations, the libjob headers are not automatically installed
  * by default, while libjob.so always is, and kernels are > 2.6. Hence it is
@@ -156,7 +156,7 @@ static void _timeout_handler(srun_timeout_msg_t *msg)
 	if (msg->timeout != last_timeout) {
 		last_timeout = msg->timeout;
 		verbose("job time limit to be reached at %s",
-			ctime(&msg->timeout));
+			slurm_ctime(&msg->timeout));
 	}
 }
 
@@ -600,7 +600,7 @@ job_desc_msg_create_from_opts (void)
 	hostlist_t hl = NULL;
 
 	slurm_init_job_desc_msg(j);
-#ifdef HAVE_REAL_CRAY
+#if defined HAVE_ALPS_CRAY && defined HAVE_REAL_CRAY
 	uint64_t pagg_id = job_getjid(getpid());
 	/*
 	 * Interactive sessions require pam_job.so in /etc/pam.d/common-session
@@ -621,6 +621,8 @@ job_desc_msg_create_from_opts (void)
 #endif
 
 	j->contiguous     = opt.contiguous;
+	if (opt.core_spec)
+		j->core_spec = opt.core_spec;
 	j->features       = opt.constraints;
 	j->gres           = opt.gres;
 	if (opt.immediate == 1)

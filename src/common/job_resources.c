@@ -309,6 +309,7 @@ extern job_resources_t *copy_job_resources(job_resources_t *job_resrcs_ptr)
 	new_layout->nhosts = job_resrcs_ptr->nhosts;
 	new_layout->ncpus = job_resrcs_ptr->ncpus;
 	new_layout->node_req = job_resrcs_ptr->node_req;
+	new_layout->whole_node = job_resrcs_ptr->whole_node;
 	if (job_resrcs_ptr->core_bitmap) {
 		new_layout->core_bitmap = bit_copy(job_resrcs_ptr->
 						   core_bitmap);
@@ -530,7 +531,7 @@ extern void pack_job_resources(job_resources_t *job_resrcs_ptr, Buf buffer,
 {
 	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
 
-	if (protocol_version >= SLURM_2_5_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_14_03_PROTOCOL_VERSION) {
 		if (job_resrcs_ptr == NULL) {
 			uint32_t empty = NO_VAL;
 			pack32(empty, buffer);
@@ -541,6 +542,7 @@ extern void pack_job_resources(job_resources_t *job_resrcs_ptr, Buf buffer,
 		pack32(job_resrcs_ptr->ncpus, buffer);
 		pack32(job_resrcs_ptr->node_req, buffer);
 		packstr(job_resrcs_ptr->nodes, buffer);
+		pack8(job_resrcs_ptr->whole_node, buffer);
 
 		if (job_resrcs_ptr->cpu_array_reps)
 			pack32_array(job_resrcs_ptr->cpu_array_reps,
@@ -608,8 +610,7 @@ extern void pack_job_resources(job_resources_t *job_resrcs_ptr, Buf buffer,
 			pack_bit_str(job_resrcs_ptr->core_bitmap, buffer);
 			pack_bit_str(job_resrcs_ptr->core_bitmap_used, buffer);
 		}
-	} else if (protocol_version >= SLURM_2_3_PROTOCOL_VERSION) {
-		uint8_t tmp_8;
+	} else if (protocol_version >= SLURM_2_5_PROTOCOL_VERSION) {
 		if (job_resrcs_ptr == NULL) {
 			uint32_t empty = NO_VAL;
 			pack32(empty, buffer);
@@ -618,8 +619,7 @@ extern void pack_job_resources(job_resources_t *job_resrcs_ptr, Buf buffer,
 
 		pack32(job_resrcs_ptr->nhosts, buffer);
 		pack32(job_resrcs_ptr->ncpus, buffer);
-		tmp_8 = job_resrcs_ptr->node_req;	/* 32-bit in v2.5 */
-		pack8(tmp_8, buffer);
+		pack32(job_resrcs_ptr->node_req, buffer);
 		packstr(job_resrcs_ptr->nodes, buffer);
 
 		if (job_resrcs_ptr->cpu_array_reps)
@@ -703,7 +703,7 @@ extern int unpack_job_resources(job_resources_t **job_resrcs_pptr,
 	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
 
 	xassert(job_resrcs_pptr);
-	if (protocol_version >= SLURM_2_5_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_14_03_PROTOCOL_VERSION) {
 		safe_unpack32(&empty, buffer);
 		if (empty == NO_VAL) {
 			*job_resrcs_pptr = NULL;
@@ -715,6 +715,7 @@ extern int unpack_job_resources(job_resources_t **job_resrcs_pptr,
 		safe_unpack32(&job_resrcs->ncpus, buffer);
 		safe_unpack32(&job_resrcs->node_req, buffer);
 		safe_unpackstr_xmalloc(&job_resrcs->nodes, &tmp32, buffer);
+		safe_unpack8(&job_resrcs->whole_node, buffer);
 
 		safe_unpack32_array(&job_resrcs->cpu_array_reps,
 				    &tmp32, buffer);
@@ -764,8 +765,7 @@ extern int unpack_job_resources(job_resources_t **job_resrcs_pptr,
 			unpack_bit_str(&job_resrcs->core_bitmap, buffer);
 			unpack_bit_str(&job_resrcs->core_bitmap_used, buffer);
 		}
-	} else if (protocol_version >= SLURM_2_3_PROTOCOL_VERSION) {
-		uint8_t tmp_8;
+	} else if (protocol_version >= SLURM_2_5_PROTOCOL_VERSION) {
 		safe_unpack32(&empty, buffer);
 		if (empty == NO_VAL) {
 			*job_resrcs_pptr = NULL;
@@ -775,11 +775,7 @@ extern int unpack_job_resources(job_resources_t **job_resrcs_pptr,
 		job_resrcs = xmalloc(sizeof(struct job_resources));
 		job_resrcs->nhosts = empty;
 		safe_unpack32(&job_resrcs->ncpus, buffer);
-		safe_unpack8(&tmp_8, buffer);
-		if (tmp_8 < 100)		/* Not NODE_CR_RESERVED */
-			job_resrcs->node_req = tmp_8;	/* 32-bit in v2.5 */
-		else
-			job_resrcs->node_req = NODE_CR_RESERVED;
+		safe_unpack32(&job_resrcs->node_req, buffer);
 		safe_unpackstr_xmalloc(&job_resrcs->nodes, &tmp32, buffer);
 
 		safe_unpack32_array(&job_resrcs->cpu_array_reps,
@@ -1236,7 +1232,9 @@ extern int job_fits_into_cores(job_resources_t *job_resrcs_ptr,
 		if (bit_test(job_resrcs_ptr->node_bitmap, full_node_inx)) {
 			full_bit_inx = cr_node_cores_offset[full_node_inx];
 			for (i = 0; i < bits_per_node[full_node_inx]; i++) {
-				if (bit_test(full_bitmap, full_bit_inx + i) &&
+				if (!bit_test(full_bitmap, full_bit_inx + i))
+					continue;
+				if (job_resrcs_ptr->whole_node ||
 				    bit_test(job_resrcs_ptr->core_bitmap,
 					     job_bit_inx + i)) {
 					return 0;
@@ -1280,7 +1278,8 @@ extern void add_job_to_cores(job_resources_t *job_resrcs_ptr,
 		if (bit_test(job_resrcs_ptr->node_bitmap, full_node_inx)) {
 			full_bit_inx = cr_node_cores_offset[full_node_inx];
 			for (i = 0; i < bits_per_node[full_node_inx]; i++) {
-				if (!bit_test(job_resrcs_ptr->core_bitmap,
+				if (!job_resrcs_ptr->whole_node &&
+				    !bit_test(job_resrcs_ptr->core_bitmap,
 					      job_bit_inx + i))
 					continue;
 				bit_set(*full_core_bitmap, full_bit_inx + i);
@@ -1299,8 +1298,8 @@ extern void add_job_to_cores(job_resources_t *job_resrcs_ptr,
  * RET 1 on success, 0 otherwise
  */
 extern void remove_job_from_cores(job_resources_t *job_resrcs_ptr,
-			     bitstr_t **full_core_bitmap,
-			     const uint16_t *bits_per_node)
+				  bitstr_t **full_core_bitmap,
+				  const uint16_t *bits_per_node)
 {
 	int full_node_inx = 0, job_node_cnt;
 	int job_bit_inx  = 0, full_bit_inx  = 0, i;
@@ -1322,7 +1321,8 @@ extern void remove_job_from_cores(job_resources_t *job_resrcs_ptr,
 		if (bit_test(job_resrcs_ptr->node_bitmap, full_node_inx)) {
 			full_bit_inx = cr_node_cores_offset[full_node_inx];
 			for (i = 0; i < bits_per_node[full_node_inx]; i++) {
-				if (!bit_test(job_resrcs_ptr->core_bitmap,
+				if (!job_resrcs_ptr->whole_node &&
+				    !bit_test(job_resrcs_ptr->core_bitmap,
 					      job_bit_inx + i))
 					continue;
 				bit_clear(*full_core_bitmap, full_bit_inx + i);

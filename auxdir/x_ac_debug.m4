@@ -9,7 +9,9 @@
 #
 #  DESCRIPTION:
 #    Add support for the "--enable-debug", "--enable-memory-leak-debug",
-#    "--disable-partial-attach" and "--enable-front-end" configure script 
+#    "--disable-partial-attach", "--enable-front-end", "--enable-developer" and
+#    "--enable-simulator" configure script options.
+#
 #    options.
 #    If debugging is enabled, CFLAGS will be prepended with the debug flags.
 #    The NDEBUG macro (used by assert) will also be set accordingly.
@@ -32,14 +34,34 @@ AC_DEFUN([X_AC_DEBUG], [
     ]
   )
   if test "$x_ac_debug" = yes; then
-    test "$GCC" = yes && CFLAGS="$CFLAGS -Wall -fno-strict-aliasing"
-    test "$GXX" = yes && CXXFLAGS="$CXXFLAGS -Wall -fno-strict-aliasing"
+    # you will most likely get a -O2 in you compile line, but the last option
+    # is the only one that is looked at.
+    test "$GCC" = yes && CFLAGS="$CFLAGS -Wall -g -O0 -fno-strict-aliasing"
+    test "$GXX" = yes && CXXFLAGS="$CXXFLAGS -Wall -g -O0 -fno-strict-aliasing"
   else
     AC_DEFINE([NDEBUG], [1],
       [Define to 1 if you are building a production release.]
     )
   fi
   AC_MSG_RESULT([${x_ac_debug=no}])
+
+  AC_MSG_CHECKING([whether or not developer options are enabled])
+  AC_ARG_ENABLE(
+    [developer],
+    AS_HELP_STRING(--enable-developer,enable developer options (-Werror)),
+    [ case "$enableval" in
+        yes) x_ac_developer=yes ;;
+         no) x_ac_developer=no ;;
+          *) AC_MSG_RESULT([doh!])
+             AC_MSG_ERROR([bad value "$enableval" for --enable-developer]) ;;
+      esac
+    ]
+  )
+  if test "$x_ac_developer" = yes; then
+     test "$GCC" = yes && CFLAGS="$CFLAGS -Werror"
+     test "$GXX" = yes && CXXFLAGS="$CXXFLAGS -Werror"
+  fi
+  AC_MSG_RESULT([${x_ac_developer=no}])
 
   AC_MSG_CHECKING([whether memory leak debugging is enabled])
   AC_ARG_ENABLE(
@@ -131,6 +153,23 @@ AC_DEFUN([X_AC_DEBUG], [
   else
     AC_MSG_RESULT([no])
   fi
+
+  AC_MSG_CHECKING([whether to enable slurm simulator])
+  AC_ARG_ENABLE(
+    [simulator],
+    AS_HELP_STRING(--enable-simulator, enable slurm simulator),
+    [ case "$enableval" in
+        yes) x_ac_simulator=yes ;;
+         no) x_ac_simulator=no ;;
+          *) AC_MSG_RESULT([doh!])
+             AC_MSG_ERROR([bad value "$enableval" for --enable-simulator]) ;;
+      esac
+    ]
+  )
+  if test "$x_ac_simulator" = yes; then
+    AC_DEFINE(SLURM_SIMULATOR, 1, [Define to 1 if running slurm simulator])
+  fi
+  AC_MSG_RESULT([${x_ac_simulator=no}])
 
   ]
 )

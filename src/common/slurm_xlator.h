@@ -275,6 +275,7 @@
 #define destroy_config_key_pair	slurm_destroy_config_key_pair
 #define get_extra_conf_path	slurm_get_extra_conf_path
 #define sort_key_pairs		slurm_sort_key_pairs
+#define run_in_daemon           slurm_run_in_daemon
 
 /* slurm_auth.[ch] functions
  * None exported today.
@@ -308,10 +309,18 @@
 #define	_xrfc5424timecat	slurm_xrfc5424timecat
 #define	_xstrfmtcat		slurm_xstrfmtcat
 #define	_xmemcat		slurm_xmemcat
-#define	_xstrsubstitute		slurm_xstrsubstitute
 #define	xstrdup			slurm_xstrdup
 #define	xstrdup_printf		slurm_xstrdup_printf
 #define	xbasename		slurm_xbasename
+#define	_xstrsubstitute		slurm_xstrsubstitute
+#define	xstrstrip		slurm_xstrstrip
+#define	xshort_hostname		slurm_xshort_hostname
+#define xstring_is_whitespace   slurm_xstring_is_whitespace
+#define	xstrtolower		slurm_xstrtolower
+#define xstrchr			slurm_xstrchr
+#define xstrcmp			slurm_xstrcmp
+#define xstrcasecmp		slurm_xstrcasecmp
+
 
 /* slurm_protocol_defs.[ch] functions */
 #define preempt_mode_string	slurm_preempt_mode_string
@@ -358,11 +367,25 @@
 #define destroy_select_ba_request	slurm_destroy_select_ba_request
 
 /* parse_config.[ch] functions */
-#define s_p_get_string			slurm_s_p_get_string
-#define s_p_get_uint32			slurm_s_p_get_uint32
-#define s_p_hashtbl_create		slurm_s_p_hashtbl_create
-#define s_p_hashtbl_destroy		slurm_s_p_hashtbl_destroy
-#define s_p_parse_file			slurm_s_p_parse_file
+#define s_p_hashtbl_create	slurm_s_p_hashtbl_create
+#define s_p_hashtbl_destroy	slurm_s_p_hashtbl_destroy
+#define s_p_parse_file		slurm_s_p_parse_file
+#define s_p_parse_pair		slurm_s_p_parse_pair
+#define s_p_parse_line		slurm_s_p_parse_line
+#define s_p_hashtbl_merge 	slurm_s_p_hashtbl_merge
+#define s_p_get_string		slurm_s_p_get_string
+#define s_p_get_long		slurm_s_p_get_long
+#define s_p_get_uint16		slurm_s_p_get_uint16
+#define s_p_get_uint32		slurm_s_p_get_uint32
+#define s_p_get_pointer		slurm_s_p_get_pointer
+#define s_p_get_array		slurm_s_p_get_array
+#define s_p_get_boolean		slurm_s_p_get_boolean
+#define s_p_dump_values		slurm_s_p_dump_values
+#define transfer_s_p_options	slurm_transfer_s_p_options
+
+/* slurm_step_layout.[ch] functions */
+#define pack_slurm_step_layout          slurm_pack_slurm_step_layout
+#define unpack_slurm_step_layout        slurm_unpack_slurm_step_layout
 
 #endif /* USE_ALIAS */
 
@@ -377,6 +400,7 @@
 #include "src/common/node_select.h"
 #include "src/common/pack.h"
 #include "src/common/parse_config.h"
+#include "src/common/read_config.h"
 #include "src/common/env.h"
 #include "src/common/slurm_auth.h"
 #include "src/common/strlcpy.h"
@@ -386,5 +410,6 @@
 #include "src/common/xmalloc.h"
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
+#include "src/common/slurm_step_layout.h"
 
 #endif /*__SLURM_XLATOR_H__*/

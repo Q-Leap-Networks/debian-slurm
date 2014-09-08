@@ -59,6 +59,7 @@ extern void slurmdb_destroy_user_defs(void *object);
 extern void slurmdb_destroy_user_rec(void *object);
 extern void slurmdb_destroy_account_rec(void *object);
 extern void slurmdb_destroy_coord_rec(void *object);
+extern void slurmdb_destroy_clus_res_rec(void *object);
 extern void slurmdb_destroy_cluster_accounting_rec(void *object);
 extern void slurmdb_destroy_cluster_rec(void *object);
 extern void slurmdb_destroy_accounting_rec(void *object);
@@ -68,6 +69,7 @@ extern void slurmdb_destroy_job_rec(void *object);
 extern void slurmdb_destroy_qos_rec(void *object);
 extern void slurmdb_destroy_reservation_rec(void *object);
 extern void slurmdb_destroy_step_rec(void *object);
+extern void slurmdb_destroy_res_rec(void *object);
 extern void slurmdb_destroy_txn_rec(void *object);
 extern void slurmdb_destroy_wckey_rec(void *object);
 extern void slurmdb_destroy_archive_rec(void *object);
@@ -84,6 +86,7 @@ extern void slurmdb_destroy_job_cond(void *object);
 extern void slurmdb_destroy_job_modify_cond(void *object);
 extern void slurmdb_destroy_qos_cond(void *object);
 extern void slurmdb_destroy_reservation_cond(void *object);
+extern void slurmdb_destroy_res_cond(void *object);
 extern void slurmdb_destroy_txn_cond(void *object);
 extern void slurmdb_destroy_wckey_cond(void *object);
 extern void slurmdb_destroy_archive_cond(void *object);
@@ -101,9 +104,13 @@ extern void slurmdb_destroy_report_cluster_grouping(void *object);
 
 extern void slurmdb_init_association_rec(slurmdb_association_rec_t *assoc,
 					 bool free_it);
+extern void slurmdb_init_clus_res_rec(slurmdb_clus_res_rec_t *clus_res,
+				      bool free_it);
 extern void slurmdb_init_cluster_rec(slurmdb_cluster_rec_t *cluster,
 				     bool free_it);
 extern void slurmdb_init_qos_rec(slurmdb_qos_rec_t *qos,
+				 bool free_it);
+extern void slurmdb_init_res_rec(slurmdb_res_rec_t *res,
 				 bool free_it);
 extern void slurmdb_init_wckey_rec(slurmdb_wckey_rec_t *wckey,
 				   bool free_it);
@@ -116,6 +123,10 @@ extern char *slurmdb_qos_str(List qos_list, uint32_t level);
 extern uint32_t str_2_slurmdb_qos(List qos_list, char *level);
 extern char *slurmdb_qos_flags_str(uint32_t flags);
 extern uint32_t str_2_qos_flags(char *flags, int option);
+extern char *slurmdb_res_flags_str(uint32_t flags);
+extern uint32_t str_2_res_flags(char *flags, int option);
+extern char *slurmdb_res_type_str(slurmdb_resource_type_t type);
+
 extern char *slurmdb_admin_level_str(slurmdb_admin_level_t level);
 extern slurmdb_admin_level_t str_2_slurmdb_admin_level(char *level);
 

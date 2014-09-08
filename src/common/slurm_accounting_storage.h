@@ -61,10 +61,10 @@ extern int slurm_acct_storage_fini(void); /* unload the plugin */
  *     this can be used to tell which connection is doing what
  * IN: rollback - maintain journal of changes to permit rollback
  * RET: pointer used to access db
-*/
+ */
 extern void *acct_storage_g_get_connection(
-             const slurm_trigger_callbacks_t *callbacks,
-             int conn_num, bool rollback,char *cluster_name);
+	const slurm_trigger_callbacks_t *callbacks,
+	int conn_num, bool rollback,char *cluster_name);
 
 /*
  * release connection to the storage unit
@@ -132,6 +132,14 @@ extern int acct_storage_g_add_associations(void *db_conn, uint32_t uid,
  */
 extern int acct_storage_g_add_qos(void *db_conn, uint32_t uid,
 				  List qos_list);
+
+/*
+ * add res's to accounting system
+ * IN:  res_list List of char *
+ * RET: SLURM_SUCCESS on success SLURM_ERROR else
+ */
+extern int acct_storage_g_add_res(void *db_conn, uint32_t uid,
+				       List res_list);
 
 /*
  * add wckey's to accounting system
@@ -211,6 +219,16 @@ extern List acct_storage_g_modify_qos(void *db_conn, uint32_t uid,
 				      slurmdb_qos_rec_t *qos);
 
 /*
+ * modify existing res in the accounting system
+ * IN:  slurmdb_res_cond_t *res_cond
+ * IN:  slurmdb_res_rec_t *res
+ * RET: List containing (char *'s) else NULL on error
+ */
+extern List acct_storage_g_modify_res(void *db_conn, uint32_t uid,
+					   slurmdb_res_cond_t *res_cond,
+					   slurmdb_res_rec_t *res);
+
+/*
  * modify existing wckey in the accounting system
  * IN:  slurmdb_wckey_cond_t *wckey_cond
  * IN:  slurmdb_wckey_rec_t *wckey
@@ -271,11 +289,19 @@ extern List acct_storage_g_remove_associations(
 
 /*
  * remove qos from accounting system
- * IN:  slurmdb_qos_cond_t *assoc_qos
+ * IN:  slurmdb_qos_cond_t *qos_cond
  * RET: List containing (char *'s) else NULL on error
  */
 extern List acct_storage_g_remove_qos(
 	void *db_conn, uint32_t uid, slurmdb_qos_cond_t *qos_cond);
+
+/*
+ * remove res from accounting system
+ * IN:  slurmdb_res_cond_t *res_cond
+ * RET: List containing (char *'s) else NULL on error
+ */
+extern List acct_storage_g_remove_res(
+	void *db_conn, uint32_t uid, slurmdb_res_cond_t *res_cond);
 
 /*
  * remove wckey from accounting system
@@ -364,6 +390,15 @@ extern List acct_storage_g_get_problems(
  */
 extern List acct_storage_g_get_qos(void *db_conn, uint32_t uid,
 				   slurmdb_qos_cond_t *qos_cond);
+
+/*
+ * get info from the storage
+ * IN:  slurmdb_res_cond_t *
+ * RET: List of slurmdb_res_rec_t *
+ * note List needs to be freed when called
+ */
+extern List acct_storage_g_get_res(void *db_conn, uint32_t uid,
+				   slurmdb_res_cond_t *res_cond);
 
 /*
  * get info from the storage

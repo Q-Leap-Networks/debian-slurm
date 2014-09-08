@@ -83,7 +83,7 @@
 static int          _background_process_msg(slurm_msg_t * msg);
 static void *       _background_rpc_mgr(void *no_data);
 static void *       _background_signal_hand(void *no_data);
-static int          _backup_reconfig(void);
+static void         _backup_reconfig(void);
 static int          _ping_controller(void);
 static int          _shutdown_primary_controller(int wait_time);
 static void	     _trigger_slurmctld_event(uint32_t trig_type);
@@ -217,19 +217,19 @@ void run_backup(slurm_trigger_callbacks_t *callbacks)
 	pthread_join(slurmctld_config.thread_id_sig, NULL);
 	pthread_join(slurmctld_config.thread_id_rpc, NULL);
 
-	/* The job list needs to be freed before we run
-	 * ctld_assoc_mgr_init, it should be empty here in the first place.
-	 */
-	lock_slurmctld(config_write_lock);
-	job_fini();
-	init_job_conf();
-	unlock_slurmctld(config_write_lock);
-
-	ctld_assoc_mgr_init(callbacks);
+	if (!acct_db_conn) {
+		/* Make sure we get a connection right away to avoid
+		   race condition on this happening too late.
+		*/
+		acct_db_conn = acct_storage_g_get_connection(
+			callbacks, 0, false,
+			slurmctld_cluster_name);
+	}
 
 	/* clear old state and read new state */
 	lock_slurmctld(config_write_lock);
-	if (switch_restore(slurmctld_conf.state_save_location, true)) {
+	job_fini();
+	if (switch_g_restore(slurmctld_conf.state_save_location, true)) {
 		error("failed to restore switch state");
 		abort();
 	}
@@ -278,14 +278,9 @@ static void *_background_signal_hand(void *no_data)
 			 * restart the (possibly new) plugin.
 			 */
 			lock_slurmctld(config_write_lock);
-			rc = _backup_reconfig();
-			if (rc)
-				error("_backup_reconfig: %s",
-					slurm_strerror(rc));
-			else {
-				/* Leave config lock set through this */
-				_update_cred_key();
-			}
+			_backup_reconfig();
+			/* Leave config lock set through this */
+			_update_cred_key();
 			unlock_slurmctld(config_write_lock);
 			break;
 		case SIGABRT:   /* abort */
@@ -477,12 +472,12 @@ static int _ping_controller(void)
  * upon old job state information.
  * This is a stripped down version of read_slurm_conf(0).
  */
-static int _backup_reconfig(void)
+static void _backup_reconfig(void)
 {
 	slurm_conf_reinit(NULL);
 	update_logging();
 	slurmctld_conf.last_update = time(NULL);
-	return SLURM_SUCCESS;
+	return;
 }
 
 /*

@@ -94,6 +94,7 @@ typedef struct allocation_info {
 	uint32_t                nnodes;
 	char                   *nodelist;
 	uint32_t                num_cpu_groups;
+	char                   *partition;
 	dynamic_plugin_data_t  *select_jobinfo;
 	uint32_t                stepid;
 } allocation_info_t;
@@ -276,7 +277,7 @@ job_step_create_allocation(resource_allocation_response_msg_t *resp)
 				xfree(buf);
 				while ((node_name = hostlist_shift(tmp_hl)) &&
 				       (i < diff)) {
-					hostlist_push(inc_hl, node_name);
+					hostlist_push_host(inc_hl, node_name);
 					i++;
 				}
 				hostlist_destroy(tmp_hl);
@@ -366,6 +367,7 @@ job_step_create_allocation(resource_allocation_response_msg_t *resp)
 	ai->num_cpu_groups = resp->num_cpu_groups;
 	ai->cpus_per_node  = resp->cpus_per_node;
 	ai->cpu_count_reps = resp->cpu_count_reps;
+	ai->partition = resp->partition;
 
 /* 	info("looking for %d nodes out of %s with a must list of %s", */
 /* 	     ai->nnodes, ai->nodelist, opt.nodelist); */
@@ -391,6 +393,7 @@ job_create_allocation(resource_allocation_response_msg_t *resp)
 	i->alias_list     = resp->alias_list;
 	i->nodelist       = _normalize_hostlist(resp->node_list);
 	i->nnodes	  = resp->node_cnt;
+	i->partition      = resp->partition;
 	i->jobid          = resp->job_id;
 	i->stepid         = NO_VAL;
 	i->num_cpu_groups = resp->num_cpu_groups;
@@ -512,6 +515,13 @@ extern void create_srun_job(srun_job_t **p_job, bool *got_alloc,
 			xfree(opt.alloc_nodelist);
 			if (!opt.ntasks_set)
 				opt.ntasks = opt.min_nodes;
+		}
+		if (opt.core_spec_set) {
+			/* NOTE: Silently ignore specialized core count set
+			 * with SLURM_CORE_SPEC environment variable */
+			error("Ignoring --core-spec value for a job step "
+			      "within an existing job. Set specialized cores "
+			      "at job allocation time.");
 		}
 		if (opt.alloc_nodelist == NULL)
 			opt.alloc_nodelist = xstrdup(resp->node_list);
@@ -767,6 +777,7 @@ _job_create_structure(allocation_info_t *ainfo)
 
  	job->alias_list = xstrdup(ainfo->alias_list);
  	job->nodelist = xstrdup(ainfo->nodelist);
+ 	job->partition = xstrdup(ainfo->partition);
 	job->stepid  = ainfo->stepid;
 
 #if defined HAVE_BG && !defined HAVE_BG_L_P
@@ -817,7 +828,7 @@ _job_create_structure(allocation_info_t *ainfo)
 #endif
 	}
 
-#elif defined HAVE_FRONT_END && !defined HAVE_CRAY
+#elif defined HAVE_FRONT_END && !defined HAVE_ALPS_CRAY
 	/* Limited job step support */
 	opt.overcommit = true;
 	job->nhosts = 1;

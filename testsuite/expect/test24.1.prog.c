@@ -83,15 +83,13 @@ int _setup_assoc_list(void)
 	assoc_mgr_qos_list =
 		list_create(slurmdb_destroy_qos_rec);
 
-	/* we just want make it so we setup_childern so just pretend
-	   we are running off cache */
+	/* we just want make it so we setup_children so just pretend
+	 * we are running off cache */
 	running_cache = 1;
 	assoc_mgr_init(NULL, NULL, SLURM_SUCCESS);
 
-	/* Here we make the associations we want to add to the
-	   system.  We do this as an update to avoid having to do
-	   setup.
-	*/
+	/* Here we make the associations we want to add to the system.
+	 * We do this as an update to avoid having to do setup. */
 	memset(&update, 0, sizeof(slurmdb_update_object_t));
 	update.type = SLURMDB_ADD_ASSOC;
 	update.objects = list_create(slurmdb_destroy_association_rec);
@@ -269,7 +267,8 @@ int _setup_assoc_list(void)
 	assoc->user = xstrdup("User6");
 	list_append(update.objects, assoc);
 
-	assoc_mgr_update_assocs(&update);
+	if (assoc_mgr_update_assocs(&update))
+		error("assoc_mgr_update_assocs: %m");
 	list_destroy(update.objects);
 
 	return SLURM_SUCCESS;
@@ -293,6 +292,7 @@ int main (int argc, char **argv)
 	/* force priority type to be multifactor */
 	xfree(conf->priority_type);
 	conf->priority_type = xstrdup("priority/multifactor");
+	conf->priority_flags = 0;
 	/* force accounting type to be slurmdbd (It doesn't really talk
 	 * to any database, but needs this to work with fairshare
 	 * calculation). */

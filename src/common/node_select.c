@@ -60,8 +60,8 @@
 
 /*
  * Must be synchronized with slurm_select_ops_t in node_select.h.
- * Also must be synchronized with the other_plugin.c in
- * the select/cray plugin. (We tried to make it so we only had to
+ * Also must be synchronized with the other_select.c in
+ * the select/other lib. (We tried to make it so we only had to
  * define it once, but it didn't seem to work.)
  */
 const char *node_select_syms[] = {
@@ -83,6 +83,7 @@ const char *node_select_syms[] = {
 	"select_p_job_suspend",
 	"select_p_job_resume",
 	"select_p_step_pick_nodes",
+	"select_p_step_start",
 	"select_p_step_finish",
 	"select_p_pack_select_info",
 	"select_p_select_nodeinfo_pack",
@@ -237,18 +238,34 @@ extern int slurm_select_init(bool only_default)
 		}
 #endif
 
-#ifdef HAVE_CRAY
+#ifdef HAVE_ALPS_CRAY
+		if (strcasecmp(type, "select/alps")) {
+			error("%s is incompatible with Cray system "
+			      "running alps", type);
+			fatal("Use SelectType=select/alps");
+		}
+#else
+		if (!strcasecmp(type, "select/alps")) {
+			fatal("Requested SelectType=select/alps "
+			      "in slurm.conf, but not running on a ALPS Cray "
+			      "system.  If looking to emulate a Alps Cray "
+			      "system use --enable-alps-cray-emulation.");
+		}
+#endif
+
+#ifdef HAVE_NATIVE_CRAY
 		if (strcasecmp(type, "select/cray")) {
-			error("%s is incompatible with Cray", type);
+			error("%s is incompatible with a native Cray system.",
+			      type);
 			fatal("Use SelectType=select/cray");
 		}
 #else
-		if (!strcasecmp(type, "select/cray")) {
-			fatal("Requested SelectType=select/cray "
-			      "in slurm.conf, but not running on a Cray "
-			      "system.  If looking to emulate a Cray "
-			      "system use --enable-cray-emulation.");
-		}
+		/* if (!strcasecmp(type, "select/cray")) { */
+		/* 	fatal("Requested SelectType=select/cray " */
+		/* 	      "in slurm.conf, but not running on a native Cray " */
+		/* 	      "system.  If looking to run on a Cray " */
+		/* 	      "system natively use --enable-native-cray."); */
+		/* } */
 #endif
 	}
 
@@ -694,11 +711,14 @@ extern int select_g_job_resume(struct job_record *job_ptr, bool indf_susp)
  * OUT step_jobinfo - Fill in the resources to be used if not
  *                    full size of job.
  * IN node_count  - How many nodes we are looking for.
+ * OUT avail_nodes - bitmap of available nodes according to the plugin
+ *                  (not always set).
  * RET map of slurm nodes to be used for step, NULL on failure
  */
 extern bitstr_t *select_g_step_pick_nodes(struct job_record *job_ptr,
 					  dynamic_plugin_data_t *step_jobinfo,
-					  uint32_t node_count)
+					  uint32_t node_count,
+					  bitstr_t **avail_nodes)
 {
 	if (slurm_select_init(0) < 0)
 		return NULL;
@@ -706,7 +726,20 @@ extern bitstr_t *select_g_step_pick_nodes(struct job_record *job_ptr,
 	xassert(step_jobinfo);
 
 	return (*(ops[select_context_default].step_pick_nodes))
-		(job_ptr, step_jobinfo->data, node_count);
+		(job_ptr, step_jobinfo->data, node_count, avail_nodes);
+}
+
+/*
+ * Post pick_nodes operations for the step.
+ * IN/OUT step_ptr - step pointer to operate on.
+ */
+extern int select_g_step_start(struct step_record *step_ptr)
+{
+	if (slurm_select_init(0) < 0)
+		return SLURM_ERROR;
+
+	return (*(ops[select_context_default].step_start))
+		(step_ptr);
 }
 
 /*
@@ -749,7 +782,7 @@ extern int select_g_select_nodeinfo_pack(dynamic_plugin_data_t *nodeinfo,
 	} else
 		plugin_id = select_context_default;
 
-	if (protocol_version >= SLURM_2_3_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_2_5_PROTOCOL_VERSION) {
 		pack32(*(ops[plugin_id].plugin_id),
 		       buffer);
 	} else {
@@ -773,7 +806,7 @@ extern int select_g_select_nodeinfo_unpack(dynamic_plugin_data_t **nodeinfo,
 	nodeinfo_ptr = xmalloc(sizeof(dynamic_plugin_data_t));
 	*nodeinfo = nodeinfo_ptr;
 
-	if (protocol_version >= SLURM_2_3_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_2_5_PROTOCOL_VERSION) {
 		int i;
 		uint32_t plugin_id;
 		safe_unpack32(&plugin_id, buffer);
@@ -1006,7 +1039,7 @@ extern int select_g_select_jobinfo_pack(dynamic_plugin_data_t *jobinfo,
 	} else
 		plugin_id = select_context_default;
 
-	if (protocol_version >= SLURM_2_3_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_2_5_PROTOCOL_VERSION) {
 		pack32(*(ops[plugin_id].plugin_id), buffer);
 	} else {
 		error("select_g_select_jobinfo_pack: protocol_version "
@@ -1034,7 +1067,7 @@ extern int select_g_select_jobinfo_unpack(dynamic_plugin_data_t **jobinfo,
 	jobinfo_ptr = xmalloc(sizeof(dynamic_plugin_data_t));
 	*jobinfo = jobinfo_ptr;
 
-	if (protocol_version >= SLURM_2_3_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_2_5_PROTOCOL_VERSION) {
 		int i;
 		uint32_t plugin_id;
 		safe_unpack32(&plugin_id, buffer);
@@ -1237,20 +1270,22 @@ extern int select_g_reconfigure (void)
  *	request. "best" is defined as either single set of consecutive nodes
  *	satisfying the request and leaving the minimum number of unused nodes
  *	OR the fewest number of consecutive node sets
- * IN avail_bitmap - nodes available for the reservation
+ * IN/OUT avail_bitmap - nodes available for the reservation
  * IN node_cnt - count of required nodes
- * IN core_cnt - count of required cores
- * IN core_bitmap - cores to be excluded for this reservation
+ * IN core_cnt - count of required cores per node
+ * IN/OUT core_bitmap - cores which can not be used for this reservation
+ * IN flags - reservation request flags
  * RET - nodes selected for use by the reservation
  */
 extern bitstr_t * select_g_resv_test(bitstr_t *avail_bitmap, uint32_t node_cnt,
-				     uint32_t *core_cnt, bitstr_t **core_bitmap)
+				     uint32_t *core_cnt, bitstr_t **core_bitmap,
+				     uint32_t flags)
 {
 	if (slurm_select_init(0) < 0)
 		return NULL;
 
 	return (*(ops[select_context_default].resv_test))
-		(avail_bitmap, node_cnt, core_cnt, core_bitmap);
+		(avail_bitmap, node_cnt, core_cnt, core_bitmap, flags);
 }
 
 extern void select_g_ba_init(node_info_msg_t *node_info_ptr, bool sanity_check)

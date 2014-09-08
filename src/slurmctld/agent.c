@@ -139,6 +139,7 @@ typedef struct agent_info {
 	bool get_reply;			/* flag if reply expected */
 	slurm_msg_type_t msg_type;	/* RPC to be issued */
 	void **msg_args_pptr;		/* RPC data to be used */
+	uint16_t protocol_version;	/* if set, use this version */
 } agent_info_t;
 
 typedef struct task_info {
@@ -151,6 +152,7 @@ typedef struct task_info {
 	bool get_reply;			/* flag if reply expected */
 	slurm_msg_type_t msg_type;	/* RPC to be issued */
 	void *msg_args_ptr;		/* ptr to RPC data to be used */
+	uint16_t protocol_version;	/* if set, use this version */
 } task_info_t;
 
 typedef struct queued_request {
@@ -394,6 +396,7 @@ static agent_info_t *_make_agent_info(agent_arg_t *agent_arg_ptr)
 	agent_info_ptr->thread_struct  = thread_ptr;
 	agent_info_ptr->msg_type       = agent_arg_ptr->msg_type;
 	agent_info_ptr->msg_args_pptr  = &agent_arg_ptr->msg_args;
+	agent_info_ptr->protocol_version = agent_arg_ptr->protocol_version;
 
 	if ((agent_arg_ptr->msg_type != REQUEST_JOB_NOTIFY)	&&
 	    (agent_arg_ptr->msg_type != REQUEST_REBOOT_NODES)	&&
@@ -445,12 +448,12 @@ static agent_info_t *_make_agent_info(agent_arg_t *agent_arg_ptr)
 			name = hostlist_shift(agent_arg_ptr->hostlist);
 			if (!name)
 				break;
-			hostlist_push(hl, name);
+			hostlist_push_host(hl, name);
 			free(name);
 			i++;
 		}
 		hostlist_uniq(hl);
-		thread_ptr[thr_count].nodelist = 
+		thread_ptr[thr_count].nodelist =
 			hostlist_ranged_string_xmalloc(hl);
 		hostlist_destroy(hl);
 #if 0
@@ -476,6 +479,7 @@ static task_info_t *_make_task_data(agent_info_t *agent_info_ptr, int inx)
 	task_info_ptr->get_reply         = agent_info_ptr->get_reply;
 	task_info_ptr->msg_type          = agent_info_ptr->msg_type;
 	task_info_ptr->msg_args_ptr      = *agent_info_ptr->msg_args_pptr;
+	task_info_ptr->protocol_version  = agent_info_ptr->protocol_version;
 
 	return task_info_ptr;
 }
@@ -675,6 +679,8 @@ static void _notify_slurmctld_nodes(agent_info_t *agent_ptr,
 	lock_slurmctld(node_write_lock);
 	for (i = 0; i < agent_ptr->thread_count; i++) {
 		char *down_msg, *node_names;
+		slurm_msg_type_t resp_type = RESPONSE_SLURM_RC;
+
 		if (!thread_ptr[i].ret_list) {
 			state = thread_ptr[i].state;
 			is_ret_list = 0;
@@ -686,22 +692,19 @@ static void _notify_slurmctld_nodes(agent_info_t *agent_ptr,
 		while ((ret_data_info = list_next(itr))) {
 			state = ret_data_info->err;
 		switch_on_state:
+			if (is_ret_list) {
+				node_names = ret_data_info->node_name;
+				resp_type = ret_data_info->type;
+			} else
+				node_names = thread_ptr[i].nodelist;
+
 			switch(state) {
 			case DSH_NO_RESP:
-				if (!is_ret_list) {
-					node_not_resp(thread_ptr[i].nodelist,
-						      thread_ptr[i].
-						      start_time);
-				} else {
-					node_not_resp(ret_data_info->node_name,
-						      thread_ptr[i].start_time);
-				}
+				node_not_resp(node_names,
+					      thread_ptr[i].start_time,
+					      resp_type);
 				break;
 			case DSH_FAILED:
-				if (is_ret_list)
-					node_names = ret_data_info->node_name;
-				else
-					node_names = thread_ptr[i].nodelist;
 #ifdef HAVE_FRONT_END
 				down_msg = "";
 #else
@@ -713,19 +716,11 @@ static void _notify_slurmctld_nodes(agent_info_t *agent_ptr,
 				      node_names, down_msg);
 				break;
 			case DSH_DONE:
-				if (!is_ret_list)
-					node_did_resp(thread_ptr[i].nodelist);
-				else
-					node_did_resp(ret_data_info->node_name);
+				node_did_resp(node_names);
 				break;
 			default:
-				if (!is_ret_list) {
-					error("unknown state returned for %s",
-					      thread_ptr[i].nodelist);
-				} else {
-					error("unknown state returned for %s",
-					      ret_data_info->node_name);
-				}
+				error("unknown state returned for %s",
+				      node_names);
 				break;
 			}
 			if (!is_ret_list)
@@ -844,6 +839,10 @@ static void *_thread_per_group_rpc(void *args)
 
 	/* send request message */
 	slurm_msg_t_init(&msg);
+
+	if (task_ptr->protocol_version)
+		msg.protocol_version = task_ptr->protocol_version;
+
 	msg.msg_type = msg_type;
 	msg.data     = task_ptr->msg_args_ptr;
 #if 0
@@ -1006,9 +1005,11 @@ static void *_thread_per_group_rpc(void *args)
 					       msg_type);
 				unlock_slurmctld(node_read_lock);
 			}
+
 			if (srun_agent)
 				thread_state = DSH_FAILED;
-			else if (ret_data_info->type == RESPONSE_FORWARD_FAILED)
+			else if (rc || (ret_data_info->type ==
+					RESPONSE_FORWARD_FAILED))
 				/* check if a forward failed */
 				thread_state = DSH_NO_RESP;
 			else {	/* some will fail that don't mean anything went
@@ -1061,7 +1062,7 @@ static int _setup_requeue(agent_arg_t *agent_arg_ptr, thd_t *thread_ptr,
 		      ret_data_info->node_name, count);
 
 		if (agent_arg_ptr) {
-			hostlist_push(agent_arg_ptr->hostlist,
+			hostlist_push_host(agent_arg_ptr->hostlist,
 				      ret_data_info->node_name);
 
 			if ((++(*spot)) == count) {
@@ -1093,7 +1094,7 @@ static void _queue_agent_retry(agent_info_t * agent_info_ptr, int count)
 	agent_arg_ptr = xmalloc(sizeof(agent_arg_t));
 	agent_arg_ptr->node_count = count;
 	agent_arg_ptr->retry = 1;
-	agent_arg_ptr->hostlist = hostlist_create("");
+	agent_arg_ptr->hostlist = hostlist_create(NULL);
 	agent_arg_ptr->msg_type = agent_info_ptr->msg_type;
 	agent_arg_ptr->msg_args = *(agent_info_ptr->msg_args_pptr);
 	*(agent_info_ptr->msg_args_pptr) = NULL;
@@ -1106,7 +1107,7 @@ static void _queue_agent_retry(agent_info_t * agent_info_ptr, int count)
 
 			debug("got the name %s to resend",
 			      thread_ptr[i].nodelist);
-			hostlist_push(agent_arg_ptr->hostlist,
+			hostlist_push_host(agent_arg_ptr->hostlist,
 				      thread_ptr[i].nodelist);
 
 			if ((++j) == count)
@@ -1456,14 +1457,13 @@ static void _mail_proc(mail_info_t *mi)
 	if (pid < 0) {		/* error */
 		error("fork(): %m");
 	} else if (pid == 0) {	/* child */
-		int fd;
-		(void) close(0);
-		(void) close(1);
-		(void) close(2);
-		fd = open("/dev/null", O_RDWR); // 0
-		if (dup(fd) == -1) // 1
+		int fd, i;
+		for (i = 0; i < 1024; i++)
+			(void) close(i);
+		fd = open("/dev/null", O_RDWR); // fd = 0
+		if (dup(fd) == -1)		// fd = 1
 			error("Couldn't do a dup for 1: %m");
-		if (dup(fd) == -1) // 2
+		if (dup(fd) == -1)		// fd = 2
 			error("Couldn't do a dup for 2 %m");
 		execle(slurmctld_conf.mail_prog, "mail",
 			"-s", mi->message, mi->user_name,

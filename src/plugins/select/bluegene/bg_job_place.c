@@ -962,7 +962,8 @@ static int _check_for_booted_overlapping_blocks(
 
 					if (kill_job_list) {
 						bg_status_process_kill_job_list(
-							kill_job_list, 1);
+							kill_job_list,
+							JOB_FAILED, 1);
 						list_destroy(kill_job_list);
 					}
 					free_block_list(NO_VAL, tmp_list, 1, 0);
@@ -1755,6 +1756,16 @@ extern int submit_job(struct job_record *job_ptr, bitstr_t *slurm_block_bitmap,
 	int dim = 0;
 	select_jobinfo_t *jobinfo = job_ptr->select_jobinfo->data;
 
+
+	if (!job_ptr->details)
+		return EINVAL;
+
+	if (job_ptr->details->core_spec) {
+		verbose("select/bluegene: job %u core_spec(%u) not supported",
+			job_ptr->job_id, job_ptr->details->core_spec);
+		job_ptr->details->core_spec = 0;
+	}
+
 	if (preemptee_candidates && preemptee_job_list
 	    && list_count(preemptee_candidates))
 		local_mode |= SELECT_MODE_PREEMPT_FLAG;
@@ -2038,6 +2049,32 @@ extern int submit_job(struct job_record *job_ptr, bitstr_t *slurm_block_bitmap,
 			set_select_jobinfo(jobinfo,
 					   SELECT_JOBDATA_BLOCK_PTR,
 					   NULL);
+
+			/* If using SubBlocks set the state to waiting
+			   for block instead of the generic
+			   "Resources" reason.
+			*/
+			if (bg_conf->sub_blocks
+			    && (job_ptr->details->max_cpus
+				< bg_conf->cpus_per_mp)) {
+				bg_record_t *found_record;
+				if ((found_record = block_exist_in_list(
+					     block_list, bg_record))) {
+					if ((found_record->action
+					     == BG_BLOCK_ACTION_FREE)
+					    && (found_record->state
+						== BG_BLOCK_INITED)) {
+						job_ptr->state_reason =
+							WAIT_BLOCK_D_ACTION;
+						xfree(job_ptr->state_desc);
+					} else if (found_record->err_ratio
+						   >= bg_conf->max_block_err) {
+						job_ptr->state_reason =
+							WAIT_BLOCK_MAX_ERR;
+						xfree(job_ptr->state_desc);
+					}
+				}
+			}
 		} else {
 			if (job_ptr->part_ptr
 			    && job_ptr->part_ptr->max_share <= 1) {

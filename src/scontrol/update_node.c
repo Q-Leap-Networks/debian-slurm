@@ -144,7 +144,7 @@ scontrol_update_node (int argc, char *argv[])
 			update_cnt++;
 		}
 		else if (strncasecmp(tag, "State", MAX(tag_len, 1)) == 0) {
-			if (cluster_flags & CLUSTER_FLAG_CRAYXT) {
+			if (cluster_flags & CLUSTER_FLAG_CRAY_A) {
 				fprintf (stderr, "%s can not be changed through"
 					 " SLURM. Use native Cray tools such as"
 					 " xtprocadmin(8)\n", argv[i]);
@@ -180,6 +180,10 @@ scontrol_update_node (int argc, char *argv[])
 				   MAX(val_len, 7)) == 0) {
 				node_msg.node_state = NODE_STATE_POWER_UP;
 				update_cnt++;
+			} else if (strncasecmp(val, "UNDRAIN",
+				   MAX(val_len, 3)) == 0) {
+				node_msg.node_state = NODE_STATE_UNDRAIN;
+				update_cnt++;
 			} else {
 				state_val = (uint16_t) NO_VAL;
 				for (j = 0; j < NODE_STATE_END; j++) {
@@ -198,7 +202,7 @@ scontrol_update_node (int argc, char *argv[])
 					fprintf (stderr, "Valid states are: ");
 					fprintf (stderr,
 						 "NoResp DRAIN FAIL RESUME "
-						 "POWER_DOWN POWER_UP ");
+						 "POWER_DOWN POWER_UP UNDRAIN");
 					for (k = 0; k < NODE_STATE_END; k++) {
 						fprintf (stderr, "%s ",
 						         node_state_string(k));

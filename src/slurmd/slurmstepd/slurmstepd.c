@@ -59,6 +59,7 @@
 #include "src/common/plugstack.h"
 #include "src/common/node_select.h"
 
+#include "src/slurmd/common/core_spec_plugin.h"
 #include "src/slurmd/common/slurmstepd_init.h"
 #include "src/slurmd/common/setproctitle.h"
 #include "src/slurmd/common/proctrack.h"
@@ -75,10 +76,10 @@ static int _init_from_slurmd(int sock, char **argv, slurm_addr_t **_cli,
 static void _dump_user_env(void);
 static void _send_ok_to_slurmd(int sock);
 static void _send_fail_to_slurmd(int sock);
-static slurmd_job_t *_step_setup(slurm_addr_t *cli, slurm_addr_t *self,
+static stepd_step_rec_t *_step_setup(slurm_addr_t *cli, slurm_addr_t *self,
 				 slurm_msg_t *msg);
 #ifdef MEMORY_LEAK_DEBUG
-static void _step_cleanup(slurmd_job_t *job, slurm_msg_t *msg, int rc);
+static void _step_cleanup(stepd_step_rec_t *job, slurm_msg_t *msg, int rc);
 #endif
 static int process_cmdline (int argc, char *argv[]);
 
@@ -96,7 +97,7 @@ main (int argc, char *argv[])
 	slurm_addr_t *cli;
 	slurm_addr_t *self;
 	slurm_msg_t *msg;
-	slurmd_job_t *job;
+	stepd_step_rec_t *job;
 	int ngids;
 	gid_t *gids;
 	int rc = 0;
@@ -121,7 +122,7 @@ main (int argc, char *argv[])
 	 * on STDERR_FILENO for us. */
 	dup2(STDERR_FILENO, STDIN_FILENO);
 
-	/* Create the slurmd_job_t, mostly from info in a
+	/* Create the stepd_step_rec_t, mostly from info in a
 	 * launch_tasks_request_msg_t or a batch_job_launch_msg_t */
 	if (!(job = _step_setup(cli, self, msg))) {
 		_send_fail_to_slurmd(STDOUT_FILENO);
@@ -164,6 +165,7 @@ main (int argc, char *argv[])
 ending:
 #ifdef MEMORY_LEAK_DEBUG
 	acct_gather_conf_destroy();
+	(void) core_spec_g_fini();
 	_step_cleanup(job, msg, rc);
 
 	fini_setproctitle();
@@ -404,7 +406,9 @@ _init_from_slurmd(int sock, char **argv,
 	/* receive conf from slurmd */
 	if ((conf = read_slurmd_conf_lite (sock)) == NULL)
 		fatal("Failed to read conf from slurmd");
+
 	log_alter(conf->log_opts, 0, conf->logfile);
+	log_set_timefmt(conf->log_fmt);
 
 	debug2("debug level is %d.", conf->debug_level);
 
@@ -498,10 +502,10 @@ rwfail:
 	exit(1);
 }
 
-static slurmd_job_t *
+static stepd_step_rec_t *
 _step_setup(slurm_addr_t *cli, slurm_addr_t *self, slurm_msg_t *msg)
 {
-	slurmd_job_t *job = NULL;
+	stepd_step_rec_t *job = NULL;
 
 	switch(msg->msg_type) {
 	case REQUEST_BATCH_JOB_LAUNCH:
@@ -549,12 +553,12 @@ _step_setup(slurm_addr_t *cli, slurm_addr_t *self, slurm_msg_t *msg)
 
 #ifdef MEMORY_LEAK_DEBUG
 static void
-_step_cleanup(slurmd_job_t *job, slurm_msg_t *msg, int rc)
+_step_cleanup(stepd_step_rec_t *job, slurm_msg_t *msg, int rc)
 {
 	if (job) {
 		jobacctinfo_destroy(job->jobacct);
 		if (!job->batch)
-			job_destroy(job);
+			stepd_step_rec_destroy(job);
 	}
 	/*
 	 * The message cannot be freed until the jobstep is complete

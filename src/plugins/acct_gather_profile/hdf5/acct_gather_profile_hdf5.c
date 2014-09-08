@@ -115,7 +115,7 @@ static char      group_node[MAX_GROUP_NAME+1];
 static slurm_hdf5_conf_t hdf5_conf;
 static uint32_t debug_flags = 0;
 static uint32_t g_profile_running = ACCT_GATHER_PROFILE_NOT_SET;
-static slurmd_job_t *g_job = NULL;
+static stepd_step_rec_t *g_job = NULL;
 
 static void _reset_slurm_profile_conf()
 {
@@ -184,14 +184,14 @@ static int _create_directories()
 		      hdf5_conf.dir);
 	chmod(hdf5_conf.dir, 0755);
 
-	user_dir = xstrdup_printf("%s/%s", hdf5_conf.dir, g_job->pwd->pw_name);
+	user_dir = xstrdup_printf("%s/%s", hdf5_conf.dir, g_job->user_name);
 	if (((rc = stat(user_dir, &st)) < 0) && (errno == ENOENT)) {
 		if (mkdir(user_dir, 0700) < 0)
 			fatal("mkdir(%s): %m", user_dir);
 	}
 	chmod(user_dir, 0700);
-	if (chown(user_dir, (uid_t)g_job->pwd->pw_uid,
-		  (gid_t)g_job->pwd->pw_gid) < 0)
+	if (chown(user_dir, (uid_t)g_job->uid,
+		  (gid_t)g_job->gid) < 0)
 		error("chown(%s): %m", user_dir);
 
 	xfree(user_dir);
@@ -301,7 +301,7 @@ extern void acct_gather_profile_p_get(enum acct_gather_profile_info info_type,
 	}
 }
 
-extern int acct_gather_profile_p_node_step_start(slurmd_job_t* job)
+extern int acct_gather_profile_p_node_step_start(stepd_step_rec_t* job)
 {
 	int rc = SLURM_SUCCESS;
 
@@ -335,7 +335,7 @@ extern int acct_gather_profile_p_node_step_start(slurmd_job_t* job)
 
 	profile_file_name = xstrdup_printf(
 		"%s/%s/%u_%u_%s.h5",
-		hdf5_conf.dir, g_job->pwd->pw_name,
+		hdf5_conf.dir, g_job->user_name,
 		g_job->jobid, g_job->stepid, g_job->node_name);
 
 	if (debug_flags & DEBUG_FLAG_PROFILE) {
@@ -349,8 +349,8 @@ extern int acct_gather_profile_p_node_step_start(slurmd_job_t* job)
 	file_id = H5Fcreate(profile_file_name, H5F_ACC_TRUNC, H5P_DEFAULT,
 			    H5P_DEFAULT);
 
-	if (chown(profile_file_name, (uid_t)g_job->pwd->pw_uid,
-		  (gid_t)g_job->pwd->pw_gid) < 0)
+	if (chown(profile_file_name, (uid_t)g_job->uid,
+		  (gid_t)g_job->gid) < 0)
 		error("chown(%s): %m", profile_file_name);
 	chmod(profile_file_name,  0600);
 	xfree(profile_file_name);
@@ -372,7 +372,8 @@ extern int acct_gather_profile_p_node_step_start(slurmd_job_t* job)
 	put_string_attribute(gid_node, ATTR_NODENAME, g_job->node_name);
 	put_int_attribute(gid_node, ATTR_NTASKS, g_job->node_tasks);
 	start_time = time(NULL);
-	put_string_attribute(gid_node, ATTR_STARTTIME, ctime(&start_time));
+	put_string_attribute(gid_node, ATTR_STARTTIME,
+			     slurm_ctime(&start_time));
 
 	return rc;
 }
@@ -614,4 +615,24 @@ extern int acct_gather_profile_p_add_sample_data(uint32_t type, void *data)
 	H5Gclose(g_sample_grp);
 
 	return SLURM_SUCCESS;
+}
+
+extern void acct_gather_profile_p_conf_values(List *data)
+{
+	config_key_pair_t *key_pair;
+
+	xassert(*data);
+
+	key_pair = xmalloc(sizeof(config_key_pair_t));
+	key_pair->name = xstrdup("ProfileHDF5Dir");
+	key_pair->value = xstrdup(hdf5_conf.dir);
+	list_append(*data, key_pair);
+
+	key_pair = xmalloc(sizeof(config_key_pair_t));
+	key_pair->name = xstrdup("ProfileHDF5Default");
+	key_pair->value = xstrdup(acct_gather_profile_to_string(hdf5_conf.def));
+	list_append(*data, key_pair);
+
+	return;
+
 }

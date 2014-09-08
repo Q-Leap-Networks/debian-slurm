@@ -91,6 +91,8 @@
 #include "src/slurmctld/srun_comm.h"
 #include "src/slurmctld/trigger_mgr.h"
 
+bool slurmctld_init_db = 1;
+
 static void _acct_restore_active_jobs(void);
 static int  _build_bitmaps(void);
 static void _build_bitmaps_pre_select(void);
@@ -122,6 +124,10 @@ static int  _update_preempt(uint16_t old_enable_preempt);
 #ifdef 	HAVE_ELAN
 static void _validate_node_proc_count(void);
 #endif
+static int _compare_hostnames(struct node_record *old_node_table,
+							  int old_node_count,
+							  struct node_record *node_table,
+							  int node_count);
 
 /* Verify that Slurm directories are secure, not world writable */
 static void _stat_slurm_dirs(void)
@@ -343,7 +349,7 @@ static int _build_bitmaps(void)
 		if (!IS_JOB_RUNNING(job_ptr) ||
 		    (job_ptr->node_bitmap == NULL)        ||
 		    (job_ptr->details     == NULL)        ||
-		    (job_ptr->details->shared != 0))
+		    (job_ptr->details->share_res != 0))
 			continue;
 		tmp_bits = bit_copy(job_ptr->node_bitmap);
 		bit_not(tmp_bits);
@@ -530,6 +536,79 @@ static int _build_all_nodeline_info(void)
 	return rc;
 }
 
+/* Convert a comma delimited list of account names into a NULL terminated
+ * array of pointers to strings. Call accounts_list_free() to release memory */
+extern void accounts_list_build(char *accounts, char ***accounts_array)
+{
+	char *tmp_accts, *one_acct_name, *name_ptr = NULL, **tmp_array = NULL;
+	int array_len = 0, array_used = 0;
+
+	if (!accounts) {
+		accounts_list_free(accounts_array);
+		*accounts_array = NULL;
+		return;
+	}
+
+	tmp_accts = xstrdup(accounts);
+	one_acct_name = strtok_r(tmp_accts, ",", &name_ptr);
+	while (one_acct_name) {
+		if (array_len < array_used + 2) {
+			array_len += 10;
+			xrealloc(tmp_array, sizeof(char *) * array_len);
+		}
+		tmp_array[array_used++] = xstrdup(one_acct_name);
+		one_acct_name = strtok_r(NULL, ",", &name_ptr);
+	}
+	xfree(tmp_accts);
+	accounts_list_free(accounts_array);
+	*accounts_array = tmp_array;
+}
+/* Free memory allocated for an account array by accounts_list_build() */
+extern void accounts_list_free(char ***accounts_array)
+{
+	int i;
+
+	if (*accounts_array == NULL)
+		return;
+	for (i = 0; accounts_array[0][i]; i++)
+		xfree(accounts_array[0][i]);
+	xfree(*accounts_array);
+}
+
+/* Convert a comma delimited list of QOS names into a bitmap */
+extern void qos_list_build(char *qos, bitstr_t **qos_bits)
+{
+	char *tmp_qos, *one_qos_name, *name_ptr = NULL;
+	slurmdb_qos_rec_t qos_rec, *qos_ptr = NULL;
+	bitstr_t *tmp_qos_bitstr;
+
+	if (!qos) {
+		FREE_NULL_BITMAP(*qos_bits);
+		*qos_bits = NULL;
+		return;
+	}
+
+	tmp_qos_bitstr = bit_alloc(g_qos_count);
+	tmp_qos = xstrdup(qos);
+	one_qos_name = strtok_r(tmp_qos, ",", &name_ptr);
+	while (one_qos_name) {
+		memset(&qos_rec, 0, sizeof(slurmdb_qos_rec_t));
+		qos_rec.name = one_qos_name;
+		if (assoc_mgr_fill_in_qos(acct_db_conn, &qos_rec,
+					  accounting_enforce,
+					  &qos_ptr) == SLURM_SUCCESS) {
+			bit_set(tmp_qos_bitstr, qos_rec.id);
+		} else {
+			error("Ignoring invalid Allow/DenyQOS value %s",
+			      one_qos_name);
+		}
+		one_qos_name = strtok_r(NULL, ",", &name_ptr);
+	}
+	xfree(tmp_qos);
+	FREE_NULL_BITMAP(*qos_bits);
+	*qos_bits = tmp_qos_bitstr;
+}
+
 /*
  * _build_single_partitionline_info - get a array of slurm_conf_partition_t
  *	structures from the slurm.conf reader, build table, and set values
@@ -595,6 +674,8 @@ static int _build_single_partitionline_info(slurm_conf_partition_t *part)
 		part_ptr->flags |= PART_FLAG_ROOT_ONLY;
 	if (part->req_resv_flag)
 		part_ptr->flags |= PART_FLAG_REQ_RESV;
+	if (part->lln_flag)
+		part_ptr->flags |= PART_FLAG_LLN;
 	part_ptr->max_time       = part->max_time;
 	part_ptr->def_mem_per_cpu = part->def_mem_per_cpu;
 	part_ptr->default_time   = part->default_time;
@@ -611,10 +692,37 @@ static int _build_single_partitionline_info(slurm_conf_partition_t *part)
 	part_ptr->grace_time     = part->grace_time;
 	part_ptr->cr_type        = part->cr_type;
 
+	if (part->allow_accounts) {
+		xfree(part_ptr->allow_accounts);
+		part_ptr->allow_accounts = xstrdup(part->allow_accounts);
+		accounts_list_build(part_ptr->allow_accounts,
+				    &part_ptr->allow_account_array);
+	}
+
 	if (part->allow_groups) {
 		xfree(part_ptr->allow_groups);
 		part_ptr->allow_groups = xstrdup(part->allow_groups);
 	}
+
+	if (part->allow_qos) {
+		xfree(part_ptr->allow_qos);
+		part_ptr->allow_qos = xstrdup(part->allow_qos);
+		qos_list_build(part_ptr->allow_qos,&part_ptr->allow_qos_bitstr);
+	}
+
+	if (part->deny_accounts) {
+		xfree(part_ptr->deny_accounts);
+		part_ptr->deny_accounts = xstrdup(part->deny_accounts);
+		accounts_list_build(part_ptr->deny_accounts,
+				    &part_ptr->deny_account_array);
+	}
+
+	if (part->deny_qos) {
+		xfree(part_ptr->deny_qos);
+		part_ptr->deny_qos = xstrdup(part->deny_qos);
+		qos_list_build(part_ptr->deny_qos, &part_ptr->deny_qos_bitstr);
+	}
+
  	if (part->allow_alloc_nodes) {
  		if (part_ptr->allow_alloc_nodes) {
  			int cnt_tot, cnt_uniq;
@@ -793,6 +901,14 @@ int read_slurm_conf(int recover, bool reconfig)
 
 	/* Build node and partition information based upon slurm.conf file */
 	_build_all_nodeline_info();
+	if (reconfig) {
+		if (_compare_hostnames(old_node_table_ptr,
+							   old_node_record_count,
+							   node_record_table_ptr,
+							   node_record_count) < 0) {
+			fatal("%s: hostnames inconsistency detected", __func__);
+		}
+	}
 	_handle_all_downnodes();
 	_build_all_partitionline_info();
 	if (!reconfig)
@@ -864,11 +980,11 @@ int read_slurm_conf(int recover, bool reconfig)
 		}
 		load_last_job_id();
 		reset_first_job_id();
-		(void) slurm_sched_reconfig();
+		(void) slurm_sched_g_reconfig();
 	} else if (recover == 0) {	/* Build everything from slurm.conf */
 		load_last_job_id();
 		reset_first_job_id();
-		(void) slurm_sched_reconfig();
+		(void) slurm_sched_g_reconfig();
 	} else if (recover == 1) {	/* Load job & node state files */
 		(void) load_all_node_state(true);
 		(void) load_all_front_end_state(true);
@@ -907,8 +1023,7 @@ int read_slurm_conf(int recover, bool reconfig)
 	reserve_port_config(mpi_params);
 	xfree(mpi_params);
 
-	license_free();
-	if (license_init(slurmctld_conf.licenses) != SLURM_SUCCESS)
+	if (license_update(slurmctld_conf.licenses) != SLURM_SUCCESS)
 		fatal("Invalid Licenses value: %s", slurmctld_conf.licenses);
 
 	/* NOTE: Run restore_node_features before _restore_job_dependencies */
@@ -926,7 +1041,7 @@ int read_slurm_conf(int recover, bool reconfig)
 		load_all_resv_state(recover);
 		if (recover >= 1) {
 			trigger_state_restore();
-			(void) slurm_sched_reconfig();
+			(void) slurm_sched_g_reconfig();
 		}
 	}
 
@@ -1205,6 +1320,14 @@ static int  _restore_part_state(List old_part_list, char *old_def_part_name,
 			}
 			/* Current partition found in slurm.conf,
 			 * report differences from slurm.conf configuration */
+			if (_strcmp(part_ptr->allow_accounts,
+				    old_part_ptr->allow_accounts)) {
+				error("Partition %s AllowAccounts differs from "
+				      "slurm.conf", part_ptr->name);
+				xfree(part_ptr->allow_accounts);
+				part_ptr->allow_accounts =
+					xstrdup(old_part_ptr->allow_accounts);
+			}
 			if (_strcmp(part_ptr->allow_groups,
 				    old_part_ptr->allow_groups)) {
 				error("Partition %s AllowGroups differs from "
@@ -1212,6 +1335,38 @@ static int  _restore_part_state(List old_part_list, char *old_def_part_name,
 				xfree(part_ptr->allow_groups);
 				part_ptr->allow_groups = xstrdup(old_part_ptr->
 								 allow_groups);
+				accounts_list_build(part_ptr->allow_accounts,
+						&part_ptr->allow_account_array);
+			}
+			if (_strcmp(part_ptr->allow_qos,
+				    old_part_ptr->allow_qos)) {
+				error("Partition %s AllowQos differs from "
+				      "slurm.conf", part_ptr->name);
+				xfree(part_ptr->allow_qos);
+				part_ptr->allow_qos = xstrdup(old_part_ptr->
+								 allow_qos);
+				qos_list_build(part_ptr->allow_qos,
+					       &part_ptr->allow_qos_bitstr);
+			}
+			if (_strcmp(part_ptr->deny_accounts,
+				    old_part_ptr->deny_accounts)) {
+				error("Partition %s DenyAccounts differs from "
+				      "slurm.conf", part_ptr->name);
+				xfree(part_ptr->deny_accounts);
+				part_ptr->deny_accounts =
+					xstrdup(old_part_ptr->deny_accounts);
+				accounts_list_build(part_ptr->deny_accounts,
+						&part_ptr->deny_account_array);
+			}
+			if (_strcmp(part_ptr->deny_qos,
+				    old_part_ptr->deny_qos)) {
+				error("Partition %s DenyQos differs from "
+				      "slurm.conf", part_ptr->name);
+				xfree(part_ptr->deny_qos);
+				part_ptr->deny_qos = xstrdup(old_part_ptr->
+							     deny_qos);
+				qos_list_build(part_ptr->deny_qos,
+					       &part_ptr->deny_qos_bitstr);
 			}
 			if (_strcmp(part_ptr->allow_alloc_nodes,
 				    old_part_ptr->allow_alloc_nodes)) {
@@ -1264,6 +1419,15 @@ static int  _restore_part_state(List old_part_list, char *old_def_part_name,
 					part_ptr->flags |= PART_FLAG_REQ_RESV;
 				else
 					part_ptr->flags &= (~PART_FLAG_REQ_RESV);
+			}
+			if ((part_ptr->flags & PART_FLAG_LLN) !=
+			    (old_part_ptr->flags & PART_FLAG_LLN)) {
+				error("Partition %s LLN differs from "
+				      "slurm.conf", part_ptr->name);
+				if (old_part_ptr->flags & PART_FLAG_LLN)
+					part_ptr->flags |= PART_FLAG_LLN;
+				else
+					part_ptr->flags &= (~PART_FLAG_LLN);
 			}
 			if (part_ptr->max_nodes_orig !=
 			    old_part_ptr->max_nodes_orig) {
@@ -1338,9 +1502,25 @@ static int  _restore_part_state(List old_part_list, char *old_def_part_name,
 			part_ptr->name = xstrdup(old_part_ptr->name);
 			part_ptr->allow_alloc_nodes = xstrdup(old_part_ptr->
 							    allow_alloc_nodes);
+			part_ptr->allow_accounts = xstrdup(old_part_ptr->
+							   allow_accounts);
+			accounts_list_build(part_ptr->allow_accounts,
+					 &part_ptr->allow_account_array);
 			part_ptr->allow_groups = xstrdup(old_part_ptr->
 							 allow_groups);
+			part_ptr->allow_qos = xstrdup(old_part_ptr->
+						      allow_qos);
+			qos_list_build(part_ptr->allow_qos,
+				       &part_ptr->allow_qos_bitstr);
 			part_ptr->default_time = old_part_ptr->default_time;
+			part_ptr->deny_accounts = xstrdup(old_part_ptr->
+							  deny_accounts);
+			accounts_list_build(part_ptr->deny_accounts,
+					 &part_ptr->deny_account_array);
+			part_ptr->deny_qos = xstrdup(old_part_ptr->
+						     deny_qos);
+			qos_list_build(part_ptr->deny_qos,
+				       &part_ptr->deny_qos_bitstr);
 			part_ptr->flags = old_part_ptr->flags;
 			part_ptr->max_nodes = old_part_ptr->max_nodes;
 			part_ptr->max_nodes_orig = old_part_ptr->
@@ -1598,7 +1778,7 @@ static int _sync_nodes_to_active_job(struct job_record *job_ptr)
 		node_ptr->run_job_cnt++; /* NOTE:
 				* This counter moved to comp_job_cnt
 				* by _sync_nodes_to_comp_job() */
-		if ((job_ptr->details) && (job_ptr->details->shared == 0))
+		if ((job_ptr->details) && (job_ptr->details->share_res == 0))
 			node_ptr->no_share_job_cnt++;
 
 		if (IS_NODE_DOWN(node_ptr)              &&
@@ -1779,4 +1959,203 @@ static void _acct_restore_active_jobs(void)
 		}
 	}
 	list_iterator_destroy(job_iterator);
+}
+
+/* _compare_hostnames()
+ */
+static int
+_compare_hostnames(struct node_record *old_node_table,
+				   int old_node_count,
+				   struct node_record *node_table,
+				   int node_count)
+{
+	int cc;
+	int set_size;
+	char *old_ranged;
+	char *ranged;
+	hostset_t old_set;
+	hostset_t set;
+
+	if (old_node_count != node_count) {
+		error("%s: node count has changed before reconfiguration \
+from %d to %d. You have to restart slurmctld.",
+			  __func__, old_node_count, node_count);
+		return -1;
+	}
+
+	old_set = hostset_create("");
+	for (cc = 0; cc < old_node_count; cc++)
+		hostset_insert(old_set, old_node_table[cc].name);
+
+	set = hostset_create("");
+	for (cc = 0; cc < node_count; cc++)
+		hostset_insert(set, node_table[cc].name);
+
+	set_size = MAXHOSTNAMELEN * node_count * sizeof(char)
+		+ node_count * sizeof(char) + 1;
+
+	old_ranged = xmalloc(set_size);
+	ranged = xmalloc(set_size);
+
+	hostset_ranged_string(old_set, set_size, old_ranged);
+	hostset_ranged_string(set, set_size, ranged);
+
+	cc = 0;
+	if (strcmp(old_ranged, ranged) != 0) {
+		error("%s: node names changed before reconfiguration. \
+You have to restart slurmctld.", __func__);
+		cc = -1;
+	}
+
+	hostset_destroy(old_set);
+	hostset_destroy(set);
+	xfree(old_ranged);
+	xfree(ranged);
+
+	return cc;
+}
+
+extern int dump_config_state_lite(void)
+{
+	static int high_buffer_size = (1024 * 1024);
+	int error_code = 0, log_fd;
+	char *old_file = NULL, *new_file = NULL, *reg_file = NULL;
+	Buf buffer = init_buf(high_buffer_size);
+
+	DEF_TIMERS;
+
+	START_TIMER;
+	/* write header: version, time */
+	pack16(SLURM_PROTOCOL_VERSION, buffer);
+	pack_time(time(NULL), buffer);
+	packstr(slurmctld_conf.accounting_storage_type, buffer);
+
+	/* write the buffer to file */
+	reg_file = xstrdup_printf("%s/last_config_lite",
+				  slurmctld_conf.state_save_location);
+	old_file = xstrdup_printf("%s.old", reg_file);
+	new_file = xstrdup_printf("%s.new", reg_file);
+
+	log_fd = creat(new_file, 0600);
+	if (log_fd < 0) {
+		error("Can't save state, create file %s error %m",
+		      new_file);
+		error_code = errno;
+	} else {
+		int pos = 0, nwrite = get_buf_offset(buffer), amount;
+		char *data = (char *)get_buf_data(buffer);
+		high_buffer_size = MAX(nwrite, high_buffer_size);
+		while (nwrite > 0) {
+			amount = write(log_fd, &data[pos], nwrite);
+			if ((amount < 0) && (errno != EINTR)) {
+				error("Error writing file %s, %m", new_file);
+				error_code = errno;
+				break;
+			}
+			nwrite -= amount;
+			pos    += amount;
+		}
+		fsync(log_fd);
+		close(log_fd);
+	}
+	if (error_code)
+		(void) unlink(new_file);
+	else {			/* file shuffle */
+		(void) unlink(old_file);
+		if (link(reg_file, old_file))
+			debug4("unable to create link for %s -> %s: %m",
+			       reg_file, old_file);
+		(void) unlink(reg_file);
+		if (link(new_file, reg_file))
+			debug4("unable to create link for %s -> %s: %m",
+			       new_file, reg_file);
+		(void) unlink(new_file);
+	}
+	xfree(old_file);
+	xfree(reg_file);
+	xfree(new_file);
+
+	free_buf(buffer);
+
+	END_TIMER2("dump_config_state_lite");
+	return error_code;
+
+}
+
+extern int load_config_state_lite(void)
+{
+	int data_allocated, data_read = 0;
+	uint32_t data_size = 0, uint32_tmp = 0;
+	uint16_t ver = 0;
+	int state_fd;
+	char *data = NULL, *state_file;
+	Buf buffer;
+	time_t buf_time;
+	char *last_accounting_storage_type = NULL;
+
+	/* Always ignore .old file */
+	state_file = xstrdup_printf("%s/last_config_lite",
+				    slurmctld_conf.state_save_location);
+
+	//info("looking at the %s file", state_file);
+	state_fd = open(state_file, O_RDONLY);
+	if (state_fd < 0) {
+		debug2("No last_config_lite file (%s) to recover", state_file);
+	} else {
+		data_allocated = BUF_SIZE;
+		data = xmalloc(data_allocated);
+		while (1) {
+			data_read = read(state_fd, &data[data_size],
+					 BUF_SIZE);
+			if (data_read < 0) {
+				if (errno == EINTR)
+					continue;
+				else {
+					error("Read error on %s: %m",
+					      state_file);
+					break;
+				}
+			} else if (data_read == 0)	/* eof */
+				break;
+			data_size      += data_read;
+			data_allocated += data_read;
+			xrealloc(data, data_allocated);
+		}
+		close(state_fd);
+	}
+	xfree(state_file);
+
+	buffer = create_buf(data, data_size);
+
+	safe_unpack16(&ver, buffer);
+	debug3("Version in last_conf_lite header is %u", ver);
+	if (ver > SLURM_PROTOCOL_VERSION) {
+		error("***********************************************");
+		error("Can not recover last_conf_lite, incompatible version, "
+		      "got %u <= %u", ver, SLURM_PROTOCOL_VERSION);
+		error("***********************************************");
+		free_buf(buffer);
+		return EFAULT;
+	}
+
+	safe_unpack_time(&buf_time, buffer);
+	safe_unpackstr_xmalloc(&last_accounting_storage_type,
+			       &uint32_tmp, buffer);
+
+	xassert(slurmctld_conf.accounting_storage_type);
+
+	if (last_accounting_storage_type
+	    && !strcmp(last_accounting_storage_type,
+		       slurmctld_conf.accounting_storage_type))
+		slurmctld_init_db = 0;
+	xfree(last_accounting_storage_type);
+
+	free_buf(buffer);
+	return SLURM_SUCCESS;
+
+unpack_error:
+	if (buffer)
+		free_buf(buffer);
+
+	return SLURM_ERROR;
 }

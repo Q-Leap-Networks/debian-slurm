@@ -1,9 +1,10 @@
 /*****************************************************************************\
- *  src/slurmd/slurmstepd/slurmstepd_job.c - slurmd_job_t routines
+ *  src/slurmd/slurmstepd/slurmstepd_job.c - stepd_step_rec_t routines
  *  $Id$
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
+ *  Copyright (C) 2013      Intel, Inc.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
@@ -72,9 +73,9 @@
 static char ** _array_copy(int n, char **src);
 static void _array_free(char ***array);
 static void _srun_info_destructor(void *arg);
-static void _job_init_task_info(slurmd_job_t *job, uint32_t *gtid,
+static void _job_init_task_info(stepd_step_rec_t *job, uint32_t **gtid,
 				char *ifname, char *ofname, char *efname);
-static void _task_info_destroy(slurmd_task_info_t *t, uint16_t multi_prog);
+static void _task_info_destroy(stepd_step_task_info_t *t, uint16_t multi_prog);
 
 static int _check_acct_freq_task(uint32_t job_mem_lim, char *acctg_freq)
 {
@@ -100,56 +101,39 @@ static int _check_acct_freq_task(uint32_t job_mem_lim, char *acctg_freq)
 	return 0;
 }
 
-static struct passwd *
-_pwd_create(uid_t uid)
-{
-	struct passwd *pwd = xmalloc(sizeof(*pwd));
-	struct passwd *ppwd = getpwuid(uid);
-
-	if (!ppwd) {
-		xfree(pwd);
-		return NULL;
-	}
-
-	pwd->pw_name   = xstrdup(ppwd->pw_name);
-	pwd->pw_passwd = xstrdup(ppwd->pw_passwd);
-	pwd->pw_gecos  = xstrdup(ppwd->pw_gecos);
-	pwd->pw_shell  = xstrdup(ppwd->pw_shell);
-	pwd->pw_dir    = xstrdup(ppwd->pw_dir);
-	pwd->pw_uid    = ppwd->pw_uid;
-	pwd->pw_gid    = ppwd->pw_gid;
-
-	return pwd;
-}
-
-static void
-_pwd_destroy(struct passwd *pwd)
-{
-	if (!pwd)
-		return;
-	xfree(pwd->pw_name);
-	xfree(pwd->pw_passwd);
-	xfree(pwd->pw_gecos);
-	xfree(pwd->pw_shell);
-	xfree(pwd->pw_dir);
-	xfree(pwd);
-}
-
-/* returns 0 if invalid gid, otherwise returns 1 */
+/* returns 0 if invalid gid, otherwise returns 1.  Set gid with
+ * correct gid if root launched job.  Also set user_name
+ * if not already set. */
 static int
-_valid_gid(struct passwd *pwd, gid_t *gid)
+_valid_uid_gid(uid_t uid, gid_t *gid, char **user_name)
 {
+	struct passwd *pwd;
 	struct group *grp;
 	int i;
 
-	if (!pwd)
+#ifdef HAVE_NATIVE_CRAY
+	/* already verified */
+	if (*user_name)
+		return 1;
+#endif
+
+	pwd = getpwuid(uid);
+	if (!pwd) {
+		error("uid %ld not found on system", (long) uid);
+		slurm_seterrno(ESLURMD_UID_NOT_FOUND);
 		return 0;
+	}
+
+	if (!*user_name)
+		*user_name = xstrdup(pwd->pw_name);
+
 	if (pwd->pw_gid == *gid)
 		return 1;
 
 	grp = getgrgid(*gid);
 	if (!grp) {
 		error("gid %ld not found on system", (long)(*gid));
+		slurm_seterrno(ESLURMD_GID_NOT_FOUND);
 		return 0;
 	}
 
@@ -159,7 +143,7 @@ _valid_gid(struct passwd *pwd, gid_t *gid)
 		return 1;
 	}
 	for (i = 0; grp->gr_mem[i]; i++) {
-	       	if (strcmp(pwd->pw_name,grp->gr_mem[i]) == 0) {
+		if (!strcmp(pwd->pw_name, grp->gr_mem[i])) {
 			pwd->pw_gid = *gid;
 		       	return 1;
 	       	}
@@ -176,15 +160,152 @@ _valid_gid(struct passwd *pwd, gid_t *gid)
 	}
 	error("uid %ld is not a member of gid %ld",
 		(long)pwd->pw_uid, (long)(*gid));
+	slurm_seterrno(ESLURMD_GID_NOT_FOUND);
+
 	return 0;
 }
 
-/* create a slurmd job structure from a launch tasks message */
-slurmd_job_t *
-job_create(launch_tasks_request_msg_t *msg)
+/*
+ * return the default output filename for a batch job
+ */
+static char *
+_batchfilename(stepd_step_rec_t *job, const char *name)
 {
-	struct passwd *pwd = NULL;
-	slurmd_job_t  *job = NULL;
+	if (name == NULL) {
+		if (job->array_task_id == (uint16_t) NO_VAL)
+			return fname_create(job, "slurm-%J.out", 0);
+		else
+			return fname_create(job, "slurm-%A_%a.out", 0);
+	} else
+		return fname_create(job, name, 0);
+}
+
+/*
+ * Expand a stdio file name.
+ *
+ * If "filename" is NULL it means that an eio object should be created
+ * for that stdio file rather than a directly connecting it to a file.
+ *
+ * If the "filename" is a valid task number in string form and the
+ * number matches "taskid", then NULL is returned so that an eio
+ * object will be used.  If is a valid number, but it does not match
+ * "taskid", then the file descriptor will be connected to /dev/null.
+ */
+static char *
+_expand_stdio_filename(char *filename, int gtaskid, stepd_step_rec_t *job)
+{
+	int id;
+
+	if (filename == NULL)
+		return NULL;
+
+	id = fname_single_task_io(filename);
+
+	if (id < 0)
+		return fname_create(job, filename, gtaskid);
+	if (id >= job->ntasks) {
+		error("Task ID in filename is invalid");
+		return NULL;
+	}
+
+	if (id == gtaskid)
+		return NULL;
+	else
+		return xstrdup("/dev/null");
+}
+
+static void
+_job_init_task_info(stepd_step_rec_t *job, uint32_t **gtid,
+		    char *ifname, char *ofname, char *efname)
+{
+	int          i, node_id = job->nodeid;
+	char        *in, *out, *err;
+
+	if (job->node_tasks == 0) {
+		error("User requested launch of zero tasks!");
+		job->task = NULL;
+		return;
+	}
+
+	job->task = (stepd_step_task_info_t **)
+		xmalloc(job->node_tasks * sizeof(stepd_step_task_info_t *));
+
+	for (i = 0; i < job->node_tasks; i++){
+		in = _expand_stdio_filename(ifname, gtid[node_id][i], job);
+		out = _expand_stdio_filename(ofname, gtid[node_id][i], job);
+		err = _expand_stdio_filename(efname, gtid[node_id][i], job);
+		job->task[i] = task_info_create(i, gtid[node_id][i], in, out,
+						err);
+		if (!job->multi_prog) {
+			job->task[i]->argc = job->argc;
+			job->task[i]->argv = job->argv;
+		}
+	}
+
+	if (job->multi_prog) {
+		char *switch_type = slurm_get_switch_type();
+		if (!strcmp(switch_type, "switch/cray"))
+			multi_prog_parse(job, gtid);
+		xfree(switch_type);
+		for (i = 0; i < job->node_tasks; i++){
+			multi_prog_get_argv(job->argv[1], job->env,
+					    gtid[node_id][i],
+					    &job->task[i]->argc,
+					    &job->task[i]->argv,
+					    job->argc, job->argv);
+		}
+	}
+}
+
+static char **
+_array_copy(int n, char **src)
+{
+	char **dst = xmalloc((n+1) * sizeof(char *));
+	int i;
+
+	for (i = 0; i < n; i++) {
+		dst[i] = xstrdup(src[i]);
+	}
+	dst[n] = NULL;
+
+	return dst;
+}
+
+static void
+_array_free(char ***array)
+{
+	int i = 0;
+	while ((*array)[i] != NULL)
+		xfree((*array)[i++]);
+	xfree(*array);
+	*array = NULL;
+}
+
+/* destructor for list routines */
+static void
+_srun_info_destructor(void *arg)
+{
+	srun_info_t *srun = (srun_info_t *)arg;
+	srun_info_destroy(srun);
+}
+
+static void
+_task_info_destroy(stepd_step_task_info_t *t, uint16_t multi_prog)
+{
+	slurm_mutex_lock(&t->mutex);
+	slurm_mutex_unlock(&t->mutex);
+	slurm_mutex_destroy(&t->mutex);
+	if (multi_prog) {
+		xfree(t->argv);
+	} /* otherwise, t->argv is a pointer to job->argv */
+	xfree(t);
+}
+
+/* create a slurmd job structure from a launch tasks message */
+extern stepd_step_rec_t *
+stepd_step_rec_create(launch_tasks_request_msg_t *msg)
+{
+	stepd_step_rec_t  *job = NULL;
 	srun_info_t   *srun = NULL;
 	slurm_addr_t     resp_addr;
 	slurm_addr_t     io_addr;
@@ -192,24 +313,16 @@ job_create(launch_tasks_request_msg_t *msg)
 
 	xassert(msg != NULL);
 	xassert(msg->complete_nodelist != NULL);
-	debug3("entering job_create");
-	if ((pwd = _pwd_create((uid_t)msg->uid)) == NULL) {
-		error("uid %ld not found on system", (long) msg->uid);
-		slurm_seterrno (ESLURMD_UID_NOT_FOUND);
-		return NULL;
-	}
-	if (!_valid_gid(pwd, &(msg->gid))) {
-		slurm_seterrno (ESLURMD_GID_NOT_FOUND);
-		_pwd_destroy(pwd);
-		return NULL;
-	}
+	debug3("entering stepd_step_rec_create");
 
-	if (_check_acct_freq_task(msg->job_mem_lim, msg->acctg_freq)) {
-		_pwd_destroy(pwd);
+	if (!_valid_uid_gid((uid_t)msg->uid, &(msg->gid), &(msg->user_name)))
 		return NULL;
-	}
 
-	job = xmalloc(sizeof(slurmd_job_t));
+	if (_check_acct_freq_task(msg->job_mem_lim, msg->acctg_freq))
+		return NULL;
+
+	job = xmalloc(sizeof(stepd_step_rec_t));
+	job->msg = msg;
 #ifndef HAVE_FRONT_END
 	nodeid = nodelist_find(msg->complete_nodelist, conf->node_name);
 	job->node_name = xstrdup(conf->node_name);
@@ -220,18 +333,21 @@ job_create(launch_tasks_request_msg_t *msg)
 	if (nodeid < 0) {
 		error("couldn't find node %s in %s",
 		      job->node_name, msg->complete_nodelist);
-		job_destroy(job);
+		stepd_step_rec_destroy(job);
 		return NULL;
 	}
 
 	job->state	= SLURMSTEPD_STEP_STARTING;
-	job->pwd	= pwd;
 	job->node_tasks	= msg->tasks_to_launch[nodeid];
+	i = sizeof(uint16_t) * msg->nnodes;
+	job->task_cnts  = xmalloc(i);
+	memcpy(job->task_cnts, msg->tasks_to_launch, i);
 	job->ntasks	= msg->ntasks;
 	job->jobid	= msg->job_id;
 	job->stepid	= msg->job_step_id;
 
 	job->uid	= (uid_t) msg->uid;
+	job->user_name  = xstrdup(msg->user_name);
 	job->gid	= (gid_t) msg->gid;
 	job->cwd	= xstrdup(msg->cwd);
 	job->task_dist	= msg->task_dist;
@@ -310,7 +426,8 @@ job_create(launch_tasks_request_msg_t *msg)
 	job->nnodes  = msg->nnodes;
 	job->nodeid  = nodeid;
 	job->debug   = msg->slurmd_debug;
-	job->cpus    = msg->cpus_allocated[nodeid];
+	job->cpus    = msg->node_cpus;
+	job->job_core_spec = msg->job_core_spec;
 
 	/* This needs to happen before acct_gather_profile_startpoll
 	   and only really looks at the profile in the job.
@@ -338,7 +455,7 @@ job_create(launch_tasks_request_msg_t *msg)
 					     job->job_mem);
 	}
 
-#ifdef HAVE_CRAY
+#ifdef HAVE_ALPS_CRAY
 	/* This is only used for Cray emulation mode where slurmd is used to
 	 * launch job steps. On a real Cray system, ALPS is used to launch
 	 * the tasks instead of SLURM. SLURM's task launch RPC does NOT
@@ -354,59 +471,32 @@ job_create(launch_tasks_request_msg_t *msg)
 
 	list_append(job->sruns, (void *) srun);
 
-	_job_init_task_info(job, msg->global_task_ids[nodeid],
+	_job_init_task_info(job, msg->global_task_ids,
 			    msg->ifname, msg->ofname, msg->efname);
 
 	return job;
 }
 
-/*
- * return the default output filename for a batch job
- */
-static char *
-_batchfilename(slurmd_job_t *job, const char *name)
+extern stepd_step_rec_t *
+batch_stepd_step_rec_create(batch_job_launch_msg_t *msg)
 {
-	if (name == NULL) {
-		if (job->array_task_id == (uint16_t) NO_VAL)
-			return fname_create(job, "slurm-%J.out", 0);
-		else
-			return fname_create(job, "slurm-%A_%a.out", 0);
-	} else
-		return fname_create(job, name, 0);
-}
-
-slurmd_job_t *
-job_batch_job_create(batch_job_launch_msg_t *msg)
-{
-	struct passwd *pwd;
-	slurmd_job_t *job;
+	stepd_step_rec_t *job;
 	srun_info_t  *srun = NULL;
 	char *in_name;
 
 	xassert(msg != NULL);
 
-	debug3("entering batch_job_create");
+	debug3("entering batch_stepd_step_rec_create");
 
-	if ((pwd = _pwd_create((uid_t)msg->uid)) == NULL) {
-		error("uid %ld not found on system", (long) msg->uid);
-		slurm_seterrno (ESLURMD_UID_NOT_FOUND);
+	if (!_valid_uid_gid((uid_t)msg->uid, &(msg->gid), &(msg->user_name)))
 		return NULL;
-	}
-	if (!_valid_gid(pwd, &(msg->gid))) {
-		slurm_seterrno (ESLURMD_GID_NOT_FOUND);
-		_pwd_destroy(pwd);
-		return NULL;
-	}
 
-	if (_check_acct_freq_task(msg->job_mem, msg->acctg_freq)) {
-		_pwd_destroy(pwd);
+	if (_check_acct_freq_task(msg->job_mem, msg->acctg_freq))
 		return NULL;
-	}
 
-	job = xmalloc(sizeof(slurmd_job_t));
+	job = xmalloc(sizeof(stepd_step_rec_t));
 
 	job->state   = SLURMSTEPD_STEP_STARTING;
-	job->pwd     = pwd;
 	if (msg->cpus_per_node)
 		job->cpus    = msg->cpus_per_node[0];
 	job->node_tasks  = 1;
@@ -415,6 +505,7 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 	job->stepid  = msg->step_id;
 	job->array_job_id  = msg->array_job_id;
 	job->array_task_id = msg->array_task_id;
+	job->job_core_spec = msg->job_core_spec;
 
 	job->batch   = true;
 	/* This needs to happen before acct_gather_profile_startpoll
@@ -431,6 +522,7 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 	job->node_name  = xstrdup(conf->node_name);
 
 	job->uid     = (uid_t) msg->uid;
+	job->user_name  = xstrdup(msg->user_name);
 	job->gid     = (gid_t) msg->gid;
 	job->cwd     = xstrdup(msg->work_dir);
 
@@ -457,6 +549,7 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 
 	if (msg->cpus_per_node)
 		job->cpus    = msg->cpus_per_node[0];
+
 	format_core_allocs(msg->cred, conf->node_name, conf->cpus,
 			   &job->job_alloc_cores, &job->step_alloc_cores,
 			   &job->job_mem, &job->step_mem);
@@ -483,7 +576,7 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 		job->argv    = (char **) xmalloc(2 * sizeof(char *));
 	}
 
-	job->task = xmalloc(sizeof(slurmd_task_info_t *));
+	job->task = xmalloc(sizeof(stepd_step_task_info_t *));
 	if (msg->std_err == NULL)
 		msg->std_err = xstrdup(msg->std_out);
 
@@ -499,7 +592,7 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 	job->task[0]->argc = job->argc;
 	job->task[0]->argv = job->argv;
 
-#ifdef HAVE_CRAY
+#ifdef HAVE_ALPS_CRAY
 	select_g_select_jobinfo_get(msg->select_jobinfo, SELECT_JOBDATA_RESV_ID,
 				    &job->resv_id);
 #endif
@@ -507,143 +600,35 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 	return job;
 }
 
-/*
- * Expand a stdio file name.
- *
- * If "filename" is NULL it means that an eio object should be created
- * for that stdio file rather than a directly connecting it to a file.
- *
- * If the "filename" is a valid task number in string form and the
- * number matches "taskid", then NULL is returned so that an eio
- * object will be used.  If is a valid number, but it does not match
- * "taskid", then the file descriptor will be connected to /dev/null.
- */
-static char *
-_expand_stdio_filename(char *filename, int gtaskid, slurmd_job_t *job)
-{
-	int id;
-
-	if (filename == NULL)
-		return NULL;
-
-	id = fname_single_task_io(filename);
-
-	if (id < 0)
-		return fname_create(job, filename, gtaskid);
-	if (id >= job->ntasks) {
-		error("Task ID in filename is invalid");
-		return NULL;
-	}
-
-	if (id == gtaskid)
-		return NULL;
-	else
-		return xstrdup("/dev/null");
-}
-
-static void
-_job_init_task_info(slurmd_job_t *job, uint32_t *gtid,
-		    char *ifname, char *ofname, char *efname)
-{
-	int          i;
-	char        *in, *out, *err;
-
-	if (job->node_tasks == 0) {
-		error("User requested launch of zero tasks!");
-		job->task = NULL;
-		return;
-	}
-
-	job->task = (slurmd_task_info_t **)
-		xmalloc(job->node_tasks * sizeof(slurmd_task_info_t *));
-
-	for (i = 0; i < job->node_tasks; i++){
-		in = _expand_stdio_filename(ifname, gtid[i], job);
-		out = _expand_stdio_filename(ofname, gtid[i], job);
-		err = _expand_stdio_filename(efname, gtid[i], job);
-
-		job->task[i] = task_info_create(i, gtid[i], in, out, err);
-
-		if (job->multi_prog) {
-			multi_prog_get_argv(job->argv[1], job->env, gtid[i],
-					    &job->task[i]->argc,
-					    &job->task[i]->argv,
-					    job->argc, job->argv);
-		} else {
-			job->task[i]->argc = job->argc;
-			job->task[i]->argv = job->argv;
-		}
-	}
-}
-
-void
-job_signal_tasks(slurmd_job_t *job, int signal)
-{
-	int n = job->node_tasks;
-	while (--n >= 0) {
-		if ((job->task[n]->pid > (pid_t) 0)
-		&&  (kill(job->task[n]->pid, signal) < 0)) {
-			if (errno != ESRCH) {
-				error("job %d.%d: kill task %d: %m",
-				      job->jobid, job->stepid, n);
-			}
-		}
-	}
-}
-
-void
-job_destroy(slurmd_job_t *job)
+extern void
+stepd_step_rec_destroy(stepd_step_rec_t *job)
 {
 	int i;
 
 	_array_free(&job->env);
 	_array_free(&job->argv);
 
-	_pwd_destroy(job->pwd);
-
 	for (i = 0; i < job->node_tasks; i++)
 		_task_info_destroy(job->task[i], job->multi_prog);
 	list_destroy(job->sruns);
 	xfree(job->envtp);
 	xfree(job->node_name);
+	mpmd_free(job);
 	xfree(job->task_prolog);
 	xfree(job->task_epilog);
 	xfree(job->job_alloc_cores);
 	xfree(job->step_alloc_cores);
+	xfree(job->task_cnts);
+	xfree(job->user_name);
 	xfree(job);
 }
 
-static char **
-_array_copy(int n, char **src)
-{
-	char **dst = xmalloc((n+1) * sizeof(char *));
-	int i;
-
-	for (i = 0; i < n; i++) {
-		dst[i] = xstrdup(src[i]);
-	}
-	dst[n] = NULL;
-
-	return dst;
-}
-
-static void
-_array_free(char ***array)
-{
-	int i = 0;
-	while ((*array)[i] != NULL)
-		xfree((*array)[i++]);
-	xfree(*array);
-	*array = NULL;
-}
-
-
-struct srun_info *
+extern srun_info_t *
 srun_info_create(slurm_cred_t *cred, slurm_addr_t *resp_addr, slurm_addr_t *ioaddr)
 {
 	char             *data = NULL;
 	uint32_t          len  = 0;
-	struct srun_info *srun = xmalloc(sizeof(struct srun_info));
+	srun_info_t *srun = xmalloc(sizeof(srun_info_t));
 	srun_key_t       *key  = xmalloc(sizeof(srun_key_t));
 
 	srun->key    = key;
@@ -674,33 +659,25 @@ srun_info_create(slurm_cred_t *cred, slurm_addr_t *resp_addr, slurm_addr_t *ioad
 	return srun;
 }
 
-/* destructor for list routines */
-static void
-_srun_info_destructor(void *arg)
-{
-	struct srun_info *srun = (struct srun_info *)arg;
-	srun_info_destroy(srun);
-}
-
-void
-srun_info_destroy(struct srun_info *srun)
+extern void
+srun_info_destroy(srun_info_t *srun)
 {
 	xfree(srun->key);
 	xfree(srun);
 }
 
-slurmd_task_info_t *
+extern stepd_step_task_info_t *
 task_info_create(int taskid, int gtaskid,
 		 char *ifname, char *ofname, char *efname)
 {
-	slurmd_task_info_t *t = xmalloc(sizeof(slurmd_task_info_t));
+	stepd_step_task_info_t *t = xmalloc(sizeof(stepd_step_task_info_t));
 
 	xassert(taskid >= 0);
 	xassert(gtaskid >= 0);
 
 	slurm_mutex_init(&t->mutex);
 	slurm_mutex_lock(&t->mutex);
-	t->state       = SLURMD_TASK_INIT;
+	t->state       = STEPD_STEP_TASK_INIT;
 	t->id          = taskid;
 	t->gtid	       = gtaskid;
 	t->pid         = (pid_t) -1;
@@ -713,25 +690,16 @@ task_info_create(int taskid, int gtaskid,
 	t->from_stdout = -1;
 	t->stderr_fd   = -1;
 	t->from_stderr = -1;
-	t->estatus     = -1;
 	t->in          = NULL;
 	t->out         = NULL;
 	t->err         = NULL;
+	t->killed_by_cmd = false;
+	t->aborted     = false;
+	t->esent       = false;
+	t->exited      = false;
+	t->estatus     = -1;
 	t->argc	       = 0;
 	t->argv	       = NULL;
 	slurm_mutex_unlock(&t->mutex);
 	return t;
-}
-
-
-static void
-_task_info_destroy(slurmd_task_info_t *t, uint16_t multi_prog)
-{
-	slurm_mutex_lock(&t->mutex);
-	slurm_mutex_unlock(&t->mutex);
-	slurm_mutex_destroy(&t->mutex);
-	if (multi_prog) {
-		xfree(t->argv);
-	} /* otherwise, t->argv is a pointer to job->argv */
-	xfree(t);
 }

@@ -17,6 +17,7 @@
 # Written by Danny Auble <da@llnl.gov>
 # Written by Morris Jette <jette1@llnl.gov>
 # Additions by Joseph Donaghy <donaghy1@llnl.gov>
+# Additions by Bill Brophy <bill.brophy@bull.com>
 # CODE-OCEC-09-009. All rights reserved.
 #
 # This file is part of SLURM, a resource management program.
@@ -45,8 +46,9 @@ set timeout 60
 #
 # Use sacctmgr to create a cluster
 #
-proc add_cluster {name qos fairshare grpcpu grpjob grpnode grpsubmit maxcpumin maxcpu maxjob maxnode maxsubmit maxwall} {
-        global sacctmgr timeout
+proc add_cluster {name qos fairshare grpcpu grpmem grpjob grpnode grpsubmit \
+maxcpumin maxcpu maxjob maxnode maxsubmit maxwall} {
+	global sacctmgr timeout
 
 	set exit_code 0
 	set matches 0
@@ -65,6 +67,11 @@ proc add_cluster {name qos fairshare grpcpu grpjob grpnode grpsubmit maxcpumin m
 
 	if { [string length $grpcpu] } {
 		set command "$command GrpCPUs=$grpcpu"
+		set assoc_stuff 1
+	}
+
+	if { [string length $grpmem] } {
+		set command "$command GrpMem=$grpmem"
 		set assoc_stuff 1
 	}
 
@@ -167,10 +174,114 @@ proc add_cluster {name qos fairshare grpcpu grpjob grpnode grpsubmit maxcpumin m
 }
 
 #
+# Use sacctmgr to create a cluster
+#
+proc add_cluster2 { name clus_req_in } {
+	global sacctmgr timeout
+
+	set exit_code 0
+	set matches 0
+	array set clus_req $clus_req_in
+	if { ![string length $name] } {
+		send_user "FAILURE: we need a name to add\n"
+		return 1
+	}
+
+	set command "$name"
+
+	foreach option [array names clus_req] {
+		# send_user "looking for option $option\n"
+		# switch -- $option \
+		#     fairshare {
+		# 	    set command "$command fairshare=$clus_req($option)"
+		#     } grpcpu {
+		# 	    set command "$command GrpCPUs=$clus_req($option)"
+		#     } grpmem {
+		# 	    set command "$command GrpMem=$clus_req($option)"
+		#     } grpjob {
+		# 	    set command "$command GrpJobs=$clus_req($option)"
+		#     } grpnode {
+		# 	    set command "$command GrpNodes=$clus_req($option)"
+		#     } grpsubmit {
+		# 	    set command "$command GrpSubmitJobs=$clus_req($option)"
+		#     } maxcpumin {
+		# 	    set command "$command MaxCPUMins=$clus_req($option)"
+		#     } maxcpu {
+		# 	    set command "$command MaxCPUs=$clus_req($option)"
+		#     } maxjob {
+		# 	    set command "$command MaxJobs=$clus_req($option)"
+		#     } maxnode {
+		# 	    set command "$command MaxNodes=$clus_req($option)"
+		#     } maxsubmit {
+		# 	    set command "$command MaxSubmitJobs=$clus_req($option)"
+		#     } maxwall {
+		# 	    set command "$command MaxWall=$clus_req($option)"
+		#     } qos {
+		# 	    if { ![string compare $clus_req($option) " "] } {
+		# 		    set $clus_req($option) ""
+		# 	    }
+		# 	    set command "$command qoslevel='$clus_req($option)'"
+		#     } default {
+		# 	    send_user "$option is not a valid option for a cluster_request\n"
+		#     }
+		if { ![string compare $option "qos"] } {
+			if { ![string compare $clus_req($option) " "] } {
+				set $clus_req($option) "''"
+			}
+		}
+		set command "$command $option=$clus_req($option)"
+	}
+	set my_pid [eval spawn $sacctmgr -i add cluster $command]
+	expect {
+		-re "(There was a problem|Unknown condition|Bad format on|Bad MaxWall|Unknown option)" {
+			send_user "FAILURE: there was a problem with the sacctmgr command\n"
+			incr exit_code 1
+		}
+		-re "Problem getting" {
+			send_user "FAILURE: there was a problem getting information from the database\n"
+			incr exit_code 1
+		}
+		-re "Problem adding" {
+			send_user "FAILURE: there was an unknown problem\n"
+			incr exit_code 1
+		}
+		-re "No associations" {
+			send_user "FAILURE: your command didn't return anything\n"
+			incr exit_code 1
+		}
+		-re "Adding Cluster" {
+			incr matches
+			exp_continue
+		}
+		timeout {
+			send_user "\nFAILURE: sacctmgr add not responding\n"
+			slow_kill $my_pid
+			exit_code 1
+		}
+		eof {
+			wait
+		}
+	}
+
+	if {$matches != 1} {
+		send_user "\nFAILURE:  sacctmgr had a problem adding clusters
+	got $matches\n"
+		incr exit_code 1
+	}
+
+	if { ![check_acct_associations] } {
+		send_user "\nFAILURE:  Our associations don't line up\n"
+		incr exit_code 1
+	}
+
+	return $exit_code
+}
+
+#
 # Use sacctmgr to remove the test cluster
 #
 proc remove_cluster {name} {
-        global access_err sacctmgr timeout
+	global access_err sacctmgr timeout
 
 	set exit_code 0
 	set matches 0
@@ -244,8 +355,8 @@ proc remove_cluster {name} {
 #
 # Use sacctmgr to add an user
 #
-proc add_acct { cluster parent name desc org qos fairshare grpcpumin grpcpu grpjob grpnode grpsubmit grpwall maxcpumin maxcpu maxjob maxnode maxsubmit maxwall } {
-        global sacctmgr timeout
+proc add_acct { cluster parent name desc org qos fairshare grpcpumin grpcpurunmins grpcpu grpjob grpmem grpnode grpsubmit grpwall maxcpumin maxcpu maxjob maxnode maxsubmit maxwall} {
+	global sacctmgr timeout
 
 	set exit_code 0
 	set matches 0
@@ -399,7 +510,7 @@ proc add_acct { cluster parent name desc org qos fairshare grpcpumin grpcpu grpj
 # Use sacctmgr to remove an account
 #
 proc remove_acct { cluster name } {
-        global sacctmgr timeout
+	global sacctmgr timeout
 
 	set exit_code 0
 	set matches 0
@@ -473,7 +584,7 @@ proc remove_acct { cluster name } {
 #
 # Use sacctmgr to modify an account
 #
-proc mod_acct { cluster wparent name wdesc worg qos fairshare grpcpumin grpcpu grpjob grpnode grpsubmit grpwall maxcpumin maxcpu maxjob maxnode maxsubmit maxwall parent desc org } {
+proc mod_acct { cluster wparent name wdesc worg qos fairshare grpcpumin grpcpurunmins grpcpu grpjob grpmem grpnode grpsubmit grpwall maxcpumin maxcpu maxjob maxnode maxsubmit maxwall parent desc org } {
 	global sacctmgr timeout
 
 	set exit_code 0
@@ -533,6 +644,11 @@ proc mod_acct { cluster wparent name wdesc worg qos fairshare grpcpumin grpcpu g
 		set assoc_stuff 1
 	}
 
+	if { [string length $grpcpurunmins] } {
+		set scommand "$scommand GrpCpuRunMins=$grpcpurunmins"
+		set assoc_stuff 1
+	}
+
 	if { [string length $grpcpu] } {
 		set scommand "$scommand GrpCPUs=$grpcpu"
 		set assoc_stuff 1
@@ -540,6 +656,11 @@ proc mod_acct { cluster wparent name wdesc worg qos fairshare grpcpumin grpcpu g
 
 	if { [string length $grpjob] } {
 		set scommand "$scommand GrpJobs=$grpjob"
+		set assoc_stuff 1
+	}
+
+	if { [string length $grpmem] } {
+		set scommand "$scommand GrpMemory=$grpmem"
 		set assoc_stuff 1
 	}
 
@@ -651,8 +772,8 @@ proc mod_acct { cluster wparent name wdesc worg qos fairshare grpcpumin grpcpu g
 #
 # Use sacctmgr to add an user
 #
-proc add_user { cluster account name part admin dacct dwckey wckey qos fairshare grpcpumin grpcpu grpjob grpnode grpsubmit grpwall maxcpumin maxcpu maxjob maxnode maxsubmit maxwall } {
-        global sacctmgr timeout
+proc add_user { cluster account name part admin dacct dwckey wckey qos fairshare grpcpumin grpcpurunmins grpcpu grpjob grpmem grpnode grpsubmit grpwall maxcpumin maxcpu maxjob maxnode maxsubmit maxwall defaultqos} {
+	global sacctmgr timeout
 
 	set exit_code 0
 	set matches 0
@@ -694,6 +815,11 @@ proc add_user { cluster account name part admin dacct dwckey wckey qos fairshare
 		set assoc_stuff 1
 	}
 
+	if { [string length $grpcpurunmins] } {
+		set command "$command GrpCpuRunMin=$grpcpurunmins"
+		set assoc_stuff 1
+	}
+
 	if { [string length $grpcpu] } {
 		set command "$command GrpCPUs=$grpcpu"
 		set assoc_stuff 1
@@ -701,6 +827,11 @@ proc add_user { cluster account name part admin dacct dwckey wckey qos fairshare
 
 	if { [string length $grpjob] } {
 		set command "$command GrpJobs=$grpjob"
+		set assoc_stuff 1
+	}
+
+	if { [string length $grpmem] } {
+		set command "$command GrpMemory=$grpmem"
 		set assoc_stuff 1
 	}
 
@@ -746,6 +877,11 @@ proc add_user { cluster account name part admin dacct dwckey wckey qos fairshare
 
 	if { [string length $maxwall] } {
 		set command "$command MaxWall=$maxwall"
+		set assoc_stuff 1
+	}
+
+	if { [string length $defaultqos] } {
+		set command "$command DefaultQos=$defaultqos"
 		set assoc_stuff 1
 	}
 
@@ -821,7 +957,7 @@ proc add_user { cluster account name part admin dacct dwckey wckey qos fairshare
 # Use sacctmgr to remove an user
 #
 proc remove_user { cluster acct user } {
-        global sacctmgr timeout
+	global sacctmgr timeout
 
 	set exit_code 0
 	set matches 0
@@ -900,7 +1036,7 @@ proc remove_user { cluster acct user } {
 #
 # Use sacctmgr to modify an user
 #
-proc mod_user { cluster account name part wadmin wdacct wdwckey qos fairshare grpcpumin grpcpu grpjob grpnode grpsubmit grpwall maxcpumin maxcpu maxjob maxnode maxsubmit maxwall admin dacct dwckey } {
+proc mod_user { cluster account name part wadmin wdacct wdwckey qos fairshare grpcpumin grpcpurunmins grpcpu grpjob grpmem grpnode grpsubmit grpwall maxcpumin maxcpu maxjob maxnode maxsubmit maxwall admin dacct dwckey defaultqos} {
 	global sacctmgr timeout
 
 	set exit_code 0
@@ -952,6 +1088,11 @@ proc mod_user { cluster account name part wadmin wdacct wdwckey qos fairshare gr
 	if { [string length $dacct] } {
 		set scommand "$scommand defaultaccount='$dacct'"
 		set acct_stuff 1
+	}
+
+	if { [string length $defaultqos] } {
+		set command "$command DefaultQos=$defaultqos"
+		set assoc_stuff 1
 	}
 
 	if { [string length $dwckey] } {
@@ -1088,7 +1229,7 @@ proc mod_user { cluster account name part wadmin wdacct wdwckey qos fairshare gr
 # Use sacctmgr to create a QoS
 #
 proc add_qos {name} {
-        global sacctmgr timeout
+	global sacctmgr timeout
 
 	set exit_code 0
 	set matches 0
@@ -1147,7 +1288,7 @@ proc add_qos {name} {
 # Use sacctmgr to remove the test QoS
 #
 proc remove_qos {name} {
-        global access_err sacctmgr timeout
+	global access_err sacctmgr timeout
 
 	set exit_code 0
 	set matches 0
@@ -1219,7 +1360,7 @@ proc remove_qos {name} {
 # Use sacctmgr to add a coordinator
 #
 proc add_coor { accounts names } {
-        global sacctmgr timeout
+	global sacctmgr timeout
 
 	set exit_code 0
 	set matches 0
@@ -1292,7 +1433,7 @@ proc add_coor { accounts names } {
 # Use sacctmgr to remove a coordinator
 #
 proc remove_coor { accounts names } {
-        global sacctmgr timeout
+	global sacctmgr timeout
 
 	set exit_code 0
 	set matches 0
@@ -1364,7 +1505,7 @@ proc remove_coor { accounts names } {
 }
 
 proc archive_load { file } {
-        global sacctmgr timeout
+	global sacctmgr timeout
 	#
 	# Use sacctmgr to load info
 	#
@@ -1395,4 +1536,396 @@ proc archive_load { file } {
 		incr exit_code 1
 	}
 	return $exit_code
+}
+
+#
+# Use sacctmgr to create a res
+#
+proc add_res {name count manager server desc} {
+        global sacctmgr timeout
+
+	set exit_code 0
+	set matches 0
+
+	if { ![string length $name] } {
+		send_user "FAILURE: Need name of res to add\n"
+		return 1
+	}
+	set command "name=$name"
+
+	if { [string length $count] } {
+		set command "$command count=$count"
+	}
+
+	if { [string length $manager] } {
+		set command "$command manager=$manager"
+	}
+
+	if { [string length $server] } {
+		set command "$command server=$server"
+	}
+
+	if { [string length $manager] } {
+		set command "$command description=$desc"
+	}
+
+	set my_pid [eval spawn $sacctmgr -i add res $command]
+	expect {
+		-re "(There was a problem|Unknown condition|Unknown field|Unknown option)" {
+			send_user "FAILURE: there was a problem with the sacctmgr command\n"
+			incr exit_code 1
+		}
+		-re "Problem getting" {
+			send_user "FAILURE: there was a problem getting system resources from the database\n"
+			incr exit_code 1
+		}
+		-re "Problem adding" {
+			send_user "FAILURE: there was an unknown problem\n"
+			incr exit_code 1
+		}
+		-re "Adding system resource(s)" {
+			incr matches
+			exp_continue
+		}
+		timeout {
+			send_user "\nFAILURE: sacctmgr add not responding\n"
+			slow_kill $my_pid
+			exit_code 1
+		}
+		eof {
+			wait
+		}
+	}
+
+	if {$matches != 1} {
+		send_user "\nFAILURE:  sacctmgr had a problem adding system resource got $matches\n"
+		incr exit_code 1
+	}
+
+	return $exit_code
+}
+
+#
+# Use sacctmgr to create a clus_res
+#
+proc add_clus_res {name allowed} {
+        global sacctmgr timeout
+
+	set exit_code 0
+	set matches 0
+
+
+
+	if { ![string length $name] } {
+		send_user "FAILURE: Need name of clus_res to add\n"
+		return 1
+	}
+	set command "name=$name"
+
+	if { [string length $allowed] } {
+		set command "$command allowed=$allowed"
+	}
+
+	set my_pid [eval spawn $sacctmgr -i add clus_res $command]
+	expect {
+		-re "(There was a problem|Unknown condition|Unknown field|Unknown option)" {
+			send_user "FAILURE: there was a problem with the sacctmgr command\n"
+			incr exit_code 1
+		}
+		-re "Problem getting" {
+			send_user "FAILURE: there was a problem getting cluster resources from the database\n"
+			incr exit_code 1
+		}
+		-re "Problem adding" {
+			send_user "FAILURE: there was an unknown problem\n"
+			incr exit_code 1
+		}
+		-re "Adding cluster resource(s)" {
+			incr matches
+			exp_continue
+		}
+		timeout {
+			send_user "\nFAILURE: sacctmgr add not responding\n"
+			slow_kill $my_pid
+			exit_code 1
+		}
+		eof {
+			wait
+		}
+	}
+
+	if {$matches != 1} {
+		send_user "\nFAILURE:  sacctmgr had a problem adding cluster resource got $matches\n"
+		incr exit_code 1
+	}
+
+	return $exit_code
+}
+
+#
+# Use sacctmgr to remove the test res
+#
+proc remove_res {name} {
+        global access_err sacctmgr timeout
+
+	set exit_code 0
+	set matches 0
+	set nothing 0
+
+	if { ![string length $name] } {
+		send_user "FAILURE: we need a name to remove\n"
+		return 1
+	}
+
+	set my_pid [eval spawn $sacctmgr -i delete res $name]
+	expect {
+		-re "privilege to perform this action" {
+			set access_err 1
+			exp_continue
+		}
+		-re "(There was a problem|Unknown condition|Unknown field|Unknown option)" {
+			send_user "FAILURE: there was a problem with the sacctmgr command\n"
+			incr exit_code 1
+		}
+		-re "Problem getting" {
+			send_user "FAILURE: there was a problem getting information from the database\n"
+			incr exit_code 1
+		}
+		-re "Problem adding" {
+			send_user "FAILURE: there was an unknown problem\n"
+			incr exit_code 1
+		}
+		-re " Deleting system resource" {
+			incr matches
+		}
+		-re " Nothing deleted" {
+			incr nothing
+			exp_continue
+		}
+		timeout {
+			send_user "\nFAILURE: sacctmgr delete not responding\n"
+			slow_kill $my_pid
+			incr exit_code 1
+		}
+		eof {
+			wait
+		}
+	}
+	if {$matches == 1} {
+		return $exit_code
+	}
+	if {$access_err != 0} {
+		return 1
+	}
+
+	return $exit_code
+}
+
+
+#
+# Use sacctmgr to remove the test clus_res
+#
+proc remove_clus_res {name} {
+        global access_err sacctmgr timeout
+
+	set exit_code 0
+	set matches 0
+	set nothing 0
+
+	if { ![string length $name] } {
+		send_user "FAILURE: we need a name to remove\n"
+		return 1
+	}
+
+	set my_pid [eval spawn $sacctmgr -i delete clus_res $name]
+	expect {
+		-re "privilege to perform this action" {
+			set access_err 1
+			exp_continue
+		}
+		-re "(There was a problem|Unknown condition|Unknown field|Unknown option)" {
+			send_user "FAILURE: there was a problem with the sacctmgr command\n"
+			incr exit_code 1
+		}
+		-re "Problem getting" {
+			send_user "FAILURE: there was a problem getting information from the database\n"
+			incr exit_code 1
+		}
+		-re "Problem adding" {
+			send_user "FAILURE: there was an unknown problem\n"
+			incr exit_code 1
+		}
+		-re "Deleting cluster resource" {
+			incr matches
+			exp_continue
+		}
+		-re " Nothing deleted" {
+			incr matches
+			set nothing 1
+			exp_continue
+		}
+		timeout {
+			send_user "\nFAILURE: sacctmgr delete not responding\n"
+			slow_kill $my_pid
+			incr exit_code 1
+		}
+		eof {
+			wait
+		}
+	}
+	if {$access_err != 0} {
+		return 1
+	}
+	if {$matches != 1} {
+		send_user "\nFAILURE: sacctmgr had a problem deleting cluster resource got $matches\n"
+		incr exit_code 1
+	}
+
+	return $exit_code
+}
+
+################################################################
+#
+# Proc: check_assoc_limit
+#
+# Purpose: check that the association limits are correct
+#
+# Returns: 1 if association limits are correct, 0 otherwise
+#
+################################################################
+proc check_assoc_limit { assoc type name fs gcm gc gcrm gj gn gsj gw mc mcm mj msj mn mw gm dqos } {
+	global sacctmgr number alpha_numeric_under exit_code
+
+	send_user "\nChecking $name Limits\n"
+	log_user 0
+	set check_val 0
+	if {$assoc == 1} {
+		spawn $sacctmgr list cluster $type=$name -p -n format=Cluster,Fairshare,GrpCPUs,GrpJobs,GrpNodes,GrpSubmitJobs,MaxCPUs,MaxCPUMins,MaxJobs,MaxSubmitJobs,MaxNodes,MaxWall,GrpMemory,DefaultQos
+		expect {
+			-re "$name.$fs.$gc.$gj.$gn.$gsj.$mc.$mcm.$mj.$msj.$mn.$mw.$gm.$dqos" {
+				 set check_val 1
+				 exp_continue
+			}
+			timeout {
+				send_user "\nFAILURE: sacctmgr is not responding\n"
+				set exit_code 1
+			}
+			eof {
+				wait
+			}
+
+		}
+		if {$check_val != 1} {
+			send_user "\nFAILURE: $name was not set correctly\n"
+			set exit_code 1
+		}
+
+	} elseif {$assoc == 2} {
+		spawn $sacctmgr list assoc $type=$name -p -n format=account,fairshare,GrpCPUMins,GrpCpuRunMins,GrpCPUs,GrpJobs,GrpSubmitJobs,GrpNodes,GrpWall,MaxCPUMins,MaxCPUs,MaxJobs,MaxSubmitJobs,MaxNodes,MaxWall,GrpMemory,DefaultQos
+		expect {
+			-re "$name.$fs.$gcm.$gcrm.$gc.$gj.$gsj.$gn.$gw.$mcm.$mc.$mj.$msj.$mn.$mw.$gm.$dqos" {
+				set check_val 1
+				exp_continue
+			}
+			timeout {
+				send_user "\nFAILURE: sacctmgr is not responding\n"
+				set exit_code 1
+			}
+			eof {
+				wait
+			}
+
+		}
+		if {$check_val != 1} {
+			send_user "\nFAILURE: $name was not set correctly $check_val\n"
+			set exit_code 1
+		}
+	} elseif {$assoc == 3} {
+		spawn $sacctmgr list assoc $type=$name -p -n format=user,fairshare,GrpCpuMins,GrpCpuRunMins,GrpCPUs,GrpJob,GrpMemory,GrpNode,GrpSubmit,GrpWall,MaxCpuMin,MaxCpus,MaxJob,MaxNode,MaxSubmit,MaxWall,DefaultQos
+		expect {
+			-re "$name.$fs.$gcm.$gcrm.$gc.$gj.$gm.$gn.$gsj.$gw.$mcm.$mc.$mj.$mn.$msj.$mw.$dqos" {
+				set check_val 1
+				exp_continue
+			}
+			timeout {
+				send_user "\nFAILURE: sacctmgr is not responding\n"
+				set exit_code 1
+			}
+			eof {
+				wait
+			}
+		}
+		if {$check_val != 1} {
+			send_user "\nFAILURE: $name was not set correctly $check_val\n"
+			set exit_code 1
+		}
+	}
+
+
+	log_user 1
+
+}
+
+################################################################
+#
+# Proc: reset_account_usage
+#
+# Purpose: reset account association limits on a given cluster
+#
+# Returns: 1 if usage reset was successful, 0 otherwise
+#
+################################################################
+proc reset_account_usage { cluster acct } {
+	global sacctmgr exit_code
+
+	if { ![string compare $cluster ""] } {
+		set cluster [get_cluster_name]
+	}
+
+	spawn $sacctmgr -i mod account $acct cluster=$cluster set RawUsage=0
+	expect {
+		-re "error:" {
+			send_user "\nFAILURE something went wrong with sacctmgr command\n"
+			set exit_code 1
+		}
+		timeout {
+			send_user "\nFAILURE sacctmgr not responding\n"
+			set exit_code 1
+		}
+		eof {
+			wait
+		}
+	}
+}
+
+################################################################
+#
+# Proc: reset_qos_usage
+#
+# Purpose: reset QOS usage on a given cluster
+#
+# Returns: 1 if successful, 0 otherwise
+#
+################################################################
+proc reset_qos_usage { cluster qos } {
+	global sacctmgr exit_code
+
+	if { ![string compare $cluster ""] } {
+		set cluster [get_cluster_name]
+	}
+
+	spawn $sacctmgr -i mod qos $qos cluster=$cluster set RawUsage=0
+	expect {
+		-re "error:" {
+			send_user "\nFAILURE something went wrong with sacctmgr command\n"
+			set exit_code 1
+		}
+		timeout {
+			send_user "\nFAILURE sacctmgr not responding\n"
+			set exit_code 1
+		}
+		eof {
+			wait
+		}
+	}
 }

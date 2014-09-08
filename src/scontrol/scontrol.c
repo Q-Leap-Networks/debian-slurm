@@ -115,6 +115,7 @@ main (int argc, char *argv[])
 	input_field_count = 0;
 	quiet_flag        = 0;
 	verbosity         = 0;
+	slurm_conf_init(NULL);
 	log_init("scontrol", opts, SYSLOG_FACILITY_DAEMON, NULL);
 
 	if (getenv ("SCONTROL_ALL"))
@@ -719,7 +720,27 @@ _process_command (int argc, char *argv[])
 		}
 		detail_flag = 2;
 	}
-	else if (strncasecmp (tag, "exit", MAX(tag_len, 1)) == 0) {
+	else if ((strncasecmp (tag, "errnumstr", MAX(tag_len, 2)) == 0) ||
+		 (strncasecmp (tag, "errnostr", MAX(tag_len, 2)) == 0)) {
+		if (argc != 2) {
+			exit_code = 1;
+			fprintf (stderr,
+				 "one arguments required for keyword:%s\n",
+				 tag);
+		} else {
+			char *end_ptr;
+			int err = strtol(argv[1], &end_ptr, 10);
+			if (end_ptr[0] == '\0') {
+				printf("%s\n", slurm_strerror(err));
+			} else {
+				exit_code = 1;
+				fprintf (stderr,
+					 "numeric arguments required for keyword:%s\n",
+					 tag);
+			}
+		}
+	}
+	else if (strncasecmp (tag, "exit", MAX(tag_len, 2)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr,
@@ -847,7 +868,7 @@ _process_command (int argc, char *argv[])
 		}
 	}
 	else if (strncasecmp (tag, "requeue", MAX(tag_len, 3)) == 0) {
-		if (argc > 2) {
+		if (argc > 3) {
 			exit_code = 1;
 			if (quiet_flag != 1)
 				fprintf(stderr,
@@ -860,7 +881,30 @@ _process_command (int argc, char *argv[])
 					"too few arguments for keyword:%s\n",
 					tag);
 		} else {
-			error_code = scontrol_requeue(argv[1]);
+			error_code = scontrol_requeue((argc - 1), &argv[1]);
+			if (error_code) {
+				exit_code = 1;
+				if (quiet_flag != 1)
+					slurm_perror ("slurm_requeue error");
+			}
+		}
+
+	}
+	else if (strncasecmp(tag, "requeuehold", 11) == 0) {
+		if (argc > 3) {
+			exit_code = 1;
+			if (quiet_flag != 1)
+				fprintf(stderr,
+					"too many arguments for keyword:%s\n",
+					tag);
+		} else if (argc < 2) {
+			exit_code = 1;
+			if (quiet_flag != 1)
+				fprintf(stderr,
+					"too few arguments for keyword:%s\n",
+					tag);
+		} else {
+			error_code = scontrol_requeue_hold((argc - 1), &argv[1]);
 			if (error_code) {
 				exit_code = 1;
 				if (quiet_flag != 1)
@@ -910,7 +954,7 @@ _process_command (int argc, char *argv[])
 		}
 	}
 	else if (strncasecmp (tag, "wait_job", MAX(tag_len, 2)) == 0) {
-		if (cluster_flags & CLUSTER_FLAG_CRAYXT) {
+		if (cluster_flags & CLUSTER_FLAG_CRAY_A) {
 			fprintf(stderr,
 				"wait_job is handled automatically on Cray.\n");
 		} else if (argc > 2) {
@@ -1202,15 +1246,13 @@ _process_command (int argc, char *argv[])
 			exit_code = 1;
 			slurm_perror("job notify failure");
 		}
-	}
-	else {
+	}	else {
 		exit_code = 1;
 		fprintf (stderr, "invalid keyword: %s\n", tag);
 	}
 
 	return 0;
 }
-
 
 /*
  * _create_it - create a slurm configuration per the supplied arguments
@@ -1419,6 +1461,8 @@ _show_it (int argc, char *argv[])
 		scontrol_print_step (val);
 	} else if (strncasecmp (tag, "topology", MAX(tag_len, 1)) == 0) {
 		scontrol_print_topo (val);
+	} else if (strncasecmp(tag, "licenses", MAX(tag_len, 2)) == 0) {
+		scontrol_print_licenses(val);
 	} else {
 		exit_code = 1;
 		if (quiet_flag != 1)
@@ -1755,6 +1799,8 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
      delete <SPECIFICATIONS>  delete the specified partition or reservation\n\
 			      On Dynamic layout Bluegene systems you can also\n\
 			      delete blocks.                               \n\
+     errnumstr <ERRNO>        Given a Slurm error number, return a         \n\
+                              descriptive string.                          \n\
      exit                     terminate scontrol                           \n\
      help                     print this description of use.               \n\
      hold <jobid_list>        prevent specified job from starting (see release)\n\
@@ -1778,6 +1824,7 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
      reconfigure              re-read configuration files.                 \n\
      release <jobid_list>     permit specified job to start (see hold)     \n\
      requeue <job_id>         re-queue a batch job                         \n\
+     requeuehold <job_id>     re-queue and hold a batch                    \n\
      resume <jobid_list>      resume previously suspended job (see suspend)\n\
      setdebug <level>         set slurmctld debug level                    \n\
      setdebugflags [+|-]<flag>  add or remove slurmctld DebugFlags         \n\

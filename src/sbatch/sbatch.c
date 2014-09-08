@@ -87,6 +87,7 @@ int main(int argc, char *argv[])
 	int script_size = 0;
 	int retries = 0;
 
+	slurm_conf_init(NULL);
 	log_init(xbasename(argv[0]), logopt, 0, NULL);
 
 	_set_exit_code();
@@ -164,6 +165,14 @@ int main(int argc, char *argv[])
 	if (_check_cluster_specific_settings(&desc) != SLURM_SUCCESS)
 		exit(error_exit);
 
+	if (opt.test_only) {
+		if (slurm_job_will_run(&desc) != SLURM_SUCCESS) {
+			slurm_perror("allocation failure");
+			exit (1);
+		}
+		exit (0);
+	}
+
 	while (slurm_submit_batch_job(&desc, &resp) < 0) {
 		static char *msg;
 
@@ -191,10 +200,17 @@ int main(int argc, char *argv[])
 		sleep (++retries);
         }
 
-	printf("Submitted batch job %u", resp->job_id);
-	if (working_cluster_rec)
-		printf(" on cluster %s", working_cluster_rec->name);
-	printf("\n");
+	if (!opt.parsable){
+		printf("Submitted batch job %u", resp->job_id);
+		if (working_cluster_rec)
+			printf(" on cluster %s", working_cluster_rec->name);
+		printf("\n");
+	} else {
+		printf("%u", resp->job_id);
+		if (working_cluster_rec)
+			printf(";%s", working_cluster_rec->name);
+		printf("\n");
+	}
 
 	xfree(desc.script);
 	slurm_free_submit_response_response_msg(resp);
@@ -291,7 +307,7 @@ static int _check_cluster_specific_settings(job_desc_msg_t *req)
 {
 	int rc = SLURM_SUCCESS;
 
-	if (is_cray_system()) {
+	if (is_alps_cray_system()) {
 		/*
 		 * Fix options and inform user, but do not abort submission.
 		 */
@@ -320,6 +336,8 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 	if (opt.jobid_set)
 		desc->job_id = opt.jobid;
 	desc->contiguous = opt.contiguous ? 1 : 0;
+	if (opt.core_spec)
+		desc->core_spec = opt.core_spec;
 	desc->features = opt.constraints;
 	desc->immediate = opt.immediate;
 	desc->gres = opt.gres;
@@ -448,6 +466,8 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 	desc->shared = opt.shared;
 
 	desc->wait_all_nodes = opt.wait_all_nodes;
+	if (opt.warn_flags)
+		desc->warn_flags = opt.warn_flags;
 	if (opt.warn_signal)
 		desc->warn_signal = opt.warn_signal;
 	if (opt.warn_time)
@@ -465,6 +485,8 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 		env_array_merge(&desc->environment, (const char **)environ);
 	} else if (!strcasecmp(opt.export_env, "NONE")) {
 		desc->environment = env_array_create();
+		env_array_merge_slurm(&desc->environment,
+				      (const char **)environ);
 		opt.get_user_env_time = 0;
 	} else {
 		_env_merge_filter(desc);

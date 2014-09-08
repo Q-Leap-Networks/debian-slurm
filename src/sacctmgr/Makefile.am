@@ -3,7 +3,7 @@
 AUTOMAKE_OPTIONS = foreign
 CLEANFILES = core.*
 
-INCLUDES = -I$(top_srcdir)
+AM_CPPFLAGS = -I$(top_srcdir)
 
 bin_PROGRAMS = sacctmgr
 
@@ -20,6 +20,7 @@ sacctmgr_SOURCES =	\
 	event_functions.c	\
 	file_functions.c	\
 	job_functions.c		\
+	resource_functions.c	\
 	sacctmgr.c sacctmgr.h	\
 	qos_functions.c		\
 	txn_functions.c		\

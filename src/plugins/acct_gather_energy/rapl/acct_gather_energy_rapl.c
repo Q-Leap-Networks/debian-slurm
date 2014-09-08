@@ -313,7 +313,7 @@ static void _get_joules_task(acct_gather_energy_t *energy)
 	double ret;
 
 	if (pkg_fd[0] < 0) {
-		error("%s: device /dev/cpu/#msr not opened "
+		error("%s: device /dev/cpu/#/msr not opened "
 		      "energy data cannot be collected.", __func__);
 		_send_drain_request();
 		return;
@@ -545,5 +545,10 @@ extern void acct_gather_energy_p_conf_set(s_p_hashtbl_t *tbl)
 
 	verbose("%s loaded", plugin_name);
 
+	return;
+}
+
+extern void acct_gather_energy_p_conf_values(List *data)
+{
 	return;
 }

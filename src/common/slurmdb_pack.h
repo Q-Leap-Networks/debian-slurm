@@ -63,6 +63,10 @@ extern void pack_cluster_accounting_rec(void *in,
 					uint16_t rpc_version, Buf buffer);
 extern int unpack_cluster_accounting_rec(void **object, uint16_t rpc_version,
 					 Buf buffer);
+extern void slurmdb_pack_clus_res_rec(void *in,
+				      uint16_t rpc_version, Buf buffer);
+extern int slurmdb_unpack_clus_res_rec(void **object, uint16_t rpc_version,
+				       Buf buffer);
 extern void slurmdb_pack_cluster_rec(void *in,
 				     uint16_t rpc_version, Buf buffer);
 extern int slurmdb_unpack_cluster_rec(void **object, uint16_t rpc_version,
@@ -90,6 +94,9 @@ extern void slurmdb_pack_reservation_rec(void *in,
 					 uint16_t rpc_version, Buf buffer);
 extern int slurmdb_unpack_reservation_rec(void **object, uint16_t rpc_version,
 					  Buf buffer);
+extern void slurmdb_pack_res_rec(void *in, uint16_t rpc_version, Buf buffer);
+extern int slurmdb_unpack_res_rec(void **object, uint16_t rpc_version,
+				  Buf buffer);
 extern void slurmdb_pack_txn_rec(void *in,
 				 uint16_t rpc_version, Buf buffer);
 extern int slurmdb_unpack_txn_rec(void **object,
@@ -152,6 +159,9 @@ extern void slurmdb_pack_step_rec(slurmdb_step_rec_t *step,
 				  uint16_t rpc_version, Buf buffer);
 extern int slurmdb_unpack_step_rec(slurmdb_step_rec_t **step,
 				   uint16_t rpc_version, Buf buffer);
+extern void slurmdb_pack_res_cond(void *in, uint16_t rpc_version, Buf buffer);
+extern int slurmdb_unpack_res_cond(void **object, uint16_t rpc_version,
+				   Buf buffer);
 extern void slurmdb_pack_txn_cond(void *in,
 				  uint16_t rpc_version, Buf buffer);
 extern int slurmdb_unpack_txn_cond(void **object, uint16_t rpc_version,

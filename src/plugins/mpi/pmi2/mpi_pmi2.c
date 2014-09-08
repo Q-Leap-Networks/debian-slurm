@@ -86,7 +86,7 @@ const uint32_t plugin_version   = 100;
  * The following is executed in slurmstepd.
  */
 
-int p_mpi_hook_slurmstepd_prefork(const slurmd_job_t *job,
+int p_mpi_hook_slurmstepd_prefork(const stepd_step_rec_t *job,
 				  char ***env)
 {
 	int rc;
@@ -123,6 +123,12 @@ int p_mpi_hook_slurmstepd_task (const mpi_plugin_task_info_t *job,
 	if (job_info.spawn_seq) { /* PMI1.1 needs this env-var */
 		env_array_overwrite_fmt(env, "PMI_SPAWNED", "%u", 1);
 	}
+
+	/* Set the path to the stepd socket for the pmi
+	 * library to connect to.
+	 */
+	env_array_overwrite_fmt(env, "PMI2_SUN_PATH", "%s", sun_path);
+
 	/* close unused sockets in task */
 	close(tree_sock);
 	tree_sock = 0;

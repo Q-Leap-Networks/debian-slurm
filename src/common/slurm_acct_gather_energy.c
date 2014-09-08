@@ -61,6 +61,7 @@ typedef struct slurm_acct_gather_energy_ops {
 	void (*conf_options)      (s_p_options_t **full_options,
 				   int *full_options_cnt);
 	void (*conf_set)          (s_p_hashtbl_t *tbl);
+	void (*conf_values)        (List *data);
 } slurm_acct_gather_energy_ops_t;
 /*
  * These strings must be kept in the same order as the fields
@@ -71,7 +72,8 @@ static const char *syms[] = {
 	"acct_gather_energy_p_get_data",
 	"acct_gather_energy_p_set_data",
 	"acct_gather_energy_p_conf_options",
-	"acct_gather_energy_p_conf_set"
+	"acct_gather_energy_p_conf_set",
+	"acct_gather_energy_p_conf_values",
 };
 
 static slurm_acct_gather_energy_ops_t ops;
@@ -317,4 +319,12 @@ extern void acct_gather_energy_g_conf_set(s_p_hashtbl_t *tbl)
 		return;
 
 	(*(ops.conf_set))(tbl);
+}
+
+extern void acct_gather_energy_g_conf_values(void *data)
+{
+	if (slurm_acct_gather_energy_init() < 0)
+		return;
+
+	(*(ops.conf_values))(data);
 }

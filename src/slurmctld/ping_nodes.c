@@ -126,7 +126,7 @@ void ping_nodes (void)
 					 * limit the number to avoid huge
 					 * communication delays */
 	int i;
-	time_t now, still_live_time, node_dead_time;
+	time_t now = time(NULL), still_live_time, node_dead_time;
 	static time_t last_ping_time = (time_t) 0;
 	hostlist_t down_hostlist = NULL;
 	char *host_str = NULL;
@@ -136,19 +136,20 @@ void ping_nodes (void)
 	front_end_record_t *front_end_ptr = NULL;
 #else
 	struct node_record *node_ptr = NULL;
+	time_t old_cpu_load_time = now - slurmctld_conf.slurmd_timeout;
 #endif
-
-	now = time (NULL);
 
 	ping_agent_args = xmalloc (sizeof (agent_arg_t));
 	ping_agent_args->msg_type = REQUEST_PING;
 	ping_agent_args->retry = 0;
-	ping_agent_args->hostlist = hostlist_create("");
+	ping_agent_args->protocol_version = SLURM_PROTOCOL_VERSION;
+	ping_agent_args->hostlist = hostlist_create(NULL);
 
 	reg_agent_args = xmalloc (sizeof (agent_arg_t));
 	reg_agent_args->msg_type = REQUEST_NODE_REGISTRATION_STATUS;
 	reg_agent_args->retry = 0;
-	reg_agent_args->hostlist = hostlist_create("");
+	reg_agent_args->protocol_version = SLURM_PROTOCOL_VERSION;
+	reg_agent_args->hostlist = hostlist_create(NULL);
 
 	/*
 	 * If there are a large number of down nodes, the node ping
@@ -218,7 +219,11 @@ void ping_nodes (void)
 		 * can generate a flood of incoming RPCs. */
 		if (IS_NODE_UNKNOWN(front_end_ptr) || restart_flag ||
 		    ((i >= offset) && (i < (offset + max_reg_threads)))) {
-			hostlist_push(reg_agent_args->hostlist,
+			if (reg_agent_args->protocol_version >
+			    front_end_ptr->protocol_version)
+				reg_agent_args->protocol_version =
+					front_end_ptr->protocol_version;
+			hostlist_push_host(reg_agent_args->hostlist,
 				      front_end_ptr->name);
 			reg_agent_args->node_count++;
 			continue;
@@ -234,7 +239,12 @@ void ping_nodes (void)
 		    IS_NODE_DOWN(front_end_ptr))
 			continue;
 
-		hostlist_push(ping_agent_args->hostlist, front_end_ptr->name);
+		if (ping_agent_args->protocol_version >
+		    front_end_ptr->protocol_version)
+			ping_agent_args->protocol_version =
+				front_end_ptr->protocol_version;
+		hostlist_push_host(ping_agent_args->hostlist,
+				   front_end_ptr->name);
 		ping_agent_args->node_count++;
 	}
 #else
@@ -283,14 +293,19 @@ void ping_nodes (void)
 		 * can generate a flood of incoming RPCs. */
 		if (IS_NODE_UNKNOWN(node_ptr) || restart_flag ||
 		    ((i >= offset) && (i < (offset + max_reg_threads)))) {
-			hostlist_push(reg_agent_args->hostlist,
-				      node_ptr->name);
+			if (reg_agent_args->protocol_version >
+			    node_ptr->protocol_version)
+				reg_agent_args->protocol_version =
+					node_ptr->protocol_version;
+			hostlist_push_host(reg_agent_args->hostlist,
+					   node_ptr->name);
 			reg_agent_args->node_count++;
 			continue;
 		}
 
 		if ((!IS_NODE_NO_RESPOND(node_ptr)) &&
-		    (node_ptr->last_response >= still_live_time))
+		    (node_ptr->last_response >= still_live_time) &&
+		    (node_ptr->cpu_load_time >= old_cpu_load_time))
 			continue;
 
 		/* Do not keep pinging down nodes since this can induce
@@ -298,7 +313,11 @@ void ping_nodes (void)
 		if (IS_NODE_NO_RESPOND(node_ptr) && IS_NODE_DOWN(node_ptr))
 			continue;
 
-		hostlist_push(ping_agent_args->hostlist, node_ptr->name);
+		if (ping_agent_args->protocol_version >
+		    node_ptr->protocol_version)
+			ping_agent_args->protocol_version =
+				node_ptr->protocol_version;
+		hostlist_push_host(ping_agent_args->hostlist, node_ptr->name);
 		ping_agent_args->node_count++;
 	}
 #endif
@@ -356,13 +375,13 @@ extern void run_health_check(void)
 	check_agent_args = xmalloc (sizeof (agent_arg_t));
 	check_agent_args->msg_type = REQUEST_HEALTH_CHECK;
 	check_agent_args->retry = 0;
-	check_agent_args->hostlist = hostlist_create("");
+	check_agent_args->hostlist = hostlist_create(NULL);
 #ifdef HAVE_FRONT_END
 	for (i = 0, front_end_ptr = front_end_nodes;
 	     i < front_end_node_cnt; i++, front_end_ptr++) {
 		if (IS_NODE_NO_RESPOND(front_end_ptr))
 			continue;
-		hostlist_push(check_agent_args->hostlist, front_end_ptr->name);
+		hostlist_push_host(check_agent_args->hostlist, front_end_ptr->name);
 		check_agent_args->node_count++;
 	}
 #else
@@ -403,7 +422,7 @@ extern void run_health_check(void)
 			}
 		}
 
-		hostlist_push(check_agent_args->hostlist, node_ptr->name);
+		hostlist_push_host(check_agent_args->hostlist, node_ptr->name);
 		check_agent_args->node_count++;
 	}
 #endif
@@ -437,14 +456,14 @@ extern void update_nodes_acct_gather_data(void)
 	agent_args = xmalloc (sizeof (agent_arg_t));
 	agent_args->msg_type = REQUEST_ACCT_GATHER_UPDATE;
 	agent_args->retry = 0;
-	agent_args->hostlist = hostlist_create("");
+	agent_args->hostlist = hostlist_create(NULL);
 
 #ifdef HAVE_FRONT_END
 	for (i = 0, front_end_ptr = front_end_nodes;
 	     i < front_end_node_cnt; i++, front_end_ptr++) {
 		if (IS_NODE_NO_RESPOND(front_end_ptr))
 			continue;
-		hostlist_push(agent_args->hostlist, front_end_ptr->name);
+		hostlist_push_host(agent_args->hostlist, front_end_ptr->name);
 		agent_args->node_count++;
 	}
 #else
@@ -453,7 +472,7 @@ extern void update_nodes_acct_gather_data(void)
 		if (IS_NODE_NO_RESPOND(node_ptr) || IS_NODE_FUTURE(node_ptr) ||
 		    IS_NODE_POWER_SAVE(node_ptr))
 			continue;
-		hostlist_push(agent_args->hostlist, node_ptr->name);
+		hostlist_push_host(agent_args->hostlist, node_ptr->name);
 		agent_args->node_count++;
 	}
 #endif

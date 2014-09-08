@@ -66,6 +66,7 @@
 #include "src/common/xmalloc.h"
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
+#include "src/common/switch.h"
 #include "src/api/step_ctx.h"
 
 int step_signals[] = {
@@ -332,14 +333,14 @@ slurm_step_ctx_create_no_alloc (const slurm_step_ctx_params_t *step_params,
 		step_req->min_nodes,
 		step_req->num_tasks);
 
-	if (switch_alloc_jobinfo(&step_resp->switch_job) < 0)
-		fatal("switch_alloc_jobinfo: %m");
-	if (switch_build_jobinfo(step_resp->switch_job,
-				 step_resp->step_layout->node_list,
-				 step_resp->step_layout->tasks,
-				 step_resp->step_layout->tids,
+	if (switch_g_alloc_jobinfo(&step_resp->switch_job,
+				   step_req->job_id,
+				   step_resp->job_step_id) < 0)
+		fatal("switch_g_alloc_jobinfo: %m");
+	if (switch_g_build_jobinfo(step_resp->switch_job,
+				 step_resp->step_layout,
 				 step_req->network) < 0)
-		fatal("switch_build_jobinfo: %m");
+		fatal("switch_g_build_jobinfo: %m");
 
 
 

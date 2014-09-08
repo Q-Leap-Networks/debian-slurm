@@ -305,11 +305,11 @@ _server_read(eio_obj_t *obj, List objs)
 
 		n = io_hdr_read_fd(obj->fd, &s->header);
 		if (n <= 0) { /* got eof or error on socket read */
+			error("%s: fd %d got error or unexpected eof reading header",
+				  __func__, obj->fd);
 			if (s->cio->sls)
 				step_launch_notify_io_failure(s->cio->sls,
-							      s->node_id);
-			debug3("got error or unexpected eof "
-			       "on _server_read header");
+											  s->node_id);
 			close(obj->fd);
 			obj->fd = -1;
 			s->in_eof = true;
@@ -338,6 +338,13 @@ _server_read(eio_obj_t *obj, List objs)
 					"header");
 			} else
 				error("Unrecognized output message type");
+			/* If all remote eios are gone, shutdown
+			 * the i/o channel with stepd.
+			 */
+			if (s->remote_stdout_objs == 0
+				&& s->remote_stderr_objs == 0) {
+				obj->shutdown = true;
+			}
 			list_enqueue(s->cio->free_outgoing, s->in_msg);
 			s->in_msg = NULL;
 			return SLURM_SUCCESS;
@@ -373,11 +380,11 @@ _server_read(eio_obj_t *obj, List objs)
 			}
 		}
 		if (n <= 0) { /* got eof or unhandled error */
+			error("%s: fd %d got error or unexpected eof reading message body",
+				  __func__, obj->fd);
 			if (s->cio->sls)
 				step_launch_notify_io_failure(
 					s->cio->sls, s->node_id);
-			debug3("got error or unexpected eof "
-			       "on _server_read body");
 			close(obj->fd);
 			obj->fd = -1;
 			s->in_eof = true;
@@ -741,7 +748,7 @@ again:
 		for (i = 0; i < info->cio->num_nodes; i++) {
 			msg->ref_count++;
 			if (info->cio->ioserver[i] == NULL)
-				/* client_io_handler_abort() or 
+				/* client_io_handler_abort() or
 				 * client_io_handler_downnodes() called */
 				verbose("ioserver stream of node %d not yet "
 					"initialized", i);

@@ -190,6 +190,11 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("Admin");
 		field->len = 9;
 		field->print_routine = print_fields_str;
+	} else if (!strncasecmp("Allowed", object, MAX(command_len, 2))) {
+		field->type = PRINT_ALLOWED;
+		field->name = xstrdup("% Allowed");
+		field->len = 10;
+		field->print_routine = print_fields_uint16;
 	} else if (!strncasecmp("Classification", object,
 				MAX(command_len, 3))) {
 		field->type = PRINT_CPUS;
@@ -222,6 +227,21 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("ControlPort");
 		field->len = 12;
 		field->print_routine = print_fields_uint;
+	} else if (!strncasecmp("Count", object, MAX(command_len, 3))) {
+		field->type = PRINT_COUNT;
+		field->name = xstrdup("Count");
+		field->len = 6;
+		field->print_routine = print_fields_uint;
+	} else if (!strncasecmp("CountAllowed", object, MAX(command_len, 6))) {
+		field->type = PRINT_CALLOWED;
+		field->name = xstrdup("# Allowed");
+		field->len = 10;
+		field->print_routine = print_fields_uint32;
+	} else if (!strncasecmp("CountUsed", object, MAX(command_len, 6))) {
+		field->type = PRINT_CALLOWED;
+		field->name = xstrdup("# Used");
+		field->len = 10;
+		field->print_routine = print_fields_uint32;
 	} else if (!strncasecmp("CPUCount", object, MAX(command_len, 2))) {
 		field->type = PRINT_CPUS;
 		field->name = xstrdup("CPUCount");
@@ -333,6 +353,11 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("LFT");
 		field->len = 6;
 		field->print_routine = print_fields_uint;
+	} else if (!strncasecmp("Manager", object, MAX(command_len, 3))) {
+		field->type = PRINT_MANAGER;
+		field->name = xstrdup("Manager");
+		field->len = 10;
+		field->print_routine = print_fields_str;
 	} else if (!strncasecmp("MaxCPUMinsPerJob", object,
 				MAX(command_len, 7))) {
 		field->type = PRINT_MAXCM;
@@ -476,19 +501,29 @@ static print_field_t *_get_print_field(char *object)
 	} else if (!strncasecmp("RPC", object, MAX(command_len, 1))) {
 		field->type = PRINT_RPC_VERSION;
 		field->name = xstrdup("RPC");
-		field->len = 3;
+		field->len = 5;
 		field->print_routine = print_fields_uint;
+	} else if (!strncasecmp("Server", object, MAX(command_len, 3))) {
+		field->type = PRINT_SERVER;
+		field->name = xstrdup("Server");
+		field->len = 10;
+		field->print_routine = print_fields_str;
 	} else if (!strncasecmp("Share", object, MAX(command_len, 1))
 		   || !strncasecmp("FairShare", object, MAX(command_len, 2))) {
 		field->type = PRINT_FAIRSHARE;
 		field->name = xstrdup("Share");
 		field->len = 9;
 		field->print_routine = print_fields_uint;
-	} else if (!strncasecmp("TimeStamp", object, MAX(command_len, 1))) {
+	} else if (!strncasecmp("TimeStamp", object, MAX(command_len, 2))) {
 		field->type = PRINT_TS;
 		field->name = xstrdup("Time");
 		field->len = 19;
 		field->print_routine = print_fields_date;
+	} else if (!strncasecmp("Type", object, MAX(command_len, 2))) {
+		field->type = PRINT_TYPE;
+		field->name = xstrdup("Type");
+		field->len = 8;
+		field->print_routine = print_fields_str;
 	} else if (!strncasecmp("UsageFactor", object, MAX(command_len, 6))) {
 		field->type = PRINT_UF;
 		field->name = xstrdup("UsageFactor");
@@ -500,6 +535,11 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("UsageThres");
 		field->len = 10;
 		field->print_routine = print_fields_double;
+	} else if (!strncasecmp("Used", object, MAX(command_len, 7))) {
+		field->type = PRINT_USED;
+		field->name = xstrdup("% Used");
+		field->len = 10;
+		field->print_routine = print_fields_uint16;
 	} else if (!strncasecmp("User", object, MAX(command_len, 1))) {
 		field->type = PRINT_USER;
 		field->name = xstrdup("User");
@@ -707,6 +747,104 @@ end_it:
 
 	list_destroy(local_assoc_list);
 	list_destroy(local_cluster_list);
+
+	return rc;
+}
+
+extern int sacctmgr_remove_qos_usage(slurmdb_qos_cond_t *qos_cond)
+{
+	List update_list = NULL;
+	List cluster_list;
+	List local_qos_list = NULL;
+	List local_cluster_list = NULL;
+	ListIterator itr = NULL, itr2 = NULL;
+	char *qos_name = NULL, *cluster_name = NULL;
+	slurmdb_qos_rec_t* rec = NULL;
+	slurmdb_cluster_rec_t* cluster_rec = NULL;
+	slurmdb_update_object_t* update_obj = NULL;
+	slurmdb_cluster_cond_t cluster_cond;
+	int rc = SLURM_SUCCESS;
+	bool free_cluster_name = 0;
+
+	cluster_list = qos_cond->description_list;
+	qos_cond->description_list = NULL;
+
+	if (!cluster_list)
+		cluster_list = list_create(slurm_destroy_char);
+
+	if (!list_count(cluster_list)) {
+		char *temp = slurm_get_cluster_name();
+		if (temp) {
+			printf("No cluster specified, resetting "
+			       "on local cluster %s\n", temp);
+			list_append(cluster_list, temp);
+		}
+		if (!list_count(cluster_list)) {
+			error("A cluster name is required to remove usage");
+			return SLURM_ERROR;
+		}
+	}
+
+	if (!commit_check("Would you like to reset usage?")) {
+		printf(" Changes Discarded\n");
+		return rc;
+	}
+
+	local_qos_list = acct_storage_g_get_qos(db_conn, my_uid, qos_cond);
+
+	slurmdb_init_cluster_cond(&cluster_cond, 0);
+	cluster_cond.cluster_list = cluster_list;
+	local_cluster_list = acct_storage_g_get_clusters(
+		db_conn, my_uid, &cluster_cond);
+
+	itr = list_iterator_create(cluster_list);
+	itr2 = list_iterator_create(qos_cond->name_list);
+	while ((cluster_name = list_next(itr))) {
+		cluster_rec = sacctmgr_find_cluster_from_list(
+			local_cluster_list, cluster_name);
+		if (!cluster_rec) {
+			error("Failed to find cluster %s in database",
+			      cluster_name);
+			rc = SLURM_ERROR;
+			goto end_it;
+		}
+
+		update_list = list_create(slurmdb_destroy_update_object);
+		update_obj = xmalloc(sizeof(slurmdb_update_object_t));
+		update_obj->type = SLURMDB_REMOVE_QOS_USAGE;
+		update_obj->objects = list_create(NULL);
+
+		while ((qos_name = list_next(itr2))) {
+			rec = sacctmgr_find_qos_from_list(
+				local_qos_list, qos_name);
+			if (!rec) {
+				error("Failed to find QOS %s", qos_name);
+				rc = SLURM_ERROR;
+				goto end_it;
+			}
+			list_append(update_obj->objects, rec);
+		}
+		list_iterator_reset(itr2);
+
+		if (list_count(update_obj->objects)) {
+			list_append(update_list, update_obj);
+			rc = slurmdb_send_accounting_update(
+				update_list, cluster_name,
+				cluster_rec->control_host,
+				cluster_rec->control_port,
+				cluster_rec->rpc_version);
+		}
+		FREE_NULL_LIST(update_list);
+	}
+end_it:
+	list_iterator_destroy(itr);
+	list_iterator_destroy(itr2);
+
+	FREE_NULL_LIST(update_list);
+	FREE_NULL_LIST(local_qos_list);
+
+	if (free_cluster_name)
+		xfree(cluster_name);
 
 	return rc;
 }
@@ -927,6 +1065,28 @@ extern slurmdb_qos_rec_t *sacctmgr_find_qos_from_list(
 
 	return qos;
 
+}
+
+extern slurmdb_res_rec_t *sacctmgr_find_res_from_list(
+	List res_list, uint32_t id, char *name, char *server)
+{
+	ListIterator itr = NULL;
+	slurmdb_res_rec_t *res = NULL;
+
+	if ((id == NO_VAL) && (!name || !res_list))
+		return NULL;
+
+	itr = list_iterator_create(res_list);
+	while ((res = list_next(itr))) {
+		if ((id == res->id)
+		    || (name && server
+			&& !strcasecmp(server, res->server)
+			&& !strcasecmp(name, res->name)))
+			break;
+	}
+	list_iterator_destroy(itr);
+
+	return res;
 }
 
 extern slurmdb_user_rec_t *sacctmgr_find_user_from_list(
@@ -1552,10 +1712,13 @@ extern void sacctmgr_print_qos_limits(slurmdb_qos_rec_t *qos)
 
 }
 
-extern int sort_coord_list(slurmdb_coord_rec_t *coord_a,
-			   slurmdb_coord_rec_t *coord_b)
+extern int sort_coord_list(void *a, void *b)
 {
-	int diff = strcmp(coord_a->name, coord_b->name);
+	slurmdb_coord_rec_t *coord_a = *(slurmdb_coord_rec_t **)a;
+	slurmdb_coord_rec_t *coord_b = *(slurmdb_coord_rec_t **)b;
+	int diff;
+
+	diff = strcmp(coord_a->name, coord_b->name);
 
 	if (diff < 0)
 		return -1;
@@ -1581,4 +1744,53 @@ extern List sacctmgr_process_format_list(List format_list)
 	list_iterator_destroy(itr);
 
 	return print_fields_list;
+}
+
+extern int sacctmgr_validate_cluster_list(List cluster_list)
+{
+	List temp_list = NULL;
+	char *cluster = NULL;
+	int rc = SLURM_SUCCESS;
+	ListIterator itr = NULL, itr_c = NULL;
+
+	if (cluster_list) {
+		slurmdb_cluster_cond_t cluster_cond;
+		slurmdb_init_cluster_cond(&cluster_cond, 0);
+		cluster_cond.cluster_list = cluster_list;
+
+		temp_list = acct_storage_g_get_clusters(db_conn, my_uid,
+							&cluster_cond);
+	} else
+		temp_list = acct_storage_g_get_clusters(db_conn, my_uid,
+							NULL);
+
+
+	itr_c = list_iterator_create(cluster_list);
+	itr = list_iterator_create(temp_list);
+	while ((cluster = list_next(itr_c))) {
+		slurmdb_cluster_rec_t *cluster_rec = NULL;
+
+		list_iterator_reset(itr);
+		while ((cluster_rec = list_next(itr))) {
+			if (!strcasecmp(cluster_rec->name, cluster))
+				break;
+		}
+		if (!cluster_rec) {
+			exit_code=1;
+			fprintf(stderr, " This cluster '%s' "
+				"doesn't exist.\n"
+				"        Contact your admin "
+				"to add it to accounting.\n",
+				cluster);
+			list_delete_item(itr_c);
+		}
+	}
+	list_iterator_destroy(itr);
+	list_iterator_destroy(itr_c);
+	list_destroy(temp_list);
+
+	if (!list_count(cluster_list))
+		rc = SLURM_ERROR;
+
+	return rc;
 }

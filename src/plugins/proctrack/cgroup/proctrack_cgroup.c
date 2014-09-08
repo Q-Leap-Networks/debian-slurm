@@ -101,7 +101,7 @@
  * matures.
  */
 const char plugin_name[]      = "Process tracking via linux "
-				"cgroup freezer subsystem";
+	"cgroup freezer subsystem";
 const char plugin_type[]      = "proctrack/cgroup";
 const uint32_t plugin_version = 91;
 
@@ -134,7 +134,7 @@ int _slurm_cgroup_init(void)
 
 	/* initialize freezer cgroup namespace */
 	if (xcgroup_ns_create(&slurm_cgroup_conf, &freezer_ns, "", "freezer")
-	     != XCGROUP_SUCCESS) {
+	    != XCGROUP_SUCCESS) {
 		error("unable to create freezer cgroup namespace");
 		return SLURM_ERROR;
 	}
@@ -150,7 +150,7 @@ int _slurm_cgroup_init(void)
 	return SLURM_SUCCESS;
 }
 
-int _slurm_cgroup_create(slurmd_job_t *job, uint64_t id, uid_t uid, gid_t gid)
+int _slurm_cgroup_create(stepd_step_rec_t *job, uint64_t id, uid_t uid, gid_t gid)
 {
 	/* we do it here as we do not have access to the conf structure */
 	/* in libslurm (src/common/xcgroup.c) */
@@ -198,7 +198,7 @@ int _slurm_cgroup_create(slurmd_job_t *job, uint64_t id, uid_t uid, gid_t gid)
 	/* build job cgroup relative path if no set (should not be) */
 	if (*job_cgroup_path == '\0') {
 		if (snprintf(job_cgroup_path, PATH_MAX, "%s/job_%u",
-			      user_cgroup_path, job->jobid) >= PATH_MAX) {
+			     user_cgroup_path, job->jobid) >= PATH_MAX) {
 			error("unable to build job %u cgroup relative "
 			      "path : %m", job->jobid);
 			goto bail;
@@ -229,16 +229,16 @@ int _slurm_cgroup_create(slurmd_job_t *job, uint64_t id, uid_t uid, gid_t gid)
 
 	/* create user cgroup in the freezer ns (it could already exist) */
 	if (xcgroup_create(&freezer_ns, &user_freezer_cg,
-			    user_cgroup_path,
-			    getuid(), getgid()) != XCGROUP_SUCCESS) {
+			   user_cgroup_path,
+			   getuid(), getgid()) != XCGROUP_SUCCESS) {
 		xcgroup_destroy(&slurm_freezer_cg);
 		goto bail;
 	}
 
 	/* create job cgroup in the freezer ns (it could already exist) */
 	if (xcgroup_create(&freezer_ns, &job_freezer_cg,
-			    job_cgroup_path,
-			    getuid(), getgid()) != XCGROUP_SUCCESS) {
+			   job_cgroup_path,
+			   getuid(), getgid()) != XCGROUP_SUCCESS) {
 		xcgroup_destroy(&slurm_freezer_cg);
 		xcgroup_destroy(&user_freezer_cg);
 		goto bail;
@@ -246,8 +246,8 @@ int _slurm_cgroup_create(slurmd_job_t *job, uint64_t id, uid_t uid, gid_t gid)
 
 	/* create step cgroup in the freezer ns (it should not exists) */
 	if (xcgroup_create(&freezer_ns, &step_freezer_cg,
-			    jobstep_cgroup_path,
-			    getuid(), getgid()) != XCGROUP_SUCCESS) {
+			   jobstep_cgroup_path,
+			   getuid(), getgid()) != XCGROUP_SUCCESS) {
 		xcgroup_destroy(&slurm_freezer_cg);
 		xcgroup_destroy(&user_freezer_cg);
 		xcgroup_destroy(&job_freezer_cg);
@@ -385,7 +385,7 @@ _slurm_cgroup_is_pid_a_slurm_task(uint64_t id, pid_t pid)
 	char file_path[PATH_MAX], buf[2048];
 
 	if (snprintf(file_path, PATH_MAX, "/proc/%ld/stat",
-		      (long)pid) >= PATH_MAX) {
+		     (long)pid) >= PATH_MAX) {
 		debug2("unable to build pid '%d' stat file: %m ", pid);
 		return fstatus;
 	}
@@ -456,7 +456,7 @@ extern int fini (void)
 /*
  * Uses slurmd job-step manager's pid as the unique container id.
  */
-extern int slurm_container_plugin_create (slurmd_job_t *job)
+extern int proctrack_p_create (stepd_step_rec_t *job)
 {
 	int fstatus;
 
@@ -487,12 +487,12 @@ extern int slurm_container_plugin_create (slurmd_job_t *job)
 	return SLURM_SUCCESS;
 }
 
-extern int slurm_container_plugin_add (slurmd_job_t *job, pid_t pid)
+extern int proctrack_p_add (stepd_step_rec_t *job, pid_t pid)
 {
 	return _slurm_cgroup_add_pids(job->cont_id, &pid, 1);
 }
 
-extern int slurm_container_plugin_signal (uint64_t id, int signal)
+extern int proctrack_p_signal (uint64_t id, int signal)
 {
 	pid_t* pids = NULL;
 	int npids;
@@ -501,7 +501,7 @@ extern int slurm_container_plugin_signal (uint64_t id, int signal)
 
 	/* get all the pids associated with the step */
 	if (_slurm_cgroup_get_pids(id, &pids, &npids) !=
-	     SLURM_SUCCESS) {
+	    SLURM_SUCCESS) {
 		debug3("unable to get pids list for cont_id=%"PRIu64"", id);
 		/* that could mean that all the processes already exit */
 		/* the container so return success */
@@ -547,12 +547,12 @@ extern int slurm_container_plugin_signal (uint64_t id, int signal)
 	return SLURM_SUCCESS;
 }
 
-extern int slurm_container_plugin_destroy (uint64_t id)
+extern int proctrack_p_destroy (uint64_t id)
 {
 	return _slurm_cgroup_destroy();
 }
 
-extern uint64_t slurm_container_plugin_find(pid_t pid)
+extern uint64_t proctrack_p_find(pid_t pid)
 {
 	uint64_t cont_id = -1;
 
@@ -562,12 +562,12 @@ extern uint64_t slurm_container_plugin_find(pid_t pid)
 	return cont_id;
 }
 
-extern bool slurm_container_plugin_has_pid(uint64_t cont_id, pid_t pid)
+extern bool proctrack_p_has_pid(uint64_t cont_id, pid_t pid)
 {
 	return _slurm_cgroup_has_pid(pid);
 }
 
-extern int slurm_container_plugin_wait(uint64_t cont_id)
+extern int proctrack_p_wait(uint64_t cont_id)
 {
 	int delay = 1;
 
@@ -578,8 +578,8 @@ extern int slurm_container_plugin_wait(uint64_t cont_id)
 
 	/* Spin until the container is successfully destroyed */
 	/* This indicates that all tasks have exited the container */
-	while (slurm_container_plugin_destroy(cont_id) != SLURM_SUCCESS) {
-		slurm_container_plugin_signal(cont_id, SIGKILL);
+	while (proctrack_p_destroy(cont_id) != SLURM_SUCCESS) {
+		proctrack_p_signal(cont_id, SIGKILL);
 		sleep(delay);
 		if (delay < 120) {
 			delay *= 2;
@@ -592,8 +592,8 @@ extern int slurm_container_plugin_wait(uint64_t cont_id)
 	return SLURM_SUCCESS;
 }
 
-extern int slurm_container_plugin_get_pids(uint64_t cont_id,
-					   pid_t **pids, int *npids)
+extern int proctrack_p_get_pids(uint64_t cont_id,
+				       pid_t **pids, int *npids)
 {
 	return _slurm_cgroup_get_pids(cont_id, pids, npids);
 }

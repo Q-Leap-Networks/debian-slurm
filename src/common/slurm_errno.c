@@ -82,7 +82,7 @@ static slurm_errtab_t slurm_errtab[] = {
 	{ SLURM_COMMUNICATIONS_SHUTDOWN_ERROR,
 	  "Communication shutdown failure"			},
 	{ SLURM_PROTOCOL_VERSION_ERROR,
-	  "Protocol version has changed, re-link your code"	},
+	  "Incompatible versions of client and server code"	},
         { SLURM_PROTOCOL_IO_STREAM_VERSION_ERROR,
           "I/O stream version number error"                     },
         { SLURM_PROTOCOL_AUTHENTICATION_ERROR,
@@ -288,6 +288,8 @@ static slurm_errtab_t slurm_errtab[] = {
 	  "Reservation request lacks users or accounts"		},
 	{ ESLURM_INVALID_ARRAY,
 	  "Invalid job array specification"			},
+	{ ESLURM_RESERVATION_NAME_DUP,
+	  "Duplicate reservation name"			},
 
 	/* slurmd error codes */
 
@@ -394,10 +396,12 @@ static slurm_errtab_t slurm_errtab[] = {
 	  "Can only change one at a time"                       },
 	{ ESLURM_BAD_NAME,
 	  "Unacceptable name given. (No '.' in name allowed)"   },
+	{ ESLURM_OVER_ALLOCATE,
+	  "You can not allocate more than 100% of a resource"     },
 
 	/* plugin and custom errors */
 	{ ESLURM_MISSING_TIME_LIMIT,
-	  "Missing time limit"   }
+	  "Time limit specification required, but not provided"  }
 };
 
 /*
@@ -432,7 +436,7 @@ static char *_lookup_slurm_api_errtab(int errnum)
 	if ((res == NULL) &&
 	    (errnum >= ESLURM_SWITCH_MIN) &&
 	    (errnum <= ESLURM_SWITCH_MAX))
-		res = switch_strerror(errnum);
+		res = switch_g_strerror(errnum);
 
 	return res;
 }

@@ -239,6 +239,11 @@ For memory leaks (for AIX use zerofault, zf; for linux use valgrind)
  - Examine the end of the log files for leaks. pthread_create() and dlopen()
    have small memory leaks on some systems, which do not grow over time
 
+Job profiling:
+ - "export CFLAGS=-pg", then run "configure" and "make install" as usual.
+ - Run the slurm daemons through a stress test and exit normally
+ - Run "gprof [executable-file] >outfile"
+
 Before new major release:
  - Test on ia64, i386, x86_64, BGL, AIX, OSX, XCPU
  - Test on Elan and IB switches
@@ -249,4 +254,7 @@ Before new major release:
  - Review and release code
  - Run "make check"
  - Test that the prolog and epilog run
- - Run the test suite with SlurmUser NOT being self 
+ - Run the test suite with SlurmUser NOT being self
+ - Test for errors reported by CLANG tool:
+   scan-build -k -v make >m.sb.out 2>&1 
+   # and look for output in /tmp/scan-build-<DATE>

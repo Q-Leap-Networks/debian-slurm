@@ -1,4 +1,4 @@
-.TH "slurmdbd.conf" "5" "Feb 2013" "slurmdbd.conf 2.6" "Slurm configuration file"
+.TH "slurmdbd.conf" "5" "September 2013" "slurmdbd.conf 14.03" "Slurm configuration file"
 .SH "NAME"
 slurmdbd.conf \- Slurm Database Daemon (SlurmDBD) configuration file
 
@@ -201,6 +201,20 @@ See the section \fBLOGGING\fR in the slurm.conf man page
 if a pathname is specified.
 
 .TP
+\fBLogTimeFormat\fR
+Format of the timestamp in slurmdbd log files. Accepted values are
+"iso8601", "iso8601_ms", "rfc5424", "rfc5424_ms", "clock", and
+"short". The values ending in "_ms" differ from the ones without in
+that fractional seconds with millisecond precision are printed. The
+default value is "iso8601_ms". The "rfc5424" formats are the same as
+the "iso8601" formats except that the timezone value is also
+shown. The "clock" format shows a timestamp in microseconds retrieved
+with the C standard clock() function. The "short" format is a short
+date and time format. The "thread_id" format shows the timestamp
+in the C standard ctime() function form without the year but
+including the microseconds, the daemon's process ID and the current thread ID.
+
+.TP
 \fBMessageTimeout\fR
 Time permitted for a round\-trip communication to complete
 in seconds. Default value is 10 seconds.
@@ -345,18 +359,10 @@ with the database.
 .TP
 \fBStorageType\fR
 Define the accounting storage mechanism type.
-Acceptable values at present include
-"accounting_storage/mysql", and
-"accounting_storage/pgsql".
+Acceptable values at present include "accounting_storage/mysql".
 The value "accounting_storage/mysql" indicates that accounting records
-should be written to a MySQL database specified by the
+should be written to a MySQL or MariaDB database specified by the
 \fBStorageLoc\fR parameter.
-The value "accounting_storage/pgsql" indicates that accounting records
-should be written to a PostgreSQL database specified by the
-\fBStorageLoc\fR parameter.  This plugin is not complete and has been
-depricated.  In future versions of Slurm this plugin may be removed.
-It should not be used if wanting to use associations.  It will however work
-with basic accounting of jobs and job steps.
 This value must be specified.
 
 .TP

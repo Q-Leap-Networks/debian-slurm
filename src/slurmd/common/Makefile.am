@@ -3,12 +3,14 @@
 AUTOMAKE_OPTIONS = foreign
 CLEANFILES = core.*
 
-INCLUDES = -I$(top_srcdir)
+AM_CPPFLAGS = -I$(top_srcdir)
 
 # making a .la
 
 noinst_LTLIBRARIES = libslurmd_common.la
 libslurmd_common_la_SOURCES =    \
+	core_spec_plugin.c core_spec_plugin.h \
+	job_container_plugin.c job_container_plugin.h \
 	proctrack.c proctrack.h \
 	setproctitle.c setproctitle.h \
 	slurmstepd_init.c slurmstepd_init.h \

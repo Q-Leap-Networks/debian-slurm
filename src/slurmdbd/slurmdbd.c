@@ -166,7 +166,7 @@ int main(int argc, char *argv[])
 	memset(&assoc_init_arg, 0, sizeof(assoc_init_args_t));
 
 	/* If we are tacking wckey we need to cache
-	   wckeys, if we aren't only cache the users and qos */
+	   wckeys, if we aren't only cache the users, qos */
 	assoc_init_arg.cache_level = ASSOC_MGR_CACHE_USER | ASSOC_MGR_CACHE_QOS;
 	if (slurmdbd_conf->track_wckey)
 		assoc_init_arg.cache_level |= ASSOC_MGR_CACHE_WCKEY;
@@ -190,7 +190,7 @@ int main(int argc, char *argv[])
 			backup = true;
 			run_dbd_backup();
 			if (!shutdown_time)
-				assoc_mgr_refresh_lists(db_conn, NULL);
+				assoc_mgr_refresh_lists(db_conn);
 		} else if (slurmdbd_conf->dbd_host &&
 			   (!strcmp(slurmdbd_conf->dbd_host, node_name) ||
 			    !strcmp(slurmdbd_conf->dbd_host, "localhost"))) {
@@ -385,6 +385,7 @@ static void _update_logging(bool startup)
 	}
 
 	log_alter(log_opts, SYSLOG_FACILITY_DAEMON, slurmdbd_conf->log_file);
+	log_set_timefmt(slurmdbd_conf->log_fmt);
 	if (startup && slurmdbd_conf->log_file) {
 		int rc;
 		gid_t slurm_user_gid;
@@ -549,7 +550,7 @@ static void *_rollup_handler(void *db_conn)
 		/* run the roll up */
 		slurm_mutex_lock(&rollup_lock);
 		running_rollup = 1;
-		debug2("running rollup at %s", ctime(&start_time));
+		debug2("running rollup at %s", slurm_ctime(&start_time));
 		acct_storage_g_roll_usage(db_conn, 0, 0, 1);
 		running_rollup = 0;
 		slurm_mutex_unlock(&rollup_lock);

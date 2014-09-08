@@ -46,9 +46,7 @@
 #include <ctype.h>
 #include <sys/stat.h>
 
-#include "src/common/xstring.h"
-#include "src/common/xmalloc.h"
-#include "src/common/list.h"
+#include "src/common/slurm_xlator.h"
 #include "filetxt_jobacct_process.h"
 #include "src/slurmctld/slurmctld.h"
 #include "src/slurmdbd/read_config.h"
@@ -467,8 +465,8 @@ static FILE *_open_log_file(char *logfile)
 }
 
 static int _cmp_jrec(const void *a1, const void *a2) {
-	expired_rec_t *j1 = (expired_rec_t *) a1;
-	expired_rec_t *j2 = (expired_rec_t *) a2;
+	expired_rec_t *j1 = *(expired_rec_t **) a1;
+	expired_rec_t *j2 = *(expired_rec_t **) a2;
 
 	if (j1->job <  j2->job)
 		return -1;
