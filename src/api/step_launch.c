@@ -442,6 +442,8 @@ void slurm_step_launch_wait_finish(slurm_step_ctx_t *ctx)
 			}
 		}
 	}
+	if (sls->abort && !time_set)
+		info("Job step aborted");	/* no need to wait */
 
 	if (!force_terminated_job && task_exit_signal)
 		info("Force Terminated job step %u.%u",
@@ -931,13 +933,13 @@ _node_fail_handler(struct step_launch_state *sls, slurm_msg_t *fail_msg)
 	for (i = 0; i < num_node_ids; i++) {
 		node = hostlist_next(fail_itr);
 		node_id = node_ids[i] = hostset_find(all_nodes, node);
-		free(node);
-
 		if (node_id < 0) {
 			error(  "Internal error: bad SRUN_NODE_FAIL message. "
 				"Node %s not part of this job step", node);
+			free(node);
 			continue;
 		}
+		free(node);
 
 		/* find all of the tasks that should run on this node and
 		 * mark them as having started and exited.  If they haven't
@@ -1028,13 +1030,13 @@ _step_missing_handler(struct step_launch_state *sls, slurm_msg_t *missing_msg)
 	for (i = 0; i < num_node_ids; i++) {
 		node = hostlist_next(fail_itr);
 		node_id = hostset_find(all_nodes, node);
-		free(node);
-
 		if (node_id < 0) {
 			error(  "Internal error: bad SRUN_STEP_MISSING message. "
 				"Node %s not part of this job step", node);
+			free(node);
 			continue;
 		}
+		free(node);
 
 		/* If this is true, an I/O error has already occurred on the
 		   stepd for the current node, and the job should abort */

@@ -3,6 +3,43 @@ documents those changes that are of interest to users and admins.
 
 * Changes in SLURM 2.1.1
 =============================
+ -- Fix for case sensitive databases when a slurmctld has a mixed case
+    clustername to lower case the string to easy compares.
+ -- Fix squeue if job is completing and failed to print remaining
+    nodes instead of failed message.
+ -- Fix sview core when searching for partitions by state.
+ -- Fixed setting the start time when querying in sacct to the
+    beginning of the day if not set previously.
+ -- Defined slurm_free_reservation_info_msg and slurm_free_topo_info_msg
+    in common/slurm_protocol_defs.h
+ -- Avoid generating error when a job step includes a memory specification and 
+    memory is not configured as a consumable resource.
+ -- Patch for small memory leak in src/common/plugstack.c
+ -- Fix sview search on node state.
+ -- Fix bug in which improperly formed job dependency specification can cause
+    slurmctld to abort.
+ -- Fixed issue where slurmctld wouldn't always get a message to send cluster
+    information when registering for the first time with the slurmdbd.
+ -- Add slurm_*_trigger.3 man pages for event trigger APIs.
+ -- Fix bug in job preemption logic that would free allocated memory twice.
+ -- Fix spelling issues (from Gennaro Oliva)
+ -- Fix issue when changing parents of an account in accounting all childern
+    weren't always sent to their respected slurmctlds until a restart.
+ -- Restore support for srun/salloc/sbatch option --hint=nomultithread to 
+    bind tasks to cores rather than threads (broken in slurm v2.1.0-pre5).
+ -- Fix issue where a 2.0 sacct could not talk correctly to a 2.1 slurmdbd.
+ -- BLUEGENE - Fix issue where no partitions have any nodes assigned them to
+    alert user no blocks can be created.
+ -- BLUEGENE - Fix smap to put BGP images when using -Dc on a Blue Gene/P system
+ -- Set SLURM_SUBMIT_DIR environment variable for srun and salloc commands to
+    match behavior of sbatch command.
+ -- Report WorkDir from "scontrol show job" command for jobs launched using
+    salloc and srun.
+ -- Update correctly the wckey when changing it on a pending job.
+ -- Set wckeyid correctly in accounting when cancelling a pending job.
+ -- BLUEGENE - critical fix where jobs would be killed incorrectly.
+ -- BLUEGENE - fix for sview putting multiple ionodes on to nodelists when
+    viewing the jobs tab.
 
 * Changes in SLURM 2.1.0
 =============================
@@ -4762,4 +4799,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 19206 2010-01-05 17:01:44Z da $
+$Id: NEWS 19293 2010-01-21 01:45:33Z da $

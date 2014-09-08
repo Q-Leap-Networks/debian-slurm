@@ -386,6 +386,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	hl_last = hostlist_create(NULL);
 	if (!hl_last) {
 		error("slurm_sprint_job_info: hostlist_create: NULL");
+		hostlist_destroy(hl);
 		return NULL;
 	}
 
@@ -411,6 +412,8 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 		core_bitmap = bit_alloc(bit_reps);
 		if (core_bitmap == NULL) {
 			error("bit_alloc malloc failure");
+			hostlist_destroy(hl_last);
+			hostlist_destroy(hl);
 			return NULL;
 		}
 
@@ -572,7 +575,7 @@ line13:
 		 job_ptr->contiguous, job_ptr->licenses, job_ptr->network);
 	xstrcat(out, tmp_line);
 
-	/****** Lines 16, 17 (optional, batch only) ******/
+	/****** Line 16 (optional, batch only) ******/
 	if (job_ptr->batch_flag) {
 		if (one_liner)
 			xstrcat(out, " ");
@@ -580,14 +583,15 @@ line13:
 			xstrcat(out, "\n   ");
 		sprintf(tmp_line, "Command=%s", job_ptr->command);
 		xstrcat(out, tmp_line);
-
-		if (one_liner)
-			xstrcat(out, " ");
-		else
-			xstrcat(out, "\n   ");
-		sprintf(tmp_line, "WorkDir=%s", job_ptr->work_dir);
-		xstrcat(out, tmp_line);
 	}
+	if (one_liner)
+		xstrcat(out, " ");
+	else
+		xstrcat(out, "\n   ");
+
+	/****** Line 17 ******/
+	sprintf(tmp_line, "WorkDir=%s", job_ptr->work_dir);
+	xstrcat(out, tmp_line);
 
 #ifdef HAVE_BG
 	/****** Line 18 (optional) ******/

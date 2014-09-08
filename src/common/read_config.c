@@ -371,6 +371,13 @@ static void _set_node_prefix(const char *nodenames)
 		       && nodenames[i-1] >= '0'))
 			break;
 	}
+
+	if(i == 1) {
+		error("In your Node definition in your slurm.conf you "
+		      "gave a nodelist '%s' without a prefix.  "
+		      "Please try something like bg%s.", nodenames, nodenames);
+	}
+
 	xfree(conf_ptr->node_prefix);
 	if(nodenames[i] == '\0')
 		conf_ptr->node_prefix = xstrdup(nodenames);
@@ -1803,6 +1810,16 @@ _validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 		conf->batch_start_timeout = DEFAULT_BATCH_START_TIMEOUT;
 
 	s_p_get_string(&conf->cluster_name, "ClusterName", hashtbl);
+	/* Some databases are case sensitive so we have to make sure
+	   the cluster name is lower case since sacctmgr makes sure
+	   this is the case as well.
+	*/
+	if(conf->cluster_name) {
+		int i;
+		for (i = 0; conf->cluster_name[i] != '\0'; i++)
+			conf->cluster_name[i] =
+				(char)tolower(conf->cluster_name[i]);
+	}
 
 	if (!s_p_get_uint16(&conf->complete_wait, "CompleteWait", hashtbl))
 		conf->complete_wait = DEFAULT_COMPLETE_WAIT;
@@ -2256,7 +2273,7 @@ _validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 #ifdef HAVE_BG
 	if ((conf->preempt_mode & PREEMPT_MODE_GANG) ||
 	    (conf->preempt_mode & PREEMPT_MODE_SUSPEND))
-		fatal("PreemptMode incompatable with BlueGene systems");
+		fatal("PreemptMode incompatible with BlueGene systems");
 #endif
 
 	if (s_p_get_string(&temp_str, "PriorityDecayHalfLife", hashtbl)) {

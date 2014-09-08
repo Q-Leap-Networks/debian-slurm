@@ -321,9 +321,9 @@ static uint32_t _get_wckeyid(mysql_conn_t *mysql_conn, char **name,
 			wckey_ptr->user = xstrdup(user);
 			wckey_ptr->cluster = xstrdup(cluster);
 			list_append(wckey_list, wckey_ptr);
-/* 			info("adding wckey '%s' '%s' '%s'", */
-/* 				     wckey_ptr->name, wckey_ptr->user, */
-/* 				     wckey_ptr->cluster); */
+			/* info("adding wckey '%s' '%s' '%s'", */
+			/* 	     wckey_ptr->name, wckey_ptr->user, */
+			/* 	     wckey_ptr->cluster); */
 			/* we have already checked to make
 			   sure this was the slurm user before
 			   calling this */
@@ -341,7 +341,7 @@ static uint32_t _get_wckeyid(mysql_conn_t *mysql_conn, char **name,
 			list_destroy(wckey_list);
 		}
 		xfree(user);
-		//info("got wckeyid of %d", wckey_rec.id);
+		/* info("got wckeyid of %d", wckey_rec.id); */
 		wckeyid = wckey_rec.id;
 	}
 no_wckeyid:
@@ -1783,7 +1783,7 @@ static int _addto_update_list(List update_list, acct_update_type_t type,
 /* This should take care of all the lft and rgts when you move an
  * account.  This handles deleted associations also.
  */
-static int _move_account(mysql_conn_t *mysql_conn, uint32_t lft, uint32_t rgt,
+static int _move_account(mysql_conn_t *mysql_conn, uint32_t *lft, uint32_t *rgt,
 			 char *cluster,
 			 char *id, char *parent, time_t now)
 {
@@ -1813,7 +1813,7 @@ static int _move_account(mysql_conn_t *mysql_conn, uint32_t lft, uint32_t rgt,
 	par_left = atoi(row[0]);
 	mysql_free_result(result);
 
-	diff = ((par_left + 1) - lft);
+	diff = ((par_left + 1) - *lft);
 
 	if(diff == 0) {
 		debug3("Trying to move association to the same position?  "
@@ -1821,7 +1821,7 @@ static int _move_account(mysql_conn_t *mysql_conn, uint32_t lft, uint32_t rgt,
 		return ESLURM_SAME_PARENT_ACCOUNT;
 	}
 
-	width = (rgt - lft + 1);
+	width = (*rgt - *lft + 1);
 
 	/* every thing below needs to be a %d not a %u because we are
 	   looking for -1 */
@@ -1829,7 +1829,7 @@ static int _move_account(mysql_conn_t *mysql_conn, uint32_t lft, uint32_t rgt,
 		   "update %s set mod_time=%d, deleted = deleted + 2, "
 		   "lft = lft + %d, rgt = rgt + %d "
 		   "WHERE lft BETWEEN %d AND %d;",
-		   assoc_table, now, diff, diff, lft, rgt);
+		   assoc_table, now, diff, diff, *lft, *rgt);
 
 	xstrfmtcat(query,
 		   "UPDATE %s SET mod_time=%d, rgt = rgt + %d WHERE "
@@ -1849,11 +1849,11 @@ static int _move_account(mysql_conn_t *mysql_conn, uint32_t lft, uint32_t rgt,
 		   "(%d < 0 && lft > %d && deleted < 2) "
 		   "|| (%d > 0 && lft > %d);",
 		   assoc_table, now, width,
-		   diff, rgt,
-		   diff, lft,
+		   diff, *rgt,
+		   diff, *lft,
 		   assoc_table, now, width,
-		   diff, rgt,
-		   diff, lft);
+		   diff, *rgt,
+		   diff, *lft);
 
 	xstrfmtcat(query,
 		   "update %s set mod_time=%d, "
@@ -1863,9 +1863,23 @@ static int _move_account(mysql_conn_t *mysql_conn, uint32_t lft, uint32_t rgt,
 		   "update %s set mod_time=%d, "
 		   "parent_acct=\"%s\" where id = %s;",
 		   assoc_table, now, parent, id);
+	/* get the new lft and rgt if changed */
+	xstrfmtcat(query,
+		   "select lft, rgt from %s where id = %s",
+		   assoc_table, id);
 	debug3("%d(%d) query\n%s", mysql_conn->conn, __LINE__, query);
-	rc = mysql_db_query(mysql_conn->db_conn, query);
+	if(!(result = mysql_db_query_ret(mysql_conn->db_conn, query, 1))) {
+		xfree(query);
+		return SLURM_ERROR;
+	}
 	xfree(query);
+	if((row = mysql_fetch_row(result))) {
+		debug4("lft and rgt were %u %u and now is %s %s",
+		       *lft, *rgt, row[0], row[1]);
+		*lft = atoi(row[0]);
+		*rgt = atoi(row[1]);
+	}
+	mysql_free_result(result);
 
 	return rc;
 }
@@ -1876,7 +1890,7 @@ static int _move_account(mysql_conn_t *mysql_conn, uint32_t lft, uint32_t rgt,
  * of current parent, and parent to be child of child.)
  */
 static int _move_parent(mysql_conn_t *mysql_conn, uid_t uid,
-			uint32_t lft, uint32_t rgt,
+			uint32_t *lft, uint32_t *rgt,
 			char *cluster,
 			char *id, char *old_parent, char *new_parent,
 			time_t now)
@@ -1893,7 +1907,7 @@ static int _move_parent(mysql_conn_t *mysql_conn, uid_t uid,
 	query = xstrdup_printf(
 		"select id, lft, rgt from %s where lft between %d and %d "
 		"&& acct=\"%s\" && user='' order by lft;",
-		assoc_table, lft, rgt,
+		assoc_table, *lft, *rgt,
 		new_parent);
 	debug3("%d(%d) query\n%s", mysql_conn->conn, __LINE__, query);
 	if(!(result =
@@ -1904,9 +1918,11 @@ static int _move_parent(mysql_conn_t *mysql_conn, uid_t uid,
 	xfree(query);
 
 	if((row = mysql_fetch_row(result))) {
+		uint32_t child_lft = atoi(row[1]), child_rgt = atoi(row[2]);
+
 		debug4("%s(%s) %s,%s is a child of %s",
 		       new_parent, row[0], row[1], row[2], id);
-		rc = _move_account(mysql_conn, atoi(row[1]), atoi(row[2]),
+		rc = _move_account(mysql_conn, &child_lft, &child_rgt,
 				   cluster, row[0], old_parent, now);
 	}
 
@@ -1931,7 +1947,9 @@ static int _move_parent(mysql_conn_t *mysql_conn, uid_t uid,
 	xfree(query);
 
 	if((row = mysql_fetch_row(result))) {
-		rc = _move_account(mysql_conn, atoi(row[0]), atoi(row[1]),
+		*lft = atoi(row[0]);
+		*rgt = atoi(row[1]);
+		rc = _move_account(mysql_conn, lft, rgt,
 				   cluster, id, new_parent, now);
 	} else {
 		error("can't find parent? we were able to a second ago.");
@@ -2097,7 +2115,6 @@ static int _modify_unset_users(mysql_conn_t *mysql_conn,
 
 		mod_assoc = xmalloc(sizeof(acct_association_rec_t));
 		init_acct_association_rec(mod_assoc);
-
 		mod_assoc->id = atoi(row[ASSOC_ID]);
 
 		if(!row[ASSOC_MJ] && assoc->max_jobs != NO_VAL) {
@@ -4567,6 +4584,9 @@ extern int acct_storage_p_add_associations(mysql_conn_t *mysql_conn,
 			xfree(extra);
 			continue;
 		} else {
+			uint32_t lft = atoi(row[MASSOC_LFT]);
+			uint32_t rgt = atoi(row[MASSOC_RGT]);
+
 			/* If it was once deleted we have kept the lft
 			 * and rgt's consant while it was deleted and
 			 * so we can just unset the deleted flag,
@@ -4579,8 +4599,7 @@ extern int acct_storage_p_add_associations(mysql_conn_t *mysql_conn,
 
 				/* We need to move the parent! */
 				if(_move_parent(mysql_conn, uid,
-						atoi(row[MASSOC_LFT]),
-						atoi(row[MASSOC_RGT]),
+						&lft, &rgt,
 						object->cluster,
 						row[MASSOC_ID],
 						row[MASSOC_PACCT],
@@ -4589,8 +4608,8 @@ extern int acct_storage_p_add_associations(mysql_conn_t *mysql_conn,
 					continue;
 				moved_parent = 1;
 			} else {
-				object->lft = atoi(row[MASSOC_LFT]);
-				object->rgt = atoi(row[MASSOC_RGT]);
+				object->lft = lft;
+				object->rgt = rgt;
 			}
 
 			affect_rows = 2;
@@ -5412,19 +5431,10 @@ extern List acct_storage_p_modify_clusters(mysql_conn_t *mysql_conn,
 		return NULL;
 	}
 
-	/* Set here is used to ask for jobs and nodes in anything
-	 * other than up state, so it you reset it later make sure
-	 * this is accounted for before you do
-	 */
-	set = 1;
 	rc = 0;
 	ret_list = list_create(slurm_destroy_char);
 	while((row = mysql_fetch_row(result))) {
 		object = xstrdup(row[0]);
-
-		/* check to see if this is the first time to register */
-		if(clust_reg && (row[1][0] == '0'))
-			set = 0;
 
 		list_append(ret_list, object);
 		if(!rc) {
@@ -5456,50 +5466,6 @@ extern List acct_storage_p_modify_clusters(mysql_conn_t *mysql_conn,
 			list_destroy(ret_list);
 			ret_list = NULL;
 			goto end_it;
-		}
-	}
-
-	/* Get all nodes in a down state and jobs pending or running.
-	 * This is for the first time a cluster registers
-	 */
-
-	if(!set && slurmdbd_conf) {
-		/* This only happens here with the slurmdbd.  If
-		 * calling this plugin directly we do this in
-		 * clusteracct_storage_p_cluster_procs.
-		 */
-		slurm_addr ctld_address;
-		slurm_fd fd;
-
-		info("First time to register cluster requesting "
-		     "running jobs and system information.");
-
-		slurm_set_addr_char(&ctld_address, cluster->control_port,
-				    cluster->control_host);
-		fd = slurm_open_msg_conn(&ctld_address);
-		if (fd < 0) {
-			error("can not open socket back to slurmctld "
-			      "%s(%u): %m", cluster->control_host,
-			      cluster->control_port);
-		} else {
-			slurm_msg_t out_msg;
-			accounting_update_msg_t update;
-			/* We have to put this update message here so
-			   we can tell the sender to send the correct
-			   RPC version.
-			*/
-			memset(&update, 0, sizeof(accounting_update_msg_t));
-			update.rpc_version = cluster->rpc_version;
-			slurm_msg_t_init(&out_msg);
-			out_msg.msg_type = ACCOUNTING_FIRST_REG;
-			out_msg.flags = SLURM_GLOBAL_AUTH_KEY;
-			out_msg.data = &update;
-			slurm_send_node_msg(fd, &out_msg);
-			/* We probably need to add matching recv_msg function
-			 * for an arbitray fd or should these be fire
-			 * and forget?  For this, that we can probably
-			 * forget about it */
-			slurm_close_stream(fd);
 		}
 	}
 
@@ -5655,6 +5621,12 @@ extern List acct_storage_p_modify_associations(
 	while((row = mysql_fetch_row(result))) {
 		acct_association_rec_t *mod_assoc = NULL;
 		int account_type=0;
+		/* If parent changes these also could change
+		   so we need to keep track of the latest
+		   ones.
+		*/
+		uint32_t lft = atoi(row[MASSOC_LFT]);
+		uint32_t rgt = atoi(row[MASSOC_RGT]);
 
 		if(!is_admin) {
 			acct_coord_rec_t *coord = NULL;
@@ -5743,8 +5715,7 @@ extern List acct_storage_p_modify_associations(
 					continue;
 				}
 				rc = _move_parent(mysql_conn, uid,
-						  atoi(row[MASSOC_LFT]),
-						  atoi(row[MASSOC_RGT]),
+						  &lft, &rgt,
 						  row[MASSOC_CLUSTER],
 						  row[MASSOC_ID],
 						  row[MASSOC_PACCT],
@@ -5875,8 +5846,7 @@ extern List acct_storage_p_modify_associations(
 			_modify_unset_users(mysql_conn,
 					    mod_assoc,
 					    row[MASSOC_ACCT],
-					    atoi(row[MASSOC_LFT]),
-					    atoi(row[MASSOC_RGT]),
+					    lft, rgt,
 					    ret_list,
 					    moved_parent);
 		}
@@ -8259,7 +8229,7 @@ extern List acct_storage_p_get_associations(mysql_conn_t *mysql_conn,
 	MYSQL_RES *result = NULL;
 	MYSQL_ROW row;
 	uint32_t parent_mj = INFINITE;
-        uint32_t parent_msj = INFINITE;
+	uint32_t parent_msj = INFINITE;
 	uint32_t parent_mcpj = INFINITE;
 	uint32_t parent_mnpj = INFINITE;
 	uint32_t parent_mwpj = INFINITE;
@@ -10333,17 +10303,12 @@ extern int clusteracct_storage_p_cluster_procs(mysql_conn_t *mysql_conn,
 		/* Get all nodes in a down state and jobs pending or running.
 		 * This is for the first time a cluster registers
 		 *
-		 * This only happens here when calling the plugin directly.  If
-		 * calling this plugin throught the slurmdbd we do this in
-		 * acct_storage_p_modify_clusters.
+		 * We will return ACCOUNTING_FIRST_REG so this
+		 * is taken care of since the message thread
+		 * may not be up when we run this in the controller or
+		 * in the slurmdbd.
 		 */
-		if(!slurmdbd_conf) {
-			/* We will return ACCOUNTING_FIRST_REG so this
-			   is taken care of since the message thread
-			   may not be up when we run this in the controller.
-			*/
-			first = 1;
-		}
+		first = 1;
 		goto add_it;
 	}
 
@@ -10642,8 +10607,10 @@ no_rollup_change:
 #endif
 	}
 
-	/* if there is a start_time get the wckeyid */
-	if(job_ptr->start_time && job_ptr->assoc_id)
+	/* If there is a start_time get the wckeyid.  If the job is
+	 * cancelled before the job starts we also want to grab it. */
+	if(job_ptr->assoc_id
+	   && (job_ptr->start_time || IS_JOB_CANCELLED(job_ptr)))
 		wckeyid = _get_wckeyid(mysql_conn, &job_ptr->wckey,
 				       job_ptr->user_id, cluster_name,
 				       job_ptr->assoc_id);

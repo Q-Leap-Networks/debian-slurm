@@ -2,7 +2,7 @@
  *  bg_job_run.c - blue gene job execution (e.g. initiation and termination)
  *  functions.
  *
- *  $Id: bg_job_run.c 19215 2010-01-05 19:20:58Z da $
+ *  $Id: bg_job_run.c 19292 2010-01-21 01:17:17Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -364,7 +364,7 @@ static void _remove_jobs_on_block_and_reset(rm_job_list_t *job_list,
 		debug2("looking at block %s looking for %s\n",
 		       job_block, block_id);
 
-		if (!strcmp(job_block, block_id)) {
+		if (strcmp(job_block, block_id)) {
 			free(job_block);
 			continue;
 		}

@@ -7009,7 +7009,7 @@ static bool _validate_acct_policy(job_desc_msg_t *job_desc,
 		    (qos_ptr->grp_used_submit_jobs
 		     >= qos_ptr->grp_submit_jobs)) {
 			info("job submit for user %s(%u): "
-			     "group max submit job limit exceded %u "
+			     "group max submit job limit exceeded %u "
 			     "for qos '%s'",
 			     user_name,
 			     job_desc->user_id,
@@ -7084,7 +7084,7 @@ static bool _validate_acct_policy(job_desc_msg_t *job_desc,
 			if(used_limits && (used_limits->submit_jobs
 					   >= qos_ptr->max_submit_jobs_pu)) {
 				info("job submit for user %s(%u): "
-				     "account max submit job limit exceded %u",
+				     "account max submit job limit exceeded %u",
 				     user_name,
 				     job_desc->user_id,
 				     qos_ptr->max_submit_jobs_pu);
@@ -7461,9 +7461,9 @@ extern int update_job_wckey(char *module, struct job_record *job_ptr,
 		}
 	}
 
+	xfree(job_ptr->wckey);
 	if (wckey_rec.name && wckey_rec.name[0] != '\0') {
-		xstrfmtcat(job_ptr->name, "\"%s", wckey_rec.name);
-		job_ptr->account = xstrdup(wckey_rec.name);
+		job_ptr->wckey = xstrdup(wckey_rec.name);
 		info("%s: setting wckey to %s for job_id %u",
 		     module, wckey_rec.name, job_ptr->job_id);
 	} else {
