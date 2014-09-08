@@ -127,7 +127,7 @@ static int _set_cond(int *start, int argc, char *argv[],
 			
 			if(!qos_list) {
 				qos_list = acct_storage_g_get_qos(
-					db_conn, NULL);
+					db_conn, my_uid, NULL);
 			}
 			
 			addto_qos_char_list(acct_cond->qos_list, qos_list,
@@ -224,7 +224,7 @@ static int _set_rec(int *start, int argc, char *argv[],
 			
 			if(!qos_list) {
 				qos_list = acct_storage_g_get_qos(
-					db_conn, NULL);
+					db_conn, my_uid, NULL);
 			}
 			if(end > 2 && argv[i][end-1] == '='
 			   && (argv[i][end-2] == '+' 
@@ -253,6 +253,38 @@ static int _set_rec(int *start, int argc, char *argv[],
 	else if(u_set)
 		return 1;
 	return 0;
+}
+
+static int _isdefault(List acct_list)
+{
+	int rc = 0;
+	acct_user_cond_t user_cond;
+	List ret_list = NULL;
+
+	if(!acct_list || !list_count(acct_list))
+		return rc;
+
+	memset(&user_cond, 0, sizeof(acct_user_cond_t));
+	user_cond.def_acct_list = acct_list;
+
+	ret_list = acct_storage_g_get_users(db_conn, my_uid, &user_cond);
+	if(ret_list && list_count(ret_list)) {
+		ListIterator itr = list_iterator_create(ret_list);
+		acct_user_rec_t *user = NULL;
+		fprintf(stderr," Users listed below have these "
+			"as their Default Accounts.\n");
+		while((user = list_next(itr))) {
+			fprintf(stderr, " User - %-10.10s Account - %s\n",
+				user->name, user->default_acct);
+		}
+		list_iterator_destroy(itr);
+		rc = 1;		
+	}
+
+	if(ret_list)
+		list_destroy(ret_list);
+
+	return rc;
 }
 
 extern int sacctmgr_add_account(int argc, char *argv[])
@@ -335,7 +367,7 @@ extern int sacctmgr_add_account(int argc, char *argv[])
 			
 			if(!qos_list) {
 				qos_list = acct_storage_g_get_qos(
-					db_conn, NULL);
+					db_conn, my_uid, NULL);
 			}
 			addto_qos_char_list(add_qos_list, qos_list,
 					    argv[i]+end, option);
@@ -364,7 +396,7 @@ extern int sacctmgr_add_account(int argc, char *argv[])
 		account_cond.assoc_cond = &assoc_cond;
 
 		local_account_list = acct_storage_g_get_accounts(
-			db_conn, &account_cond);
+			db_conn, my_uid, &account_cond);
 		
 	}
 	if(!local_account_list) {
@@ -386,7 +418,7 @@ extern int sacctmgr_add_account(int argc, char *argv[])
 		List temp_list = NULL;
 		acct_cluster_rec_t *cluster_rec = NULL;
 
-		temp_list = acct_storage_g_get_clusters(db_conn, NULL);
+		temp_list = acct_storage_g_get_clusters(db_conn, my_uid, NULL);
 		if(!cluster_list) {
 			exit_code=1;
 			fprintf(stderr, 
@@ -428,7 +460,8 @@ extern int sacctmgr_add_account(int argc, char *argv[])
 		memset(&cluster_cond, 0, sizeof(acct_cluster_cond_t));
 		cluster_cond.cluster_list = cluster_list;
 
-		temp_list = acct_storage_g_get_clusters(db_conn, &cluster_cond);
+		temp_list = acct_storage_g_get_clusters(db_conn, my_uid,
+							&cluster_cond);
 		
 		itr_c = list_iterator_create(cluster_list);
 		itr = list_iterator_create(temp_list);
@@ -477,7 +510,7 @@ extern int sacctmgr_add_account(int argc, char *argv[])
 
 	assoc_cond.cluster_list = cluster_list;
 	local_assoc_list = acct_storage_g_get_associations(
-		db_conn, &assoc_cond);	
+		db_conn, my_uid, &assoc_cond);	
 	list_destroy(assoc_cond.acct_list);
 	if(!local_assoc_list) {
 		exit_code=1;
@@ -866,7 +899,7 @@ extern int sacctmgr_list_account(int argc, char *argv[])
 		return SLURM_ERROR;
 	}
 
-	acct_list = acct_storage_g_get_accounts(db_conn, acct_cond);	
+	acct_list = acct_storage_g_get_accounts(db_conn, my_uid, acct_cond);	
 	destroy_acct_account_cond(acct_cond);
 
 	if(!acct_list) {
@@ -969,6 +1002,7 @@ extern int sacctmgr_list_account(int argc, char *argv[])
 							qos_list = 
 								acct_storage_g_get_qos(
 									db_conn,
+									my_uid,
 									NULL);
 						}
 						field->print_routine(
@@ -983,6 +1017,7 @@ extern int sacctmgr_list_account(int argc, char *argv[])
 							qos_list = 
 								acct_storage_g_get_qos(
 									db_conn,
+									my_uid,
 									NULL);
 						}
 						field->print_routine(
@@ -1104,6 +1139,7 @@ extern int sacctmgr_list_account(int argc, char *argv[])
 						qos_list = 
 							acct_storage_g_get_qos(
 								db_conn,
+								my_uid,
 								NULL);
 					}
 					field->print_routine(
@@ -1117,6 +1153,7 @@ extern int sacctmgr_list_account(int argc, char *argv[])
 						qos_list = 
 							acct_storage_g_get_qos(
 								db_conn,
+								my_uid,
 								NULL);
 					}
 					field->print_routine(
@@ -1356,7 +1393,23 @@ extern int sacctmgr_delete_account(int argc, char *argv[])
 	
 	if(ret_list && list_count(ret_list)) {
 		char *object = NULL;
-		ListIterator itr = list_iterator_create(ret_list);
+		ListIterator itr = NULL;
+
+		/* Check to see if person is trying to remove a default
+		 * account of a user.
+		 */
+		if(_isdefault(ret_list)) {
+			exit_code=1;
+			fprintf(stderr, " Please either remove accounts listed "
+				"above from list and resubmit,\n"
+				" or change these users default account to "
+				"remove the account(s).\n"
+				" Changes Discarded\n");
+			list_destroy(ret_list);
+			acct_storage_g_commit(db_conn, 0);
+			return SLURM_ERROR;	
+		}
+		itr = list_iterator_create(ret_list);
 		if(set == 1) {
 			printf(" Deleting accounts...\n");
 		} else if(set == 2 || set == 3) {

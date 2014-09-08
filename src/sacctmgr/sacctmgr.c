@@ -171,7 +171,10 @@ main (int argc, char *argv[])
 		log_alter(opts, 0, NULL);
 	}
 
-	db_conn = acct_storage_g_get_connection(false, rollback_flag);
+	/* always do a rollback.  If you don't then if there is an
+	 * error you can not rollback ;)
+	 */
+	db_conn = acct_storage_g_get_connection(false, 1);
 	my_uid = getuid();
 
 	if (input_field_count)
@@ -480,6 +483,9 @@ static void _add_it (int argc, char *argv[])
 		return;		
 	}
 
+	/* reset the connection to get the most recent stuff */
+	acct_storage_g_commit(db_conn, 0);
+
 	/* First identify the entity to add */
 	if (strncasecmp (argv[0], "Account", 1) == 0) {
 		error_code = sacctmgr_add_account((argc - 1), &argv[1]);
@@ -515,6 +521,9 @@ static void _show_it (int argc, char *argv[])
 {
 	int error_code = SLURM_SUCCESS;
 		
+	/* reset the connection to get the most recent stuff */
+	acct_storage_g_commit(db_conn, 0);
+
 	/* First identify the entity to list */
 	if (strncasecmp (argv[0], "Account", 2) == 0) {
 		error_code = sacctmgr_list_account((argc - 1), &argv[1]);
@@ -558,6 +567,9 @@ static void _modify_it (int argc, char *argv[])
 		return;		
 	}
 
+	/* reset the connection to get the most recent stuff */
+	acct_storage_g_commit(db_conn, 0);
+
 	/* First identify the entity to modify */
 	if (strncasecmp (argv[0], "Account", 1) == 0) {
 		error_code = sacctmgr_modify_account((argc - 1), &argv[1]);
@@ -592,6 +604,9 @@ static void _delete_it (int argc, char *argv[])
 		fprintf(stderr, "Can't run this command in readonly mode.\n");
 		return;		
 	}
+
+	/* reset the connection to get the most recent stuff */
+	acct_storage_g_commit(db_conn, 0);
 
 	/* First identify the entity to delete */
 	if (strncasecmp (argv[0], "Account", 1) == 0) {

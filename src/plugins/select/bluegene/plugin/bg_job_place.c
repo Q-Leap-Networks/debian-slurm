@@ -2,7 +2,7 @@
  *  bg_job_place.c - blue gene job placement (e.g. base block selection)
  *  functions.
  *
- *  $Id: bg_job_place.c 14660 2008-07-30 17:39:47Z jette $ 
+ *  $Id: bg_job_place.c 14952 2008-09-03 16:08:14Z da $ 
  *****************************************************************************
  *  Copyright (C) 2004-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -531,6 +531,7 @@ static int _check_for_booted_overlapping_blocks(
 	bg_record_t *found_record = NULL;
 	ListIterator itr = NULL;
 	int rc = 0;
+	int overlap = 0;
 
 	 /* this test only is for actually picking a block not testing */
 	if(test_only && bluegene_layout_mode == LAYOUT_DYNAMIC)
@@ -549,7 +550,12 @@ static int _check_for_booted_overlapping_blocks(
 			continue;
 		}
 		
-		if(blocks_overlap(bg_record, found_record)) {
+		slurm_mutex_lock(&block_state_mutex);
+		overlap = blocks_overlap(bg_record, found_record);
+		slurm_mutex_unlock(&block_state_mutex);
+
+		if(overlap) {
+			overlap = 0;
 			/* make the available time on this block
 			 * (bg_record) the max of this found_record's job
 			 * or the one already set if in overlapped_block_list
