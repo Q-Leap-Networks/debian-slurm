@@ -1609,6 +1609,8 @@ top:	orig_map = bit_copy(save_bitmap);
 			}
 			FREE_NULL_BITMAP(orig_map);
 			list_iterator_destroy(job_iterator);
+			_destroy_part_data(future_part);
+			_destroy_node_data(future_usage, NULL);
 			goto top;
 		}
 		list_iterator_destroy(job_iterator);
@@ -1914,8 +1916,8 @@ extern int select_p_node_init(struct node_record *node_ptr, int node_cnt)
 
 	info("cons_res: select_p_node_init");
 	if ((cr_type & (CR_CPU | CR_SOCKET | CR_CORE)) == 0) {
-		fatal("Invalid SelectTypeParameter: %s",
-		      select_type_param_string(cr_type));
+		fatal("Invalid SelectTypeParameters: %s (%u)",
+		      select_type_param_string(cr_type), cr_type);
 	}
 	if (node_ptr == NULL) {
 		error("select_p_node_init: node_ptr == NULL");

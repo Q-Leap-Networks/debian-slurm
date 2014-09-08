@@ -1668,7 +1668,6 @@ static void _slurm_rpc_complete_job_allocation(slurm_msg_t * msg)
 		NO_LOCK, WRITE_LOCK, WRITE_LOCK, NO_LOCK
 	};
 	uid_t uid = g_slurm_auth_get_uid(msg->auth_cred, NULL);
-	bool job_requeue = false;
 
 	/* init */
 	START_TIMER;
@@ -1682,7 +1681,7 @@ static void _slurm_rpc_complete_job_allocation(slurm_msg_t * msg)
 	/* do RPC call */
 	/* Mark job and/or job step complete */
 	error_code = job_complete(comp_msg->job_id, uid,
-				  job_requeue, false, comp_msg->job_rc);
+				  false, false, comp_msg->job_rc);
 	unlock_slurmctld(job_write_lock);
 	_throttle_fini(&active_rpc_cnt);
 	END_TIMER2("_slurm_rpc_complete_job_allocation");
@@ -1892,7 +1891,8 @@ static void _slurm_rpc_complete_batch_script(slurm_msg_t * msg)
 						 getuid());
 #endif	/* !HAVE_FRONT_END */
 #endif	/* !HAVE_BG */
-			if (comp_msg->job_rc != SLURM_SUCCESS)
+			if ((comp_msg->job_rc != SLURM_SUCCESS) && job_ptr &&
+			    job_ptr->details && job_ptr->details->requeue)
 				job_requeue = true;
 			dump_job = true;
 			dump_node = true;
@@ -2576,7 +2576,7 @@ static void _slurm_rpc_reconfigure_controller(slurm_msg_t * msg)
 		error("Security violation, RECONFIGURE RPC from uid=%d", uid);
 		error_code = ESLURM_USER_ID_MISSING;
 	}
-	if (in_progress)
+	if (in_progress || slurmctld_config.shutdown_time)
 		error_code = EINPROGRESS;
 
 	/* do RPC call */
@@ -2740,7 +2740,6 @@ static void _slurm_rpc_step_complete(slurm_msg_t *msg)
 	slurmctld_lock_t job_write_lock = {
 		NO_LOCK, WRITE_LOCK, WRITE_LOCK, NO_LOCK };
 	uid_t uid = g_slurm_auth_get_uid(msg->auth_cred, NULL);
-	bool job_requeue = false;
 	bool dump_job = false, dump_node = false;
 
 	/* init */
@@ -2767,7 +2766,7 @@ static void _slurm_rpc_step_complete(slurm_msg_t *msg)
 
 	if (req->job_step_id == SLURM_BATCH_SCRIPT) {
 		/* FIXME: test for error, possibly cause batch job requeue */
-		error_code = job_complete(req->job_id, uid, job_requeue,
+		error_code = job_complete(req->job_id, uid, false,
 					  false, step_rc);
 		unlock_slurmctld(job_write_lock);
 		_throttle_fini(&active_rpc_cnt);
@@ -2786,7 +2785,7 @@ static void _slurm_rpc_step_complete(slurm_msg_t *msg)
 		}
 	} else {
 		error_code = job_step_complete(req->job_id, req->job_step_id,
-					       uid, job_requeue, step_rc);
+					       uid, false, step_rc);
 		unlock_slurmctld(job_write_lock);
 		_throttle_fini(&active_rpc_cnt);
 		END_TIMER2("_slurm_rpc_step_complete");
@@ -3790,9 +3789,12 @@ inline static void _slurm_rpc_requeue(slurm_msg_t * msg)
 			 * requested operation and carry on. The requeue
 			 * will be done after the last job epilog completes.
 			 */
-			if (req_ptr->state & JOB_SPECIAL_EXIT)
+			if (!(job_ptr->job_state & JOB_SPECIAL_EXIT)
+			    && req_ptr->state & JOB_SPECIAL_EXIT)
 				job_ptr->job_state |= JOB_SPECIAL_EXIT;
-			if (req_ptr->state & JOB_REQUEUE_HOLD)
+
+			if (!(job_ptr->job_state & JOB_REQUEUE_HOLD)
+			    && req_ptr->state & JOB_REQUEUE_HOLD)
 				job_ptr->job_state |= JOB_REQUEUE_HOLD;
 			job_ptr->job_state |= JOB_REQUEUE;
 

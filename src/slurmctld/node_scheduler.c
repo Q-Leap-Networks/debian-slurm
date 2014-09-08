@@ -700,14 +700,16 @@ _resolve_shared_status(struct job_record *job_ptr, uint16_t part_max_share,
 		return 1;
 
 	if (cons_res_flag) {
+		if (part_max_share == 1) /* partition configured Shared=NO */
+			return 0;
 		if ((job_ptr->details->share_res  == 0) ||
+		    (job_ptr->details->share_res  == (uint8_t) NO_VAL) ||
 		    (job_ptr->details->whole_node == 1))
 			return 0;
 		return 1;
 	} else {
 		job_ptr->details->whole_node = 1;
-		/* no sharing if partition Shared=NO */
-		if (part_max_share == 1)
+		if (part_max_share == 1) /* partition configured Shared=NO */
 			return 0;
 		/* share if the user requested it */
 		if (job_ptr->details->share_res == 1)
@@ -1541,6 +1543,7 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 	bool configuring = false;
 	List preemptee_job_list = NULL;
 	slurmdb_qos_rec_t *qos_ptr = NULL;
+	slurmdb_association_rec_t *assoc_ptr = NULL;
 
 	xassert(job_ptr);
 	xassert(job_ptr->magic == JOB_MAGIC);
@@ -1550,6 +1553,7 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 
 	part_ptr = job_ptr->part_ptr;
 	qos_ptr = (slurmdb_qos_rec_t *)job_ptr->qos_ptr;
+	assoc_ptr = (slurmdb_association_rec_t *)job_ptr->assoc_ptr;
 
 	/* identify partition */
 	if (part_ptr == NULL) {
@@ -1558,6 +1562,28 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 		job_ptr->part_ptr = part_ptr;
 		error("partition pointer reset for job %u, part %s",
 		      job_ptr->job_id, job_ptr->partition);
+	}
+
+	/* Quick check to see if this QOS is allowed on this
+	 * partition. */
+	if ((error_code = part_policy_valid_qos(
+		     job_ptr->part_ptr, qos_ptr)) != SLURM_SUCCESS) {
+		xfree(job_ptr->state_desc);
+		job_ptr->state_reason = WAIT_QOS;
+		last_job_update = now;
+		return ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE;
+	}
+
+	/* Quick check to see if this account is allowed on
+	 * this partition. */
+	if ((error_code = part_policy_valid_acct(
+		     job_ptr->part_ptr,
+		     job_ptr->assoc_ptr ? assoc_ptr->acct : NULL))
+	    != SLURM_SUCCESS) {
+		xfree(job_ptr->state_desc);
+		job_ptr->state_reason = WAIT_ACCOUNT;
+		last_job_update = now;
+		return ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE;
 	}
 
 	if (job_ptr->priority == 0) {	/* user/admin hold */
@@ -1742,12 +1768,7 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 			job_ptr->time_limit = part_ptr->max_time;
 	}
 
-	if (job_ptr->time_limit == INFINITE)
-		job_ptr->end_time = job_ptr->start_time +
-				    (365 * 24 * 60 * 60); /* secs in year */
-	else
-		job_ptr->end_time = job_ptr->start_time +
-			(job_ptr->time_limit * 60);   /* secs */
+	job_end_time_reset(job_ptr);
 
 	if (select_g_job_begin(job_ptr) != SLURM_SUCCESS) {
 		/* Leave job queued, something is hosed */
@@ -2183,6 +2204,25 @@ extern int job_req_node_filter(struct job_record *job_ptr,
 	return SLURM_SUCCESS;
 }
 
+/* Return the count of nodes which have never registered for service,
+ * so we don't know their memory size, etc. */
+static int _no_reg_nodes(void)
+{
+	static int node_count = -1;
+	struct node_record *node_ptr;
+	int inx;
+
+	if (node_count == 0)	/* No need to keep testing */
+		return node_count;
+	node_count = 0;
+	for (inx = 0, node_ptr = node_record_table_ptr; inx < node_record_count;
+	     inx++, node_ptr++) {
+		if (node_ptr->last_response == 0)
+			node_count++;
+	}
+	return node_count;
+}
+
 /*
  * _build_node_list - identify which nodes could be allocated to a job
  *	based upon node features, memory, processors, etc. Note that a
@@ -2365,14 +2405,18 @@ static int _build_node_list(struct job_record *job_ptr,
 	FREE_NULL_BITMAP(usable_node_mask);
 
 	if (node_set_inx == 0) {
+		rc = ESLURM_REQUESTED_NODE_CONFIG_UNAVAILABLE;
 		info("No nodes satisfy job %u requirements in partition %s",
 		     job_ptr->job_id, job_ptr->part_ptr->name);
 		xfree(node_set_ptr);
 		if (job_ptr->resv_name) {
 			job_ptr->state_reason = WAIT_RESERVATION;
-			return ESLURM_NODES_BUSY;
+			rc = ESLURM_NODES_BUSY;
+		} else if ((slurmctld_conf.fast_schedule == 0) &&
+			   (_no_reg_nodes() > 0)) {
+			rc = ESLURM_NODES_BUSY;
 		}
-		return ESLURM_REQUESTED_NODE_CONFIG_UNAVAILABLE;
+		return rc;
 	}
 
 	/* If any nodes are powered down, put them into a new node_set

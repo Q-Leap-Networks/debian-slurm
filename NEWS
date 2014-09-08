@@ -1,8 +1,112 @@
 This file describes changes in recent versions of Slurm. It primarily
 documents those changes that are of interest to users and admins.
 
-* Changes in Slurm 14.03.3-2
+* Changes in Slurm 14.03.4
 ==========================
+ -- Fix issue where not enforcing QOS but a partition either allows or denies
+    them.
+ -- CRAY - Make switch/cray default when running on a Cray natively.
+ -- CRAY - Make job_container/cncu default when running on a Cray natively.
+ -- Disable job time limit change if it's preemption is in progress.
+ -- Correct logic to properly enforce job preemption GraceTime.
+ -- Fix sinfo -R to print each down/drained node once, rather than once per
+    partition.
+ -- If a job has non-responding node, retry job step create rather than
+    returning with DOWN node error.
+ -- Support SLURM_CONF path which does not have "slurm.conf" as the file name.
+ -- CRAY - make job_container/cncu default when running on a Cray natively
+ -- Fix issue where batch cpuset wasn't looked at correctly in
+    jobacct_gather/cgroup.
+ -- Correct squeue's job node and CPU counts for requeued jobs.
+ -- Correct SelectTypeParameters=CR_LLN with job selecition of specific nodes.
+ -- Only if ALL of their partitions are hidden will a job be hidden by default.
+ -- Run EpilogSlurmctld for a job is killed during slurmctld reconfiguration.
+ -- Close window with srun if waiting for an allocation and while printing
+    something you also get a signal which would produce deadlock.
+ -- Add SelectTypeParameters option of CR_PACK_NODES to pack a job's tasks
+    tightly on its allocated nodes rather than distributing them evenly across
+    the allocated nodes.
+ -- cpus-per-task support: Try to pack all CPUs of each tasks onto one socket.
+    Previous logic could spread the tasks CPUs across multiple sockets.
+ -- Add new distribution method fcyclic so when a task is using multiple cpus
+    it can bind cyclically across sockets.
+ -- task/affinity - When using --hint=nomultithread only bind to the first
+    thread in a core.
+ -- Make cgroup task layout (block | cyclic) method mirror that of
+    task/affinity.
+ -- If TaskProlog sets SLURM_PROLOG_CPU_MASK reset affinity for that task
+    based on the mask given.
+ -- Keep supporting 'srun -N x --pty bash' for historical reasons.
+ -- If EnforcePartLimits=Yes and QOS job is using can override limits, allow
+    it.
+ -- Fix issues if partition allows or denys account's or QOS' and either are
+    not set.
+ -- If a job requests a partition and it doesn't allow a QOS or account the
+    job is requesting pend unless EnforcePartLimits=Yes.  Before it would
+    always kill the job at submit.
+ -- Fix format output of scontrol command when printing node state.
+ -- Improve the clean up of cgroup hierarchy when using the
+    jobacct_gather/cgroup plugin.
+ -- Added SchedulerParameters value of Ignore_NUMA.
+ -- Fix issues with code when using automake 1.14.1
+ -- select/cons_res plugin: Fix memory leak related to job preemption.
+ -- After reconfig rebuild the job node counters only for jobs that have
+    not finished yet, otherwise if requeued the job may enter an invalid
+    COMPLETING state.
+ -- Do not purge the script and environment files for completed jobs on
+    slurmctld reconfiguration or restart (they might be later requeued).
+ -- scontrol now accepts the option job=xxx or jobid=xxx for the requeue,
+    requeuehold and release operations.
+ -- task/cgroup - fix to bind batch job in the proper CPUs.
+ -- Added strigger option of -N, --noheader to not print the header when
+    displaying a list of triggers.
+ -- Modify strigger to accept arguments to the program to execute when an
+    event trigger occurs.
+ -- Attempt to create duplicate event trigger now generates ESLURM_TRIGGER_DUP
+    ("Duplicate event trigger").
+ -- Treat special characters like %A, %s etc. literally in the file names
+    when specified escaped e.g. sbatch -o /home/zebra\\%s will not expand
+    %s as the stepid of the running job.
+ -- CRAYALPS - Add better support for CLE 5.2 when running Slurm over ALPS.
+ -- Test time when job_state file was written to detect multiple primary
+    slurmctld daemons (e.g. both backup and primary are functioning as
+    primary and there is a split brain problem).
+ -- Fix scontrol to accept update jobid=# numtasks=#
+ -- If the backup slurmctld assumes primary status, then do NOT purge any
+    job state files (batch script and environment files) and do not re-use them.
+    This may indicate that multiple primary slurmctld daemons are active (e.g.
+    both backup and primary are functioning as primary and there is a split
+    brain problem).
+ -- Set correct error code when requeuing a completing/pending job
+ -- When checking for if dependency of type afterany, afterok and afternotok
+    don't clear the dependency if the job is completing.
+ -- Cleanup the JOB_COMPLETING flag and eventually requeue the job when the
+    last epilog completes, either slurmd epilog or slurmctld epilog, whichever
+    comes last.
+ -- When attempting to requeue a job distinguish the case in which the job is
+    JOB_COMPLETING or already pending.
+ -- When reconfiguring the controller don't restart the slurmctld epilog if it
+    is already running.
+ -- Email messages for job array events print now use the job ID using the
+    format "#_# (#)" rather than just the internal job ID.
+ -- Set the number of free licenses to be 0 if the global license count decreases
+    and total is less than in use.
+ -- Add DebugFlag of BackfillMap. Previously a DebugFlag value of Backfill
+    logged information about what it was doing plus a map of expected resouce
+    use in the future. Now that very verbose resource use map is only logged
+    with a DebugFlag value of BackfillMap
+ -- Fix slurmstepd core dump.
+ -- Modify the description of -E and -S option of sacct command as point in time
+    'before' or 'after' the database records are returned.
+ -- Correct support for partition with Shared=YES configuration.
+ -- If job requests --exclusive then do not use nodes which have any cores in an
+    advanced reservation. Also prevents case where nodes can be shared by other
+    jobs.
+ -- For "scontrol --details show job" report the correct CPU_IDs when thre are
+    multiple threads per core (we are translating a core bitmap to CPU IDs).
+
+* Changes in Slurm 14.03.3-2
+============================
  -- BGQ - Fix issue with uninitialized variable.
 
 * Changes in Slurm 14.03.3
@@ -442,6 +546,14 @@ documents those changes that are of interest to users and admins.
  -- Handle node ranges better when dealing with accounting max node limits.
  -- Fix perlapi to compile correctly with perl 5.18
  -- BGQ - Fix issue with uninitialized variable.
+ -- Correct sinfo --sort fields to match documentation: E => Reason,
+    H -> Reason Time (new), R -> Partition Name, u/U -> Reason user (new)
+ -- If an invalid assoc_ptr comes in don't use the id to verify it.
+ -- Sched/backfill modified to avoid using nodes in completing state.
+ -- Correct support for job --profile=none option and related documentation.
+ -- Properly enforce job --requeue and --norequeue options.
+ -- If a job --mem-per-cpu limit exceeds the partition or system limit, then
+    scale the job's memory limit and CPUs per task to satisfy the limit.
 
 * Changes in Slurm 2.6.9
 ========================

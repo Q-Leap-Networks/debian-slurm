@@ -168,16 +168,15 @@ static void _dump_job_sched(struct job_record *job_ptr, time_t end_time,
 	xfree(node_list);
 }
 
-static void _dump_job_test(struct job_record *job_ptr, bitstr_t *avail_bitmap)
+static void _dump_job_test(struct job_record *job_ptr, bitstr_t *avail_bitmap,
+			   time_t start_time)
 {
 	char begin_buf[32], *node_list;
 
-	if (job_ptr->start_time == 0) {
+	if (start_time == 0)
 		strcpy(begin_buf, "NOW");
-	} else {
-		slurm_make_time_str(&job_ptr->start_time, begin_buf,
-				    sizeof(begin_buf));
-	}
+	else
+		slurm_make_time_str(&start_time, begin_buf, sizeof(begin_buf));
 	node_list = bitmap2node_name(avail_bitmap);
 	info("Test job %u at %s on %s", job_ptr->job_id, begin_buf, node_list);
 	xfree(node_list);
@@ -374,7 +373,7 @@ static int  _try_sched(struct job_record *job_ptr, bitstr_t **avail_bitmap,
 		if (((rc != SLURM_SUCCESS) || (job_ptr->start_time > now)) &&
 		    (orig_shared != 0)) {
 			FREE_NULL_BITMAP(*avail_bitmap);
-			*avail_bitmap= tmp_bitmap;
+			*avail_bitmap = tmp_bitmap;
 			rc = select_g_job_test(job_ptr, *avail_bitmap,
 					       min_nodes, max_nodes, req_nodes,
 					       SELECT_MODE_WILL_RUN,
@@ -611,7 +610,8 @@ static int _attempt_backfill(void)
 	uint32_t time_limit, comp_time_limit, orig_time_limit, part_time_limit;
 	uint32_t min_nodes, max_nodes, req_nodes;
 	bitstr_t *avail_bitmap = NULL, *resv_bitmap = NULL;
-	bitstr_t *exc_core_bitmap = NULL;
+	bitstr_t *exc_core_bitmap = NULL, *non_cg_bitmap = NULL;
+	bitstr_t *previous_bitmap = NULL;
 	time_t now, sched_start, later_start, start_res, resv_end;
 	node_space_map_t *node_space;
 	struct timeval bf_time1, bf_time2;
@@ -623,7 +623,7 @@ static int _attempt_backfill(void)
 	bool already_counted;
 	uint32_t reject_array_job_id = 0;
 	struct part_record *reject_array_part = NULL;
-	uint32_t job_start_cnt = 0;
+	uint32_t job_start_cnt = 0, start_time;
 	time_t config_update = slurmctld_conf.last_update;
 	time_t part_update = last_part_update;
 
@@ -660,12 +660,18 @@ static int _attempt_backfill(void)
 
 	job_queue = build_job_queue(true, true);
 	if (list_count(job_queue) == 0) {
-		debug("backfill: no jobs to backfill");
+		if (debug_flags & DEBUG_FLAG_BACKFILL)
+			info("backfill: no jobs to backfill");
+		else
+			debug("backfill: no jobs to backfill");
 		list_destroy(job_queue);
 		return 0;
 	}
 
 	gettimeofday(&bf_time1, NULL);
+
+	non_cg_bitmap = bit_copy(cg_node_bitmap);
+	bit_not(non_cg_bitmap);
 
 	slurmctld_diag_stats.bf_queue_len = list_count(job_queue);
 	slurmctld_diag_stats.bf_queue_len_sum += slurmctld_diag_stats.
@@ -682,7 +688,7 @@ static int _attempt_backfill(void)
 	node_space[0].avail_bitmap = bit_copy(avail_node_bitmap);
 	node_space[0].next = 0;
 	node_space_recs = 1;
-	if (debug_flags & DEBUG_FLAG_BACKFILL)
+	if (debug_flags & DEBUG_FLAG_BACKFILL_MAP)
 		_dump_node_space_table(node_space);
 
 	if (max_backfill_job_per_part) {
@@ -704,14 +710,23 @@ static int _attempt_backfill(void)
 		njobs = xmalloc(BF_MAX_USERS * sizeof(uint16_t));
 	}
 	sort_job_queue(job_queue);
-	while ((job_queue_rec = (job_queue_rec_t *) list_pop(job_queue))) {
+	while (1) {
+		job_queue_rec = (job_queue_rec_t *) list_pop(job_queue);
+		if (!job_queue_rec) {
+			if (debug_flags & DEBUG_FLAG_BACKFILL)
+				info("backfill: reached end of job queue");
+			break;
+		}
+		if (slurmctld_config.shutdown_time)
+			break;
 		if (((defer_rpc_cnt > 0) &&
 		     (slurmctld_config.server_thread_count >= defer_rpc_cnt)) ||
 		    ((time(NULL) - sched_start) >= sched_timeout)) {
 			if (debug_flags & DEBUG_FLAG_BACKFILL) {
 				END_TIMER;
 				info("backfill: completed yielding locks "
-				     "after testing %d jobs, %s",
+				     "after testing %u(%d) jobs, %s",
+				     slurmctld_diag_stats.bf_last_depth,
 				     job_test_count, TIME_STR);
 			}
 			if ((_yield_locks(yield_sleep) && !backfill_continue) ||
@@ -719,13 +734,18 @@ static int _attempt_backfill(void)
 			    (last_part_update != part_update)) {
 				if (debug_flags & DEBUG_FLAG_BACKFILL) {
 					info("backfill: system state changed, "
-					     "breaking out after testing %d "
-					     "jobs", job_test_count);
+					     "breaking out after testing "
+					     "%u(%d) jobs",
+					     slurmctld_diag_stats.bf_last_depth,
+					     job_test_count);
 				}
 				rc = 1;
 				xfree(job_queue_rec);
 				break;
 			}
+			/* cg_node_bitmap may be changed */
+			bit_copybits(non_cg_bitmap, cg_node_bitmap);
+			bit_not(non_cg_bitmap);
 			/* Reset backfill scheduling timers, resume testing */
 			sched_start = time(NULL);
 			job_test_count = 0;
@@ -742,7 +762,10 @@ static int _attempt_backfill(void)
 		}
 		orig_time_limit = job_ptr->time_limit;
 		part_ptr = job_queue_rec->part_ptr;
+
 		job_test_count++;
+		slurmctld_diag_stats.bf_last_depth++;
+		already_counted = false;
 
 		xfree(job_queue_rec);
 		if (!IS_JOB_PENDING(job_ptr))
@@ -761,9 +784,6 @@ static int _attempt_backfill(void)
 
 		if (debug_flags & DEBUG_FLAG_BACKFILL)
 			info("backfill test for job %u", job_ptr->job_id);
-
-		slurmctld_diag_stats.bf_last_depth++;
-		already_counted = false;
 
 		if (max_backfill_job_per_part) {
 			bool skip_job = false;
@@ -882,7 +902,10 @@ static int _attempt_backfill(void)
 
 		/* Determine impact of any resource reservations */
 		later_start = now;
+		FREE_NULL_BITMAP(previous_bitmap);
  TRY_LATER:
+		if (slurmctld_config.shutdown_time)
+			break;
 		if (((defer_rpc_cnt > 0) &&
 		     (slurmctld_config.server_thread_count >= defer_rpc_cnt)) ||
 		    ((time(NULL) - sched_start) >= sched_timeout)) {
@@ -891,8 +914,9 @@ static int _attempt_backfill(void)
 			job_ptr->time_limit = orig_time_limit;
 			if (debug_flags & DEBUG_FLAG_BACKFILL) {
 				END_TIMER;
-				info("backfill: completed yielding locks 2"
-				     "after testing %d jobs, %s",
+				info("backfill: completed yielding locks "
+				     "after testing %u(%d) jobs, %s",
+				     slurmctld_diag_stats.bf_last_depth,
 				     job_test_count, TIME_STR);
 			}
 			if ((_yield_locks(yield_sleep) && !backfill_continue) ||
@@ -900,12 +924,17 @@ static int _attempt_backfill(void)
 			    (last_part_update != part_update)) {
 				if (debug_flags & DEBUG_FLAG_BACKFILL) {
 					info("backfill: system state changed, "
-					     "breaking out after testing %d "
-					     "jobs", job_test_count);
+					     "breaking out after testing "
+					     "%u(%d) jobs",
+					     slurmctld_diag_stats.bf_last_depth,
+					     job_test_count);
 				}
 				rc = 1;
 				break;
 			}
+			/* cg_node_bitmap may be changed */
+			bit_copybits(non_cg_bitmap, cg_node_bitmap);
+			bit_not(non_cg_bitmap);
 
 			/* With bf_continue configured, the original job could
 			 * have been scheduled or cancelled and purged.
@@ -943,6 +972,7 @@ static int _attempt_backfill(void)
 		/* Identify usable nodes for this job */
 		bit_and(avail_bitmap, part_ptr->node_bitmap);
 		bit_and(avail_bitmap, up_node_bitmap);
+		bit_and(avail_bitmap, non_cg_bitmap);
 		for (j=0; ; ) {
 			if ((node_space[j].end_time > start_res) &&
 			     node_space[j].next && (later_start == 0))
@@ -971,12 +1001,16 @@ static int _attempt_backfill(void)
 
 		/* Test if insufficient nodes remain OR
 		 *	required nodes missing OR
-		 *	nodes lack features */
+		 *	nodes lack features OR
+		 *	no change since previously tested nodes (only changes
+		 *	in other partition nodes) */
 		if ((bit_set_count(avail_bitmap) < min_nodes) ||
 		    ((job_ptr->details->req_node_bitmap) &&
 		     (!bit_super_set(job_ptr->details->req_node_bitmap,
 				     avail_bitmap))) ||
-		    (job_req_node_filter(job_ptr, avail_bitmap))) {
+		    (job_req_node_filter(job_ptr, avail_bitmap)) ||
+		    (previous_bitmap &&
+		     bit_equal(previous_bitmap, avail_bitmap))) {
 			if (later_start) {
 				job_ptr->start_time = 0;
 				goto TRY_LATER;
@@ -986,6 +1020,9 @@ static int _attempt_backfill(void)
 			job_ptr->start_time = sched_start + backfill_window;
 			continue;
 		}
+
+		FREE_NULL_BITMAP(previous_bitmap);
+		previous_bitmap = bit_copy(avail_bitmap);
 
 		/* Identify nodes which are definitely off limits */
 		FREE_NULL_BITMAP(resv_bitmap);
@@ -1001,8 +1038,8 @@ static int _attempt_backfill(void)
 			already_counted = true;
 		}
 
-		if (debug_flags & DEBUG_FLAG_BACKFILL)
-			_dump_job_test(job_ptr, avail_bitmap);
+		if (debug_flags & DEBUG_FLAG_BACKFILL_MAP)
+			_dump_job_test(job_ptr, avail_bitmap, start_res);
 		j = _try_sched(job_ptr, &avail_bitmap, min_nodes, max_nodes,
 			       req_nodes, exc_core_bitmap);
 
@@ -1017,7 +1054,7 @@ static int _attempt_backfill(void)
 			job_ptr->start_time = start_res;
 			last_job_update = now;
 		}
-		if (job_ptr->start_time <= now) {
+		if (job_ptr->start_time <= now) {	/* Can start now */
 			uint32_t save_time_limit = job_ptr->time_limit;
 			int rc = _start_job(job_ptr, resv_bitmap);
 			if (qos_ptr && (qos_ptr->flags & QOS_FLAG_NO_RESERVE)) {
@@ -1057,10 +1094,16 @@ static int _attempt_backfill(void)
 				job_ptr->start_time = 0;
 				continue;
 			} else if (rc != SLURM_SUCCESS) {
-				/* Planned to start job, but something bad
-				 * happended. */
-				job_ptr->start_time = 0;
-				break;
+				if (debug_flags & DEBUG_FLAG_BACKFILL) {
+					info("backfill: planned start of job %u"
+					     " failed: %s", job_ptr->job_id,
+					     slurm_strerror(rc));
+				}
+				/* Drop through and reserve these resources.
+				 * Likely due to state changes during sleep.
+				 * Make best-effort based upon original state */
+				job_ptr->time_limit = orig_time_limit;
+				later_start = 0;
 			} else {
 				/* Started this job, move to next one */
 				reject_array_job_id = 0;
@@ -1071,15 +1114,30 @@ static int _attempt_backfill(void)
 				if (save_time_limit != job_ptr->time_limit)
 					jobacct_storage_g_job_start(acct_db_conn,
 								    job_ptr);
+				job_start_cnt++;
 				if (max_backfill_jobs_start &&
-				    (++job_start_cnt >= max_backfill_jobs_start))
+				    (job_start_cnt >= max_backfill_jobs_start)){
+					if (debug_flags & DEBUG_FLAG_BACKFILL) {
+						info("backfill: bf_max_job_start"
+						     " limit of %d reached",
+						     max_backfill_jobs_start);
+					}
 					break;
+				}
 				continue;
 			}
-		} else
+		} else {
 			job_ptr->time_limit = orig_time_limit;
+		}
 
-		if (later_start && (job_ptr->start_time > later_start)) {
+		start_time  = job_ptr->start_time;
+		end_reserve = job_ptr->start_time + (time_limit * 60);
+		start_time  = (start_time / backfill_resolution) *
+			      backfill_resolution;
+		end_reserve = (end_reserve / backfill_resolution) *
+			      backfill_resolution;
+
+		if (later_start && (start_time > later_start)) {
 			/* Try later when some nodes currently reserved for
 			 * pending jobs are free */
 			job_ptr->start_time = 0;
@@ -1092,13 +1150,16 @@ static int _attempt_backfill(void)
 		}
 
 		if (node_space_recs >= max_backfill_job_cnt) {
-			/* Already have too many jobs to deal with */
+			if (debug_flags & DEBUG_FLAG_BACKFILL) {
+				info("backfill: table size limit of %u reached",
+				     max_backfill_job_cnt);
+			}
 			break;
 		}
 
-		end_reserve = job_ptr->start_time + (time_limit * 60);
-		if (_test_resv_overlap(node_space, avail_bitmap,
-				       job_ptr->start_time, end_reserve)) {
+		if ((job_ptr->start_time > now) &&
+		    _test_resv_overlap(node_space, avail_bitmap,
+				       start_time, end_reserve)) {
 			/* This job overlaps with an existing reservation for
 			 * job to be backfill scheduled, which the sched
 			 * plugin does not know about. Try again later. */
@@ -1117,9 +1178,9 @@ static int _attempt_backfill(void)
 		if (debug_flags & DEBUG_FLAG_BACKFILL)
 			_dump_job_sched(job_ptr, end_reserve, avail_bitmap);
 		bit_not(avail_bitmap);
-		_add_reservation(job_ptr->start_time, end_reserve,
+		_add_reservation(start_time, end_reserve,
 				 avail_bitmap, node_space, &node_space_recs);
-		if (debug_flags & DEBUG_FLAG_BACKFILL)
+		if (debug_flags & DEBUG_FLAG_BACKFILL_MAP)
 			_dump_node_space_table(node_space);
 	}
 	xfree(bf_part_jobs);
@@ -1129,6 +1190,8 @@ static int _attempt_backfill(void)
 	FREE_NULL_BITMAP(avail_bitmap);
 	FREE_NULL_BITMAP(exc_core_bitmap);
 	FREE_NULL_BITMAP(resv_bitmap);
+	FREE_NULL_BITMAP(non_cg_bitmap);
+	FREE_NULL_BITMAP(previous_bitmap);
 
 	for (i=0; ; ) {
 		FREE_NULL_BITMAP(node_space[i].avail_bitmap);
@@ -1141,7 +1204,8 @@ static int _attempt_backfill(void)
 	_do_diag_stats(&bf_time1, &bf_time2, yield_sleep);
 	if (debug_flags & DEBUG_FLAG_BACKFILL) {
 		END_TIMER;
-		info("backfill: completed testing %d jobs, %s",
+		info("backfill: completed testing %u(%d) jobs, %s",
+		     slurmctld_diag_stats.bf_last_depth,
 		     job_test_count, TIME_STR);
 	}
 	return rc;
@@ -1264,12 +1328,19 @@ static void _add_reservation(uint32_t start_time, uint32_t end_reserve,
 	bool placed = false;
 	int i, j;
 
-	/* If we decrease the resolution of our timing information, this can
-	 * decrease the number of records managed and increase performance */
-	start_time = (start_time / backfill_resolution) * backfill_resolution;
-	end_reserve = (end_reserve / backfill_resolution) * backfill_resolution;
+#if 0	
+	info("add job start:%u end:%u", start_time, end_reserve);
+	for (j = 0; ; ) {
+		info("node start:%u end:%u",
+		     (uint32_t) node_space[j].begin_time,
+		     (uint32_t) node_space[j].end_time);
+		if ((j = node_space[j].next) == 0)
+			break;
+	}
+#endif
 
-	for (j=0; ; ) {
+	start_time = MAX(start_time, node_space[0].begin_time);
+	for (j = 0; ; ) {
 		if (node_space[j].end_time > start_time) {
 			/* insert start entry record */
 			i = *node_space_recs;
@@ -1304,6 +1375,9 @@ static void _add_reservation(uint32_t start_time, uint32_t end_reserve,
 					(*node_space_recs)++;
 					break;
 				}
+				if (end_reserve == node_space[j].end_time) {
+					break;
+				}
 			}
 			break;
 		}
@@ -1311,13 +1385,29 @@ static void _add_reservation(uint32_t start_time, uint32_t end_reserve,
 			break;
 	}
 
-	for (j=0; ; ) {
+	for (j = 0; ; ) {
 		if ((node_space[j].begin_time >= start_time) &&
 		    (node_space[j].end_time <= end_reserve))
 			bit_and(node_space[j].avail_bitmap, res_bitmap);
 		if ((node_space[j].begin_time >= end_reserve) ||
 		    ((j = node_space[j].next) == 0))
 			break;
+	}
+
+	/* Drop records with identical bitmaps (up to one record).
+	 * This can significantly improve performance of the backfill tests. */
+	for (i = 0; ; ) {
+		if ((j = node_space[i].next) == 0)
+			break;
+		if (!bit_equal(node_space[i].avail_bitmap,
+			       node_space[j].avail_bitmap)) {
+			i = j;
+			continue;
+		}
+		node_space[i].end_time = node_space[j].end_time;
+		node_space[i].next = node_space[j].next;
+		FREE_NULL_BITMAP(node_space[j].avail_bitmap);
+		break;
 	}
 }
 

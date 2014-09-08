@@ -903,9 +903,9 @@ int read_slurm_conf(int recover, bool reconfig)
 	_build_all_nodeline_info();
 	if (reconfig) {
 		if (_compare_hostnames(old_node_table_ptr,
-							   old_node_record_count,
-							   node_record_table_ptr,
-							   node_record_count) < 0) {
+				       old_node_record_count,
+				       node_record_table_ptr,
+				       node_record_count) < 0) {
 			fatal("%s: hostnames inconsistency detected", __func__);
 		}
 	}
@@ -1731,6 +1731,17 @@ static int _sync_nodes_to_comp_job(void)
 	job_iterator = list_iterator_create(job_list);
 	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
 		if ((job_ptr->node_bitmap) && IS_JOB_COMPLETING(job_ptr)) {
+
+			/* If the controller is reconfiguring
+			 * and the job is in completing state
+			 * and the slurmctld epilog is already
+			 * running which means deallocate_nodes()
+			 * was alredy called, do invoke it again
+			 * and don't start another epilog.
+			 */
+			if (job_ptr->epilog_running == true)
+				continue;
+
 			update_cnt++;
 			/* This needs to be set up for the priority
 			   plugin and this happens before it is
@@ -1739,7 +1750,8 @@ static int _sync_nodes_to_comp_job(void)
 			if (!cluster_cpus)
 				set_cluster_cpus();
 
-			info("Job %u in completing state", job_ptr->job_id);
+			info("%s: Job %u in completing state",
+			     __func__, job_ptr->job_id);
 			if (!job_ptr->node_bitmap_cg)
 				build_cg_bitmap(job_ptr);
 			deallocate_nodes(job_ptr, false, false, false);
@@ -1750,7 +1762,7 @@ static int _sync_nodes_to_comp_job(void)
 	}
 	list_iterator_destroy(job_iterator);
 	if (update_cnt)
-		info("_sync_nodes_to_comp_job completing %d jobs", update_cnt);
+		info("%s: completing %d jobs", __func__, update_cnt);
 	return update_cnt;
 }
 
@@ -1811,6 +1823,10 @@ static int _sync_nodes_to_active_job(struct job_record *job_ptr)
 			job_ptr->state_reason = FAIL_DOWN_NODE;
 			xfree(job_ptr->state_desc);
 			job_completion_logger(job_ptr, false);
+			if (job_ptr->job_state == JOB_NODE_FAIL) {
+				/* build_cg_bitmap() may clear JOB_COMPLETING */
+				epilog_slurmctld(job_ptr);
+			}
 			cnt++;
 		} else if (IS_NODE_IDLE(node_ptr)) {
 			cnt++;
@@ -1977,9 +1993,9 @@ _compare_hostnames(struct node_record *old_node_table,
 	hostset_t set;
 
 	if (old_node_count != node_count) {
-		error("%s: node count has changed before reconfiguration \
-from %d to %d. You have to restart slurmctld.",
-			  __func__, old_node_count, node_count);
+		error("%s: node count has changed before reconfiguration "
+		      "from %d to %d. You have to restart slurmctld.",
+		      __func__, old_node_count, node_count);
 		return -1;
 	}
 
@@ -2002,8 +2018,8 @@ from %d to %d. You have to restart slurmctld.",
 
 	cc = 0;
 	if (strcmp(old_ranged, ranged) != 0) {
-		error("%s: node names changed before reconfiguration. \
-You have to restart slurmctld.", __func__);
+		error("%s: node names changed before reconfiguration. "
+		      "You have to restart slurmctld.", __func__);
 		cc = -1;
 	}
 

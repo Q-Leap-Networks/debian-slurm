@@ -903,7 +903,8 @@ _pick_step_nodes (struct job_record  *job_ptr,
 				*return_code = ESLURM_NODES_BUSY;
 				/* Update job's end-time to allow for node
 				 * boot time. */
-				if (job_ptr->time_limit != INFINITE) {
+				if ((job_ptr->time_limit != INFINITE) &&
+				    (!job_ptr->preempt_time)) {
 					job_ptr->end_time = time(NULL) +
 						(job_ptr->time_limit * 60);
 				}
@@ -1575,8 +1576,30 @@ cleanup:
 	FREE_NULL_BITMAP(nodes_idle);
 	FREE_NULL_BITMAP(nodes_picked);
 	xfree(usable_cpu_cnt);
-	if (*return_code == SLURM_SUCCESS)
+	if (*return_code == SLURM_SUCCESS) {
 		*return_code = ESLURM_REQUESTED_NODE_CONFIG_UNAVAILABLE;
+	} else if (*return_code == ESLURM_NODE_NOT_AVAIL) {
+		/* Return ESLURM_NODES_BUSY if the node is not responding.
+		 * The node will eventually either come back UP or go DOWN. */
+		nodes_picked = bit_copy(up_node_bitmap);
+		bit_not(nodes_picked);
+		bit_and(nodes_picked, job_ptr->node_bitmap);
+		first_bit = bit_ffs(nodes_picked);
+		if (first_bit == -1)
+			last_bit = -2;
+		else
+			last_bit = bit_fls(nodes_picked);
+		for (i = first_bit; i <= last_bit; i++) {
+			if (!bit_test(nodes_picked, i))
+				continue;
+			node_ptr = node_record_table_ptr + i;
+			if (!IS_NODE_NO_RESPOND(node_ptr)) {
+				*return_code = ESLURM_NODES_BUSY;
+				break;
+			}
+		}
+		FREE_NULL_BITMAP(nodes_picked);
+	}
 	return NULL;
 }
 
@@ -2054,6 +2077,8 @@ step_create(job_step_create_request_msg_t *step_specs,
 	    (step_specs->task_dist != SLURM_DIST_BLOCK_CYCLIC) &&
 	    (step_specs->task_dist != SLURM_DIST_CYCLIC_BLOCK) &&
 	    (step_specs->task_dist != SLURM_DIST_BLOCK_BLOCK) &&
+	    (step_specs->task_dist != SLURM_DIST_CYCLIC_CFULL) &&
+	    (step_specs->task_dist != SLURM_DIST_BLOCK_CFULL) &&
 	    (step_specs->task_dist != SLURM_DIST_PLANE) &&
 	    (step_specs->task_dist != SLURM_DIST_ARBITRARY))
 		return ESLURM_BAD_DIST;
@@ -2243,6 +2268,7 @@ step_create(job_step_create_request_msg_t *step_specs,
 	switch(step_specs->task_dist) {
 	case SLURM_DIST_CYCLIC:
 	case SLURM_DIST_CYCLIC_CYCLIC:
+	case SLURM_DIST_CYCLIC_CFULL:
 	case SLURM_DIST_CYCLIC_BLOCK:
 		step_ptr->cyclic_alloc = 1;
 		break;
