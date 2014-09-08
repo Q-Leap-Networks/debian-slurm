@@ -66,7 +66,7 @@ The default input file is the file named in the
 .TP "10"
 \f3\-a\fP\f3,\fP \f3\-\-allusers\fP
 Displays all users jobs when run by user root or if \fBPrivateData\fP is not
-configurred to \fBjobs\fP.
+configured to \fBjobs\fP.
 Otherwise display the current user's jobs
 .IP
 
@@ -476,13 +476,13 @@ Note: Only in case of exclusive job allocation this value
 reflects the jobs' real energy consumption.
 
 .TP
-\f3cputime\fP
-Formatted number of cpu seconds a process was allocated.
+\f3CPUTime\fP
+Formatted (Elapsed time * CPU) count used by a job or step.
 
 .TP
-\f3cputimeraw\fP
-How much cpu time process was allocated in second format, not formatted
-like above.
+\f3CPUTimeRaw\fP
+Unlike above non formatted (Elapsed time * CPU) count for a job or step.
+Units are cpu-seconds.
 
 .TP
 \f3DerivedExitCode\fP
@@ -879,7 +879,7 @@ used with \-S (\-\-starttime) and \-E (\-\-endtime). When the \-T option is
 used, the start time of the job will be the specified
 \-S value if the job was started before the specified time, otherwise
 the time will be the job's start time. The end time will be the specified \-E
-option if the job ends after the specifed time, otherwise it will be
+option if the job ends after the specified time, otherwise it will be
 the jobs end time.
 
 NOTE: If no \-s (\-\-state) option is given sacct will

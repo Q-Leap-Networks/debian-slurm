@@ -3259,6 +3259,11 @@ static void _create_job_array(struct job_record *job_ptr,
 		if (!bit_test(job_specs->array_bitmap, i))
 			continue;
 		job_ptr_new = _job_rec_copy(job_ptr);
+		/* Make sure the db_index is zero
+		 * for array elements in case the
+		 * first element had the index assigned.
+		 */
+		job_ptr_new->db_index = 0;
 		if (!job_ptr_new)
 			break;
 		job_ptr_new->array_job_id  = job_ptr->job_id;
@@ -3296,7 +3301,11 @@ static int _select_nodes_parts(struct job_record *job_ptr, bool test_only,
 			rc = select_nodes(job_ptr, test_only,
 					  select_node_bitmap);
 			if ((rc != ESLURM_REQUESTED_NODE_CONFIG_UNAVAILABLE) &&
-			    (rc != ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE))
+			    (rc != ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE) &&
+			    (rc != ESLURM_NODES_BUSY))
+				break;
+			if ((job_ptr->preempt_in_progress) &&
+			    (rc != ESLURM_NODES_BUSY))
 				break;
 		}
 		list_iterator_destroy(iter);
@@ -3692,8 +3701,8 @@ extern int job_signal(uint32_t job_id, uint16_t signal, uint16_t flags,
 		} else {
 			_signal_job(job_ptr, signal);
 		}
-		verbose("job_signal %u of running job %u successful",
-			signal, job_id);
+		verbose("job_signal %u of running job %u successful 0x%x",
+			signal, job_id, job_ptr->job_state);
 		return SLURM_SUCCESS;
 	}
 
@@ -5039,9 +5048,9 @@ extern int validate_job_create_req(job_desc_msg_t * job_desc)
 	    _test_strlen(job_desc->req_nodes, "req_nodes", 1024*64)	||
 	    _test_strlen(job_desc->reservation, "reservation", 1024)	||
 	    _test_strlen(job_desc->script, "script", 1024 * 1024 * 4)	||
-	    _test_strlen(job_desc->std_err, "std_err", MAXPATHLEN)		||
-	    _test_strlen(job_desc->std_in, "std_in", MAXPATHLEN)		||
-	    _test_strlen(job_desc->std_out, "std_out", MAXPATHLEN)		||
+	    _test_strlen(job_desc->std_err, "std_err", MAXPATHLEN)	||
+	    _test_strlen(job_desc->std_in, "std_in", MAXPATHLEN)	||
+	    _test_strlen(job_desc->std_out, "std_out", MAXPATHLEN)	||
 	    _test_strlen(job_desc->wckey, "wckey", 1024)		||
 	    _test_strlen(job_desc->work_dir, "work_dir", MAXPATHLEN))
 		return ESLURM_PATHNAME_TOO_LONG;
@@ -8678,6 +8687,7 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 			     job_specs->job_id);
 			job_ptr->state_reason = WAIT_NO_REASON;
 			job_ptr->job_state &= ~JOB_SPECIAL_EXIT;
+			job_ptr->exit_code = 0;
 			xfree(job_ptr->state_desc);
 		} else if ((job_ptr->priority == 0) &&
 			   (job_specs->priority != INFINITE)) {

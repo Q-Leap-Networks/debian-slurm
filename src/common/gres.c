@@ -2937,10 +2937,14 @@ static bool _cores_on_gres(bitstr_t *core_bitmap,
 		return true;
 
 	for (i = 0; i < node_gres_ptr->topo_cnt; i++) {
+		if (!node_gres_ptr->topo_gres_bitmap[i])
+			continue;
 		if (bit_size(node_gres_ptr->topo_gres_bitmap[i]) < gres_inx)
 			continue;
 		if (!bit_test(node_gres_ptr->topo_gres_bitmap[i], gres_inx))
 			continue;
+		if (!node_gres_ptr->topo_cpus_bitmap[i])
+			return true;
 		if (bit_size(node_gres_ptr->topo_cpus_bitmap[i]) !=
 		    bit_size(core_bitmap))
 			break;
@@ -2980,8 +2984,8 @@ extern void gres_plugin_job_clear(List job_gres_list)
 		xfree(job_state_ptr->gres_bit_alloc);
 		xfree(job_state_ptr->gres_bit_step_alloc);
 		xfree(job_state_ptr->gres_cnt_step_alloc);
+		job_state_ptr->node_cnt = 0;
 	}
-	job_state_ptr->node_cnt = 0;
 	list_iterator_destroy(job_gres_iter);
 }
 
