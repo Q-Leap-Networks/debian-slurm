@@ -7,7 +7,7 @@
  *  from existing SLURM source code, particularly src/srun/opt.c
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -71,8 +71,11 @@ void print_gres_help(void);
 /* verify the requested distribution type */
 task_dist_states_t verify_dist_type(const char *arg, uint32_t *plane_size);
 
-/* verify the requested connection type */
-uint16_t verify_conn_type(const char *arg);
+/*
+ * verify comma separated list of connection types to array of uint16_t 
+ * connection_types or NO_VAL if not recognized
+ */
+extern void verify_conn_type(const char *arg, uint16_t *conn_type);
 
 /* verify the requested geometry arguments */
 int verify_geometry(const char *arg, uint16_t *geometry);

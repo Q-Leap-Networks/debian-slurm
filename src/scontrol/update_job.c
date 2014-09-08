@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -61,7 +61,7 @@ extern int
 scontrol_checkpoint(char *op, char *job_step_id_str, int argc, char *argv[])
 {
 	int rc = SLURM_SUCCESS;
-	uint32_t job_id = 0, step_id = 0, step_id_set = 0;
+	uint32_t job_id = 0, step_id = 0;
 	char *next_str;
 	uint32_t ckpt_errno;
 	char *ckpt_strerror = NULL;
@@ -74,7 +74,6 @@ scontrol_checkpoint(char *op, char *job_step_id_str, int argc, char *argv[])
 		if (next_str[0] == '.') {
 			step_id = (uint32_t) strtol (&next_str[1], &next_str,
 						     10);
-			step_id_set = 1;
 		} else
 			step_id = NO_VAL;
 		if (next_str[0] != '\0') {
@@ -200,6 +199,31 @@ _parse_restart_args(int argc, char **argv, uint16_t *stick, char **image_dir)
 	return 0;
 }
 
+/* Return the current time limit of the specified job_id or NO_VAL if the
+ * information is not available */
+static uint32_t _get_job_time(uint32_t job_id)
+{
+	uint32_t time_limit = NO_VAL;
+	int i, rc;
+	job_info_msg_t *resp;
+
+	rc = slurm_load_job(&resp, job_id, SHOW_ALL);
+	if (rc == SLURM_SUCCESS) {
+		for (i = 0; i < resp->record_count; i++) {
+			if (resp->job_array[i].job_id != job_id)
+				continue;	/* should not happen */
+			time_limit = resp->job_array[i].time_limit;
+			break;
+		}
+		slurm_free_job_info_msg(resp);
+	} else {
+		error("Could not load state information for job %u: %m",
+		      job_id);
+	}
+
+	return time_limit;
+}
+
 /*
  * scontrol_hold - perform some job hold/release operation
  * IN op - suspend/resume operation
@@ -216,6 +240,9 @@ scontrol_hold(char *op, char *job_id_str)
 	uint16_t job_state;
 
 	slurm_init_job_desc_msg (&job_msg);
+
+	/* set current user, needed e.g., for AllowGroups checks */
+	job_msg.user_id = getuid();
 
 	if (job_id_str) {
 		job_msg.job_id = (uint32_t) strtol(job_id_str, &next_str, 10);
@@ -337,6 +364,9 @@ scontrol_update_job (int argc, char *argv[])
 
 	slurm_init_job_desc_msg (&job_msg);
 
+	/* set current user, needed e.g., for AllowGroups checks */
+	job_msg.user_id = getuid();
+
 	for (i=0; i<argc; i++) {
 		tag = argv[i];
 		val = strchr(argv[i], '=');
@@ -366,11 +396,38 @@ scontrol_update_job (int argc, char *argv[])
 			update_cnt++;
 		}
 		else if (strncasecmp(tag, "TimeLimit", MAX(taglen, 5)) == 0) {
-			int time_limit = time_str2mins(val);
+			bool incr, decr;
+			uint32_t job_current_time, time_limit;
+
+			incr = (val[0] == '+');
+			decr = (val[0] == '-');
+			if (incr || decr)
+				val++;
+			time_limit = time_str2mins(val);
 			if ((time_limit < 0) && (time_limit != INFINITE)) {
 				error("Invalid TimeLimit value");
 				exit_code = 1;
 				return 0;
+			}
+			if (incr || decr) {
+				job_current_time = _get_job_time(job_msg.
+								 job_id);
+				if (job_current_time == NO_VAL) {
+					exit_code = 1;
+					return 0;
+				}
+				if (incr) {
+					time_limit += job_current_time;
+				} else if (time_limit > job_current_time) {
+					error("TimeLimit decrement larger than"
+					      " current time limit (%u > %u)",
+					      time_limit, job_current_time);
+					exit_code = 1;
+					return 0;
+				} else {
+					time_limit = job_current_time -
+						     time_limit;
+				}
 			}
 			job_msg.time_limit = time_limit;
 			update_cnt++;
@@ -432,14 +489,22 @@ scontrol_update_job (int argc, char *argv[])
 		/* ReqNodes was replaced by NumNodes in SLURM version 2.1 */
 		else if ((strncasecmp(tag, "ReqNodes", MAX(taglen, 8)) == 0) ||
 		         (strncasecmp(tag, "NumNodes", MAX(taglen, 8)) == 0)) {
-			int rc = get_resource_arg_range(
-				val,
-				"requested node count",
-				(int *)&job_msg.min_nodes,
-				(int *)&job_msg.max_nodes,
-				false);
-			if(!rc)
-				return rc;
+			int min_nodes, max_nodes, rc;
+			if (strcmp(val, "0") == 0) {
+				job_msg.min_nodes = 0;
+			} else if (strcasecmp(val, "ALL") == 0) {
+				job_msg.min_nodes = INFINITE;
+			} else {
+				min_nodes = (int) job_msg.min_nodes;
+				max_nodes = (int) job_msg.max_nodes;
+				rc = get_resource_arg_range(
+						val, "requested node count",
+						&min_nodes, &max_nodes, false);
+				if (!rc)
+					return rc;
+				job_msg.min_nodes = (uint32_t) min_nodes;
+				job_msg.max_nodes = (uint32_t) max_nodes;
+			}
 			update_size = true;
 			update_cnt++;
 		}
@@ -506,6 +571,22 @@ scontrol_update_job (int argc, char *argv[])
 		}
 		else if (strncasecmp(tag, "WCKey", MAX(taglen, 1)) == 0) {
 			job_msg.wckey = val;
+			update_cnt++;
+		}
+		else if (strncasecmp(tag, "Switches", MAX(taglen, 5)) == 0) {
+			char *sep_char;
+			job_msg.req_switch =
+				(uint32_t) strtol(val, &sep_char, 10);
+			update_cnt++;
+			if (sep_char && sep_char[0] == '@') {
+				job_msg.wait4switch = time_str2mins(sep_char+1)
+						      * 60;
+			}
+		}
+		else if (strncasecmp(tag, "wait-for-switch", MAX(taglen, 5))
+			 == 0) {
+			job_msg.wait4switch =
+				(uint32_t) strtol(val, (char **) NULL, 10);
 			update_cnt++;
 		}
 		else if (strncasecmp(tag, "Shared", MAX(taglen, 2)) == 0) {
@@ -615,8 +696,8 @@ scontrol_update_job (int argc, char *argv[])
 			update_cnt++;
 		}
 		else if (strncasecmp(tag, "Conn-Type", MAX(taglen, 2)) == 0) {
-			job_msg.conn_type = verify_conn_type(val);
-			if(job_msg.conn_type != (uint16_t)NO_VAL)
+			verify_conn_type(val, job_msg.conn_type);
+			if(job_msg.conn_type[0] != (uint16_t)NO_VAL)
 				update_cnt++;
 		}
 		else if (strncasecmp(tag, "Licenses", MAX(taglen, 1)) == 0) {
@@ -625,8 +706,8 @@ scontrol_update_job (int argc, char *argv[])
 		}
 		else if (!strncasecmp(tag, "EligibleTime", MAX(taglen, 2)) ||
 			 !strncasecmp(tag, "StartTime",    MAX(taglen, 2))) {
-			if((job_msg.begin_time = parse_time(val, 0))) {
-				if(job_msg.begin_time < time(NULL))
+			if ((job_msg.begin_time = parse_time(val, 0))) {
+				if (job_msg.begin_time < time(NULL))
 					job_msg.begin_time = time(NULL);
 				update_cnt++;
 			}
@@ -652,11 +733,11 @@ scontrol_update_job (int argc, char *argv[])
 
 	if (slurm_update_job(&job_msg))
 		return slurm_get_errno ();
-	else {
-		if (update_size)
-			_update_job_size(job_msg.job_id);
-		return 0;
-	}
+
+	if (update_size)
+		_update_job_size(job_msg.job_id);
+
+	return SLURM_SUCCESS;
 }
 
 /*

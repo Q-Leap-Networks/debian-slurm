@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -101,10 +101,10 @@ typedef enum {
 		PRINT_AVEVSIZE,
 		PRINT_BLOCKID,
 		PRINT_CLUSTER,
+		PRINT_COMMENT,
 		PRINT_CPU_TIME,
 		PRINT_CPU_TIME_RAW,
 		PRINT_DERIVED_EC,
-		PRINT_DERIVED_ES,
 		PRINT_ELAPSED,
 		PRINT_ELIGIBLE,
 		PRINT_END,

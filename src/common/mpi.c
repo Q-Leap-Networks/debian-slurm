@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -296,8 +296,15 @@ bool mpi_hook_client_single_task_per_node (void)
 {
 	if (_mpi_init(NULL) < 0)
 		return SLURM_ERROR;
-
+#if defined HAVE_BGQ
+//#if defined HAVE_BGQ && defined HAVE_BG_FILES
+	/* On BGQ systems we only want 1 task to be spawned since srun
+	   is wrapping runjob.
+	*/
+	return true;
+#else
 	return (*(g_context->ops.client_single_task))();
+#endif
 }
 
 int mpi_hook_client_fini (mpi_plugin_client_state_t *state)

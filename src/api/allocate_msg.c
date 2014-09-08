@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -50,7 +50,7 @@
 #include <signal.h>
 #include <pthread.h>
 
-#include <slurm/slurm.h>
+#include "slurm/slurm.h"
 
 #include "src/common/slurm_protocol_defs.h"
 #include "src/common/slurm_protocol_api.h"
@@ -74,9 +74,9 @@ static void _handle_msg(void *arg, slurm_msg_t *msg);
 static pthread_mutex_t msg_thr_start_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t msg_thr_start_cond = PTHREAD_COND_INITIALIZER;
 static struct io_operations message_socket_ops = {
-	readable:	&eio_message_socket_readable,
-	handle_read:	&eio_message_socket_accept,
-	handle_msg:     &_handle_msg
+	.readable = &eio_message_socket_readable,
+	.handle_read = &eio_message_socket_accept,
+	.handle_msg = &_handle_msg
 };
 
 static void *_msg_thr_internal(void *arg)
@@ -224,6 +224,7 @@ static void _handle_ping(struct allocation_msg_thread *msg_thr,
 
 	slurm_free_srun_ping_msg(msg->data);
 }
+
 static void _handle_job_complete(struct allocation_msg_thread *msg_thr,
 				 slurm_msg_t *msg)
 {
@@ -234,6 +235,18 @@ static void _handle_job_complete(struct allocation_msg_thread *msg_thr,
 		(msg_thr->callback.job_complete)(comp);
 
 	slurm_free_srun_job_complete_msg(msg->data);
+}
+
+static void _handle_suspend(struct allocation_msg_thread *msg_thr,
+			    slurm_msg_t *msg)
+{
+	suspend_msg_t *sus_msg = (suspend_msg_t *)msg->data;
+	debug3("received suspend message");
+
+	if (msg_thr->callback.job_suspend != NULL)
+		(msg_thr->callback.job_suspend)(sus_msg);
+
+	slurm_free_suspend_msg(msg->data);
 }
 
 static void
@@ -265,6 +278,9 @@ _handle_msg(void *arg, slurm_msg_t *msg)
 		break;
 	case SRUN_NODE_FAIL:
 		_handle_node_fail(msg_thr, msg);
+		break;
+	case SRUN_REQUEST_SUSPEND:
+		_handle_suspend(msg_thr, msg);
 		break;
 	default:
 		error("received spurious message type: %d",

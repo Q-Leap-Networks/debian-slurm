@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -41,8 +41,6 @@
 #  include "config.h"
 #endif
 
-#include <slurm/slurm_errno.h>
-
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -52,6 +50,7 @@
 #  include <pthread.h>
 #endif /* WITH_PTHREADS */
 
+#include "slurm/slurm_errno.h"
 #include "src/common/bitstring.h"
 #include "src/common/gres.h"
 #include "src/common/io_hdr.h"
@@ -820,8 +819,7 @@ void slurm_cred_free_args(slurm_cred_arg_t *arg)
 	xfree(arg->sockets_per_node);
 }
 
-int
-slurm_cred_get_args(slurm_cred_t *cred, slurm_cred_arg_t *arg)
+int slurm_cred_get_args(slurm_cred_t *cred, slurm_cred_arg_t *arg)
 {
 	xassert(cred != NULL);
 	xassert(arg  != NULL);

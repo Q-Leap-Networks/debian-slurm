@@ -13,15 +13,21 @@ if HAVE_SOME_CURSES
 
 bin_PROGRAMS = smap
 
-smap_LDADD = \
-	$(top_builddir)/src/plugins/select/bluegene/block_allocator/libbluegene_block_allocator.la \
-	$(top_builddir)/src/api/libslurm.o -ldl
-
 noinst_HEADERS = smap.h
 smap_SOURCES = smap.c \
 	job_functions.c partition_functions.c \
-	configure_functions.c grid_functions.c \
-	reservation_functions.c opts.c
+	grid_functions.c reservation_functions.c opts.c
+
+smap_LDADD = $(top_builddir)/src/api/libslurm.o -ldl
+
+if BLUEGENE_LOADED
+bg_dir = $(top_builddir)/src/plugins/select/bluegene
+
+smap_LDADD += $(bg_dir)/libconfigure_api.la
+
+smap_SOURCES += configure_functions.c
+
+endif
 
 force:
 $(smap_LDADD) : force

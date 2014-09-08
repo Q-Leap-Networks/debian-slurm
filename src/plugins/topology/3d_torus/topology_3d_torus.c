@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -44,7 +44,7 @@
 #include <signal.h>
 #include <sys/types.h>
 
-#include <slurm/slurm_errno.h>
+#include "slurm/slurm_errno.h"
 #include "src/common/bitstring.h"
 #include "src/common/log.h"
 #include "src/common/node_conf.h"
@@ -79,7 +79,7 @@
  */
 const char plugin_name[]        = "topology 3d_torus plugin";
 const char plugin_type[]        = "topology/3d_torus";
-const uint32_t plugin_version   = 100;
+const uint32_t plugin_version   = 101;
 
 extern void nodes_to_hilbert_curve(void);
 
@@ -107,19 +107,20 @@ extern int fini(void)
  *	after a system startup or reconfiguration.
  */
 extern int topo_build_config(void)
-{	static bool first_run = true;
-
-	/* We can only re-order the nodes once at slurmctld startup.
-	 * After that time, many bitmaps are created based upon the
-	 * index of each node name in the array. */
-	if (!first_run)
-		return SLURM_SUCCESS;
-	first_run = false;
-
-#ifndef HAVE_BG
-	nodes_to_hilbert_curve();
-#endif
+{
 	return SLURM_SUCCESS;
+}
+
+/*
+ * topo_generate_node_ranking  -  populate node_rank fields
+ */
+extern bool topo_generate_node_ranking(void)
+{
+#ifdef HAVE_BG
+	return false;
+#endif
+	nodes_to_hilbert_curve();
+	return true;
 }
 
 /*
@@ -130,8 +131,10 @@ extern int topo_build_config(void)
  */
 extern int topo_get_node_addr(char* node_name, char** paddr, char** ppattern)
 {
+#ifndef HAVE_FRONT_END
 	if (find_node_record(node_name) == NULL)
 		return SLURM_ERROR;
+#endif
 
 	*paddr = xstrdup(node_name);
 	*ppattern = xstrdup("node");

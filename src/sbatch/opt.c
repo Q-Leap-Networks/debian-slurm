@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -167,6 +167,7 @@
 #define LONG_OPT_GRES            0x14f
 #define LONG_OPT_WAIT_ALL_NODES  0x150
 #define LONG_OPT_EXPORT          0x151
+#define LONG_OPT_REQ_SWITCH      0x152
 
 /*---- global variables, defined in opt.h ----*/
 opt_t opt;
@@ -291,7 +292,7 @@ static void _opt_default()
 
 	opt.ntasks = 1;
 	opt.ntasks_set = false;
-	opt.cpus_per_task = 1;
+	opt.cpus_per_task = 0;
 	opt.cpus_set = false;
 	opt.min_nodes = 1;
 	opt.max_nodes = 0;
@@ -347,11 +348,12 @@ static void _opt_default()
 	opt.nodelist	    = NULL;
 	opt.exc_nodes	    = NULL;
 
-	for (i=0; i<HIGHEST_DIMENSIONS; i++)
+	for (i=0; i<HIGHEST_DIMENSIONS; i++) {
+		opt.conn_type[i]    = (uint16_t) NO_VAL;
 		opt.geometry[i]	    = (uint16_t) NO_VAL;
+	}
 	opt.reboot          = false;
 	opt.no_rotate	    = false;
-	opt.conn_type	    = (uint16_t) NO_VAL;
 
 	opt.euid	    = (uid_t) -1;
 	opt.egid	    = (gid_t) -1;
@@ -368,6 +370,8 @@ static void _opt_default()
 	opt.acctg_freq        = -1;
 	opt.reservation       = NULL;
 	opt.wckey             = NULL;
+	opt.req_switch        = -1;
+	opt.wait4switch       = -1;
 
 	opt.ckpt_interval = 0;
 	opt.ckpt_interval_str = NULL;
@@ -472,6 +476,8 @@ env_vars_t env_vars[] = {
   {"SBATCH_WCKEY",         OPT_STRING,     &opt.wckey,         NULL          },
   {"SBATCH_GET_USER_ENV",  OPT_GET_USER_ENV, NULL,             NULL          },
   {"SBATCH_EXPORT",        OPT_STRING,     &opt.export_env,    NULL          },
+  {"SBATCH_REQ_SWITCH",    OPT_INT,        &opt.req_switch,    NULL          },
+  {"SBATCH_WAIT4SWITCH",   OPT_INT,        &opt.wait4switch,   NULL          },
 
   {NULL, 0, NULL, NULL}
 };
@@ -575,7 +581,7 @@ _process_env_var(env_vars_t *e, const char *val)
 		break;
 
 	case OPT_CONN_TYPE:
-		opt.conn_type = verify_conn_type(val);
+		verify_conn_type(val, opt.conn_type);
 		break;
 
 	case OPT_NO_ROTATE:
@@ -632,7 +638,11 @@ _process_env_var(env_vars_t *e, const char *val)
 		break;
 	case OPT_CLUSTERS:
 		if (!(opt.clusters = slurmdb_get_info_cluster((char *)val))) {
-			error("'%s' invalid entry for --clusters", val);
+			error("'%s' can't be reached now, "
+			      "or it is an invalid entry for "
+			      "--cluster.  Use 'sacctmgr --list "
+			      "cluster' to see available clusters.",
+			      optarg);
 			exit(1);
 		}
 		break;
@@ -737,11 +747,13 @@ static struct option long_options[] = {
 	{"wait-all-nodes",required_argument, 0, LONG_OPT_WAIT_ALL_NODES},
 	{"wckey",         required_argument, 0, LONG_OPT_WCKEY},
 	{"wrap",          required_argument, 0, LONG_OPT_WRAP},
+	{"switches",      required_argument, 0, LONG_OPT_REQ_SWITCH},
 	{NULL,            0,                 0, 0}
 };
 
 static char *opt_string =
 	"+bA:B:c:C:d:D:e:F:g:hHi:IJ:kL:m:M:n:N:o:Op:P:QRst:uU:vVw:x:";
+char *pos_delimit;
 
 
 /*
@@ -1148,8 +1160,7 @@ static void _set_options(int argc, char **argv)
 			break;
 		case 'c':
 			opt.cpus_set = true;
-			opt.cpus_per_task =
-				_get_int(optarg, "cpus-per-task");
+			opt.cpus_per_task = _get_int(optarg, "cpus-per-task");
 			break;
 		case 'C':
 			xfree(opt.constraints);
@@ -1227,7 +1238,10 @@ static void _set_options(int argc, char **argv)
 				list_destroy(opt.clusters);
 			if (!(opt.clusters =
 			      slurmdb_get_info_cluster(optarg))) {
-				error("'%s' invalid entry for --clusters",
+				error("'%s' can't be reached now, "
+				      "or it is an invalid entry for "
+				      "--cluster.  Use 'sacctmgr --list "
+				      "cluster' to see available clusters.",
 				      optarg);
 				exit(1);
 			}
@@ -1411,7 +1425,7 @@ static void _set_options(int argc, char **argv)
 			}
 			break;
 		case LONG_OPT_CONNTYPE:
-			opt.conn_type = verify_conn_type(optarg);
+			verify_conn_type(optarg, opt.conn_type);
 			break;
 		case LONG_OPT_BEGIN:
 			opt.begin = parse_time(optarg, 0);
@@ -1617,6 +1631,15 @@ static void _set_options(int argc, char **argv)
 			xfree(opt.export_env);
 			opt.export_env = xstrdup(optarg);
 			break;
+		case LONG_OPT_REQ_SWITCH:
+			pos_delimit = strstr(optarg,"@");
+			if (pos_delimit != NULL) {
+				pos_delimit[0] = '\0';
+				pos_delimit++;
+				opt.wait4switch = time_str2mins(pos_delimit) * 60;
+			}
+			opt.req_switch = _get_int(optarg, "switches");
+			break;
 		default:
 			if (spank_process_option (opt_char, optarg) < 0) {
 				error("Unrecognized command line parameter %c",
@@ -1755,6 +1778,15 @@ static void _set_pbs_options(int argc, char **argv)
 				error("Invalid nice value, must be between "
 				      "-%d and %d", NICE_OFFSET, NICE_OFFSET);
 				exit(error_exit);
+			}
+			if (opt.nice < 0) {
+				uid_t my_uid = getuid();
+				if ((my_uid != 0) &&
+				    (my_uid != slurm_get_slurm_user_id())) {
+					error("Nice value must be "
+					      "non-negative, value ignored");
+					opt.nice = 0;
+				}
 			}
 			break;
 		case 'q':
@@ -1964,6 +1996,47 @@ static void _parse_pbs_resource_list(char *rl)
 			}
 
 			xfree(temp);
+#ifdef HAVE_CRAY
+		/*
+		 * NB: no "mppmem" here since it specifies per-PE memory units,
+		 *     whereas SLURM uses per-node and per-CPU memory units.
+		 */
+		} else if (!strncmp(rl + i, "mppdepth=", 9)) {
+			/* Cray: number of CPUs (threads) per processing element */
+			i += 9;
+			temp = _get_pbs_option_value(rl, &i);
+			if (temp) {
+				opt.cpus_per_task = _get_int(temp, "mppdepth");
+				opt.cpus_set	  = true;
+			}
+			xfree(temp);
+		} else if (!strncmp(rl + i, "mppnodes=", 9)) {
+			/* Cray `nodes' variant: hostlist without prefix */
+			i += 9;
+			temp = _get_pbs_option_value(rl, &i);
+			if (!temp) {
+				error("No value given for mppnodes");
+				exit(error_exit);
+			}
+			xfree(opt.nodelist);
+			opt.nodelist = temp;
+		} else if (!strncmp(rl + i, "mppnppn=", 8)) {
+			/* Cray: number of processing elements per node */
+			i += 8;
+			temp = _get_pbs_option_value(rl, &i);
+			if (temp)
+				opt.ntasks_per_node = _get_int(temp, "mppnppn");
+			xfree(temp);
+		} else if (!strncmp(rl + i, "mppwidth=", 9)) {
+			/* Cray: task width (number of processing elements) */
+			i += 9;
+			temp = _get_pbs_option_value(rl, &i);
+			if (temp) {
+				opt.ntasks     = _get_int(temp, "mppwidth");
+				opt.ntasks_set = true;
+			}
+			xfree(temp);
+#endif	/* HAVE_CRAY */
 		} else if(!strncmp(rl+i, "nice=", 5)) {
 			i+=5;
 			temp = _get_pbs_option_value(rl, &i);
@@ -1975,6 +2048,15 @@ static void _parse_pbs_resource_list(char *rl)
 				error("Invalid nice value, must be between "
 				      "-%d and %d", NICE_OFFSET, NICE_OFFSET);
 				exit(error_exit);
+			}
+			if (opt.nice < 0) {
+				uid_t my_uid = getuid();
+				if ((my_uid != 0) &&
+				    (my_uid != slurm_get_slurm_user_id())) {
+					error("Nice value must be "
+					      "non-negative, value ignored");
+					opt.nice = 0;
+				}
 			}
 			xfree(temp);
 		} else if(!strncmp(rl+i, "nodes=", 6)) {
@@ -2052,7 +2134,7 @@ static bool _opt_verify(void)
 		opt.ntasks_set = 1;
 	}
 
-	if (opt.mincpus < opt.cpus_per_task)
+	if (opt.cpus_set && (opt.mincpus < opt.cpus_per_task))
 		opt.mincpus = opt.cpus_per_task;
 
 	if ((opt.job_name == NULL) && (opt.script_argc > 0))
@@ -2066,7 +2148,7 @@ static bool _opt_verify(void)
 		verified = false;
 	}
 
-	if (opt.cpus_per_task <= 0) {
+	if (opt.cpus_set && (opt.cpus_per_task <= 0)) {
 		error("invalid number of cpus per task (-c %d)",
 		      opt.cpus_per_task);
 		verified = false;
@@ -2143,22 +2225,27 @@ static bool _opt_verify(void)
 		}
 	}
 
+	if (opt.cpus_set &&
+	    setenvf(NULL, "SLURM_CPUS_PER_TASK", "%d", opt.cpus_per_task)) {
+		error("Can't set SLURM_CPUS_PER_TASK env variable");
+	}
+
 	_set_distribution(opt.distribution, &dist, &lllp_dist);
-	if(dist)
-		if (setenvf(NULL, "SLURM_DISTRIBUTION", "%s", dist)) {
-			error("Can't set SLURM_DISTRIBUTION env variable");
-		}
+	if (dist &&
+	    setenvf(NULL, "SLURM_DISTRIBUTION", "%s", dist)) {
+		error("Can't set SLURM_DISTRIBUTION env variable");
+	}
 
-	if(opt.distribution == SLURM_DIST_PLANE)
-		if (setenvf(NULL, "SLURM_DIST_PLANESIZE", "%d",
-			    opt.plane_size)) {
-			error("Can't set SLURM_DIST_PLANESIZE env variable");
-		}
+	if ((opt.distribution == SLURM_DIST_PLANE) &&
+	    setenvf(NULL, "SLURM_DIST_PLANESIZE", "%d", opt.plane_size)) {
+		error("Can't set SLURM_DIST_PLANESIZE env variable");
+	}
 
-	if(lllp_dist)
-		if (setenvf(NULL, "SLURM_DIST_LLLP", "%s", lllp_dist)) {
-			error("Can't set SLURM_DIST_LLLP env variable");
-		}
+	if (lllp_dist && setenvf(NULL, "SLURM_DIST_LLLP", "%s", lllp_dist)) {
+		error("Can't set SLURM_DIST_LLLP env variable");
+	}
+
+	
 
 	/* bound threads/cores from ntasks_cores/sockets */
 	if (opt.ntasks_per_core > 0) {
@@ -2567,8 +2654,9 @@ static void _fullpath(char **filename, const char *cwd)
 
 #define tf_(b) (b == true) ? "true" : "false"
 
-static void _opt_list()
+static void _opt_list(void)
 {
+	int i;
 	char *str;
 
 	info("defined options for program `%s'", opt.progname);
@@ -2580,8 +2668,8 @@ static void _opt_list()
 	info("cwd               : %s", opt.cwd);
 	info("ntasks            : %d %s", opt.ntasks,
 		opt.ntasks_set ? "(set)" : "(default)");
-	info("cpus_per_task     : %d %s", opt.cpus_per_task,
-		opt.cpus_set ? "(set)" : "(default)");
+	if (opt.cpus_set)
+		info("cpus_per_task     : %d", opt.cpus_per_task);
 	if (opt.max_nodes) {
 		info("nodes             : %d-%d",
 		     opt.min_nodes, opt.max_nodes);
@@ -2622,8 +2710,11 @@ static void _opt_list()
 	str = print_constraints();
 	info("constraints       : %s", str);
 	xfree(str);
-	if (opt.conn_type != (uint16_t) NO_VAL)
-		info("conn_type         : %u", opt.conn_type);
+	for (i = 0; i < HIGHEST_DIMENSIONS; i++) {
+		if (opt.conn_type[i] == (uint16_t) NO_VAL)
+			break;
+		info("conn_type[%d]    : %u", i, opt.conn_type[i]);
+	}
 	str = print_geometry(opt.geometry);
 	info("geometry          : %s", str);
 	xfree(str);
@@ -2669,6 +2760,8 @@ static void _opt_list()
 	info("plane_size        : %u", opt.plane_size);
 	info("propagate         : %s",
 	     opt.propagate == NULL ? "NONE" : opt.propagate);
+	info("switch            : %d", opt.req_switch);
+	info("wait-for-switch   : %d", opt.wait4switch);
 	str = print_commandline(opt.script_argc, opt.script_argv);
 	info("remote command    : `%s'", str);
 	xfree(str);
@@ -2702,6 +2795,7 @@ static void _usage(void)
 "              [--nodefile=file] [--nodelist=hosts] [--exclude=hosts]\n"
 "              [--network=type] [--mem-per-cpu=MB] [--qos=qos] [--gres=list]\n"
 "              [--cpu_bind=...] [--mem_bind=...] [--reservation=name]\n"
+"              [--switch=max-switches{@max-time-to-wait}]\n"
 "              [--export[=names]] executable [args...]\n");
 }
 
@@ -2740,7 +2834,7 @@ static void _help(void)
 "      --mail-user=user        who to send email notification for job state\n"
 "                              changes\n"
 "  -n, --ntasks=ntasks         number of tasks to run\n"
-"      --nice[=value]          decrease secheduling priority by value\n"
+"      --nice[=value]          decrease scheduling priority by value\n"
 "      --no-requeue            if set, do not permit the job to be requeued\n"
 "      --ntasks-per-node=n     number of tasks to invoke on each node\n"
 "  -N, --nodes=N               number of nodes on which to run (N = min[-max])\n"
@@ -2756,6 +2850,9 @@ static void _help(void)
 "  -s, --share                 share nodes with other jobs\n"
 "      --uid=user_id           user ID to run job as (user root only)\n"
 "  -v, --verbose               verbose mode (multiple -v's increase verbosity)\n"
+"      --wrap[=command string] wrap commmand string in a sh script and submit\n"
+"      --switch=max-switches{@max-time-to-wait}\n"
+"                              Optimum switches and max time to wait for optimum\n"
 "\n"
 "Constraint options:\n"
 "      --contiguous            demand a contiguous range of nodes\n"

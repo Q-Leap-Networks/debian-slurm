@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -88,6 +88,13 @@ int set_user_limits(slurmd_job_t *job)
 	slurm_rlimits_info_t *rli;
 	struct rlimit r;
 	rlim_t task_mem_bytes;
+
+	if (getrlimit(RLIMIT_CPU, &r) == 0) {
+		if (r.rlim_max != RLIM_INFINITY) {
+			error("SLURM process CPU time limit is %d seconds",
+			      (int) r.rlim_max);
+		}
+	}
 
 	for (rli = get_slurm_rlimits_info(); rli->name; rli++)
 		_set_limit( job->env, rli );

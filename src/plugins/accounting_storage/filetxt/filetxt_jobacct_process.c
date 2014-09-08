@@ -9,7 +9,7 @@
  *  Written by Danny Auble <da@llnl.gov>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -46,6 +46,7 @@
 
 #include "src/common/xstring.h"
 #include "src/common/xmalloc.h"
+#include "src/common/list.h"
 #include "filetxt_jobacct_process.h"
 #include "src/slurmctld/slurmctld.h"
 #include "src/slurmdbd/read_config.h"
@@ -1074,12 +1075,15 @@ extern List filetxt_jobacct_process_get_jobs(slurmdb_job_cond_t *job_cond)
 				if (fptr)
 					*fptr = 0;
 				break;
-			} else
+			} else {
 				*fptr++ = 0;
+			}
 		}
-		f[++i] = 0;
+		if (i < MAX_RECORD_FIELDS)
+			i++;
+		f[i] = 0;
 
-		if(i < HEADER_LENGTH) {
+		if (i < HEADER_LENGTH) {
 			continue;
 		}
 

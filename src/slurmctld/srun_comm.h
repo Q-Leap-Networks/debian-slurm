@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -65,12 +65,20 @@ extern void srun_allocate_abort(struct job_record *job_ptr);
  */
 extern void srun_exec(struct step_record *step_ptr, char **argv);
 
-
 /*
  * srun_job_complete - notify srun of a job's termination
  * IN job_ptr - pointer to the slurmctld job record
  */
 extern void srun_job_complete (struct job_record *job_ptr);
+
+
+/*
+ * srun_job_suspend - notify salloc of suspend/resume operation
+ * IN job_ptr - pointer to the slurmctld job record
+ * IN op - SUSPEND_JOB or RESUME_JOB (enum suspend_opts from slurm.h)
+ * RET - true if message send, otherwise false
+ */
+extern bool srun_job_suspend (struct job_record *job_ptr, uint16_t op);
 
 /*
  * srun_step_complete - notify srun of a job step's termination

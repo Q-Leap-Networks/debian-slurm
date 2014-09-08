@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -32,7 +32,8 @@
 
 #include <pthread.h>
 #include <stdlib.h>
-#include <slurm/slurm_errno.h>
+
+#include "slurm/slurm_errno.h"
 
 #include "src/api/slurm_pmi.h"
 #include "src/common/macros.h"
@@ -64,8 +65,8 @@ struct barrier_resp {
 	char *hostname;
 };				/* details for barrier task communcations */
 struct barrier_resp *barrier_ptr = NULL;
-uint16_t barrier_resp_cnt = 0;	/* tasks having reached barrier */
-uint16_t barrier_cnt = 0;	/* tasks needing to reach barrier */
+uint32_t barrier_resp_cnt = 0;	/* tasks having reached barrier */
+uint32_t barrier_cnt = 0;	/* tasks needing to reach barrier */
 
 pthread_mutex_t agent_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t  agent_cond  = PTHREAD_COND_INITIALIZER;
@@ -144,7 +145,7 @@ static void _kvs_xmit_tasks(void)
 static void *_msg_thread(void *x)
 {
 	struct msg_arg *msg_arg_ptr = (struct msg_arg *) x;
-	int rc, success = 0, timeout;
+	int rc, timeout;
 	slurm_msg_t msg_send;
 
 	slurm_msg_t_init(&msg_send);
@@ -166,7 +167,6 @@ static void *_msg_thread(void *x)
 			msg_arg_ptr->bar_ptr->hostname, rc);
 	} else {
 		/* successfully transmitted KVS keypairs */
-		success = 1;
 	}
 
 	slurm_mutex_lock(&agent_mutex);
@@ -518,7 +518,7 @@ fini:	pthread_mutex_unlock(&kvs_mutex);
 
 /*
  * Set the maximum number of threads to be used by the PMI server code.
- * The PMI server code is used interally by the slurm_step_launch() function
+ * The PMI server code is used internally by the slurm_step_launch() function
  * to support MPI libraries that bootstrap themselves using PMI.
  */
 extern void pmi_server_max_threads(int max_threads)

@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -162,7 +162,7 @@ typedef struct srun_options {
 	bool noshell;		/* --no-shell                   */
 	bool overcommit;	/* --overcommit,   -O		*/
 	bool no_kill;		/* --no-kill, -k		*/
-	bool kill_bad_exit;	/* --kill-on-bad-exit, -K	*/
+	int32_t kill_bad_exit;	/* --kill-on-bad-exit, -K	*/
 	uint16_t shared;	/* --share,   -s		*/
 	int  max_wait;		/* --wait,    -W		*/
 	bool quit_on_intr;      /* --quit-on-interrupt, -q      */
@@ -197,10 +197,10 @@ typedef struct srun_options {
 	char *network;		/* --network=			*/
 
 	/* BLUEGENE SPECIFIC */
-	uint16_t geometry[SYSTEM_DIMENSIONS]; /* --geometry, -g	*/
+	uint16_t geometry[HIGHEST_DIMENSIONS]; /* --geometry, -g */
 	bool reboot;		/* --reboot			*/
 	bool no_rotate;		/* --no_rotate, -R		*/
-	uint16_t conn_type;	/* --conn-type 			*/
+	uint16_t conn_type[HIGHEST_DIMENSIONS];	/* --conn-type 	*/
 	char *blrtsimage;       /* --blrtsimage BlrtsImage for block */
 	char *linuximage;       /* --linuximage LinuxImage for block */
 	char *mloaderimage;     /* --mloaderimage mloaderImage for block */
@@ -223,6 +223,8 @@ typedef struct srun_options {
 	char **spank_job_env;	/* SPANK controlled environment for job
 				 * Prolog and Epilog		*/
 	int spank_job_env_size;	/* size of spank_job_env	*/
+	int req_switch;		/* Minimum number of switches	*/
+	int wait4switch;	/* Maximum time to wait for minimum switches */
 } opt_t;
 
 extern opt_t opt;
@@ -258,7 +260,7 @@ extern int   spank_set_job_env(const char *name, const char *value,
 			       int overwrite);
 extern int   spank_unset_job_env(const char *name);
 
-/* Initialize the the spank_job_env based upon environment variables set
+/* Initialize the spank_job_env based upon environment variables set
  *	via salloc or sbatch commands */
 extern void init_spank_env(void);
 

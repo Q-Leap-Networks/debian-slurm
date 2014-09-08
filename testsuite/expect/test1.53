@@ -14,7 +14,7 @@
 # CODE-OCEC-09-009. All rights reserved.
 #
 # This file is part of SLURM, a resource management program.
-# For details, see <https://computing.llnl.gov/linux/slurm/>.
+# For details, see <http://www.schedmd.com/slurmdocs/>.
 # Please also read the included file: DISCLAIMER.
 #
 # SLURM is free software; you can redistribute it and/or modify it under
@@ -42,8 +42,8 @@ print_header $test_id
 #
 # Delete left-over programs and rebuild them.
 #
-exec rm -f $file_prog
-exec cc -o $file_prog $file_prog.c
+exec $bin_rm -f $file_prog
+exec $bin_cc -o $file_prog $file_prog.c
 
 #
 # submit job to run 4 mins, but get signaled 2 mins before time limit

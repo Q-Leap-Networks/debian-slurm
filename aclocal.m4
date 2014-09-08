@@ -353,7 +353,7 @@ $$1_PKG_ERRORS
 Consider adjusting the PKG_CONFIG_PATH environment variable if you
 installed software in a non-standard prefix.
 
-_PKG_TEXT])dnl
+_PKG_TEXT])[]dnl
         ])
 elif test $pkg_failed = untried; then
      	AC_MSG_RESULT([no])
@@ -364,7 +364,7 @@ path to pkg-config.
 
 _PKG_TEXT
 
-To get pkg-config, see <http://pkg-config.freedesktop.org/>.])dnl
+To get pkg-config, see <http://pkg-config.freedesktop.org/>.])[]dnl
         ])
 else
 	$1[]_CFLAGS=$pkg_cv_[]$1[]_CFLAGS
@@ -1367,6 +1367,7 @@ m4_include([auxdir/x_ac_gpl_licensed.m4])
 m4_include([auxdir/x_ac_hwloc.m4])
 m4_include([auxdir/x_ac_iso.m4])
 m4_include([auxdir/x_ac_lua.m4])
+m4_include([auxdir/x_ac_man2html.m4])
 m4_include([auxdir/x_ac_munge.m4])
 m4_include([auxdir/x_ac_ncurses.m4])
 m4_include([auxdir/x_ac_pam.m4])
@@ -1377,5 +1378,6 @@ m4_include([auxdir/x_ac_setpgrp.m4])
 m4_include([auxdir/x_ac_setproctitle.m4])
 m4_include([auxdir/x_ac_sgi_job.m4])
 m4_include([auxdir/x_ac_slurm_ssl.m4])
+m4_include([auxdir/x_ac_srun.m4])
 m4_include([auxdir/x_ac_sun_const.m4])
 m4_include([auxdir/x_ac_xcpu.m4])

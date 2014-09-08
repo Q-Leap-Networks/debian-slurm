@@ -21,6 +21,7 @@ The actual mechanism used to task binding is dependent upon the available
 infrastructure as determined by the "configure" program when SLURM is built
 and the value of the <b>TaskPluginParam</b> as defined in the <b>slurm.conf</b>
 (SLURM configuration file).</li>
+<li><b>cgroup</b>&#151;Use Linux cgroups for binding tasks to resources.</li>
 <li><b>none</b>&#151;A plugin that implements the API without providing any
 services. This is the default behavior and provides no task binding.</li>
 </ul>
@@ -175,11 +176,24 @@ data structure definition.</p>
 On failure, the plugin should return SLURM_ERROR and set the errno to an
 appropriate value to indicate the reason for failure.</p>
 
+<p class="commandline">int task_post_step (slurmd_job_t *job);</p>
+<p style="margin-left:.2in"><b>Description</b>: task_post_step() is called
+after termination of all the tasks of the job step.
+Executed by the <b>slurmstepd</b> program as user root.</p>
+<p style="margin-left:.2in"><b>Arguments</b>:
+<span class="commandline">job</span>&nbsp;&nbsp;&nbsp;(input)
+pointer to the job which has terminated.
+See <b>src/slurmd/slurmstepd/slurmstepd_job.h</b> for the
+data structure definition.</p>
+<p style="margin-left:.2in"><b>Returns</b>: SLURM_SUCCESS if successful.
+On failure, the plugin should return SLURM_ERROR and set the errno to an
+appropriate value to indicate the reason for failure.</p>
+
 <h2>Versioning</h2>
-<p> This document describes version 1 of the SLURM Task Plugin API.
+<p> This document describes version 2 of the SLURM Task Plugin API.
 Future releases of SLURM may revise this API.</p>
 <p class="footer"><a href="#top">top</a></p>
 
-<p style="text-align:center;">Last modified 19 February 2009</p>
+<p style="text-align:center;">Last modified 29 April 2011</p>
 
 <!--#include virtual="footer.txt"-->

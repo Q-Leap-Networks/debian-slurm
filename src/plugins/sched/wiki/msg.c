@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -38,10 +38,10 @@
 \*****************************************************************************/
 
 #include "slurm/slurm.h"
-#include <src/common/uid.h>
-#include <src/slurmctld/locks.h>
-#include <src/plugins/sched/wiki/crypto.h>
-#include <src/plugins/sched/wiki/msg.h>
+#include "src/common/uid.h"
+#include "src/slurmctld/locks.h"
+#include "src/plugins/sched/wiki/crypto.h"
+#include "src/plugins/sched/wiki/msg.h"
 
 #define _DEBUG 0
 
@@ -285,7 +285,7 @@ extern int parse_wiki_config(void)
 
 	debug("Reading wiki.conf file (%s)",wiki_conf);
 	tbl = s_p_hashtbl_create(options);
-	if (s_p_parse_file(tbl, NULL, wiki_conf) == SLURM_ERROR)
+	if (s_p_parse_file(tbl, NULL, wiki_conf, false) == SLURM_ERROR)
 		fatal("something wrong with opening/reading wiki.conf file");
 
 	if (! s_p_get_string(&key, "AuthKey", tbl))

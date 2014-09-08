@@ -2,13 +2,13 @@
  *  smap.h - definitions used for smap data functions
  *****************************************************************************
  *  Copyright (C) 2004-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2011 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -105,11 +105,15 @@
 #include "src/common/hostlist.h"
 #include "src/common/list.h"
 #include "src/common/macros.h"
-#include "src/common/slurmdb_defs.h"
-#include "src/plugins/select/bluegene/block_allocator/block_allocator.h"
+#include "src/common/node_select.h"
 #include "src/common/slurm_protocol_api.h"
+#include "src/common/slurmdb_defs.h"
+#include "src/common/xmalloc.h"
+#include "src/common/xstring.h"
 
-#include "src/plugins/select/bluegene/wrap_rm_api.h"
+#include "src/plugins/select/bluegene/bg_enums.h"
+#include "src/plugins/select/bluegene/ba_common.h"
+#include "src/plugins/select/bluegene/configure_api.h"
 
 /* getopt_long options, integers but not characters */
 #define OPT_LONG_HELP	0x100
@@ -117,8 +121,6 @@
 #define OPT_LONG_HIDE	0x102
 
 enum { JOBS, RESERVATIONS, SLURMPART, BGPART, COMMANDS };
-
-//typedef void (*sighandler_t) (int);
 
 /* Input parameters */
 typedef struct {
@@ -128,6 +130,7 @@ typedef struct {
 	uint16_t cluster_dims;
 	uint32_t cluster_flags;
 	bool commandline;
+	char *command;
 	int display;
 	int iterate;
 	bitstr_t *io_bit;
@@ -137,8 +140,36 @@ typedef struct {
 	int verbose;
 } smap_parameters_t;
 
+/*
+ * smap_node_t: node within the allocation system.
+ */
+typedef struct {
+	/* coordinates of midplane */
+	uint16_t *coord;
+	/* coordinates on display screen */
+	int grid_xcord, grid_ycord;
+	/* color of letter used in smap */
+	int color;
+	/* midplane index used for easy look up of the miplane */
+	int index;
+	/* letter used in smap */
+	char letter;
+	int state;
+	/* set if using this midplane in a block */
+	uint16_t used;
+} smap_node_t;
+
+typedef struct {
+	int node_cnt;
+	smap_node_t **grid;
+} smap_system_t;
+
 extern WINDOW *grid_win;
 extern WINDOW *text_win;
+
+extern int *dim_size;
+extern char letters[62]; /* complete list of letters used in smap */
+extern char colors[6]; /* index into colors used for smap */
 
 extern int main_xcord;
 extern int main_ycord;
@@ -148,19 +179,22 @@ extern int text_line_cnt;
 
 extern void parse_command_line(int argc, char *argv[]);
 
-extern ba_system_t *ba_system_ptr;
+extern smap_system_t *smap_system_ptr;
 extern int quiet_flag;
 
 extern void init_grid(node_info_msg_t *node_info_ptr);
-extern int set_grid_inx(int start, int end, int count);
-extern int set_grid_inx2(char *node_names, int count);
+extern void clear_grid(void);
+extern void free_grid(void);
+extern int *get_cluster_dims(node_info_msg_t *node_info_ptr);
+extern void set_grid_inx(int start, int end, int count);
 extern int set_grid_bg(int *start, int *end, int count, int set);
-extern void print_grid(int dir);
-bitstr_t *get_requested_node_bitmap();
+extern void print_grid(void);
+bitstr_t *get_requested_node_bitmap(void);
 
 extern void parse_command_line(int argc, char *argv[]);
 extern void print_date(void);
 extern void clear_window(WINDOW *win);
+extern char *resolve_mp(char *desc);
 
 extern void get_slurm_part(void);
 extern void get_bg_part(void);

@@ -14,7 +14,7 @@
 # CODE-OCEC-09-009. All rights reserved.
 #
 # This file is part of SLURM, a resource management program.
-# For details, see <https://computing.llnl.gov/linux/slurm/>.
+# For details, see <http://www.schedmd.com/slurmdocs/>.
 # Please also read the included file: DISCLAIMER.
 #
 # SLURM is free software; you can redistribute it and/or modify it under
@@ -42,9 +42,19 @@ set file_out_n       "test$test_id.n.%n.output"
 set file_out_s       "test$test_id.s.%s.output"
 set file_out_t       "test$test_id.t.%t.output"
 set job_id           0
-set task_cnt         5
 
 print_header $test_id
+
+if {[test_cray]} {
+	send_user "\nWARNING: This test is incompatible with Cray systems\n"
+	exit $exit_code
+}
+if {[test_bluegene]} {
+	# We never launch more than one task on emulated Bluegene
+	set task_cnt 1
+} else {
+	set task_cnt 5
+}
 
 #
 # Spawn a program that generates "task_id" (%t) in stdout file names

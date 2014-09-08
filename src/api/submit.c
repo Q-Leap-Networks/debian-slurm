@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -50,7 +50,7 @@
 extern pid_t getsid(pid_t pid);		/* missing from <unistd.h> */
 #endif
 
-#include <slurm/slurm.h>
+#include "slurm/slurm.h"
 
 #include "src/common/read_config.h"
 #include "src/common/slurm_protocol_api.h"

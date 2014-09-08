@@ -1,14 +1,16 @@
-.TH "gres.conf" "5" "September 2010" "gres.conf 2.2" "Slurm configuration file"
+.TH "gres.conf" "5" "September 2011" "gres.conf 2.3" "Slurm configuration file"
 .SH "NAME"
 gres.conf \- Slurm configuration file for generic resource management.
 
 .SH "DESCRIPTION"
-\fB/etc/gres.conf\fP is an ASCII file which describes the configuration
+\fBgres.conf\fP is an ASCII file which describes the configuration
 of generic resources on each compute node. Each node must contain a
 gres.conf file if generic resources are to be scheduled by SLURM.
 The file location can be modified at system build time using the
-DEFAULT_SLURM_CONF parameter. The file will always be located in the
-same directory as the \fBslurm.conf\fP file.
+DEFAULT_SLURM_CONF parameter or at execution time by setting the SLURM_CONF
+environment variable. The file will always be located in the
+same directory as the \fBslurm.conf\fP file. If generic resource counts are
+set by the gres plugin function node_config_load(), this file may be optional.
 .LP
 Parameter names are case insensitive.
 Any text following a "#" in the configuration file is treated
@@ -30,7 +32,7 @@ to mulitply the number by 1024, 1048576 or 1073741824 respectively.
 .TP
 \fBCPUs\fR
 Specify the CPU index numbers for the specific CPUs which can
-use this resources. For example, it may be strongly preferable
+use this resource. For example, it may be strongly preferable
 to use specific CPUs with specific devices (e.g. on a NUMA
 architecture). Multiple CPUs may be specified using a comma
 delimited list or a range may be specified using a "\-" separator
@@ -42,7 +44,7 @@ If any CPU can be used with the resources, then do not specify the
 .TP
 \fBFile\fR
 Fully qualified pathname of the device files associated with a resource. 
-The name can include a numberic range suffix to be interpretted by SLURM
+The name can include a numberic range suffix to be interpreted by SLURM
 (e.g. \fIFile=/dev/nvidia[0\-3]\fR).
 This field is generally required if enforcement of generic resource
 allocations is to be supported (i.e. prevents a users from making
@@ -99,7 +101,7 @@ Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 CODE\-OCEC\-09\-009. All rights reserved.
 .LP
 This file is part of SLURM, a resource management program.
-For details, see <https://computing.llnl.gov/linux/slurm/>.
+For details, see <http://www.schedmd.com/slurmdocs/>.
 .LP
 SLURM is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free

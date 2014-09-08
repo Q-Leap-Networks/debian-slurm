@@ -1,13 +1,14 @@
 ############################################################################
 # Copyright (C) 2002-2007 The Regents of the University of California.
-# Copyright (C) 2008-2010 Lawrence Livermore National Security.
+# Copyright (C) 2008-2011 Lawrence Livermore National Security.
+# Copyright (C) 2010-2011 SchedMD LLC
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
 # Additionals by Joseph Donaghy <donaghy1@llnl.gov>
 # CODE-OCEC-09-009. All rights reserved.
 #
 # This file is part of SLURM, a resource management program.
-# For details, see <https://computing.llnl.gov/linux/slurm/>.
+# For details, see <http://www.schedmd.com/slurmdocs/>.
 # Please also read the supplied file: DISCLAIMER.
 #
 # SLURM is free software; you can redistribute it and/or modify it under
@@ -201,7 +202,7 @@ test2.2    Validate scontrol help command.
 test2.3    Validate scontrol ping command.
 test2.4    Validate scontrol exit, quit, and !! commands.
 test2.5    Validate scontrol show commands for configuation, daemons,
-           nodes, and partitions.
+           nodes, frontends, and partitions.
 test2.6    Validate scontrol verbose and quite options.
 test2.7    Validate scontrol pidinfo command.
 test2.8    Validate scontrol show commands for jobs and steps.
@@ -211,6 +212,7 @@ test2.11   Validate scontrol listpids command.
 test2.12   Validate scontrol show topology option.
 test2.13   Validate scontrol update command for job steps.
 test2.14   Validate scontrol update size of running job.
+test2.15   Validate scontrol update size of running job with some running tasks.
 
 
 test3.#    Testing of scontrol options (best run as SlurmUser or root).
@@ -226,6 +228,7 @@ test3.8    Test of batch job requeue.
 test3.9    Test of "scontrol show slurmd"
 test3.10   Test of "scontrol notify <jobid> <message>"
 test3.11   Validate scontrol create, delete, and update of reservations.
+test3.12   Validate scontrol update command for front end nodes.
 UNTESTED   "scontrol abort"    would stop slurm
 UNTESTED   "scontrol shutdown" would stop slurm
 
@@ -325,6 +328,15 @@ test8.5    Test creation of all blocks 1 midplane and smaller.
 test8.6    Stress test Dynamic mode block creation.
 test8.7    Test of Blue Gene scheduling with sched/wik2 plugin.
 test8.8    Test result of marking smaller blocks in an error state.
+**NOTE**   The following tests are specificallly for Bluegene/Q systems
+test8.20   Bluegene/Q only: Test that job step allocations are a valid size
+           and within the job's allocation
+test8.21   Bluegene/Q only: Test that multple job step allocations are
+           properly packed within the job's allocation
+test8.22   Bluegene/Q only: Stress test of running many job step allocations
+           within the job's allocation
+test8.23   Bluegene/Q only: Test that multple jobs allocations are properly
+           packed within a midplane
 
 
 test9.#    System stress testing. Exercises all commands and daemons.
@@ -570,3 +582,8 @@ test24.2   sshare h, n, p, P, v, and V options.
 test25.#   Testing of sprio command and options.
 =================================================
 test25.1   sprio all options
+
+test26.#   Test of Cray specific functionality.
+================================================
+test26.1   Validate scontrol update command for nodes is disabled.
+test26.2   Test of srun/aprun wrapper use of --alps= option

@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -39,8 +39,8 @@
 #ifndef __SLURM_CONTROLLER_TOPO_PLUGIN_API_H__
 #define __SLURM_CONTROLLER_TOPO_PLUGIN_API_H__
 
-#include <slurm/slurm.h>
-#include <src/slurmctld/slurmctld.h>
+#include "slurm/slurm.h"
+#include "src/slurmctld/slurmctld.h"
 
 /*****************************************************************************\
  *  SWITCH topology data structures
@@ -88,6 +88,13 @@ extern int slurm_topo_fini(void);
  *	after a system startup or reconfiguration.
  */
 extern int slurm_topo_build_config( void );
+
+/*
+ * slurm_topo_generate_node_ranking  -  populate node_rank fields
+ * NOTE: This operation is only supported by those topology plugins for
+ *       which the node ordering between slurmd and slurmctld is invariant.
+ */
+extern bool slurm_topo_generate_node_ranking( void );
 
 /*
  * slurm_topo_get_node_addr - build node address and the associated pattern

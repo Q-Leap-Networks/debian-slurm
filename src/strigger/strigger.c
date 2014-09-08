@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -48,13 +48,13 @@
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
-#include <slurm/slurm_errno.h>
-#include <slurm/slurm.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #ifdef HAVE_STRINGS_H
 #  include <strings.h>
 #endif
+#include "slurm/slurm_errno.h"
+#include "slurm/slurm.h"
 
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
@@ -136,6 +136,8 @@ static int _set_trigger(void)
 			ti.trig_type |= TRIGGER_TYPE_FINI;
 		if (params.time_limit)
 			ti.trig_type |= TRIGGER_TYPE_TIME;
+	} else if (params.front_end) {
+		ti.res_type = TRIGGER_RES_TYPE_FRONT_END;
 	} else {
 		ti.res_type = TRIGGER_RES_TYPE_NODE;
 		if (params.node_id)
@@ -250,8 +252,10 @@ static int _get_trigger(void)
 				continue;
 		}
 		if (params.node_down) {
-			if ((trig_msg->trigger_array[i].res_type
-					!= TRIGGER_RES_TYPE_NODE) ||
+			if (((trig_msg->trigger_array[i].res_type
+					!= TRIGGER_RES_TYPE_NODE) &&
+			     (trig_msg->trigger_array[i].res_type
+					!= TRIGGER_RES_TYPE_FRONT_END)) ||
 			    (trig_msg->trigger_array[i].trig_type
 					!= TRIGGER_TYPE_DOWN))
 				continue;
@@ -283,8 +287,10 @@ static int _get_trigger(void)
 				continue;
 		}
 		if (params.node_up) {
-			if ((trig_msg->trigger_array[i].res_type
-					!= TRIGGER_RES_TYPE_NODE) ||
+			if (((trig_msg->trigger_array[i].res_type
+					!= TRIGGER_RES_TYPE_NODE) &&
+			     (trig_msg->trigger_array[i].res_type
+					!= TRIGGER_RES_TYPE_FRONT_END)) ||
 			    (trig_msg->trigger_array[i].trig_type
 					!= TRIGGER_TYPE_UP))
 				continue;

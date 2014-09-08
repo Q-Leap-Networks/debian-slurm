@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -117,6 +117,8 @@ static int _multi_cluster(List clusters)
 	int rc = 0, rc2;
 
 	itr = list_iterator_create(clusters);
+	if (!itr)
+		fatal("list_iterator_create: malloc failure");
 	while ((working_cluster_rec = list_next(itr))) {
 		if (first)
 			first = false;

@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -529,7 +529,7 @@ typedef struct {
 	char	*blockid;
 	char    *cluster;
 	uint32_t derived_ec;
-	char	*derived_es;
+	char	*derived_es; /* aka "comment" */
 	uint32_t elapsed;
 	time_t eligible;
 	time_t end;
@@ -572,6 +572,7 @@ typedef struct {
 	uint32_t id;
 	uint32_t flags; /* flags for various things to enforce or
 			   override other limits */
+	uint32_t grace_time; /* preemption grace time */
 	uint64_t grp_cpu_mins; /* max number of cpu minutes all jobs
 				* running under this qos can run for */
 	uint64_t grp_cpu_run_mins; /* max number of cpu minutes all jobs
@@ -594,9 +595,13 @@ typedef struct {
 				   * using this qos */
 	uint32_t max_cpus_pj; /* max number of cpus a job can
 			       * allocate with this qos */
+	uint32_t max_cpus_pu; /* max number of cpus a user can
+			       * allocate with this qos at one time */
 	uint32_t max_jobs_pu;	/* max number of jobs a user can
 				 * run with this qos at one time */
 	uint32_t max_nodes_pj; /* max number of nodes a job can
+				* allocate with this qos at one time */
+	uint32_t max_nodes_pu; /* max number of nodes a user can
 				* allocate with this qos at one time */
 	uint32_t max_submit_jobs_pu; /* max number of jobs a user can
 					submit with this qos at once */
@@ -720,7 +725,9 @@ typedef struct {
 typedef struct {
 	uint64_t cpu_run_mins; /* how many cpu mins are allocated
 				* currently */
+	uint32_t cpus; /* count of CPUs allocated */
 	uint32_t jobs;	/* count of active jobs */
+	uint32_t nodes;	/* count of nodes allocated */
 	uint32_t submit_jobs; /* count of jobs pending or running */
 	uint32_t uid;
 } slurmdb_used_limits_t;
@@ -731,7 +738,7 @@ typedef struct {
 	slurmdb_association_cond_t *assoc_cond; /* use user_list here for
 						   names and acct_list for
 						   default accounts */
-	List def_acct_list; /* list of char * (We can't readly use
+	List def_acct_list; /* list of char * (We can't really use
 			     * the assoc_cond->acct_list for this
 			     * because then it is impossible for us
 			     * to tell which accounts are defaults
@@ -1102,7 +1109,7 @@ extern List slurmdb_coord_remove(void *db_conn, List acct_list,
 
 /*
  * get info from the storage
- * RET: List of config_key_pairs_t *
+ * RET: List of config_key_pair_t *
  * note List needs to be freed with slurm_list_destroy() when called
  */
 extern List slurmdb_config_get(void *db_conn);

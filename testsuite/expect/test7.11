@@ -13,7 +13,7 @@
 # CODE-OCEC-09-009. All rights reserved.
 #
 # This file is part of SLURM, a resource management program.
-# For details, see <https://computing.llnl.gov/linux/slurm/>.
+# For details, see <http://www.schedmd.com/slurmdocs/>.
 # Please also read the included file: DISCLAIMER.
 #
 # SLURM is free software; you can redistribute it and/or modify it under
@@ -48,13 +48,13 @@ if {[test_super_user] == 0} {
 	send_user "\nWARNING: This test must be run as SlurmUser\n"
 	exit 0
 }
-if {[test_aix] == 1} {
+if {[test_aix]} {
 	send_user "WARNING: Test is incompatible with AIX\n"
 	exit 0
 }
-if {[test_bluegene] == 1} {
-	send_user "WARNING: Test is incompatible with Blue Gene\n"
-	exit 0
+if {[test_front_end]} {
+        send_user "\nWARNING: This test is incompatible with front-end systems\n"
+        exit $exit_code
 }
 
 #

@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -61,7 +61,7 @@
 /****************************/
 
 /* pack_header
- * packs a slurm protocol header that proceeds every slurm message
+ * packs a slurm protocol header that precedes every slurm message
  * IN header - the header structure to pack
  * IN/OUT buffer - destination of the pack, contains pointers that are
  *			automatically updated
@@ -69,7 +69,7 @@
 extern void pack_header ( header_t  * header , Buf buffer );
 
 /* unpack_header
- * unpacks a slurm protocol header that proceeds every slurm message
+ * unpacks a slurm protocol header that precedes every slurm message
  * OUT header - the header structure to unpack
  * IN/OUT buffer - source of the unpack data, contains pointers that are
  *			automatically updated
@@ -144,6 +144,10 @@ extern void pack_multi_core_data (multi_core_data_t *multi_core, Buf buffer,
 				  uint16_t protocol_version);
 extern int unpack_multi_core_data (multi_core_data_t **multi_core, Buf buffer,
 				   uint16_t protocol_version);
+extern void slurm_pack_block_job_info(block_job_info_t *block_job_info,
+				      Buf buffer, uint16_t protocol_version);
+extern int slurm_unpack_block_info_members(block_info_t *block_info, Buf buffer,
+					   uint16_t protocol_version);
 extern int slurm_unpack_block_info_msg(
 	block_info_msg_t **block_info_msg_pptr, Buf buffer,
 	uint16_t protocol_version);

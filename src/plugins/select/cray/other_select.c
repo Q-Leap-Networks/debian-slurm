@@ -16,7 +16,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -78,15 +78,21 @@ static slurm_select_ops_t *_other_select_get_ops(slurm_select_context_t *c)
 		"select_p_state_save",
 		"select_p_state_restore",
 		"select_p_job_init",
+		"select_p_node_ranking",
 		"select_p_node_init",
 		"select_p_block_init",
 		"select_p_job_test",
 		"select_p_job_begin",
 		"select_p_job_ready",
+		"select_p_job_expand_allow",
+		"select_p_job_expand",
 		"select_p_job_resized",
+		"select_p_job_signal",
 		"select_p_job_fini",
 		"select_p_job_suspend",
 		"select_p_job_resume",
+		"select_p_step_pick_nodes",
+		"select_p_step_finish",
 		"select_p_pack_select_info",
                 "select_p_select_nodeinfo_pack",
                 "select_p_select_nodeinfo_unpack",
@@ -111,6 +117,10 @@ static slurm_select_ops_t *_other_select_get_ops(slurm_select_context_t *c)
 		"select_p_update_node_state",
 		"select_p_alter_node_cnt",
 		"select_p_reconfigure",
+		"select_p_resv_test",
+		"select_p_ba_init",
+		"select_p_ba_fini",
+		"select_p_ba_get_dims",
 	};
 	int n_syms = sizeof(syms) / sizeof(char *);
 
@@ -379,18 +389,59 @@ extern int other_job_ready(struct job_record *job_ptr)
 }
 
 /*
- * Modify internal data structures for a job that has changed size
- *	Only support jobs shrinking now.
+ * Test if expanding a job is permitted
+ */
+extern bool other_job_expand_allow(void)
+{
+	if (other_select_init() < 0)
+		return false;
+
+	return (*(other_select_context->ops.job_expand_allow))();
+}
+
+/*
+ * Move the resource allocated to one job into that of another job.
+ *	All resources are removed from "from_job_ptr" and moved into
+ *	"to_job_ptr". Also see other_job_resized().
+ * RET: 0 or an error code
+ */
+extern int other_job_expand(struct job_record *from_job_ptr,
+			    struct job_record *to_job_ptr)
+{
+	if (other_select_init() < 0)
+		return -1;
+
+	return (*(other_select_context->ops.job_expand))
+		(from_job_ptr, to_job_ptr);
+}
+
+/*
+ * Modify internal data structures for a job that has decreased job size.
+ *	Only support jobs shrinking. Also see other_job_expand();
  * RET: 0 or an error code
  */
 extern int other_job_resized(struct job_record *job_ptr,
-				struct node_record *node_ptr)
+			     struct node_record *node_ptr)
 {
 	if (other_select_init() < 0)
 		return -1;
 
 	return (*(other_select_context->ops.job_resized))
 		(job_ptr, node_ptr);
+}
+
+/*
+ * Pass job-step signal to other plugin.
+ * IN job_ptr - job to be signalled
+ * IN signal  - signal(7) number
+ */
+extern int other_job_signal(struct job_record *job_ptr, int signal)
+{
+	if (other_select_init() < 0)
+		return -1;
+
+	return (*(other_select_context->ops.job_signal))
+		(job_ptr, signal);
 }
 
 /*
@@ -409,29 +460,69 @@ extern int other_job_fini(struct job_record *job_ptr)
 /*
  * Suspend a job. Executed from slurmctld.
  * IN job_ptr - pointer to job being suspended
+ * indf_susp IN - set if job is being suspended indefinitely by user
+ *                or admin, otherwise suspended for gang scheduling
  * RET SLURM_SUCCESS or error code
  */
-extern int other_job_suspend(struct job_record *job_ptr)
+extern int other_job_suspend(struct job_record *job_ptr, bool indf_susp)
 {
 	if (other_select_init() < 0)
 		return SLURM_ERROR;
 
 	return (*(other_select_context->ops.job_suspend))
-		(job_ptr);
+		(job_ptr, indf_susp);
 }
 
 /*
  * Resume a job. Executed from slurmctld.
+ * indf_susp IN - set if job is being resumed from indefinite suspend by user
+ *                or admin, otherwise resume from gang scheduling
  * IN job_ptr - pointer to job being resumed
  * RET SLURM_SUCCESS or error code
  */
-extern int other_job_resume(struct job_record *job_ptr)
+extern int other_job_resume(struct job_record *job_ptr, bool indf_susp)
 {
 	if (other_select_init() < 0)
 		return SLURM_ERROR;
 
 	return (*(other_select_context->ops.job_resume))
-		(job_ptr);
+		(job_ptr, indf_susp);
+}
+
+/*
+ * Select the "best" nodes for given job step from those available in
+ * a job allocation.
+ *
+ * IN/OUT job_ptr - pointer to job already allocated and running in a
+ *                  block where the step is to run.
+ *                  set's start_time when job expected to start
+ * OUT step_jobinfo - Fill in the resources to be used if not
+ *                    full size of job.
+ * IN node_count  - How many nodes we are looking for.
+ * RET map of slurm nodes to be used for step, NULL on failure
+ */
+extern bitstr_t *other_step_pick_nodes(struct job_record *job_ptr,
+				       select_jobinfo_t *jobinfo,
+				       uint32_t node_count)
+{
+	if (other_select_init() < 0)
+		return NULL;
+
+	return (*(other_select_context->ops.step_pick_nodes))
+		(job_ptr, jobinfo, node_count);
+}
+
+/*
+ * clear what happened in select_g_step_pick_nodes
+ * IN/OUT step_ptr - Flush the resources from the job and step.
+ */
+extern int other_step_finish(struct step_record *step_ptr)
+{
+	if (other_select_init() < 0)
+		return SLURM_ERROR;
+
+	return (*(other_select_context->ops.step_finish))
+		(step_ptr);
 }
 
 extern int other_pack_select_info(time_t last_query_time, uint16_t show_flags,
@@ -445,8 +536,8 @@ extern int other_pack_select_info(time_t last_query_time, uint16_t show_flags,
 }
 
 extern int other_select_nodeinfo_pack(select_nodeinfo_t *nodeinfo,
-					 Buf buffer,
-					 uint16_t protocol_version)
+				      Buf buffer,
+				      uint16_t protocol_version)
 {
 	if (other_select_init() < 0)
 		return SLURM_ERROR;
@@ -466,12 +557,12 @@ extern int other_select_nodeinfo_unpack(select_nodeinfo_t **nodeinfo,
 		(nodeinfo, buffer, protocol_version);
 }
 
-extern select_nodeinfo_t *other_select_nodeinfo_alloc(uint32_t size)
+extern select_nodeinfo_t *other_select_nodeinfo_alloc(void)
 {
 	if (other_select_init() < 0)
 		return NULL;
 
-	return (*(other_select_context->ops.nodeinfo_alloc))(size);
+	return (*(other_select_context->ops.nodeinfo_alloc))();
 }
 
 extern int other_select_nodeinfo_free(select_nodeinfo_t *nodeinfo)
@@ -698,13 +789,12 @@ extern int other_update_node_config (int index)
  * IN state  - state to update to
  * RETURN SLURM_SUCCESS on success || SLURM_ERROR else wise
  */
-extern int other_update_node_state (int index, uint16_t state)
+extern int other_update_node_state (struct node_record *node_ptr)
 {
 	if (other_select_init() < 0)
 		return SLURM_ERROR;
 
-	return (*(other_select_context->ops.update_node_state))
-		(index, state);
+	return (*(other_select_context->ops.update_node_state))(node_ptr);
 }
 
 /*
@@ -728,4 +818,46 @@ extern int other_reconfigure (void)
 		return SLURM_ERROR;
 
 	return (*(other_select_context->ops.reconfigure))();
+}
+
+/*
+ * other_resv_test - Identify the nodes which "best" satisfy a reservation
+ *	request. "best" is defined as either single set of consecutive nodes
+ *	satisfying the request and leaving the minimum number of unused nodes
+ *	OR the fewest number of consecutive node sets
+ * IN avail_bitmap - nodes available for the reservation
+ * IN node_cnt - count of required nodes
+ * RET - nodes selected for use by the reservation
+ */
+extern bitstr_t * other_resv_test(bitstr_t *avail_bitmap, uint32_t node_cnt)
+{
+	if (other_select_init() < 0)
+		return NULL;
+
+	return (*(other_select_context->ops.resv_test))
+		(avail_bitmap, node_cnt);
+}
+
+extern void other_ba_init(node_info_msg_t *node_info_ptr, bool sanity_check)
+{
+	if (other_select_init() < 0)
+		return;
+
+	(*(other_select_context->ops.ba_init))(node_info_ptr, sanity_check);
+}
+
+extern void other_ba_fini(void)
+{
+	if (other_select_init() < 0)
+		return;
+
+	(*(other_select_context->ops.ba_fini))();
+}
+
+extern int *other_ba_get_dims(void)
+{
+	if (other_select_init() < 0)
+		return NULL;
+
+	return (*(other_select_context->ops.ba_get_dims))();
 }

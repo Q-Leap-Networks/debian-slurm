@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -43,7 +43,7 @@
 #include <signal.h>
 #include <sys/types.h>
 
-#include <slurm/slurm_errno.h>
+#include "slurm/slurm_errno.h"
 #include "src/common/log.h"
 #include "src/common/node_conf.h"
 #include "src/common/xstring.h"
@@ -77,7 +77,7 @@
  */
 const char plugin_name[]        = "topology NONE plugin";
 const char plugin_type[]        = "topology/none";
-const uint32_t plugin_version   = 100;
+const uint32_t plugin_version   = 101;
 
 /*
  * init() is called when the plugin is loaded, before any other functions
@@ -108,6 +108,14 @@ extern int topo_build_config(void)
 }
 
 /*
+ * topo_generate_node_ranking  -  this plugin does not set any node_rank fields
+ */
+extern bool topo_generate_node_ranking(void)
+{
+	return false;
+}
+
+/*
  * topo_get_node_addr - build node address and the associated pattern
  *      based on the topology information
  *
@@ -115,8 +123,10 @@ extern int topo_build_config(void)
  */
 extern int topo_get_node_addr(char* node_name, char** paddr, char** ppattern)
 {
+#ifndef HAVE_FRONT_END
 	if (find_node_record(node_name) == NULL)
 		return SLURM_ERROR;
+#endif
 
 	*paddr = xstrdup(node_name);
 	*ppattern = xstrdup("node");

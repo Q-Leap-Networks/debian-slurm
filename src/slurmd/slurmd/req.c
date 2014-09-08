@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -259,6 +259,12 @@ slurmd_req(slurm_msg_t *msg)
 		debug2("Processing RPC: REQUEST_TERMINATE_TASKS");
 		_rpc_terminate_tasks(msg);
 		slurm_free_kill_tasks_msg(msg->data);
+		break;
+	case REQUEST_KILL_PREEMPTED:
+		debug2("Processing RPC: REQUEST_KILL_PREEMPTED");
+		last_slurmctld_msg = time(NULL);
+		_rpc_timelimit(msg);
+		slurm_free_timelimit_msg(msg->data);
 		break;
 	case REQUEST_KILL_TIMELIMIT:
 		debug2("Processing RPC: REQUEST_KILL_TIMELIMIT");
@@ -916,7 +922,9 @@ _rpc_launch_tasks(slurm_msg_t *msg)
 	uid_t    req_uid;
 	launch_tasks_request_msg_t *req = msg->data;
 	bool     super_user = false;
+#ifndef HAVE_FRONT_END
 	bool     first_job_run;
+#endif
 	slurm_addr_t self;
 	slurm_addr_t *cli = &msg->orig_addr;
 	socklen_t adlen;
@@ -947,7 +955,9 @@ _rpc_launch_tasks(slurm_msg_t *msg)
 	env_array_overwrite(&req->env, "SLURM_SRUN_COMM_HOST", host);
 	req->envc = envcount(req->env);
 
+#ifndef HAVE_FRONT_END
 	first_job_run = !slurm_cred_jobid_cached(conf->vctx, req->job_id);
+#endif
 	if (_check_job_credential(req, req_uid, nodeid, &step_hset) < 0) {
 		errnum = errno;
 		error("Invalid job credential from %ld@%s: %m",
@@ -1162,10 +1172,11 @@ _set_batch_job_limits(slurm_msg_t *msg)
 			last_bit = arg.sockets_per_node[0] *
 				   arg.cores_per_socket[0];
 			for (i=0; i<last_bit; i++) {
-				if (bit_test(arg.job_core_bitmap, i)) {
+				if (!bit_test(arg.job_core_bitmap, i))
+					continue;
+				if (cpu_log)
 					info("JobNode[0] CPU[%u] Job alloc",i);
-					alloc_lps++;
-				}
+				alloc_lps++;
 			}
 		}
 		if (cpu_log)
@@ -1252,11 +1263,10 @@ _rpc_batch_job(slurm_msg_t *msg)
 		/*
 	 	 * Run job prolog on this node
 	 	 */
-#ifdef HAVE_BG
+#if defined(HAVE_BG)
 		select_g_select_jobinfo_get(req->select_jobinfo,
 					    SELECT_JOBDATA_BLOCK_ID, &resv_id);
-#endif
-#ifdef HAVE_CRAY
+#elif defined(HAVE_CRAY)
 		resv_id = select_g_select_jobinfo_xstrdup(req->select_jobinfo,
 					    SELECT_PRINT_RESV_ID);
 #endif
@@ -1847,7 +1857,8 @@ _signal_jobstep(uint32_t jobid, uint32_t stepid, uid_t req_uid,
 #  endif
 #endif
 
-	if ((signal == SIG_TIME_LIMIT) || (signal == SIG_DEBUG_WAKE)) {
+	if ((signal == SIG_PREEMPTED) || (signal == SIG_TIME_LIMIT) ||
+	    (signal == SIG_DEBUG_WAKE)) {
 		rc = stepd_signal_container(fd, signal);
 	} else {
 		rc = stepd_signal(fd, signal);
@@ -2262,14 +2273,20 @@ _rpc_timelimit(slurm_msg_t *msg)
 		slurm_ctl_conf_t *cf;
 		int delay;
 		/* A jobstep has timed out:
-		 * - send the container a SIG_TIME_LIMIT to note the occasion
+		 * - send the container a SIG_TIME_LIMIT or SIG_PREEMPTED
+		 *   to log the event
 		 * - send a SIGCONT to resume any suspended tasks
 		 * - send a SIGTERM to begin termination
 		 * - sleep KILL_WAIT
 		 * - send a SIGKILL to clean up
 		 */
-		rc = _signal_jobstep(req->job_id, req->step_id, uid,
-				     SIG_TIME_LIMIT);
+		if (msg->msg_type == REQUEST_KILL_TIMELIMIT) {
+			rc = _signal_jobstep(req->job_id, req->step_id, uid,
+					     SIG_TIME_LIMIT);
+		} else {
+			rc = _signal_jobstep(req->job_id, req->step_id, uid,
+					     SIG_PREEMPTED);
+		}
 		if (rc != SLURM_SUCCESS)
 			return;
 		rc = _signal_jobstep(req->job_id, req->step_id, uid, SIGCONT);
@@ -2286,7 +2303,10 @@ _rpc_timelimit(slurm_msg_t *msg)
 		return;
 	}
 
-	_kill_all_active_steps(req->job_id, SIG_TIME_LIMIT, true);
+	if (msg->msg_type == REQUEST_KILL_TIMELIMIT)
+		_kill_all_active_steps(req->job_id, SIG_TIME_LIMIT, true);
+	else /* (msg->type == REQUEST_KILL_PREEMPTED) */
+		_kill_all_active_steps(req->job_id, SIG_PREEMPTED, true);
 	nsteps = xcpu_signal(SIGTERM, req->nodes) +
 		_kill_all_active_steps(req->job_id, SIGTERM, false);
 	verbose( "Job %u: timeout: sent SIGTERM to %d active steps",
@@ -2844,7 +2864,7 @@ _steps_completed_now(uint32_t jobid)
 }
 
 /*
- *  Send epilog complete message to currently active comtroller.
+ *  Send epilog complete message to currently active controller.
  *   Returns SLURM_SUCCESS if message sent successfully,
  *           SLURM_FAILURE if epilog complete message fails to be sent.
  */
@@ -3237,12 +3257,11 @@ _rpc_abort_job(slurm_msg_t *msg)
 	}
 
 	save_cred_state(conf->vctx);
-#ifdef HAVE_BG
+#if defined(HAVE_BG)
 	select_g_select_jobinfo_get(req->select_jobinfo,
 				    SELECT_JOBDATA_BLOCK_ID,
 				    &resv_id);
-#endif
-#ifdef HAVE_CRAY
+#elif defined(HAVE_CRAY)
 	resv_id = select_g_select_jobinfo_xstrdup(req->select_jobinfo,
 				    SELECT_PRINT_RESV_ID);
 #endif
@@ -3426,12 +3445,11 @@ _rpc_terminate_job(slurm_msg_t *msg)
 
 	save_cred_state(conf->vctx);
 
-#ifdef HAVE_BG
+#if defined(HAVE_BG)
 	select_g_select_jobinfo_get(req->select_jobinfo,
 				    SELECT_JOBDATA_BLOCK_ID,
 				    &resv_id);
-#endif
-#ifdef HAVE_CRAY
+#elif defined(HAVE_CRAY)
 	resv_id = select_g_select_jobinfo_xstrdup(req->select_jobinfo,
 				    SELECT_PRINT_RESV_ID);
 #endif
@@ -3597,9 +3615,10 @@ static bool
 _pause_for_job_completion (uint32_t job_id, char *nodes, int max_time)
 {
 	int sec = 0;
+	int pause = 1;
 	bool rc = false;
 
-	while ((sec++ < max_time) || (max_time == 0)) {
+	while ((sec < max_time) || (max_time == 0)) {
 		rc = (_job_still_running (job_id) ||
 			xcpu_signal(0, nodes));
 		if (!rc)
@@ -3608,12 +3627,15 @@ _pause_for_job_completion (uint32_t job_id, char *nodes, int max_time)
 			xcpu_signal(SIGKILL, nodes);
 			_terminate_all_steps(job_id, true);
 		}
-		if (sec < 10)
-			sleep(1);
-		else {
-			/* Reduce logging about unkillable tasks */
-			sleep(60);
+		if (sec > 10) {
+			/* Reduce logging frequency about unkillable tasks */
+			if (max_time)
+				pause = MIN((max_time - sec), 10);
+			else
+				pause = 10;
 		}
+		sleep(pause);
+		sec += pause;
 	}
 
 	/*
@@ -3675,14 +3697,13 @@ _build_env(uint32_t jobid, uid_t uid, char *resv_id,
 	setenvf(&env, "SLURM_JOBID", "%u", jobid);
 	setenvf(&env, "SLURM_UID",   "%u", uid);
 	if (resv_id) {
-#ifdef HAVE_BG
+#if defined(HAVE_BG)
 		setenvf(&env, "MPIRUN_PARTITION", "%s", resv_id);
 # ifdef HAVE_BGP
 		/* Needed for HTC jobs */
 		setenvf(&env, "SUBMIT_POOL", "%s", resv_id);
 # endif
-#endif
-#ifdef HAVE_CRAY
+#elif defined(HAVE_CRAY)
 		setenvf(&env, "BASIL_RESERVATION_ID", "%s", resv_id);
 #endif
 	}
@@ -3999,7 +4020,7 @@ init_gids_cache(int cache)
 	gids_t *gids;
 #ifdef HAVE_AIX
 	FILE *fp = NULL;
-#elif defined (__APPLE__)
+#elif defined (__APPLE__) || defined (__CYGWIN__)
 #else
 	struct passwd pw;
 	char buf[BUF_SIZE];
@@ -4029,7 +4050,7 @@ init_gids_cache(int cache)
 	setpwent();
 #if defined (__sun)
 	while ((pwd = getpwent_r(&pw, buf, BUF_SIZE)) != NULL) {
-#elif defined (__APPLE__)
+#elif defined (__APPLE__) || defined (__CYGWIN__)
 	while ((pwd = getpwent()) != NULL) {
 #else
 

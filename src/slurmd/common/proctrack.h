@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -39,9 +39,10 @@
 #ifndef __PROC_TRACK_H__
 #define __PROC_TRACK_H__
 
-#include <slurm/slurm.h>
-#include "src/slurmd/slurmstepd/slurmstepd_job.h"
 #include <stdbool.h>
+
+#include "slurm/slurm.h"
+#include "src/slurmd/slurmstepd/slurmstepd_job.h"
 
 /*
  * Initialize the process tracking plugin.
@@ -92,7 +93,7 @@ extern int slurm_container_add(slurmd_job_t *job, pid_t pid);
  *
  * Returns a SLURM errno.
  */
-extern int slurm_container_signal(uint32_t cont_id, int signal);
+extern int slurm_container_signal(uint64_t cont_id, int signal);
 
 
 /* 
@@ -102,20 +103,20 @@ extern int slurm_container_signal(uint32_t cont_id, int signal);
  *
  * Returns a SLURM errno.
  */
-extern int slurm_container_destroy(uint32_t cont_id);
+extern int slurm_container_destroy(uint64_t cont_id);
 
 /*
  * Get container ID for given process ID
  *
  * Returns zero if no container found for the given pid.
  */
-extern uint32_t slurm_container_find(pid_t pid);
+extern uint64_t slurm_container_find(pid_t pid);
 
 /*
  * Return "true" if the container "cont_id" contains the process with
  * ID "pid".
  */
-extern bool slurm_container_has_pid(uint32_t cont_id, pid_t pid);
+extern bool slurm_container_has_pid(uint64_t cont_id, pid_t pid);
 
 /*
  * Wait for all processes within a container to exit.
@@ -127,7 +128,7 @@ extern bool slurm_container_has_pid(uint32_t cont_id, pid_t pid);
  *
  * Return SLURM_SUCCESS or SLURM_ERROR.
  */
-extern int slurm_container_wait(uint32_t cont_id);
+extern int slurm_container_wait(uint64_t cont_id);
 
 /*
  * Get all process IDs within a container.
@@ -141,7 +142,7 @@ extern int slurm_container_wait(uint32_t cont_id);
  *   pids NULL), return SLURM_ERROR if container does not exist, or
  *   plugin does not implement the call.
  */
-extern int slurm_container_get_pids(uint32_t cont_id, pid_t **pids, int *npids);
+extern int slurm_container_get_pids(uint64_t cont_id, pid_t **pids, int *npids);
 
 /* Collect accounting information for all processes within a container */
 

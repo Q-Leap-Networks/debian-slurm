@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -39,7 +39,7 @@
 #ifndef _SPRIO_PRINT_H_
 #define _SPRIO_PRINT_H_
 
-#include <slurm/slurm.h>
+#include "slurm/slurm.h"
 
 #include "src/common/list.h"
 

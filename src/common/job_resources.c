@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -38,7 +38,8 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <slurm/slurm_errno.h>
+
+#include "slurm/slurm_errno.h"
 
 #include "src/common/hostlist.h"
 #include "src/common/job_resources.h"
@@ -236,7 +237,10 @@ extern int reset_node_bitmap(job_resources_t *job_resrcs_ptr, uint32_t job_id)
 		error("Invalid nodes (%s) for job_id %u",
 		      job_resrcs_ptr->nodes, job_id);
 		return SLURM_ERROR;
+	} else if (job_resrcs_ptr->nodes == NULL) {
+		job_resrcs_ptr->node_bitmap = bit_alloc(node_record_count);
 	}
+
 	i = bit_set_count(job_resrcs_ptr->node_bitmap);
 	if (job_resrcs_ptr->nhosts != i) {
 		error("Invalid change in resource allocation node count for "
@@ -529,14 +533,12 @@ extern void pack_job_resources(job_resources_t *job_resrcs_ptr, Buf buffer,
 {
 	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
 
-	if(protocol_version >= SLURM_2_2_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_2_2_PROTOCOL_VERSION) {
 		if (job_resrcs_ptr == NULL) {
 			uint32_t empty = NO_VAL;
 			pack32(empty, buffer);
 			return;
 		}
-
-		xassert(job_resrcs_ptr->nhosts);
 
 		pack32(job_resrcs_ptr->nhosts, buffer);
 		pack32(job_resrcs_ptr->ncpus, buffer);
@@ -615,8 +617,6 @@ extern void pack_job_resources(job_resources_t *job_resrcs_ptr, Buf buffer,
 			pack32(empty, buffer);
 			return;
 		}
-
-		xassert(job_resrcs_ptr->nhosts);
 
 		pack32(job_resrcs_ptr->nhosts, buffer);
 		pack32(job_resrcs_ptr->ncpus, buffer);
@@ -907,6 +907,89 @@ extern int set_job_resources_bit(job_resources_t *job_resrcs_ptr,
 	return SLURM_SUCCESS;
 }
 
+/* For every core bitmap and core_bitmap_used set in the "from" resources
+ * structure at from_node_offset, set the corresponding bit in the "new"
+ * resources structure at new_node_offset */
+extern int job_resources_bits_copy(job_resources_t *new_job_resrcs_ptr,
+				   uint16_t new_node_offset,
+				   job_resources_t *from_job_resrcs_ptr,
+				   uint16_t from_node_offset)
+{
+	int i, rc = SLURM_SUCCESS;
+	int new_bit_inx  = 0, new_core_cnt  = 0;
+	int from_bit_inx = 0, from_core_cnt = 0;
+
+	xassert(new_job_resrcs_ptr);
+	xassert(from_job_resrcs_ptr);
+
+	if (new_node_offset >= new_job_resrcs_ptr->nhosts) {
+		error("job_resources_bits_move: new_node_offset invalid "
+		      "(%u is 0 or >=%u)", new_node_offset,
+		      new_job_resrcs_ptr->nhosts);
+		return SLURM_ERROR;
+	}
+	for (i = 0; i < new_job_resrcs_ptr->nhosts; i++) {
+		if (new_job_resrcs_ptr->sock_core_rep_count[i] <=
+		    new_node_offset) {
+			new_bit_inx += new_job_resrcs_ptr->sockets_per_node[i] *
+				new_job_resrcs_ptr->cores_per_socket[i] *
+				new_job_resrcs_ptr->sock_core_rep_count[i];
+			new_node_offset -= new_job_resrcs_ptr->
+					   sock_core_rep_count[i];
+		} else {
+			new_bit_inx += new_job_resrcs_ptr->sockets_per_node[i] *
+				new_job_resrcs_ptr->cores_per_socket[i] *
+				new_node_offset;
+			new_core_cnt = new_job_resrcs_ptr->sockets_per_node[i] *
+				new_job_resrcs_ptr->cores_per_socket[i];
+			break;
+		}
+	}
+
+	if (from_node_offset >= from_job_resrcs_ptr->nhosts) {
+		error("job_resources_bits_move: from_node_offset invalid "
+		      "(%u is 0 or >=%u)", from_node_offset,
+		      from_job_resrcs_ptr->nhosts);
+		return SLURM_ERROR;
+	}
+	for (i = 0; i < from_job_resrcs_ptr->nhosts; i++) {
+		if (from_job_resrcs_ptr->sock_core_rep_count[i] <=
+		    from_node_offset) {
+			from_bit_inx += from_job_resrcs_ptr->sockets_per_node[i] *
+				from_job_resrcs_ptr->cores_per_socket[i] *
+				from_job_resrcs_ptr->sock_core_rep_count[i];
+			from_node_offset -= from_job_resrcs_ptr->
+					    sock_core_rep_count[i];
+		} else {
+			from_bit_inx += from_job_resrcs_ptr->sockets_per_node[i] *
+				from_job_resrcs_ptr->cores_per_socket[i] *
+				from_node_offset;
+			from_core_cnt = from_job_resrcs_ptr->sockets_per_node[i] *
+				from_job_resrcs_ptr->cores_per_socket[i];
+			break;
+		}
+	}
+
+	if (new_core_cnt != from_core_cnt) {
+		error("job_resources_bits_move: core_cnt mis-match (%d != %d)",
+		      new_core_cnt, from_core_cnt);
+		new_core_cnt = MIN(new_core_cnt, from_core_cnt);
+		rc = SLURM_ERROR;
+	}
+
+	for (i = 0; i < new_core_cnt; i++) {
+		if (bit_test(from_job_resrcs_ptr->core_bitmap, from_bit_inx+i))
+			bit_set(new_job_resrcs_ptr->core_bitmap,new_bit_inx+i);
+		if (bit_test(from_job_resrcs_ptr->core_bitmap_used,
+			     from_bit_inx+i)) {
+			bit_set(new_job_resrcs_ptr->core_bitmap_used,
+				new_bit_inx+i);
+		}
+	}
+
+	return rc;
+}
+
 extern int get_job_resources_node(job_resources_t *job_resrcs_ptr,
 				  uint32_t node_id)
 {
@@ -1001,6 +1084,50 @@ extern int clear_job_resources_node(job_resources_t *job_resrcs_ptr,
 				    uint32_t node_id)
 {
 	return _change_job_resources_node(job_resrcs_ptr, node_id, false);
+}
+
+/* Return the count of core bitmaps set for the specific node */
+extern int count_job_resources_node(job_resources_t *job_resrcs_ptr,
+				    uint32_t node_id)
+{
+	int i, bit_inx = 0, core_cnt = 0;
+	int set_cnt = 0;
+
+	xassert(job_resrcs_ptr);
+
+	for (i=0; i<job_resrcs_ptr->nhosts; i++) {
+		if (job_resrcs_ptr->sock_core_rep_count[i] <= node_id) {
+			bit_inx += job_resrcs_ptr->sockets_per_node[i] *
+				job_resrcs_ptr->cores_per_socket[i] *
+				job_resrcs_ptr->sock_core_rep_count[i];
+			node_id -= job_resrcs_ptr->sock_core_rep_count[i];
+		} else {
+			bit_inx += job_resrcs_ptr->sockets_per_node[i] *
+				job_resrcs_ptr->cores_per_socket[i] *
+				node_id;
+			core_cnt = job_resrcs_ptr->sockets_per_node[i] *
+				job_resrcs_ptr->cores_per_socket[i];
+			break;
+		}
+	}
+	if (core_cnt < 1) {
+		error("count_job_resources_node: core_cnt=0");
+		return set_cnt;
+	}
+
+	i = bit_size(job_resrcs_ptr->core_bitmap);
+	if ((bit_inx + core_cnt) > i) {
+		error("count_job_resources_node: offset > bitmap size "
+		      "(%d >= %d)", (bit_inx + core_cnt), i);
+		return set_cnt;
+	}
+
+	for (i=0; i<core_cnt; i++) {
+		if (bit_test(job_resrcs_ptr->core_bitmap, bit_inx++))
+			set_cnt++;
+	}
+
+	return set_cnt;
 }
 
 extern int get_job_resources_cnt(job_resources_t *job_resrcs_ptr,
@@ -1099,6 +1226,48 @@ extern void add_job_to_cores(job_resources_t *job_resrcs_ptr,
 					      job_bit_inx + i))
 					continue;
 				bit_set(*full_core_bitmap, full_bit_inx + i);
+			}
+			job_bit_inx += bits_per_node[full_node_inx];
+		}
+		full_bit_inx += bits_per_node[full_node_inx];
+	}
+}
+
+/*
+ * Remove job from full-length core_bitmap
+ * IN job_resrcs_ptr - resources allocated to a job
+ * IN/OUT full_bitmap - bitmap of available CPUs, allocate as needed
+ * IN bits_per_node - bits per node in the full_bitmap
+ * RET 1 on success, 0 otherwise
+ */
+extern void remove_job_from_cores(job_resources_t *job_resrcs_ptr,
+			     bitstr_t **full_core_bitmap,
+			     const uint16_t *bits_per_node)
+{
+	int full_node_inx = 0;
+	int job_bit_inx  = 0, full_bit_inx  = 0, i;
+
+	if (!job_resrcs_ptr->core_bitmap)
+		return;
+
+	/* add the job to the row_bitmap */
+	if (*full_core_bitmap == NULL) {
+		uint32_t size = 0;
+		for (i = 0; i < node_record_count; i++)
+			size += bits_per_node[i];
+		*full_core_bitmap = bit_alloc(size);
+		if (!*full_core_bitmap)
+			fatal("add_job_to_cores: bitmap memory error");
+	}
+
+	for (full_node_inx = 0; full_node_inx < node_record_count;
+	     full_node_inx++) {
+		if (bit_test(job_resrcs_ptr->node_bitmap, full_node_inx)) {
+			for (i = 0; i < bits_per_node[full_node_inx]; i++) {
+				if (!bit_test(job_resrcs_ptr->core_bitmap,
+					      job_bit_inx + i))
+					continue;
+				bit_clear(*full_core_bitmap, full_bit_inx + i);
 			}
 			job_bit_inx += bits_per_node[full_node_inx];
 		}

@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -55,6 +55,7 @@ extern void parse_command_line(int argc, char *argv[])
 
 	static struct option long_options[] = {
 		{"commandline", no_argument, 0, 'c'},
+		{"command", required_argument, 0, 'C'},
 		{"display", required_argument, 0, 'D'},
 		{"noheader", no_argument, 0, 'h'},
 		{"iterate", required_argument, 0, 'i'},
@@ -75,7 +76,7 @@ extern void parse_command_line(int argc, char *argv[])
 	memset(&params, 0, sizeof(params));
 
 	while ((opt_char =
-		getopt_long(argc, argv, "cD:hi:I:Hn:M:QR:vV",
+		getopt_long(argc, argv, "cC:D:hi:I:Hn:M:QR:vV",
 			    long_options, &option_index)) != -1) {
 		switch (opt_char) {
 		case '?':
@@ -85,6 +86,9 @@ extern void parse_command_line(int argc, char *argv[])
 			break;
 		case 'c':
 			params.commandline = TRUE;
+			break;
+		case 'C':
+			params.command = xstrdup(optarg);
 			break;
 		case 'D':
 			if (!strcmp(optarg, "j"))
@@ -132,7 +136,10 @@ extern void parse_command_line(int argc, char *argv[])
 				list_destroy(params.clusters);
 			if(!(params.clusters =
 			     slurmdb_get_info_cluster(optarg))) {
-				error("'%s' invalid entry for --cluster",
+				error("'%s' can't be reached now, "
+				      "or it is an invalid entry for "
+				      "--cluster.  Use 'sacctmgr --list "
+				      "cluster' to see available clusters.",
 				      optarg);
 				exit(1);
 			}
@@ -170,12 +177,15 @@ extern void parse_command_line(int argc, char *argv[])
 			exit(0);
 		}
 	}
-	params.cluster_base = hostlist_get_base();
+
 	params.cluster_dims = slurmdb_setup_cluster_dims();
+	if (params.cluster_dims > 4)
+		fatal("smap is unable to support more than four dimensions");
+	params.cluster_base = hostlist_get_base(params.cluster_dims);
 	params.cluster_flags = slurmdb_setup_cluster_flags();
 }
 
-extern void print_date()
+extern void print_date(void)
 {
 	time_t now_time = time(NULL);
 
@@ -198,6 +208,51 @@ extern void clear_window(WINDOW *win)
 		}
 	wmove(win, 1, 1);
 	wnoutrefresh(win);
+}
+
+extern char *resolve_mp(char *desc)
+{
+	char *ret_str = NULL;
+#if defined HAVE_BG_FILES
+	ba_mp_t *ba_mp = NULL;
+	int i;
+
+	if (!desc) {
+		ret_str = xstrdup("No Description given.\n");
+		goto fini;
+	}
+
+#ifdef HAVE_BG
+	bg_configure_ba_setup_wires();
+#endif
+	i = strlen(desc) - params.cluster_dims;
+	if (i < 0) {
+		ret_str = xstrdup_printf("Must enter %d coords to resolve.\n",
+					 params.cluster_dims);
+		goto fini;
+	}
+
+	if (desc[0] != 'R') {
+		ba_mp = bg_configure_str2ba_mp(desc+i);
+		if (ba_mp)
+			ret_str = xstrdup_printf("%s resolves to %s\n",
+						 ba_mp->coord_str, ba_mp->loc);
+		else
+			ret_str = xstrdup_printf("%s has no resolve\n", desc+i);
+	} else {
+		ba_mp = bg_configure_loc2ba_mp(desc);
+		if (ba_mp)
+			ret_str = xstrdup_printf("%s resolves to %s\n",
+						 desc, ba_mp->coord_str);
+		else
+			ret_str = xstrdup_printf("%s has no resolve.\n", desc);
+	}
+fini:
+#else
+	ret_str = xstrdup("Must be physically on a BlueGene system for support "
+			  "of resolve option.\n");
+#endif
+	return ret_str;
 }
 
 static void _usage(void)

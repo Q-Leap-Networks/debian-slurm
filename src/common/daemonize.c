@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -50,16 +50,6 @@
 #include "src/common/log.h"
 #include "src/common/macros.h"
 #include "src/common/xassert.h"
-
-/* closeall FDs >= a specified value */
-static void
-closeall(int fd)
-{
-	int fdlimit = sysconf(_SC_OPEN_MAX);
-
-	while (fd < fdlimit)
-		close(fd++);
-}
 
 /* detach and go into background.
  * caller is responsible for umasks

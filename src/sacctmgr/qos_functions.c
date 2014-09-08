@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -118,7 +118,6 @@ static int _set_cond(int *start, int argc, char *argv[],
 	int set = 0;
 	int end = 0;
 	int command_len = 0;
-	int option = 0;
 
 	if(!qos_cond) {
 		error("No qos_cond given");
@@ -131,8 +130,7 @@ static int _set_cond(int *start, int argc, char *argv[],
 			command_len=strlen(argv[i]);
 		else {
 			command_len=end-1;
-			if(argv[i][end] == '=') {
-				option = (int)argv[i][end-1];
+			if (argv[i][end] == '=') {
 				end++;
 			}
 		}
@@ -204,6 +202,10 @@ static int _set_cond(int *start, int argc, char *argv[],
 				fprintf(stderr,
 					" Bad Preempt Mode given: %s\n",
 					argv[i]);
+				exit_code = 1;
+			} else if (qos_cond->preempt_mode == PREEMPT_MODE_SUSPEND) {
+				printf("PreemptType and PreemptMode "
+					"values incompatible\n");
 				exit_code = 1;
 			} else
 				set = 1;
@@ -277,6 +279,14 @@ static int _set_rec(int *start, int argc, char *argv[],
 				exit_code = 1;
 			} else
 				set = 1;
+		} else if (!strncasecmp (argv[i], "GraceTime",
+					 MAX(command_len, 3))) {
+			if (!qos)
+				continue;
+			if (get_uint(argv[i]+end, &qos->grace_time,
+			             "GraceTime") == SLURM_SUCCESS) {
+				set = 1;
+			}
 		} else if (!strncasecmp (argv[i], "GrpCPUMins",
 					 MAX(command_len, 7))) {
 			if(!qos)
@@ -285,12 +295,19 @@ static int _set_rec(int *start, int argc, char *argv[],
 				       &qos->grp_cpu_mins,
 				       "GrpCPUMins") == SLURM_SUCCESS)
 				set = 1;
-		} else if (!strncasecmp (argv[i], "GrpCpus",
+		} else if (!strncasecmp (argv[i], "GrpCPURunMins",
+					 MAX(command_len, 7))) {
+			if(!qos)
+				continue;
+			if (get_uint64(argv[i]+end, &qos->grp_cpu_run_mins,
+				       "GrpCPURunMins") == SLURM_SUCCESS)
+				set = 1;
+		} else if (!strncasecmp (argv[i], "GrpCPUs",
 					 MAX(command_len, 7))) {
 			if(!qos)
 				continue;
 			if (get_uint(argv[i]+end, &qos->grp_cpus,
-			    "GrpCpus") == SLURM_SUCCESS)
+				     "GrpCPUs") == SLURM_SUCCESS)
 				set = 1;
 		} else if (!strncasecmp (argv[i], "GrpJobs",
 					 MAX(command_len, 4))) {
@@ -335,12 +352,19 @@ static int _set_rec(int *start, int argc, char *argv[],
 				       &qos->max_cpu_mins_pj,
 				       "MaxCPUMins") == SLURM_SUCCESS)
 				set = 1;
-		} else if (!strncasecmp (argv[i], "MaxCpusPerJob",
+		} else if (!strncasecmp (argv[i], "MaxCPUsPerJob",
 					 MAX(command_len, 7))) {
 			if(!qos)
 				continue;
 			if (get_uint(argv[i]+end, &qos->max_cpus_pj,
-			    "MaxCpus") == SLURM_SUCCESS)
+			    "MaxCPUs") == SLURM_SUCCESS)
+				set = 1;
+		} else if (!strncasecmp (argv[i], "MaxCPUsPerUser",
+					 MAX(command_len, 11))) {
+			if(!qos)
+				continue;
+			if (get_uint(argv[i]+end, &qos->max_cpus_pu,
+			    "MaxCPUsPerUser") == SLURM_SUCCESS)
 				set = 1;
 		} else if (!strncasecmp (argv[i], "MaxJobsPerUser",
 					 MAX(command_len, 4))) {
@@ -356,6 +380,14 @@ static int _set_rec(int *start, int argc, char *argv[],
 			if (get_uint(argv[i]+end,
 			    &qos->max_nodes_pj,
 			    "MaxNodes") == SLURM_SUCCESS)
+				set = 1;
+		} else if (!strncasecmp (argv[i], "MaxNodesPerUser",
+					 MAX(command_len, 8))) {
+			if(!qos)
+				continue;
+			if (get_uint(argv[i]+end,
+			    &qos->max_nodes_pu,
+			    "MaxNodesPerUser") == SLURM_SUCCESS)
 				set = 1;
 		} else if (!strncasecmp (argv[i], "MaxSubmitJobsPerUser",
 					 MAX(command_len, 4))) {
@@ -387,6 +419,10 @@ static int _set_rec(int *start, int argc, char *argv[],
 				fprintf(stderr,
 					" Bad Preempt Mode given: %s\n",
 					argv[i]);
+				exit_code = 1;
+			} else if (qos->preempt_mode == PREEMPT_MODE_SUSPEND) {
+				printf("PreemptType and PreemptMode "
+					"values incompatible\n");
 				exit_code = 1;
 			} else
 				set = 1;
@@ -582,6 +618,7 @@ extern int sacctmgr_add_qos(int argc, char *argv[])
 			else
 				qos->description = xstrdup(name);
 
+			qos->grace_time = start_qos->grace_time;
 			qos->grp_cpu_mins = start_qos->grp_cpu_mins;
 			qos->grp_cpus = start_qos->grp_cpus;
 			qos->grp_jobs = start_qos->grp_jobs;
@@ -591,13 +628,16 @@ extern int sacctmgr_add_qos(int argc, char *argv[])
 
 			qos->max_cpu_mins_pj = start_qos->max_cpu_mins_pj;
 			qos->max_cpus_pj = start_qos->max_cpus_pj;
+			qos->max_cpus_pu = start_qos->max_cpus_pu;
 			qos->max_jobs_pu = start_qos->max_jobs_pu;
 			qos->max_nodes_pj = start_qos->max_nodes_pj;
+			qos->max_nodes_pu = start_qos->max_nodes_pu;
 			qos->max_submit_jobs_pu = start_qos->max_submit_jobs_pu;
 			qos->max_wall_pj = start_qos->max_wall_pj;
 
 			qos->preempt_list =
 				copy_char_list(start_qos->preempt_list);
+			qos->preempt_mode = start_qos->preempt_mode;
 
 			qos->priority = start_qos->priority;
 
@@ -687,7 +727,8 @@ extern int sacctmgr_list_qos(int argc, char *argv[])
 		list_destroy(format_list);
 		return SLURM_ERROR;
 	} else if(!list_count(format_list)) {
-		slurm_addto_char_list(format_list, "Name,Prio,Preempt,PreemptM,"
+		slurm_addto_char_list(format_list,
+				      "Name,Prio,GraceT,Preempt,PreemptM,"
 				      "Flags%40,UsageThres,GrpCPUs,GrpCPUMins,"
 				      "GrpJ,GrpN,GrpS,GrpW,"
 				      "MaxCPUs,MaxCPUMins,MaxJ,MaxN,MaxS,MaxW");
@@ -740,10 +781,21 @@ extern int sacctmgr_list_qos(int argc, char *argv[])
 					field, qos->usage_thres,
 					(curr_inx == field_count));
 				break;
+			case PRINT_GRACE:
+				field->print_routine(
+					field, qos->grace_time,
+					(curr_inx == field_count));
+				break;
 			case PRINT_GRPCM:
 				field->print_routine(
 					field,
 					qos->grp_cpu_mins,
+					(curr_inx == field_count));
+				break;
+			case PRINT_GRPCRM:
+				field->print_routine(
+					field,
+					qos->grp_cpu_run_mins,
 					(curr_inx == field_count));
 				break;
 			case PRINT_GRPC:
@@ -788,6 +840,11 @@ extern int sacctmgr_list_qos(int argc, char *argv[])
 						     qos->max_cpus_pj,
 						     (curr_inx == field_count));
 				break;
+			case PRINT_MAXCU:
+				field->print_routine(field,
+						     qos->max_cpus_pu,
+						     (curr_inx == field_count));
+				break;
 			case PRINT_MAXJ:
 				field->print_routine(field,
 						     qos->max_jobs_pu,
@@ -796,6 +853,11 @@ extern int sacctmgr_list_qos(int argc, char *argv[])
 			case PRINT_MAXN:
 				field->print_routine(field,
 						     qos->max_nodes_pj,
+						     (curr_inx == field_count));
+				break;
+			case PRINT_MAXNU:
+				field->print_routine(field,
+						     qos->max_nodes_pu,
 						     (curr_inx == field_count));
 				break;
 			case PRINT_MAXS:

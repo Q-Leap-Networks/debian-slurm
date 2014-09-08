@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -93,8 +93,10 @@ static void  _init_config(void);
 static void  _init_pidfile(void);
 static void  _kill_old_slurmdbd(void);
 static void  _parse_commandline(int argc, char *argv[]);
+static void  _request_registrations(void *db_conn);
 static void  _rollup_handler_cancel();
 static void *_rollup_handler(void *no_data);
+static int _send_slurmctld_register_req(slurmdb_cluster_rec_t *cluster_rec);
 static void *_signal_handler(void *no_data);
 static void  _update_logging(void);
 static void  _update_nice(void);
@@ -148,8 +150,6 @@ int main(int argc, char *argv[])
 	if (xsignal_block(dbd_sigarray) < 0)
 		error("Unable to block signals");
 
-	db_conn = acct_storage_g_get_connection(NULL, 0, false, NULL);
-
 	/* Create attached thread for signal handling */
 	slurm_attr_init(&thread_attr);
 	if (pthread_create(&signal_handler_thread, &thread_attr,
@@ -165,7 +165,8 @@ int main(int argc, char *argv[])
 	if (slurmdbd_conf->track_wckey)
 		assoc_init_arg.cache_level |= ASSOC_MGR_CACHE_WCKEY;
 
-	if (assoc_mgr_init(db_conn, &assoc_init_arg) == SLURM_ERROR) {
+	db_conn = acct_storage_g_get_connection(NULL, 0, false, NULL);
+	if (assoc_mgr_init(db_conn, &assoc_init_arg, errno) == SLURM_ERROR) {
 		error("Problem getting cache of data");
 		acct_storage_g_close_connection(&db_conn);
 		goto end_it;
@@ -223,6 +224,8 @@ int main(int argc, char *argv[])
 			if (backup)
 				run_backup();
 		}
+
+		_request_registrations(db_conn);
 
 		/* this is only ran if not backup */
 		if (rollup_handler_thread)
@@ -457,6 +460,28 @@ static void _daemonize(void)
 	}
 }
 
+static void _request_registrations(void *db_conn)
+{
+	List cluster_list = acct_storage_g_get_clusters(
+		db_conn, getuid(), NULL);
+	ListIterator itr;
+	slurmdb_cluster_rec_t *cluster_rec = NULL;
+
+	if (!cluster_list)
+		return;
+	itr = list_iterator_create(cluster_list);
+	while ((cluster_rec = list_next(itr))) {
+		if (!cluster_rec->control_port
+		    || (cluster_rec->rpc_version < 9))
+			continue;
+		if (_send_slurmctld_register_req(cluster_rec) != SLURM_SUCCESS)
+			/* mark this cluster as unresponsive */
+			clusteracct_storage_g_fini_ctld(db_conn, cluster_rec);
+	}
+	list_iterator_destroy(itr);
+	list_destroy(cluster_list);
+}
+
 static void _rollup_handler_cancel()
 {
 	if (running_rollup)
@@ -521,6 +546,39 @@ static void *_rollup_handler(void *db_conn)
 	}
 
 	return NULL;
+}
+
+/*
+ * send_slurmctld_register_req - request register from slurmctld
+ * IN host: control host of cluster
+ * IN port: control port of cluster
+ * IN rpc_version: rpc version of cluster
+ * RET:  error code
+ */
+static int _send_slurmctld_register_req(slurmdb_cluster_rec_t *cluster_rec)
+{
+	slurm_addr_t ctld_address;
+	slurm_fd_t fd;
+	int rc = SLURM_SUCCESS;
+
+	slurm_set_addr_char(&ctld_address, cluster_rec->control_port,
+			    cluster_rec->control_host);
+	fd = slurm_open_msg_conn(&ctld_address);
+	if (fd < 0) {
+		rc = SLURM_ERROR;
+	} else {
+		slurm_msg_t out_msg;
+		slurm_msg_t_init(&out_msg);
+		out_msg.msg_type = ACCOUNTING_REGISTER_CTLD;
+		out_msg.flags = SLURM_GLOBAL_AUTH_KEY;
+		slurm_send_node_msg(fd, &out_msg);
+		/* We probably need to add matching recv_msg function
+		 * for an arbitray fd or should these be fire
+		 * and forget?  For this, that we can probably
+		 * forget about it */
+		slurm_close_stream(fd);
+	}
+	return rc;
 }
 
 /* _signal_handler - Process daemon-wide signals */

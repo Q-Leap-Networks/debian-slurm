@@ -1,4 +1,4 @@
-.TH SQUEUE "1" "September 2010" "squeue 2.2" "Slurm components"
+.TH SQUEUE "1" "June 2011" "squeue 2.3" "Slurm components"
 
 .SH "NAME"
 squeue \- view information about jobs located in the SLURM scheduling queue.
@@ -118,6 +118,15 @@ This reports the value of the \fBsrun \-\-ntasks\fR option.
 \fB%b\fR
 Generic resources (gres) required by the job or step.
 (Valid for jobs and job steps)
+.TP
+\fB%B\fR
+Executing (batch) host. For an allocated session, this is the host on which
+the session is executing (i.e. the node from which the the \fBsrun\fR or the
+\fBsalloc\fR command was executed). For a batch job, this is the node executing
+the batch script. In the case of a typical Linux cluster, this would be the
+compute node zero of the allocation. In the case of a BlueGene or a Cray
+system, this would be the front\-end host whose slurmd daemon executes the job
+script.
 .TP
 \fB%c\fR
 Minimum number of CPUs (processors) per node requested by the job.
@@ -295,7 +304,7 @@ See the \fBJOB STATE CODES\fR section below for more information.
 \fB%T\fR
 Job state, extended form:
 PENDING, RUNNING, SUSPENDED, CANCELLED, COMPLETING, COMPLETED, CONFIGURING,
-FAILED, TIMEOUT, and NODE_FAIL.
+FAILED, TIMEOUT, PREEMPTED, and NODE_FAIL.
 See the \fBJOB STATE CODES\fR section below for more information.
 (Valid for jobs only)
 .TP
@@ -309,6 +318,14 @@ User ID for a job or job step.
 .TP
 \fB%v\fR
 Reservation for the job.
+(Valid for jobs only)
+.TP
+\fB%w\fR
+Workload Characterization Key (wckey).
+(Valid for jobs only)
+.TP
+\fB%W\fR
+Licenses reserved for the job.
 (Valid for jobs only)
 .TP
 \fB%x\fR
@@ -330,6 +347,10 @@ list of partition names.
 \fB\-q <qos_list>\fR, \fB\-\-qos=<qos_list>\fR
 Specify the qos(s) of the jobs or steps to view. Accepts a comma
 separated list of qos's.
+
+.TP
+\fB\-R\fR, \fB\-\-reservation\fR=\fIreservation_name\fR
+Specify the reservation of the jobs to view. 
 
 .TP
 \fB\-s\fR, \fB\-\-steps\fR
@@ -373,8 +394,8 @@ reported. If no state is specified then pending, running, and completing
 jobs are reported. Valid states (in both extended and compact form) include:
 PENDING (PD), RUNNING (R), SUSPENDED (S),
 COMPLETING (CG), COMPLETED (CD), CONFIGURING (CF), CANCELLED (CA),
-FAILED (F), TIMEOUT (TO), and NODE_FAIL (NF). Note the \fB<state_list>\fR
-supplied is case insensitve ("pd" and "PD" work the same).
+FAILED (F), TIMEOUT (TO), PREEMPTED (PR) and NODE_FAIL (NF). Note the
+\fB<state_list>\fR supplied is case insensitve ("pd" and "PD" work the same).
 See the \fBJOB STATE CODES\fR section below for more information.
 
 .TP
@@ -473,6 +494,9 @@ Job terminated due to failure of one or more allocated nodes.
 \fBPD  PENDING\fR
 Job is awaiting resource allocation.
 .TP
+\fBPR  PREEMPTED\fR
+Job terminated due to preemption.
+.TP
 \fBR   RUNNING\fR
 Job currently has an allocation.
 .TP
@@ -493,6 +517,18 @@ Same as \fB\-\-clusters\fR
 .TP
 \fBSLURM_CONF\fR
 The location of the SLURM configuration file.
+.TP
+\fBSLURM_TIME_FORMAT\fR
+Specify the format used to report time stamps. A value of \fIstandard\fR, the
+default value, generates output in the form "year-month-dateThour:minute:second".
+A value of \fIrelative\fR returns only "hour:minute:second" if the current day.
+For other dates in the current year it prints the "hour:minute" preceded by
+"Tomorr" (tomorrow), "Ystday" (yesterday), the name of the day for the coming
+week (e.g. "Mon", "Tue", etc.), otherwise the date (e.g. "25 Apr").
+For other years it returns a date month and year without a time (e.g.
+"6 Jun 2012").
+Another suggested value is "%a %T" for a day of week and time stamp (e.g.
+"Mon 12:34:56"). All of the time stamps use a 24 hour format.
 .TP
 \fBSQUEUE_ACCOUNT\fR
 \fB\-A <account_list>, \-\-account=<account_list>\fR
@@ -580,7 +616,7 @@ Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 CODE\-OCEC\-09\-009. All rights reserved.
 .LP
 This file is part of SLURM, a resource management program.
-For details, see <https://computing.llnl.gov/linux/slurm/>.
+For details, see <http://www.schedmd.com/slurmdocs/>.
 .LP
 SLURM is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free
@@ -594,6 +630,6 @@ details.
 .SH "SEE ALSO"
 \fBscancel\fR(1), \fBscontrol\fR(1), \fBsinfo\fR(1),
 \fBsmap\fR(1), \fBsrun\fR(1),
-\fBslurm_load_ctl_conf\fR(3), \fBslurm_load_jobs\fR(3),
-\fBslurm_load_node\fR(3),
-\fBslurm_load_partitions\fR(3)
+\fBslurm_load_ctl_conf\fR (3), \fBslurm_load_jobs\fR (3),
+\fBslurm_load_node\fR (3),
+\fBslurm_load_partitions\fR (3)

@@ -1,14 +1,27 @@
 <!--#include virtual="header.txt"-->
 
 <h1>Download</h1>
-<p>
-SLURM source can be downloaded from
-<a href="http://sourceforge.net/projects/slurm/">
-http://sourceforge.net/projects/slurm/</a><br>
+<p>SLURM source can be downloaded from
+<a href="http://www.schedmd.com/#repos">
+http://www.schedmd.com/#repos</a><br>
 SLURM has also been packaged for
 <a href="http://packages.debian.org/src:slurm-llnl">Debian</a> and
 <a href="http://packages.ubuntu.com/src:slurm-llnl">Ubuntu</a>
 (both named <i>slurm-llnl</i>).</p>
+
+<p>A <a href="http://www.bsc.es/plantillaA.php?cat_id=705">SLURM simulator</a>
+is available to assess various scheduling policies.
+Under simulation jobs are not actually executed. Instead a job execution trace
+from a real system or a synthetic trace are used.</p>
+
+<!--
+SLURM interface to PHP
+https://github.com/jcftang/slurm/commits/php-slurm
+http://thammuz.tchpc.tcd.ie/mirrors/php-slurm/1.0/
+Development by Peter Vermeulen with help from staff of
+Trinity Centre for High Performance Computing,
+Trinity College Dublin, Ireland.
+-->
 
 <p>Related software available from various sources include:
 <ul>
@@ -40,7 +53,7 @@ for the application to manage Kerberos V credentials.</li>
 See our <a href="accounting.html">Accounting</a> web page for more information.</li>
 <ul>
 <li><a href="http://www.mysql.com/">MySQL</a> (recommended)</li>
-<li><a href="http://www.postgresql.org/">PostgreSQL</a></li>
+<li><a href="http://www.postgresql.org/">PostgreSQL</a> (Not fully functional)</li>
 </ul><br>
 
 <li><b>Debuggers</b> and debugging tools</li>
@@ -68,7 +81,7 @@ Download it from <a href="http://www.openssl.org/">http://www.openssl.org/</a>.<
 is an implementation of <a href="http://www.gridforum.org/">Open Grid Forum</a>
 <a href="http://www.drmaa.org/">DRMAA 1.0</a> (Distributed Resource Management Application API)
 <a href="http://www.ogf.org/documents/GFD.133.pdf">specification</a> for submission
-and control of jobs to <href="https://computing.llnl.gov/linux/slurm/">SLURM</a>.
+and control of jobs to <href="http://www.schedmd.com/slurmdocs/">SLURM</a>.
 Using DRMAA, grid applications builders, portal developers and ISVs can use 
 the same high-level API to link their software with different cluster/resource
 management systems.</li><br>
@@ -88,8 +101,8 @@ the <b>qsnetlibs</b> development libraries from
 plugin also requires the <b>libelanhosts</b> library and
 a corresponding /etc/elanhosts configuration file, used to map
 hostnames to Elan IDs. The libelanhosts source is available from
-<a href="https://sourceforge.net/projects/slurm/">
-https://sourceforge.net/projects/slurm/</a>.
+<a href="http://www.schedmd.com/download/extras/libelanhosts-0.9-1.tgz">
+http://www.schedmd.com/download/extras/libelanhosts-0.9-1.tgz</a>.
 </ul><br>
 
 <li><b>I/O Watchdog</b><br>
@@ -118,15 +131,15 @@ http://io-watchdog.googlecode.com/files/io-watchdog-0.6.tar.bz2</a></li><br>
 <li><a href="http://www.quadrics.com/">Quadrics MPI</a></li>
 </ul><br>
 
-<li><b>PAM Modules (pam_slurm)</b><br>
+<li><b>PAM Module (pam_slurm)</b><br>
 Pluggable Authentication Module (PAM) for restricting access to compute nodes
 where SLURM performs resource management. Access to the node is restricted to
 user root and users who have been allocated resources on that node.
 NOTE: pam_slurm is included within the SLURM distribution for version 2.1
 or higher.
 For earlier SLURM versions, pam_slurm is available for download from<br>
-<a href="https://sourceforge.net/projects/slurm/">
-https://sourceforge.net/projects/slurm/</a><br>
+<a href="http://www.schedmd.com/download/extras/pam_slurm-1.6.tar.bz2">
+http://www.schedmd.com/download/extras/pam_slurm-1.6.tar.bz2</a><br>
 SLURM's PAM module has also been packaged for
 <a href="http://packages.debian.org/src:libpam-slurm">Debian</a> and
 <a href="http://packages.ubuntu.com/src:libpam-slurm">Ubuntu</a>
@@ -176,20 +189,6 @@ The current source for the plugins can be checked out of the subversion
 repository with the following command:<br>
 <i>svn checkout http://slurm-spank-plugins.googlecode.com/svn/trunk/ slurm-plugins</i></li><br>
 
-<li><b>PAM Module (pam_slurm)</b><br>
-Pluggable Authentication Module (PAM) for restricting access to compute nodes
-where SLURM performs resource management. Access to the node is restricted to
-user root and users who have been allocated resources on that node.
-NOTE: pam_slurm is included within the SLURM distribution for version 2.1
-or higher.
-For earlier SLURM versions, pam_slurm is available for download from<br>
-<a href="https://sourceforge.net/projects/slurm/">
-https://sourceforge.net/projects/slurm/</a><br>
-SLURM's PAM module has also been packaged for
-<a href="http://packages.debian.org/src:libpam-slurm">Debian</a> and
-<a href="http://packages.ubuntu.com/src:libpam-slurm">Ubuntu</a>
-(both named <i>libpam-slurm</i>).</li><br>
-
 <li><b>Sqlog</b><br>
 A set of scripts that leverages SLURM's job completion logging facility
 in provide information about what jobs were running at any point in the
@@ -204,6 +203,6 @@ Portable Linux Processor Affinity (PLPA)</a></li>
 
 </ul>
 
-<p style="text-align:center;">Last modified 20 December 2010</p>
+<p style="text-align:center;">Last modified 24 May 2011</p>
 
 <!--#include virtual="footer.txt"-->

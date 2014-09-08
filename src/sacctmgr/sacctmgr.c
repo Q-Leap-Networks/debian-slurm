@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -856,24 +856,26 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
        delete coordinator - Accounts=, and Names=                          \n\
                                                                            \n\
        list events        - All_Clusters, All_Time, Clusters=, End=, Events=,\n\
-                            Format=, MaxCpus=, MinCpus=, Nodes=, Reason=,  \n\
+                            Format=, MaxCPUs=, MinCPUs=, Nodes=, Reason=,  \n\
                             Start=, States=, and User=                     \n\
                                                                            \n\
-       modify job         - (set options) DerivedExitCode=, DerivedExitString=\n\
+       modify job         - (set options) DerivedExitCode=, Comment=       \n\
                             (where options) JobID=, Cluster=               \n\
                                                                            \n\
        list qos           - Descriptions=, Format=, Id=, Names=,           \n\
                             PreemptMode=, and WithDeleted                  \n\
-       add qos            - Description=, Flags=, GrpCPUMins=, GrpCPUs=,   \n\
-                            GrpJobs=, GrpNodes=, GrpSubmitJob=, GrpWall=,  \n\
-                            MaxCPUMins=, MaxCPUs=, MaxJobs=, MaxNodes=,    \n\
-                            MaxSubmitJobs=, MaxWall=, Names=, Preempt=,    \n\
-                            PreemptMode=, Priority=, UsageFactor=,         \n\
-                            and UsageThreshold=                            \n\
-       modify qos         - (set options) Description=, Flags=,            \n\
+       add qos            - Description=, Flags=, GraceTime=, GrpCPUMins=, \n\
+                            GGrpCPUs=, GrpJobs=, GrpNodes=, GrpSubmitJob=, \n\
+                            GrpWall=,MaxCPUMins=, MaxCPUs=, MaxCPUsPerUser=,\n\
+                            MaxJobs=, MaxNodesPerUser=, MaxCPUsPerUser=,   \n\
+                            MaxNodes=, MaxSubmitJobs=, MaxWall=, Names=,   \n\
+                            Preempt=, PreemptMode=, Priority=,             \n\
+                            UsageFactor=, and UsageThreshold=              \n\
+       modify qos         - (set options) Description=, Flags=, GraceTime=,\n\
                             GrpCPUMins=, GrpCPUs=, GrpJobs=, GrpNodes=,    \n\
                             GrpSubmitJob=, GrpWall=, MaxCPUMins=, MaxCPUs=,\n\
-                            MaxJobs=, MaxNodes=, MaxSubmitJobs=,           \n\
+                            MaxCPUsPerUser=, MaxJobs=, MaxNodes=,          \n\
+                            MaxNodesPerUser=, MaxSubmitJobs=,              \n\
                             MaxWall=, Names=, Preempt=, PreemptMode=,      \n\
                             Priority=, UsageFactor=, and UsageThreshold=   \n\
                             (where options) Descriptions=, ID=, Names=     \n\
@@ -939,10 +941,11 @@ sacctmgr [<OPTION>] [<COMMAND>]                                            \n\
                             Event, EventRaw, NodeName, Reason, Start,      \n\
                             State, StateRaw, User                          \n\
                                                                            \n\
-       QOS                - Description, Flags, GrpCPUMins, GrpCPUs,       \n\
-                            GrpJobs, GrpNodes, GrpSubmitJob, GrpWall, ID,  \n\
-                            MaxCPUMins, MaxCPUs, MaxJobs, MaxNodes,        \n\
-                            MaxSubmitJobs, MaxWall, Name,                  \n\
+       QOS                - Description, Flags, GraceTime, GrpCPUMins,     \n\
+                            GrpCPUs,GrpJobs, GrpNodes, GrpSubmitJob,       \n\
+                            GrpWall, ID,MaxCPUMins, MaxCPUs,               \n\
+                            MaxCPUsPerUser, MaxJobs, MaxNodes,             \n\
+                            MaxNodesPerUser, MaxSubmitJobs, MaxWall, Name, \n\
                             Preempt, PreemptMode, Priority, UsageFactor,   \n\
                             UsageThreshold                                 \n\
                                                                            \n\

@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -40,7 +40,7 @@
 #ifndef _SQUEUE_PRINT_H_
 #define _SQUEUE_PRINT_H_
 
-#include <slurm/slurm.h>
+#include "slurm/slurm.h"
 
 #include "src/common/list.h"
 
@@ -81,6 +81,8 @@ int job_format_add_function(List list, int width, bool right_justify,
 			    char *suffix,
 			    int (*function) (job_info_t *, int, bool, char*));
 
+#define job_format_add_batch_host(list,wid,right,suffix) \
+	job_format_add_function(list,wid,right,suffix,_print_job_batch_host)
 #define job_format_add_job_id(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_job_job_id)
 #define job_format_add_partition(list,wid,right,suffix) \
@@ -93,6 +95,8 @@ int job_format_add_function(List list, int width, bool right_justify,
 	job_format_add_function(list,wid,right,prefix,_print_job_reason_list)
 #define job_format_add_name(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_job_name)
+#define job_format_add_licenses(list,wid,right,suffix) \
+	job_format_add_function(list,wid,right,suffix,_print_job_licenses)
 #define job_format_add_wckey(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_job_wckey)
 #define job_format_add_user_name(list,wid,right,suffix) \
@@ -180,9 +184,9 @@ int job_format_add_function(List list, int width, bool right_justify,
 /*****************************************************************************
  * Job Line Print Functions
  *****************************************************************************/
-int _print_job_job_id(job_info_t * job, int width, bool right_justify,
+int _print_job_batch_host(job_info_t * job, int width, bool right_justify,
 			char* suffix);
-int _print_job_partition(job_info_t * job, int width, bool right_justify,
+int _print_job_job_id(job_info_t * job, int width, bool right_justify,
 			char* suffix);
 int _print_job_prefix(job_info_t * job, int width, bool right_justify,
 			char* suffix);
@@ -191,6 +195,8 @@ int _print_job_reason(job_info_t * job, int width, bool right_justify,
 int _print_job_reason_list(job_info_t * job, int width, bool right_justify,
 			char* suffix);
 int _print_job_name(job_info_t * job, int width, bool right_justify,
+			char* suffix);
+int _print_job_licenses(job_info_t * job, int width, bool right_justify,
 			char* suffix);
 int _print_job_wckey(job_info_t * job, int width, bool right_justify,
 			char* suffix);

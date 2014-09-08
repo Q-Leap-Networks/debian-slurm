@@ -22,6 +22,7 @@
 # --without readline %_without_readline 1    don't require readline-devel RPM to be installed
 # --with sgijob      %_with_sgijob      1    build proctrack-sgi-job RPM
 # --with sun_const   %_with_sun_const   1    build for Sun Constellation system
+# --with-srun2aprun  %_with_srun2aprun  1    build srun as aprun wrapper
 
 #
 #  Allow defining --with and --without build options or %_with and %without in .rpmmacors
@@ -43,6 +44,7 @@
 %slurm_without_opt debug
 %slurm_without_opt elan
 %slurm_without_opt sun_const
+%slurm_without_opt srun2aprun
 
 # These options are only here to force there to be these on the build.
 # If they are not set they will still be compiled if the packages exist.
@@ -86,16 +88,16 @@
 %endif
 
 Name:    slurm
-Version: 2.2.7
+Version: 2.3.2
 Release: 1%{?dist}
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL
 Group: System Environment/Base
-Source: slurm-2.2.7.tar.bz2
+Source: slurm-2.3.2.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
-URL: https://computing.llnl.gov/linux/slurm/
+URL: http://www.schedmd.com/slurmdocs/
 
 Requires: slurm-plugins
 
@@ -288,6 +290,15 @@ Requires: slurm-perlapi
 %description torque
 Torque wrapper scripts used for helping migrate from Torque/PBS to SLURM.
 
+%if %{slurm_with srun2aprun}
+%package srun2aprun
+Summary: SLURM srun command is a wrapper for Cray/ALPS aprun command.
+Group: Development/System
+Requires: slurm-perlapi
+%description srun2aprun
+SLURM srun command is a wrapper for Cray/ALPS aprun command.
+%endif
+
 %package sjobexit
 Summary: SLURM job exit code management tools.
 Group: Development/System
@@ -368,7 +379,7 @@ Gives the ability for SLURM to use Berkeley Lab Checkpoint/Restart
 #############################################################################
 
 %prep
-%setup -n slurm-2.2.7
+%setup -n slurm-2.3.2
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \
@@ -406,9 +417,13 @@ DESTDIR="$RPM_BUILD_ROOT" make install-contrib
       install -D -m755 etc/init.d.slurmdbd $RPM_BUILD_ROOT/etc/init.d/slurmdbd
    fi
 %endif
-install -D -m644 etc/cgroup.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/cgroup.conf.example
-install -D -m755 etc/cgroup.release_agent ${RPM_BUILD_ROOT}%{_sysconfdir}/cgroup.release_agent
 install -D -m644 etc/slurm.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/slurm.conf.example
+install -D -m644 etc/cgroup.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/cgroup.conf.example
+install -D -m755 etc/cgroup_allowed_devices_file.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/cgroup_allowed_devices_file.conf.example
+install -D -m755 etc/cgroup.release_common.example ${RPM_BUILD_ROOT}%{_sysconfdir}/cgroup.release_common.example
+install -D -m755 etc/cgroup.release_common.example ${RPM_BUILD_ROOT}%{_sysconfdir}/cgroup/release_freezer
+install -D -m755 etc/cgroup.release_common.example ${RPM_BUILD_ROOT}%{_sysconfdir}/cgroup/release_cpuset
+install -D -m755 etc/cgroup.release_common.example ${RPM_BUILD_ROOT}%{_sysconfdir}/cgroup/release_memory
 install -D -m644 etc/slurmdbd.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/slurmdbd.conf.example
 install -D -m755 etc/slurm.epilog.clean ${RPM_BUILD_ROOT}%{_sysconfdir}/slurm.epilog.clean
 install -D -m755 contribs/sjstat ${RPM_BUILD_ROOT}%{_bindir}/sjstat
@@ -429,7 +444,18 @@ rm -f $RPM_BUILD_ROOT/lib64/security/pam_slurm.{a,la}
 rm -f $RPM_BUILD_ROOT/%{_libdir}/slurm/auth_none.so
 %endif
 %if ! %{slurm_with bluegene}
+rm -f $RPM_BUILD_ROOT/%{_libdir}/slurm/job_submit_cnode.so
+rm -f $RPM_BUILD_ROOT/%{_libdir}/slurm/libsched_if.so
+rm -f $RPM_BUILD_ROOT/%{_libdir}/slurm/libsched_if64.so
+rm -f $RPM_BUILD_ROOT/%{_libdir}/slurm/runjob_plugin.so
 rm -f $RPM_BUILD_ROOT/%{_mandir}/man5/bluegene*
+rm -f $RPM_BUILD_ROOT/%{_sbindir}/sfree
+rm -f $RPM_BUILD_ROOT/%{_sbindir}/slurm_epilog
+rm -f $RPM_BUILD_ROOT/%{_sbindir}/slurm_prolog
+%endif
+%if ! %{slurm_with munge}
+rm -f $RPM_BUILD_ROOT/%{_libdir}/slurm/auth_munge.so
+rm -f $RPM_BUILD_ROOT/%{_libdir}/slurm/crypto_munge.so
 %endif
 rm -f $RPM_BUILD_ROOT/%{_perldir}/auto/Slurm/.packlist
 rm -f $RPM_BUILD_ROOT/%{_perlarchlibdir}/perllocal.pod
@@ -438,25 +464,32 @@ rm -f $RPM_BUILD_ROOT/%{_perldir}/auto/Slurmdb/.packlist
 
 %if ! %{slurm_with blcr}
 # remove these if they exist
-rm -f ${RPM_BUILD_ROOT}%{_mandir}/man1/srun_cr* ${RPM_BUILD_ROOT}%{_bindir}/srun_cr ${RPM_BUILD_ROOT}%{_libexecdir}/slurm/cr_*
+rm -f ${RPM_BUILD_ROOT}%{_mandir}/man1/srun_cr*
+rm -f ${RPM_BUILD_ROOT}%{_bindir}/srun_cr
+rm -f ${RPM_BUILD_ROOT}%{_libexecdir}/slurm/cr_*
 %endif
 
 # Build man pages that are generated directly by the tools
 rm -f $RPM_BUILD_ROOT/%{_mandir}/man1/sjobexitmod.1
 ${RPM_BUILD_ROOT}%{_bindir}/sjobexitmod --roff > $RPM_BUILD_ROOT/%{_mandir}/man1/sjobexitmod.1
+%if %{slurm_with srun2aprun}
+    rm -f $RPM_BUILD_ROOT/%{_mandir}/man1/srun.1
+    pod2man --section=1 contribs/cray/srun.pl > $RPM_BUILD_ROOT/%{_mandir}/man1/srun.1
+%endif
 
 # Build conditional file list for main package
 LIST=./slurm.files
 touch $LIST
-test -f $RPM_BUILD_ROOT/etc/init.d/slurm                       &&
-  echo /etc/init.d/slurm                               >> $LIST
+test -f $RPM_BUILD_ROOT/etc/init.d/slurm			&&
+  echo /etc/init.d/slurm				>> $LIST
+test -f $RPM_BUILD_ROOT/%{_bindir}/sview			&&
+  echo %{_bindir}/sview					>> $LIST
 
 %if %{slurm_with aix}
 install -D -m644 etc/federation.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/federation.conf.example
 %endif
 
 %if %{slurm_with bluegene}
-rm -f ${RPM_BUILD_ROOT}%{_bindir}/srun
 install -D -m644 etc/bluegene.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/bluegene.conf.example
 mkdir -p ${RPM_BUILD_ROOT}/etc/ld.so.conf.d
 echo "%{_libdir}/slurm" > ${RPM_BUILD_ROOT}/etc/ld.so.conf.d/slurm.conf
@@ -468,6 +501,8 @@ test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/libsched_if.so &&
    echo %{_libdir}/slurm/libsched_if.so >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/libsched_if64.so &&
    echo %{_libdir}/slurm/libsched_if64.so >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/runjob_plugin.so &&
+   echo %{_libdir}/slurm/runjob_plugin.so >> $LIST
 
 %endif
 
@@ -495,10 +530,14 @@ test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/jobcomp_pgsql.so            &&
    echo %{_libdir}/slurm/jobcomp_pgsql.so            >> $LIST
 
 LIST=./plugins.files
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/select_bluegene.so          &&
+   echo %{_libdir}/slurm/select_bluegene.so          >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/crypto_openssl.so           &&
    echo %{_libdir}/slurm/crypto_openssl.so           >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/task_affinity.so            &&
    echo %{_libdir}/slurm/task_affinity.so            >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/task_cgroup.so              &&
+   echo %{_libdir}/slurm/task_cgroup.so              >> $LIST
 
 LIST=./pam.files
 touch $LIST
@@ -523,7 +562,7 @@ rm -rf $RPM_BUILD_ROOT
 %defattr(-,root,root,0755)
 %doc AUTHORS
 %doc NEWS
-%doc README
+%doc README.rst
 %doc RELEASE_NOTES
 %doc DISCLAIMER
 %doc COPYING
@@ -539,6 +578,7 @@ rm -rf $RPM_BUILD_ROOT
 %{_libdir}/slurm/src/*
 %{_mandir}/man1/*
 %{_mandir}/man5/cgroup.*
+%{_mandir}/man5/cray.*
 %{_mandir}/man5/gres.*
 %{_mandir}/man5/slurm.*
 %{_mandir}/man5/topology.*
@@ -549,14 +589,21 @@ rm -rf $RPM_BUILD_ROOT
 %{_mandir}/man8/spank*
 %dir %{_sysconfdir}
 %dir %{_libdir}/slurm/src
-%config %{_sysconfdir}/cgroup.conf.example
-%config %{_sysconfdir}/cgroup.release_agent
 %config %{_sysconfdir}/slurm.conf.example
+%config %{_sysconfdir}/cgroup.conf.example
+%config %{_sysconfdir}/cgroup_allowed_devices_file.conf.example
+%config %{_sysconfdir}/cgroup.release_common.example
+%config %{_sysconfdir}/cgroup/release_freezer
+%config %{_sysconfdir}/cgroup/release_cpuset
+%config %{_sysconfdir}/cgroup/release_memory
 %config %{_sysconfdir}/slurm.epilog.clean
 %exclude %{_mandir}/man1/sjobexit*
 %if %{slurm_with blcr}
 %exclude %{_mandir}/man1/srun_cr*
 %exclude %{_bindir}/srun_cr
+%endif
+%if %{slurm_with srun2aprun}
+%exclude %{_bindir}/srun*
 %endif
 #############################################################################
 
@@ -653,7 +700,6 @@ rm -rf $RPM_BUILD_ROOT
 %{_libdir}/slurm/accounting_storage_slurmdbd.so
 %{_libdir}/slurm/checkpoint_none.so
 %{_libdir}/slurm/checkpoint_ompi.so
-%{_libdir}/slurm/checkpoint_xlch.so
 %{_libdir}/slurm/gres_gpu.so
 %{_libdir}/slurm/gres_nic.so
 %{_libdir}/slurm/jobacct_gather_aix.so
@@ -686,9 +732,7 @@ rm -rf $RPM_BUILD_ROOT
 %{_libdir}/slurm/sched_hold.so
 %{_libdir}/slurm/sched_wiki.so
 %{_libdir}/slurm/sched_wiki2.so
-%{_libdir}/slurm/select_bluegene.so
 %{_libdir}/slurm/select_cray.so
-%{_libdir}/slurm/select_bgq.so
 %{_libdir}/slurm/select_cons_res.so
 %{_libdir}/slurm/select_linear.so
 %{_libdir}/slurm/switch_none.so
@@ -708,6 +752,14 @@ rm -rf $RPM_BUILD_ROOT
 %{_bindir}/qstat
 %{_bindir}/qsub
 %{_bindir}/mpiexec
+#############################################################################
+
+%if %{slurm_with srun2aprun}
+%files srun2aprun
+
+%defattr(-,root,root)
+%{_bindir}/srun
+%endif
 #############################################################################
 
 %files sjobexit
@@ -786,26 +838,13 @@ if [ -x /sbin/ldconfig ]; then
 	[ -x /sbin/chkconfig ] && /sbin/chkconfig --add slurm
     fi
 fi
-if [ ! -f %{_sysconfdir}/slurm.conf ]; then
-    echo "You need to build and install a slurm.conf file"
-    echo "Edit %{_sysconfdir}/slurm.conf.example and copy it to slurm.conf or"
-    echo "Build a new one using http://www.llnl.gov/linux/slurm/configurator.html"
-fi
 
 %post slurmdbd
-if [ ! -f %{_sysconfdir}/slurmdbd.conf ]; then
-    echo "You need to build and install a slurmdbd.conf file"
-    echo "Edit %{_sysconfdir}/slurmdbd.conf.example and copy it to slurmdbd.conf"
-fi
 
 %if %{slurm_with bluegene}
 %post bluegene
 if [ -x /sbin/ldconfig ]; then
     /sbin/ldconfig %{_libdir}/slurm
-fi
-if [ ! -f %{_sysconfdir}/bluegene.conf ]; then
-    echo "You need to build and install a bluegene.conf file"
-    echo "Edit %{_sysconfdir}/bluegene.conf.example and copy it to bluegene.conf"
 fi
 %endif
 

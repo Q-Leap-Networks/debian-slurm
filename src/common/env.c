@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -90,29 +90,45 @@ static int _setup_particulars(uint32_t cluster_flags,
 	int rc = SLURM_SUCCESS;
 	if (cluster_flags & CLUSTER_FLAG_BG) {
 		char *bg_part_id = NULL;
+		uint32_t node_cnt = 0;
 		select_g_select_jobinfo_get(select_jobinfo,
 					    SELECT_JOBDATA_BLOCK_ID,
 					    &bg_part_id);
 		if (bg_part_id) {
 			/* check to see if this is a HTC block or not. */
 			if (cluster_flags & CLUSTER_FLAG_BGP) {
-				uint16_t conn_type =
-					(uint16_t)NO_VAL;
+				uint16_t conn_type[HIGHEST_DIMENSIONS];
 				select_g_select_jobinfo_get(
 					select_jobinfo,
 					SELECT_JOBDATA_CONN_TYPE,
 					&conn_type);
-				if (conn_type > SELECT_SMALL) {
+				if (conn_type[0] > SELECT_SMALL) {
 					/* SUBMIT_POOL over rides
 					   HTC_SUBMIT_POOL */
 					setenvf(dest, "SUBMIT_POOL", "%s",
 						bg_part_id);
 				}
 			}
+			select_g_select_jobinfo_get(
+				select_jobinfo,
+				SELECT_JOBDATA_BLOCK_NODE_CNT,
+				&node_cnt);
+			if (node_cnt)
+				setenvf(dest, "SLURM_BLOCK_NUM_NODES",
+					"%u", node_cnt);
+
 			setenvf(dest, "MPIRUN_PARTITION", "%s", bg_part_id);
 			setenvf(dest, "MPIRUN_NOFREE", "%d", 1);
 			setenvf(dest, "MPIRUN_NOALLOCATE", "%d", 1);
 			xfree(bg_part_id);
+			select_g_select_jobinfo_get(select_jobinfo,
+						    SELECT_JOBDATA_IONODES,
+						    &bg_part_id);
+			if (bg_part_id) {
+				setenvf(dest, "SLURM_JOB_SUB_MP", "%s",
+					bg_part_id);
+				xfree(bg_part_id);
+			}
 		} else
 			rc = SLURM_FAILURE;
 
@@ -947,6 +963,34 @@ env_array_for_job(char ***dest, const resource_allocation_response_msg_t *alloc,
 	env_array_overwrite_fmt(dest, "SLURM_JOB_CPUS_PER_NODE", "%s", tmp);
 	xfree(tmp);
 
+	if (alloc->pn_min_memory & MEM_PER_CPU) {
+		uint32_t tmp_mem = alloc->pn_min_memory & (~MEM_PER_CPU);
+		env_array_overwrite_fmt(dest, "SLURM_MEM_PER_CPU", "%u",
+					tmp_mem);
+#ifdef HAVE_CRAY
+		env_array_overwrite_fmt(dest, "CRAY_AUTO_APRUN_OPTIONS",
+					"\"-m%u\"", tmp_mem);
+#endif
+	} else if (alloc->pn_min_memory) {
+		uint32_t tmp_mem = alloc->pn_min_memory;
+#ifdef HAVE_CRAY
+		uint32_t i, max_cpus_per_node = 1;
+		for (i = 0; i < alloc->num_cpu_groups; i++) {
+			if ((i == 0) ||
+			    (max_cpus_per_node < alloc->cpus_per_node[i])) {
+				max_cpus_per_node = alloc->cpus_per_node[i];
+			}
+		}
+#endif
+		env_array_overwrite_fmt(dest, "SLURM_MEM_PER_NODE", "%u",
+					tmp_mem);
+#ifdef HAVE_CRAY
+		tmp_mem /= max_cpus_per_node;
+		env_array_overwrite_fmt(dest, "CRAY_AUTO_APRUN_OPTIONS",
+					"\"-m%u\"", tmp_mem);
+#endif
+	}
+
 	/* OBSOLETE, but needed by MPI, do not remove */
 	env_array_overwrite_fmt(dest, "SLURM_JOBID", "%u", alloc->job_id);
 	env_array_overwrite_fmt(dest, "SLURM_NNODES", "%u", node_cnt);
@@ -1065,15 +1109,11 @@ env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch,
 	env_array_overwrite_fmt(dest, "SLURM_NNODES", "%u", num_nodes);
 	env_array_overwrite_fmt(dest, "SLURM_NODELIST", "%s", batch->nodes);
 
-	if((batch->cpus_per_task != 0) &&
-	   (batch->cpus_per_task != (uint16_t) NO_VAL))
+	if ((batch->cpus_per_task != 0) &&
+	    (batch->cpus_per_task != (uint16_t) NO_VAL))
 		cpus_per_task = batch->cpus_per_task;
 	else
 		cpus_per_task = 1;	/* default value */
-	if (cpus_per_task > 1) {
-		env_array_overwrite_fmt(dest, "SLURM_CPUS_PER_TASK", "%u",
-					cpus_per_task);
-	}
 
 	if(num_tasks) {
 		env_array_overwrite_fmt(dest, "SLURM_NTASKS", "%u",
@@ -1107,6 +1147,35 @@ env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch,
 	slurm_step_layout_destroy(step_layout);
 	env_array_overwrite_fmt(dest, "SLURM_TASKS_PER_NODE", "%s", tmp);
 	xfree(tmp);
+
+	if (batch->pn_min_memory & MEM_PER_CPU) {
+		uint32_t tmp_mem = batch->pn_min_memory & (~MEM_PER_CPU);
+		env_array_overwrite_fmt(dest, "SLURM_MEM_PER_CPU", "%u",
+					tmp_mem);
+#ifdef HAVE_CRAY
+		env_array_overwrite_fmt(dest, "CRAY_AUTO_APRUN_OPTIONS",
+					"\"-m%u\"", tmp_mem);
+#endif
+	} else if (batch->pn_min_memory) {
+		uint32_t tmp_mem = batch->pn_min_memory;
+#ifdef HAVE_CRAY
+		uint32_t i, max_cpus_per_node = 1;
+		for (i = 0; i < batch->num_cpu_groups; i++) {
+			if ((i == 0) ||
+			    (max_cpus_per_node < batch->cpus_per_node[i])) {
+				max_cpus_per_node = batch->cpus_per_node[i];
+			}
+		}
+#endif
+		env_array_overwrite_fmt(dest, "SLURM_MEM_PER_NODE", "%u",
+					tmp_mem);
+#ifdef HAVE_CRAY
+		tmp_mem /= max_cpus_per_node;
+		env_array_overwrite_fmt(dest, "CRAY_AUTO_APRUN_OPTIONS",
+					"\"-m%u\"", tmp_mem);
+#endif
+	}
+
 	return SLURM_SUCCESS;
 
 }
@@ -1128,6 +1197,7 @@ env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch,
  *	SLURM_STEP_LAUNCHER_PORT
  *	SLURM_STEP_LAUNCHER_IPADDR
  *	SLURM_STEP_RESV_PORTS
+ *      SLURM_STEP_SUB_MP
  *
  * Sets OBSOLETE variables:
  *	SLURM_STEPID
@@ -1145,18 +1215,42 @@ env_array_for_step(char ***dest,
 		   uint16_t launcher_port,
 		   bool preserve_env)
 {
-	char *tmp;
+	char *tmp, *tpn;
+	uint32_t node_cnt = step->step_layout->node_cnt;
+	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
 
-	tmp = _uint16_array_to_str(step->step_layout->node_cnt,
+	tpn = _uint16_array_to_str(step->step_layout->node_cnt,
 				   step->step_layout->tasks);
 	env_array_overwrite_fmt(dest, "SLURM_STEP_ID", "%u", step->job_step_id);
 	env_array_overwrite_fmt(dest, "SLURM_STEP_NODELIST",
 				"%s", step->step_layout->node_list);
+	if (cluster_flags & CLUSTER_FLAG_BG) {
+		char geo_char[HIGHEST_DIMENSIONS+1];
+
+		select_g_select_jobinfo_get(step->select_jobinfo,
+					    SELECT_JOBDATA_NODE_CNT,
+					    &node_cnt);
+		if (!node_cnt)
+			node_cnt = step->step_layout->node_cnt;
+
+		select_g_select_jobinfo_sprint(step->select_jobinfo,
+					       geo_char, sizeof(geo_char),
+					       SELECT_PRINT_GEOMETRY);
+		if (geo_char[0] != '0')
+			env_array_overwrite_fmt(dest, "SLURM_STEP_GEO",
+						"%s", geo_char);
+		select_g_select_jobinfo_sprint(step->select_jobinfo,
+					       geo_char, sizeof(geo_char),
+					       SELECT_PRINT_START_LOC);
+		env_array_overwrite_fmt(dest, "SLURM_STEP_START_LOC",
+					"%s", geo_char);
+	}
+
 	env_array_overwrite_fmt(dest, "SLURM_STEP_NUM_NODES",
-				"%hu", step->step_layout->node_cnt);
+				"%u", node_cnt);
 	env_array_overwrite_fmt(dest, "SLURM_STEP_NUM_TASKS",
 				"%u", step->step_layout->task_cnt);
-	env_array_overwrite_fmt(dest, "SLURM_STEP_TASKS_PER_NODE", "%s", tmp);
+	env_array_overwrite_fmt(dest, "SLURM_STEP_TASKS_PER_NODE", "%s", tpn);
 	env_array_overwrite_fmt(dest, "SLURM_STEP_LAUNCHER_PORT",
 				"%hu", launcher_port);
 	if (step->resv_ports) {
@@ -1164,23 +1258,32 @@ env_array_for_step(char ***dest,
 					"%s", step->resv_ports);
 	}
 
-	/* OBSOLETE, but needed by MPI, do not remove */
+	tmp = NULL;
+	select_g_select_jobinfo_get(step->select_jobinfo,
+				    SELECT_JOBDATA_IONODES,
+				    &tmp);
+	if (tmp) {
+		setenvf(dest, "SLURM_STEP_SUB_MP", "%s", tmp);
+		xfree(tmp);
+	}
+
+	/* OBSOLETE, but needed by some MPI implementations, do not remove */
 	env_array_overwrite_fmt(dest, "SLURM_STEPID", "%u", step->job_step_id);
 	if (!preserve_env) {
 		env_array_overwrite_fmt(dest, "SLURM_NNODES",
-					"%hu", step->step_layout->node_cnt);
+					"%u", node_cnt);
 		env_array_overwrite_fmt(dest, "SLURM_NTASKS", "%u",
 					step->step_layout->task_cnt);
 		/* keep around for old scripts */
 		env_array_overwrite_fmt(dest, "SLURM_NPROCS",
 					"%u", step->step_layout->task_cnt);
 		env_array_overwrite_fmt(dest, "SLURM_TASKS_PER_NODE", "%s",
-					tmp);
+					tpn);
 	}
 	env_array_overwrite_fmt(dest, "SLURM_SRUN_COMM_PORT",
 				"%hu", launcher_port);
 
-	xfree(tmp);
+	xfree(tpn);
 }
 
 /*

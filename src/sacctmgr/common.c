@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -273,6 +273,11 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("Flags");
 		field->len = 20;
 		field->print_routine = print_fields_str;
+	} else if (!strncasecmp("GraceTime", object, MAX(command_len, 3))) {
+		field->type = PRINT_GRACE;
+		field->name = xstrdup("GraceTime");
+		field->len = 10;
+		field->print_routine = print_fields_time_from_secs;
 	} else if (!strncasecmp("GrpCPUMins", object, MAX(command_len, 7))) {
 		field->type = PRINT_GRPCM;
 		field->name = xstrdup("GrpCPUMins");
@@ -339,6 +344,12 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("MaxCPUs");
 		field->len = 8;
 		field->print_routine = print_fields_uint;
+	} else if (!strncasecmp("MaxCPUsPerUser", object,
+				MAX(command_len, 11))) {
+		field->type = PRINT_MAXCU;
+		field->name = xstrdup("MaxCPUsPerUser");
+		field->len = 14;
+		field->print_routine = print_fields_uint;
 	} else if (!strncasecmp("MaxJobs", object, MAX(command_len, 4))) {
 		field->type = PRINT_MAXJ;
 		field->name = xstrdup("MaxJobs");
@@ -349,6 +360,12 @@ static print_field_t *_get_print_field(char *object)
 		field->type = PRINT_MAXN;
 		field->name = xstrdup("MaxNodes");
 		field->len = 8;
+		field->print_routine = print_fields_uint;
+	} else if (!strncasecmp("MaxNodesPerUser", object,
+				MAX(command_len, 12))) {
+		field->type = PRINT_MAXNU;
+		field->name = xstrdup("MaxNodesPerUser");
+		field->len = 15;
 		field->print_routine = print_fields_uint;
 	} else if (!strncasecmp("MaxSubmitJobs", object, MAX(command_len, 4))) {
 		field->type = PRINT_MAXS;
@@ -566,10 +583,20 @@ extern int sacctmgr_remove_assoc_usage(slurmdb_association_cond_t *assoc_cond)
 	slurmdb_cluster_cond_t cluster_cond;
 	int rc = SLURM_SUCCESS;
 
-	if (!assoc_cond->cluster_list ||
-	    !list_count(assoc_cond->cluster_list)) {
-		error("A cluster name is required to remove usage");
-		return SLURM_ERROR;
+	if (!assoc_cond->cluster_list)
+		assoc_cond->cluster_list = list_create(slurm_destroy_char);
+
+	if (!list_count(assoc_cond->cluster_list)) {
+		char *temp = slurm_get_cluster_name();
+		if (temp) {
+			printf("No cluster specified, resetting "
+			       "on local cluster %s\n", temp);
+			list_append(assoc_cond->cluster_list, temp);
+		}
+		if (!list_count(assoc_cond->cluster_list)) {
+			error("A cluster name is required to remove usage");
+			return SLURM_ERROR;
+		}
 	}
 
 	if(!commit_check("Would you like to reset usage?")) {
@@ -1383,6 +1410,11 @@ extern void sacctmgr_print_qos_limits(slurmdb_qos_rec_t *qos)
 	if (qos->preempt_list && !g_qos_list)
 		g_qos_list = acct_storage_g_get_qos(db_conn, my_uid, NULL);
 
+	if (qos->grace_time != NO_VAL)
+		printf("  GraceTime       = %d\n", qos->grace_time);
+	else
+		printf("  GraceTime       = NONE\n");
+
 	if (qos->grp_cpu_mins == INFINITE)
 		printf("  GrpCPUMins     = NONE\n");
 	else if (qos->grp_cpu_mins != NO_VAL)
@@ -1430,6 +1462,11 @@ extern void sacctmgr_print_qos_limits(slurmdb_qos_rec_t *qos)
 	else if (qos->max_cpus_pj != NO_VAL)
 		printf("  MaxCPUs        = %u\n", qos->max_cpus_pj);
 
+	if (qos->max_cpus_pu == INFINITE)
+		printf("  MaxCPUsPerUser        = NONE\n");
+	else if (qos->max_cpus_pu != NO_VAL)
+		printf("  MaxCPUsPerUser        = %u\n", qos->max_cpus_pu);
+
 	if (qos->max_jobs_pu == INFINITE)
 		printf("  MaxJobs        = NONE\n");
 	else if (qos->max_jobs_pu != NO_VAL)
@@ -1439,6 +1476,11 @@ extern void sacctmgr_print_qos_limits(slurmdb_qos_rec_t *qos)
 		printf("  MaxNodes       = NONE\n");
 	else if (qos->max_nodes_pj != NO_VAL)
 		printf("  MaxNodes       = %u\n", qos->max_nodes_pj);
+
+	if (qos->max_nodes_pu == INFINITE)
+		printf("  MaxNodesPerUser       = NONE\n");
+	else if (qos->max_nodes_pu != NO_VAL)
+		printf("  MaxNodesPerUser       = %u\n", qos->max_nodes_pu);
 
 	if (qos->max_submit_jobs_pu == INFINITE)
 		printf("  MaxSubmitJobs  = NONE\n");
@@ -1462,6 +1504,11 @@ extern void sacctmgr_print_qos_limits(slurmdb_qos_rec_t *qos)
 			printf("  Preempt        = %s\n", temp_char);
 			xfree(temp_char);
 		}
+	}
+
+	if (qos->preempt_mode) {
+		printf("  PreemptMode    = %s\n",
+		       preempt_mode_string(qos->preempt_mode));
 	}
 
 	if (qos->priority == INFINITE)

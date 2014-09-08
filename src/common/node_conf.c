@@ -13,7 +13,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -78,8 +78,9 @@
 #define _DEBUG 0
 
 /* Global variables */
-List config_list  = NULL;		/* list of config_record entries */
-List feature_list = NULL;		/* list of features_record entries */
+List config_list  = NULL;	/* list of config_record entries */
+List feature_list = NULL;	/* list of features_record entries */
+List front_end_list = NULL;	/* list of slurm_conf_frontend_t entries */
 time_t last_node_update = (time_t) 0;	/* time of last update */
 struct node_record *node_record_table_ptr = NULL;	/* node records */
 struct node_record **node_hash_table = NULL;	/* node_record hash table */
@@ -98,7 +99,6 @@ static void	_list_delete_config (void *config_entry);
 static void	_list_delete_feature (void *feature_entry);
 static int	_list_find_config (void *config_entry, void *key);
 static int	_list_find_feature (void *feature_entry, void *key);
-
 
 
 static void _add_config_feature(char *feature, bitstr_t *node_bitmap)
@@ -150,9 +150,10 @@ static int _build_single_nodeline_info(slurm_conf_node_t *node_ptr,
 	char *hostname = NULL;
 	char *address = NULL;
 	int state_val = NODE_STATE_UNKNOWN;
+	int address_count, alias_count, hostname_count;
 
 	if (node_ptr->state != NULL) {
-		state_val = state_str2int(node_ptr->state);
+		state_val = state_str2int(node_ptr->state, node_ptr->nodenames);
 		if (state_val == NO_VAL)
 			goto cleanup;
 	}
@@ -177,22 +178,27 @@ static int _build_single_nodeline_info(slurm_conf_node_t *node_ptr,
 	}
 
 	/* some sanity checks */
+	address_count  = hostlist_count(address_list);
+	alias_count    = hostlist_count(alias_list);
+	hostname_count = hostlist_count(hostname_list);
 #ifdef HAVE_FRONT_END
-	if ((hostlist_count(hostname_list) != 1) ||
-	    (hostlist_count(address_list)  != 1)) {
-		error("Only one hostname and address allowed "
-		      "in FRONT_END mode");
+	if ((hostname_count != alias_count) && (hostname_count != 1)) {
+		error("NodeHostname count must equal that of NodeName "
+		      "records of there must be no more than one");
 		goto cleanup;
 	}
-	hostname = node_ptr->hostnames;
-	address = node_ptr->addresses;
+	if ((address_count != alias_count) && (address_count != 1)) {
+		error("NodeAddr count must equal that of NodeName "
+		      "records of there must be no more than one");
+		goto cleanup;
+	}
 #else
-	if (hostlist_count(hostname_list) < hostlist_count(alias_list)) {
+	if (hostname_count < alias_count) {
 		error("At least as many NodeHostname are required "
 		      "as NodeName");
 		goto cleanup;
 	}
-	if (hostlist_count(address_list) < hostlist_count(alias_list)) {
+	if (address_count < alias_count) {
 		error("At least as many NodeAddr are required as NodeName");
 		goto cleanup;
 	}
@@ -200,10 +206,18 @@ static int _build_single_nodeline_info(slurm_conf_node_t *node_ptr,
 
 	/* now build the individual node structures */
 	while ((alias = hostlist_shift(alias_list))) {
-#ifndef HAVE_FRONT_END
-		hostname = hostlist_shift(hostname_list);
-		address = hostlist_shift(address_list);
-#endif
+		if (hostname_count > 0) {
+			hostname_count--;
+			if (hostname)
+				free(hostname);
+			hostname = hostlist_shift(hostname_list);
+		}
+		if (address_count > 0) {
+			address_count--;
+			if (address)
+				free(address);
+			address = hostlist_shift(address_list);
+		}
 		/* find_node_record locks this to get the
 		 * alias so we need to unlock */
 		node_rec = find_node_record(alias);
@@ -215,6 +229,7 @@ static int _build_single_nodeline_info(slurm_conf_node_t *node_ptr,
 				node_rec->node_state = state_val;
 			node_rec->last_response = (time_t) 0;
 			node_rec->comm_name = xstrdup(address);
+			node_rec->node_hostname = xstrdup(hostname);
 			node_rec->port      = node_ptr->port;
 			node_rec->weight    = node_ptr->weight;
 			node_rec->features  = xstrdup(node_ptr->feature);
@@ -224,14 +239,14 @@ static int _build_single_nodeline_info(slurm_conf_node_t *node_ptr,
 			error("reconfiguration for node %s, ignoring!", alias);
 		}
 		free(alias);
-#ifndef HAVE_FRONT_END
-		free(hostname);
-		free(address);
-#endif
 	}
 
 	/* free allocated storage */
 cleanup:
+	if (address)
+		free(address);
+	if (hostname)
+		free(hostname);
 	if (alias_list)
 		hostlist_destroy(alias_list);
 	if (hostname_list)
@@ -249,8 +264,9 @@ cleanup:
 static int _delete_config_record (void)
 {
 	last_node_update = time (NULL);
-	(void) list_delete_all (config_list,  &_list_find_config,  NULL);
-	(void) list_delete_all (feature_list, &_list_find_feature, NULL);
+	(void) list_delete_all (config_list,    &_list_find_config,  NULL);
+	(void) list_delete_all (feature_list,   &_list_find_feature, NULL);
+	(void) list_delete_all (front_end_list, &list_find_frontend, NULL);
 	return SLURM_SUCCESS;
 }
 
@@ -359,6 +375,8 @@ static int _hash_index (char *name)
 	for (j = 1; *name; name++, j++)
 		index += (int)*name * j;
 	index %= node_record_count;
+	if (index < 0)
+		index += node_record_count;
 
 	return index;
 }
@@ -408,14 +426,16 @@ static int _list_find_config (void *config_entry, void *key)
 }
 
 /*
- * bitmap2node_name - given a bitmap, build a list of comma separated node
- *	names. names may include regular expressions (e.g. "lx[01-10]")
+ * bitmap2node_name_sortable - given a bitmap, build a list of comma
+ *	separated node names. names may include regular expressions
+ *	(e.g. "lx[01-10]")
  * IN bitmap - bitmap pointer
+ * IN sort   - returned sorted list or not
  * RET pointer to node list or NULL on error
  * globals: node_record_table_ptr - pointer to node table
  * NOTE: the caller must xfree the memory at node_list when no longer required
  */
-char * bitmap2node_name (bitstr_t *bitmap)
+char * bitmap2node_name_sortable (bitstr_t *bitmap, bool sort)
 {
 	int i, first, last;
 	hostlist_t hl;
@@ -437,11 +457,26 @@ char * bitmap2node_name (bitstr_t *bitmap)
 			continue;
 		hostlist_push(hl, node_record_table_ptr[i].name);
 	}
-	hostlist_uniq(hl);
+	if (sort)
+		hostlist_sort(hl);
 	buf = hostlist_ranged_string_xmalloc(hl);
 	hostlist_destroy(hl);
 
 	return buf;
+}
+
+/*
+ * bitmap2node_name - given a bitmap, build a list of sorted, comma
+ *	separated node names. names may include regular expressions
+ *	(e.g. "lx[01-10]")
+ * IN bitmap - bitmap pointer
+ * RET pointer to node list or NULL on error
+ * globals: node_record_table_ptr - pointer to node table
+ * NOTE: the caller must xfree the memory at node_list when no longer required
+ */
+char * bitmap2node_name (bitstr_t *bitmap)
+{
+	return bitmap2node_name_sortable(bitmap, 1);
 }
 
 /*
@@ -461,6 +496,81 @@ static int _list_find_feature (void *feature_entry, void *key)
 	if (strcmp(feature_ptr->name, (char *) key) == 0)
 		return 1;
 	return 0;
+}
+
+#ifdef HAVE_FRONT_END
+/* Log the contents of a frontend record */
+static void _dump_front_end(slurm_conf_frontend_t *fe_ptr)
+{
+	info("fe name:%s addr:%s port:%u state:%u reason:%s",
+	     fe_ptr->frontends, fe_ptr->addresses,
+	     fe_ptr->port, fe_ptr->node_state, fe_ptr->reason);
+}
+#endif
+
+/*
+ * build_all_frontend_info - get a array of slurm_conf_frontend_t structures
+ *	from the slurm.conf reader, build table, and set values
+ * is_slurmd_context: set to true if run from slurmd
+ * RET 0 if no error, error code otherwise
+ */
+extern int build_all_frontend_info (bool is_slurmd_context)
+{
+	slurm_conf_frontend_t **ptr_array;
+#ifdef HAVE_FRONT_END
+	slurm_conf_frontend_t *fe_single, *fe_line;
+	int i, count, max_rc = SLURM_SUCCESS;
+	bool front_end_debug;
+
+	if (slurm_get_debug_flags() & DEBUG_FLAG_FRONT_END)
+		front_end_debug = true;
+	else
+		front_end_debug = false;
+	count = slurm_conf_frontend_array(&ptr_array);
+	if (count == 0)
+		fatal("No FrontendName information available!");
+
+	for (i = 0; i < count; i++) {
+		hostlist_t hl_name, hl_addr;
+		char *fe_name, *fe_addr;
+
+		fe_line = ptr_array[i];
+		hl_name = hostlist_create(fe_line->frontends);
+		if (hl_name == NULL)
+			fatal("Invalid FrontendName:%s", fe_line->frontends);
+		hl_addr = hostlist_create(fe_line->addresses);
+		if (hl_addr == NULL)
+			fatal("Invalid FrontendAddr:%s", fe_line->addresses);
+		if (hostlist_count(hl_name) != hostlist_count(hl_addr)) {
+			fatal("Inconsistent node count between "
+			      "FrontendName(%s) and FrontendAddr(%s)",
+			      fe_line->frontends, fe_line->addresses);
+		}
+		while ((fe_name = hostlist_shift(hl_name))) {
+			fe_addr = hostlist_shift(hl_addr);
+			fe_single = xmalloc(sizeof(slurm_conf_frontend_t));
+			if (list_append(front_end_list, fe_single) == NULL)
+				fatal("list_append: malloc failure");
+			fe_single->frontends = xstrdup(fe_name);
+			fe_single->addresses = xstrdup(fe_addr);
+			free(fe_name);
+			free(fe_addr);
+			fe_single->port = fe_line->port;
+			if (fe_line->reason && fe_line->reason[0])
+				fe_single->reason = xstrdup(fe_line->reason);
+			fe_single->node_state = fe_line->node_state;
+			if (front_end_debug && !is_slurmd_context)
+				_dump_front_end(fe_single);
+		}
+		hostlist_destroy(hl_addr);
+		hostlist_destroy(hl_name);
+	}
+	return max_rc;
+#else
+	if (slurm_conf_frontend_array(&ptr_array) != 0)
+		fatal("FrontendName information configured!");
+	return SLURM_SUCCESS;
+#endif
 }
 
 /*
@@ -543,7 +653,7 @@ extern void  build_config_feature_list(struct config_record *config_ptr)
 		tmp_str = xmalloc(i);
 		/* Remove white space from feature specification */
 		for (i=0, j=0; config_ptr->feature[i]; i++) {
-			if (!isspace(config_ptr->feature[i]))
+			if (!isspace((int)config_ptr->feature[i]))
 				tmp_str[j++] = config_ptr->feature[i];
 		}
 		if (i != j)
@@ -625,7 +735,7 @@ extern struct node_record *create_node_record (
 	node_ptr->threads = config_ptr->threads;
 	node_ptr->real_memory = config_ptr->real_memory;
 	node_ptr->tmp_disk = config_ptr->tmp_disk;
-	node_ptr->select_nodeinfo = select_g_select_nodeinfo_alloc(NO_VAL);
+	node_ptr->select_nodeinfo = select_g_select_nodeinfo_alloc();
 	xassert (node_ptr->magic = NODE_MAGIC)  /* set value */;
 	return node_ptr;
 }
@@ -704,9 +814,11 @@ extern int init_node_conf (void)
 	if (config_list)	/* delete defunct configuration entries */
 		(void) _delete_config_record ();
 	else {
-		config_list  = list_create (_list_delete_config);
-		feature_list = list_create (_list_delete_feature);
-		if ((config_list == NULL) || (feature_list == NULL))
+		config_list    = list_create (_list_delete_config);
+		feature_list   = list_create (_list_delete_feature);
+		front_end_list = list_create (destroy_frontend);
+		if ((config_list == NULL) || (feature_list == NULL) ||
+		    (front_end_list == NULL))
 			fatal("list_create malloc failure");
 	}
 
@@ -725,6 +837,8 @@ extern void node_fini2 (void)
 		config_list = NULL;
 		list_destroy(feature_list);
 		feature_list = NULL;
+		list_destroy(front_end_list);
+		front_end_list = NULL;
 	}
 
 	node_ptr = node_record_table_ptr;
@@ -802,6 +916,7 @@ extern void purge_node_rec (struct node_record *node_ptr)
 	if (node_ptr->gres_list)
 		list_destroy(node_ptr->gres_list);
 	xfree(node_ptr->name);
+	xfree(node_ptr->node_hostname);
 	xfree(node_ptr->os);
 	xfree(node_ptr->part_pptr);
 	xfree(node_ptr->reason);
@@ -838,7 +953,7 @@ extern void rehash_node (void)
 }
 
 /* Convert a node state string to it's equivalent enum value */
-extern int state_str2int(const char *state_str)
+extern int state_str2int(const char *state_str, char *node_name)
 {
 	int state_val = NO_VAL;
 	int i;
@@ -858,7 +973,7 @@ extern int state_str2int(const char *state_str)
 			state_val = NODE_STATE_IDLE | NODE_STATE_FAIL;
 	}
 	if (state_val == NO_VAL) {
-		error("invalid node state %s", state_str);
+		error("node %s has invalid state %s", node_name, state_str);
 		errno = EINVAL;
 	}
 	return state_val;

@@ -6,7 +6,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -54,9 +54,9 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <sys/wait.h>
-
 #include <libcr.h>
-#include <slurm/slurm.h>
+
+#include "slurm/slurm.h"
 
 #include "src/common/fd.h"
 #include "src/common/log.h"

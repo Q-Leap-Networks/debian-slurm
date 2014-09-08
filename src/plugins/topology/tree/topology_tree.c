@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -45,7 +45,7 @@
 #include <stdlib.h>
 #include <sys/types.h>
 
-#include <slurm/slurm_errno.h>
+#include "slurm/slurm_errno.h"
 #include "src/common/bitstring.h"
 #include "src/common/log.h"
 #include "src/common/slurm_topology.h"
@@ -81,7 +81,7 @@
  */
 const char plugin_name[]        = "topology tree plugin";
 const char plugin_type[]        = "topology/tree";
-const uint32_t plugin_version   = 100;
+const uint32_t plugin_version   = 101;
 
 typedef struct slurm_conf_switches {
 	uint32_t link_speed;	/* link speed, arbitrary units */
@@ -139,6 +139,13 @@ extern int topo_build_config(void)
 	return SLURM_SUCCESS;
 }
 
+/*
+ * topo_generate_node_ranking  -  this plugin does not set any node_rank fields
+ */
+extern bool topo_generate_node_ranking(void)
+{
+	return false;
+}
 
 /*
  * topo_get_node_addr - build node address and the associated pattern
@@ -219,7 +226,7 @@ static void _validate_switches(void)
 {
 	slurm_conf_switches_t *ptr, **ptr_array;
 	int depth, i, j;
-	struct switch_record *switch_ptr;
+	struct switch_record *switch_ptr, *prior_ptr;
 	hostlist_t hl, invalid_hl = NULL;
 	char *child;
 	bitstr_t *multi_homed_bitmap = NULL;	/* nodes on >1 leaf switch */
@@ -242,6 +249,14 @@ static void _validate_switches(void)
 	for (i=0; i<switch_record_cnt; i++, switch_ptr++) {
 		ptr = ptr_array[i];
 		switch_ptr->name = xstrdup(ptr->switch_name);
+		/* See if switch name has already been defined. */
+		prior_ptr = switch_record_table;
+		for (j=0; j<i; j++, prior_ptr++) {
+			if (strcmp(switch_ptr->name, prior_ptr->name) == 0) {
+				fatal("Switch (%s) has already been defined",
+				      prior_ptr->name);
+			}
+		}
 		switch_ptr->link_speed = ptr->link_speed;
 		if (ptr->nodes) {
 			switch_ptr->level = 0;	/* leaf switch */
@@ -449,7 +464,8 @@ extern int  _read_topo_file(slurm_conf_switches_t **ptr_array[])
 		topo_conf = _get_topo_conf();
 
 	conf_hashtbl = s_p_hashtbl_create(switch_options);
-	if (s_p_parse_file(conf_hashtbl, NULL, topo_conf) == SLURM_ERROR) {
+	if (s_p_parse_file(conf_hashtbl, NULL, topo_conf, false) ==
+	    SLURM_ERROR) {
 		fatal("something wrong with opening/reading %s: %m",
 		      topo_conf);
 	}

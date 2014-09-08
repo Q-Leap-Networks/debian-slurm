@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -68,8 +68,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <slurm/slurm.h>
-#include <slurm/slurm_errno.h>
+#include "slurm/slurm.h"
+#include "slurm/slurm_errno.h"
 
 #include "src/common/slurm_xlator.h"
 #include "src/common/bitstring.h"
@@ -166,7 +166,10 @@ extern void job_set_env(char ***job_env_ptr, void *gres_ptr)
 				    dev_list);
 		xfree(dev_list);
 	} else {
-		env_array_overwrite(job_env_ptr,"CUDA_VISIBLE_DEVICES", "");
+		/* The gres.conf file must identify specific device files
+		 * in order to set the CUDA_VISIBLE_DEVICES env var */
+		error("gres/gpu unable to set CUDA_VISIBLE_DEVICES, "
+		      "no device files configured");
 	}
 }
 
@@ -200,6 +203,9 @@ extern void step_set_env(char ***job_env_ptr, void *gres_ptr)
 				    dev_list);
 		xfree(dev_list);
 	} else {
-		env_array_overwrite(job_env_ptr,"CUDA_VISIBLE_DEVICES", "");
+		/* The gres.conf file must identify specific device files
+		 * in order to set the CUDA_VISIBLE_DEVICES env var */
+		error("gres/gpu unable to set CUDA_VISIBLE_DEVICES, "
+		      "no device files configured");
 	}
 }

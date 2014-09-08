@@ -13,7 +13,7 @@
 # CODE-OCEC-09-009. All rights reserved.
 #
 # This file is part of SLURM, a resource management program.
-# For details, see <https://computing.llnl.gov/linux/slurm/>.
+# For details, see <http://www.schedmd.com/slurmdocs/>.
 # Please also read the included file: DISCLAIMER.
 #
 # SLURM is free software; you can redistribute it and/or modify it under
@@ -42,21 +42,27 @@ if {[test_aix]} {
 } else {
     set task_cnt 4
 }
+
 print_header $test_id
+
+if {[test_bluegene]} {
+	send_user "\nWARNING: This test is incompatible with Bluegene systems\n"
+	exit $exit_code
+}
+if {[test_cray]} {
+	send_user "\nWARNING: This test is incompatible with Cray systems\n"
+	exit $exit_code
+}
 
 #
 # Spawn srun with $task_cnt tasks each of which runs a $mult way /bin/id
 #
 set timeout $max_job_delay
 
-if { [test_bluegene] } {
-	set node_cnt 1-2048
+if { [test_xcpu] } {
+	set node_cnt 1-1
 } else {
-	if { [test_xcpu] } {
-		set node_cnt 1-1
-	} else {
-		set node_cnt 1-4
-	}
+	set node_cnt 1-4
 }
 
 set srun_pid [spawn $srun -N$node_cnt -n$task_cnt -O -t1 $srun -l -n$mult -O $bin_id]

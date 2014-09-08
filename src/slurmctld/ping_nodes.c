@@ -2,13 +2,13 @@
  *  ping_nodes.c - ping the slurmd daemons to test if they respond
  *****************************************************************************
  *  Copyright (C) 2003-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2011 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -51,6 +51,7 @@
 #include "src/common/hostlist.h"
 #include "src/common/read_config.h"
 #include "src/slurmctld/agent.h"
+#include "src/slurmctld/front_end.h"
 #include "src/slurmctld/ping_nodes.h"
 #include "src/slurmctld/slurmctld.h"
 
@@ -117,6 +118,7 @@ void ping_end (void)
  */
 void ping_nodes (void)
 {
+	static bool restart_flag = true;	/* system just restarted */
 	static int offset = 0;	/* mutex via node table write lock on entry */
 	static int max_reg_threads = 0;	/* max node registration threads
 					 * this can include DOWN nodes, so
@@ -125,12 +127,15 @@ void ping_nodes (void)
 	int i;
 	time_t now, still_live_time, node_dead_time;
 	static time_t last_ping_time = (time_t) 0;
-	bool restart_flag;
 	hostlist_t down_hostlist = NULL;
 	char *host_str = NULL;
 	agent_arg_t *ping_agent_args = NULL;
 	agent_arg_t *reg_agent_args = NULL;
-	struct node_record *node_ptr;
+#ifdef HAVE_FRONT_END
+	front_end_record_t *front_end_ptr = NULL;
+#else
+	struct node_record *node_ptr = NULL;
+#endif
 
 	now = time (NULL);
 
@@ -153,12 +158,12 @@ void ping_nodes (void)
 	 * Because of this, we extend the SlurmdTimeout by the
 	 * time needed to complete a ping of all nodes.
 	 */
-	if ((slurmctld_conf.slurmd_timeout == 0)
-	||  (last_ping_time == (time_t) 0)) {
+	if ((slurmctld_conf.slurmd_timeout == 0) ||
+	    (last_ping_time == (time_t) 0)) {
 		node_dead_time = (time_t) 0;
 	} else {
 		node_dead_time = last_ping_time -
-				slurmctld_conf.slurmd_timeout;
+				 slurmctld_conf.slurmd_timeout;
 	}
 	still_live_time = now - (slurmctld_conf.slurmd_timeout / 3);
 	last_ping_time  = now;
@@ -171,11 +176,71 @@ void ping_nodes (void)
 	    (offset >= (max_reg_threads * MAX_REG_FREQUENCY)))
 		offset = 0;
 
+#ifdef HAVE_FRONT_END
+	for (i = 0, front_end_ptr = front_end_nodes;
+	     i < front_end_node_cnt; i++, front_end_ptr++) {
+		if ((slurmctld_conf.slurmd_timeout == 0)	&&
+		    (!restart_flag)				&&
+		    (!IS_NODE_UNKNOWN(front_end_ptr))		&&
+		    (!IS_NODE_NO_RESPOND(front_end_ptr)))
+			continue;
+
+		if ((front_end_ptr->last_response != (time_t) 0)     &&
+		    (front_end_ptr->last_response <= node_dead_time) &&
+		    (!IS_NODE_DOWN(front_end_ptr))) {
+			if (down_hostlist)
+				(void) hostlist_push_host(down_hostlist,
+					front_end_ptr->name);
+			else {
+				down_hostlist =
+					hostlist_create(front_end_ptr->name);
+				if (down_hostlist == NULL)
+					fatal("hostlist_create: malloc error");
+			}
+			set_front_end_down(front_end_ptr, "Not responding");
+			front_end_ptr->not_responding = false;
+			continue;
+		}
+
+		if (restart_flag) {
+			front_end_ptr->last_response =
+				slurmctld_conf.last_update;
+		}
+
+		/* Request a node registration if its state is UNKNOWN or
+		 * on a periodic basis (about every MAX_REG_FREQUENCY ping,
+		 * this mechanism avoids an additional (per node) timer or
+		 * counter and gets updated configuration information
+		 * once in a while). We limit these requests since they
+		 * can generate a flood of incoming RPCs. */
+		if (IS_NODE_UNKNOWN(front_end_ptr) || restart_flag ||
+		    ((i >= offset) && (i < (offset + max_reg_threads)))) {
+			hostlist_push(reg_agent_args->hostlist,
+				      front_end_ptr->name);
+			reg_agent_args->node_count++;
+			continue;
+		}
+
+		if ((!IS_NODE_NO_RESPOND(front_end_ptr)) &&
+		    (front_end_ptr->last_response >= still_live_time))
+			continue;
+
+		/* Do not keep pinging down nodes since this can induce
+		 * huge delays in hierarchical communication fail-over */
+		if (IS_NODE_NO_RESPOND(front_end_ptr) &&
+		    IS_NODE_DOWN(front_end_ptr))
+			continue;
+
+		hostlist_push(ping_agent_args->hostlist, front_end_ptr->name);
+		ping_agent_args->node_count++;
+	}
+#else
 	for (i=0, node_ptr=node_record_table_ptr;
 	     i<node_record_count; i++, node_ptr++) {
 		if (IS_NODE_FUTURE(node_ptr) || IS_NODE_POWER_SAVE(node_ptr))
 			continue;
 		if ((slurmctld_conf.slurmd_timeout == 0) &&
+		    (!restart_flag)			 &&
 		    (!IS_NODE_UNKNOWN(node_ptr))         &&
 		    (!IS_NODE_NO_RESPOND(node_ptr)))
 			continue;
@@ -186,24 +251,19 @@ void ping_nodes (void)
 			if (down_hostlist)
 				(void) hostlist_push_host(down_hostlist,
 					node_ptr->name);
-			else
+			else {
 				down_hostlist =
 					hostlist_create(node_ptr->name);
-			set_node_down(node_ptr->name, "Not responding");
+				if (down_hostlist == NULL)
+					fatal("hostlist_create: malloc error");
+			}
+			set_node_down_ptr(node_ptr, "Not responding");
 			node_ptr->not_responding = false;  /* logged below */
 			continue;
 		}
 
-		if (node_ptr->last_response == (time_t) 0) {
-			restart_flag = true;	/* system just restarted */
+		if (restart_flag)
 			node_ptr->last_response = slurmctld_conf.last_update;
-		} else
-			restart_flag = false;
-
-#ifdef HAVE_FRONT_END		/* Operate only on front-end */
-		if (i > 0)
-			continue;
-#endif
 
 		/* Request a node registration if its state is UNKNOWN or
 		 * on a periodic basis (about every MAX_REG_FREQUENCY ping,
@@ -231,7 +291,9 @@ void ping_nodes (void)
 		hostlist_push(ping_agent_args->hostlist, node_ptr->name);
 		ping_agent_args->node_count++;
 	}
+#endif
 
+	restart_flag = false;
 	if (ping_agent_args->node_count == 0) {
 		hostlist_destroy(ping_agent_args->hostlist);
 		xfree (ping_agent_args);
@@ -271,29 +333,40 @@ void ping_nodes (void)
 /* Spawn health check function for every node that is not DOWN */
 extern void run_health_check(void)
 {
+#ifdef HAVE_FRONT_END
+	front_end_record_t *front_end_ptr;
+#else
+	struct node_record *node_ptr;
+#endif
 	int i;
 	char *host_str = NULL;
 	agent_arg_t *check_agent_args = NULL;
-	struct node_record *node_ptr;
 
 	check_agent_args = xmalloc (sizeof (agent_arg_t));
 	check_agent_args->msg_type = REQUEST_HEALTH_CHECK;
 	check_agent_args->retry = 0;
 	check_agent_args->hostlist = hostlist_create("");
+	if (check_agent_args->hostlist == NULL)
+		fatal("hostlist_create: malloc failure");
 
+#ifdef HAVE_FRONT_END
+	for (i = 0, front_end_ptr = front_end_nodes;
+	     i < front_end_node_cnt; i++, front_end_ptr++) {
+		if (IS_NODE_NO_RESPOND(front_end_ptr))
+			continue;
+		hostlist_push(check_agent_args->hostlist, front_end_ptr->name);
+		check_agent_args->node_count++;
+	}
+#else
 	for (i=0, node_ptr=node_record_table_ptr;
 	     i<node_record_count; i++, node_ptr++) {
-		if (IS_NODE_NO_RESPOND(node_ptr) || IS_NODE_FUTURE(node_ptr))
+		if (IS_NODE_NO_RESPOND(node_ptr) || IS_NODE_FUTURE(node_ptr) ||
+		    IS_NODE_POWER_SAVE(node_ptr))
 			continue;
-
-#ifdef HAVE_FRONT_END		/* Operate only on front-end */
-		if (i > 0)
-			continue;
-#endif
-
 		hostlist_push(check_agent_args->hostlist, node_ptr->name);
 		check_agent_args->node_count++;
 	}
+#endif
 
 	if (check_agent_args->node_count == 0) {
 		hostlist_destroy(check_agent_args->hostlist);

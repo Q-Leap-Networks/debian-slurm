@@ -8,7 +8,7 @@
  *  Written by Danny Auble <da@llnl.gov>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -236,23 +236,6 @@ extern int as_mysql_job_start(mysql_conn_t *mysql_conn,
 
 	job_state = job_ptr->job_state;
 
-	/* Since we need a new db_inx make sure the old db_inx
-	 * removed. This is most likely the only time we are going to
-	 * be notified of the change also so make the state without
-	 * the resize. */
-	if (IS_JOB_RESIZING(job_ptr)) {
-		/* If we have a db_index lets end the previous record. */
-		if (job_ptr->db_index)
-			as_mysql_job_complete(mysql_conn, job_ptr);
-		else
-			error("We don't have a db_index for job %u, "
-			      "this should never happen.", job_ptr->job_id);
-		job_state &= (~JOB_RESIZING);
-		job_ptr->db_index = 0;
-	}
-
-	job_state &= JOB_STATE_BASE;
-
 	if (job_ptr->resize_time) {
 		begin_time  = job_ptr->resize_time;
 		submit_time = job_ptr->resize_time;
@@ -262,6 +245,30 @@ extern int as_mysql_job_start(mysql_conn_t *mysql_conn,
 		submit_time = job_ptr->details->submit_time;
 		start_time  = job_ptr->start_time;
 	}
+
+	/* Since we need a new db_inx make sure the old db_inx
+	 * removed. This is most likely the only time we are going to
+	 * be notified of the change also so make the state without
+	 * the resize. */
+	if (IS_JOB_RESIZING(job_ptr)) {
+		/* If we have a db_index lets end the previous record. */
+		if (!job_ptr->db_index) {
+			error("We don't have a db_index for job %u, "
+			      "this should never happen.", job_ptr->job_id);
+			job_ptr->db_index = _get_db_index(mysql_conn,
+							  submit_time,
+							  job_ptr->job_id,
+							  job_ptr->assoc_id);
+		}
+
+		if (job_ptr->db_index)
+			as_mysql_job_complete(mysql_conn, job_ptr);
+
+		job_state &= (~JOB_RESIZING);
+		job_ptr->db_index = 0;
+	}
+
+	job_state &= JOB_STATE_BASE;
 
 	/* See what we are hearing about here if no start time. If
 	 * this job latest time is before the last roll up we will
@@ -614,8 +621,8 @@ extern List as_mysql_modify_job(mysql_conn_t *mysql_conn, uint32_t uid,
 		list_append(ret_list, object);
 		mysql_free_result(result);
 	} else {
-		errno = SLURM_NO_CHANGE_IN_DATA;
-		debug3("didn't effect anything\n%s", query);
+		errno = ESLURM_INVALID_JOB_ID;
+		debug3("as_mysql_modify_job: Job not found\n%s", query);
 		xfree(vals);
 		xfree(query);
 		mysql_free_result(result);
@@ -718,14 +725,26 @@ extern int as_mysql_job_complete(mysql_conn_t *mysql_conn,
 		}
 	}
 
+	/*
+	 * make sure we handle any quotes that may be in the comment
+	 */
+
 	query = xstrdup_printf("update \"%s_%s\" set "
-			       "time_end=%ld, state=%d, nodelist='%s', "
-			       "derived_ec=%d, exit_code=%d, "
-			       "kill_requid=%d where job_db_inx=%d;",
+			       "time_end=%ld, state=%d, nodelist='%s'",
 			       mysql_conn->cluster_name, job_table,
-			       end_time, job_state, nodes,
-			       job_ptr->derived_ec, job_ptr->exit_code,
-			       job_ptr->requid, job_ptr->db_index);
+			       end_time, job_state, nodes);
+
+	if (job_ptr->derived_ec != NO_VAL)
+		xstrfmtcat(query, ", derived_ec=%u", job_ptr->derived_ec);
+
+	if (job_ptr->comment) {
+		char *comment = slurm_add_slash_to_quotes(job_ptr->comment);
+		xstrfmtcat(query, ", derived_es='%s'", comment);
+		xfree(comment);
+	}
+
+	xstrfmtcat(query, ", exit_code=%d, kill_requid=%d where job_db_inx=%d;",
+		   job_ptr->exit_code, job_ptr->requid, job_ptr->db_index);
 
 	debug3("%d(%s:%d) query\n%s",
 	       mysql_conn->conn, THIS_FILE, __LINE__, query);
@@ -743,10 +762,6 @@ extern int as_mysql_step_start(mysql_conn_t *mysql_conn,
 	char node_list[BUFFER_SIZE];
 	char *node_inx = NULL, *step_name = NULL;
 	time_t start_time, submit_time;
-
-#ifdef HAVE_BG
-	char *ionodes = NULL;
-#endif
 	char *query = NULL;
 
 	if (!step_ptr->job_ptr->db_index
@@ -790,43 +805,52 @@ extern int as_mysql_step_start(mysql_conn_t *mysql_conn,
 		snprintf(node_list, BUFFER_SIZE, "%s", step_ptr->gres);
 		nodes = cpus = tasks = 1;
 	} else {
+		char *ionodes = NULL, *temp_nodes = NULL;
 		char temp_bit[BUF_SIZE];
 
 		if (step_ptr->step_node_bitmap) {
 			node_inx = bit_fmt(temp_bit, sizeof(temp_bit),
 					   step_ptr->step_node_bitmap);
 		}
-#ifdef HAVE_BG
-		tasks = cpus = step_ptr->job_ptr->details->min_cpus;
-		select_g_select_jobinfo_get(step_ptr->job_ptr->select_jobinfo,
-					    SELECT_JOBDATA_IONODES,
-					    &ionodes);
-		if (ionodes) {
-			snprintf(node_list, BUFFER_SIZE,
-				 "%s[%s]", step_ptr->job_ptr->nodes, ionodes);
-			xfree(ionodes);
-		} else
-			snprintf(node_list, BUFFER_SIZE, "%s",
-				 step_ptr->job_ptr->nodes);
+#ifdef HAVE_BG_L_P
+		/* Only L and P use this code */
+		if (step_ptr->job_ptr->details)
+			tasks = cpus = step_ptr->job_ptr->details->min_cpus;
+		else
+			tasks = cpus = step_ptr->job_ptr->cpu_cnt;
 		select_g_select_jobinfo_get(step_ptr->job_ptr->select_jobinfo,
 					    SELECT_JOBDATA_NODE_CNT,
 					    &nodes);
+		temp_nodes = step_ptr->job_ptr->nodes;
 #else
 		if (!step_ptr->step_layout
 		    || !step_ptr->step_layout->task_cnt) {
 			tasks = cpus = step_ptr->job_ptr->total_cpus;
-			snprintf(node_list, BUFFER_SIZE, "%s",
-				 step_ptr->job_ptr->nodes);
 			nodes = step_ptr->job_ptr->total_nodes;
+			temp_nodes = step_ptr->job_ptr->nodes;
 		} else {
 			cpus = step_ptr->cpu_count;
 			tasks = step_ptr->step_layout->task_cnt;
+#ifdef HAVE_BGQ
+			select_g_select_jobinfo_get(step_ptr->select_jobinfo,
+						    SELECT_JOBDATA_NODE_CNT,
+						    &nodes);
+#else
 			nodes = step_ptr->step_layout->node_cnt;
+#endif
 			task_dist = step_ptr->step_layout->task_dist;
-			snprintf(node_list, BUFFER_SIZE, "%s",
-				 step_ptr->step_layout->node_list);
+			temp_nodes = step_ptr->step_layout->node_list;
 		}
 #endif
+		select_g_select_jobinfo_get(step_ptr->select_jobinfo,
+					    SELECT_JOBDATA_IONODES,
+					    &ionodes);
+		if (ionodes) {
+			snprintf(node_list, BUFFER_SIZE, "%s[%s]",
+				 temp_nodes, ionodes);
+			xfree(ionodes);
+		} else
+			snprintf(node_list, BUFFER_SIZE, "%s", temp_nodes);
 	}
 
 	if (!step_ptr->job_ptr->db_index) {
@@ -884,7 +908,7 @@ extern int as_mysql_step_complete(mysql_conn_t *mysql_conn,
 	time_t now;
 	int elapsed;
 	int comp_status;
-	int cpus = 0, tasks = 0;
+	int cpus = 0;
 	struct jobacctinfo *jobacct = (struct jobacctinfo *)step_ptr->jobacct;
 	struct jobacctinfo dummy_jobacct;
 	double ave_vsize = 0, ave_rss = 0, ave_pages = 0;
@@ -923,23 +947,20 @@ extern int as_mysql_step_complete(mysql_conn_t *mysql_conn,
 
 	if (slurmdbd_conf) {
 		now = step_ptr->job_ptr->end_time;
-		tasks = step_ptr->job_ptr->details->num_tasks;
 		cpus = step_ptr->cpu_count;
 	} else if (step_ptr->step_id == SLURM_BATCH_SCRIPT) {
 		now = time(NULL);
-		cpus = tasks = 1;
+		cpus = 1;
 	} else {
 		now = time(NULL);
-#ifdef HAVE_BG
-		tasks = cpus = step_ptr->job_ptr->details->min_cpus;
-
+#ifdef HAVE_BG_L_P
+		/* Only L and P use this code */
+		cpus = step_ptr->job_ptr->details->min_cpus;
 #else
 		if (!step_ptr->step_layout || !step_ptr->step_layout->task_cnt)
-			tasks = cpus = step_ptr->job_ptr->total_cpus;
-		else {
+			cpus = step_ptr->job_ptr->total_cpus;
+		else
 			cpus = step_ptr->cpu_count;
-			tasks = step_ptr->step_layout->task_cnt;
-		}
 #endif
 	}
 

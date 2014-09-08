@@ -8,7 +8,7 @@
  *  Written by Danny Auble <da@llnl.gov>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -68,6 +68,9 @@ extern int as_mysql_node_up(mysql_conn_t *mysql_conn,
 
 extern int as_mysql_register_ctld(mysql_conn_t *mysql_conn,
 				  char *cluster, uint16_t port);
+
+extern int as_mysql_fini_ctld(mysql_conn_t *mysql_conn,
+			      slurmdb_cluster_rec_t *cluster_rec);
 
 extern int as_mysql_cluster_cpus(mysql_conn_t *mysql_conn,
 				 char *cluster_nodes, uint32_t cpus,

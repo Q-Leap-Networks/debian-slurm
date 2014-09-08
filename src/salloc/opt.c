@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -112,6 +112,7 @@
 #define OPT_IMMEDIATE   0x12
 #define OPT_WCKEY       0x14
 #define OPT_SIGNAL      0x15
+#define OPT_KILL_CMD    0x16
 
 /* generic getopt_long flags, integers and *not* valid characters */
 #define LONG_OPT_CPU_BIND    0x101
@@ -160,6 +161,7 @@
 #define LONG_OPT_TIME_MIN        0x140
 #define LONG_OPT_GRES            0x141
 #define LONG_OPT_WAIT_ALL_NODES  0x142
+#define LONG_OPT_REQ_SWITCH      0x143
 
 /*---- global variables, defined in opt.h ----*/
 opt_t opt;
@@ -281,7 +283,7 @@ static void _opt_default()
 
 	opt.ntasks = 1;
 	opt.ntasks_set = false;
-	opt.cpus_per_task = 1;
+	opt.cpus_per_task = 0;
 	opt.cpus_set = false;
 	opt.min_nodes = 1;
 	opt.max_nodes = 0;
@@ -338,11 +340,12 @@ static void _opt_default()
 	opt.nodelist	    = NULL;
 	opt.exc_nodes	    = NULL;
 
-	for (i=0; i<SYSTEM_DIMENSIONS; i++)
+	for (i=0; i<HIGHEST_DIMENSIONS; i++) {
+		opt.conn_type[i]    = (uint16_t) NO_VAL;
 		opt.geometry[i]	    = (uint16_t) NO_VAL;
+	}
 	opt.reboot          = false;
 	opt.no_rotate	    = false;
-	opt.conn_type	    = (uint16_t) NO_VAL;
 
 	opt.euid	    = (uid_t) -1;
 	opt.egid	    = (gid_t) -1;
@@ -355,6 +358,8 @@ static void _opt_default()
 	opt.reservation     = NULL;
 	opt.wait_all_nodes  = (uint16_t) NO_VAL;
 	opt.wckey           = NULL;
+	opt.req_switch      = -1;
+	opt.wait4switch     = -1;
 }
 
 /*---[ env var processing ]-----------------------------------------------*/
@@ -386,6 +391,7 @@ env_vars_t env_vars[] = {
   {"SALLOC_GEOMETRY",      OPT_GEOMETRY,   NULL,               NULL          },
   {"SALLOC_IMMEDIATE",     OPT_IMMEDIATE,  NULL,               NULL          },
   {"SALLOC_JOBID",         OPT_JOBID,      NULL,               NULL          },
+  {"SALLOC_KILL_CMD",      OPT_KILL_CMD,   NULL,               NULL          },
   {"SALLOC_MEM_BIND",      OPT_MEM_BIND,   NULL,               NULL          },
   {"SALLOC_NETWORK",       OPT_STRING    , &opt.network,       NULL          },
   {"SALLOC_NO_BELL",       OPT_NO_BELL,    NULL,               NULL          },
@@ -398,6 +404,8 @@ env_vars_t env_vars[] = {
   {"SALLOC_WAIT",          OPT_IMMEDIATE,  NULL,               NULL          },
   {"SALLOC_WAIT_ALL_NODES",OPT_INT,        &opt.wait_all_nodes,NULL          },
   {"SALLOC_WCKEY",         OPT_STRING,     &opt.wckey,         NULL          },
+  {"SALLOC_REQ_SWITCH",    OPT_INT,        &opt.req_switch,    NULL          },
+  {"SALLOC_WAIT4SWITCH",   OPT_INT,        &opt.wait4switch,   NULL          },
   {NULL, 0, NULL, NULL}
 };
 
@@ -481,7 +489,7 @@ _process_env_var(env_vars_t *e, const char *val)
 		break;
 
 	case OPT_CONN_TYPE:
-		opt.conn_type = verify_conn_type(val);
+		verify_conn_type(val, opt.conn_type);
 		break;
 
 	case OPT_NO_ROTATE:
@@ -539,6 +547,16 @@ _process_env_var(env_vars_t *e, const char *val)
 			error("Invalid signal specification: %s", val);
 			exit(error_exit);
 		}
+		break;
+	case OPT_KILL_CMD:
+		if (val) {
+			opt.kill_command_signal = sig_name2num((char *) val);
+			if (opt.kill_command_signal == 0) {
+				error("Invalid signal name %s", val);
+				exit(error_exit);
+			}
+		}
+		opt.kill_command_signal_set = true;
 		break;
 	default:
 		/* do nothing */
@@ -654,10 +672,12 @@ void set_options(const int argc, char **argv)
 		{"uid",           required_argument, 0, LONG_OPT_UID},
 		{"wait-all-nodes",required_argument, 0, LONG_OPT_WAIT_ALL_NODES},
 		{"wckey",         required_argument, 0, LONG_OPT_WCKEY},
+		{"switches",      required_argument, 0, LONG_OPT_REQ_SWITCH},
 		{NULL,            0,                 0, 0}
 	};
 	char *opt_string =
 		"+A:B:c:C:d:D:F:g:hHIJ:kK::L:m:n:N:Op:P:QRst:uU:vVw:W:x:";
+	char *pos_delimit;
 
 	struct option *optz = spank_option_table_create(long_options);
 
@@ -698,8 +718,7 @@ void set_options(const int argc, char **argv)
 			break;
 		case 'c':
 			opt.cpus_set = true;
-			opt.cpus_per_task =
-				_get_int(optarg, "cpus-per-task");
+			opt.cpus_per_task = _get_int(optarg, "cpus-per-task");
 			break;
 		case 'C':
 			xfree(opt.constraints);
@@ -932,7 +951,7 @@ void set_options(const int argc, char **argv)
 			}
 			break;
 		case LONG_OPT_CONNTYPE:
-			opt.conn_type = verify_conn_type(optarg);
+			verify_conn_type(optarg, opt.conn_type);
 			break;
 		case LONG_OPT_BEGIN:
 			opt.begin = parse_time(optarg, 0);
@@ -1117,6 +1136,16 @@ void set_options(const int argc, char **argv)
 		case LONG_OPT_WAIT_ALL_NODES:
 			opt.wait_all_nodes = strtol(optarg, NULL, 10);
 			break;
+		case LONG_OPT_REQ_SWITCH:
+			pos_delimit = strstr(optarg,"@");
+			if (pos_delimit != NULL) {
+				pos_delimit[0] = '\0';
+				pos_delimit++;
+				opt.wait4switch = time_str2mins(pos_delimit) *
+						   60;
+			}
+			opt.req_switch = _get_int(optarg, "switches");
+			break;
 		default:
 			if (spank_process_option(opt_char, optarg) < 0) {
 				error("Unrecognized command line parameter %c",
@@ -1231,7 +1260,7 @@ static bool _opt_verify(void)
 		opt.ntasks_set = 1;
 	}
 
-	if (opt.mincpus < opt.cpus_per_task)
+	if (opt.cpus_set && (opt.mincpus < opt.cpus_per_task))
 		opt.mincpus = opt.cpus_per_task;
 
 	if ((opt.euid != (uid_t) -1) && (opt.euid != opt.uid))
@@ -1253,7 +1282,7 @@ static bool _opt_verify(void)
 		verified = false;
 	}
 
-	if (opt.cpus_per_task <= 0) {
+	if (opt.cpus_set && (opt.cpus_per_task <= 0)) {
 		error("invalid number of cpus per task (-c %d)",
 		      opt.cpus_per_task);
 		verified = false;
@@ -1266,7 +1295,40 @@ static bool _opt_verify(void)
 		verified = false;
 	}
 
-#ifdef HAVE_BGL
+#if defined(HAVE_CRAY)
+	if (getenv("BASIL_RESERVATION_ID") != NULL) {
+		error("BASIL_RESERVATION_ID already set - running salloc "
+		      "within salloc?");
+		return false;
+	}
+	if (opt.no_shell) {
+		/*
+		 * As long as we are not using srun instead of aprun, this flag
+		 * makes no difference for the operational behaviour of aprun.
+		 */
+		error("--no-shell mode is not supported on Cray (due to srun)");
+		return false;
+	}
+	if (opt.shared && opt.shared != (uint16_t)NO_VAL) {
+		info("Space sharing nodes is not supported on Cray systems");
+		opt.shared = false;
+	}
+	if (opt.overcommit) {
+		info("Oversubscribing is not supported on Cray.");
+		opt.overcommit = false;
+	}
+	if (!opt.wait_all_nodes)
+		info("Cray needs --wait-all-nodes to wait on ALPS reservation");
+	opt.wait_all_nodes = true;
+	if (opt.kill_command_signal_set) {
+		/*
+		 * Disabled to avoid that the user supplies a weaker signal that
+		 * could cause the child processes not to terminate.
+		 */
+		info("The --kill-command is not supported on Cray.");
+		opt.kill_command_signal_set = false;
+	}
+#elif defined(HAVE_BGL)
 	if (opt.blrtsimage && strchr(opt.blrtsimage, ' ')) {
 		error("invalid BlrtsImage given '%s'", opt.blrtsimage);
 		verified = false;
@@ -1620,8 +1682,9 @@ static char *print_constraints()
 
 #define tf_(b) (b == true) ? "true" : "false"
 
-static void _opt_list()
+static void _opt_list(void)
 {
+	int i;
 	char *str;
 
 	info("defined options for program `%s'", opt.progname);
@@ -1674,8 +1737,11 @@ static void _opt_list()
 	str = print_constraints();
 	info("constraints    : %s", str);
 	xfree(str);
-	if (opt.conn_type != (uint16_t) NO_VAL)
-		info("conn_type      : %u", opt.conn_type);
+	for (i = 0; i < HIGHEST_DIMENSIONS; i++) {
+		if (opt.conn_type[i] == (uint16_t) NO_VAL)
+			break;
+		info("conn_type[%d]   : %u", i, opt.conn_type[i]);
+	}
 	str = print_geometry(opt.geometry);
 	info("geometry       : %s", str);
 	xfree(str);
@@ -1720,6 +1786,8 @@ static void _opt_list()
 	     opt.mem_bind == NULL ? "default" : opt.mem_bind);
 	str = print_commandline(command_argc, command_argv);
 	info("user command   : `%s'", str);
+	info("switch         : %d", opt.req_switch);
+	info("wait-for-switch: %d", opt.wait4switch);
 	xfree(str);
 
 }
@@ -1750,6 +1818,7 @@ static void _usage(void)
 "              [--network=type] [--mem-per-cpu=MB] [--qos=qos]\n"
 "              [--cpu_bind=...] [--mem_bind=...] [--reservation=name]\n"
 "              [--time-min=minutes] [--gres=list]\n"
+"              [--switch=max-switches[@max-time-to-wait]]\n"
 "              [executable [args...]]\n");
 }
 
@@ -1784,7 +1853,7 @@ static void _help(void)
 "      --mail-user=user        who to send email notification for job state\n"
 "                              changes\n"
 "  -n, --tasks=N               number of processors required\n"
-"      --nice[=value]          decrease secheduling priority by value\n"
+"      --nice[=value]          decrease scheduling priority by value\n"
 "      --no-bell               do NOT ring the terminal bell\n"
 "      --ntasks-per-node=n     number of tasks to invoke on each node\n"
 "  -N, --nodes=N               number of nodes on which to run (N = min[-max])\n"
@@ -1797,6 +1866,8 @@ static void _help(void)
 "      --time-min=minutes      minimum time limit (if distinct)\n"
 "      --uid=user_id           user ID to run job as (user root only)\n"
 "  -v, --verbose               verbose mode (multiple -v's increase verbosity)\n"
+"      --switch=max-switches{@max-time-to-wait}\n"
+"                              Optimum switches and max time to wait for optimum\n"
 "\n"
 "Constraint options:\n"
 "      --contiguous            demand a contiguous range of nodes\n"

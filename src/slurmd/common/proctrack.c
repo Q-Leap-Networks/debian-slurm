@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -51,12 +51,12 @@
 typedef struct slurm_proctrack_ops {
 	int              (*create)    (slurmd_job_t * job);
 	int              (*add)       (slurmd_job_t * job, pid_t pid);
-	int              (*signal)    (uint32_t id, int signal);
-	int              (*destroy)   (uint32_t id);
-	 uint32_t        (*find_cont) (pid_t pid);
-	 bool            (*has_pid)   (uint32_t id, pid_t pid);
-	int              (*wait)      (uint32_t id);
-	int              (*get_pids)  (uint32_t id, pid_t ** pids, int *npids);
+	int              (*signal)    (uint64_t id, int signal);
+	int              (*destroy)   (uint64_t id);
+	uint64_t         (*find_cont) (pid_t pid);
+	bool             (*has_pid)   (uint64_t id, pid_t pid);
+	int              (*wait)      (uint64_t id);
+	int              (*get_pids)  (uint64_t id, pid_t ** pids, int *npids);
 } slurm_proctrack_ops_t;
 
 
@@ -85,14 +85,14 @@ _proctrack_get_ops(slurm_proctrack_context_t * c)
 	 * Must be synchronized with slurm_proctrack_ops_t above.
 	 */
 	static const char *syms[] = {
-		"slurm_container_create",
-		"slurm_container_add",
-		"slurm_container_signal",
-		"slurm_container_destroy",
-		"slurm_container_find",
-		"slurm_container_has_pid",
-		"slurm_container_wait",
-		"slurm_container_get_pids"
+		"slurm_container_plugin_create",
+		"slurm_container_plugin_add",
+		"slurm_container_plugin_signal",
+		"slurm_container_plugin_destroy",
+		"slurm_container_plugin_find",
+		"slurm_container_plugin_has_pid",
+		"slurm_container_plugin_wait",
+		"slurm_container_plugin_get_pids"
 	};
 	int n_syms = sizeof(syms) / sizeof(char *);
 
@@ -290,7 +290,7 @@ extern int slurm_container_add(slurmd_job_t * job, pid_t pid)
  *
  * Returns a SLURM errno.
  */
-extern int slurm_container_signal(uint32_t cont_id, int signal)
+extern int slurm_container_signal(uint64_t cont_id, int signal)
 {
 	if (slurm_proctrack_init() < 0) {
 		return SLURM_ERROR;
@@ -304,7 +304,7 @@ extern int slurm_container_signal(uint32_t cont_id, int signal)
  *
  * Returns a SLURM errno.
 */
-extern int slurm_container_destroy(uint32_t cont_id)
+extern int slurm_container_destroy(uint64_t cont_id)
 {
 	if (slurm_proctrack_init() < 0)
 		return SLURM_ERROR;
@@ -317,7 +317,7 @@ extern int slurm_container_destroy(uint32_t cont_id)
  *
  * Returns zero if no container found for the given pid.
  */
-extern uint32_t slurm_container_find(pid_t pid)
+extern uint64_t slurm_container_find(pid_t pid)
 {
 	if (slurm_proctrack_init() < 0)
 		return SLURM_ERROR;
@@ -329,7 +329,7 @@ extern uint32_t slurm_container_find(pid_t pid)
  * Return "true" if the container "cont_id" contains the process with
  * ID "pid".
  */
-extern bool slurm_container_has_pid(uint32_t cont_id, pid_t pid)
+extern bool slurm_container_has_pid(uint64_t cont_id, pid_t pid)
 {
 	if (slurm_proctrack_init() < 0)
 		return SLURM_ERROR;
@@ -347,7 +347,7 @@ extern bool slurm_container_has_pid(uint32_t cont_id, pid_t pid)
  *
  * Return SLURM_SUCCESS or SLURM_ERROR.
  */
-extern int slurm_container_wait(uint32_t cont_id)
+extern int slurm_container_wait(uint64_t cont_id)
 {
 	if (slurm_proctrack_init() < 0)
 		return SLURM_ERROR;
@@ -368,7 +368,7 @@ extern int slurm_container_wait(uint32_t cont_id)
  *   plugin does not implement the call.
  */
 extern int
-slurm_container_get_pids(uint32_t cont_id, pid_t ** pids, int *npids)
+slurm_container_get_pids(uint64_t cont_id, pid_t ** pids, int *npids)
 {
 	if (slurm_proctrack_init() < 0)
 		return SLURM_ERROR;

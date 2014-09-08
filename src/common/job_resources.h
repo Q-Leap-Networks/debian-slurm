@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -206,6 +206,13 @@ extern int get_job_resources_bit(job_resources_t *job_resrcs_ptr,
 extern int set_job_resources_bit(job_resources_t *job_resrcs_ptr,
 				 uint32_t node_id, uint16_t socket_id,
 				 uint16_t core_id);
+/* For every core bitmap set in the "from" resources structure at
+ * from_node_offset, set the corresponding bit in the "new" resources structure
+ * at new_node_offset */
+extern int job_resources_bits_copy(job_resources_t *new_job_resrcs_ptr,
+				   uint16_t new_node_offset,
+				   job_resources_t *from_job_resrcs_ptr,
+				   uint16_t from_node_offset);
 
 /* Get/clear/set bit value at specified location for whole node allocations
  *	get is for any socket/core on the specified node
@@ -218,6 +225,10 @@ extern int clear_job_resources_node(job_resources_t *job_resrcs_ptr,
 				    uint32_t node_id);
 extern int set_job_resources_node(job_resources_t *job_resrcs_ptr,
 				  uint32_t node_id);
+
+/* Return the count of core bitmaps set for the specific node */
+extern int count_job_resources_node(job_resources_t *job_resrcs_ptr,
+				    uint32_t node_id);
 
 /* Get socket and core count for a specific node_id (zero origin) */
 extern int get_job_resources_cnt(job_resources_t *job_resrcs_ptr,
@@ -245,6 +256,17 @@ extern int job_fits_into_cores(job_resources_t *job_resrcs_ptr,
 extern void add_job_to_cores(job_resources_t *job_resrcs_ptr,
 			     bitstr_t **full_core_bitmap,
 			     const uint16_t *bits_per_node);
+
+/*
+ * Remove job from full-length core_bitmap
+ * IN job_resrcs_ptr - resources allocated to a job
+ * IN/OUT full_bitmap - bitmap of available CPUs, allocate as needed
+ * IN bits_per_node - bits per node in the full_bitmap
+ * RET 1 on success, 0 otherwise
+ */
+extern void remove_job_from_cores(job_resources_t *job_resrcs_ptr,
+			       bitstr_t **full_core_bitmap,
+			       const uint16_t *bits_per_node);
 
 /* Given a job pointer and a global node index, return the index of that
  * node in the job_resrcs_ptr->cpus. Return -1 if invalid */

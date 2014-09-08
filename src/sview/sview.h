@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -50,14 +50,14 @@
 #  include "src/common/getopt.h"
 #endif
 
-#include <stdlib.h>
-#include <pwd.h>
 #include <ctype.h>
+#include <pwd.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
-
-#include <slurm/slurmdb.h>
 
 #if defined(HAVE_AIX)
 /* AIX defines a func_data macro which conflicts with func_data
@@ -68,21 +68,21 @@
 #  include <gtk/gtk.h>
 #endif
 
+#include "slurm/slurmdb.h"
+
 #include "src/common/bitstring.h"
 #include "src/common/hostlist.h"
 #include "src/common/list.h"
 #include "src/common/macros.h"
 #include "src/common/node_select.h"
-#include "src/common/uid.h"
+#include "src/common/parse_time.h"
 #include "src/common/slurmdb_defs.h"
-#include "src/plugins/select/bluegene/block_allocator/block_allocator.h"
-#include "src/plugins/select/bluegene/plugin/bluegene.h"
-//#include "src/plugins/select/bluegene/wrap_rm_api.h"
-
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_defs.h"
+#include "src/common/uid.h"
+#include "src/common/xstring.h"
 
-#include "src/plugins/select/bluegene/wrap_rm_api.h"
+#include "src/plugins/select/bluegene/bg_enums.h"
 
 /* getopt_long options, integers but not characters */
 #define OPT_LONG_HELP	0x100
@@ -108,6 +108,7 @@ enum { JOB_PAGE,
        RESV_PAGE,
        BLOCK_PAGE,
        NODE_PAGE,
+       FRONT_END_PAGE,
        SUBMIT_PAGE,
        ADMIN_PAGE,
        INFO_PAGE,
@@ -148,7 +149,11 @@ typedef struct specific_info specific_info_t;
 typedef struct popup_info popup_info_t;
 typedef struct popup_positioner popup_positioner_t;
 
-typedef enum { SEARCH_JOB_ID = 1,
+typedef enum {
+	       CREATE_BATCH_JOB = 1,
+	       CREATE_PARTITION,
+	       CREATE_RESERVATION,
+	       SEARCH_JOB_ID = 10,
 	       SEARCH_JOB_USER,
 	       SEARCH_JOB_STATE,
 	       SEARCH_BLOCK_NAME,
@@ -190,12 +195,13 @@ typedef struct {
 	GtkToggleAction *action_gridtopo;
 	GtkToggleAction *action_ruled;
 	GtkRadioAction *action_tab;
+	uint16_t button_size;
+	uint16_t gap_size;
 	bool admin_mode;
 	uint16_t default_page;
 	uint32_t fi_popup_width;
 	uint32_t fi_popup_height;
 	uint32_t grid_hori;
-	bool grid_speedup;
 	bool grid_topological;
 	uint32_t grid_vert;
 	uint32_t grid_x_width;
@@ -303,6 +309,8 @@ typedef struct {
 	char *boot_time;
 	char *reason;
 	char *slurmd_start_time;
+	bool iter_set;
+	GtkTreeIter iter_ptr;
 } sview_node_info_t;
 
 typedef struct {
@@ -314,7 +322,6 @@ extern sview_config_t default_sview_config;
 extern sview_config_t working_sview_config;
 
 extern int fini;
-extern ba_system_t *ba_system_ptr;
 extern bool toggled;
 extern bool force_refresh;
 extern bool apply_hidden_change;
@@ -346,6 +353,7 @@ extern uint32_t cluster_flags;
 extern int cluster_dims;
 extern List cluster_list;
 extern block_info_msg_t *g_block_info_ptr;
+extern front_end_info_msg_t *g_front_end_info_ptr;
 extern job_info_msg_t *g_job_info_ptr;
 extern node_info_msg_t *g_node_info_ptr;
 extern partition_info_msg_t *g_part_info_ptr;
@@ -362,8 +370,6 @@ extern int set_grid(int start, int end, int count);
 extern int set_grid_bg(int *start, int *end, int count, int set);
 extern void print_grid(int dir);
 
-extern void print_date();
-
 //sview.c
 extern void refresh_main(GtkAction *action, gpointer user_data);
 extern void toggle_tab_visiblity(GtkToggleButton *toggle_button,
@@ -375,12 +381,14 @@ extern void close_tab(GtkWidget *widget, GdkEventButton *event,
 
 //popups.c
 extern void create_config_popup(GtkAction *action, gpointer user_data);
+extern void create_create_popup(GtkAction *action, gpointer user_data);
 extern void create_dbconfig_popup(GtkAction *action, gpointer user_data);
 extern void create_daemon_popup(GtkAction *action, gpointer user_data);
 extern void create_search_popup(GtkAction *action, gpointer user_data);
 extern void change_refresh_popup(GtkAction *action, gpointer user_data);
 extern void change_grid_popup(GtkAction *action, gpointer user_data);
 extern void about_popup(GtkAction *action, gpointer user_data);
+extern void usage_popup(GtkAction *action, gpointer user_data);
 
 //grid.c
 extern void destroy_grid_button(void *arg);
@@ -390,6 +398,10 @@ extern grid_button_t *create_grid_button_from_another(
 extern char *change_grid_color(List button_list, int start, int end,
 			       int color_inx, bool change_unused,
 			       enum node_states state_override);
+extern void change_grid_color_array(List button_list, int array_len,
+				    int *color_inx, bool *color_set_flag,
+				    bool only_change_unused,
+				    enum node_states state_override);
 extern void highlight_grid(GtkTreeView *tree_view,
 			   int node_inx_id, int color_inx_id, List button_list);
 extern void highlight_grid_range(int start, int end, List button_list);
@@ -410,6 +422,8 @@ extern void setup_popup_grid_list(popup_info_t *popup_win);
 extern void post_setup_popup_grid_list(popup_info_t *popup_win);
 
 // part_info.c
+extern GtkWidget *create_part_entry(update_part_msg_t *part_msg,
+				    GtkTreeModel *model, GtkTreeIter *iter);
 extern bool visible_part(char* part_name);
 extern bool check_part_includes_node(int node_dx);
 extern void refresh_part(GtkAction *action, gpointer user_data);
@@ -427,7 +441,7 @@ extern void select_admin_partitions(GtkTreeModel *model, GtkTreeIter *iter,
 				    display_data_t *display_data,
 				    GtkTreeView *treeview);
 extern void admin_part(GtkTreeModel *model, GtkTreeIter *iter, char *type);
-extern void cluster_change_part();
+extern void cluster_change_part(void);
 
 // accnt_info.c
 extern void refresh_accnt(GtkAction *action, gpointer user_data);
@@ -455,9 +469,28 @@ extern void popup_all_block(GtkTreeModel *model, GtkTreeIter *iter, int id);
 extern void select_admin_block(GtkTreeModel *model, GtkTreeIter *iter,
 			       display_data_t *display_data,
 			       GtkTreeView *treeview);
-extern void cluster_change_block();
+extern void cluster_change_block(void);
+
+// front_end_info.c
+extern void admin_edit_front_end(GtkCellRendererText *cell,
+				 const char *path_string,
+				 const char *new_text, gpointer data);
+extern void cluster_change_front_end(void);
+extern GtkListStore *create_model_front_end(int type);
+extern void get_info_front_end(GtkTable *table, display_data_t *display_data);
+extern int  get_new_info_front_end(front_end_info_msg_t **info_ptr, int force);
+extern void popup_all_front_end(GtkTreeModel *model, GtkTreeIter *iter, int id);
+extern void refresh_front_end(GtkAction *action, gpointer user_data);
+extern void select_admin_front_end(GtkTreeModel *model, GtkTreeIter *iter,
+				  display_data_t *display_data,
+				  GtkTreeView *treeview);
+extern void set_menus_front_end(void *arg, void *arg2, GtkTreePath *path,
+				int type);
+extern void specific_info_front_end(popup_info_t *popup_win);
 
 // job_info.c
+extern GtkWidget *create_job_entry(job_desc_msg_t *job_msg,
+				   GtkTreeModel *model, GtkTreeIter *iter);
 extern void refresh_job(GtkAction *action, gpointer user_data);
 extern GtkListStore *create_model_job(int type);
 extern void admin_edit_job(GtkCellRendererText *cell,
@@ -473,7 +506,7 @@ extern void set_menus_job(void *arg, void *arg2, GtkTreePath *path, int type);
 extern void popup_all_job(GtkTreeModel *model, GtkTreeIter *iter, int id);
 extern void admin_job(GtkTreeModel *model, GtkTreeIter *iter, char *type,
 		      GtkTreeView *treeview);
-extern void cluster_change_job();
+extern void cluster_change_job(void);
 
 // node_info.c
 extern void refresh_node(GtkAction *action, gpointer user_data);
@@ -501,9 +534,11 @@ extern void popup_all_node_name(char *name, int id);
 extern void admin_menu_node_name(char *name, GdkEventButton *event);
 extern void admin_node(GtkTreeModel *model, GtkTreeIter *iter, char *type);
 extern void admin_node_name(char *name, char *old_value, char *type);
-extern void cluster_change_node();
+extern void cluster_change_node(void);
 
 // resv_info.c
+extern GtkWidget *create_resv_entry(resv_desc_msg_t *resv_msg,
+				    GtkTreeModel *model, GtkTreeIter *iter);
 extern void refresh_resv(GtkAction *action, gpointer user_data);
 extern GtkListStore *create_model_resv(int type);
 extern void admin_edit_resv(GtkCellRendererText *cell,
@@ -518,7 +553,7 @@ extern void popup_all_resv(GtkTreeModel *model, GtkTreeIter *iter, int id);
 extern void select_admin_resv(GtkTreeModel *model, GtkTreeIter *iter,
 			      display_data_t *display_data,
 			      GtkTreeView *treeview);
-extern void cluster_change_resv();
+extern void cluster_change_resv(void);
 
 
 // submit_info.c
@@ -546,8 +581,8 @@ extern void make_fields_menu(popup_info_t *popup_win, GtkMenu *menu,
 			     display_data_t *display_data, int count);
 extern void make_options_menu(GtkTreeView *tree_view, GtkTreePath *path,
 			      GtkMenu *menu, display_data_t *display_data);
-extern GtkScrolledWindow *create_scrolled_window();
-extern GtkWidget *create_entry();
+extern GtkScrolledWindow *create_scrolled_window(void);
+extern GtkWidget *create_entry(void);
 extern void create_page(GtkNotebook *notebook, display_data_t *display_data);
 extern GtkTreeView *create_treeview(display_data_t *local, List *button_list);
 extern GtkTreeView *create_treeview_2cols_attach_to_table(GtkTable *table);
@@ -588,13 +623,13 @@ extern void destroy_popup_info(void *arg);
 extern void destroy_signal_params(void *arg);
 
 extern gboolean delete_popup(GtkWidget *widget, GtkWidget *event, char *title);
-extern gboolean delete_popups();
+extern gboolean delete_popups(void);
 extern void *popup_thr(popup_info_t *popup_win);
 extern void remove_old(GtkTreeModel *model, int updated);
 extern GtkWidget *create_pulldown_combo(display_data_t *display_data,
 					int count);
 extern char *str_tolower(char *upper_str);
-extern char *get_reason();
+extern char *get_reason(void);
 extern void display_admin_edit(GtkTable *table, void *type_msg, int *row,
 			       GtkTreeModel *model, GtkTreeIter *iter,
 			       display_data_t *display_data,
@@ -625,9 +660,9 @@ extern char *visible_to_str(sview_config_t *sview_config);
 extern gboolean entry_changed(GtkWidget *widget, void *msg);
 
 // defaults.c
-extern int load_defaults();
+extern int load_defaults(void);
 extern int save_defaults(bool final_save);
 extern GtkListStore *create_model_defaults(int type);
-extern int configure_defaults();
+extern int configure_defaults(void);
 
 #endif

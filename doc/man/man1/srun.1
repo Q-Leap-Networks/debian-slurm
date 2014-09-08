@@ -1,4 +1,4 @@
-.TH "srun" "1" "SLURM 2.2" "November 2010" "SLURM Commands"
+.TH "srun" "1" "SLURM 2.3" "August 2011" "SLURM Commands"
 
 .SH "NAME"
 srun \- Run parallel jobs
@@ -9,6 +9,11 @@ srun \- Run parallel jobs
 .SH "DESCRIPTION"
 Run a parallel job on cluster managed by SLURM.  If necessary, srun will
 first create a resource allocation in which to run the parallel job.
+
+The following document describes the the influence of various options on the 
+allocation of cpus to jobs and tasks. 
+.br
+http://www.schedmd.com/slurmdocs/cpu_management.html
 
 .SH "OPTIONS"
 .LP
@@ -180,7 +185,7 @@ is in use:
         SLURM_CPU_BIND_LIST
 .fi
 
-See the \fBENVIRONMENT VARIABLE\fR section for a more detailed description
+See the \fBENVIRONMENT VARIABLES\fR section for a more detailed description
 of the individual SLURM_CPU_BIND* variables.
 
 When using \fB\-\-cpus\-per\-task\fR to run multithreaded tasks, be aware that
@@ -338,6 +343,11 @@ in some failed state (non-zero exit code, node failure, timed out, etc).
 This job can begin execution after the specified jobs have successfully
 executed (ran to completion with an exit code of zero).
 .TP
+\fBexpand:job_id\fR
+Resources allocated to this job should be used to expand the specified job.
+The job to expand must share the same QOS (Quality of Service) and partition.
+Gang scheduling of resources in the partition is also not supported.
+.TP
 \fBsingleton\fR
 This job can begin execution after any previously launched jobs
 sharing the same job name and user have terminated.
@@ -376,12 +386,13 @@ parameter in slurm.conf.
 .TP
 \fB\-\-exclusive\fR
 When used to initiate a job, the job allocation cannot share nodes with
-other running jobs.  This is the oposite of \-\-share, whichever option
-is seen last on the command line will win.  (The default shared/exclusive
-behavior depends on system configuration.)
+other running jobs.  This is the opposite of \-\-share, whichever option
+is seen last on the command line will win. The default shared/exclusive
+behavior depends on system configuration and the partition's \fBShared\fR
+option takes precedence over the job's option.
 
-This option can also be used when initiating more than job step within
-an existing resource allocation and you want separate processors to
+This option can also be used when initiating more than one job step within
+an existing resource allocation, where you want separate processors to
 be dedicated to each job step. If sufficient processors are not
 available to initiate the job step, it will be deferred. This can
 be thought of as providing resource management for the job within
@@ -412,13 +423,18 @@ The available generic consumable resources is configurable by the system
 administrator.
 A list of available generic consumable resources will be printed and the
 command will exit if the option argument is "help".
-Examples of use include "\-\-gres=gpus:2*cpu,disk=40G" and "\-\-gres=help".
+Examples of use include "\-\-gres=gpu:2*cpu,disk=40G" and "\-\-gres=help".
+NOTE: By default, a job step is allocated all of the generic resources that
+have allocated to the job. To change the behavior so that each job step is
+allocated no generic resources, explicitly set the value of \-\-gres to specify
+zero counts for each generic resource OR set "\-\-gres=none" OR set the
+SLURM_STEP_GRES environment variable to "none".
 
 .TP
 \fB\-H, \-\-hold\fR
 Specify the job is to be submitted in a held state (priority of zero).
 A held job can now be released using scontrol to reset its priority
-(e.g. "\fIscontrol update jobid=<id> priority=1\fR".
+(e.g. "\fIscontrol release <job_id>\fR").
 
 .TP
 \fB\-h\fR, \fB\-\-help\fR
@@ -480,11 +496,15 @@ Using this option will cause \fBsrun\fR to behave exactly as if the
 SLURM_JOB_ID environment variable was set.
 
 .TP
-\fB\-K\fR, \fB\-\-kill\-on\-bad\-exit\fR
-Immediately terminate a job if any task exits with a non\-zero exit code.
-Note: The \fB\-K\fR, \fB\-\-kill\-on\-bad\-exit\fR option takes precedence
-over \fB\-W\fR, \fB\-\-wait\fR to terminate the job immediately if a task
-exits with a non\-zero exit code.
+\fB\-K\fR, \fB\-\-kill\-on\-bad\-exit\fR[=0|1]
+Controls whether or not to terminate a job if any task exits with a non\-zero
+exit code. If this option is not specified, the default action will be based
+upon the SLURM configuration parameter of \fBKillOnBadExit\fR. If this option
+is specified, it will take precedence over \fBKillOnBadExit\fR. An option
+argument of zero will not terminate the job. A non\-zero argument or no
+argument will terminate the job.
+Note: This option takes precedence over the \fB\-W\fR, \fB\-\-wait\fR option
+to terminate the job immediately if a task exits with a non\-zero exit code.
 
 .TP
 \fB\-k\fR, \fB\-\-no\-kill\fR
@@ -528,7 +548,8 @@ method (before the ":") controls the distribution of resources across
 nodes. The optional second distribution method (after the ":")
 controls the distribution of resources across sockets within a node.
 Note that with select/cons_res, the number of cpus allocated on each
-socket and node may be different. Refer to the mc_support.html document
+socket and node may be different. Refer to
+http://www.schedmd.com/slurmdocs/mc_support.html
 for more information on resource allocation, assignment of tasks to
 nodes, and binding of tasks to CPUs.
 .RS
@@ -565,11 +586,11 @@ followed by an optional specification of the task distribution scheme
 within a block of tasks and between the blocks of tasks.  For more
 details (including examples and diagrams), please see
 .br
-https://computing.llnl.gov/linux/slurm/mc_support.html
+http://www.schedmd.com/slurmdocs/mc_support.html
 .br
 and
 .br
-https://computing.llnl.gov/linux/slurm/dist_plane.html.
+http://www.schedmd.com/slurmdocs/dist_plane.html
 .TP
 .B arbitrary
 The arbitrary method of distribution will allocate processes in\-order
@@ -754,11 +775,9 @@ below for details on the configuration file contents.
 .TP
 \fB\-N\fR, \fB\-\-nodes\fR=<\fIminnodes\fR[\-\fImaxnodes\fR]>
 Request that a minimum of \fIminnodes\fR nodes be allocated to this job.
-The scheduler may decide to launch the job on more than \fIminnodes\fR nodes.
-A limit on the maximum node count may be specified with \fImaxnodes\fR
-(e.g. "\-\-nodes=2\-4").  The minimum and maximum node count may be the
-same to specify a specific number of nodes (e.g. "\-\-nodes=2\-2" will ask
-for two and ONLY two nodes).
+A maximum node count may also be specified with \fImaxnodes\fR.
+If only one number is specified, this is used as both the minimum and
+maximum node count.
 The partition's node limits supersede those of the job.
 If a job's node limits are outside of the range permitted for its
 associated partition, the job will be left in a PENDING state.
@@ -768,12 +787,15 @@ If a job node limit exceeds the number of nodes configured in the
 partition, the job will be rejected.
 Note that the environment
 variable \fBSLURM_NNODES\fR will be set to the count of nodes actually
-allocated to the job. See the \fBENVIRONMENT VARIABLES \fR section
+allocated to the job. See the \fBENVIRONMENT VARIABLES\fR section
 for more information.  If \fB\-N\fR is not specified, the default
 behavior is to allocate enough nodes to satisfy the requirements of
 the \fB\-n\fR and \fB\-c\fR options.
 The job will be allocated as many nodes as possible within the range specified
 and without delaying the initiation of the job.
+The node count specification may include a numeric value followed by a suffix
+of "k" (multiplies numeric value by 1,024) or "m" (multiplies numeric value by
+1,048,576).
 
 .TP
 \fB\-n\fR, \fB\-\-ntasks\fR=<\fInumber\fR>
@@ -821,18 +843,6 @@ NOTE: This option is not supported unless
 \fISelectTypeParameters=CR_Core_Memory\fR is configured.
 
 .TP
-\fB\-\-ntasks\-per\-socket\fR=<\fIntasks\fR>
-Request the maximum \fIntasks\fR be invoked on each socket.
-Meant to be used with the \fB\-\-ntasks\fR option.
-Related to \fB\-\-ntasks\-per\-node\fR except at the socket level
-instead of the node level.  Masks will automatically be generated
-to bind the tasks to specific sockets unless \fB\-\-cpu_bind=none\fR
-is specified.
-NOTE: This option is not supported unless
-\fISelectTypeParameters=CR_Socket\fR or
-\fISelectTypeParameters=CR_Socket_Memory\fR is configured.
-
-.TP
 \fB\-\-ntasks\-per\-node\fR=<\fIntasks\fR>
 Request the maximum \fIntasks\fR be invoked on each node.
 Meant to be used with the \fB\-\-nodes\fR option.
@@ -846,6 +856,18 @@ assigned to each node while allowing the OpenMP portion to utilize
 all of the parallelism present in the node, or submitting a single
 setup/cleanup/monitoring job to each node of a pre\-existing
 allocation as one step in a larger job script.
+
+.TP
+\fB\-\-ntasks\-per\-socket\fR=<\fIntasks\fR>
+Request the maximum \fIntasks\fR be invoked on each socket.
+Meant to be used with the \fB\-\-ntasks\fR option.
+Related to \fB\-\-ntasks\-per\-node\fR except at the socket level
+instead of the node level.  Masks will automatically be generated
+to bind the tasks to specific sockets unless \fB\-\-cpu_bind=none\fR
+is specified.
+NOTE: This option is not supported unless
+\fISelectTypeParameters=CR_Socket\fR or
+\fISelectTypeParameters=CR_Socket_Memory\fR is configured.
 
 .TP
 \fB\-O\fR, \fB\-\-overcommit\fR
@@ -880,7 +902,7 @@ The default value is specified by the system configuration parameter
 .TP
 \fB\-p\fR, \fB\-\-partition\fR=<\fIpartition_names\fR>
 Request a specific partition for the resource allocation.  If not specified,
-the default behaviour is to allow the slurm controller to select the default
+the default behavior is to allow the slurm controller to select the default
 partition as designated by the system administrator. If the job can use more
 than one partition, specify their names in a comma separate list and the one
 offering earliest initiation will be used.
@@ -907,7 +929,7 @@ options may not be supported on some systems):
 All limits listed below
 .TP
 \fBAS\fR
-The maximum address space for a processes
+The maximum address space for a process
 .TP
 \fBCORE\fR
 The maximum size of core file
@@ -919,7 +941,9 @@ The maximum amount of CPU time
 The maximum size of a process's data segment
 .TP
 \fBFSIZE\fR
-The maximum size of files created
+The maximum size of files created. Note that if the user sets FSIZE to less
+than the current size of the slurmd.log, job launches will fail with 
+a 'File size limit exceeded' error.
 .TP
 \fBMEMLOCK\fR
 The maximum size that may be locked into memory
@@ -939,7 +963,7 @@ The maximum stack size
 
 .TP
 \fB\-\-pty\fR
-Execute task zero in pseudo terminal.
+Execute task zero in pseudo terminal mode.
 Implicitly sets \fB\-\-unbuffered\fR.
 Implicitly sets \fB\-\-error\fR and \fB\-\-output\fR to /dev/null
 for all tasks except task zero, which may cause those tasks to 
@@ -996,8 +1020,14 @@ be read (used by the checkpoint/blcrm and checkpoint/xlch plugins only).
 
 .TP
 \fB\-s\fR, \fB\-\-share\fR
-The job can share nodes with other running jobs. This may result in faster job
-initiation and higher system utilization, but lower application performance.
+The job allocation can share nodes with other running jobs.
+This is the opposite of \-\-exclusive, whichever option is seen last
+on the command line will be used. The default shared/exclusive
+behavior depends on system configuration and the partition's \fBShared\fR
+option takes precedence over the job's option.
+This option may result the allocation being granted sooner than if the \-\-share
+option was not set and allow higher system utilization, but application
+performance will likely suffer due to competition for resources within a node.
 
 .TP
 \fB\-\-signal\fR=<\fIsig_num\fR>[@<\fIsig_time\fR>]
@@ -1023,6 +1053,18 @@ the job. By default only errors are displayed.
 Restrict node selection to nodes with at least the specified number of
 sockets.  See additional information under \fB\-B\fR option above when
 task/affinity plugin is enabled.
+
+.TP
+\fB\-\-switch\fR=<\fIcount\fR>[@<\fImax\-time\fR>]
+When a tree topology is used, this defines the maximum count of switches
+desired for the job allocation and optionally the maximum time to wait
+for that number of switches. If SLURM finds an allocation containing more
+switches than the count specified, the job remain pending until it either finds
+an allocation with desired switch count or the time limit expires. By default
+there is no switch count limit and there is no delay in starting the job.
+The job's maximum time delay may be limited by the system administrator using
+the \fBSchedulerParameters\fR configuration parameter with the
+\fBmax_switch_wait\fR parameter option.
 
 .TP
 \fB\-T\fR, \fB\-\-threads\fR=<\fInthreads\fR>
@@ -1078,6 +1120,9 @@ Returns an estimate of when a job would be scheduled to run given the
 current job queue and all the other \fBsrun\fR arguments specifying
 the job.  This limits \fBsrun's\fR behavior to just return
 information; no job is actually submitted.
+EXCEPTION: On Bluegene/Q systems on when running within an existing job
+allocation, this disables the use of "runjob" to launch tasks. The program
+will be executed directly by the slurmd dameon.
 
 .TP
 \fB\-\-threads\-per\-core\fR=<\fIthreads\fR>
@@ -1204,6 +1249,7 @@ SLURM will normally allocate a TORUS if possible for a given geometry.
 If running on a BGP system and wanting to run in HTC mode (only for 1
 midplane and below).  You can use HTC_S for SMP, HTC_D for Dual, HTC_V
 for virtual node mode, and HTC_L for Linux mode.
+A comma separated lists of connection types may be specified, one for each dimension.
 
 .TP
 \fB\-g\fR, \fB\-\-geometry\fR=<\fIXxYxZ\fR>
@@ -1486,6 +1532,9 @@ Also see \fBSLURM_EXIT_ERROR\fR.
 \fBSLURM_GEOMETRY\fR
 Same as \fB\-g, \-\-geometry\fR
 .TP
+\fBSLURM_GRES\fR
+Same as \fB\-\-gres\fR. Also see \fBSLURM_STEP_GRES\fR
+.TP
 \fBSLURM_JOB_NAME\fR
 Same as \fB\-J, \-\-job\-name\fR except within an existing
 allocation, in which case it is ignored to avoid using the batch job's name
@@ -1496,6 +1545,12 @@ Same as \fB\-l, \-\-label\fR
 .TP
 \fBSLURM_MEM_BIND\fR
 Same as \fB\-\-mem_bind\fR
+.TP
+\fBSLURM_MEM_PER_CPU\fR
+Same as \fB\-\-mem\-per\-cpu\fR
+.TP
+\fBSLURM_MEM_PER_NODE\fR
+Same as \fB\-\-mem\fR
 .TP
 \fBSLURM_MPI_TYPE\fR
 Same as \fB\-\-mpi\fR
@@ -1559,6 +1614,10 @@ Same as \fB\-e, \-\-error\fR
 \fBSLURM_STDINMODE\fR
 Same as \fB\-i, \-\-input\fR
 .TP
+\fBSLURM_STEP_GRES\fR
+Same as \fB\-\-gres\fR (only applies to job steps, not to job allocations).
+Also see \fBSLURM_GRES\fR
+.TP
 \fBSLURM_STDOUTMODE\fR
 Same as \fB\-o, \-\-output\fR
 .TP
@@ -1593,10 +1652,6 @@ of the executing tasks on the remote compute nodes.
 These environment variables are:
 
 .TP 22
-\fBBASIL_RESERVATION_ID\fR
-The reservation ID on Cray systems running ALPS/BASIL only.
-
-.TP
 \fBSLURM_CHECKPOINT_IMAGE_DIR\fR
 Directory into which checkpoint images should be written
 if specified on the execute line.
@@ -1629,6 +1684,12 @@ Set to value of the \-\-dependency option.
 .TP
 \fBSLURM_JOB_ID\fR (and \fBSLURM_JOBID\fR for backwards compatibility)
 Job id of the executing job
+
+.TP
+\fBSLURM_JOB_NAME\fR
+Set to the value of the \-\-job\-name option or the command name when srun
+is used to create a new job allocation. Not set when srun is used only to
+create a job step (i.e. within an existing job allocation).
 
 .TP
 \fBSLURM_LAUNCH_NODE_IPADDR\fR
@@ -1746,7 +1807,7 @@ These tasks initiated outside of SLURM's monitoring
 or control. SLURM's epilog should be configured to purge
 these tasks when the job's allocation is relinquished.
 
-See \fIhttps://computing.llnl.gov/linux/slurm/mpi_guide.html\fR
+See \fIhttp://www.schedmd.com/slurmdocs/mpi_guide.html\fR
 for more information on use of these various MPI implementation
 with SLURM.
 
@@ -1952,7 +2013,7 @@ Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 CODE\-OCEC\-09\-009. All rights reserved.
 .LP
 This file is part of SLURM, a resource management program.
-For details, see <https://computing.llnl.gov/linux/slurm/>.
+For details, see <http://www.schedmd.com/slurmdocs/>.
 .LP
 SLURM is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free
@@ -1967,5 +2028,5 @@ details.
 .SH "SEE ALSO"
 \fBsalloc\fR(1), \fBsattach\fR(1), \fBsbatch\fR(1), \fBsbcast\fR(1),
 \fBscancel\fR(1), \fBscontrol\fR(1), \fBsqueue\fR(1), \fBslurm.conf\fR(5),
-\fBsched_setaffinity\fR(2), \fBnuma\fR(3)
-\fBgetrlimit\fR(2),
+\fBsched_setaffinity\fR (2), \fBnuma\fR (3)
+\fBgetrlimit\fR (2)

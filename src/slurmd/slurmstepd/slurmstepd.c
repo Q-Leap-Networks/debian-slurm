@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -220,6 +220,9 @@ _init_from_slurmd(int sock, char **argv,
 	gid_t *gids = NULL;
 	uint16_t port;
 	char buf[16];
+	log_options_t lopts = LOG_OPTS_INITIALIZER;
+
+	log_init(argv[0], lopts, LOG_DAEMON, NULL);
 
 	/* receive job type from slurmd */
 	safe_read(sock, &step_type, sizeof(int));
@@ -247,11 +250,10 @@ _init_from_slurmd(int sock, char **argv,
 	}
 	free_buf(buffer);
 
-	debug2("debug level is %d.", conf->debug_level);
 	conf->log_opts.stderr_level = conf->debug_level;
 	conf->log_opts.logfile_level = conf->debug_level;
 	conf->log_opts.syslog_level = conf->debug_level;
-	//log_alter(conf->log_opts, 0, NULL);
+
 	/*
 	 * If daemonizing, turn off stderr logging -- also, if
 	 * logging to a file, turn off syslog.
@@ -265,8 +267,9 @@ _init_from_slurmd(int sock, char **argv,
 			conf->log_opts.syslog_level = LOG_LEVEL_QUIET;
 	} else
 		conf->log_opts.syslog_level  = LOG_LEVEL_QUIET;
+	log_alter(conf->log_opts, 0, conf->logfile);
 
-	log_init(argv[0], conf->log_opts, LOG_DAEMON, conf->logfile);
+	debug2("debug level is %d.", conf->debug_level);
 	/* acct info */
 	jobacct_gather_g_startpoll(conf->job_acct_gather_freq);
 
@@ -407,9 +410,11 @@ _step_setup(slurm_addr_t *cli, slurm_addr_t *self, slurm_msg_t *msg)
 static void
 _step_cleanup(slurmd_job_t *job, slurm_msg_t *msg, int rc)
 {
-	jobacct_gather_g_destroy(job->jobacct);
-	if (!job->batch)
-		job_destroy(job);
+	if (job) {
+		jobacct_gather_g_destroy(job->jobacct);
+		if (!job->batch)
+			job_destroy(job);
+	}
 	/*
 	 * The message cannot be freed until the jobstep is complete
 	 * because the job struct has pointers into the msg, such

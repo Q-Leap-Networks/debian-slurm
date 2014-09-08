@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -273,6 +273,8 @@ int decode_state_char(char *state)
 		return JOB_TIMEOUT;
 	else if (!strcasecmp(state, "nf"))
 		return JOB_NODE_FAIL;
+	else if (!strcasecmp(state, "pr"))
+		return JOB_PREEMPTED;
 	else
 		return -1; // unknown
 }

@@ -10,11 +10,12 @@ EXTRA_DIST =			\
 	etc/slurm.epilog.clean	\
 	etc/init.d.slurm	\
 	etc/init.d.slurmdbd	\
-	etc/cgroup.conf.example	\
-	etc/cgroup.release_agent \
+	etc/cgroup.conf.example \
+	etc/cgroup.release_common.example \
+	etc/cgroup_allowed_devices_file.conf.example \
 	autogen.sh		\
 	slurm.spec		\
-	README			\
+	README.rst		\
 	RELEASE_NOTES		\
 	DISCLAIMER		\
 	COPYING			\

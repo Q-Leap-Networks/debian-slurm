@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -40,8 +40,8 @@
 #ifndef _CRAY_OTHER_SELECT_H
 #define _CRAY_OTHER_SELECT_H
 
-#include <slurm/slurm.h>
-#include <slurm/slurm_errno.h>
+#include "slurm/slurm.h"
+#include "slurm/slurm_errno.h"
 
 #include "src/common/slurm_xlator.h"	/* Must be first */
 #include "src/common/list.h"
@@ -128,7 +128,7 @@ extern int other_update_node_config(int index);
  * IN state  - state to update to
  * RETURN SLURM_SUCCESS on success || SLURM_ERROR else wise
  */
-extern int other_update_node_state(int index, uint16_t state);
+extern int other_update_node_state(struct node_record *node_ptr);
 
 /*
  * Alter the node count for a job given the type of system we are on
@@ -176,12 +176,33 @@ extern int other_job_begin(struct job_record *job_ptr);
 extern int other_job_ready(struct job_record *job_ptr);
 
 /*
- * Modify internal data structures for a job that has changed size
- *	Only support jobs shrinking now.
+ * Test if expanding a job is permitted
+ */
+extern bool other_job_expand_allow(void);
+
+/*
+ * Move the resource allocated to one job into that of another job.
+ *	All resources are removed from "from_job_ptr" and moved into
+ *	"to_job_ptr". Also see other_job_resized().
+ * RET: 0 or an error code
+ */
+extern int other_job_expand(struct job_record *from_job_ptr,
+			    struct job_record *to_job_ptr);
+
+/*
+ * Modify internal data structures for a job that has decreased job size.
+ *	Only support jobs shrinking. Also see other_job_expand();
  * RET: 0 or an error code
  */
 extern int other_job_resized(struct job_record *job_ptr,
 			     struct node_record *node_ptr);
+
+/*
+ * Pass job-step signal to other plugin.
+ * IN job_ptr - job to be signalled
+ * IN signal  - signal(7) number
+ */
+extern int other_job_signal(struct job_record *job_ptr, int signal);
 
 /*
  * Note termination of job is starting. Executed from slurmctld.
@@ -192,16 +213,40 @@ extern int other_job_fini(struct job_record *job_ptr);
 /*
  * Suspend a job. Executed from slurmctld.
  * IN job_ptr - pointer to job being suspended
+ * indf_susp IN - set if job is being suspended indefinitely by user
+ *                or admin, otherwise suspended for gang scheduling
  * RET SLURM_SUCCESS or error code
  */
-extern int other_job_suspend(struct job_record *job_ptr);
+extern int other_job_suspend(struct job_record *job_ptr, bool indf_susp);
 
 /*
  * Resume a job. Executed from slurmctld.
  * IN job_ptr - pointer to job being resumed
+ * indf_susp IN - set if job is being resumed from indefinite suspend by user
+ *                or admin, otherwise resume from gang scheduling
  * RET SLURM_SUCCESS or error code
  */
-extern int other_job_resume(struct job_record *job_ptr);
+extern int other_job_resume(struct job_record *job_ptr, bool indf_susp);
+
+/*
+ * Select the "best" nodes for given job from those available
+ * IN/OUT job_ptr - pointer to job already allocated and running in a
+ *                  block where the step is to run.
+ *                  set's start_time when job expected to start
+ * OUT step_jobinfo - Fill in the resources to be used if not
+ *                    full size of job.
+ * IN node_count  - How many nodes we are looking for.
+ * RET map of slurm nodes to be used for step, NULL on failure
+ */
+extern bitstr_t * other_step_pick_nodes(struct job_record *job_ptr,
+					select_jobinfo_t *jobinfo,
+					uint32_t node_count);
+
+/*
+ * clear what happened in select_g_step_pick_nodes
+ * IN/OUT step_ptr - Flush the resources from the job and step.
+ */
+extern int other_step_finish(struct step_record *step_ptr);
 
 /* allocate storage for a select job credential
  * RET jobinfo - storage for a select job credential
@@ -294,7 +339,7 @@ extern int other_select_nodeinfo_unpack(select_nodeinfo_t **nodeinfo,
 					Buf buffer,
 					uint16_t protocol_version);
 
-extern select_nodeinfo_t *other_select_nodeinfo_alloc(uint32_t size);
+extern select_nodeinfo_t *other_select_nodeinfo_alloc(void);
 
 extern int other_select_nodeinfo_free(select_nodeinfo_t *nodeinfo);
 
@@ -325,5 +370,11 @@ extern int other_pack_select_info(time_t last_query_time, uint16_t show_flags,
 
 /* Note reconfiguration or change in partition configuration */
 extern int other_reconfigure(void);
+
+extern bitstr_t * other_resv_test(bitstr_t *avail_bitmap, uint32_t node_cnt);
+
+extern void other_ba_init(node_info_msg_t *node_info_ptr, bool sanity_check);
+extern void other_ba_fini(void);
+extern int *other_ba_get_dims(void);
 
 #endif /* _CRAY_OTHER_SELECT_H */

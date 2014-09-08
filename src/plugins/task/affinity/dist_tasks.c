@@ -5,7 +5,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -119,6 +119,7 @@ static void _lllp_free_masks(const uint32_t maxtasks, bitstr_t **masks)
 {
     	int i;
 	bitstr_t *bitmask;
+
 	for (i = 0; i < maxtasks; i++) {
 		bitmask = masks[i];
 		FREE_NULL_BITMAP(bitmask);
@@ -168,8 +169,7 @@ void batch_bind(batch_job_launch_msg_t *req)
 	bitstr_t *req_map, *hw_map;
 	slurm_cred_arg_t arg;
 	uint16_t sockets=0, cores=0, num_cpus;
-	int start, p, t, task_cnt=0;
-	char *str;
+	int start, task_cnt=0;
 
 	if (slurm_cred_get_args(req->cred, &arg) != SLURM_SUCCESS) {
 		error("task/affinity: job lacks a credential");
@@ -178,6 +178,11 @@ void batch_bind(batch_job_launch_msg_t *req)
 	start = _get_local_node_info(&arg, 0, &sockets, &cores);
 	if (start != 0) {
 		error("task/affinity: missing node 0 in job credential");
+		slurm_cred_free_args(&arg);
+		return;
+	}
+	if ((sockets * cores) == 0) {
+		error("task/affinity: socket and core count both zero");
 		slurm_cred_free_args(&arg);
 		return;
 	}
@@ -194,6 +199,19 @@ void batch_bind(batch_job_launch_msg_t *req)
 		return;
 	}
 
+#ifdef HAVE_FRONT_END
+{
+	/* Since the front-end nodes are a shared resource, we limit each job
+	 * to one CPU based upon monotonically increasing sequence number */
+	static int last_id = 0;
+	bit_set(hw_map, ((last_id++) % conf->block_map_size));
+	task_cnt = 1;
+}
+#else
+{
+	char *str;
+	int t, p;
+
 	/* Transfer core_bitmap data to local req_map.
 	 * The MOD function handles the case where fewer processes
 	 * physically exist than are configured (slurmd is out of
@@ -202,6 +220,7 @@ void batch_bind(batch_job_launch_msg_t *req)
 		if (bit_test(arg.job_core_bitmap, p))
 			bit_set(req_map, (p % num_cpus));
 	}
+
 	str = (char *)bit_fmt_hexmask(req_map);
 	debug3("task/affinity: job %u CPU mask from slurmctld: %s",
 		req->job_id, str);
@@ -224,6 +243,8 @@ void batch_bind(batch_job_launch_msg_t *req)
 			task_cnt++;
 		}
 	}
+}
+#endif
 	if (task_cnt) {
 		req->cpu_bind_type = CPU_BIND_MASK;
 		if (conf->task_plugin_param & CPU_BIND_VERBOSE)
@@ -319,6 +340,7 @@ void lllp_distribution(launch_tasks_request_msg_t *req, uint32_t node_id)
 		      "nodes:%d sockets:%d:%d cores:%d:%d threads:%d",
 		      max_tasks, whole_nodes, whole_sockets ,part_sockets,
 		      whole_cores, part_cores, whole_threads);
+
 		if ((max_tasks == whole_sockets) && (part_sockets == 0)) {
 			req->cpu_bind_type |= CPU_BIND_TO_SOCKETS;
 			goto make_auto;
@@ -408,7 +430,8 @@ void lllp_distribution(launch_tasks_request_msg_t *req, uint32_t node_id)
 		      req->job_id, buf_type);
 		error("Verify socket/core/thread counts in configuration");
 	}
-	_lllp_free_masks(maxtasks, masks);
+	if (masks)
+		_lllp_free_masks(maxtasks, masks);
 }
 
 
@@ -614,6 +637,7 @@ static bitstr_t *_get_avail_map(launch_tasks_request_msg_t *req,
 		 * requested */
 		for (t = 0; t < (*hw_threads); t++) {
 			uint16_t bit = new_p * (*hw_threads) + t;
+			bit %= conf->block_map_size;
 			bit_set(hw_map, bit);
 		}
 	}
@@ -649,39 +673,38 @@ static void _blot_mask(bitstr_t *mask, uint16_t blot)
 	}
 }
 
-/* helper function for _expand_masks() 
- * foreach task, consider which other tasks have set bits on the same socket */
+/* helper function for _expand_masks()
+ * for each task, consider which other bits are set in avail_map
+ * on the same socket */
 static void _blot_mask_sockets(const uint32_t maxtasks, const uint32_t task,
-			       bitstr_t **masks, uint16_t blot)
+			       bitstr_t **masks, uint16_t blot,
+			       bitstr_t *avail_map)
 {
-        uint16_t i, j, size = 0;
-        uint32_t q;
+  	uint16_t i, j, size = 0;
 
-        if (!masks[task])
-                return;
+	if (!masks[task])
+ 		return;
 
-        size = bit_size(masks[task]);
-        for (i = 0; i < size; i++) {
-                if (bit_test(masks[task], i)) {
-			/* check if other tasks have set bits on this socket */
-                        uint16_t start = (i / blot) * blot;
-                        for (j = start; j < start+blot; j++) {
-                                for (q = 0; q < maxtasks; q++) {
-                                        if ((q != task) &&
-					    bit_test(masks[q], j)) {
-						bit_set(masks[task], j);
-					}
-				}
+	size = bit_size(masks[task]);
+	for (i = 0; i < size; i++) {
+		if (bit_test(masks[task], i)) {
+			/* check if other bits are set in avail_map on this
+			 * socket and set each corresponding bit in masks */
+			uint16_t start = (i / blot) * blot;
+			for (j = start; j < start+blot; j++) {
+				if (bit_test(avail_map, j))
+					bit_set(masks[task], j);
 			}
 		}
 	}
 }
 
-/* foreach mask, expand the mask around the set bits to include the
+/* for each mask, expand the mask around the set bits to include the
  * complete resource to which the set bits are to be bound */
 static void _expand_masks(uint16_t cpu_bind_type, const uint32_t maxtasks,
 			  bitstr_t **masks, uint16_t hw_sockets,
-			  uint16_t hw_cores, uint16_t hw_threads)
+			  uint16_t hw_cores, uint16_t hw_threads,
+			  bitstr_t *avail_map)
 {
 	uint32_t i;
 
@@ -699,7 +722,8 @@ static void _expand_masks(uint16_t cpu_bind_type, const uint32_t maxtasks,
 		if (hw_threads*hw_cores < 2)
 			return;
 		for (i = 0; i < maxtasks; i++) {
-			_blot_mask_sockets(maxtasks, i, masks, hw_threads*hw_cores);
+   			_blot_mask_sockets(maxtasks, i, masks,
+					   hw_threads*hw_cores, avail_map);
 		}
 		return;
 	}
@@ -778,12 +802,12 @@ static int _task_layout_lllp_multi(launch_tasks_request_msg_t *req,
 				break;
 		}
 	}
-	FREE_NULL_BITMAP(avail_map);
 
 	/* last step: expand the masks to bind each task
 	 * to the requested resource */
 	_expand_masks(req->cpu_bind_type, max_tasks, masks,
-			hw_sockets, hw_cores, hw_threads);
+			hw_sockets, hw_cores, hw_threads, avail_map);
+	FREE_NULL_BITMAP(avail_map);
 
 	return SLURM_SUCCESS;
 }
@@ -794,7 +818,7 @@ static int _task_layout_lllp_multi(launch_tasks_request_msg_t *req,
  * task_layout_lllp_cyclic creates a cyclic distribution at the
  * lowest level of logical processor which is either socket, core or
  * thread depending on the system architecture. The Cyclic algorithm
- * is the same as the the Cyclic distribution performed in srun.
+ * is the same as the Cyclic distribution performed in srun.
  *
  *  Distribution at the lllp:
  *  -m hostfile|plane|block|cyclic:block|cyclic
@@ -817,6 +841,7 @@ static int _task_layout_lllp_cyclic(launch_tasks_request_msg_t *req,
 	uint16_t c, i, s, t, hw_sockets = 0, hw_cores = 0, hw_threads = 0;
 	int size, max_tasks = req->tasks_to_launch[(int)node_id];
 	int max_cpus = max_tasks * req->cpus_per_task;
+	int avail_size;
 	bitstr_t *avail_map;
 	bitstr_t **masks = NULL;
 
@@ -825,6 +850,7 @@ static int _task_layout_lllp_cyclic(launch_tasks_request_msg_t *req,
 	avail_map = _get_avail_map(req, &hw_sockets, &hw_cores, &hw_threads);
 	if (!avail_map)
 		return SLURM_ERROR;
+	avail_size = bit_size(avail_map);
 
 	*masks_p = xmalloc(max_tasks * sizeof(bitstr_t*));
 	masks = *masks_p;
@@ -855,6 +881,8 @@ static int _task_layout_lllp_cyclic(launch_tasks_request_msg_t *req,
 				for (s = 0; s < hw_sockets; s++) {
 					uint16_t bit = s*(hw_cores*hw_threads) +
 						       c*(hw_threads) + t;
+					/* In case hardware and config differ */
+					bit %= avail_size;
 					if (bit_test(avail_map, bit) == 0)
 						continue;
 					if (masks[taskcount] == NULL) {
@@ -864,6 +892,7 @@ static int _task_layout_lllp_cyclic(launch_tasks_request_msg_t *req,
 								  block_map_size);
 					}
 					bit_set(masks[taskcount], bit);
+
 					if (++i < req->cpus_per_task)
 						continue;
 					i = 0;
@@ -877,12 +906,12 @@ static int _task_layout_lllp_cyclic(launch_tasks_request_msg_t *req,
 				break;
 		}
 	}
-	FREE_NULL_BITMAP(avail_map);
 
 	/* last step: expand the masks to bind each task
 	 * to the requested resource */
 	_expand_masks(req->cpu_bind_type, max_tasks, masks,
-			hw_sockets, hw_cores, hw_threads);
+			hw_sockets, hw_cores, hw_threads, avail_map);
+	FREE_NULL_BITMAP(avail_map);
 
 	return SLURM_SUCCESS;
 }
@@ -893,7 +922,7 @@ static int _task_layout_lllp_cyclic(launch_tasks_request_msg_t *req,
  * task_layout_lllp_block will create a block distribution at the
  * lowest level of logical processor which is either socket, core or
  * thread depending on the system architecture. The Block algorithm
- * is the same as the the Block distribution performed in srun.
+ * is the same as the Block distribution performed in srun.
  *
  *  Distribution at the lllp:
  *  -m hostfile|plane|block|cyclic:block|cyclic
@@ -1021,12 +1050,12 @@ static int _task_layout_lllp_block(launch_tasks_request_msg_t *req,
 	}
 
 	xfree(task_array);
-	FREE_NULL_BITMAP(avail_map);
 
 	/* last step: expand the masks to bind each task
 	 * to the requested resource */
 	_expand_masks(req->cpu_bind_type, max_tasks, masks,
-			hw_sockets, hw_cores, hw_threads);
+			hw_sockets, hw_cores, hw_threads, avail_map);
+	FREE_NULL_BITMAP(avail_map);
 
 	return SLURM_SUCCESS;
 }

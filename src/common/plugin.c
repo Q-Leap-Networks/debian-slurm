@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -52,7 +52,7 @@
 #include "src/common/plugin.h"
 #include "src/common/xstring.h"
 #include "src/common/slurm_protocol_api.h"
-#include <slurm/slurm_errno.h>
+#include "slurm/slurm_errno.h"
 
 #  if HAVE_UNISTD_H
 #    include <unistd.h>
@@ -217,9 +217,11 @@ plugin_load_and_link(const char *type_name, int n_syms,
 
 	if (!type_name)
 		return plug;
-
+#if defined(__CYGWIN__)
+	so_name = xstrdup_printf("%s.dll", type_name);
+#else
 	so_name = xstrdup_printf("%s.so", type_name);
-
+#endif
 	while(so_name[i]) {
 		if(so_name[i] == '/')
 			so_name[i] = '_';

@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -65,17 +65,9 @@
 #  include <sys/checkpnt.h>
 #endif
 
-#ifdef HAVE_PTY_H
-#  include <pty.h>
-#endif
-
-#ifdef HAVE_UTMP_H
-#  include <utmp.h>
-#endif
-
 #include <sys/resource.h>
 
-#include <slurm/slurm_errno.h>
+#include "slurm/slurm_errno.h"
 
 #include "src/common/checkpoint.h"
 #include "src/common/env.h"
@@ -337,36 +329,14 @@ _setup_mpi(slurmd_job_t *job, int ltaskid)
  *  Current process is running as the user when this is called.
  */
 void
-exec_task(slurmd_job_t *job, int i, int waitfd)
+exec_task(slurmd_job_t *job, int i)
 {
-	char c;
 	uint32_t *gtids;		/* pointer to arrary of ranks */
 	int fd, j;
-	int rc;
 	slurmd_task_info_t *task = job->task[i];
-
-#ifdef HAVE_PTY_H
-	/* Execute login_tty() before setpgid() calls */
-	if (job->pty && (task->gtid == 0)) {
-		if (login_tty(task->stdin_fd))
-			error("login_tty: %m");
-		else
-			debug3("login_tty good");
-	}
-#endif
 
 	if (i == 0)
 		_make_tmpdir(job);
-
-	/*
-	 * Stall exec until all tasks have joined the same process group
-	 */
-	if ((rc = read (waitfd, &c, sizeof (c))) != 1) {
-		error ("_exec_task read failed, fd = %d, rc=%d: %m", waitfd, rc);
-		log_fini();
-		exit(1);
-	}
-	close(waitfd);
 
 	gtids = xmalloc(job->node_tasks * sizeof(uint32_t));
 	for (j = 0; j < job->node_tasks; j++)
@@ -422,14 +392,7 @@ exec_task(slurmd_job_t *job, int i, int waitfd)
 		}
 	}
 
-#ifdef HAVE_PTY_H
-	if (job->pty && (task->gtid == 0)) {
-		/* Need to perform the login_tty() before all tasks
-		 * register and the process groups are reset, otherwise
-		 * login_tty() gets disabled */
-	} else
-#endif
-		io_dup_stdio(task);
+	io_dup_stdio(task);
 
 	/* task-specific pre-launch activities */
 
@@ -518,10 +481,21 @@ _make_tmpdir(slurmd_job_t *job)
 	char *tmpdir;
 
 	if (!(tmpdir = getenvp(job->env, "TMPDIR")))
-		return;
+		setenvf(&job->env, "TMPDIR", "/tmp"); /* task may want it set */
+	else if (mkdir(tmpdir, 0700) < 0) {
+		if (errno == EEXIST) {
+			struct stat st;
 
-	if ((mkdir(tmpdir, 0700) < 0) && (errno != EEXIST))
-		error ("Unable to create TMPDIR [%s]: %m", tmpdir);
+			if (stat(tmpdir, &st) == 0 && /* does user have access? */
+			    S_ISDIR(st.st_mode) && /* is it a directory? */
+			    ((st.st_mode & S_IWOTH) || /* can user write there? */
+			     (st.st_uid == job->uid && (st.st_mode & S_IWUSR))))
+				return;
+		}
+		error("Unable to create TMPDIR [%s]: %m", tmpdir);
+		error("Setting TMPDIR to /tmp");
+		setenvf(&job->env, "TMPDIR", "/tmp");
+	}
 
 	return;
 }

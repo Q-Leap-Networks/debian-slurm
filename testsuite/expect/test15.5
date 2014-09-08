@@ -15,7 +15,7 @@
 # CODE-OCEC-09-009. All rights reserved.
 #
 # This file is part of SLURM, a resource management program.
-# For details, see <https://computing.llnl.gov/linux/slurm/>.
+# For details, see <http://www.schedmd.com/slurmdocs/>.
 # Please also read the included file: DISCLAIMER.
 #
 # SLURM is free software; you can redistribute it and/or modify it under
@@ -120,20 +120,16 @@ set salloc_pid [spawn $salloc -t1 --kill-command=KILL ./$file_in]
 expect {
 	-re "Granted job allocation ($number)" {
 		set job_id $expect_out(1,string)
-		date
+		exec date
 		exp_continue
 	}
 	-re "Job allocation time limit to be reached at" {
-		date
-		exp_continue
-	}
-	-re "Job allocation ($number) has been revoked." {
-		date
+		exec date
 		exp_continue
 	}
 	-re "FINI" {
 		send_user "\nFAILURE: job time limit not honored\n"
-		date
+		exec date
 		set exit_code 1
 		exp_continue
 	}
@@ -156,19 +152,15 @@ set salloc_pid [spawn $salloc -t4 --kill-command=KILL ./$file_in]
 expect {
 	-re "Granted job allocation ($number)" {
 		set job_id $expect_out(1,string)
-		date
+		exec date
 		exp_continue
 	}
 	-re "Job allocation time limit to be reached at" {
-		date
-		exp_continue
-	}
-	-re "Job allocation ($number) has been revoked." {
-		date
+		exec date
 		exp_continue
 	}
 	-re "FINI" {
-		date
+		exec date
 		incr completions
 		exp_continue
 	}
@@ -185,7 +177,7 @@ expect {
 	}
 }
 if {$completions != 1} {
-	send_user "\nFAILURE: job failed to complete properly\n"
+	send_user "\nFAILURE: job failed to complete properly ($completions)\n"
 	set exit_code 1
 }
 

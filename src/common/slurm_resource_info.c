@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -45,7 +45,8 @@
 
 #include <ctype.h>
 #include <sys/types.h>
-#include <slurm/slurm.h>
+
+#include "slurm/slurm.h"
 
 #include "src/common/log.h"
 #include "src/common/slurm_protocol_api.h"
@@ -72,11 +73,11 @@ static void _clear_then_set(int *data, int clear_mask, int set_mask)
  * returns 1 is the argument appears to be a value, 0 otherwise
  */
 static int _isvalue(char *arg) {
-    	if (isdigit(*arg)) {	 /* decimal values and 0x... hex values */
+    	if (isdigit((int)*arg)) { /* decimal values and 0x... hex values */
 	    	return 1;
 	}
 
-	while (isxdigit(*arg)) { /* hex values not preceded by 0x */
+	while (isxdigit((int)*arg)) { /* hex values not preceded by 0x */
 		arg++;
 	}
 	if (*arg == ',' || *arg == '\0') { /* end of field or string */
@@ -139,7 +140,7 @@ int slurm_get_avail_procs(const uint16_t socket_cnt,
 	uint16_t max_avail_cpus = 0xffff;	/* for alloc_* accounting */
 	uint16_t min_sockets = 1, max_sockets = 0xffff;
 	uint16_t min_cores   = 1, max_cores   = 0xffff;
-	uint16_t min_threads = 1, max_threads = 0xffff;
+	uint16_t                  max_threads = 0xffff;
 	int i;
 
         /* pick defaults for any unspecified items */
@@ -148,7 +149,7 @@ int slurm_get_avail_procs(const uint16_t socket_cnt,
 	if (core_cnt != (uint16_t) NO_VAL)
 		min_cores = max_cores = core_cnt;	
 	if (thread_cnt != (uint16_t) NO_VAL)
-		min_threads = max_threads = thread_cnt;
+		max_threads = thread_cnt;
 	if (cpus_per_task <= 0)
 		cpus_per_task = 1;
 	if (*threads <= 0)

@@ -10,7 +10,7 @@
  *  Copyright (C) 2005 Hewlett-Packard Development Company, L.P.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -69,8 +69,8 @@
 #include <time.h>
 #include <unistd.h>
 
-#include <slurm/slurm.h>
-#include <slurm/slurmdb.h>
+#include "slurm/slurm.h"
+#include "slurm/slurmdb.h"
 
 #include "src/common/macros.h"
 #include "src/common/pack.h"
@@ -101,7 +101,7 @@ extern int  jobacct_gather_g_endpoll();
 extern void jobacct_gather_g_suspend_poll();
 extern void jobacct_gather_g_resume_poll();
 
-extern int jobacct_gather_g_set_proctrack_container_id(uint32_t id);
+extern int jobacct_gather_g_set_proctrack_container_id(uint64_t id);
 extern int jobacct_gather_g_add_task(pid_t pid, jobacct_id_t *jobacct_id);
 /* must free jobacctinfo_t if not NULL */
 extern jobacctinfo_t *jobacct_gather_g_stat_task(pid_t pid);

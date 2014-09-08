@@ -23,9 +23,11 @@ then check-in the new Makefile.am and Makefile.in files
 
 Here is a step-by-step HOWTO for creating a new release of SLURM on a
 Linux cluster (See BlueGene and AIX specific notes below for some differences).
-0. svn co https://eris.llnl.gov/svn/slurm/trunk slurm
-   svn co https://eris.llnl.gov/svn/chaos/private/buildfarm/trunk buildfarm
-   put the buildfarm directory in your search path
+0. Get current copies of SLURM and buildfarm
+   > git clone https://<user_name>@github.com/chaos/slurm.git
+   > svn co https://eris.llnl.gov/svn/chaos/private/buildfarm/trunk buildfarm
+   place the buildfarm directory in your search path
+   > export PATH=~/buildfarm:$PATH
 1. Update NEWS and META files for the new release. In the META file,
    the API, Major, Minor, Micro, Version, and Release fields must all
    by up-to-date. **** DON'T UPDATE META UNTIL RIGHT BEFORE THE TAG ****
@@ -35,39 +37,37 @@ Linux cluster (See BlueGene and AIX specific notes below for some differences).
      files, but not to code.
    - this is a prerelease (Release = 0.preX)
 2. Tag the repository with the appropriate name for the new version.
-   svn copy https://eris.llnl.gov/svn/slurm/trunk \
-     https://eris.llnl.gov/svn/slurm/tags/slurm-1-2-0-0-pre3 \
-     -m "description"
+   > git tag -a slurm-2-3-0-0-pre5 -m "create tag v2.3.0-pre5"
+   > git push --tags
 3. Use the rpm make target to create the new RPMs. This requires a .rpmmacros 
    (.rpmrc for newer versions of rpmbuild) file containing:
 	%_slurm_sysconfdir      /etc/slurm
 	%_with_debug            1
 	%_with_sgijob		1
 	%_with_elan		1   (ONLY ON SYSTEMS WITH ELAN SWITCH)
-   I usually build with using the following syntax:
-   build  -s https://eris.llnl.gov/svn/slurm/tags/slurm-1-2-0-0-pre3
-4. Remove the RPMs that we don't want:
-   rm -f slurm-perlapi*rpm slurm-torque*rpm
-5. Move the RPMs to
-   /usr/local/admin/rpms/llnl/RPMS-RHEL4/x86_64 (odevi, or gauss)
-   /usr/local/admin/rpms/llnl/RPMS-RHEL4/i386/ (adevi)
-   /usr/local/admin/rpms/llnl/RPMS-RHEL4/ia64/ (tdevi)
-   send an announcement email (with the latest entry from the NEWS
-   file) out to linux-admin@lists.llnl.gov.
-6. Copy tagged bzip file (e.g. slurm-0.6.0-0.pre3.bz2) to FTP server
-   for external SLURM users.
-7. Copy bzip file and rpms (including src.rpm) to sourceforge.net:
-   ncftp upload.sf.net
-   cd upload
-   put filename
-   Use SourceForge admin tool to add new release, including changelog.
+   NOTE: build will make a tar-ball based upon ALL of the files in your current
+   local directory. If that includes scratch files, everyone will get those
+   files in the tar-ball. For that reason, it is a good idea to clone a clean
+   copy of the repository and build from that
+   > git clone https://<user_name>@github.com/chaos/slurm.git <local_dir>
+   Build using the following syntax:
+   > build  --snapshot   -s <local_dir>  OR
+   > build  --nosnapshot -s <local_dir>
+   --nosnapshot will name the tar-ball and RPMs based upon the META file
+   --snapshot will name the tar-ball and RPMs based upon the META file plus a
+   timestamp. Do this to make a tar-ball for a non-tagged release.
+   NOTE: <local_dir> should be a fully-qualified pathname
+4. scp the files to schedmd.com in to ~/www/download/development or
+   ~/www/download/development. Move the older files to ~/www/download/archive,
+   login to schedmd.com, cd to ~/download, and execute "php process.php" to
+   update the web pages.
 
 BlueGene build notes:
 0. If on a bgp system and you want sview export these variables
-    export CFLAGS="-I/opt/gnome/lib/gtk-2.0/include -I/opt/gnome/lib/glib-2.0/include $CFLAGS"
-    export LIBS="-L/usr/X11R6/lib64 $LIBS"
-    export CMD_LDFLAGS='-L/usr/X11R6/lib64'
-    export PKG_CONFIG_PATH="/opt/gnome/lib64/pkgconfig/:$PKG_CONFIG_PATH"
+   > export CFLAGS="-I/opt/gnome/lib/gtk-2.0/include -I/opt/gnome/lib/glib-2.0/include $CFLAGS"
+   > export LIBS="-L/usr/X11R6/lib64 $LIBS"
+   > export CMD_LDFLAGS='-L/usr/X11R6/lib64'
+   > export PKG_CONFIG_PATH="/opt/gnome/lib64/pkgconfig/:$PKG_CONFIG_PATH"
 1. Use the rpm make target to create the new RPMs. This requires a .rpmmacros
    (.rpmrc for newer versions of rpmbuild) file containing:
 	%_prefix                /usr
@@ -76,13 +76,17 @@ BlueGene build notes:
 	%_without_pam		1
 	%_with_debug            1
    Build on Service Node with using the following syntax
-   rpmbuild -ta slurm-...bz2
+   > rpmbuild -ta slurm-...bz2
    The RPM files get written to the directory
    /usr/src/packages/RPMS/ppc64
 
 To build and run on AIX:
-0. svn co https://eris.llnl.gov/svn/slurm/trunk slurm
-   svn co https://eris.llnl.gov/svn/buildfarm/trunk buildfarm
+0. Get current copies of SLURM and buildfarm
+   > git clone https://<user_name>@github.com/chaos/slurm.git
+   > svn co https://eris.llnl.gov/svn/chaos/private/buildfarm/trunk buildfarm
+   put the buildfarm directory in your search path
+   > export PATH=~/buildfarm:$PATH
+
    Put the buildfarm directory in your search path
    Also, you will need several commands to appear FIRST in your PATH:
 
@@ -93,10 +97,11 @@ To build and run on AIX:
    I do this by making symlinks to those commands in the buildfarm directory,
    then making the buildfarm directory the first one in my PATH.
    Also, make certain that the "proctrack" rpm is installed.
-1. export OBJECT_MODE=32
-   export PKG_CONFIG="/usr/bin/pkg-config"
+1. Export some environment variables
+   > export OBJECT_MODE=32
+   > export PKG_CONFIG="/usr/bin/pkg-config"
 2. Build with:
-   ./configure --enable-debug --prefix=/opt/freeware \
+   > ./configure --enable-debug --prefix=/opt/freeware \
 	--sysconfdir=/opt/freeware/etc/slurm \
 	--with-ssl=/opt/freeware --with-munge=/opt/freeware \
 	--with-proctrack=/opt/freeware
@@ -119,11 +124,23 @@ To build and run on AIX:
 	%with_munge             "--with-munge=/opt/freeware"
 	%with_proctrack         "--with-proctrack=/opt/freeware"
    Log in to the machine "uP".  uP is currently the lowest-common-denominator
-     AIX machine.
-   CC=/usr/bin/gcc build -s https://eris.llnl.gov/svn/slurm/tags/slurm-1-2-0-0-pre3
-4. export MP_RMLIB=./slurm_ll_api.so
-   export CHECKPOINT=yes
-5. poe hostname -rmpool debug
+   AIX machine.
+   NOTE: build will make a tar-ball based upon ALL of the files in your current
+   local directory. If that includes scratch files, everyone will get those
+   files in the tar-ball. For that reason, it is a good idea to clone a clean
+   copy of the repository and build from that
+   > git clone https://<user_name>@github.com/chaos/slurm.git <local_dir>
+   Build using the following syntax:
+   > export CC=/usr/bin/gcc
+   > build  --snapshot   -s <local_dir>  OR
+   > build  --nosnapshot -s <local_dir>
+   --nosnapshot will name the tar-ball and RPMs based upon the META file
+   --snapshot will name the tar-ball and RPMs based upon the META file plus a
+   timestamp. Do this to make a tar-ball for a non-tagged release.
+4. Test POE after telling POE where to find SLURM's LoadLeveler wrapper.
+   > export MP_RMLIB=./slurm_ll_api.so
+   > export CHECKPOINT=yes
+5. > poe hostname -rmpool debug
 6. To debug, set SLURM_LL_API_DEBUG=3 before running poe - will create a file
      /tmp/slurm.*
    It can also be helpful to use poe options "-ilevel 6 -pmdlog yes"
@@ -205,9 +222,17 @@ not change gnats bug state, but records source files associated
 with the bug.
 
 For memory leaks (for AIX use zerofault, zf; for linux use valgrind)
- - run configure with the option --enable-memory-leak-debug
- - valgrind --tool=memcheck --leak-check=yes --num-callers=6 --leak-resolution=med \
-   ./slurmctld -Dc >ctld.out 2>&1    (or similar like for slurmd)
+ - Run configure with the option "--enable-memory-leak-debug" to completely
+   release allocated memory when the daemons exit
+ - valgrind --tool=memcheck --leak-check=yes --num-callers=8 --leak-resolution=med \
+   ./slurmctld -Dc >valg.ctld.out 2>&1
+ - valgrind --tool=memcheck --leak-check=yes --num-callers=8 --leak-resolution=med \
+   ./slurmd -Dc >valg.slurmd.out 2>&1    (Probably only one one node of cluster)
+ - Run the regression test. In the globals.local file include:
+   "set enable_memory_leak_debug 1"
+ - Shutdown the daemons using "scontrol shutdown"
+ - Examine the end of the log files for leaks. pthread_create() and dlopen()
+   have small memory leaks on some systems, which do not grow over time
 
 Before new major release:
  - Test on ia64, i386, x86_64, BGL, AIX, OSX, XCPU

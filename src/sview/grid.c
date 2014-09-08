@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -37,9 +37,10 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 #include "sview.h"
-#include "src/plugins/select/bluegene/plugin/bluegene.h"
-#define TOPO_DEBUG 0
+
 #define RESET_GRID -2
+#define TOPO_DEBUG  0
+
 List grid_button_list = NULL;
 List blinking_button_list = NULL;
 List multi_button_list = NULL;
@@ -75,15 +76,6 @@ typedef struct {
 } button_processor_t;
 
 GStaticMutex blinking_mutex = G_STATIC_MUTEX_INIT;
-
-static int _coord(char coord)
-{
-	if ((coord >= '0') && (coord <= '9'))
-		return (coord - '0');
-	if ((coord >= 'A') && (coord <= 'Z'))
-		return ((coord - 'A') + 10);
-	return -1;
-}
 
 static gboolean _mouseover_node(GtkWidget *widget, GdkEventButton *event,
 				grid_button_t *grid_button)
@@ -232,7 +224,9 @@ void _put_button_as_down(grid_button_t *grid_button, int state)
 	grid_button->color = NULL;
 	grid_button->color_inx = MAKE_DOWN;
 	grid_button->button = gtk_event_box_new();
-	gtk_widget_set_size_request(grid_button->button, 10, 10);
+	gtk_widget_set_size_request(grid_button->button,
+				    working_sview_config.button_size,
+				    working_sview_config.button_size);
 	gtk_event_box_set_above_child(GTK_EVENT_BOX(grid_button->button),
 				      FALSE);
 	_add_button_signals(grid_button);
@@ -272,7 +266,9 @@ void _put_button_as_up(grid_button_t *grid_button)
 	}
 	gtk_widget_destroy(grid_button->button);
 	grid_button->button = gtk_button_new();
-	gtk_widget_set_size_request(grid_button->button, 10, 10);
+	gtk_widget_set_size_request(grid_button->button,
+				    working_sview_config.button_size,
+				    working_sview_config.button_size);
 	_add_button_signals(grid_button);
 
 /* 	if (grid_button->frame) */
@@ -298,7 +294,9 @@ void _put_button_as_inactive(grid_button_t *grid_button)
 	}
 	gtk_widget_destroy(grid_button->button);
 	grid_button->button = gtk_button_new();
-	gtk_widget_set_size_request(grid_button->button, 10, 10);
+	gtk_widget_set_size_request(grid_button->button,
+				    working_sview_config.button_size,
+				    working_sview_config.button_size);
 	//gtk_widget_set_sensitive (grid_button->button, FALSE);
 
 	_add_button_signals(grid_button);
@@ -391,7 +389,6 @@ static void _each_highlightd(GtkTreeModel *model,
 
 	int j=0;
 	GdkColor color;
-	bool changed = 0;
 
 	grid_foreach_t *grid_foreach = userdata;
 
@@ -422,10 +419,9 @@ static void _each_highlightd(GtkTreeModel *model,
 		    || (grid_button->inx > node_inx[j+1]))
 			continue;
 
-		if (_change_button_color(grid_button, color_inx,
-					 sview_colors[color_inx],
-					 color, 0, 0))
-			changed = 1;
+		(void)_change_button_color(grid_button, color_inx,
+				     sview_colors[color_inx],
+				     color, 0, 0);
 
 		if (GTK_WIDGET_STATE(grid_button->button) != GTK_STATE_NORMAL)
 			gtk_widget_set_state(grid_button->button,
@@ -437,14 +433,8 @@ static void _each_highlightd(GtkTreeModel *model,
 	}
 
 	list_iterator_destroy(itr);
-	if (changed && working_sview_config.grid_speedup) {
-		gtk_widget_set_sensitive(GTK_WIDGET(main_grid_table), 0);
-		gtk_widget_set_sensitive(GTK_WIDGET(main_grid_table), 1);
-	}
 	return;
 }
-
-
 
 static void _each_highlight_selected(GtkTreeModel *model,
 				     GtkTreePath *path,
@@ -469,9 +459,8 @@ static void _each_highlight_selected(GtkTreeModel *model,
 		return;
 	itr = list_iterator_create(grid_foreach->button_list);
 	while ((grid_button = list_next(itr))) {
-		/*For multiple selections, need to retain all selected.
-		 *(previously this assumed only one selected).
-		 */
+		/* For multiple selections, need to retain all selected.
+		 * (previously this assumed only one selected). */
 		if (grid_button->inx != node_inx)
 			continue;
 		else if (GTK_WIDGET_STATE(grid_button->button)
@@ -507,15 +496,13 @@ static int _block_in_node(int *bp_inx, int inx)
  * in the system (e.g. there is a gap in the 3-D torus for a service or login
  * node.
  */
-static void _build_empty_node(int x, int y, int z,
+static void _build_empty_node(int coord_x, int coord_y,
 			      button_processor_t *button_processor)
 {
 	grid_button_t *grid_button = button_processor->grid_button;
-	int y_offset;
 
-	(*button_processor->coord_x) = (x + (DIM_SIZE[Z] - 1)) - z;
-	y_offset = button_processor->default_y_offset - (DIM_SIZE[Z] * y);
-	(*button_processor->coord_y) = (y_offset - y) + z;
+	(*button_processor->coord_x) = coord_x;
+	(*button_processor->coord_y) = coord_y;
 	grid_button = xmalloc(sizeof(grid_button_t));
 	grid_button->color_inx = MAKE_BLACK;
 	grid_button->inx = (*button_processor->inx);
@@ -537,61 +524,168 @@ static void _build_empty_node(int x, int y, int z,
 			 GTK_SHRINK, GTK_SHRINK, 1, 1);
 }
 
+static void _calc_coord_3d(int x, int y, int z, int default_y_offset,
+			   int *coord_x, int *coord_y, int *dim_size)
+{
+	int y_offset;
+
+	*coord_x = (x + (dim_size[2] - 1)) - z;
+	y_offset = default_y_offset - (dim_size[2] * y);
+	*coord_y = (y_offset - y) + z;
+}
+
+static void _calc_coord_4d(int a, int x, int y, int z, int default_y_offset,
+			   int *coord_x, int *coord_y, int* dim_size)
+{
+	int x_offset, y_offset;
+
+	x_offset = (dim_size[1] + dim_size[3]) * a;
+	*coord_x = x_offset + (x + (dim_size[3] - 1)) - z;
+	y_offset = default_y_offset - (dim_size[3] * y);
+	*coord_y = (y_offset - y) + z;
+}
+
+static int *_get_cluster_dims(void)
+{
+	int *my_dim_size = slurmdb_setup_cluster_dim_size();
+
+	if ((cluster_flags & CLUSTER_FLAG_CRAYXT) && my_dim_size) {
+		static int cray_dim_size[3] = {-1, -1, -1};
+		/* For now, assume four nodes per coordinate all in
+		 * the same cage. Need to refine. */
+		cray_dim_size[0] = my_dim_size[0];
+		cray_dim_size[1] = my_dim_size[1];
+		cray_dim_size[2] = my_dim_size[2];
+		return cray_dim_size;
+	}
+
+	return my_dim_size;
+}
+
 /* Add a button for a given node. If node_ptr == NULL then fill in any gaps
  * in the grid just for a clean look. Always call with node_ptr == NULL for
  * the last call in the sequence. */
 static int _add_button_to_list(node_info_t *node_ptr,
 			       button_processor_t *button_processor)
 {
+	static bool *node_exists = NULL;
+	static int node_exists_cnt = 1;
 	grid_button_t *grid_button = button_processor->grid_button;
+	int *dim_size = NULL, i, coord_x = 0, coord_y = 0;
+	int len = 0, len_a = 0;
 
-	if (cluster_dims == 4) {
-		/* FIXME: */
-		return SLURM_ERROR;
-	} else if (cluster_dims == 3) {
-		static bool *node_exists = NULL;
-		int i, x=0, y=0, z=0, y_offset=0;
-		/* On 3D system we need to translate a
-		   3D space to a 2D space and make it
-		   appear 3D.  So we get the coords of
-		   each node in xyz format and apply
-		   an x and y offset to get a coord_x
-		   and coord_y.  This is not needed
-		   for linear systems since they can
-		   be laid out in any fashion
-		*/
+	if (cluster_dims > 1) {
+		dim_size = _get_cluster_dims();
+		if (dim_size == NULL) {
+			g_error("Could not read dim_size\n");
+			return SLURM_ERROR;
+		}
+		if ((dim_size[0] < 1) || (cluster_dims < 1)) {
+			g_error("Invalid dim_size %d or cluster_dims %d\n",
+				dim_size[0], cluster_dims);
+			return SLURM_ERROR;
+		}
 
+		/* Translate a 3D or 4D space into a 2D space to the extent
+		 * possible. */
 		if (node_exists == NULL) {
-			node_exists = xmalloc(sizeof(bool) * DIM_SIZE[X] *
-					      DIM_SIZE[Y] * DIM_SIZE[Z]);
+			node_exists_cnt = 1;
+			for (i = 0; i < cluster_dims; i++)
+				node_exists_cnt *= dim_size[i];
+			node_exists = xmalloc(sizeof(bool) * node_exists_cnt);
 		}
 		if (node_ptr) {
-			i = strlen(node_ptr->name);
-			if (i < 4) {
+			len = strlen(node_ptr->name);
+			if (len < cluster_dims) {
 				g_error("bad node name %s\n", node_ptr->name);
 				return SLURM_ERROR;
-			} else {
-				x = _coord(node_ptr->name[i-3]);
-				y = _coord(node_ptr->name[i-2]);
-				z = _coord(node_ptr->name[i-1]);
-				i = (x * DIM_SIZE[Y] + y) * DIM_SIZE[Z] + z;
-				node_exists[i] = true;
 			}
-			(*button_processor->coord_x) = (x + (DIM_SIZE[Z] - 1))
-				- z;
-			y_offset = button_processor->default_y_offset
-				- (DIM_SIZE[Z] * y);
-			(*button_processor->coord_y) = (y_offset - y) + z;
+			if (cluster_flags & CLUSTER_FLAG_CRAYXT) {
+				len_a = strlen(node_ptr->node_addr);
+				if (len_a < cluster_dims) {
+					g_error("bad node addr %s\n",
+						node_ptr->node_addr);
+					return SLURM_ERROR;
+				}
+			}
+		}
+	}
+
+	if (cluster_dims == 4) {
+		int a, x, y, z;
+		if (node_ptr) {
+			a = select_char2coord(node_ptr->name[len-4]);
+			x = select_char2coord(node_ptr->name[len-3]);
+			y = select_char2coord(node_ptr->name[len-2]);
+			z = select_char2coord(node_ptr->name[len-1]);
+			/* Ignore "b" dimension for BlueGene/Q */
+			i = ((a * dim_size[1] + x) * dim_size[2] + y) *
+			    dim_size[3] + z;
+			node_exists[i] = true;
+			_calc_coord_4d(a, x, y, z,
+				       button_processor->default_y_offset,
+				       &coord_x, &coord_y, dim_size);
 		} else {
-			for (x = 0; x < DIM_SIZE[X]; x++) {
-				for (y = 0; y < DIM_SIZE[Y]; y++) {
-					for (z = 0; z < DIM_SIZE[Z]; z++) {
-						i = (x * DIM_SIZE[Y] + y) *
-							DIM_SIZE[Z] + z;
+			for (i = -1, a = 0; a < dim_size[0]; a++) {
+				for (x = 0; x < dim_size[1]; x++) {
+					for (y = 0; y < dim_size[2]; y++) {
+						for (z = 0; z < dim_size[3];
+						     z++) {
+							i++;
+							if (node_exists[i])
+								continue;
+							_calc_coord_4d(a,x,y,z,
+				      				button_processor->
+								default_y_offset,
+								&coord_x,
+								&coord_y,
+								dim_size);
+							_build_empty_node(
+								coord_x,
+								coord_y,
+								button_processor);
+						}
+					}
+				}
+			}
+			xfree(node_exists);
+			return SLURM_SUCCESS;
+		}
+	} else if (cluster_dims == 3) {
+		int x, y, z;
+		if (node_ptr) {
+			if (cluster_flags & CLUSTER_FLAG_CRAYXT) {
+				x = select_char2coord(
+					node_ptr->node_addr[len_a-3]);
+				y = select_char2coord(
+					node_ptr->node_addr[len_a-2]);
+				z = select_char2coord(
+					node_ptr->node_addr[len_a-1]);
+			} else {
+				x = select_char2coord(node_ptr->name[len-3]);
+				y = select_char2coord(node_ptr->name[len-2]);
+				z = select_char2coord(node_ptr->name[len-1]);
+			}
+			i = (x * dim_size[1] + y) * dim_size[2] + z;
+			node_exists[i] = true;
+			_calc_coord_3d(x, y, z,
+				       button_processor->default_y_offset,
+				       &coord_x, &coord_y, dim_size);
+		} else {
+			for (x = 0; x < dim_size[0]; x++) {
+				for (y = 0; y < dim_size[1]; y++) {
+					for (z = 0; z < dim_size[2]; z++) {
+						i = (x * dim_size[1] + y) *
+							dim_size[2] + z;
 						if (node_exists[i])
 							continue;
+						_calc_coord_3d(x, y, z,
+				      			button_processor->
+							default_y_offset,
+							&coord_x, &coord_y,
+							dim_size);
 						_build_empty_node(
-							x, y, z,
+							coord_x, coord_y,
 							button_processor);
 					}
 				}
@@ -603,6 +697,14 @@ static int _add_button_to_list(node_info_t *node_ptr,
 	if (node_ptr == NULL)
 		return SLURM_SUCCESS;
 
+	if (cluster_dims > 1) {
+		(*button_processor->coord_x) = coord_x;
+		(*button_processor->coord_y) = coord_y;
+#if 0
+		g_print("%s %d:%d\n", node_ptr->name, coord_x, coord_y);
+#endif
+	}
+
 	if (!grid_button) {
 		grid_button = xmalloc(sizeof(grid_button_t));
 		grid_button->color_inx = MAKE_INIT;
@@ -613,7 +715,9 @@ static int _add_button_to_list(node_info_t *node_ptr,
 		grid_button->button = gtk_button_new();
 		grid_button->node_name = xstrdup(node_ptr->name);
 
-		gtk_widget_set_size_request(grid_button->button, 10, 10);
+		gtk_widget_set_size_request(grid_button->button,
+					    working_sview_config.button_size,
+					    working_sview_config.button_size);
 		_add_button_signals(grid_button);
 		list_append(button_processor->button_list, grid_button);
 
@@ -641,13 +745,21 @@ static int _add_button_to_list(node_info_t *node_ptr,
 /* 		gtk_frame_set_shadow_type(GTK_FRAME(grid_button->frame), */
 /* 					  GTK_SHADOW_ETCHED_OUT); */
 	if (cluster_dims < 3) {
-		/* On linear systems we just up the
-		   x_coord until we hit the side of
-		   the table and then increment the
-		   coord_y.  We add space inbetween
-		   each 10th row.
-		*/
+		/* On linear systems we just up the x_coord until we hit the
+		 * side of the table and then increment the coord_y.  We add
+		 * space between each tenth row. */
 		(*button_processor->coord_x)++;
+
+		if (button_processor->force_row_break) {
+			(*button_processor->coord_x) = 0;
+			(*button_processor->coord_y)++;
+			gtk_table_set_row_spacing(
+				button_processor->table,
+				(*button_processor->coord_y)-1,
+				working_sview_config.gap_size);
+			return SLURM_SUCCESS;
+		}
+
 		if ((*button_processor->coord_x)
 		    == working_sview_config.grid_x_width) {
 			(*button_processor->coord_x) = 0;
@@ -656,16 +768,8 @@ static int _add_button_to_list(node_info_t *node_ptr,
 			      % working_sview_config.grid_vert))
 				gtk_table_set_row_spacing(
 					button_processor->table,
-					(*button_processor->coord_y)-1, 5);
-		}
-
-		if (button_processor->force_row_break) {
-			(*button_processor->coord_x) = 0;
-			(*button_processor->coord_y)+= 2;
-			gtk_table_set_row_spacing(
-				button_processor->table,
-				(*button_processor->coord_y)-1,	5);
-			return SLURM_SUCCESS;
+					(*button_processor->coord_y)-1,
+					working_sview_config.gap_size);
 		}
 
 		if ((*button_processor->coord_y) == button_processor->table_y)
@@ -676,7 +780,8 @@ static int _add_button_to_list(node_info_t *node_ptr,
 		      % working_sview_config.grid_hori))
 			gtk_table_set_col_spacing(
 				button_processor->table,
-				(*button_processor->coord_x)-1, 5);
+				(*button_processor->coord_x)-1,
+				working_sview_config.gap_size);
 	}
 	return SLURM_SUCCESS;
 }
@@ -687,14 +792,12 @@ static int _grid_table_by_switch(button_processor_t *button_processor,
 	int rc = SLURM_SUCCESS;
 	int inx = 0, ii = 0;
 	switch_record_bitmaps_t *sw_nodes_bitmaps_ptr = g_switch_nodes_maps;
-
+#if TOPO_DEBUG
+	/* engage if want original display below switched */
+	ListIterator itr = list_iterator_create(node_list);
+	sview_node_info_t *sview_node_info_ptr = NULL;
+#endif
 	button_processor->inx = &inx;
-
-	/* engage if want original
-	   ListIterator itr = list_iterator_create(node_list);
-	   sview_node_info_t *sview_node_info_ptr = NULL;
-	   * display below switched
-	   */
 	for (ii=0; ii<g_topo_info_msg_ptr->record_count;
 	     ii++, sw_nodes_bitmaps_ptr++) {
 		int j = 0, first, last;
@@ -728,19 +831,19 @@ static int _grid_table_by_switch(button_processor_t *button_processor,
 		rc = _add_button_to_list(NULL, button_processor);
 	}
 
+#if TOPO_DEBUG
 	/* engage this if want original display below
-	 * switched grid
+	 * switched grid */
 	 button_processor->inx = &inx;
 	 while ((sview_node_info_ptr = list_next(itr))) {
-	 if ((rc = _add_button_to_list(
-	 sview_node_info_ptr->node_ptr,
-	 button_processor)) != SLURM_SUCCESS)
-	 break;
-	 inx++;
+		 if ((rc = _add_button_to_list(
+				sview_node_info_ptr->node_ptr,
+	 			button_processor)) != SLURM_SUCCESS)
+			 break;
+	 	inx++;
 	 }
 	 list_iterator_destroy(itr);
-
-	*/
+#endif
 
 	/* This is needed to get the correct width of the grid window.
 	 * If it is not given then we get a really narrow window. */
@@ -788,6 +891,8 @@ static int _grid_table_by_list(button_processor_t *button_processor,
 static int _init_button_processor(button_processor_t *button_processor,
 				  int node_count)
 {
+	int *dim_size = NULL;
+
 	if (node_count == 0) {
 		g_print("_init_button_processor: no nodes selected\n");
 		return SLURM_ERROR;
@@ -795,15 +900,26 @@ static int _init_button_processor(button_processor_t *button_processor,
 
 	memset(button_processor, 0, sizeof(button_processor_t));
 
+	if (cluster_dims > 1) {
+		dim_size = _get_cluster_dims();
+		if (dim_size == NULL) {
+			g_error("could not read dim_size\n");
+			return SLURM_ERROR;
+		}
+	}
 	if (cluster_dims == 4) {
-		/* FIXME: */
-		return SLURM_ERROR;
+		button_processor->default_y_offset = (dim_size[3] * dim_size[2])
+					+ (dim_size[2] - dim_size[3]);
+		working_sview_config.grid_x_width = (dim_size[1] + dim_size[3])
+						    * dim_size[0];
+		button_processor->table_y = (dim_size[3] * dim_size[2])
+					    + dim_size[2];
 	} else if (cluster_dims == 3) {
-		button_processor->default_y_offset = (DIM_SIZE[Z] * DIM_SIZE[Y])
-			+ (DIM_SIZE[Y] - DIM_SIZE[Z]);
-		working_sview_config.grid_x_width = DIM_SIZE[X] + DIM_SIZE[Z];
-		button_processor->table_y =
-			(DIM_SIZE[Z] * DIM_SIZE[Y]) + DIM_SIZE[Y];
+		button_processor->default_y_offset = (dim_size[2] * dim_size[1])
+			+ (dim_size[1] - dim_size[2]);
+		working_sview_config.grid_x_width = dim_size[0] + dim_size[2];
+		button_processor->table_y = (dim_size[2] * dim_size[1])
+					    + dim_size[1];
 	} else {
 		if (!working_sview_config.grid_x_width) {
 			if (node_count < 50) {
@@ -932,7 +1048,9 @@ extern grid_button_t *create_grid_button_from_another(
 /* 		sview_widget_modify_bg(send_grid_button->button,  */
 /* 				       GTK_STATE_ACTIVE, color); */
 	}
-	gtk_widget_set_size_request(send_grid_button->button, 10, 10);
+	gtk_widget_set_size_request(send_grid_button->button,
+				    working_sview_config.button_size,
+				    working_sview_config.button_size);
 
 	send_grid_button->node_name = xstrdup(name);
 
@@ -968,16 +1086,59 @@ extern char *change_grid_color(List button_list, int start, int end,
 
 	itr = list_iterator_create(button_list);
 	while ((grid_button = list_next(itr))) {
-		if (start != -1)
-			if ((grid_button->inx < start)
-			    ||  (grid_button->inx > end))
-				continue;
+		if ((start != -1) &&
+		    ((grid_button->inx < start) || (grid_button->inx > end)))
+			continue;
 		_change_button_color(grid_button, color_inx, new_col,
 				     color, only_change_unused, state_override);
 	}
 	list_iterator_destroy(itr);
 
 	return sview_colors[color_inx];
+}
+
+/* This variation of change_grid_color() is faster when changing many
+ * button colors at the same time since we can issue a single call to
+ * _change_button_color() and eliminate a nested loop. */
+extern void change_grid_color_array(List button_list, int array_len,
+				    int *color_inx, bool *color_set_flag,
+				    bool only_change_unused,
+				    enum node_states state_override)
+{
+	ListIterator itr = NULL;
+	grid_button_t *grid_button = NULL;
+	GdkColor color;
+	char *new_col = NULL;
+
+	if (!button_list)
+		return;
+
+	itr = list_iterator_create(button_list);
+	while ((grid_button = list_next(itr))) {
+		if ((grid_button->inx < 0) || (grid_button->inx >= array_len))
+			continue;
+		if (!color_set_flag[grid_button->inx])
+			continue;
+
+		if (color_inx[grid_button->inx] >= 0) {
+			color_inx[grid_button->inx] %= sview_colors_cnt;
+			new_col = sview_colors[color_inx[grid_button->inx]];
+		} else if (color_inx[grid_button->inx] == MAKE_BLACK) {
+			new_col = blank_color;
+		} else if (color_inx[grid_button->inx] == MAKE_TOPO_1) {
+			new_col = topo1_color;
+		} else if (color_inx[grid_button->inx] == MAKE_TOPO_2) {
+			new_col = topo2_color;
+		} else
+			new_col = white_color;
+		gdk_color_parse(new_col, &color);
+
+		_change_button_color(grid_button, color_inx[grid_button->inx],
+				     new_col, color, only_change_unused,
+				     state_override);
+	}
+	list_iterator_destroy(itr);
+	return;
 }
 
 extern void highlight_grid(GtkTreeView *tree_view,
@@ -1016,10 +1177,6 @@ extern void highlight_grid(GtkTreeView *tree_view,
 		gtk_tree_selection_selected_foreach(
 			gtk_tree_view_get_selection(tree_view),
 			_each_highlight_selected, &grid_foreach);
-	if (working_sview_config.grid_speedup) {
-		gtk_widget_set_sensitive(GTK_WIDGET(main_grid_table), 0);
-		gtk_widget_set_sensitive(GTK_WIDGET(main_grid_table), 1);
-	}
 
 	return;
 }
@@ -1155,7 +1312,7 @@ extern void add_extra_bluegene_buttons(List *button_list, int inx,
 	grid_button_t *grid_button = NULL;
 	grid_button_t *send_grid_button = NULL;
 	int i=0;
-	char *nodes = NULL;
+	char *mp_str = NULL;
 	char tmp_nodes[256];
 	int found = 0;
 	int coord_y=0;
@@ -1194,23 +1351,23 @@ extern void add_extra_bluegene_buttons(List *button_list, int inx,
 
 	for (i=0; i < block_ptr->record_count; i++) {
 		bg_info_ptr = &block_ptr->block_array[i];
-		if (!_block_in_node(bg_info_ptr->bp_inx, inx))
+		if (!_block_in_node(bg_info_ptr->mp_inx, inx))
 			continue;
 		found = 1;
-		nodes = bg_info_ptr->nodes;
-		if (bg_info_ptr->ionodes) {
-			sprintf(tmp_nodes, "%s[%s]", nodes,
-				bg_info_ptr->ionodes);
-			nodes = tmp_nodes;
+		mp_str = bg_info_ptr->mp_str;
+		if (bg_info_ptr->ionode_str) {
+			sprintf(tmp_nodes, "%s[%s]", mp_str,
+				bg_info_ptr->ionode_str);
+			mp_str = tmp_nodes;
 		}
-		if (bg_info_ptr->state == RM_PARTITION_ERROR)
+		if (bg_info_ptr->state & BG_BLOCK_ERROR_FLAG)
 			grid_button->state = NODE_STATE_ERROR;
 		else if (bg_info_ptr->job_running > NO_JOB_RUNNING)
 			grid_button->state = NODE_STATE_ALLOCATED;
 		else
 			grid_button->state = NODE_STATE_IDLE;
 		send_grid_button = create_grid_button_from_another(
-			grid_button, nodes, *color_inx);
+			grid_button, mp_str, *color_inx);
 		grid_button->state = orig_state;
 		if (send_grid_button) {
 			send_grid_button->button_list = *button_list;
@@ -1286,8 +1443,19 @@ extern void put_buttons_in_table(GtkTable *table, List button_list)
 	itr = list_iterator_create(button_list);
 	while ((grid_button = list_next(itr))) {
 		if (cluster_dims == 4) {
-			/* FIXME: */
-			return;
+			grid_button->table = table;
+			gtk_table_attach(table, grid_button->button,
+					 grid_button->table_x,
+					 (grid_button->table_x+1),
+					 grid_button->table_y,
+					 (grid_button->table_y+1),
+					 GTK_SHRINK, GTK_SHRINK,
+					 1, 1);
+			if (!grid_button->table_x) {
+				gtk_table_set_row_spacing(table,
+						grid_button->table_y,
+						working_sview_config.gap_size);
+			}
 		} else if (cluster_dims == 3) {
 			grid_button->table = table;
 			gtk_table_attach(table, grid_button->button,
@@ -1297,10 +1465,11 @@ extern void put_buttons_in_table(GtkTable *table, List button_list)
 					 (grid_button->table_y+1),
 					 GTK_SHRINK, GTK_SHRINK,
 					 1, 1);
-			if (!grid_button->table_x)
+			if (!grid_button->table_x) {
 				gtk_table_set_row_spacing(table,
-							  grid_button->table_y,
-							  5);
+						grid_button->table_y,
+						working_sview_config.gap_size);
+			}
 		} else {
 			grid_button->table = table;
 			grid_button->table_x = coord_x;
@@ -1316,7 +1485,8 @@ extern void put_buttons_in_table(GtkTable *table, List button_list)
 				coord_y++;
 				if (!(coord_y % working_sview_config.grid_vert))
 					gtk_table_set_row_spacing(
-						table, coord_y-1, 5);
+						table, coord_y-1,
+						working_sview_config.gap_size);
 			}
 
 			if (coord_y == button_processor.table_y)
@@ -1329,12 +1499,11 @@ extern void put_buttons_in_table(GtkTable *table, List button_list)
 	}
 	list_iterator_destroy(itr);
 
-#ifndef HAVE_3D
-	/* This is needed to get the correct width of the grid
-	   window.  If it is not given then we get a really narrow
-	   window. */
-	gtk_table_set_row_spacing(table, coord_y-1, 1);
-#endif
+	if (cluster_dims == 0) {
+		/* This is needed to get the correct width of the grid window.
+		 * If it is not given then we get a really narrow window. */
+		gtk_table_set_row_spacing(table, coord_y-1, 1);
+	}
 	gtk_widget_show_all(GTK_WIDGET(table));
 }
 
@@ -1421,7 +1590,8 @@ extern int get_system_stats(GtkTable *table)
 		changed = 0;
 	} else if (rc != SLURM_SUCCESS)
 		return SLURM_ERROR;
-	ba_init(node_info_ptr, 0);
+
+	select_g_ba_init(node_info_ptr, 0);
 
 	node_list = create_node_info_list(node_info_ptr,
 					  changed, FALSE);
@@ -1487,8 +1657,8 @@ extern void sview_init_grid(bool reset_highlight)
 	ListIterator itr = NULL;
 	grid_button_t *grid_button = NULL;
 
-	if ((rc = get_new_info_node(&node_info_ptr, force_refresh))
-	    == SLURM_NO_CHANGE_IN_DATA) {
+	rc = get_new_info_node(&node_info_ptr, force_refresh);
+	if (rc == SLURM_NO_CHANGE_IN_DATA) {
 		/* need to clear out old data */
 		set_grid_used(grid_button_list, -1, -1, false, reset_highlight);
 		return;
@@ -1502,7 +1672,7 @@ extern void sview_init_grid(bool reset_highlight)
 	}
 
 	itr = list_iterator_create(grid_button_list);
-	for(i=0; i<node_info_ptr->record_count; i++) {
+	for (i = 0; i < node_info_ptr->record_count; i++) {
 		int tried_again = 0;
 		node_ptr = &node_info_ptr->node_array[i];
 	try_again:
@@ -1512,7 +1682,6 @@ extern void sview_init_grid(bool reset_highlight)
 			grid_button->state = node_ptr->node_state;
 			gtk_widget_set_state(grid_button->button,
 					     GTK_STATE_NORMAL);
-			change_grid_color(grid_button_list, i, i, i, true, 0);
 			grid_button->used = false;
 			break;
 		}
@@ -1571,8 +1740,4 @@ extern void post_setup_popup_grid_list(popup_info_t *popup_win)
 
 	change_grid_color(popup_win->grid_button_list, -1, -1,
 			  MAKE_BLACK, true, NODE_STATE_IDLE);
-	if (working_sview_config.grid_speedup) {
-		gtk_widget_set_sensitive(GTK_WIDGET(popup_win->grid_table), 0);
-		gtk_widget_set_sensitive(GTK_WIDGET(popup_win->grid_table), 1);
-	}
 }

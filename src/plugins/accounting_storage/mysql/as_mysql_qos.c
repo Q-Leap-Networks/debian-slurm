@@ -8,7 +8,7 @@
  *  Written by Danny Auble <da@llnl.gov>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -112,19 +112,23 @@ static int _setup_qos_limits(slurmdb_qos_rec_t *qos,
 			qos->grp_cpu_run_mins = (uint64_t)INFINITE;
 		if (qos->max_cpus_pj == NO_VAL)
 			qos->max_cpus_pj = INFINITE;
+		if (qos->max_cpus_pu == NO_VAL)
+			qos->max_cpus_pu = INFINITE;
 		if (qos->max_jobs_pu == NO_VAL)
 			qos->max_jobs_pu = INFINITE;
 		if (qos->max_nodes_pj == NO_VAL)
 			qos->max_nodes_pj = INFINITE;
+		if (qos->max_nodes_pu == NO_VAL)
+			qos->max_nodes_pu = INFINITE;
 		if (qos->max_submit_jobs_pu == NO_VAL)
 			qos->max_submit_jobs_pu = INFINITE;
 		if (qos->max_wall_pj == NO_VAL)
 			qos->max_wall_pj = INFINITE;
 		if (qos->preempt_mode == (uint16_t)NO_VAL)
 			qos->preempt_mode = (uint16_t)INFINITE;
-		if (qos->usage_factor == (double)NO_VAL)
+		if (fuzzy_equal(qos->usage_factor, NO_VAL))
 			qos->usage_factor = (double)INFINITE;
-		if (qos->usage_thres == (double)NO_VAL)
+		if (fuzzy_equal(qos->usage_thres, NO_VAL))
 			qos->usage_thres = (double)INFINITE;
 	}
 
@@ -154,6 +158,17 @@ static int _setup_qos_limits(slurmdb_qos_rec_t *qos,
 			xstrcat(*cols, ", flags");
 			xstrfmtcat(*vals, ", '%u'", qos->flags & ~QOS_FLAG_ADD);
 		}
+	}
+
+	if (qos->grace_time == INFINITE) {
+		xstrcat(*cols, ", grace_time");
+		xstrcat(*vals, ", NULL");
+		xstrcat(*extra, ", grace_time=NULL");
+	} else if ((qos->grace_time != NO_VAL) &&
+		   ((int32_t)qos->grace_time >= 0)) {
+		xstrcat(*cols, ", grace_time");
+		xstrfmtcat(*vals, ", %u", qos->grace_time);
+		xstrfmtcat(*extra, ", grace_time=%u", qos->grace_time);
 	}
 
 	if (qos->grp_cpu_mins == (uint64_t)INFINITE) {
@@ -275,6 +290,17 @@ static int _setup_qos_limits(slurmdb_qos_rec_t *qos,
 		xstrfmtcat(*extra, ", max_cpus_per_job=%u", qos->max_cpus_pj);
 	}
 
+	if (qos->max_cpus_pu == INFINITE) {
+		xstrcat(*cols, ", max_cpus_per_user");
+		xstrcat(*vals, ", NULL");
+		xstrcat(*extra, ", max_cpus_per_user=NULL");
+	} else if ((qos->max_cpus_pu != NO_VAL)
+		   && ((int32_t)qos->max_cpus_pu >= 0)) {
+		xstrcat(*cols, ", max_cpus_per_user");
+		xstrfmtcat(*vals, ", %u", qos->max_cpus_pu);
+		xstrfmtcat(*extra, ", max_cpus_per_user=%u", qos->max_cpus_pu);
+	}
+
 	if (qos->max_jobs_pu == INFINITE) {
 		xstrcat(*cols, ", max_jobs_per_user");
 		xstrcat(*vals, ", NULL");
@@ -296,6 +322,18 @@ static int _setup_qos_limits(slurmdb_qos_rec_t *qos,
 		xstrfmtcat(*vals, ", %u", qos->max_nodes_pj);
 		xstrfmtcat(*extra, ", max_nodes_per_job=%u",
 			   qos->max_nodes_pj);
+	}
+
+	if (qos->max_nodes_pu == INFINITE) {
+		xstrcat(*cols, ", max_nodes_per_user");
+		xstrcat(*vals, ", NULL");
+		xstrcat(*extra, ", max_nodes_per_user=NULL");
+	} else if ((qos->max_nodes_pu != NO_VAL)
+		   && ((int32_t)qos->max_nodes_pu >= 0)) {
+		xstrcat(*cols, ", max_nodes_per_user");
+		xstrfmtcat(*vals, ", %u", qos->max_nodes_pu);
+		xstrfmtcat(*extra, ", max_nodes_per_user=%u",
+			   qos->max_nodes_pu);
 	}
 
 	if (qos->max_submit_jobs_pu == INFINITE) {
@@ -385,22 +423,22 @@ static int _setup_qos_limits(slurmdb_qos_rec_t *qos,
 		xstrfmtcat(*extra, ", priority=%u", qos->priority);
 	}
 
-	if (qos->usage_factor == (double)INFINITE) {
+	if (fuzzy_equal(qos->usage_factor, INFINITE)) {
 		xstrcat(*cols, ", usage_factor");
 		xstrcat(*vals, ", 1");
 		xstrcat(*extra, ", usage_factor=1");
-	} else if ((qos->usage_factor != (double)NO_VAL)
+	} else if (!fuzzy_equal(qos->usage_factor, NO_VAL)
 		   && (qos->usage_factor >= 0)) {
 		xstrcat(*cols, ", usage_factor");
 		xstrfmtcat(*vals, ", %f", qos->usage_factor);
 		xstrfmtcat(*extra, ", usage_factor=%f", qos->usage_factor);
 	}
 
-	if (qos->usage_thres == (double)INFINITE) {
+	if (fuzzy_equal(qos->usage_thres, INFINITE)) {
 		xstrcat(*cols, ", usage_thres");
 		xstrcat(*vals, ", NULL");
 		xstrcat(*extra, ", usage_thres=NULL");
-	} else if ((qos->usage_thres != (double)NO_VAL)
+	} else if (!fuzzy_equal(qos->usage_thres, NO_VAL)
 		   && (qos->usage_thres >= 0)) {
 		xstrcat(*cols, ", usage_thres");
 		xstrfmtcat(*vals, ", %f", qos->usage_thres);
@@ -640,6 +678,7 @@ extern List as_mysql_modify_qos(mysql_conn_t *mysql_conn, uint32_t uid,
 		qos_rec->flags = qos->flags;
 
 		qos_rec->grp_cpus = qos->grp_cpus;
+		qos_rec->grace_time = qos->grace_time;
 		qos_rec->grp_cpu_mins = qos->grp_cpu_mins;
 		qos_rec->grp_cpu_run_mins = qos->grp_cpu_run_mins;
 		qos_rec->grp_jobs = qos->grp_jobs;
@@ -648,10 +687,12 @@ extern List as_mysql_modify_qos(mysql_conn_t *mysql_conn, uint32_t uid,
 		qos_rec->grp_wall = qos->grp_wall;
 
 		qos_rec->max_cpus_pj = qos->max_cpus_pj;
+		qos_rec->max_cpus_pu = qos->max_cpus_pu;
 		qos_rec->max_cpu_mins_pj = qos->max_cpu_mins_pj;
 		qos_rec->max_cpu_run_mins_pu = qos->max_cpu_run_mins_pu;
 		qos_rec->max_jobs_pu  = qos->max_jobs_pu;
 		qos_rec->max_nodes_pj = qos->max_nodes_pj;
+		qos_rec->max_nodes_pu = qos->max_nodes_pu;
 		qos_rec->max_submit_jobs_pu  = qos->max_submit_jobs_pu;
 		qos_rec->max_wall_pj = qos->max_wall_pj;
 
@@ -921,6 +962,7 @@ extern List as_mysql_get_qos(mysql_conn_t *mysql_conn, uid_t uid,
 		"description",
 		"id",
 		"flags",
+		"grace_time",
 		"grp_cpu_mins",
 		"grp_cpu_run_mins",
 		"grp_cpus",
@@ -931,8 +973,10 @@ extern List as_mysql_get_qos(mysql_conn_t *mysql_conn, uid_t uid,
 		"max_cpu_mins_per_job",
 		"max_cpu_run_mins_per_user",
 		"max_cpus_per_job",
+		"max_cpus_per_user",
 		"max_jobs_per_user",
 		"max_nodes_per_job",
+		"max_nodes_per_user",
 		"max_submit_jobs_per_user",
 		"max_wall_duration_per_job",
 		"preempt",
@@ -946,6 +990,7 @@ extern List as_mysql_get_qos(mysql_conn_t *mysql_conn, uid_t uid,
 		QOS_REQ_DESC,
 		QOS_REQ_ID,
 		QOS_REQ_FLAGS,
+		QOS_REQ_GRACE,
 		QOS_REQ_GCM,
 		QOS_REQ_GCRM,
 		QOS_REQ_GC,
@@ -956,8 +1001,10 @@ extern List as_mysql_get_qos(mysql_conn_t *mysql_conn, uid_t uid,
 		QOS_REQ_MCMPJ,
 		QOS_REQ_MCRM,
 		QOS_REQ_MCPJ,
+		QOS_REQ_MCPU,
 		QOS_REQ_MJPU,
 		QOS_REQ_MNPJ,
+		QOS_REQ_MNPU,
 		QOS_REQ_MSJPU,
 		QOS_REQ_MWPJ,
 		QOS_REQ_PREE,
@@ -1064,6 +1111,11 @@ empty:
 		if (row[QOS_REQ_NAME] && row[QOS_REQ_NAME][0])
 			qos->name = xstrdup(row[QOS_REQ_NAME]);
 
+		if (row[QOS_REQ_GRACE])
+			qos->grace_time = slurm_atoul(row[QOS_REQ_GRACE]);
+		else
+			qos->grace_time = (uint32_t)NO_VAL;
+
 		if (row[QOS_REQ_GCM])
 			qos->grp_cpu_mins = slurm_atoull(row[QOS_REQ_GCM]);
 		else
@@ -1106,6 +1158,10 @@ empty:
 			qos->max_cpus_pj = slurm_atoul(row[QOS_REQ_MCPJ]);
 		else
 			qos->max_cpus_pj = INFINITE;
+		if (row[QOS_REQ_MCPU])
+			qos->max_cpus_pu = slurm_atoul(row[QOS_REQ_MCPU]);
+		else
+			qos->max_cpus_pu = INFINITE;
 		if (row[QOS_REQ_MJPU])
 			qos->max_jobs_pu = slurm_atoul(row[QOS_REQ_MJPU]);
 		else
@@ -1114,6 +1170,10 @@ empty:
 			qos->max_nodes_pj = slurm_atoul(row[QOS_REQ_MNPJ]);
 		else
 			qos->max_nodes_pj = INFINITE;
+		if (row[QOS_REQ_MNPU])
+			qos->max_nodes_pu = slurm_atoul(row[QOS_REQ_MNPU]);
+		else
+			qos->max_nodes_pu = INFINITE;
 		if (row[QOS_REQ_MSJPU])
 			qos->max_submit_jobs_pu =
 				slurm_atoul(row[QOS_REQ_MSJPU]);

@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -44,7 +44,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <slurm/slurm.h>
+#include "slurm/slurm.h"
 
 #include "src/common/parse_time.h"
 #include "src/common/slurm_protocol_api.h"
@@ -105,8 +105,10 @@ char *slurm_sprint_reservation_info ( reserve_info_t * resv_ptr,
 {
 	char tmp1[32], tmp2[32], tmp3[32], *flag_str = NULL;
 	char tmp_line[MAXHOSTRANGELEN];
+	char *state="INACTIVE";
 	char *out = NULL;
 	uint32_t duration;
+	time_t now = time(NULL);
 
 	/****** Line 1 ******/
 	slurm_make_time_str(&resv_ptr->start_time, tmp1, sizeof(tmp1));
@@ -138,9 +140,11 @@ char *slurm_sprint_reservation_info ( reserve_info_t * resv_ptr,
 		xstrcat(out, "\n   ");
 
 	/****** Line 3 ******/
+	if ((resv_ptr->start_time <= now) && (resv_ptr->end_time >= now))
+		state = "ACTIVE";
 	snprintf(tmp_line, sizeof(tmp_line),
-		 "Users=%s Accounts=%s Licenses=%s",
-		 resv_ptr->users, resv_ptr->accounts, resv_ptr->licenses);
+		 "Users=%s Accounts=%s Licenses=%s State=%s",
+		 resv_ptr->users, resv_ptr->accounts, resv_ptr->licenses, state);
 	xstrcat(out, tmp_line);
 	if (one_liner)
 		xstrcat(out, "\n");

@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -46,7 +46,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <slurm/slurm.h>
+#include "slurm/slurm.h"
 
 #include "src/common/parse_time.h"
 #include "src/common/read_config.h"
@@ -66,48 +66,6 @@
 extern long slurm_api_version (void)
 {
 	return (long) SLURM_API_VERSION;
-}
-
-
-static char *
-_select_info(uint16_t select_type_param)
-{
-	static char select_str[64];
-
-	select_str[0] = '\0';
-	if ((select_type_param & CR_CPU) &&
-	    (select_type_param & CR_MEMORY))
-		strcat(select_str, "CR_CPU_MEMORY");
-	else if ((select_type_param & CR_CORE) &&
-		 (select_type_param & CR_MEMORY))
-		strcat(select_str, "CR_CORE_MEMORY");
-	else if ((select_type_param & CR_SOCKET) &&
-		 (select_type_param & CR_MEMORY))
-		strcat(select_str, "CR_SOCKET_MEMORY");
-	else if (select_type_param & CR_CPU)
-		strcat(select_str, "CR_CPU");
-	else if (select_type_param & CR_CORE)
-		strcat(select_str, "CR_CORE");
-	else if (select_type_param & CR_SOCKET)
-		strcat(select_str, "CR_SOCKET");
-	else if (select_type_param & CR_MEMORY)
-		strcat(select_str, "CR_MEMORY");
-
-	if (select_type_param & CR_ONE_TASK_PER_CORE) {
-		if (select_str[0])
-			strcat(select_str, ",");
-		strcat(select_str, "CR_ONE_TASK_PER_CORE");
-	}
-	if (select_type_param & CR_CORE_DEFAULT_DIST_BLOCK) {
-		if (select_str[0])
-			strcat(select_str, ",");
-		strcat(select_str, "CR_CORE_DEFAULT_DIST_BLOCK");
-	}
-
-	if (select_str[0] == '\0')
-		strcat(select_str, "NONE");
-
-	return select_str;
 }
 
 static char *
@@ -227,6 +185,14 @@ extern void *slurm_ctl_conf_2_key_pairs (slurm_ctl_conf_t* slurm_ctl_conf_ptr)
 	list_append(ret_list, key_pair);
 
 	key_pair = xmalloc(sizeof(config_key_pair_t));
+	key_pair->name = xstrdup("AccountingStoreJobComment");
+	if (slurm_ctl_conf_ptr->acctng_store_job_comment)
+		key_pair->value = xstrdup("YES");
+	else
+		key_pair->value = xstrdup("NO");
+	list_append(ret_list, key_pair);
+
+	key_pair = xmalloc(sizeof(config_key_pair_t));
 	key_pair->name = xstrdup("AuthType");
 	key_pair->value = xstrdup(slurm_ctl_conf_ptr->authtype);
 	list_append(ret_list, key_pair);
@@ -297,22 +263,24 @@ extern void *slurm_ctl_conf_2_key_pairs (slurm_ctl_conf_t* slurm_ctl_conf_ptr)
 
 	key_pair = xmalloc(sizeof(config_key_pair_t));
 	key_pair->name = xstrdup("DebugFlags");
-	key_pair->value = debug_flags2str(slurm_ctl_conf_ptr->debug_flags);;
+	key_pair->value = debug_flags2str(slurm_ctl_conf_ptr->debug_flags);
 	list_append(ret_list, key_pair);
 
 	key_pair = xmalloc(sizeof(config_key_pair_t));
 	list_append(ret_list, key_pair);
-	key_pair->name = xstrdup("DefMemPerCPU");
 	if (slurm_ctl_conf_ptr->def_mem_per_cpu & MEM_PER_CPU) {
+		key_pair->name = xstrdup("DefMemPerCPU");
 		snprintf(tmp_str, sizeof(tmp_str), "%u",
 			 slurm_ctl_conf_ptr->def_mem_per_cpu &
 			 (~MEM_PER_CPU));
 		key_pair->value = xstrdup(tmp_str);
 	} else if (slurm_ctl_conf_ptr->def_mem_per_cpu) {
+		key_pair->name = xstrdup("DefMemPerNode");
 		snprintf(tmp_str, sizeof(tmp_str), "%u",
 			 slurm_ctl_conf_ptr->def_mem_per_cpu);
 		key_pair->value = xstrdup(tmp_str);
 	} else {
+		key_pair->name = xstrdup("DefMemPerNode");
 		key_pair->value = xstrdup("UNLIMITED");
 	}
 
@@ -391,8 +359,8 @@ extern void *slurm_ctl_conf_2_key_pairs (slurm_ctl_conf_t* slurm_ctl_conf_ptr)
 	key_pair->value = xstrdup(tmp_str);
 	list_append(ret_list, key_pair);
 
-	if(slurm_ctl_conf_ptr->hash_val != NO_VAL) {
-		if(slurm_ctl_conf_ptr->hash_val == slurm_get_hash_val())
+	if (slurm_ctl_conf_ptr->hash_val != NO_VAL) {
+		if (slurm_ctl_conf_ptr->hash_val == slurm_get_hash_val())
 			snprintf(tmp_str, sizeof(tmp_str), "Match");
 		else {
 			snprintf(tmp_str, sizeof(tmp_str),
@@ -401,7 +369,7 @@ extern void *slurm_ctl_conf_2_key_pairs (slurm_ctl_conf_t* slurm_ctl_conf_ptr)
 				 slurm_ctl_conf_ptr->hash_val);
 		}
 		key_pair = xmalloc(sizeof(config_key_pair_t));
-		key_pair->name = xstrdup("HashVal");
+		key_pair->name = xstrdup("HASH_VAL");
 		key_pair->value = xstrdup(tmp_str);
 		list_append(ret_list, key_pair);
 	}
@@ -538,21 +506,37 @@ extern void *slurm_ctl_conf_2_key_pairs (slurm_ctl_conf_t* slurm_ctl_conf_ptr)
 	key_pair->value = xstrdup(tmp_str);
 	list_append(ret_list, key_pair);
 
+	snprintf(tmp_str, sizeof(tmp_str), "%u",
+		 slurm_ctl_conf_ptr->max_job_id);
+	key_pair = xmalloc(sizeof(config_key_pair_t));
+	key_pair->name = xstrdup("MaxJobId");
+	key_pair->value = xstrdup(tmp_str);
+	list_append(ret_list, key_pair);
+
 	key_pair = xmalloc(sizeof(config_key_pair_t));
 	list_append(ret_list, key_pair);
-	key_pair->name = xstrdup("MaxMemPerCPU");
 	if (slurm_ctl_conf_ptr->max_mem_per_cpu & MEM_PER_CPU) {
+		key_pair->name = xstrdup("MaxMemPerCPU");
 		snprintf(tmp_str, sizeof(tmp_str), "%u",
 			 slurm_ctl_conf_ptr->max_mem_per_cpu & (~MEM_PER_CPU));
 		key_pair->value = xstrdup(tmp_str);
 
 	} else if (slurm_ctl_conf_ptr->max_mem_per_cpu) {
+		key_pair->name = xstrdup("MaxMemPerNode");
 		snprintf(tmp_str, sizeof(tmp_str), "%u",
 			 slurm_ctl_conf_ptr->max_mem_per_cpu);
 		key_pair->value = xstrdup(tmp_str);
 	} else {
+		key_pair->name = xstrdup("MaxMemPerNode");
 		key_pair->value = xstrdup("UNLIMITED");
 	}
+
+	snprintf(tmp_str, sizeof(tmp_str), "%u",
+		 slurm_ctl_conf_ptr->max_step_cnt);
+	key_pair = xmalloc(sizeof(config_key_pair_t));
+	key_pair->name = xstrdup("MaxStepCount");
+	key_pair->value = xstrdup(tmp_str);
+	list_append(ret_list, key_pair);
 
 	snprintf(tmp_str, sizeof(tmp_str), "%u",
 		 slurm_ctl_conf_ptr->max_tasks_per_node);
@@ -834,7 +818,8 @@ extern void *slurm_ctl_conf_2_key_pairs (slurm_ctl_conf_t* slurm_ctl_conf_ptr)
 		key_pair = xmalloc(sizeof(config_key_pair_t));
 		key_pair->name = xstrdup("SelectTypeParameters");
 		key_pair->value = xstrdup(
-			_select_info(slurm_ctl_conf_ptr->select_type_param));
+			sched_param_type_string(slurm_ctl_conf_ptr->
+						select_type_param));
 		list_append(ret_list, key_pair);
 	}
 

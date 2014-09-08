@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -81,6 +81,8 @@ struct config_record {
 };
 extern List config_list;	/* list of config_record entries */
 
+extern List front_end_list;	/* list of slurm_conf_frontend_t entries */
+
 struct features_record {
 	uint32_t magic;		/* magic cookie to test data integrity */
 	char *name;		/* name of a feature */
@@ -91,6 +93,7 @@ extern List feature_list;	/* list of features_record entries */
 struct node_record {
 	uint32_t magic;			/* magic cookie for data integrity */
 	char *name;			/* name of the node. NULL==defunct */
+	char *node_hostname;		/* hostname of the node */
 	uint16_t node_state;		/* enum node_states, ORed with
 					 * NODE_STATE_NO_RESPOND if not
 					 * responding */
@@ -146,6 +149,7 @@ struct node_record {
 #ifdef HAVE_CRAY
 	uint32_t basil_node_id;		/* Cray-XT BASIL node ID,
 					 * no need to save/restore */
+	time_t down_time;		/* When first set to DOWN state */
 #endif	/* HAVE_CRAY */
 	dynamic_plugin_data_t *select_nodeinfo; /* opaque data structure,
 						 * use select_g_get_nodeinfo()
@@ -159,6 +163,18 @@ extern time_t last_node_update;		/* time of last node record update */
 
 
 /*
+ * bitmap2node_name_sortable - given a bitmap, build a list of comma
+ *	separated node names. names may include regular expressions
+ *	(e.g. "lx[01-10]")
+ * IN bitmap - bitmap pointer
+ * IN sort   - returned ordered list or not
+ * RET pointer to node list or NULL on error
+ * globals: node_record_table_ptr - pointer to node table
+ * NOTE: the caller must xfree the memory at node_list when no longer required
+ */
+char * bitmap2node_name_sortable (bitstr_t *bitmap, bool sort);
+
+/*
  * bitmap2node_name - given a bitmap, build a list of comma separated node
  *	names. names may include regular expressions (e.g. "lx[01-10]")
  * IN bitmap - bitmap pointer
@@ -169,12 +185,20 @@ extern time_t last_node_update;		/* time of last node record update */
 char * bitmap2node_name (bitstr_t *bitmap);
 
 /*
- * _build_all_nodeline_info - get a array of slurm_conf_node_t structures
+ * build_all_nodeline_info - get a array of slurm_conf_node_t structures
  *	from the slurm.conf reader, build table, and set values
  * IN set_bitmap - if true, set node_bitmap in config record (used by slurmd)
  * RET 0 if no error, error code otherwise
  */
 extern int build_all_nodeline_info (bool set_bitmap);
+
+/*
+ * build_all_frontend_info - get a array of slurm_conf_frontend_t structures
+ *	from the slurm.conf reader, build table, and set values
+ * is_slurmd_context: set to true if run from slurmd
+ * RET 0 if no error, error code otherwise
+ */
+extern int build_all_frontend_info (bool is_slurmd_context);
 
 /* Given a config_record with it's bitmap already set, update feature_list */
 extern void  build_config_feature_list (struct config_record *config_ptr);
@@ -242,6 +266,6 @@ extern void purge_node_rec (struct node_record *node_ptr);
 extern void rehash_node (void);
 
 /* Convert a node state string to it's equivalent enum value */
-extern int state_str2int(const char *state_str);
+extern int state_str2int(const char *state_str, char *node_name);
 
 #endif /* !_HAVE_NODE_CONF_H */

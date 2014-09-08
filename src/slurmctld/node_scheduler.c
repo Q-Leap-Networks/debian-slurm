@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -55,7 +55,7 @@
 #include <syslog.h>
 #include <unistd.h>
 
-#include <slurm/slurm_errno.h>
+#include "slurm/slurm_errno.h"
 
 #include "src/common/assoc_mgr.h"
 #include "src/common/hostlist.h"
@@ -69,7 +69,7 @@
 
 #include "src/slurmctld/acct_policy.h"
 #include "src/slurmctld/agent.h"
-#include "src/slurmctld/basil_interface.h"
+#include "src/slurmctld/front_end.h"
 #include "src/slurmctld/job_scheduler.h"
 #include "src/slurmctld/licenses.h"
 #include "src/slurmctld/node_scheduler.h"
@@ -130,11 +130,21 @@ extern void allocate_nodes(struct job_record *job_ptr)
 {
 	int i;
 
-	for (i = 0; i < node_record_count; i++) {
-		if (bit_test(job_ptr->node_bitmap, i))
-			make_node_alloc(&node_record_table_ptr[i], job_ptr);
-	}
+#ifdef HAVE_FRONT_END
+	job_ptr->front_end_ptr = assign_front_end();
+	xassert(job_ptr->front_end_ptr);
+	xfree(job_ptr->batch_host);
+	job_ptr->batch_host = xstrdup(job_ptr->front_end_ptr->name);
+#endif
 
+	for (i = 0; i < node_record_count; i++) {
+		if (!bit_test(job_ptr->node_bitmap, i))
+			continue;
+		make_node_alloc(&node_record_table_ptr[i], job_ptr);
+		if (job_ptr->batch_host)
+			continue;
+		job_ptr->batch_host = xstrdup(node_record_table_ptr[i].name);
+	}
 	last_node_update = time(NULL);
 
 	license_job_get(job_ptr);
@@ -151,15 +161,19 @@ extern void allocate_nodes(struct job_record *job_ptr)
  *	RPC instead of REQUEST_TERMINATE_JOB
  * IN suspended - true if job was already suspended (node's job_run_cnt
  *	already decremented);
+ * IN preempted - true if job is being preempted
  */
 extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
-		bool suspended)
+		bool suspended, bool preempted)
 {
 	int i;
 	kill_job_msg_t *kill_job = NULL;
 	agent_arg_t *agent_args = NULL;
 	int down_node_cnt = 0;
 	struct node_record *node_ptr;
+#ifdef HAVE_FRONT_END
+	front_end_record_t *front_end_ptr;
+#endif
 
 	xassert(job_ptr);
 	xassert(job_ptr->details);
@@ -172,17 +186,17 @@ extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
 		error("select_g_job_fini(%u): %m", job_ptr->job_id);
 	(void) epilog_slurmctld(job_ptr);
 
-#ifdef HAVE_CRAY
-	basil_release(job_ptr);
-#endif /* HAVE_CRAY */
-
 	agent_args = xmalloc(sizeof(agent_arg_t));
 	if (timeout)
 		agent_args->msg_type = REQUEST_KILL_TIMELIMIT;
+	else if (preempted)
+		agent_args->msg_type = REQUEST_KILL_PREEMPTED;
 	else
 		agent_args->msg_type = REQUEST_TERMINATE_JOB;
 	agent_args->retry = 0;	/* re_kill_job() resends as needed */
 	agent_args->hostlist = hostlist_create("");
+	if (agent_args->hostlist == NULL)
+		fatal("hostlist_create: malloc failure");
 	kill_job = xmalloc(sizeof(kill_job_msg_t));
 	last_node_update    = time(NULL);
 	kill_job->job_id    = job_ptr->job_id;
@@ -198,9 +212,57 @@ extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
 					    job_ptr->spank_job_env);
 	kill_job->spank_job_env_size = job_ptr->spank_job_env_size;
 
-	for (i=0, node_ptr=node_record_table_ptr;
+#ifdef HAVE_FRONT_END
+	if (job_ptr->batch_host &&
+	    (front_end_ptr = job_ptr->front_end_ptr)) {
+		if (IS_NODE_DOWN(front_end_ptr)) {
+			/* Issue the KILL RPC, but don't verify response */
+			front_end_ptr->job_cnt_comp = 0;
+			front_end_ptr->job_cnt_run  = 0;
+			down_node_cnt++;
+			if (job_ptr->node_bitmap_cg) {
+				bit_nclear(job_ptr->node_bitmap_cg, 0,
+					   node_record_count - 1);
+			} else {
+				error("deallocate_nodes: node_bitmap_cg is "
+				      "not set");
+				/* Create empty node_bitmap_cg */
+				job_ptr->node_bitmap_cg =
+					bit_alloc(node_record_count);
+			}
+			job_ptr->cpu_cnt  = 0;
+			job_ptr->node_cnt = 0;
+		} else {
+			front_end_ptr->job_cnt_comp++;
+			if (front_end_ptr->job_cnt_run)
+				front_end_ptr->job_cnt_run--;
+			else {
+				error("front_end %s job_cnt_run underflow",
+				      front_end_ptr->name);
+			}
+			if (front_end_ptr->job_cnt_run == 0) {
+				uint16_t state_flags;
+				state_flags = front_end_ptr->node_state &
+					      NODE_STATE_FLAGS;
+				state_flags |= NODE_STATE_COMPLETING;
+				front_end_ptr->node_state = NODE_STATE_IDLE |
+							    state_flags;
+			}
+			for (i = 0, node_ptr = node_record_table_ptr;
+			     i < node_record_count; i++, node_ptr++) {
+				if (!bit_test(job_ptr->node_bitmap, i))
+					continue;
+				make_node_comp(node_ptr, job_ptr, suspended);
+			}
+		}
+
+		hostlist_push(agent_args->hostlist, job_ptr->batch_host);
+		agent_args->node_count++;
+	}
+#else
+	for (i = 0, node_ptr = node_record_table_ptr;
 	     i < node_record_count; i++, node_ptr++) {
-		if (bit_test(job_ptr->node_bitmap, i) == 0)
+		if (!bit_test(job_ptr->node_bitmap, i))
 			continue;
 		if (IS_NODE_DOWN(node_ptr)) {
 			/* Issue the KILL RPC, but don't verify response */
@@ -215,23 +277,23 @@ extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
 			job_ptr->node_cnt--;
 		}
 		make_node_comp(node_ptr, job_ptr, suspended);
-#ifdef HAVE_FRONT_END		/* Operate only on front-end */
-		if (agent_args->node_count > 0)
-			continue;
-#endif
+
 		hostlist_push(agent_args->hostlist, node_ptr->name);
 		agent_args->node_count++;
 	}
+#endif
 
 	if ((agent_args->node_count - down_node_cnt) == 0) {
 		job_ptr->job_state &= (~JOB_COMPLETING);
-		delete_step_records(job_ptr, 0);
+		delete_step_records(job_ptr);
 		slurm_sched_schedule();
 	}
 
 	if (agent_args->node_count == 0) {
-		error("Job %u allocated no nodes to be killed on",
-		      job_ptr->job_id);
+		if (job_ptr->details->expanding_jobid == 0) {
+			error("Job %u allocated no nodes to be killed on",
+			      job_ptr->job_id);
+		}
 		xfree(kill_job->nodes);
 		select_g_select_jobinfo_free(kill_job->select_jobinfo);
 		xfree(kill_job);
@@ -946,7 +1008,7 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 	/* The job is not able to start right now, return a
 	 * value indicating when the job can start */
 	if (!runable_avail)
-		error_code = ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE;
+		error_code = ESLURM_NODE_NOT_AVAIL;
 	if (!runable_ever) {
 		error_code = ESLURM_REQUESTED_NODE_CONFIG_UNAVAILABLE;
 		info("_pick_best_nodes: job %u never runnable",
@@ -975,12 +1037,14 @@ static void _preempt_jobs(List preemptee_job_list, int *error_code)
 	while ((job_ptr = (struct job_record *) list_next(iter))) {
 		mode = slurm_job_preempt_mode(job_ptr);
 		if (mode == PREEMPT_MODE_CANCEL) {
-			rc = job_signal(job_ptr->job_id, SIGKILL, 0, 0);
+			job_cnt++;
+			if (slurm_job_check_grace(job_ptr) == SLURM_SUCCESS)
+				continue;
+			rc = job_signal(job_ptr->job_id, SIGKILL, 0, 0, true);
 			if (rc == SLURM_SUCCESS) {
 				info("preempted job %u has been killed",
 				     job_ptr->job_id);
 			}
-			job_cnt++;
 		} else if (mode == PREEMPT_MODE_CHECKPOINT) {
 			checkpoint_msg_t ckpt_msg;
 			memset(&ckpt_msg, 0, sizeof(checkpoint_msg_t));
@@ -1002,7 +1066,7 @@ static void _preempt_jobs(List preemptee_job_list, int *error_code)
 			job_cnt++;
 		} else if (mode == PREEMPT_MODE_REQUEUE) {
 			rc = job_requeue(0, job_ptr->job_id, -1,
-					 (uint16_t)NO_VAL);
+					 (uint16_t)NO_VAL, true);
 			if (rc == SLURM_SUCCESS) {
 				info("preempted job %u has been requeued",
 				     job_ptr->job_id);
@@ -1017,7 +1081,7 @@ static void _preempt_jobs(List preemptee_job_list, int *error_code)
 		}
 
 		if (rc != SLURM_SUCCESS) {
-			rc = job_signal(job_ptr->job_id, SIGKILL, 0, 0);
+			rc = job_signal(job_ptr->job_id, SIGKILL, 0, 0, true);
 			if (rc == SLURM_SUCCESS)
 				info("preempted job %u had to be killed",
 				     job_ptr->job_id);
@@ -1110,14 +1174,13 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 		fail_reason = WAIT_PART_NODE_LIMIT;
 	else if (qos_ptr && assoc_ptr &&
 		 (qos_ptr->flags & QOS_FLAG_ENFORCE_USAGE_THRES) &&
-		 (qos_ptr->usage_thres != (double)NO_VAL)) {
+		 (!fuzzy_equal(qos_ptr->usage_thres, NO_VAL))) {
 		if (!job_ptr->prio_factors)
 			job_ptr->prio_factors =
 				xmalloc(sizeof(priority_factors_object_t));
 
 		if (!job_ptr->prio_factors->priority_fs) {
-			if (assoc_ptr->usage->usage_efctv
-			    == (long double)NO_VAL)
+			if (fuzzy_equal(assoc_ptr->usage->usage_efctv, NO_VAL))
 				priority_g_set_assoc_usage(assoc_ptr);
 			job_ptr->prio_factors->priority_fs =
 				priority_g_calc_fs_factor(
@@ -1178,6 +1241,17 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 		max_nodes = MIN(job_ptr->details->max_nodes,
 				part_ptr->max_nodes);
 
+	if (job_ptr->details->req_node_bitmap && job_ptr->details->max_nodes) {
+		i = bit_set_count(job_ptr->details->req_node_bitmap);
+		if (i > job_ptr->details->max_nodes) {
+			info("Job %u required node list has more node than "
+			     "the job can use (%d > %u)",
+			     job_ptr->job_id, i, job_ptr->details->max_nodes);
+			error_code = ESLURM_REQUESTED_NODE_CONFIG_UNAVAILABLE;
+			goto cleanup;
+		}
+	}
+
 	max_nodes = MIN(max_nodes, 500000);	/* prevent overflows */
 	if (!job_ptr->limit_set_max_nodes && job_ptr->details->max_nodes)
 		req_nodes = max_nodes;
@@ -1199,8 +1273,22 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 	 * free up. total_cpus is set within _get_req_features */
 	job_ptr->cpu_cnt = job_ptr->total_cpus;
 
-	if (!test_only && preemptee_job_list && (error_code == SLURM_SUCCESS))
-		_preempt_jobs(preemptee_job_list, &error_code);
+	if (!test_only && preemptee_job_list && (error_code == SLURM_SUCCESS)){
+		struct job_details *detail_ptr = job_ptr->details;
+		time_t now = time(NULL);
+		if ((detail_ptr->preempt_start_time != 0) &&
+		    (detail_ptr->preempt_start_time >
+		     (now - slurmctld_conf.kill_wait -
+		      slurmctld_conf.msg_timeout))) {
+			/* Job preemption still in progress,
+			 * do not preempt any more jobs yet */
+			error_code = ESLURM_NODES_BUSY;
+		} else {
+			_preempt_jobs(preemptee_job_list, &error_code);
+			if (error_code == ESLURM_NODES_BUSY)
+  				detail_ptr->preempt_start_time = now;
+		}
+	}
 	if (error_code) {
 		if (error_code == ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE) {
 			/* Too many nodes requested */
@@ -1236,15 +1324,6 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 		error_code = SLURM_SUCCESS;
 		goto cleanup;
 	}
-
-#ifdef HAVE_CRAY
-	if (basil_reserve(job_ptr) != SLURM_SUCCESS) {
-		job_ptr->state_reason = WAIT_RESOURCES;
-		xfree(job_ptr->state_desc);
-		error_code = ESLURM_NODES_BUSY;
-		goto cleanup;
-	}
-#endif	/* HAVE_CRAY */
 
 	/* This job may be getting requeued, clear vestigial
 	 * state information before over-writing and leaking
@@ -1982,16 +2061,26 @@ extern void re_kill_job(struct job_record *job_ptr)
 	int i;
 	kill_job_msg_t *kill_job;
 	agent_arg_t *agent_args;
-	hostlist_t kill_hostlist = hostlist_create("");
+	hostlist_t kill_hostlist;
 	char *host_str = NULL;
 	static uint32_t last_job_id = 0;
+	struct node_record *node_ptr;
+#ifdef HAVE_FRONT_END
+	front_end_record_t *front_end_ptr;
+#endif
 
 	xassert(job_ptr);
 	xassert(job_ptr->details);
 
+	kill_hostlist = hostlist_create("");
+	if (kill_hostlist == NULL)
+		fatal("hostlist_create: malloc failure");
+
 	agent_args = xmalloc(sizeof(agent_arg_t));
 	agent_args->msg_type = REQUEST_TERMINATE_JOB;
 	agent_args->hostlist = hostlist_create("");
+	if (agent_args->hostlist == NULL)
+		fatal("hostlist_create: malloc failure");
 	agent_args->retry = 0;
 	kill_job = xmalloc(sizeof(kill_job_msg_t));
 	kill_job->job_id    = job_ptr->job_id;
@@ -2006,40 +2095,65 @@ extern void re_kill_job(struct job_record *job_ptr)
 					    job_ptr->spank_job_env);
 	kill_job->spank_job_env_size = job_ptr->spank_job_env_size;
 
+#ifdef HAVE_FRONT_END
+	if (job_ptr->batch_host &&
+	    (front_end_ptr = find_front_end_record(job_ptr->batch_host))) {
+		if (IS_NODE_DOWN(front_end_ptr)) {
+			for (i = 0, node_ptr = node_record_table_ptr;
+			     i < node_record_count; i++, node_ptr++) {
+				if ((job_ptr->node_bitmap_cg == NULL) ||
+				    (!bit_test(job_ptr->node_bitmap_cg, i)))
+					continue;
+				bit_clear(job_ptr->node_bitmap_cg, i);
+				job_update_cpu_cnt(job_ptr, i);
+				if (node_ptr->comp_job_cnt)
+					(node_ptr->comp_job_cnt)--;
+				if ((job_ptr->node_cnt > 0) &&
+				    ((--job_ptr->node_cnt) == 0)) {
+					last_node_update = time(NULL);
+					job_ptr->job_state &= (~JOB_COMPLETING);
+					delete_step_records(job_ptr);
+					slurm_sched_schedule();
+				}
+			}
+		} else if (!IS_NODE_NO_RESPOND(front_end_ptr)) {
+			(void) hostlist_push_host(kill_hostlist,
+						  job_ptr->batch_host);
+			hostlist_push(agent_args->hostlist,
+				      job_ptr->batch_host);
+			agent_args->node_count++;
+		}
+	}
+#else
 	for (i = 0; i < node_record_count; i++) {
-		struct node_record *node_ptr = &node_record_table_ptr[i];
+		node_ptr = &node_record_table_ptr[i];
 		if ((job_ptr->node_bitmap_cg == NULL) ||
-		    (bit_test(job_ptr->node_bitmap_cg, i) == 0))
+		    (bit_test(job_ptr->node_bitmap_cg, i) == 0)) {
 			continue;
-		if (IS_NODE_DOWN(node_ptr) &&
-		    bit_test(job_ptr->node_bitmap_cg, i)) {
+		} else if (IS_NODE_DOWN(node_ptr)) {
 			/* Consider job already completed */
 			bit_clear(job_ptr->node_bitmap_cg, i);
 			job_update_cpu_cnt(job_ptr, i);
 			if (node_ptr->comp_job_cnt)
 				(node_ptr->comp_job_cnt)--;
-			if ((--job_ptr->node_cnt) == 0) {
+			if ((job_ptr->node_cnt > 0) &&
+			    ((--job_ptr->node_cnt) == 0)) {
 				job_ptr->job_state &= (~JOB_COMPLETING);
-				delete_step_records(job_ptr, 0);
+				delete_step_records(job_ptr);
 				slurm_sched_schedule();
 				last_node_update = time(NULL);
 			}
-			continue;
+		} else if (!IS_NODE_NO_RESPOND(node_ptr)) {
+			(void)hostlist_push_host(kill_hostlist, node_ptr->name);
+			hostlist_push(agent_args->hostlist, node_ptr->name);
+			agent_args->node_count++;
 		}
-		if (IS_NODE_DOWN(node_ptr) || IS_NODE_NO_RESPOND(node_ptr))
-			continue;
-		(void) hostlist_push_host(kill_hostlist, node_ptr->name);
-#ifdef HAVE_FRONT_END		/* Operate only on front-end */
-		if (agent_args->node_count > 0)
-			continue;
-#endif
-		hostlist_push(agent_args->hostlist, node_ptr->name);
-		agent_args->node_count++;
 	}
+#endif
 
 	if (agent_args->node_count == 0) {
 		slurm_free_kill_job_msg(kill_job);
-		if(agent_args->hostlist)
+		if (agent_args->hostlist)
 			hostlist_destroy(agent_args->hostlist);
 		xfree(agent_args);
 		hostlist_destroy(kill_hostlist);

@@ -1,4 +1,4 @@
-.TH SCANCEL "1" "January 2011" "scancel 2.2" "Slurm components"
+.TH SCANCEL "1" "January 2011" "scancel 2.3" "Slurm components"
 
 .SH "NAME"
 scancel \- Used to signal jobs or job steps that are under the control of Slurm.
@@ -33,6 +33,8 @@ for details.
 \fB-\-ctld\fR
 Send the job signal request to the slurmctld daemon rather than directly to the
 slurmd daemons. This increases overhead, but offers better fault tolerance.
+This is the default behavior on architectures using front end nodes (e.g.
+BlueGene and Cray computers) or when the \fB\-\-clusters\fR option is used.
 
 .TP
 \fB\-\-help\fR
@@ -223,7 +225,7 @@ Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 CODE\-OCEC\-09\-009. All rights reserved.
 .LP
 This file is part of SLURM, a resource management program.
-For details, see <https://computing.llnl.gov/linux/slurm/>.
+For details, see <http://www.schedmd.com/slurmdocs/>.
 .LP
 SLURM is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free
@@ -236,4 +238,4 @@ FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 details.
 
 .SH "SEE ALSO"
-\fBslurm_kill_job\fR(3), \fBslurm_kill_job_step\fR(3)
+\fBslurm_kill_job\fR (3), \fBslurm_kill_job_step\fR (3)

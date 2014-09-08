@@ -13,7 +13,7 @@
 # CODE-OCEC-09-009. All rights reserved.
 #
 # This file is part of SLURM, a resource management program.
-# For details, see <https://computing.llnl.gov/linux/slurm/>.
+# For details, see <http://www.schedmd.com/slurmdocs/>.
 # Please also read the included file: DISCLAIMER.
 #
 # SLURM is free software; you can redistribute it and/or modify it under
@@ -33,23 +33,30 @@
 source ./globals
 
 set test_id     "1.42"
-set file_in     "test$test_id.input"
+set file_in1    "test$test_id.input1"
 set exit_code   0
 set job_id1     0
 set job_id2     0
 
 print_header $test_id
 
-#
-# Build input script file
-#
-make_bash_script $file_in "$bin_sleep 30"
+# if scontrol could be ran from the compute nodes this would work as well
+if {[test_cray]} {
+	send_user "\nWARNING: This test is incompatible with Cray systems\n"
+	exit $exit_code
+}
 
 #
-# Spawn an sbatch job that just sleeps for a while
+# Build input script files
+#
+exec $bin_rm -f $file_in1
+make_bash_script $file_in1 "$bin_sleep 10"
+
+#
+# Spawn a batch job that just sleeps for a while
 #
 set timeout $max_job_delay
-set sbatch_pid [spawn $sbatch --output=/dev/null --error=/dev/null -t1 $file_in]
+set sbatch_pid [spawn $sbatch --output=/dev/null --error=/dev/null -t1 $file_in1]
 expect {
 	-re "Submitted batch job ($number)" {
 		set job_id1 $expect_out(1,string)
@@ -72,15 +79,11 @@ if {$job_id1 == 0} {
 #
 # Submit a dependent job
 #
-set match_state 0
-set srun_pid [spawn $srun -v --dependency=afterany:$job_id1 $scontrol show job $job_id1]
+set match_job_state 0
+set srun_pid [spawn $srun --dependency=afterany:$job_id1 $scontrol show job $job_id1]
 expect {
-	-re "launching ($number).0" {
-		set job_id2 $expect_out(1,string)
-		exp_continue
-	}
 	-re "JobState=COMPLETED|COMPLETING" {
-		set match_state 1
+		set match_job_state 1
 		exp_continue
 	}
 	timeout {
@@ -92,37 +95,13 @@ expect {
 		wait
 	}
 }
-if {$match_state == 0} {
+if {$match_job_state == 0} {
 	send_user "\nFAILURE: Dependent job not completed\n"
 	set exit_code 1
 }
 
-#
-# Confirm dependency info within second job
-#
-set match_jobid 0
-spawn $scontrol show job $job_id2
-expect {
-	-re "Dependency=afterany:($number)" {
-		set match_jobid $expect_out(1,string)
-		exp_continue
-	}
-	timeout {
-		send_user "\nFAILURE: scontrol not responding\n"
-		set exit_code 1
-	}
-	eof {
-		wait
-	}
-}
-if {$match_jobid != $job_id1} {
-	send_user "\nFAILURE: Dependency information not processed\n"
-	set exit_code 1
-}
-
-
 if {$exit_code == 0} {
-	exec $bin_rm -f $file_in
+	exec $bin_rm -f $file_in1
 	send_user "\nSUCCESS\n"
 }
 exit $exit_code

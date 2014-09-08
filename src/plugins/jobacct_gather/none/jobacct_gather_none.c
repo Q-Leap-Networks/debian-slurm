@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -155,7 +155,7 @@ extern void jobacct_gather_p_resume_poll()
 	return;
 }
 
-extern int jobacct_gather_p_set_proctrack_container_id(uint32_t id)
+extern int jobacct_gather_p_set_proctrack_container_id(uint64_t id)
 {
 	return SLURM_SUCCESS;
 }

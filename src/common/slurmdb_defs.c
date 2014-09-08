@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -461,6 +461,7 @@ extern void slurmdb_destroy_job_rec(void *object)
 		xfree(job->account);
 		xfree(job->blockid);
 		xfree(job->cluster);
+		xfree(job->derived_es);
 		xfree(job->jobname);
 		xfree(job->partition);
 		xfree(job->nodes);
@@ -945,7 +946,6 @@ extern List slurmdb_get_info_cluster(char *cluster_names)
 	char *cluster_name = NULL;
 	void *db_conn = NULL;
 	ListIterator itr, itr2;
-	int err = 0;
 	bool all_clusters = 0;
 
 	if (cluster_names && !strcmp(cluster_names, "all"))
@@ -970,7 +970,6 @@ extern List slurmdb_get_info_cluster(char *cluster_names)
 	if (!cluster_names || all_clusters) {
 		while ((cluster_rec = list_next(itr))) {
 			if (_setup_cluster_rec(cluster_rec) != SLURM_SUCCESS) {
-				err = 1;
 				list_delete_item(itr);
 			}
 		}
@@ -986,12 +985,10 @@ extern List slurmdb_get_info_cluster(char *cluster_names)
 			if (!cluster_rec) {
 				error("No cluster '%s' known by database.",
 				      cluster_name);
-				err = 1;
 				goto next;
 			}
 
 			if (_setup_cluster_rec(cluster_rec) != SLURM_SUCCESS) {
-				err = 1;
 				list_delete_item(itr);
 			}
 		next:
@@ -1058,7 +1055,7 @@ extern void slurmdb_init_association_rec(slurmdb_association_rec_t *assoc,
 extern void slurmdb_init_cluster_rec(slurmdb_cluster_rec_t *cluster,
 				     bool free_it)
 {
-	if(!cluster)
+	if (!cluster)
 		return;
 
 	if (free_it)
@@ -1069,7 +1066,7 @@ extern void slurmdb_init_cluster_rec(slurmdb_cluster_rec_t *cluster,
 
 extern void slurmdb_init_qos_rec(slurmdb_qos_rec_t *qos, bool free_it)
 {
-	if(!qos)
+	if (!qos)
 		return;
 
 	if (free_it)
@@ -1078,6 +1075,7 @@ extern void slurmdb_init_qos_rec(slurmdb_qos_rec_t *qos, bool free_it)
 
 	qos->flags = QOS_FLAG_NOTSET;
 
+	qos->grace_time = NO_VAL;
 	qos->preempt_mode = (uint16_t)NO_VAL;
 	qos->priority = NO_VAL;
 
@@ -1092,8 +1090,10 @@ extern void slurmdb_init_qos_rec(slurmdb_qos_rec_t *qos, bool free_it)
 	qos->max_cpu_mins_pj = (uint64_t)NO_VAL;
 	qos->max_cpu_run_mins_pu = (uint64_t)NO_VAL;
 	qos->max_cpus_pj = NO_VAL;
+	qos->max_cpus_pu = NO_VAL;
 	qos->max_jobs_pu = NO_VAL;
 	qos->max_nodes_pj = NO_VAL;
+	qos->max_nodes_pu = NO_VAL;
 	qos->max_submit_jobs_pu = NO_VAL;
 	qos->max_wall_pj = NO_VAL;
 
@@ -1103,7 +1103,7 @@ extern void slurmdb_init_qos_rec(slurmdb_qos_rec_t *qos, bool free_it)
 
 extern void slurmdb_init_wckey_rec(slurmdb_wckey_rec_t *wckey, bool free_it)
 {
-	if(!wckey)
+	if (!wckey)
 		return;
 
 	if (free_it)
@@ -1792,20 +1792,20 @@ extern void log_assoc_rec(slurmdb_association_rec_t *assoc_ptr,
 		debug2("  Qos              : %s", "Normal");
 	}
 
-	if(assoc_ptr->parent_acct)
+	if (assoc_ptr->parent_acct)
 		debug2("  ParentAccount    : %s", assoc_ptr->parent_acct);
-	if(assoc_ptr->partition)
+	if (assoc_ptr->partition)
 		debug2("  Partition        : %s", assoc_ptr->partition);
-	if(assoc_ptr->user)
+	if (assoc_ptr->user)
 		debug2("  User             : %s(%u)",
 		       assoc_ptr->user, assoc_ptr->uid);
 
-	if(assoc_ptr->usage) {
-		if(assoc_ptr->usage->shares_norm != (double)NO_VAL)
+	if (assoc_ptr->usage) {
+		if (!fuzzy_equal(assoc_ptr->usage->shares_norm, NO_VAL))
 			debug2("  NormalizedShares : %f",
 			       assoc_ptr->usage->shares_norm);
 
-		if(assoc_ptr->usage->level_shares != NO_VAL)
+		if (assoc_ptr->usage->level_shares != NO_VAL)
 			debug2("  LevelShares      : %u",
 			       assoc_ptr->usage->level_shares);
 

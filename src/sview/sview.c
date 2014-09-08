@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -39,6 +39,7 @@
 
 #include "sview.h"
 
+#define _DEBUG 0
 #define MAX_RETRIES 3		/* g_thread_create retries */
 
 typedef struct {
@@ -86,6 +87,7 @@ switch_record_bitmaps_t *g_switch_nodes_maps = NULL;
 popup_pos_t popup_pos;
 
 block_info_msg_t *g_block_info_ptr = NULL;
+front_end_info_msg_t *g_front_end_info_ptr;
 job_info_msg_t *g_job_info_ptr = NULL;
 node_info_msg_t *g_node_info_ptr = NULL;
 partition_info_msg_t *g_part_info_ptr = NULL;
@@ -142,6 +144,10 @@ display_data_t main_display_data[] = {
 	 get_info_node, specific_info_node,
 	 set_menus_node, NULL},
 #endif
+	{G_TYPE_NONE, FRONT_END_PAGE, "Front End Nodes", FALSE, -1,
+	 refresh_main, create_model_front_end, admin_edit_front_end,
+	 get_info_front_end, specific_info_front_end,
+	 set_menus_front_end, NULL},
 	{G_TYPE_NONE, SUBMIT_PAGE, NULL, FALSE, -1,
 	 refresh_main, NULL, NULL, NULL,
 	 NULL, NULL, NULL},
@@ -167,9 +173,8 @@ void *_page_thr(void *arg)
 	display_data_t *display_data = &main_display_data[num];
 	static int thread_count = 0;
 	bool reset_highlight = true;
-	/* 	DEF_TIMERS; */
-	xfree(page);
 
+	xfree(page);
 	if (!grid_init) {
 		/* we need to signal any threads that are waiting */
 		g_mutex_lock(grid_mutex);
@@ -190,7 +195,10 @@ void *_page_thr(void *arg)
 	thread_count++;
 	g_static_mutex_unlock(&sview_mutex);
 	while (page_running == num) {
-/* 		START_TIMER; */
+#if _DEBUG
+		DEF_TIMERS;
+		START_TIMER;
+#endif
 //		g_static_mutex_lock(&sview_mutex);
 		gdk_threads_enter();
 		sview_init_grid(reset_highlight);
@@ -199,8 +207,10 @@ void *_page_thr(void *arg)
 		//gdk_flush();
 		gdk_threads_leave();
 //		g_static_mutex_unlock(&sview_mutex);
-/* 		END_TIMER; */
-/* 		g_print("got for initeration: %s\n", TIME_STR); */
+#if _DEBUG
+		END_TIMER;
+		g_print("got for iteration: %s\n", TIME_STR);
+#endif
 		sleep(working_sview_config.refresh_delay);
 		g_static_mutex_lock(&sview_mutex);
 		if (thread_count > 1) {
@@ -443,6 +453,7 @@ static void _set_ruled(GtkToggleAction *action)
 
 	/* get rid of each existing table */
 	cluster_change_block();
+	cluster_change_front_end();
 	cluster_change_resv();
 	cluster_change_part();
 	cluster_change_job();
@@ -488,6 +499,147 @@ static void _get_current_debug(GtkRadioAction *action)
 					     debug_level);
 }
 
+static void _get_current_debug_flags(GtkToggleAction *action)
+{
+	static uint32_t debug_flags = 0;
+	static slurm_ctl_conf_info_msg_t  *slurm_ctl_conf_ptr = NULL;
+	int err_code = get_new_info_config(&slurm_ctl_conf_ptr);
+	GtkAction *debug_action = NULL;
+	GtkToggleAction *toggle_action;
+	gboolean orig_state, new_state;
+
+	if (err_code != SLURM_ERROR)
+		debug_flags = slurm_ctl_conf_ptr->debug_flags;
+
+	debug_action = gtk_action_group_get_action(menu_action_group,
+						  "flags_backfill");
+	toggle_action = GTK_TOGGLE_ACTION(debug_action);
+	orig_state = gtk_toggle_action_get_active(toggle_action);
+	new_state = debug_flags & DEBUG_FLAG_BACKFILL;
+	if (orig_state != new_state)
+		gtk_toggle_action_set_active(toggle_action, new_state);
+
+	debug_action = gtk_action_group_get_action(menu_action_group,
+						  "flags_bg_algo");
+	toggle_action = GTK_TOGGLE_ACTION(debug_action);
+	orig_state = gtk_toggle_action_get_active(toggle_action);
+	new_state = debug_flags & DEBUG_FLAG_BG_ALGO;
+	if (orig_state != new_state)
+		gtk_toggle_action_set_active(toggle_action, new_state);
+
+	debug_action = gtk_action_group_get_action(menu_action_group,
+						  "flags_bg_algo_deep");
+	toggle_action = GTK_TOGGLE_ACTION(debug_action);
+	orig_state = gtk_toggle_action_get_active(toggle_action);
+	new_state = debug_flags & DEBUG_FLAG_BG_ALGO_DEEP;
+	if (orig_state != new_state)
+		gtk_toggle_action_set_active(toggle_action, new_state);
+
+	debug_action = gtk_action_group_get_action(menu_action_group,
+						  "flags_bg_pick");
+	toggle_action = GTK_TOGGLE_ACTION(debug_action);
+	orig_state = gtk_toggle_action_get_active(toggle_action);
+	new_state = debug_flags & DEBUG_FLAG_BG_PICK;
+	if (orig_state != new_state)
+		gtk_toggle_action_set_active(toggle_action, new_state);
+
+	debug_action = gtk_action_group_get_action(menu_action_group,
+						  "flags_bg_wires");
+	toggle_action = GTK_TOGGLE_ACTION(debug_action);
+	orig_state = gtk_toggle_action_get_active(toggle_action);
+	new_state = debug_flags & DEBUG_FLAG_BG_WIRES;
+	if (orig_state != new_state)
+		gtk_toggle_action_set_active(toggle_action, new_state);
+
+	debug_action = gtk_action_group_get_action(menu_action_group,
+						  "flags_cpu_bind");
+	toggle_action = GTK_TOGGLE_ACTION(debug_action);
+	orig_state = gtk_toggle_action_get_active(toggle_action);
+	new_state = debug_flags & DEBUG_FLAG_CPU_BIND;
+	if (orig_state != new_state)
+		gtk_toggle_action_set_active(toggle_action, new_state);
+
+	debug_action = gtk_action_group_get_action(menu_action_group,
+						  "flags_front_end");
+	toggle_action = GTK_TOGGLE_ACTION(debug_action);
+	orig_state = gtk_toggle_action_get_active(toggle_action);
+	new_state = debug_flags & DEBUG_FLAG_FRONT_END;
+	if (orig_state != new_state)
+		gtk_toggle_action_set_active(toggle_action, new_state);
+
+	debug_action = gtk_action_group_get_action(menu_action_group,
+						  "flags_gang");
+	toggle_action = GTK_TOGGLE_ACTION(debug_action);
+	orig_state = gtk_toggle_action_get_active(toggle_action);
+	new_state = debug_flags & DEBUG_FLAG_GANG;
+	if (orig_state != new_state)
+		gtk_toggle_action_set_active(toggle_action, new_state);
+
+	debug_action = gtk_action_group_get_action(menu_action_group,
+						  "flags_gres");
+	toggle_action = GTK_TOGGLE_ACTION(debug_action);
+	orig_state = gtk_toggle_action_get_active(toggle_action);
+	new_state = debug_flags & DEBUG_FLAG_GRES;
+	if (orig_state != new_state)
+		gtk_toggle_action_set_active(toggle_action, new_state);
+
+	debug_action = gtk_action_group_get_action(menu_action_group,
+						  "flags_no_conf_hash");
+	toggle_action = GTK_TOGGLE_ACTION(debug_action);
+	orig_state = gtk_toggle_action_get_active(toggle_action);
+	new_state = debug_flags & DEBUG_FLAG_NO_CONF_HASH;
+	if (orig_state != new_state)
+		gtk_toggle_action_set_active(toggle_action, new_state);
+
+	debug_action = gtk_action_group_get_action(menu_action_group,
+						  "flags_prio");
+	toggle_action = GTK_TOGGLE_ACTION(debug_action);
+	orig_state = gtk_toggle_action_get_active(toggle_action);
+	new_state = debug_flags & DEBUG_FLAG_PRIO;
+	if (orig_state != new_state)
+		gtk_toggle_action_set_active(toggle_action, new_state);
+
+	debug_action = gtk_action_group_get_action(menu_action_group,
+						  "flags_reservation");
+	toggle_action = GTK_TOGGLE_ACTION(debug_action);
+	orig_state = gtk_toggle_action_get_active(toggle_action);
+	new_state = debug_flags & DEBUG_FLAG_RESERVATION;
+	if (orig_state != new_state)
+		gtk_toggle_action_set_active(toggle_action, new_state);
+
+	debug_action = gtk_action_group_get_action(menu_action_group,
+						  "flags_select_type");
+	toggle_action = GTK_TOGGLE_ACTION(debug_action);
+	orig_state = gtk_toggle_action_get_active(toggle_action);
+	new_state = debug_flags & DEBUG_FLAG_SELECT_TYPE;
+	if (orig_state != new_state)
+		gtk_toggle_action_set_active(toggle_action, new_state);
+
+	debug_action = gtk_action_group_get_action(menu_action_group,
+						  "flags_steps");
+	toggle_action = GTK_TOGGLE_ACTION(debug_action);
+	orig_state = gtk_toggle_action_get_active(toggle_action);
+	new_state = debug_flags & DEBUG_FLAG_STEPS;
+	if (orig_state != new_state)
+		gtk_toggle_action_set_active(toggle_action, new_state);
+
+	debug_action = gtk_action_group_get_action(menu_action_group,
+						  "flags_triggers");
+	toggle_action = GTK_TOGGLE_ACTION(debug_action);
+	orig_state = gtk_toggle_action_get_active(toggle_action);
+	new_state = debug_flags & DEBUG_FLAG_TRIGGERS;
+	if (orig_state != new_state)
+		gtk_toggle_action_set_active(toggle_action, new_state);
+
+	debug_action = gtk_action_group_get_action(menu_action_group,
+						  "flags_wiki");
+	toggle_action = GTK_TOGGLE_ACTION(debug_action);
+	orig_state = gtk_toggle_action_get_active(toggle_action);
+	new_state = debug_flags & DEBUG_FLAG_WIKI;
+	if (orig_state != new_state)
+		gtk_toggle_action_set_active(toggle_action, new_state);
+}
+
 static void _set_debug(GtkRadioAction *action,
 		       GtkRadioAction *extra,
 		       GtkNotebook *notebook)
@@ -513,6 +665,89 @@ static void _set_debug(GtkRadioAction *action,
 	g_free(temp);
 }
 
+static void _set_flags(GtkToggleAction *action, uint32_t flag)
+{
+	char *temp = NULL;
+	uint32_t debug_flags_plus = 0, debug_flags_minus = 0;
+
+	if (action && gtk_toggle_action_get_active(action))
+		debug_flags_plus  |= flag;
+	else
+		debug_flags_minus |= flag;
+
+	if (!slurm_set_debugflags(debug_flags_plus, debug_flags_minus))
+		temp = g_strdup_printf("Slurmctld DebugFlags reset");
+	else
+		temp = g_strdup_printf("Problem with set DebugFlags request");
+	display_edit_note(temp);
+	g_free(temp);
+}
+
+static void _set_flags_backfill(GtkToggleAction *action)
+{
+	_set_flags(action, DEBUG_FLAG_BACKFILL);
+}
+static void _set_flags_bg_algo(GtkToggleAction *action)
+{
+	_set_flags(action, DEBUG_FLAG_BG_ALGO);
+}
+static void _set_flags_bg_algo_deep(GtkToggleAction *action)
+{
+	_set_flags(action, DEBUG_FLAG_BG_ALGO_DEEP);
+}
+static void _set_flags_bg_pick(GtkToggleAction *action)
+{
+	_set_flags(action, DEBUG_FLAG_BG_PICK);
+}
+static void _set_flags_bg_wires(GtkToggleAction *action)
+{
+	_set_flags(action, DEBUG_FLAG_BG_WIRES);
+}
+static void _set_flags_cpu_bind(GtkToggleAction *action)
+{
+	_set_flags(action, DEBUG_FLAG_CPU_BIND);
+}
+static void _set_flags_front_end(GtkToggleAction *action)
+{
+	_set_flags(action, DEBUG_FLAG_FRONT_END);
+}
+static void _set_flags_gang(GtkToggleAction *action)
+{
+	_set_flags(action, DEBUG_FLAG_GANG);
+}
+static void _set_flags_gres(GtkToggleAction *action)
+{
+	_set_flags(action, DEBUG_FLAG_GRES);
+}
+static void _set_flags_no_conf_hash(GtkToggleAction *action)
+{
+	_set_flags(action, DEBUG_FLAG_NO_CONF_HASH);
+}
+static void _set_flags_prio(GtkToggleAction *action)
+{
+	_set_flags(action, DEBUG_FLAG_PRIO);
+}
+static void _set_flags_reservation(GtkToggleAction *action)
+{
+	_set_flags(action, DEBUG_FLAG_RESERVATION);
+}
+static void _set_flags_select_type(GtkToggleAction *action)
+{
+	_set_flags(action, DEBUG_FLAG_SELECT_TYPE);
+}
+static void _set_flags_steps(GtkToggleAction *action)
+{
+	_set_flags(action, DEBUG_FLAG_STEPS);
+}
+static void _set_flags_triggers(GtkToggleAction *action)
+{
+	_set_flags(action, DEBUG_FLAG_TRIGGERS);
+}
+static void _set_flags_wiki(GtkToggleAction *action)
+{
+	_set_flags(action, DEBUG_FLAG_WIKI);
+}
+
 static void _tab_pos(GtkRadioAction *action,
 		     GtkRadioAction *extra,
 		     GtkNotebook *notebook)
@@ -522,7 +757,7 @@ static void _tab_pos(GtkRadioAction *action,
 	gtk_notebook_set_tab_pos(notebook, working_sview_config.tab_pos);
 }
 
-static void _init_pages()
+static void _init_pages(void)
 {
 	int i;
 	for(i=0; i<PAGE_CNT; i++) {
@@ -532,7 +767,7 @@ static void _init_pages()
 	}
 }
 
-static void _persist_dynamics()
+static void _persist_dynamics(void)
 {
 
 	gint g_x;
@@ -553,8 +788,10 @@ static gboolean _delete(GtkWidget *widget,
 	_persist_dynamics();
 	fini = 1;
 	gtk_main_quit();
-	ba_fini();
 
+	select_g_ba_fini();
+
+#ifdef MEMORY_LEAK_DEBUG
 	if (popup_list)
 		list_destroy(popup_list);
 	if (grid_button_list)
@@ -566,6 +803,7 @@ static gboolean _delete(GtkWidget *widget,
 	if (cluster_list)
 		list_destroy(cluster_list);
 	xfree(orig_cluster_name);
+#endif
 	return FALSE;
 }
 
@@ -578,6 +816,11 @@ static char *_get_ui_description()
 		"<ui>"
 		"  <menubar name='main'>"
 		"    <menu action='actions'>"
+		"      <menu action='create'>"
+		"        <menuitem action='batch_job'/>"
+		"        <menuitem action='partition'/>"
+		"        <menuitem action='reservation'/>"
+		"      </menu>"
 		"      <menu action='search'>"
 		"        <menuitem action='jobid'/>"
 		"        <menuitem action='user_jobs'/>"
@@ -620,6 +863,24 @@ static char *_get_ui_description()
 		"        <menuitem action='debug_debug4'/>"
 		"        <menuitem action='debug_debug5'/>"
 		"      </menu>"
+		"      <menu action='debugflags'>"
+		"        <menuitem action='flags_backfill'/>"
+		"        <menuitem action='flags_bg_algo'/>"
+		"        <menuitem action='flags_bg_algo_deep'/>"
+		"        <menuitem action='flags_bg_pick'/>"
+		"        <menuitem action='flags_bg_wires'/>"
+		"        <menuitem action='flags_cpu_bind'/>"
+		"        <menuitem action='flags_front_end'/>"
+		"        <menuitem action='flags_gang'/>"
+		"        <menuitem action='flags_gres'/>"
+		"        <menuitem action='flags_no_conf_hash'/>"
+		"        <menuitem action='flags_prio'/>"
+		"        <menuitem action='flags_reservation'/>"
+		"        <menuitem action='flags_select_type'/>"
+		"        <menuitem action='flags_steps'/>"
+		"        <menuitem action='flags_triggers'/>"
+		"        <menuitem action='flags_wiki'/>"
+		"      </menu>"
 		"      <separator/>"
 		"      <menuitem action='exit'/>"
 		"    </menu>"
@@ -655,6 +916,7 @@ static char *_get_ui_description()
 		"    </menu>"
 		"    <menu action='help'>"
 		"      <menuitem action='about'/>"
+		"      <menuitem action='usage'/>"
 		/* "      <menuitem action='manual'/>" */
 		"    </menu>"
 		"  </menubar>"
@@ -673,6 +935,12 @@ static GtkWidget *_get_menubar_menu(GtkWidget *window, GtkWidget *notebook)
 		{"actions", NULL, "_Actions", "<alt>a"},
 		{"options", NULL, "_Options", "<alt>o"},
 		{"displays", NULL, "_Query", "<alt>q"},
+		{"batch_job", NULL, "Batch Job", "", "Submit batch job",
+		 G_CALLBACK(create_create_popup)},
+		{"partition", NULL, "Partition", "", "Create partition",
+		 G_CALLBACK(create_create_popup)},
+		{"reservation", NULL, "Reservation", "", "Create reservation",
+		 G_CALLBACK(create_create_popup)},
 		{"search", GTK_STOCK_FIND, "Search", ""},
 		{"jobid", NULL, "Job ID",
 		 "", "Search for jobid",
@@ -692,7 +960,8 @@ static GtkWidget *_get_menubar_menu(GtkWidget *window, GtkWidget *notebook)
 		{"reservation_name", NULL, "Reservation Name",
 		 "", "Search for reservation",
 		 G_CALLBACK(create_search_popup)},
-		{"tab_pos", NULL, "_Tab Pos"},
+		{"tab_pos", NULL, "_Tab Position"},
+		{"create", GTK_STOCK_ADD, "Create"},
 		{"interval", GTK_STOCK_REFRESH, "Set Refresh _Interval",
 		 "<control>i", "Change Refresh Interval",
 		 G_CALLBACK(change_refresh_popup)},
@@ -711,6 +980,8 @@ static GtkWidget *_get_menubar_menu(GtkWidget *window, GtkWidget *notebook)
 		{"help", NULL, "_Help", "<alt>h"},
 		{"about", GTK_STOCK_ABOUT, "Ab_out", "<control>o",
 		 "About", G_CALLBACK(about_popup)},
+		{"usage", GTK_STOCK_HELP, "Usage", "",
+		 "Usage", G_CALLBACK(usage_popup)},
 		//{"manual", GTK_STOCK_HELP, "_Manual", "<control>m"},
 		{"grid_specs", GTK_STOCK_EDIT, "Set Grid _Properties",
 		 "<control>p", "Change Grid Properties",
@@ -757,6 +1028,10 @@ static GtkWidget *_get_menubar_menu(GtkWidget *window, GtkWidget *notebook)
 		{"reconfig", GTK_STOCK_REDO, "SLUR_M Reconfigure",
 		 "<control>m", "Reconfigures System",
 		 G_CALLBACK(_reconfigure)},
+		{"debugflags", GTK_STOCK_DIALOG_WARNING,
+		 "Slurmctld DebugFlags",
+		 "", "Set slurmctld DebugFlags",
+		 G_CALLBACK(_get_current_debug_flags)},
 		{"debuglevel", GTK_STOCK_DIALOG_WARNING,
 		 "Slurmctld Debug Level",
 		 "", "Set slurmctld debug level",
@@ -814,15 +1089,48 @@ static GtkWidget *_get_menubar_menu(GtkWidget *window, GtkWidget *notebook)
 		{"debug_debug5", NULL, "debug5(9)", "", "Debug5 level", 9},
 	};
 
+	GtkToggleActionEntry debug_flags[] = {
+		{"flags_backfill", NULL, "Backfill", NULL,
+		 "Backfill", G_CALLBACK(_set_flags_backfill), FALSE},
+		{"flags_bg_algo", NULL, "BgBlockAlgo", NULL,
+		 "BgBlockAlgo", G_CALLBACK(_set_flags_bg_algo), FALSE},
+		{"flags_bg_algo_deep", NULL, "BgBlockAlgoDeep", NULL,
+		 "BgBlockAlgoDeep", G_CALLBACK(_set_flags_bg_algo_deep),FALSE},
+		{"flags_bg_pick", NULL, "BgBlockPick", NULL,
+		 "BgBlockPick", G_CALLBACK(_set_flags_bg_pick), FALSE},
+		{"flags_bg_wires", NULL, "BgBlockWires", NULL,
+		 "BgBlockWires", G_CALLBACK(_set_flags_bg_wires), FALSE},
+		{"flags_cpu_bind", NULL, "CPU Bind", NULL,
+		 "CPU_Bind", G_CALLBACK(_set_flags_cpu_bind), FALSE},
+		{"flags_front_end", NULL, "FrontEnd", NULL,
+		 "FrontEnd", G_CALLBACK(_set_flags_front_end), FALSE},
+		{"flags_gang", NULL, "Gang", NULL,
+		 "Gang", G_CALLBACK(_set_flags_gang), FALSE},
+		{"flags_gres", NULL, "Gres", NULL,
+		 "Gres", G_CALLBACK(_set_flags_gres), FALSE},
+		{"flags_no_conf_hash", NULL, "NO CONF HASH", NULL,
+		 "NO_CONF_HASH", G_CALLBACK(_set_flags_no_conf_hash), FALSE},
+		{"flags_prio", NULL, "Priority", NULL,
+		 "Priority", G_CALLBACK(_set_flags_prio), FALSE},
+		{"flags_reservation", NULL, "Reservation", NULL,
+		 "Reservation", G_CALLBACK(_set_flags_reservation), FALSE},
+		{"flags_select_type", NULL, "SelectType", NULL,
+		 "SelectType", G_CALLBACK(_set_flags_select_type), FALSE},
+		{"flags_steps", NULL, "Steps", NULL,
+		 "Steps", G_CALLBACK(_set_flags_steps), FALSE},
+		{"flags_triggers", NULL, "Triggers", NULL,
+		 "Triggers", G_CALLBACK(_set_flags_triggers), FALSE},
+		{"flags_wiki", NULL, "Wiki", NULL,
+		 "Wiki", G_CALLBACK(_set_flags_wiki), FALSE},
+	};
+
 	/* Make an accelerator group (shortcut keys) */
 	menu_action_group = gtk_action_group_new ("MenuActions");
 	gtk_action_group_add_actions(menu_action_group, entries,
 				     G_N_ELEMENTS(entries), window);
 
-	//if (cluster_flags & CLUSTER_FLAG_BG)
 	gtk_action_group_add_actions(menu_action_group, bg_entries,
 				     G_N_ELEMENTS(bg_entries), window);
-	//else
 	gtk_action_group_add_actions(menu_action_group, nonbg_entries,
 				     G_N_ELEMENTS(nonbg_entries),
 				     window);
@@ -831,6 +1139,8 @@ static GtkWidget *_get_menubar_menu(GtkWidget *window, GtkWidget *notebook)
 					   G_N_ELEMENTS(radio_entries),
 					   working_sview_config.tab_pos,
 					   G_CALLBACK(_tab_pos), notebook);
+	gtk_action_group_add_toggle_actions(menu_action_group, debug_flags,
+					    G_N_ELEMENTS(debug_flags), NULL);
 	gtk_action_group_add_radio_actions(menu_action_group, debug_entries,
 					   G_N_ELEMENTS(debug_entries),
 					   -1, G_CALLBACK(_set_debug),
@@ -842,7 +1152,8 @@ static GtkWidget *_get_menubar_menu(GtkWidget *window, GtkWidget *notebook)
 	gtk_action_group_add_actions(admin_action_group, admin_entries,
 				     G_N_ELEMENTS(admin_entries),
 				     window);
-	gtk_action_group_set_sensitive(admin_action_group, FALSE);
+	gtk_action_group_set_sensitive(admin_action_group,
+				       working_sview_config.admin_mode);
 
 	g_ui_manager = gtk_ui_manager_new();
 	gtk_ui_manager_insert_action_group(g_ui_manager, menu_action_group, 0);
@@ -988,6 +1299,8 @@ extern void _change_cluster_main(GtkComboBox *combo, gpointer extra)
 	/* free old info under last cluster */
 	slurm_free_block_info_msg(g_block_info_ptr);
 	g_block_info_ptr = NULL;
+	slurm_free_front_end_info_msg(g_front_end_info_ptr);
+	g_front_end_info_ptr = NULL;
 	slurm_free_job_info_msg(g_job_info_ptr);
 	g_job_info_ptr = NULL;
 	slurm_free_node_info_msg(g_node_info_ptr);
@@ -1064,6 +1377,7 @@ extern void _change_cluster_main(GtkComboBox *combo, gpointer extra)
 
 	/* make changes for each object */
 	cluster_change_block();
+	cluster_change_front_end();
 	cluster_change_resv();
 	cluster_change_part();
 	cluster_change_job();
@@ -1075,7 +1389,8 @@ extern void _change_cluster_main(GtkComboBox *combo, gpointer extra)
 		grid_button_list = NULL;
 		got_grid = 1;
 	}
-	ba_fini();
+
+	select_g_ba_fini();
 
 	/* sorry popups can't survive a cluster change */
 	if (popup_list)
@@ -1315,7 +1630,9 @@ int main(int argc, char *argv[])
 	GtkBin *bin = NULL;
 	GtkViewport *view = NULL;
 	int i=0;
+	log_options_t lopts = LOG_OPTS_STDERR_ONLY;
 
+	log_init(argv[0], lopts, SYSLOG_FACILITY_USER, NULL);
 	load_defaults();
 	cluster_flags = slurmdb_setup_cluster_flags();
 	cluster_dims = slurmdb_setup_cluster_dims();

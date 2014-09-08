@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -44,7 +44,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include <slurm/slurm.h>
+#include "slurm/slurm.h"
 
 #include "src/api/step_io.h"
 
@@ -107,9 +107,9 @@ static void _msg_thr_destroy(message_thread_state_t *mts);
 static void _handle_msg(void *arg, slurm_msg_t *msg);
 
 static struct io_operations message_socket_ops = {
-	readable:	&eio_message_socket_readable,
-	handle_read:	&eio_message_socket_accept,
-	handle_msg:     &_handle_msg
+	.readable = &eio_message_socket_readable,
+	.handle_read = &eio_message_socket_accept,
+	.handle_msg = &_handle_msg
 };
 
 static struct termios termdefaults;
@@ -124,6 +124,7 @@ int sattach(int argc, char *argv[])
 	slurm_cred_t *fake_cred;
 	message_thread_state_t *mts;
 	client_io_t *io;
+	char *hosts;
 
 	log_init(xbasename(argv[0]), logopt, 0, NULL);
 	_set_exit_code();
@@ -157,10 +158,12 @@ int sattach(int argc, char *argv[])
 			_nodeid_from_layout(layout, opt.fds.in.taskid);
 	}
 
+	if (layout->front_end)
+		hosts = layout->front_end;
+	else
+		hosts = layout->node_list;
 	fake_cred = _generate_fake_cred(opt.jobid, opt.stepid,
-					opt.uid, layout->node_list,
-					layout->node_cnt);
-
+					opt.uid, hosts, layout->node_cnt);
 	mts = _msg_thr_create(layout->node_cnt, layout->task_cnt);
 
 	io = client_io_handler_create(opt.fds, layout->task_cnt,
@@ -380,6 +383,7 @@ static int _attach_to_tasks(uint32_t jobid,
 	List nodes_resp = NULL;
 	int timeout;
 	reattach_tasks_request_msg_t reattach_msg;
+	char *hosts;
 
 	slurm_msg_t_init(&msg);
 
@@ -396,8 +400,11 @@ static int _attach_to_tasks(uint32_t jobid,
 	msg.msg_type = REQUEST_REATTACH_TASKS;
 	msg.data = &reattach_msg;
 
-	nodes_resp = slurm_send_recv_msgs(layout->node_list, &msg,
-					  timeout, false);
+	if (layout->front_end)
+		hosts = layout->front_end;
+	else
+		hosts = layout->node_list;
+	nodes_resp = slurm_send_recv_msgs(hosts, &msg, timeout, false);
 	if (nodes_resp == NULL) {
 		error("slurm_send_recv_msgs failed: %m");
 		return SLURM_ERROR;

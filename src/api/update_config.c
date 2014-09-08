@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -47,11 +47,23 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <slurm/slurm.h>
+#include "slurm/slurm.h"
 
 #include "src/common/slurm_protocol_api.h"
 
 static int _slurm_update (void * data, slurm_msg_type_t msg_type);
+
+/*
+ * slurm_update_front_end - issue RPC to a front_end node's configuration per
+ *	request, only usable by user root
+ * IN front_end_msg - description of front_end node updates
+ * RET 0 on success, otherwise return -1 and set errno to indicate the error
+ */
+int
+slurm_update_front_end (update_front_end_msg_t * front_end_msg)
+{
+	return _slurm_update ((void *) front_end_msg, REQUEST_UPDATE_FRONT_END);
+}
 
 /*
  * slurm_update_job - issue RPC to a job's configuration per request,

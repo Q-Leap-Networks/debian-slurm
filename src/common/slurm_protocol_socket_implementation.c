@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -58,7 +58,6 @@
 #include <stdlib.h>
 #include <arpa/inet.h>
 #include <sys/param.h>
-#include <slurm/slurm_errno.h>
 #include <stdlib.h>
 
 #if HAVE_SYS_SOCKET_H
@@ -69,6 +68,7 @@
 #  endif
 #endif
 
+#include "slurm/slurm_errno.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_interface.h"
 #include "src/common/slurm_protocol_defs.h"
@@ -88,7 +88,7 @@
  *  Maximum message size. Messages larger than this value (in bytes)
  *  will not be received.
  */
-#define MAX_MSG_SIZE     (16*1024*1024)
+#define MAX_MSG_SIZE     (128*1024*1024)
 
 /****************************************************************
  * MIDDLE LAYER MSG FUNCTIONS

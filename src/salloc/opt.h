@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -134,10 +134,10 @@ typedef struct salloc_options {
 	char *network;		/* --network=			*/
 
 	/* BLUEGENE SPECIFIC */
-	uint16_t geometry[SYSTEM_DIMENSIONS]; /* --geometry, -g	*/
+	uint16_t geometry[HIGHEST_DIMENSIONS]; /* --geometry, -g */
 	bool reboot;		/* --reboot			*/
 	bool no_rotate;		/* --no_rotate, -R		*/
-	uint16_t conn_type;	/* --conn-type 			*/
+	uint16_t conn_type[HIGHEST_DIMENSIONS];	/* --conn-type 	*/
 	char *blrtsimage;       /* --blrts-image BlrtsImage for block */
 	char *linuximage;       /* --linux-image LinuxImage for block */
 	char *mloaderimage;     /* --mloader-image mloaderImage for block */
@@ -155,6 +155,8 @@ typedef struct salloc_options {
 	char *reservation;	/* --reservation		*/
 	uint16_t wait_all_nodes;  /* --wait-nodes-ready=val	*/
 	char *wckey;            /* --wckey workload characterization key */
+	int req_switch;		/* Minimum number of switches	*/
+	int wait4switch;	/* Maximum time to wait for minimum switches */
 	char **spank_job_env;	/* SPANK controlled environment for job
 				 * Prolog and Epilog		*/
 	int spank_job_env_size;	/* size of spank_job_env	*/

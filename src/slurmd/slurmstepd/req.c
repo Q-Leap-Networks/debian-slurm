@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -92,8 +92,8 @@ static bool _msg_socket_readable(eio_obj_t *obj);
 static int _msg_socket_accept(eio_obj_t *obj, List objs);
 
 struct io_operations msg_socket_ops = {
-	readable:	&_msg_socket_readable,
-	handle_read:	&_msg_socket_accept
+	.readable = &_msg_socket_readable,
+	.handle_read = &_msg_socket_accept
 };
 
 static char *socket_name;
@@ -170,7 +170,7 @@ _domain_socket_create(const char *dir, const char *nodename,
 	}
 
 	/*
-	 * Now build the the name of socket, and create the socket.
+	 * Now build the name of socket, and create the socket.
 	 */
 	xstrfmtcat(name, "%s/%s_%u.%u", dir, nodename, jobid, stepid);
 
@@ -762,7 +762,7 @@ _handle_signal_container(int fd, slurmd_job_t *job, uid_t uid)
 	 * Sanity checks
 	 */
 	if (job->cont_id == 0) {
-		debug ("step %u.%u invalid container [cont_id:%u]",
+		debug ("step %u.%u invalid container [cont_id:%"PRIu64"]",
 			job->jobid, job->stepid, job->cont_id);
 		rc = -1;
 		errnum = ESLURMD_JOB_NOTRUNNING;
@@ -787,6 +787,10 @@ _handle_signal_container(int fd, slurmd_job_t *job, uid_t uid)
 			error("*** %s CANCELLED AT %s DUE TO TIME LIMIT ***",
 			      entity, time_str);
 			msg_sent = 1;
+		} else if (sig == SIG_PREEMPTED) {
+			error("*** %s CANCELLED AT %s DUE TO PREEMPTION ***",
+			      entity, time_str);
+			msg_sent = 1;
 		} else if (sig == SIG_NODE_FAIL) {
 			error("*** %s CANCELLED AT %s DUE TO NODE FAILURE ***",
 			      entity, time_str);
@@ -801,7 +805,7 @@ _handle_signal_container(int fd, slurmd_job_t *job, uid_t uid)
 		}
 	}
 	if ((sig == SIG_TIME_LIMIT) || (sig == SIG_NODE_FAIL) ||
-	    (sig == SIG_FAILURE))
+	    (sig == SIG_PREEMPTED)  || (sig == SIG_FAILURE))
 		goto done;
 	if (sig == SIG_DEBUG_WAKE) {
 		int i;
@@ -991,7 +995,7 @@ _handle_terminate(int fd, slurmd_job_t *job, uid_t uid)
 	 * Sanity checks
 	 */
 	if (job->cont_id == 0) {
-		debug ("step %u.%u invalid container [cont_id:%u]",
+		debug ("step %u.%u invalid container [cont_id:%"PRIu64"]",
 			job->jobid, job->stepid, job->cont_id);
 		rc = -1;
 		errnum = ESLURMD_JOB_NOTRUNNING;
@@ -1159,7 +1163,7 @@ _handle_suspend(int fd, slurmd_job_t *job, uid_t uid)
 	}
 
 	if (job->cont_id == 0) {
-		debug ("step %u.%u invalid container [cont_id:%u]",
+		debug ("step %u.%u invalid container [cont_id:%"PRIu64"]",
 			job->jobid, job->stepid, job->cont_id);
 		rc = -1;
 		errnum = ESLURMD_JOB_NOTRUNNING;
@@ -1178,13 +1182,20 @@ _handle_suspend(int fd, slurmd_job_t *job, uid_t uid)
 		pthread_mutex_unlock(&suspend_mutex);
 		goto done;
 	} else {
-		/* SIGTSTP is sent first to let MPI daemons stop their
-		 * tasks, then we send SIGSTOP to stop everything else */
+		/* SIGTSTP is sent first to let MPI daemons stop their tasks,
+		 * then wait 2 seconds, then send SIGSTOP to the spawned
+		 * process's container to stop everything else.
+		 *
+		 * In some cases, 1 second has proven insufficient. Longer
+		 * delays may help insure that all MPI tasks have been stopped
+		 * (that depends upon the MPI implementaiton used), but will
+		 * also permit longer time periods when more than one job can
+		 * be running on each resource (not good). */
 		if (slurm_container_signal(job->cont_id, SIGTSTP) < 0) {
 			verbose("Error suspending %u.%u (SIGTSTP): %m",
 				job->jobid, job->stepid);
 		} else
-			sleep(1);
+			sleep(2);
 
 		if (slurm_container_signal(job->cont_id, SIGSTOP) < 0) {
 			verbose("Error suspending %u.%u (SIGSTOP): %m",
@@ -1224,7 +1235,7 @@ _handle_resume(int fd, slurmd_job_t *job, uid_t uid)
 	}
 
 	if (job->cont_id == 0) {
-		debug ("step %u.%u invalid container [cont_id:%u]",
+		debug ("step %u.%u invalid container [cont_id:%"PRIu64"]",
 			job->jobid, job->stepid, job->cont_id);
 		rc = -1;
 		errnum = ESLURMD_JOB_NOTRUNNING;

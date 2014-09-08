@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -101,6 +101,10 @@ pdebug_trace_process(slurmd_job_t *job, pid_t pid)
 		if (_PTRACE(PT_DETACH, pid, NULL, 0)) {
 #elif defined(__sun)
 		if (_PTRACE(7, pid, NULL, 0)) {
+#elif defined(__CYGWIN__)
+		if (1) {
+			debug3("No ptrace for cygwin");
+		} else {
 #else
 		if (_PTRACE(PTRACE_DETACH, pid, NULL, 0)) {
 #endif
@@ -127,6 +131,8 @@ pdebug_stop_current(slurmd_job_t *job)
 	     && (_PTRACE(PT_TRACE_ME, 0, NULL, 0) < 0) )
 #elif defined(__sun)
 	     && (_PTRACE(0, 0, NULL, 0) < 0))
+#elif defined(__CYGWIN__)
+	     && 0)
 #else
 	     && (_PTRACE(PTRACE_TRACEME, 0, NULL, 0) < 0) )
 #endif

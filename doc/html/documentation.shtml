@@ -7,6 +7,8 @@ Also see <a href="publications.html">Publications and Presentations</a>.
 <h2>SLURM Users</h2>
 <ul>
 <li><a href="quickstart.html">Quick Start User Guide</a></li>
+<li><a href="man_index.html">Man Pages</a></li>
+<li><a href="cpu_management.html">CPU Management User and Administrator Guide</a></li>
 <li><a href="mpi_guide.html">MPI Use Guide</a></li>
 <li><a href="mc_support.html">Support for Multi-core/Multi-threaded Architectures</a></li>
 <li><a href="multi_cluster.html">Multi-Cluster Operation</a></li>
@@ -23,6 +25,7 @@ Also see <a href="publications.html">Publications and Presentations</a>.
 <h2>SLURM Administrators</h2>
 <ul>
 <li><a href="quickstart_admin.html">Quick Start Administrator Guide</a></li>
+<li><a href="cpu_management.html">CPU Management User and Administrator Guide</a></li>
 <li><a href="configurator.html">Configuration Tool</a></li>
 <li><a href="troubleshoot.html">Troubleshooting Guide</a></li>
 <li><a href="big_sys.html">Large Cluster Administration Guide</a></li>
@@ -32,7 +35,7 @@ Also see <a href="publications.html">Publications and Presentations</a>.
 <ul>
 <li><a href="cons_res.html">Consumable Resources Guide</a></li>
 <li><a href="gang_scheduling.html">Gang Scheduling</a></li>
-<li><a href="gres.html">Generic Resource (Gres) Scheduling</a></li>
+<li><a href="gres.html">Generic Resource (GRES) Scheduling</a></li>
 <li><a href="high_throughput.html">High Throughput Computing Guide</a></li>
 <li><a href="priority_multifactor.html">Multifactor Job Priority</a></li>
 <li><a href="preempt.html">Preemption</a></li>
@@ -61,6 +64,12 @@ Also see <a href="publications.html">Publications and Presentations</a>.
 <ul>
 <li><a href="programmer_guide.html">Programmer Guide</a></li>
 <li><a href="api.html">Application Programmer Interface (API) Guide</a></li>
+<li>Design Information</li>
+<ul>
+<li><a href="gres_design.html">Generic Resource (GRES) Design Guide</a></li>
+<li><a href="job_launch.html">Job Launch Design Guide</a></li>
+<li><a href="select_design.html">Select Plugin Design Guide</a></li>
+</ul>
 <li><a href="plugins.html">Plugin Programmer Guide</a></li>
 <li>Plugin Interface Details</li>
 <ul>
@@ -84,6 +93,6 @@ Also see <a href="publications.html">Publications and Presentations</a>.
 </li>
 </ul>
 
-<p style="text-align:center;">Last modified 27 August 2010</p>
+<p style="text-align:center;">Last modified 31 May 2011</p>
 
 <!--#include virtual="footer.txt"-->

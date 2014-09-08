@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -174,7 +174,7 @@ char *slurm_sched_strerror( int errnum )
 /**************************************************************************/
 void slurm_sched_plugin_requeue( struct job_record *job_ptr, char *reason )
 {
-        wiki_job_requeue(job_ptr, reason);
+ 	wiki_job_requeue(job_ptr, reason);
 }
 
 /**************************************************************************/

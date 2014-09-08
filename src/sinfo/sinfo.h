@@ -1,7 +1,5 @@
 /****************************************************************************\
  *  sinfo.h - definitions used for sinfo data functions
- *
- *  $Id$
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
@@ -11,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -62,7 +60,7 @@
 #  endif
 #endif  /* HAVE_INTTYPES_H */
 
-#include <slurm/slurm.h>
+#include "slurm/slurm.h"
 
 #include "src/common/hostlist.h"
 #include "src/common/list.h"
@@ -107,6 +105,8 @@ typedef struct {
 	time_t reason_time;
 	uint32_t reason_uid;
 
+	hostlist_t hostnames;
+	hostlist_t node_addr;
 	hostlist_t nodes;
 	hostlist_t ionodes;
 
@@ -129,10 +129,12 @@ struct sinfo_match_flags {
 	bool features_flag;
 	bool groups_flag;
 	bool gres_flag;
+	bool hostnames_flag;
 	bool job_size_flag;
 	bool default_time_flag;
 	bool max_time_flag;
 	bool memory_flag;
+	bool node_addr_flag;
 	bool partition_flag;
 	bool preempt_mode_flag;
 	bool priority_flag;
@@ -141,6 +143,8 @@ struct sinfo_match_flags {
 	bool share_flag;
 	bool state_flag;
 	bool weight_flag;
+	bool reason_timestamp_flag;
+	bool reason_user_flag;
 };
 
 /* Input parameters */

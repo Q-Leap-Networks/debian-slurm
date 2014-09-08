@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -297,6 +297,17 @@ job_create(launch_tasks_request_msg_t *msg)
 		jobacct_common_set_mem_limit(job->jobid, job->stepid,
 					     job->job_mem);
 	}
+
+#ifdef HAVE_CRAY
+	/* This is only used for Cray emulation mode where slurmd is used to
+	 * launch job steps. On a real Cray system, ALPS is used to launch
+	 * the tasks instead of SLURM. SLURM's task launch RPC does NOT
+	 * contain the reservation ID, so just use some non-zero value here
+	 * for testing purposes. */
+	job->resv_id = 1;
+	select_g_select_jobinfo_set(msg->select_jobinfo, SELECT_JOBDATA_RESV_ID,
+				    &job->resv_id);
+#endif
 
 	get_cred_gres(msg->cred, conf->node_name,
 		      &job->job_gres_list, &job->step_gres_list);

@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -52,7 +52,8 @@
 #endif
 
 #include <sys/stat.h>
-#include <slurm/slurm_errno.h>
+
+#include "slurm/slurm_errno.h"
 #include "src/common/slurm_xlator.h"
 #include "src/common/read_config.h"
 #include "src/plugins/switch/federation/federation.h"
@@ -517,7 +518,7 @@ static int _parse_fed_file(hostlist_t *adapter_list)
 		fed_conf = _get_fed_conf();
 
 	tbl = s_p_hashtbl_create(options);
-	if(s_p_parse_file(tbl, NULL, fed_conf) == SLURM_ERROR)
+	if(s_p_parse_file(tbl, NULL, fed_conf, false) == SLURM_ERROR)
 		fatal("something wrong with opening/reading federation "
 		      "conf file");
 

@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -59,7 +59,9 @@
 #endif
 
 /* largest configured system dimensions */
-#define HIGHEST_DIMENSIONS 4
+#ifndef HIGHEST_DIMENSIONS
+#  define HIGHEST_DIMENSIONS 5
+#endif
 #define HIGHEST_BASE 36
 
 extern char *alpha_num;
@@ -155,6 +157,7 @@ int set_grid(int start, int end, int count);
  * The returned hostlist must be freed with hostlist_destroy()
  *
  */
+hostlist_t hostlist_create_dims(const char *hostlist, int dims);
 hostlist_t hostlist_create(const char *hostlist);
 
 /* hostlist_copy():
@@ -193,6 +196,7 @@ int hostlist_push(hostlist_t hl, const char *hosts);
  *
  * return value is 1 for success, 0 for failure.
  */
+int hostlist_push_host_dims(hostlist_t hl, const char *str, int dims);
 int hostlist_push_host(hostlist_t hl, const char *host);
 
 
@@ -318,13 +322,21 @@ void hostlist_sort(hostlist_t hl);
  */
 void hostlist_uniq(hostlist_t hl);
 
-int hostlist_get_base();
+/* Return the base used for encoding numeric hostlist suffixes */
+#define hostlist_get_base(_dimensions) ((_dimensions) > 1 ? 36 : 10)
 
 /* given a int will parse it into sizes in each dimension */
 void hostlist_parse_int_to_array(int in, int *out, int dims, int hostlist_base);
 
 /* ----[ hostlist print functions ]---- */
 
+/* hostlist_ranged_string_dims():
+ *
+ * do the same thing as hostlist_ranged_string, but provide the
+ * dimensions you are looking for.
+ */
+ssize_t hostlist_ranged_string_dims(hostlist_t hl, size_t n,
+				    char *buf, int dims, int brackets);
 /* hostlist_ranged_string():
  *
  * Write the string representation of the hostlist hl into buf,
@@ -352,6 +364,8 @@ char *hostlist_ranged_string_malloc(hostlist_t hl);
 /* Variant of hostlist_ranged_string().
  * Returns the buffer which must be released using xfree().
  */
+char *hostlist_ranged_string_xmalloc_dims(
+	hostlist_t hl, int dims, int brackets);
 char *hostlist_ranged_string_xmalloc(hostlist_t hl);
 
 /* hostlist_deranged_string():
@@ -363,6 +377,8 @@ char *hostlist_ranged_string_xmalloc(hostlist_t hl);
  * hostlist_deranged_string() will not attempt to write a bracketed
  * hostlist representation. Every hostname will be explicitly written.
  */
+ssize_t hostlist_deranged_string_dims(
+	hostlist_t hl, size_t n, char *buf, int dims);
 ssize_t hostlist_deranged_string(hostlist_t hl, size_t n, char *buf);
 
 /* Variant of hostlist_deranged_string().
@@ -373,6 +389,7 @@ char *hostlist_deranged_string_malloc(hostlist_t hl);
 /* Variant of hostlist_deranged_string().
  * Returns the buffer which must be released using xfree().
  */
+char *hostlist_deranged_string_xmalloc_dims(hostlist_t hl, int dims);
 char *hostlist_deranged_string_xmalloc(hostlist_t hl);
 
 /* ----[ hostlist utility functions ]---- */
@@ -419,6 +436,7 @@ void hostlist_iterator_reset(hostlist_iterator_t i);
  *
  * The caller is responsible for freeing the returned memory.
  */
+char * hostlist_next_dims(hostlist_iterator_t i, int dims);
 char * hostlist_next(hostlist_iterator_t i);
 
 

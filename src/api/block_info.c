@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -55,15 +55,13 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 
-#include <slurm/slurm.h>
+#include "slurm/slurm.h"
 
 #include "src/common/node_select.h"
 #include "src/common/parse_time.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
-#include "src/plugins/select/bluegene/plugin/bluegene.h"
-
 
 /*
  * slurm_print_block_info_msg - output information about all Bluegene
@@ -117,7 +115,7 @@ char *slurm_sprint_block_info(
 	block_info_t * block_ptr, int one_liner)
 {
 	int j;
-	char tmp1[16];
+	char tmp1[16], *tmp_char = NULL;
 	char *out = NULL;
 	char *line_end = "\n   ";
 	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
@@ -126,7 +124,7 @@ char *slurm_sprint_block_info(
 		line_end = " ";
 
 	/****** Line 1 ******/
-	convert_num_unit((float)block_ptr->node_cnt, tmp1, sizeof(tmp1),
+	convert_num_unit((float)block_ptr->cnode_cnt, tmp1, sizeof(tmp1),
 			 UNIT_NONE);
 
 	out = xstrdup_printf("BlockName=%s TotalNodes=%s State=%s%s",
@@ -139,10 +137,10 @@ char *slurm_sprint_block_info(
 		xstrfmtcat(out, "JobRunning=%u ", block_ptr->job_running);
 	else
 		xstrcat(out, "JobRunning=NONE ");
-
+	tmp_char = conn_type_string_full(block_ptr->conn_type);
 	xstrfmtcat(out, "User=%s ConnType=%s",
-		   block_ptr->owner_name,
-		   conn_type_string(block_ptr->conn_type));
+		   block_ptr->owner_name, tmp_char);
+	xfree(tmp_char);
 	if(cluster_flags & CLUSTER_FLAG_BGL)
 		xstrfmtcat(out, " NodeUse=%s",
 			   node_use_string(block_ptr->node_use));
@@ -150,19 +148,19 @@ char *slurm_sprint_block_info(
 	xstrcat(out, line_end);
 
 	/****** Line 3 ******/
-	if(block_ptr->ionodes)
-		xstrfmtcat(out, "BasePartitions=%s[%s] BPIndices=",
-			   block_ptr->nodes, block_ptr->ionodes);
+	if(block_ptr->ionode_str)
+		xstrfmtcat(out, "MidPlanes=%s[%s] MPIndices=",
+			   block_ptr->mp_str, block_ptr->ionode_str);
 	else
-		xstrfmtcat(out, "BasePartitions=%s BPIndices=",
-			   block_ptr->nodes);
+		xstrfmtcat(out, "MidPlanes=%s MPIndices=",
+			   block_ptr->mp_str);
 	for (j = 0;
-	     (block_ptr->bp_inx && (block_ptr->bp_inx[j] != -1));
+	     (block_ptr->mp_inx && (block_ptr->mp_inx[j] != -1));
 	     j+=2) {
 		if (j > 0)
 			xstrcat(out, ",");
-		xstrfmtcat(out, "%d-%d", block_ptr->bp_inx[j],
-			   block_ptr->bp_inx[j+1]);
+		xstrfmtcat(out, "%d-%d", block_ptr->mp_inx[j],
+			   block_ptr->mp_inx[j+1]);
 	}
 	xstrcat(out, line_end);
 
@@ -170,7 +168,7 @@ char *slurm_sprint_block_info(
 	xstrfmtcat(out, "MloaderImage=%s%s",
 		   block_ptr->mloaderimage, line_end);
 
-	if(cluster_flags & CLUSTER_FLAG_BGL) {
+	if (cluster_flags & CLUSTER_FLAG_BGL) {
 		/****** Line 5 ******/
 		xstrfmtcat(out, "BlrtsImage=%s%s", block_ptr->blrtsimage,
 			   line_end);
@@ -179,13 +177,14 @@ char *slurm_sprint_block_info(
 			   line_end);
 		/****** Line 7 ******/
 		xstrfmtcat(out, "RamdiskImage=%s", block_ptr->ramdiskimage);
-	} else {
+	} else if (cluster_flags & CLUSTER_FLAG_BGP) {
 		/****** Line 5 ******/
 		xstrfmtcat(out, "CnloadImage=%s%s", block_ptr->linuximage,
 			   line_end);
 		/****** Line 6 ******/
 		xstrfmtcat(out, "IoloadImage=%s", block_ptr->ramdiskimage);
 	}
+
 	if (one_liner)
 		xstrcat(out, "\n");
 	else

@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -1117,7 +1117,7 @@ int bit_unfmt_hexmask(bitstr_t * bitmap, const char* str)
 	int bit_index = 0, len = strlen(str);
 	int rc = 0;
 	const char *curpos = str + len - 1;
-	char current;
+	int current;
 	bitoff_t bitsize = bit_size(bitmap);
 
 	bit_nclear(bitmap, 0, bitsize - 1);

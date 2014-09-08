@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -57,8 +57,9 @@
 #  endif
 #endif  /* HAVE_INTTYPES_H */
 
-#include <slurm/slurm.h>
+#include "slurm/slurm.h"
 
+#include "src/common/list.h"
 #include "src/common/log.h"
 #include "src/common/xstring.h"
 #include "src/common/xmalloc.h"
@@ -69,14 +70,16 @@
 #define MAX_THREADS 20
 
 
-static void _cancel_jobs (void);
+static void  _cancel_jobs (void);
 static void *_cancel_job_id (void *cancel_info);
 static void *_cancel_step_id (void *cancel_info);
 
 static int  _confirmation (int i, uint32_t step_id);
 static void _filter_job_records (void);
 static void _load_job_records (void);
-static int _verify_job_ids (void);
+static int  _multi_cluster(List clusters);
+static int  _proc_cluster(void);
+static int  _verify_job_ids (void);
 
 static job_info_msg_t * job_buffer_ptr = NULL;
 
@@ -107,9 +110,41 @@ main (int argc, char *argv[])
 		log_alter (log_opts, SYSLOG_FACILITY_DAEMON, NULL);
 	}
 
+	if (opt.clusters)
+		rc = _multi_cluster(opt.clusters);
+	else
+		rc = _proc_cluster();
+
+	exit (rc);
+}
+
+/* _multi_cluster - process job cancellation across a list of clusters */
+static int
+_multi_cluster(List clusters)
+{
+	ListIterator itr;
+	int rc = 0, rc2;
+
+	itr = list_iterator_create(clusters);
+	if (!itr)
+		fatal("list_iterator_create: malloc failure");
+	while ((working_cluster_rec = list_next(itr))) {
+		rc2 = _proc_cluster();
+		rc = MAX(rc, rc2);
+	}
+	list_iterator_destroy(itr);
+
+	return rc;
+}
+
+/* _proc_cluster - process job cancellation on a specific cluster */
+static int
+_proc_cluster(void)
+{
+	int rc;
+
 	_load_job_records();
 	rc = _verify_job_ids();
-
 	if ((opt.account) ||
 	    (opt.interactive) ||
 	    (opt.job_name) ||
@@ -120,13 +155,13 @@ main (int argc, char *argv[])
 	    (opt.state != JOB_END) ||
 	    (opt.user_name) ||
 	    (opt.wckey)) {
-		_filter_job_records ();
+		_filter_job_records();
 	}
 	_cancel_jobs ();
+	slurm_free_job_info_msg(job_buffer_ptr);
 
-	exit (rc);
+	return rc;
 }
-
 
 /* _load_job_records - load all job information for filtering and verification */
 static void
@@ -455,7 +490,8 @@ _cancel_job_id (void *ci)
 		else
 			verbose("Signal %u to job %u", sig, job_id);
 
-		if ((sig == SIGKILL) || (!sig_set) || msg_to_ctld) {
+		if ((sig == SIGKILL) || (!sig_set) ||
+		    msg_to_ctld || opt.clusters) {
 			error_code = slurm_kill_job (job_id, sig,
 						     (uint16_t)opt.batch);
 		} else {
@@ -563,7 +599,6 @@ _confirmation (int i, uint32_t step_id)
 {
 	char in_line[128];
 	job_info_t *job_ptr = NULL;
-	char *line = NULL;
 
 	job_ptr = job_buffer_ptr->job_array ;
 	while (1) {
@@ -577,9 +612,8 @@ _confirmation (int i, uint32_t step_id)
 				job_ptr[i].partition);
 		}
 
-		/* we only set this here to avoid a warning.  We throw it away
-		   later. */
-		line = fgets (in_line, sizeof (in_line), stdin);
+		if (fgets(in_line, sizeof(in_line), stdin) == NULL)
+			continue;
 		if ((in_line[0] == 'y') || (in_line[0] == 'Y'))
 			return 1;
 		if ((in_line[0] == 'n') || (in_line[0] == 'N'))

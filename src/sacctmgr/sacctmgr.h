@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -76,7 +76,7 @@
 #  endif
 #endif  /* HAVE_INTTYPES_H */
 
-#include <slurm/slurm.h>
+#include "slurm/slurm.h"
 
 #include "src/common/jobacct_common.h"
 #include "src/common/parse_time.h"
@@ -113,8 +113,10 @@ typedef enum {
 	PRINT_MAXCM,
 	PRINT_MAXCRM,
 	PRINT_MAXC,
+	PRINT_MAXCU,
 	PRINT_MAXJ,
 	PRINT_MAXN,
+	PRINT_MAXNU,
 	PRINT_MAXS,
 	PRINT_MAXW,
 
@@ -145,7 +147,8 @@ typedef enum {
 	PRINT_DWCKEY,
 
 	/* QOS */
-	PRINT_PREE = 6000,
+	PRINT_GRACE = 6000,
+	PRINT_PREE,
 	PRINT_PREEM,
 	PRINT_PRIO,
 	PRINT_UF,

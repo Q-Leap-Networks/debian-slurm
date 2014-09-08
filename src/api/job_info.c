@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -52,8 +52,8 @@
 #include <sys/wait.h>
 #include <time.h>
 
-#include <slurm/slurm.h>
-#include <slurm/slurm_errno.h>
+#include "slurm/slurm.h"
+#include "slurm/slurm_errno.h"
 
 #include "src/common/forward.h"
 #include "src/common/node_select.h"
@@ -160,7 +160,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	char select_buf[122];
 	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
 
-	if(cluster_flags & CLUSTER_FLAG_BG) {
+	if (cluster_flags & CLUSTER_FLAG_BG) {
 		nodelist = "BP_List";
 		select_g_select_jobinfo_get(job_ptr->select_jobinfo,
 					    SELECT_JOBDATA_IONODES,
@@ -209,7 +209,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	if (job_ptr->state_desc) {
 		/* Replace white space with underscore for easier parsing */
 		for (j=0; job_ptr->state_desc[j]; j++) {
-			if (isspace(job_ptr->state_desc[j]))
+			if (isspace((int)job_ptr->state_desc[j]))
 				job_ptr->state_desc[j] = '_';
 		}
 		tmp6_ptr = job_ptr->state_desc;
@@ -356,6 +356,15 @@ line6:
 		xstrcat(out, "\n   ");
 
 	/****** Line 10 ******/
+	if (job_ptr->preempt_time == 0)
+		sprintf(tmp_line, "PreemptTime=None ");
+	else {
+		slurm_make_time_str((time_t *)&job_ptr->preempt_time,
+				    time_str, sizeof(time_str));
+		snprintf(tmp_line, sizeof(tmp_line), "PreemptTime=%s ",
+			 time_str);
+	}
+	xstrcat(out, tmp_line);
 	if (job_ptr->suspend_time) {
 		slurm_make_time_str ((time_t *)&job_ptr->suspend_time,
 				     time_str, sizeof(time_str));
@@ -403,8 +412,19 @@ line6:
 	else
 		xstrcat(out, "\n   ");
 
-	/****** Line 14 ******/
-	if(cluster_flags & CLUSTER_FLAG_BG) {
+	/****** Line 14 (optional) ******/
+	if (job_ptr->batch_host) {
+		snprintf(tmp_line, sizeof(tmp_line), "BatchHost=%s",
+			 job_ptr->batch_host);
+		xstrcat(out, tmp_line);
+		if (one_liner)
+			xstrcat(out, " ");
+		else
+			xstrcat(out, "\n   ");
+	}
+
+	/****** Line 15 ******/
+	if (cluster_flags & CLUSTER_FLAG_BG) {
 		select_g_select_jobinfo_get(job_ptr->select_jobinfo,
 					    SELECT_JOBDATA_NODE_CNT,
 					    &min_nodes);
@@ -457,7 +477,7 @@ line6:
 					if (i < job_resrcs->cpu_array_cnt - 1) {
 						continue;
 					}
-					/* add elipsis before last entry */
+					/* add ellipsis before last entry */
 					xstrcat(out, "...,");
 					length += 4;
 				}
@@ -778,6 +798,31 @@ line15:
 		xstrcat(out, tmp_line);
 	}
 
+	/****** Line 27 (optional) ******/
+	if (job_ptr->batch_script) {
+		if (one_liner)
+			xstrcat(out, " ");
+		else
+			xstrcat(out, "\n   ");
+		xstrcat(out, "BatchScript=\n");
+		xstrcat(out, job_ptr->batch_script);
+	}
+
+	/****** Line 28 (optional) ******/
+	if (job_ptr->req_switch) {
+		char time_buf[32];
+		if (one_liner)
+			xstrcat(out, " ");
+		else
+			xstrcat(out, "\n   ");
+		secs2time_str((time_t) job_ptr->wait4switch, time_buf,
+			      sizeof(time_buf));
+		snprintf(tmp_line, sizeof(tmp_line), "Switches=%u@%s\n",
+			 job_ptr->req_switch, time_buf);
+		xstrcat(out, tmp_line);
+	}
+
+	/****** Line 29 (optional) ******/
 	if (one_liner)
 		xstrcat(out, "\n");
 	else

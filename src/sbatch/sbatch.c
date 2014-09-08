@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -50,7 +50,7 @@
 #include <sys/param.h>               /* MAXPATHLEN */
 #include <fcntl.h>
 
-#include <slurm/slurm.h>
+#include "slurm/slurm.h"
 
 #include "src/common/env.h"
 #include "src/common/plugstack.h"
@@ -66,6 +66,7 @@
 
 static void  _env_merge_filter(job_desc_msg_t *desc);
 static int   _fill_job_desc_from_opts(job_desc_msg_t *desc);
+static int   _check_cluster_specific_settings(job_desc_msg_t *desc);
 static void *_get_script_buffer(const char *filename, int *size);
 static char *_script_wrap(char *command_string);
 static void  _set_exit_code(void);
@@ -152,6 +153,9 @@ int main(int argc, char *argv[])
 	if (sbatch_set_first_avail_cluster(&desc) != SLURM_SUCCESS)
 		exit(error_exit);
 
+	if (_check_cluster_specific_settings(&desc) != SLURM_SUCCESS)
+		exit(error_exit);
+
 	while (slurm_submit_batch_job(&desc, &resp) < 0) {
 		static char *msg;
 
@@ -220,9 +224,35 @@ static void _env_merge_filter(job_desc_msg_t *desc)
 	xfree(tmp);
 }
 
+/* Returns SLURM_ERROR if settings are invalid for chosen cluster */
+static int _check_cluster_specific_settings(job_desc_msg_t *req)
+{
+	int rc = SLURM_SUCCESS;
+
+	if (is_cray_system()) {
+		/*
+		 * Fix options and inform user, but do not abort submission.
+		 */
+		if (req->shared && req->shared != (uint16_t)NO_VAL) {
+			info("--share is not (yet) supported on Cray.");
+			req->shared = false;
+		}
+		if (req->overcommit && req->overcommit != (uint8_t)NO_VAL) {
+			info("--overcommit is not supported on Cray.");
+			req->overcommit = false;
+		}
+		if (req->wait_all_nodes && req->wait_all_nodes != (uint16_t)NO_VAL) {
+			info("--wait-all-nodes is handled automatically on Cray.");
+			req->wait_all_nodes = false;
+		}
+	}
+	return rc;
+}
+
 /* Returns 0 on success, -1 on failure */
 static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 {
+		int i;
 	extern char **environ;
 
 	if (opt.jobid_set)
@@ -284,16 +314,18 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 	if (opt.hold)
 		desc->priority     = 0;
 
-	if ((int)opt.geometry[0] > 0) {
-		int i;
+	if (opt.geometry[0] != (uint16_t) NO_VAL) {
 		int dims = slurmdb_setup_cluster_dims();
 
 		for (i=0; i<dims; i++)
 			desc->geometry[i] = opt.geometry[i];
 	}
 
-	if (opt.conn_type != (uint16_t) NO_VAL)
-		desc->conn_type = opt.conn_type;
+	for (i=0; i<HIGHEST_DIMENSIONS; i++) {
+		if (opt.conn_type[i] == (uint16_t)NO_VAL)
+			break;
+		desc->conn_type[i] = opt.conn_type[i];
+	}
 	if (opt.reboot)
 		desc->reboot = 1;
 	if (opt.no_rotate)
@@ -319,8 +351,10 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 	if (opt.overcommit) {
 		desc->min_cpus = MAX(opt.min_nodes, 1);
 		desc->overcommit = opt.overcommit;
-	} else
+	} else if (opt.cpus_set)
 		desc->min_cpus = opt.ntasks * opt.cpus_per_task;
+	else
+		desc->min_cpus = opt.ntasks;
 	desc->max_cpus = desc->max_cpus;
 
 	if (opt.ntasks_set)
@@ -398,6 +432,11 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->spank_job_env      = opt.spank_job_env;
 		desc->spank_job_env_size = opt.spank_job_env_size;
 	}
+	if (opt.req_switch >= 0)
+		desc->req_switch = opt.req_switch;
+	if (opt.wait4switch >= 0)
+		desc->wait4switch = opt.wait4switch;
+
 
 	return 0;
 }

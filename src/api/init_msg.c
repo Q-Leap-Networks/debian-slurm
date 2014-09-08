@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -45,7 +45,7 @@
 #include <errno.h>
 #include <stdio.h>
 
-#include <slurm/slurm.h>
+#include "slurm/slurm.h"
 
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/forward.h"
@@ -57,32 +57,23 @@
  */
 void slurm_init_job_desc_msg(job_desc_msg_t * job_desc_msg)
 {
-	int i;
-	int dims = slurmdb_setup_cluster_dims();
-
 	memset(job_desc_msg, 0, sizeof(job_desc_msg_t));
 	job_desc_msg->acctg_freq	= (uint16_t) NO_VAL;
 	job_desc_msg->alloc_sid		= NO_VAL;
-	job_desc_msg->conn_type		= (uint16_t) NO_VAL;
+	job_desc_msg->conn_type[0]	= (uint16_t) NO_VAL;
 	job_desc_msg->contiguous	= (uint16_t) NO_VAL;
+	job_desc_msg->cores_per_socket	= (uint16_t) NO_VAL;
 	job_desc_msg->cpu_bind_type	= (uint16_t) NO_VAL;
 	job_desc_msg->cpus_per_task	= (uint16_t) NO_VAL;
-	for (i=0; i<dims; i++)
-		job_desc_msg->geometry[i] = (uint16_t) NO_VAL;
+	job_desc_msg->geometry[0]       = (uint16_t) NO_VAL;
 	job_desc_msg->group_id		= NO_VAL;
 	job_desc_msg->job_id		= NO_VAL;
-	job_desc_msg->pn_min_cpus	= (uint16_t) NO_VAL;
-	job_desc_msg->pn_min_memory    = NO_VAL;
-	job_desc_msg->pn_min_tmp_disk  = NO_VAL;
 	job_desc_msg->kill_on_node_fail = (uint16_t) NO_VAL;
 	job_desc_msg->max_cpus		= NO_VAL;
 	job_desc_msg->max_nodes		= NO_VAL;
 	job_desc_msg->mem_bind_type	= (uint16_t) NO_VAL;
 	job_desc_msg->min_cpus		= NO_VAL;
 	job_desc_msg->min_nodes		= NO_VAL;
-	job_desc_msg->sockets_per_node	= (uint16_t) NO_VAL;
-	job_desc_msg->cores_per_socket	= (uint16_t) NO_VAL;
-	job_desc_msg->threads_per_core	= (uint16_t) NO_VAL;
 	job_desc_msg->nice		= (uint16_t) NO_VAL;
 	job_desc_msg->ntasks_per_core	= (uint16_t) NO_VAL;
 	job_desc_msg->ntasks_per_node	= (uint16_t) NO_VAL;
@@ -90,16 +81,23 @@ void slurm_init_job_desc_msg(job_desc_msg_t * job_desc_msg)
 	job_desc_msg->num_tasks		= NO_VAL;
 	job_desc_msg->overcommit	= (uint8_t) NO_VAL;
 	job_desc_msg->plane_size	= (uint16_t) NO_VAL;
+	job_desc_msg->pn_min_cpus	= (uint16_t) NO_VAL;
+	job_desc_msg->pn_min_memory	= NO_VAL;
+	job_desc_msg->pn_min_tmp_disk	= NO_VAL;
 	job_desc_msg->priority		= NO_VAL;
 	job_desc_msg->reboot		= (uint16_t) NO_VAL;
 	job_desc_msg->requeue		= (uint16_t) NO_VAL;
+	job_desc_msg->req_switch	= NO_VAL;
 	job_desc_msg->rotate		= (uint16_t) NO_VAL;
 	job_desc_msg->shared		= (uint16_t) NO_VAL;
+	job_desc_msg->sockets_per_node	= (uint16_t) NO_VAL;
 	job_desc_msg->task_dist		= (uint16_t) NO_VAL;
+	job_desc_msg->threads_per_core	= (uint16_t) NO_VAL;
 	job_desc_msg->time_limit	= NO_VAL;
 	job_desc_msg->time_min		= NO_VAL;
 	job_desc_msg->user_id		= NO_VAL;
 	job_desc_msg->wait_all_nodes	= (uint16_t) NO_VAL;
+	job_desc_msg->wait4switch	= NO_VAL;
 }
 
 /*
@@ -124,6 +122,9 @@ void slurm_init_part_desc_msg (update_part_msg_t * update_part_msg)
 {
 	memset(update_part_msg, 0, sizeof(update_part_msg_t));
 	update_part_msg->default_time   = (uint32_t) NO_VAL;
+	update_part_msg->def_mem_per_cpu = (uint32_t) NO_VAL;
+	update_part_msg->grace_time     = (uint32_t) NO_VAL;
+	update_part_msg->max_mem_per_cpu = (uint32_t) NO_VAL;
 	update_part_msg->max_nodes 	= NO_VAL;
 	update_part_msg->max_share 	= (uint16_t) NO_VAL;
 	update_part_msg->min_nodes 	= NO_VAL;
@@ -160,16 +161,26 @@ void slurm_init_update_node_msg (update_node_msg_t * update_node_msg)
 }
 
 /*
+ * slurm_init_update_front_end_msg - initialize front_end node update message
+ * OUT update_front_end_msg - user defined node descriptor
+ */
+void slurm_init_update_front_end_msg (update_front_end_msg_t *
+				      update_front_end_msg)
+{
+	memset(update_front_end_msg, 0, sizeof(update_front_end_msg_t));
+	update_front_end_msg->node_state = (uint16_t) NO_VAL;
+}
+
+/*
  * slurm_init_update_block_msg - initialize block update message
  * OUT update_block_msg - user defined block descriptor
  */
 void slurm_init_update_block_msg (update_block_msg_t *update_block_msg)
 {
 	memset(update_block_msg, 0, sizeof(update_block_msg_t));
-	update_block_msg->conn_type = (uint16_t)NO_VAL;
+	update_block_msg->conn_type[0] = (uint16_t)NO_VAL;
 	update_block_msg->job_running = NO_VAL;
-	update_block_msg->node_cnt = NO_VAL;
+	update_block_msg->cnode_cnt = NO_VAL;
 	update_block_msg->node_use = (uint16_t)NO_VAL;
 	update_block_msg->state = (uint16_t)NO_VAL;
-
 }

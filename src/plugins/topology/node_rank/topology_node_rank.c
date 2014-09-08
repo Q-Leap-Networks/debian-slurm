@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  For details, see <http://www.schedmd.com/slurmdocs/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -46,7 +46,8 @@
 #include <stdlib.h>
 #include <sys/types.h>
 
-#include <slurm/slurm_errno.h>
+#include "slurm/slurm_errno.h"
+
 #include "src/common/bitstring.h"
 #include "src/common/log.h"
 #include "src/common/slurm_topology.h"
@@ -84,7 +85,7 @@
  */
 const char plugin_name[]        = "topology node_rank plugin";
 const char plugin_type[]        = "topology/node_rank";
-const uint32_t plugin_version   = 100;
+const uint32_t plugin_version   = 101;
 
 /*
  * init() is called when the plugin is loaded, before any other functions
@@ -111,78 +112,15 @@ extern int fini(void)
  */
 extern int topo_build_config(void)
 {
-	static bool first_run = true;
-	struct node_record *node_ptr, *node_ptr2;
-	int i, j, min_inx;
-	uint32_t min_val;
-
-	/* We can only re-order the nodes once at slurmctld startup.
-	 * After that time, many bitmaps are created based upon the
-	 * index of each node name in the array. */
-	if (!first_run)
-		return SLURM_SUCCESS;
-	first_run = false;
-
-	/* Now we need to sort the node records. We only need to move a few
-	 * fields since the others were all initialized to identical values.
-	 * The fields needing to be copied are those set by the function
-	 * _build_single_nodeline_info() in src/common/read_conf.c */
-	for (i=0; i<node_record_count; i++) {
-		min_val = node_record_table_ptr[i].node_rank;
-		min_inx = i;
-		for (j=(i+1); j<node_record_count; j++) {
-			if (node_record_table_ptr[j].node_rank < min_val) {
-				min_val = node_record_table_ptr[j].node_rank;
-				min_inx = j;
-			}
-		}
-		if (min_inx != i) {	/* swap records */
-			char *tmp_str;
-			uint16_t tmp_uint16;
-			uint32_t tmp_uint32;
-
-			node_ptr =  node_record_table_ptr + i;
-			node_ptr2 = node_record_table_ptr + min_inx;
-
-			tmp_str = node_ptr->name;
-			node_ptr->name  = node_ptr2->name;
-			node_ptr2->name = tmp_str;
-
-			tmp_str = node_ptr->comm_name;
-			node_ptr->comm_name  = node_ptr2->comm_name;
-			node_ptr2->comm_name = tmp_str;
-
-			tmp_uint32 = node_ptr->node_rank;
-			node_ptr->node_rank  = node_ptr2->node_rank;
-			node_ptr2->node_rank = tmp_uint32;
-
-			tmp_str = node_ptr->features;
-			node_ptr->features  = node_ptr2->features;
-			node_ptr2->features = tmp_str;
-
-			tmp_uint16 = node_ptr->port;
-			node_ptr->port  = node_ptr2->port;
-			node_ptr2->port = tmp_uint16;
-
-			tmp_str = node_ptr->reason;
-			node_ptr->reason  = node_ptr2->reason;
-			node_ptr2->reason = tmp_str;
-
-			tmp_uint32 = node_ptr->weight;
-			node_ptr->weight  = node_ptr2->weight;
-			node_ptr2->weight = tmp_uint32;
-		}
-	}
-
-#if _DEBUG
-	/* Log the results */
-	for (i=0, node_ptr=node_record_table_ptr; i<node_record_count;
-	     i++, node_ptr++) {
-		info("%s: %u", node_ptr->name, node_ptr->node_rank);
-	}
-#endif
-
 	return SLURM_SUCCESS;
+}
+
+/*
+ * topo_generate_node_ranking  -  populate node_rank fields
+ */
+extern bool topo_generate_node_ranking(void)
+{
+	return false;		/* XXX nothing coded yet */
 }
 
 /*
@@ -195,8 +133,10 @@ extern int topo_build_config(void)
  */
 extern int topo_get_node_addr(char* node_name, char** paddr, char** ppattern)
 {
+#ifndef HAVE_FRONT_END
 	if (find_node_record(node_name) == NULL)
 		return SLURM_ERROR;
+#endif
 
 	*paddr = xstrdup(node_name);
 	*ppattern = xstrdup("node");
