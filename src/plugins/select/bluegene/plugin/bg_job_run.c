@@ -2,7 +2,7 @@
  *  bg_job_run.c - blue gene job execution (e.g. initiation and termination) 
  *  functions.
  *
- *  $Id: bg_job_run.c 18162 2009-07-15 23:23:06Z da $ 
+ *  $Id: bg_job_run.c 19082 2009-12-01 20:15:57Z da $ 
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -194,7 +194,7 @@ static int _remove_job(db_job_id_t job_id)
 				debug("job %d is in an INCOMPATIBLE_STATE",
 				      job_id);
 			else
-				error("bridge_cancel_job(%d): %s", job_id,
+				error("bridge_signal_job(%d): %s", job_id,
 				      bg_err_str(rc));
 		}
 	}
@@ -1302,7 +1302,7 @@ extern int boot_block(bg_record_t *bg_record)
 			slurm_make_time_str(&now, time_str, sizeof(time_str));
 			snprintf(reason, sizeof(reason),
 				 "boot_block: "
-				 "Block %s is in an incompatable state.  "
+				 "Block %s is in an incompatible state.  "
 				 "This usually means hardware is allocated "
 				 "by another block (maybe outside of SLURM). "
 				 "[SLURM@%s]", 

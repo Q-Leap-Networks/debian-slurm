@@ -1,7 +1,7 @@
 /****************************************************************************\
  *  opts.c - srun command line option parsing
  *
- *  $Id: opts.c 18308 2009-08-04 16:31:06Z jette $
+ *  $Id: opts.c 19082 2009-12-01 20:15:57Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security
@@ -242,7 +242,7 @@ parse_command_line( int argc, char* argv[] )
 	}
 
 	if ( params.job_flag && params.step_flag) {
-		error("Incompatable options --jobs and --steps\n");
+		error("Incompatible options --jobs and --steps\n");
 		exit(1);
 	}
 
@@ -1060,8 +1060,8 @@ Usage: squeue [OPTIONS]\n\
                                   to view, default is all partitions\n\
   -s, --steps                     comma separated list of job steps\n\
                                   to view, default is all\n\
-  -S, --sort=fields               comma seperated list of fields to sort on\n\
-  -t, --states=states             comma seperated list of states to view,\n\
+  -S, --sort=fields               comma separated list of fields to sort on\n\
+  -t, --states=states             comma separated list of states to view,\n\
                                   default is pending and running,\n\
                                   '--states=all' reports all states\n\
   -u, --user=user_name            comma separated list of users to view\n\

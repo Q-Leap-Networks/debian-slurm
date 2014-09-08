@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmd/slurmd.c - main slurm node server daemon
- *  $Id: slurmd.c 18662 2009-09-09 23:09:09Z jette $
+ *  $Id: slurmd.c 19082 2009-12-01 20:15:57Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -955,7 +955,7 @@ _create_msg_socket()
 
 	conf->lfd = ld;
 
-	debug3("succesfully opened slurm listen port %s:%d",
+	debug3("successfully opened slurm listen port %s:%d",
 	       node_addr, conf->port);
 
 	return;

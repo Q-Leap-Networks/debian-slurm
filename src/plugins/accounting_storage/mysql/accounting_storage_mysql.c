@@ -2938,8 +2938,8 @@ static int _mysql_acct_check_tables(MYSQL *db_conn)
 		{ "associd", "int unsigned not null" },
 		{ "wckey", "tinytext not null default ''" },
 		{ "wckeyid", "int unsigned not null" },
-		{ "uid", "smallint unsigned not null" },
-		{ "gid", "smallint unsigned not null" },
+		{ "uid", "int unsigned not null" },
+		{ "gid", "int unsigned not null" },
 		{ "cluster", "tinytext not null" },
 		{ "partition", "tinytext not null" },
 		{ "blockid", "tinytext" },
@@ -2960,7 +2960,7 @@ static int _mysql_acct_check_tables(MYSQL *db_conn)
 		{ "alloc_nodes", "int unsigned not null" }, 
 		{ "nodelist", "text" },
 		{ "node_inx", "text" },
-		{ "kill_requid", "smallint default -1 not null" },
+		{ "kill_requid", "int default -1 not null" },
 		{ "qos", "smallint default 0" },
 		{ "resvid", "int unsigned not null" },
 		{ NULL, NULL}
@@ -3026,7 +3026,7 @@ static int _mysql_acct_check_tables(MYSQL *db_conn)
 		{ "nodelist", "text not null" },
 		{ "node_inx", "text" },
 		{ "state", "smallint not null" },
-		{ "kill_requid", "smallint default -1 not null" },
+		{ "kill_requid", "int default -1 not null" },
 		{ "comp_code", "int default 0 not null" },
 		{ "nodes", "int unsigned not null" },
 		{ "cpus", "int unsigned not null" },
@@ -3547,7 +3547,8 @@ extern int acct_storage_p_commit(mysql_conn_t *mysql_conn, bool commit)
 			slurm_msg_t_init(&req);
 			slurm_set_addr_char(&req.address, atoi(row[1]), row[0]);
 			req.msg_type = ACCOUNTING_UPDATE_MSG;
-			req.flags = SLURM_GLOBAL_AUTH_KEY;
+			if(slurmdbd_conf)
+				req.flags = SLURM_GLOBAL_AUTH_KEY;
 			req.data = &msg;			
 			slurm_msg_t_init(&resp);
 			
@@ -10168,7 +10169,7 @@ extern int clusteracct_storage_p_register_ctld(mysql_conn_t *mysql_conn,
 
 	query = xstrdup_printf(
 		"update %s set deleted=0, mod_time=%d, "
-		"control_host='%s', control_port=%u, rpc_version=%d, "
+		"control_host='%s', control_port=%u, rpc_version=%d "
 		"where name='%s';",
 		cluster_table, now, address, port,
 		SLURMDBD_VERSION,
@@ -10852,16 +10853,18 @@ extern int jobacct_storage_p_step_start(mysql_conn_t *mysql_conn,
 	   %d */
 	query = xstrdup_printf(
 		"insert into %s (id, stepid, start, name, state, "
-		"cpus, nodes, node_inx, tasks, nodelist, task_dist) "
+		"cpus, nodes, tasks, nodelist, node_inx, task_dist) "
 		"values (%d, %d, %d, \"%s\", %d, %d, %d, %d, "
 		"\"%s\", \"%s\", %d) "
 		"on duplicate key update cpus=%d, nodes=%d, "
-		"tasks=%d, end=0, state=%d, node_inx=\"%s\", task_dist=%d",
+		"tasks=%d, end=0, state=%d, "
+		"nodelist=\"%s\", node_inx=\"%s\", task_dist=%d",
 		step_table, step_ptr->job_ptr->db_index,
 		step_ptr->step_id, 
 		(int)step_ptr->start_time, step_ptr->name,
 		JOB_RUNNING, cpus, nodes, tasks, node_list, node_inx, task_dist,
-		cpus, nodes, tasks, JOB_RUNNING, node_inx, task_dist);
+		cpus, nodes, tasks, JOB_RUNNING, 
+		node_list, node_inx, task_dist);
 	debug3("%d(%d) query\n%s", mysql_conn->conn, __LINE__, query);
 	rc = mysql_db_query(mysql_conn->db_conn, query);
 	xfree(query);
@@ -10976,8 +10979,8 @@ extern int jobacct_storage_p_step_complete(mysql_conn_t *mysql_conn,
 	query = xstrdup_printf(
 		"update %s set end=%d, state=%d, "
 		"kill_requid=%d, comp_code=%d, "
-		"user_sec=%ld, user_usec=%ld, "
-		"sys_sec=%ld, sys_usec=%ld, "
+		"user_sec=%u, user_usec=%u, "
+		"sys_sec=%u, sys_usec=%u, "
 		"max_vsize=%u, max_vsize_task=%u, "
 		"max_vsize_node=%u, ave_vsize=%f, "
 		"max_rss=%u, max_rss_task=%u, "

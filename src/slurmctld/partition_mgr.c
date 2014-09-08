@@ -2,7 +2,7 @@
  *  partition_mgr.c - manage the partition information of slurm
  *	Note: there is a global partition list (part_list) and
  *	time stamp (last_part_update)
- *  $Id: partition_mgr.c 18102 2009-07-09 20:45:13Z jette $
+ *  $Id: partition_mgr.c 19082 2009-12-01 20:15:57Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -468,7 +468,7 @@ int load_all_part_state(void)
 	debug3("Version string in part_state header is %s", ver_str);
 	if ((!ver_str) || (strcmp(ver_str, PART_STATE_VERSION) != 0)) {
 		error("**********************************************************");
-		error("Can not recover partition state, data version incompatable");
+		error("Can not recover partition state, data version incompatible");
 		error("**********************************************************");
 		xfree(ver_str);
 		free_buf(buffer);

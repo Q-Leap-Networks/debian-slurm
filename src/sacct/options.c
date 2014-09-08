@@ -389,7 +389,7 @@ sacct [<OPTION>]                                                            \n\
                    current user's jobs are displayed.  If ran by user root  \n\
                    this is the default.                                     \n\
      -A, --accounts:                                                        \n\
-	           Use this comma seperated list of accounts to select jobs \n\
+	           Use this comma separated list of accounts to select jobs \n\
                    to display.  By default, all accounts are selected.      \n\
      -b, --brief:                                                           \n\
 	           Equivalent to '--format=jobstep,state,error'. This option\n\
@@ -407,13 +407,13 @@ sacct [<OPTION>]                                                            \n\
 	           Print a list of fields that can be specified with the    \n\
 	           '--format' option                                        \n\
      -E, --endtime:                                                         \n\
-                   Select jobs started before this time.                    \n\
+                   Select jobs eligible before this time.                   \n\
      -f, --file=file:                                                       \n\
 	           Read data from the specified file, rather than SLURM's   \n\
                    current accounting log file. (Only appliciable when      \n\
                    running the filetxt plugin.)                             \n\
      -g, --gid, --group:                                                    \n\
-	           Use this comma seperated list of gids or group names     \n\
+	           Use this comma separated list of gids or group names     \n\
                    to select jobs to display.  By default, all groups are   \n\
                    selected.                                                \n\
      -h, --help:   Print this description of use.                           \n\
@@ -441,7 +441,7 @@ sacct [<OPTION>]                                                            \n\
      -N, --nodes:                                                           \n\
                    A comma separated list of nodes where jobs ran           \n\
      -o, --format:                                                          \n\
-	           Comma seperated list of fields. (use \"--helpformat\"    \n\
+	           Comma separated list of fields. (use \"--helpformat\"    \n\
                    for a list of available fields).                         \n\
      -O, --formatted_dump:                                                  \n\
 	           Dump accounting records in an easy-to-read format,       \n\
@@ -449,7 +449,7 @@ sacct [<OPTION>]                                                            \n\
      -p, --parsable: output will be '|' delimited with a '|' at the end     \n\
      -P, --parsable2: output will be '|' delimited without a '|' at the end \n\
      -r, --partition:                                                       \n\
-	           Comma seperated list of partitions to select jobs and    \n\
+	           Comma separated list of partitions to select jobs and    \n\
                    job steps from. The default is all partitions.           \n\
      -s, --state:                                                           \n\
 	           Select jobs based on their current state: running (r),   \n\
@@ -463,7 +463,7 @@ sacct [<OPTION>]                                                            \n\
                    the start time would be truncated to --starttime.        \n\
                    The same for end time and --endtime.                     \n\
      -u, --uid, --user:                                                     \n\
-	           Use this comma seperated list of uids or user names      \n\
+	           Use this comma separated list of uids or user names      \n\
                    to select jobs to display.  By default, the running      \n\
                    user's uid is used.                                      \n\
      --usage:      Display brief usage message.                             \n\
@@ -481,7 +481,7 @@ sacct [<OPTION>]                                                            \n\
 	           HH:MM[:SS] [AM|PM]                                       \n\
 	           MMDD[YY] or MM/DD[/YY] or MM.DD[.YY]                     \n\
 	           MM/DD[/YY]-HH:MM[:SS]                                    \n\
-	           YYYY-MM-DD[THH[:MM[:SS]]]                                \n\
+	           YYYY-MM-DD[THH:MM[:SS]]                                  \n\
 \n");
 
 	return;
@@ -601,6 +601,7 @@ void parse_command_line(int argc, char **argv)
 
 	static struct option long_options[] = {
 		{"allusers", 0,0, 'a'},
+		{"allclusters", 0,0, 'L'},
 		{"accounts", 1, 0, 'A'},
 		{"allocations", 0, &params.opt_allocs,  1},
 		{"brief", 0, 0, 'b'},
@@ -646,7 +647,7 @@ void parse_command_line(int argc, char **argv)
 
 	while (1) {		/* now cycle through the command line */
 		c = getopt_long(argc, argv,
-				"aA:bcC:deE:f:g:hj:lnN:o:OpPr:s:S:tu:vVW:X",
+				"aA:bcC:dDeE:f:g:hj:lLnN:o:OpPr:s:S:Ttu:vVW:X",
 				long_options, &optionIndex);
 		if (c == -1)
 			break;

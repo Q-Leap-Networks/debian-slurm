@@ -285,7 +285,7 @@ extern int init ( void )
 	rc = _init_status_pthread();
 #endif
 #ifdef HAVE_BG
-	error("%s is incompatable with BlueGene", plugin_name);
+	error("%s is incompatible with BlueGene", plugin_name);
 	fatal("Use SelectType=select/bluegene");
 #endif
 	cr_type = (select_type_plugin_info_t)
@@ -1947,7 +1947,8 @@ static void _init_node_cr(void)
 				 	      node_cr_ptr[i].exclusive_jobid,
 				 	      node_record_table_ptr[i].name);
 				}
-				node_cr_ptr[i].exclusive_jobid = job_ptr->job_id;
+				node_cr_ptr[i].exclusive_jobid = 
+					job_ptr->job_id;
 			}
 			if (job_memory_cpu == 0)
 				node_cr_ptr[i].alloc_memory += job_memory_node;

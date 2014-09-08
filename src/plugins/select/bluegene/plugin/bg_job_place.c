@@ -935,7 +935,7 @@ static int _find_best_block_match(List block_list,
 	request.procs = req_procs;
 	request.conn_type = conn_type;
 	request.rotate = rotate;
-	request.elongate = true;
+	request.elongate = rotate;
 	request.start_req = start_req;
 #ifdef HAVE_BGL
 	request.blrtsimage = blrtsimage;
@@ -1307,7 +1307,7 @@ extern int submit_job(struct job_record *job_ptr, bitstr_t *slurm_block_bitmap,
 {
 	int rc = SLURM_SUCCESS;
 	bg_record_t* bg_record = NULL;
-	char buf[100];
+	char buf[256];
 	uint16_t conn_type = (uint16_t)NO_VAL;
 	List block_list = NULL;
 	int blocks_added = 0;
@@ -1343,10 +1343,8 @@ extern int submit_job(struct job_record *job_ptr, bitstr_t *slurm_block_bitmap,
 			select_g_get_jobinfo(job_ptr->select_jobinfo,
 					     SELECT_DATA_MAX_PROCS,
 					     &max_procs);
-			if((max_procs > bg_conf->procs_per_bp)
-			   || (max_procs == NO_VAL))
-				conn_type = SELECT_TORUS;
-			else
+			if((max_procs != NO_VAL)
+			   && (max_procs < bg_conf->procs_per_bp))
 				conn_type = SELECT_SMALL;
 		}
 		select_g_set_jobinfo(job_ptr->select_jobinfo,
@@ -1355,8 +1353,8 @@ extern int submit_job(struct job_record *job_ptr, bitstr_t *slurm_block_bitmap,
 	}
 	select_g_sprint_jobinfo(job_ptr->select_jobinfo, buf, sizeof(buf), 
 				SELECT_PRINT_MIXED);
-	debug("bluegene:submit_job: %d %s nodes=%u-%u-%u", 
-	      mode, buf, min_nodes, req_nodes, max_nodes);
+	debug("bluegene:submit_job: %u mode=%d %s nodes=%u-%u-%u", 
+	      job_ptr->job_id, mode, buf, min_nodes, req_nodes, max_nodes);
 	select_g_sprint_jobinfo(job_ptr->select_jobinfo, buf, sizeof(buf), 
 				SELECT_PRINT_BLRTS_IMAGE);
 #ifdef HAVE_BGL
