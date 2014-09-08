@@ -341,9 +341,8 @@ Display the state of the specified entity with the specified identification.
 \fIhostnames\fP
 (also \fIblock\fP or \fIsubmp\fP on BlueGene systems).
 \fIID\fP can be used to identify a specific element of the identified
-entity: the configuration parameter name, job ID, node name, partition name,
-reservation name, or job step ID for \fIconfig\fP, \fIjob\fP, \fInode\fP,
-\fIpartition\fP, or \fIstep\fP respectively.
+entity: job ID, node name, partition name, reservation name, or job step ID for
+\fIjob\fP, \fInode\fP, \fIpartition\fP, or \fIstep\fP respectively.
 For an \fIENTITY\fP of \fItopology\fP, the \fIID\fP may be a node or switch name.
 If one node name is specified, all switches connected to that node (and
 their parent switches) will be shown.
@@ -910,8 +909,9 @@ Use quotes to enclose a reason having more than one word.
 .TP
 \fIState\fP=<state>
 Identify the state to be assigned to the node. Possible values are  "NoResp",
-"ALLOC", "ALLOCATED", "DOWN", "DRAIN", "FAIL", "FAILING", "IDLE",
-"MIXED", "MAINT", "POWER_DOWN", "POWER_UP", "RESUME" or "UNDRAIN".
+"ALLOC", "ALLOCATED", "COMPLETING", "DOWN", "DRAIN", "ERROR, "FAIL", "FAILING",
+"FUTURE" "IDLE", "MAINT", "MIXED", "PERFCTRS/NPC", "RESERVED", "POWER_DOWN",
+"POWER_UP", "RESUME" or "UNDRAIN".
 If a node is in a "MIXED" state it usually means the node is in
 multiple states.  For instance if only part of the node is "ALLOCATED"
 and the rest of the node is "IDLE" the state will be "MIXED".
@@ -919,6 +919,10 @@ If you want to remove a node from service, you typically want to set
 it's state to "DRAIN".
 "FAILING" is similar to "DRAIN" except that some applications will
 seek to relinquish those nodes before the job completes.
+"PERFCTRS/NPC" indicates that Network Performance Counters associated with this
+node are in use, rendering this node as not usable for any other jobs.
+"RESERVED" indicates the node is in an advanced reservation and not generally
+available.
 "RESUME" is not an actual node state, but will return a "DRAINED", "DRAINING",
 or "DOWN" node to service, either "IDLE" or "ALLOCATED" state as appropriate.
 "UNDRAIN" clears the node from being drained (like "RESUME"), but will
@@ -1272,7 +1276,7 @@ Flags\-=DAILY (NOTE: this shortcut is not supported for all flags).
 Currently supported flags include:
 .RS
 .TP 12
-\fFIRST_CORES\fR
+\fIFIRST_CORES\fR
 Use the lowest numbered cores on a node only.
 \fILICENSE_ONLY\fR
 This is a reservation for licenses only and not compute nodes.

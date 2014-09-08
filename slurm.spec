@@ -174,9 +174,9 @@ BuildRequires: perl(ExtUtils::MakeMaker)
 
 %description
 Slurm is an open source, fault-tolerant, and highly
-scalable cluster management and job scheduling system for Linux clusters
-containing up to 65,536 nodes. Components include machine status,
-partition management, job management, scheduling and accounting modules
+scalable cluster management and job scheduling system for Linux clusters.
+Components include machine status, partition management, job management,
+scheduling and accounting modules
 
 #  Allow override of sysconfdir via _slurm_sysconfdir.
 #  Note 'global' instead of 'define' needed here to work around apparent
@@ -511,7 +511,7 @@ rm -f $RPM_BUILD_ROOT/%{_libdir}/slurm/job_submit_partition.so
 rm -f $RPM_BUILD_ROOT/%{_libdir}/security/*.a
 rm -f $RPM_BUILD_ROOT/%{_libdir}/security/*.la
 %if %{?with_pam_dir}0
-rm -f $RPM_BUILD_ROOT/%{with_pam_dir}/pam_slurm.la
+rm -f $RPM_BUILD_ROOT/%{with_pam_dir}/pam_slurm.a
 rm -f $RPM_BUILD_ROOT/%{with_pam_dir}/pam_slurm.la
 %endif
 rm -f $RPM_BUILD_ROOT/lib/security/pam_slurm.a
@@ -1051,7 +1051,10 @@ if [ "$1" = 0 ]; then
 	/sbin/ldconfig %{_libdir}
     fi
 fi
+%if %{?insserv_cleanup}0
 %insserv_cleanup
+%endif
+
 #############################################################################
 
 

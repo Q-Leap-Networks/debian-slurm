@@ -256,11 +256,10 @@ _query_server(partition_info_msg_t ** part_pptr,
 	static node_info_msg_t *old_node_ptr = NULL, *new_node_ptr;
 	static block_info_msg_t *old_bg_ptr = NULL, *new_bg_ptr;
 	static reserve_info_msg_t *old_resv_ptr = NULL, *new_resv_ptr;
-	int cc;
-	uint16_t alloc_cpus;
-	struct node_info *node;
 	int error_code;
 	uint16_t show_flags = 0;
+	int cc;
+	node_info_t *node_ptr;
 
 	if (params.all_flag)
 		show_flags |= SHOW_ALL;
@@ -313,25 +312,52 @@ _query_server(partition_info_msg_t ** part_pptr,
 					     show_flags);
 	}
 
-	/* Set the node state as NODE_STATE_MIXED.
-	 */
-	for (cc = 0; cc < new_node_ptr->record_count; cc++) {
-		node = &(new_node_ptr->node_array[cc]);
-		slurm_get_select_nodeinfo(node->select_nodeinfo,
-					  SELECT_NODEDATA_SUBCNT,
-					  NODE_STATE_ALLOCATED,
-					  &alloc_cpus);
-		if (IS_NODE_ALLOCATED(node)
-		    && alloc_cpus < node->cpus)
-			node->node_state = NODE_STATE_MIXED;
-	}
-
 	if (error_code) {
 		slurm_perror("slurm_load_node");
 		return error_code;
 	}
 	old_node_ptr = new_node_ptr;
 	*node_pptr = new_node_ptr;
+
+	/* Set the node state as NODE_STATE_MIXED. */
+	for (cc = 0; cc < new_node_ptr->record_count; cc++) {
+		node_ptr = &(new_node_ptr->node_array[cc]);
+		if (IS_NODE_DRAIN(node_ptr)) {
+			/* don't worry about mixed since the
+			 * whole node is being drained. */
+		} else {
+			uint16_t alloc_cpus = 0, err_cpus = 0, idle_cpus;
+			int single_node_cpus =
+				(node_ptr->cpus / g_node_scaling);
+
+			select_g_select_nodeinfo_get(node_ptr->select_nodeinfo,
+						     SELECT_NODEDATA_SUBCNT,
+						     NODE_STATE_ALLOCATED,
+						     &alloc_cpus);
+			if (params.cluster_flags & CLUSTER_FLAG_BG) {
+				if (!alloc_cpus &&
+				    (IS_NODE_ALLOCATED(node_ptr) ||
+				     IS_NODE_COMPLETING(node_ptr)))
+					alloc_cpus = node_ptr->cpus;
+				else
+					alloc_cpus *= single_node_cpus;
+			}
+			idle_cpus = node_ptr->cpus - alloc_cpus;
+			select_g_select_nodeinfo_get(node_ptr->select_nodeinfo,
+						     SELECT_NODEDATA_SUBCNT,
+						     NODE_STATE_ERROR,
+						     &err_cpus);
+			if (params.cluster_flags & CLUSTER_FLAG_BG)
+				err_cpus *= single_node_cpus;
+			idle_cpus -= err_cpus;
+
+			if ((alloc_cpus && err_cpus) ||
+			    (idle_cpus  && (idle_cpus != node_ptr->cpus))) {
+				node_ptr->node_state &= NODE_STATE_FLAGS;
+				node_ptr->node_state |= NODE_STATE_MIXED;
+			}
+		}
+	}
 
 	if (old_resv_ptr) {
 		if (clear_old)
@@ -776,6 +802,9 @@ static bool _match_part_data(sinfo_data_t *sinfo_ptr,
 	if ((part_ptr == NULL) || (sinfo_ptr->part_info == NULL))
 		return false;
 
+	if ((_strcmp(part_ptr->name, sinfo_ptr->part_info->name)))
+		return false;
+
 	if (params.match_flags.avail_flag &&
 	    (part_ptr->state_up != sinfo_ptr->part_info->state_up))
 		return false;
@@ -799,10 +828,6 @@ static bool _match_part_data(sinfo_data_t *sinfo_ptr,
 
 	if (params.match_flags.max_time_flag &&
 	    (part_ptr->max_time != sinfo_ptr->part_info->max_time))
-		return false;
-
-	if (params.match_flags.partition_flag &&
-	    (_strcmp(part_ptr->name, sinfo_ptr->part_info->name)))
 		return false;
 
 	if (params.match_flags.root_flag &&

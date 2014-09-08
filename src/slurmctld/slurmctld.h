@@ -107,13 +107,6 @@
 #define	RPC_RETRY_INTERVAL	60
 #endif
 
-/* Attempt to schedule jobs every PERIODIC_SCHEDULE seconds despite
- * any RPC activity. This will catch any state transisions that may
- * have otherwise been missed */
-#ifndef PERIODIC_SCHEDULE
-#define	PERIODIC_SCHEDULE	60
-#endif
-
 /* Check for jobs reaching their time limit every PERIODIC_TIMEOUT seconds */
 #ifndef PERIODIC_TIMEOUT
 #define	PERIODIC_TIMEOUT	30
@@ -218,6 +211,7 @@ extern int   association_based_accounting;
 extern uint32_t   cluster_cpus;
 extern int   with_slurmdbd;
 extern bool  load_2_4_state;
+extern int   sched_interval;
 extern bool  slurmctld_init_db;
 
 /*****************************************************************************\
@@ -1649,6 +1643,9 @@ void purge_old_job(void);
 /* Convert a comma delimited list of QOS names into a bitmap */
 extern void qos_list_build(char *qos, bitstr_t **qos_bits);
 
+/* Request that the job scheduler execute soon (typically within seconds) */
+extern void queue_job_scheduler(void);
+
 /*
  * rehash_jobs - Create or rebuild the job hash table.
  * NOTE: run lock_slurmctld before entry: Read config, write job
@@ -1709,6 +1706,10 @@ extern void run_health_check(void);
 
 /* save_all_state - save entire slurmctld state for later recovery */
 extern void save_all_state(void);
+
+/* make sure the assoc_mgr lists are up and running and state is
+ * restored */
+extern void ctld_assoc_mgr_init(slurm_trigger_callbacks_t *callbacks);
 
 /* send all info for the controller to accounting */
 extern void send_all_to_accounting(time_t event_time);

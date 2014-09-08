@@ -47,6 +47,7 @@ Lead Slurm developers are:
 <li>Janne Blomqvist (Aalto University, Finland)</li>
 <li>David Bremer (Lawrence Livermore National Laboratory)</li>
 <li>Jon Bringhurst (Los Alamos National Laboratory)</li>
+<li>Franco Broi (ION)</li>
 <li>Bill Brophy (Bull)</li>
 <li>John Brunelle (Harvard University FAS Research Computing)</li>
 <br>
@@ -73,6 +74,7 @@ Lead Slurm developers are:
 <li>Kent Engstr&ouml;m  (National Supercomputer Centre, Sweden)</li>
 <br>
 <li>Carles Fenoy (Barcelona Supercomputing Center, Spain)</li>
+<li>Broi Franco (ION)</li>
 <li>Damien Fran&ccedil;ois (Universit&eacute; catholique de Louvain, Belgium)</li>
 <br>
 <li>Jim Garlick (Lawrence Livermore National Laboratory)</li>
@@ -135,6 +137,7 @@ Lead Slurm developers are:
 <li>Alan Orth (International Livestock Research Institute, Kenya)</li>
 <br>
 <li>Juan Pancorbo (Leibniz-Rechenzentrum, Germany)</li>
+<li>David Parks (Cray)</li>
 <li>Chrysovalantis Paschoulas (Juelich Supercomputing Centre, Germany)</li>
 <li>R&eacute;mi Palancher</li>
 <li>Alejandro Lucero Palau (Barcelona Supercomputing Center, Spain)</li>
@@ -192,6 +195,6 @@ Lead Slurm developers are:
 <!-- INDIVIDUALS, PLEASE KEEP IN ALPHABETICAL ORDER -->
 </ul>
 
-<p style="text-align:center;">Last modified 14 February 2014</p>
+<p style="text-align:center;">Last modified 11 April 2014</p>
 
 <!--#include virtual="footer.txt"-->

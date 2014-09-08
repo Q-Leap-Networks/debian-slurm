@@ -130,6 +130,7 @@ static int max_backfill_job_per_part = 0;
 static int max_backfill_job_per_user = 0;
 static int max_backfill_jobs_start = 0;
 static bool backfill_continue = false;
+static int defer_rpc_cnt = 0;
 
 /*********************** local functions *********************/
 static void _add_reservation(uint32_t start_time, uint32_t end_reserve,
@@ -243,7 +244,8 @@ static bool _job_is_completing(void)
 static bool _many_pending_rpcs(void)
 {
 	//info("thread_count = %u", slurmctld_config.server_thread_count);
-	if (slurmctld_config.server_thread_count > SLURMCTLD_THREAD_LIMIT)
+	if ((defer_rpc_cnt > 0) &&
+	    (slurmctld_config.server_thread_count >= defer_rpc_cnt))
 		return true;
 	return false;
 }
@@ -423,26 +425,29 @@ static void _load_config(void)
 	if (sched_params && (tmp_ptr=strstr(sched_params, "bf_interval=")))
 		backfill_interval = atoi(tmp_ptr + 12);
 	if (backfill_interval < 1) {
-		fatal("Invalid backfill scheduler bf_interval: %d",
+		error("Invalid SchedulerParameters bf_interval: %d",
 		      backfill_interval);
+		backfill_interval = BACKFILL_INTERVAL;
 	}
 
 	if (sched_params && (tmp_ptr=strstr(sched_params, "bf_window=")))
 		backfill_window = atoi(tmp_ptr + 10) * 60;  /* mins to secs */
 	if (backfill_window < 1) {
-		fatal("Invalid backfill scheduler window: %d",
+		error("Invalid SchedulerParameters bf_window: %d",
 		      backfill_window);
+		backfill_window = BACKFILL_WINDOW;
 	}
 
-	/* "max_job_bf" replaced by "bf_max_job_start" in version 14.03 and
-	 * can be removed later. Only "bf_max_job_start" is documented. */
+	/* "max_job_bf" replaced by "bf_max_job_test" in version 14.03 and
+	 * can be removed later. Only "bf_max_job_test" is documented. */
 	if (sched_params && (tmp_ptr=strstr(sched_params, "max_job_bf=")))
 		max_backfill_job_cnt = atoi(tmp_ptr + 11);
 	if (sched_params && (tmp_ptr=strstr(sched_params, "bf_max_job_test=")))
 		max_backfill_job_cnt = atoi(tmp_ptr + 16);
 	if (max_backfill_job_cnt < 1) {
-		fatal("Invalid backfill scheduler max_job_bf: %d",
+		error("Invalid SchedulerParameters bf_max_job_test: %d",
 		      max_backfill_job_cnt);
+		max_backfill_job_cnt = 50;
 	}
 	/* "bf_res=" is vestigial from version 2.3 and can be removed later.
 	 * Only "bf_resolution=" is documented. */
@@ -451,35 +456,47 @@ static void _load_config(void)
 	if (sched_params && (tmp_ptr=strstr(sched_params, "bf_resolution=")))
 		backfill_resolution = atoi(tmp_ptr + 14);
 	if (backfill_resolution < 1) {
-		fatal("Invalid backfill scheduler resolution: %d",
+		error("Invalid SchedulerParameters bf_resolution: %d",
 		      backfill_resolution);
+		backfill_resolution = BACKFILL_RESOLUTION;
 	}
 
 	if (sched_params && (tmp_ptr=strstr(sched_params, "bf_max_job_part=")))
 		max_backfill_job_per_part = atoi(tmp_ptr + 16);
 	if (max_backfill_job_per_part < 0) {
-		fatal("Invalid backfill scheduler bf_max_job_part: %d",
+		error("Invalid SchedulerParameters bf_max_job_part: %d",
 		      max_backfill_job_per_part);
+		max_backfill_job_per_part = 0;
 	}
 
 	if (sched_params && (tmp_ptr=strstr(sched_params, "bf_max_job_start=")))
 		max_backfill_jobs_start = atoi(tmp_ptr + 17);
 	if (max_backfill_jobs_start < 0) {
-		fatal("Invalid backfill scheduler bf_max_job_start: %d",
+		error("Invalid SchedulerParameters bf_max_job_start: %d",
 		      max_backfill_jobs_start);
+		max_backfill_jobs_start = 0;
 	}
 
 	if (sched_params && (tmp_ptr=strstr(sched_params, "bf_max_job_user=")))
 		max_backfill_job_per_user = atoi(tmp_ptr + 16);
 	if (max_backfill_job_per_user < 0) {
-		fatal("Invalid backfill scheduler bf_max_job_user: %d",
+		error("Invalid SchedulerParameters bf_max_job_user: %d",
 		      max_backfill_job_per_user);
+		max_backfill_job_per_user = 0;
 	}
 
 	/* bf_continue makes backfill continue where it was if interrupted
 	 */
 	if (sched_params && (strstr(sched_params, "bf_continue"))) {
 		backfill_continue = true;
+	}
+
+	if (sched_params && (tmp_ptr=strstr(sched_params, "max_rpc_cnt=")))
+		defer_rpc_cnt = atoi(tmp_ptr + 12);
+	if (defer_rpc_cnt < 0) {
+		error("Invalid SchedulerParameters max_rpc_cnt: %d",
+		      defer_rpc_cnt);
+		defer_rpc_cnt = 0;
 	}
 
 	xfree(sched_params);
@@ -605,6 +622,7 @@ static int _attempt_backfill(void)
 	uint16_t *njobs = NULL;
 	bool already_counted;
 	uint32_t reject_array_job_id = 0;
+	struct part_record *reject_array_part = NULL;
 	uint32_t job_start_cnt = 0;
 	time_t config_update = slurmctld_conf.last_update;
 	time_t part_update = last_part_update;
@@ -685,9 +703,11 @@ static int _attempt_backfill(void)
 		uid = xmalloc(BF_MAX_USERS * sizeof(uint32_t));
 		njobs = xmalloc(BF_MAX_USERS * sizeof(uint16_t));
 	}
-	while ((job_queue_rec = (job_queue_rec_t *)
-				list_pop_bottom(job_queue, sort_job_queue2))) {
-		if ((time(NULL) - sched_start) >= sched_timeout) {
+	sort_job_queue(job_queue);
+	while ((job_queue_rec = (job_queue_rec_t *) list_pop(job_queue))) {
+		if (((defer_rpc_cnt > 0) &&
+		     (slurmctld_config.server_thread_count >= defer_rpc_cnt)) ||
+		    ((time(NULL) - sched_start) >= sched_timeout)) {
 			if (debug_flags & DEBUG_FLAG_BACKFILL) {
 				END_TIMER;
 				info("backfill: completed yielding locks "
@@ -730,10 +750,12 @@ static int _attempt_backfill(void)
 		if (!avail_front_end(job_ptr))
 			continue;	/* No available frontend for this job */
 		if (job_ptr->array_task_id != NO_VAL) {
-			if (reject_array_job_id == job_ptr->array_job_id)
+			if ((reject_array_job_id == job_ptr->array_job_id) &&
+			    (reject_array_part   == part_ptr))
 				continue;  /* already rejected array element */
 			/* assume reject whole array for now, clear if OK */
 			reject_array_job_id = job_ptr->array_job_id;
+			reject_array_part   = part_ptr;
 		}
 		job_ptr->part_ptr = part_ptr;
 
@@ -861,7 +883,9 @@ static int _attempt_backfill(void)
 		/* Determine impact of any resource reservations */
 		later_start = now;
  TRY_LATER:
-		if ((time(NULL) - sched_start) >= sched_timeout) {
+		if (((defer_rpc_cnt > 0) &&
+		     (slurmctld_config.server_thread_count >= defer_rpc_cnt)) ||
+		    ((time(NULL) - sched_start) >= sched_timeout)) {
 			uint32_t save_job_id = job_ptr->job_id;
 			uint32_t save_time_limit = job_ptr->time_limit;
 			job_ptr->time_limit = orig_time_limit;
@@ -1026,6 +1050,7 @@ static int _attempt_backfill(void)
 			} else {
 				/* Started this job, move to next one */
 				reject_array_job_id = 0;
+				reject_array_part   = NULL;
 
 				/* Update the database if job time limit
 				 * changed and move to next job */
@@ -1074,6 +1099,7 @@ static int _attempt_backfill(void)
 		if (qos_ptr && (qos_ptr->flags & QOS_FLAG_NO_RESERVE))
 			continue;
 		reject_array_job_id = 0;
+		reject_array_part   = NULL;
 		if (debug_flags & DEBUG_FLAG_BACKFILL)
 			_dump_job_sched(job_ptr, end_reserve, avail_bitmap);
 		bit_not(avail_bitmap);

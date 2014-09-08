@@ -120,6 +120,8 @@ unsigned int numa_bitmask_weight(const struct bitmask *bmp);
 static int _get_numa_nodes(char *path, int *cnt, int **numa_array);
 static int _get_cpu_masks(int num_numa_nodes, int32_t *numa_array,
 			  cpu_set_t **cpuMasks);
+
+static int terminated = 0;
 #endif
 
 /*
@@ -321,6 +323,7 @@ extern int task_p_post_term (stepd_step_rec_t *job,
 	char llifile[LLI_STATUS_FILE_BUF_SIZE];
 	char status;
 	int rv, fd;
+	char *reason;
 
 	debug("task_p_post_term: %u.%u, task %d",
 	      job->jobid, job->stepid, job->envtp->procid);
@@ -367,10 +370,24 @@ extern int task_p_post_term (stepd_step_rec_t *job,
 	}
 
 	// Check the result
-	if (status == 0) {
+	if (status == 0 && !terminated) {
+		if (task->killed_by_cmd) {
+			// We've been killed by request. User already knows
+			return SLURM_SUCCESS;
+		} else if (task->aborted) {
+			reason = "aborted";
+		} else if (WIFSIGNALED(task->estatus)) {
+			reason = "signaled";
+		} else {
+			reason = "exited";
+		}
+
 		// Cancel the job step, since we didn't find the exiting msg
-		fprintf(stderr, "Terminating job step, task %d improper exit\n",
-			job->envtp->procid);
+		error("Terminating job step %"PRIu32".%"PRIu32
+			"; task %d exit code %d %s without notification",
+			job->jobid, job->stepid, task->gtid,
+			WEXITSTATUS(task->estatus), reason);
+		terminated = 1;
 		slurm_terminate_job_step(job->jobid, job->stepid);
 	}
 

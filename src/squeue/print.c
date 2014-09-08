@@ -335,14 +335,15 @@ job_format_add_function(List list, int width, bool right, char *suffix,
 int _print_job_array_job_id(job_info_t * job, int width, bool right,
 			    char* suffix)
 {
+	char id[FORMAT_STRING_SIZE];
 	if (job == NULL) {	/* Print the Header instead */
 		_print_str("ARRAY_JOB_ID", width, right, true);
 	} else if (job->array_task_id != NO_VAL) {
-		char id[FORMAT_STRING_SIZE];
 		snprintf(id, FORMAT_STRING_SIZE, "%u", job->array_job_id);
 		_print_str(id, width, right, true);
 	} else {
-		_print_str("N/A", width, right, true);
+		snprintf(id, FORMAT_STRING_SIZE, "%u", job->job_id);
+		_print_str(id, width, right, true);
 	}
 	if (suffix)
 		printf("%s", suffix);
@@ -678,6 +679,18 @@ long job_time_used(job_info_t * job_ptr)
 		return (long) (difftime(end_time, job_ptr->suspend_time)
 				+ job_ptr->pre_sus_time);
 	return (long) (difftime(end_time, job_ptr->start_time));
+}
+
+int _print_job_time_submit(job_info_t * job, int width, bool right,
+                          char* suffix)
+{
+        if (job == NULL)        /* Print the Header instead */
+                _print_str("SUBMIT_TIME", width, right, true);
+        else
+                _print_time(job->submit_time, 0, width, right);
+        if (suffix)
+                printf("%s", suffix);
+        return SLURM_SUCCESS;
 }
 
 int _print_job_time_start(job_info_t * job, int width, bool right,
@@ -1299,6 +1312,21 @@ int _print_job_work_dir(job_info_t * job, int width, bool right_justify,
 	return SLURM_SUCCESS;
 }
 
+int _print_job_nice(job_info_t * job, int width, bool right_justify,
+		    char* suffix)
+{
+	if (job == NULL)
+		_print_str("NICE", width, right_justify, true);
+	else {
+		int nice = (int) job->nice;
+		nice -= NICE_OFFSET;
+		_print_int(nice, width, right_justify, true);
+	}
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
 
 /*****************************************************************************
  * Job Step Print Functions
@@ -1550,7 +1578,7 @@ static int _filter_job(job_info_t * job)
 	ListIterator iterator;
 	uint32_t *user;
 	uint16_t *state_id;
-	char *account, *part, *qos, *name;
+	char *account, *license, *part, *qos, *name;
 	squeue_job_step_t *job_step_id;
 
 	if (params.job_list) {
@@ -1583,6 +1611,30 @@ static int _filter_job(job_info_t * job)
 			iterator = list_iterator_create(params.part_list);
 			while ((part = list_next(iterator))) {
 				if (strcmp(part, token) == 0) {
+					filter = 0;
+					break;
+				}
+			}
+			list_iterator_destroy(iterator);
+			token = strtok_r(NULL, ",", &last);
+		}
+		xfree(tmp_name);
+		if (filter == 1)
+			return 2;
+	}
+
+	if (params.licenses_list) {
+		char *token = NULL, *last = NULL, *tmp_name = NULL;
+
+		filter = 1;
+		if (job->licenses) {
+			tmp_name = xstrdup(job->licenses);
+			token = strtok_r(tmp_name, ",", &last);
+		}
+		while (token && filter) {
+			iterator = list_iterator_create(params.licenses_list);
+			while ((license = list_next(iterator))) {
+				if (strcmp(license, token) == 0) {
 					filter = 0;
 					break;
 				}

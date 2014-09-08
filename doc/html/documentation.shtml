@@ -3,7 +3,7 @@
 <h1> Documentation</h1>
 
 <p><b>NOTE: This documentation is for Slurm version @SLURM_VERSION@.<br>
-Documenation for other versions of Slurm is distributed with the code</b></p>
+Documentation for other versions of Slurm is distributed with the code</b></p>
 
 <p>Also see <a href="tutorials.html">Tutorials</a> and
 <a href="publications.html">Publications and Presentations</a>.</p>
@@ -19,6 +19,7 @@ Documenation for other versions of Slurm is distributed with the code</b></p>
 <li><a href="mc_support.html">Support for Multi-core/Multi-threaded Architectures</a></li>
 <li><a href="multi_cluster.html">Multi-Cluster Operation</a></li>
 <li><a href="hdf5_profile_user_guide.html">Profiling Using HDF5 User Guide</a></li>
+<li><a href="nonstop.html">Failure Management Support</a></li>
 <li><a href="checkpoint_blcr.html">SLURM Checkpoint/Restart with BLCR</a></li>
 <li><a href="job_exit_code.html">Job Exit Codes</a></li>
 <li>Specific Systems</li>
@@ -39,6 +40,7 @@ Documenation for other versions of Slurm is distributed with the code</b></p>
 <li><a href="configurator.html">Configuration Tool (Full version)</a></li>
 <li><a href="configurator.easy.html">Configuration Tool (Simplified version)</a></li>
 <li><a href="cpu_management.html">CPU Management User and Administrator Guide</a></li>
+<li><a href="nonstop.html">Failure Management Support</a></li>
 <li><a href="big_sys.html">Large Cluster Administration Guide</a></li>
 <li><a href="power_save.html">Power Saving Guide</a></li>
 <li><a href="prolog_epilog.html">Prolog and Epilog Guide</a></li>
@@ -51,8 +53,9 @@ Documenation for other versions of Slurm is distributed with the code</b></p>
 </ul>
 <li>SLURM Scheduling</li>
 <ul>
+<li><a href="sched_config.html">Scheduling Configuration Guide</a></li>
 <li><a href="cons_res.html">Consumable Resources Guide</a></li>
-<li><a href="core_spec.html">Core Specializatoin</a></li>
+<li><a href="core_spec.html">Core Specialization</a></li>
 <li><a href="dynalloc.html">Dynamic Resources Allocation (dynalloc)</a></li>
 <li><a href="elastic_computing.html">Elastic Computing</a></li>
 <li><a href="gang_scheduling.html">Gang Scheduling</a></li>
@@ -78,7 +81,7 @@ Documenation for other versions of Slurm is distributed with the code</b></p>
 <li><a href="cray_alps.html">Cray User and Administrator Guide with ALPS</a></li>
 <li><a href="ibm.html">IBM AIX User and Administrator Guide</a></li>
 <li><a href="ibm-pe.html">IBM Parallel Environment User and Administrator Guide</a></li>
-<li><a href="sun_const.html">Sun Constellation Aministrator Guide</a></li>
+<li><a href="sun_const.html">Sun Constellation Administrator Guide</a></li>
 </ul>
 </ul>
 
@@ -125,6 +128,6 @@ Documenation for other versions of Slurm is distributed with the code</b></p>
 </li>
 </ul>
 
-<p style="text-align:center;">Last modified 6 February 2014</p>
+<p style="text-align:center;">Last modified 7 April 2014</p>
 
 <!--#include virtual="footer.txt"-->
