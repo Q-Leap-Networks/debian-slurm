@@ -4,7 +4,7 @@
  *	hash table (node_hash_table), time stamp (last_node_update) and 
  *	configuration list (config_list)
  *
- *  $Id: node_mgr.c 14872 2008-08-25 16:25:28Z jette $
+ *  $Id: node_mgr.c 15324 2008-10-07 00:16:53Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -698,6 +698,7 @@ static void _list_delete_config (void *config_entry)
 	xassert(config_ptr);
 	xassert(config_ptr->magic == CONFIG_MAGIC);
 	xfree (config_ptr->feature);
+	build_config_feature_array(config_ptr);
 	xfree (config_ptr->nodes);
 	FREE_NULL_BITMAP (config_ptr->node_bitmap);
 	xfree (config_ptr);
@@ -1277,19 +1278,24 @@ static int _update_node_features(char *node_names, char *features)
 				config_ptr->feature = xstrdup(features);
 			else
 				config_ptr->feature = NULL;
+			build_config_feature_array(config_ptr);
 		} else {
 			/* partial update, split config_record */
 			new_config_ptr = create_config_record();
 			if (first_new == NULL);
 				first_new = new_config_ptr;
-			memcpy(new_config_ptr, config_ptr, 
-				sizeof(struct config_record));
+			new_config_ptr->magic       = config_ptr->magic;
+			new_config_ptr->cpus        = config_ptr->cpus;
+			new_config_ptr->sockets     = config_ptr->sockets;
+			new_config_ptr->cores       = config_ptr->cores;
+			new_config_ptr->threads     = config_ptr->threads;
+			new_config_ptr->real_memory = config_ptr->real_memory;
+			new_config_ptr->tmp_disk    = config_ptr->tmp_disk;
+			new_config_ptr->weight      = config_ptr->weight;
 			if (features[0])
 				new_config_ptr->feature = xstrdup(features);
-			else
-				config_ptr->feature = NULL;
-			new_config_ptr->node_bitmap = 
-				bit_copy(tmp_bitmap);
+			build_config_feature_array(new_config_ptr);
+			new_config_ptr->node_bitmap = bit_copy(tmp_bitmap);
 			new_config_ptr->nodes = 
 				bitmap2node_name(tmp_bitmap);
 			_update_config_ptr(tmp_bitmap, new_config_ptr);
@@ -1595,10 +1601,11 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg)
 						      slurmctld_cluster_name,
 						      node_ptr, now);
 		} else if ((base_state == NODE_STATE_DOWN) &&
-		           (slurmctld_conf.ret2service == 1) &&
-			   (node_ptr->reason != NULL) && 
-			   (strncmp(node_ptr->reason, "Not responding", 14) 
-					== 0)) {
+			   ((slurmctld_conf.ret2service == 2) ||
+		            ((slurmctld_conf.ret2service == 1) &&
+			     (node_ptr->reason != NULL) && 
+			     (strncmp(node_ptr->reason, "Not responding", 14) 
+					== 0)))) {
 			last_node_update = time (NULL);
 			if (reg_msg->job_count) {
 				node_ptr->node_state = NODE_STATE_ALLOCATED |
@@ -2078,8 +2085,6 @@ void set_node_down (char *name, char *reason)
 		return;
 	}
 
-	_make_node_down(node_ptr, now);
-	(void) kill_running_job_by_node_name(name, false);
 	if ((node_ptr->reason == NULL)
 	||  (strncmp(node_ptr->reason, "Not responding", 14) == 0)) {
 		time_t now;
@@ -2093,6 +2098,8 @@ void set_node_down (char *name, char *reason)
 		node_ptr->reason = xstrdup(reason);
 		xstrcat(node_ptr->reason, time_buf);
 	}
+	_make_node_down(node_ptr, now);
+	(void) kill_running_job_by_node_name(name, false);
 
 	return;
 }
@@ -2445,4 +2452,56 @@ void node_fini(void)
 	xfree(node_record_table_ptr);
 	xfree(node_hash_table);
 	node_record_count = 0;
+}
+
+extern int send_nodes_to_accounting(time_t event_time)
+{
+	int rc = SLURM_SUCCESS, i = 0;
+	struct node_record *node_ptr;
+	/* send nodes not in not 'up' state */
+	node_ptr = node_record_table_ptr;
+	for (i = 0; i < node_record_count; i++, node_ptr++) {
+		if (node_ptr->name == '\0'
+		    || (!(node_ptr->node_state & NODE_STATE_DRAIN)
+			&& !(node_ptr->node_state & NODE_STATE_FAIL) 
+			&& (node_ptr->node_state & NODE_STATE_BASE) 
+			!= NODE_STATE_DOWN))
+			continue;
+
+		if((rc = clusteracct_storage_g_node_down(acct_db_conn,
+							 slurmctld_cluster_name,
+							 node_ptr, event_time,
+							 NULL))
+		   == SLURM_ERROR) 
+			break;
+	}
+	return rc;
+}
+
+/* Given a config_record, clear any existing feature_array and
+ * if feature is set, then rebuild feature_array */
+extern void  build_config_feature_array(struct config_record *config_ptr)
+{
+	int i;
+	char *tmp_str, *token, *last = NULL;
+
+	/* clear any old feature_array */
+	if (config_ptr->feature_array) {
+		for (i=0; config_ptr->feature_array[i]; i++)
+			xfree(config_ptr->feature_array[i]);
+		xfree(config_ptr->feature_array);
+	}
+
+	if (config_ptr->feature) {
+		i = strlen(config_ptr->feature) + 1;	/* oversized */
+		config_ptr->feature_array = xmalloc(i * sizeof(char *));
+		tmp_str = xstrdup(config_ptr->feature);
+		i = 0;
+		token = strtok_r(tmp_str, ",", &last);
+		while (token) {
+			config_ptr->feature_array[i++] = xstrdup(token);
+			token = strtok_r(NULL, ",", &last);
+		}
+		xfree(tmp_str);
+	}
 }

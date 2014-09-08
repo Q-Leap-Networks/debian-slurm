@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  pmi_server.c - Global PMI data as maintained within srun
- *  $Id: pmi_server.c 14078 2008-05-19 23:56:20Z jette $
+ *  $Id: pmi_server.c 15376 2008-10-10 19:28:11Z da $
  *****************************************************************************
  *  Copyright (C) 2005-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -168,8 +168,8 @@ static void *_msg_thread(void *x)
 
 	slurm_mutex_lock(&agent_mutex);
 	agent_cnt--;
-	slurm_mutex_unlock(&agent_mutex);
 	pthread_cond_signal(&agent_cond);
+	slurm_mutex_unlock(&agent_mutex);
 	xfree(x);
 	return NULL;
 }

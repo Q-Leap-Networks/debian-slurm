@@ -62,6 +62,7 @@
 #include "src/common/xassert.h"
 #include "src/common/forward.h"
 #include "src/common/job_options.h"
+#include "src/common/slurmdbd_defs.h"
 
 #define _pack_job_info_msg(msg,buf)		_pack_buffer_msg(msg,buf)
 #define _pack_job_step_info_msg(msg,buf)	_pack_buffer_msg(msg,buf)
@@ -344,7 +345,8 @@ static void _pack_will_run_response_msg(will_run_response_msg_t *msg, Buf buffer
 static int  _unpack_will_run_response_msg(will_run_response_msg_t ** msg_ptr, 
 					  Buf buffer);
 
-static void _pack_accounting_update_msg(accounting_update_msg_t *msg, Buf buffer);
+static void _pack_accounting_update_msg(accounting_update_msg_t *msg, 
+					Buf buffer);
 static int _unpack_accounting_update_msg(accounting_update_msg_t **msg,
 					 Buf buffer);
 
@@ -360,7 +362,7 @@ pack_header(header_t * header, Buf buffer)
 	
 	pack16((uint16_t)header->version, buffer);
 	pack16((uint16_t)header->flags, buffer);
-	pack16((uint16_t) header->msg_type, buffer);
+	pack16((uint16_t)header->msg_type, buffer);
 	pack32((uint32_t)header->body_length, buffer);
 	pack16((uint16_t)header->forward.cnt, buffer);
 	if (header->forward.cnt > 0) {
@@ -385,7 +387,6 @@ pack_header(header_t * header, Buf buffer)
 int
 unpack_header(header_t * header, Buf buffer)
 {
-	uint16_t uint16_tmp;
 	uint32_t uint32_tmp = 0;
 
 	memset(header, 0, sizeof(header_t));
@@ -393,8 +394,7 @@ unpack_header(header_t * header, Buf buffer)
 	header->ret_list = NULL;
 	safe_unpack16(&header->version, buffer);
 	safe_unpack16(&header->flags, buffer);
-	safe_unpack16(&uint16_tmp, buffer);
-	header->msg_type = (slurm_msg_type_t) uint16_tmp;
+	safe_unpack16(&header->msg_type, buffer);
 	safe_unpack32(&header->body_length, buffer);
 	safe_unpack16(&header->forward.cnt, buffer);
 	if (header->forward.cnt > 0) {		
@@ -486,6 +486,7 @@ pack_msg(slurm_msg_t const *msg, Buf buffer)
 	case REQUEST_CONTROL:
 	case REQUEST_DAEMON_STATUS:
 	case REQUEST_HEALTH_CHECK:
+	case ACCOUNTING_FIRST_REG:
 		/* Message contains no body/information */
 		break;
 	case REQUEST_SHUTDOWN:
@@ -816,6 +817,7 @@ unpack_msg(slurm_msg_t * msg, Buf buffer)
 	case REQUEST_CONTROL:
 	case REQUEST_DAEMON_STATUS:
 	case REQUEST_HEALTH_CHECK:
+	case ACCOUNTING_FIRST_REG:
 		/* Message contains no body/information */
 		break;
 	case REQUEST_SHUTDOWN:
@@ -1092,7 +1094,7 @@ unpack_msg(slurm_msg_t * msg, Buf buffer)
 			(set_debug_level_msg_t **)&(msg->data), buffer);
 		break;
 	case ACCOUNTING_UPDATE_MSG:
-		_unpack_accounting_update_msg(
+		rc = _unpack_accounting_update_msg(
 			(accounting_update_msg_t **)&msg->data,
 			buffer);
 		break;
@@ -3760,7 +3762,6 @@ _unpack_ret_list(List *ret_list,
 		 uint16_t size_val, Buf buffer)
 {
 	int i = 0;
-	uint16_t uint16_tmp;
 	uint32_t uint32_tmp;
 	ret_data_info_t *ret_data_info = NULL;
 	slurm_msg_t msg;
@@ -3771,8 +3772,7 @@ _unpack_ret_list(List *ret_list,
 		list_push(*ret_list, ret_data_info);
 		
 		safe_unpack32((uint32_t *)&ret_data_info->err, buffer);
-		safe_unpack16(&uint16_tmp, buffer);
-		ret_data_info->type = (slurm_msg_type_t)uint16_tmp;
+		safe_unpack16(&ret_data_info->type, buffer);
 		safe_unpackstr_xmalloc(&ret_data_info->node_name, 
 				       &uint32_tmp, buffer);
 		msg.msg_type = ret_data_info->type;
@@ -4764,7 +4764,7 @@ static void _pack_accounting_update_msg(accounting_update_msg_t *msg,
 	if(count) {
 		itr = list_iterator_create(msg->update_list);
 		while((rec = list_next(itr))) {
-			pack_acct_update_object(rec, buffer);
+			pack_acct_update_object(rec, msg->rpc_version, buffer);
 		}
 		list_iterator_destroy(itr);
 	}
@@ -4784,7 +4784,12 @@ static int _unpack_accounting_update_msg(accounting_update_msg_t **msg,
 	safe_unpack32(&count, buffer);
 	msg_ptr->update_list = list_create(destroy_acct_update_object);
 	for(i=0; i<count; i++) {
-		if((unpack_acct_update_object(&rec, buffer)) == SLURM_ERROR)
+		/* this is only ran in the slurmctld so we can just
+		   use the version here.
+		*/
+		if((unpack_acct_update_object(&rec, SLURMDBD_VERSION,
+					      buffer))
+		   == SLURM_ERROR)
 			goto unpack_error;
 		list_append(msg_ptr->update_list, rec);
 	}

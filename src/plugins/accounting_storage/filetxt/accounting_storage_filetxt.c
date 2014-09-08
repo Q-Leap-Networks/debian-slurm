@@ -240,7 +240,8 @@ extern int fini ( void )
 	return SLURM_SUCCESS;
 }
 
-extern void * acct_storage_p_get_connection(bool make_agent, bool rollback)
+extern void * acct_storage_p_get_connection(bool make_agent, int conn_num,
+					    bool rollback)
 {
 	return NULL;
 }
@@ -315,6 +316,13 @@ extern List acct_storage_p_modify_clusters(void *db_conn, uint32_t uid,
 extern List acct_storage_p_modify_associations(void *db_conn, uint32_t uid,
 					      acct_association_cond_t *assoc_q,
 					      acct_association_rec_t *assoc)
+{
+	return SLURM_SUCCESS;
+}
+
+extern List acct_storage_p_modify_qos(void *db_conn, uint32_t uid,
+				      acct_qos_cond_t *qos_cond,
+				      acct_qos_rec_t *qos)
 {
 	return SLURM_SUCCESS;
 }
@@ -449,7 +457,7 @@ extern int clusteracct_storage_p_get_usage(
 /* 
  * load into the storage the start of a job
  */
-extern int jobacct_storage_p_job_start(void *db_conn,
+extern int jobacct_storage_p_job_start(void *db_conn, char *cluster_name,
 				       struct job_record *job_ptr)
 {
 	int	i,
@@ -668,6 +676,7 @@ extern int jobacct_storage_p_step_complete(void *db_conn,
 	float ave_vsize = 0, ave_rss = 0, ave_pages = 0;
 	float ave_cpu = 0, ave_cpu2 = 0;
 	char *account;
+	uint32_t exit_code;
 
 	if(!storage_init) {
 		debug("jobacct init was not called or it failed");
@@ -684,7 +693,12 @@ extern int jobacct_storage_p_step_complete(void *db_conn,
 	
 	if ((elapsed=now-step_ptr->start_time)<0)
 		elapsed=0;	/* For *very* short jobs, if clock is wrong */
-	if (step_ptr->exit_code)
+
+	exit_code = step_ptr->exit_code;
+	if (exit_code == NO_VAL) {
+		comp_status = JOB_CANCELLED;
+		exit_code = 0;
+	} else if (exit_code)
 		comp_status = JOB_FAILED;
 	else
 		comp_status = JOB_COMPLETE;
@@ -740,7 +754,7 @@ extern int jobacct_storage_p_step_complete(void *db_conn,
 		 JOB_STEP,
 		 step_ptr->step_id,	/* stepid */
 		 comp_status,		/* completion status */
-		 step_ptr->exit_code,	/* completion code */
+		 exit_code,	/* completion code */
 		 cpus,          	/* number of tasks */
 		 cpus,                  /* number of cpus */
 		 elapsed,	        /* elapsed seconds */

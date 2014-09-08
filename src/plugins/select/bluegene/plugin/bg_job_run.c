@@ -2,7 +2,7 @@
  *  bg_job_run.c - blue gene job execution (e.g. initiation and termination) 
  *  functions.
  *
- *  $Id: bg_job_run.c 14938 2008-08-29 21:49:01Z da $ 
+ *  $Id: bg_job_run.c 15085 2008-09-16 20:24:05Z da $ 
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -546,7 +546,7 @@ static void _start_agent(bg_update_t *bg_update_ptr)
 				      slurm_strerror(rc));
 				job_fail(bg_update_ptr->job_ptr->job_id);
 			}
-			lock_slurmctld(job_write_lock);
+			unlock_slurmctld(job_write_lock);
 
 			slurm_mutex_unlock(&job_start_mutex);
 			return;
@@ -1183,7 +1183,21 @@ extern int boot_block(bg_record_t *bg_record)
 	    != STATUS_OK) {
 		error("bridge_create_block(%s): %s",
 		      bg_record->bg_block_id, bg_err_str(rc));
-		
+		if(rc == INCOMPATIBLE_STATE) {
+			char reason[128], time_str[32];
+			time_t now = time(NULL);
+			slurm_make_time_str(&now, time_str, sizeof(time_str));
+			snprintf(reason, sizeof(reason),
+				 "boot_block: "
+				 "Block %s is in an incompatable state.  "
+				 "This usually means hardware is allocated "
+				 "by another block (maybe outside of SLURM). "
+				 "[SLURM@%s]", 
+				 bg_record->bg_block_id, time_str);
+			drain_as_needed(bg_record, reason);
+			bg_record->boot_state = 0;
+			bg_record->boot_count = 0;
+		}
 		return SLURM_ERROR;
 	}
 	

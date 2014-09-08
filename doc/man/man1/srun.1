@@ -98,6 +98,11 @@ The \fIlist\fR of constraints may include multiple features separated
 by ampersand (AND) and/or vertical bar (OR) operators.
 For example: \fB\-\-constraint="opteron&video"\fR or 
 \fB\-\-constraint="fast|faster"\fR.
+In the first example, only nodes having both the feature "opteron" AND
+the feature "video" will be used.
+There is no mechanism to specify that you want one node with feature
+"opteron" and another node with feature "video" in that case that no
+node has both features.
 If only one of a set of possible options should be used for all allocated 
 nodes, then use the OR operator and enclose the options within square brackets. 
 For example: "\fB\-\-constraint="[rack1|rack2|rack3|rack4]"\fR might 
@@ -726,6 +731,10 @@ in some failed state (non-zero exit code, node failure, timed out, etc).
 \fBafterok:job_id[:jobid...]\fR
 This job can begin execution after the specified jobs have successfully
 executed (ran to completion with non-zero exit code).
+.TP
+\fBsingleton\fR
+This job can begin execution after any previously launched jobs sharing the same
+job name and user have terminated.
 .RE
 
 .TP
@@ -1211,7 +1220,9 @@ Same as \fB\-\-exclusive\fR
 Same as \fB\-g, \-\-geometry\fR=\fIX,Y,Z\fR
 .TP
 \fBSLURM_JOB_NAME\fR
-\fB\-J, \-\-job\-name\fR=\fIjobname\fR
+Same as \fB\-J, \-\-job\-name\fR=\fIjobname\fR except within an existing 
+allocation, in which case it is ignored to avoid using the batch job's name
+as the name of each job step. 
 .TP
 \fBSLURM_LABELIO\fR
 Same as \fB\-l, \-\-label\fR
@@ -1318,10 +1329,13 @@ on this node allocated to the job.
 \fBSLURM_GTIDS\fR
 Global task IDs running on this node.
 Zero origin and comma separated.
-
+.TP
+\fBSLURM_JOB_DEPENDENCY\fR
+Set to value of the \-\-dependency option.
 .TP
 \fBSLURM_JOBID\fR
 Job id of the executing job
+
 .TP
 \fBSLURM_LAUNCH_NODE_IPADDR\fR
 IP address of the node from which the task launch was 

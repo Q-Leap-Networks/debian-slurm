@@ -88,7 +88,7 @@ set mn		maxnode
 set mw		maxwall
 set dbu		debug
 set access_err  0
-
+#set user_name   "id -u -n"
 
 print_header $test_id
 
@@ -102,6 +102,10 @@ if { [test_account_storage] == 0 } {
 	exit 0
 }
 
+if { [string compare [check_accounting_admin_level] "Administrator"] } {
+	send_user "\nWARNING: This test can't be run without being an Accounting administrator.\nUse sacctmgr mod user \$USER_NAME admin=admin.\n"
+	exit 0
+}
 
 #
 # Use sacctmgr to create a cluster
@@ -425,7 +429,7 @@ proc _mod_acct { cluster name desc org parent fs maxcpu maxjob maxnodes maxwall 
 	}
 
 	if { [string length $maxcpu] } {
-		set scommand "$scommand maxc=$maxcpu"
+		set scommand "$scommand maxcpum=$maxcpu"
 		set assoc_stuff 1
 	}
 
@@ -544,7 +548,7 @@ proc _add_user { account adminlevel cluster defaultaccount fs maxcpu maxjob maxn
 	}
 
 	if { [string length $maxcpu] } {
-		set command "$command maxcpu=$maxcpu"
+		set command "$command maxcpum=$maxcpu"
 	}
 
 	if { [string length $maxjob] } {
@@ -555,7 +559,7 @@ proc _add_user { account adminlevel cluster defaultaccount fs maxcpu maxjob maxn
 		set command "$command  maxnodes=$maxnodes"
 	}
 
-	if { [string length maxwall$] } {
+	if { [string length $maxwall] } {
 		set command "$command maxwall=$maxwall"
 	}
 
@@ -729,7 +733,7 @@ if { $exit_code } {
 # Use sacctmgr to list the test user additions
 #
 set matches 0
-set my_pid [spawn $sacctmgr -n -p list user format="User,Def,Admin,clus,acc,fair,maxc,maxj,maxn,maxw"  names=$us1,$us2,$us3 withassoc]
+set my_pid [spawn $sacctmgr -n -p list user format="User,Def,Admin,clus,acc,fair,maxcpum,maxj,maxn,maxw"  names=$us1,$us2,$us3 withassoc]
 expect {
 	-re "There was a problem" {
 	        send_user "FAILURE: there was a problem with the sacctmgr command\n"

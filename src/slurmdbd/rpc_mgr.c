@@ -77,10 +77,6 @@ static int             thread_count = 0;
 static pthread_mutex_t thread_count_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  thread_count_cond = PTHREAD_COND_INITIALIZER;
 
-typedef struct connection_arg {
-	slurm_fd newsockfd;
-} connection_arg_t;
-
 
 /* Process incoming RPCs. Meant to execute as a pthread */
 extern void *rpc_mgr(void *no_data)
@@ -89,7 +85,7 @@ extern void *rpc_mgr(void *no_data)
 	slurm_fd sockfd, newsockfd;
 	int i, retry_cnt, sigarray[] = {SIGUSR1, 0};
 	slurm_addr cli_addr;
-	connection_arg_t *conn_arg = NULL;
+	slurmdbd_conn_t *conn_arg = NULL;
 
 	slurm_mutex_lock(&thread_count_lock);
 	master_thread_id = pthread_self();
@@ -134,8 +130,11 @@ extern void *rpc_mgr(void *no_data)
 			continue;
 		}
 		fd_set_nonblocking(newsockfd);
-		conn_arg = xmalloc(sizeof(connection_arg_t));
+	
+		conn_arg = xmalloc(sizeof(slurmdbd_conn_t));
 		conn_arg->newsockfd = newsockfd;
+		slurm_get_ip_str(&cli_addr, &conn_arg->orig_port,
+				 conn_arg->ip, sizeof(conn_arg->ip));
 		retry_cnt = 0;
 		while (pthread_create(&slave_thread_id[i],
 				      &thread_attr_rpc_req,
@@ -178,16 +177,16 @@ extern void rpc_mgr_wake(void)
 
 static void * _service_connection(void *arg)
 {
-	connection_arg_t *conn = (connection_arg_t *) arg;
+	slurmdbd_conn_t *conn = (slurmdbd_conn_t *) arg;
 	uint32_t nw_size, msg_size, uid;
 	char *msg = NULL;
 	ssize_t msg_read, offset;
 	bool fini = false, first = true;
 	Buf buffer = NULL;
 	int rc;
-	void *db_conn = NULL;
 			 
-	debug2("Opened connection %d", conn->newsockfd);
+	debug2("Opened connection %d from %s", conn->newsockfd,
+		conn->ip);
 	while (!fini) {
 		if (!_fd_readable(conn->newsockfd))
 			break;		/* problem with this socket */
@@ -220,16 +219,21 @@ static void * _service_connection(void *arg)
 			offset += msg_read;
 		}
 		if (msg_size == offset) {
-			rc = proc_req(&db_conn, conn->newsockfd,
-				      msg, msg_size, first, &buffer, &uid);
+			rc = proc_req(
+				conn, msg, msg_size, first, &buffer, &uid);
 			first = false;
-			if (rc != SLURM_SUCCESS) {
-				error("Processing message from connection %d",
-				      conn->newsockfd);
+			if (rc == ESLURM_ACCESS_DENIED
+			    || rc == SLURM_PROTOCOL_VERSION_ERROR) {
+				fini = true;
+			} else if (rc != SLURM_SUCCESS) {
+				error("Processing last message from "
+				      "connection %d(%s) uid(%d)",
+				      conn->newsockfd, conn->ip, uid);
 				//fini = true;
 			}
 		} else {
-			buffer = make_dbd_rc_msg(SLURM_ERROR, "Bad offset", 0);
+			buffer = make_dbd_rc_msg(conn->rpc_version,
+						 SLURM_ERROR, "Bad offset", 0);
 			fini = true;
 		}
 
@@ -237,19 +241,20 @@ static void * _service_connection(void *arg)
 		xfree(msg);
 	}
 
-	acct_storage_g_close_connection(&db_conn);
+	acct_storage_g_close_connection(&conn->db_conn);
 	if (slurm_close_accepted_conn(conn->newsockfd) < 0)
-		error("close(%d): %m",  conn->newsockfd);
+		error("close(%d): %m(%s)",  conn->newsockfd, conn->ip);
 	else
 		debug2("Closed connection %d uid(%d)", conn->newsockfd, uid);
-	xfree(arg);
+	xfree(conn);
 	_free_server_thread(pthread_self());
 	return NULL;
 }
 
 /* Return a buffer containing a DBD_RC (return code) message
  * caller must free returned buffer */
-extern Buf make_dbd_rc_msg(int rc, char *comment, uint16_t sent_type)
+extern Buf make_dbd_rc_msg(uint16_t rpc_version, 
+			   int rc, char *comment, uint16_t sent_type)
 {
 	Buf buffer;
 
@@ -259,7 +264,7 @@ extern Buf make_dbd_rc_msg(int rc, char *comment, uint16_t sent_type)
 	msg.return_code  = rc;
 	msg.comment  = comment;
 	msg.sent_type  = sent_type;
-	slurmdbd_pack_rc_msg(&msg, buffer);
+	slurmdbd_pack_rc_msg(rpc_version, &msg, buffer);
 	return buffer;
 }
 

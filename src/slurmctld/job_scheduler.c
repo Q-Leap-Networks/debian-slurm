@@ -3,6 +3,7 @@
  *	Note there is a global job list (job_list)
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  LLNL-CODE-402394.
@@ -67,7 +68,57 @@
 #define MAX_RETRIES 10
 
 static void _depend_list_del(void *dep_ptr);
+static void _feature_list_delete(void *x);
+static int  _valid_feature_list(uint32_t job_id, List feature_list);
+static int  _valid_node_feature(char *feature);
 static char **_xduparray(uint16_t size, char ** array);
+
+
+/*
+ * _build_user_job_list - build list of jobs for a given user
+ *			  and an optional job name
+ * IN  user_id - user id
+ * IN  job_name - job name constraint
+ * OUT job_queue - pointer to job queue
+ * RET number of entries in job_queue
+ * NOTE: the buffer at *job_queue must be xfreed by the caller
+ */
+static int _build_user_job_list(uint32_t user_id,char* job_name,
+			        struct job_queue **job_queue)
+{
+	ListIterator job_iterator;
+	struct job_record *job_ptr = NULL;
+	int job_buffer_size, job_queue_size;
+	struct job_queue *my_job_queue;
+
+	/* build list pending jobs */
+	job_buffer_size = job_queue_size = 0;
+	job_queue[0] = my_job_queue = NULL;
+ 
+	job_iterator = list_iterator_create(job_list);
+	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
+		xassert (job_ptr->magic == JOB_MAGIC);
+		if (job_ptr->user_id != user_id)
+			continue;
+		if (job_name && strcmp(job_name,job_ptr->name))
+			continue;
+		if (job_buffer_size <= job_queue_size) {
+			job_buffer_size += 200;
+			xrealloc(my_job_queue, job_buffer_size *
+				 sizeof(struct job_queue));
+		}
+		my_job_queue[job_queue_size].job_ptr = job_ptr;
+		my_job_queue[job_queue_size].job_priority = job_ptr->priority;
+		my_job_queue[job_queue_size].part_priority = 
+				job_ptr->part_ptr->priority;
+		job_queue_size++;
+	}
+	list_iterator_destroy(job_iterator);
+ 
+	job_queue[0] = my_job_queue;
+	return job_queue_size;
+}
+
 
 /* 
  * build_job_queue - build (non-priority ordered) list of pending jobs
@@ -195,7 +246,6 @@ static bool _failed_partition(struct part_record *part_ptr,
 	return false;
 }
 
-#ifndef HAVE_BG
 /* Add a partition to the failed_parts array, reserving its nodes
  * from use by lower priority jobs. Also flags all partitions with
  * nodes overlapping this partition. */
@@ -223,7 +273,6 @@ static void _add_failed_partition(struct part_record *failed_part_ptr,
 
 	*failed_part_cnt = count;
 }
-#endif
 
 /* 
  * schedule - attempt to schedule all pending jobs
@@ -248,21 +297,25 @@ extern int schedule(void)
 	char *ionodes = NULL;
 	char tmp_char[256];
 #endif
+	static bool backfill_sched = false;
+	static bool sched_test = false;
 	static bool wiki_sched = false;
-	static bool wiki_sched_test = false;
 	time_t now = time(NULL);
 
 	DEF_TIMERS;
 
 	START_TIMER;
-	/* don't bother trying to avoid fragmentation with sched/wiki */
-	if (!wiki_sched_test) {
+	if (!sched_test) {
 		char *sched_type = slurm_get_sched_type();
+		/* On BlueGene, do FIFO only with sched/backfill */
+		if (strcmp(sched_type, "sched/backfill") == 0)
+			backfill_sched = true;
+		/* Disable avoiding of fragmentation with sched/wiki */
 		if ((strcmp(sched_type, "sched/wiki") == 0)
 		||  (strcmp(sched_type, "sched/wiki2") == 0))
 			wiki_sched = true;
 		xfree(sched_type);
-		wiki_sched_test = true;
+		sched_test = true;
 	}
 
 	lock_slurmctld(job_write_lock);
@@ -320,23 +373,24 @@ extern int schedule(void)
 
 		error_code = select_nodes(job_ptr, false, NULL);
 		if (error_code == ESLURM_NODES_BUSY) {
-#ifndef HAVE_BG 	/* keep trying to schedule jobs in partition */
-			/* While we use static partitiioning on Blue Gene, 
-			 * each job can be scheduled independently without 
-			 * impacting other jobs with different characteristics
-			 * (e.g. node-use [virtual or coprocessor] or conn-type
-			 * [mesh, torus, or nav]). Because of this we sort and 
-			 * then try to schedule every pending job. This does 
-			 * increase the overhead of this job scheduling cycle, 
-			 * but the only way to effectively avoid this is to 
-			 * define each SLURM partition as containing a 
-			 * single Blue Gene job partition type (e.g. 
-			 * group all Blue Gene job partitions of type 
-			 * 2x2x2 coprocessor mesh into a single SLURM
-			 * partition, say "co-mesh-222") */
-			_add_failed_partition(job_ptr->part_ptr, failed_parts,
-				      &failed_part_cnt);
+			bool fail_by_part = true;
+#ifdef HAVE_BG
+			/* When we use static or overlap partitioning on
+			 * BlueGene, each job can possibly be scheduled
+			 * independently, without impacting other jobs of
+			 * different sizes. Therefor we sort and try to
+			 * schedule every pending job unless the backfill
+			 * scheduler is configured. */
+			if (!backfill_sched)
+				fail_by_part = false;
 #endif
+			if (fail_by_part) {
+		 		/* do not schedule more jobs 
+				 * in this partition */
+				_add_failed_partition(job_ptr->part_ptr, 
+						      failed_parts, 
+						      &failed_part_cnt);
+			}
 		} else if (error_code == SLURM_SUCCESS) {	
 			/* job initiated */
 			last_job_update = now;
@@ -538,7 +592,11 @@ extern int make_batch_job_cred(batch_job_launch_msg_t *launch_msg_ptr,
 	cred_arg.jobid     = launch_msg_ptr->job_id;
 	cred_arg.stepid    = launch_msg_ptr->step_id;
 	cred_arg.uid       = launch_msg_ptr->uid;
+#ifdef HAVE_FRONT_END
+	cred_arg.hostlist  = node_record_table_ptr[0].name;
+#else
 	cred_arg.hostlist  = launch_msg_ptr->nodes;
+#endif
 	if (job_ptr->details == NULL)
 		cred_arg.job_mem = 0;
 	else if (job_ptr->details->job_min_memory & MEM_PER_CPU) {
@@ -581,7 +639,11 @@ extern void print_job_dependency(struct job_record *job_ptr)
 	if (!depend_iter)
 		fatal("list_iterator_create memory allocation failure");
 	while ((dep_ptr = list_next(depend_iter))) {
-		if      (dep_ptr->depend_type == SLURM_DEPEND_AFTER)
+		if      (dep_ptr->depend_type == SLURM_DEPEND_SINGLETON) {
+			info("  singleton");
+			continue;
+		}
+		else if (dep_ptr->depend_type == SLURM_DEPEND_AFTER)
 			dep_str = "after";
 		else if (dep_ptr->depend_type == SLURM_DEPEND_AFTER_ANY)
 			dep_str = "afterany";
@@ -607,6 +669,9 @@ extern int test_job_dependency(struct job_record *job_ptr)
 	ListIterator depend_iter;
 	struct depend_spec *dep_ptr;
 	bool failure = false;
+ 	struct job_queue *job_queue = NULL;
+ 	int i, now, job_queue_size = 0;
+ 	struct job_record *qjob_ptr;
 
 	if ((job_ptr->details == NULL) ||
 	    (job_ptr->details->depend_list == NULL))
@@ -616,7 +681,33 @@ extern int test_job_dependency(struct job_record *job_ptr)
 	if (!depend_iter)
 		fatal("list_iterator_create memory allocation failure");
 	while ((dep_ptr = list_next(depend_iter))) {
-		if (dep_ptr->job_ptr->job_id != dep_ptr->job_id) {
+ 	        if ((dep_ptr->depend_type == SLURM_DEPEND_SINGLETON) &&
+ 		    job_ptr->name) {
+ 		        /* get user jobs with the same user and name */
+ 			job_queue_size = _build_user_job_list(job_ptr->user_id,
+							      job_ptr->name,
+							      &job_queue);
+ 			now = 1;
+ 			for (i=0; i<job_queue_size; i++) {
+				qjob_ptr = job_queue[i].job_ptr;
+				/* already running/suspended job or previously
+				 * submitted pending job */
+				if ((qjob_ptr->job_state == JOB_RUNNING) ||
+				    (qjob_ptr->job_state == JOB_SUSPENDED) ||
+				    ((qjob_ptr->job_state == JOB_PENDING) &&
+				     (qjob_ptr->job_id < job_ptr->job_id))) {
+					now = 0;
+					break;
+ 				}
+ 			}
+ 			if (job_queue_size > 0)
+				xfree(job_queue);
+			/* job can run now, delete dependency */
+ 			if (now)
+ 				list_delete_item(depend_iter);
+ 			else
+				break;
+ 		} else if (dep_ptr->job_ptr->job_id != dep_ptr->job_id) {
 			/* job is gone, dependency lifted */
 			list_delete_item(depend_iter);
 		} else if (dep_ptr->depend_type == SLURM_DEPEND_AFTER) {
@@ -695,6 +786,26 @@ extern int update_job_dependency(struct job_record *job_ptr, char *new_depend)
 	new_depend_list = list_create(_depend_list_del);
 	/* validate new dependency string */
 	while (rc == SLURM_SUCCESS) {
+
+ 	        /* test singleton dependency flag */
+ 	        if ( strncasecmp(tok, "singleton", 9) == 0 ) {
+			depend_type = SLURM_DEPEND_SINGLETON;
+			dep_ptr = xmalloc(sizeof(struct depend_spec));
+			dep_ptr->depend_type = depend_type;
+			/* dep_ptr->job_id = 0;		set by xmalloc */
+			/* dep_ptr->job_ptr = NULL;	set by xmalloc */
+			if (!list_append(new_depend_list, dep_ptr)) {
+				fatal("list_append memory allocation "
+				      "failure for singleton");
+			}
+			if ( *(tok + 9 ) == ',' ) {
+				tok+=10;
+				continue;
+			}
+			else
+				break;
+ 		}
+
 		sep_ptr = strchr(tok, ':');
 		if ((sep_ptr == NULL) && (job_id == 0)) {
 			job_id = strtol(tok, &sep_ptr, 10);
@@ -707,7 +818,8 @@ extern int update_job_dependency(struct job_record *job_ptr, char *new_depend)
 			dep_job_ptr = find_job_record(job_id);
 			if (!dep_job_ptr)	/* assume already done */
 				break;
-			snprintf(dep_buf, sizeof(dep_buf), "afterany:%u", job_id);
+			snprintf(dep_buf, sizeof(dep_buf), 
+				 "afterany:%u", job_id);
 			new_depend = dep_buf;
 			dep_ptr = xmalloc(sizeof(struct depend_spec));
 			dep_ptr->depend_type = SLURM_DEPEND_AFTER_ANY;
@@ -879,4 +991,194 @@ extern int job_start_data(job_desc_msg_t *job_desc_msg,
 		return ESLURM_REQUESTED_NODE_CONFIG_UNAVAILABLE;
 	}
 
+}
+
+/*
+ * build_feature_list - Translate a job's feature string into a feature_list
+ * IN  details->features
+ * OUT details->feature_list
+ * RET error code
+ */
+extern int build_feature_list(struct job_record *job_ptr)
+{
+	struct job_details *detail_ptr = job_ptr->details;
+	char *tmp_requested, *str_ptr1, *str_ptr2, *feature = NULL;
+	int bracket = 0, count = 0, i;
+	bool have_count = false, have_or = false;
+	struct feature_record *feat;
+
+	if (detail_ptr->features == NULL)	/* no constraints */
+		return SLURM_SUCCESS;
+	if (detail_ptr->feature_list)		/* already processed */
+		return SLURM_SUCCESS;
+
+	tmp_requested = xstrdup(detail_ptr->features);
+	str_ptr1 = tmp_requested;
+	detail_ptr->feature_list = list_create(_feature_list_delete);
+	for (i=0; ; i++) {
+		if (tmp_requested[i] == '*') {
+			tmp_requested[i] = '\0';
+			have_count = true;
+			count = strtol(&tmp_requested[i+1], &str_ptr2, 10);
+			if ((feature == NULL) || (count <= 0)) {
+				info("Job %u invalid constraint %s", 
+					job_ptr->job_id, detail_ptr->features);
+				xfree(tmp_requested);
+				return ESLURM_INVALID_FEATURE;
+			}
+			i = str_ptr2 - tmp_requested - 1;
+		} else if (tmp_requested[i] == '&') {
+			tmp_requested[i] = '\0';
+			if ((feature == NULL) || (bracket != 0)) {
+				info("Job %u invalid constraint %s", 
+					job_ptr->job_id, detail_ptr->features);
+				xfree(tmp_requested);
+				return ESLURM_INVALID_FEATURE;
+			}
+			feat = xmalloc(sizeof(struct feature_record));
+			feat->name = xstrdup(feature);
+			feat->count = count;
+			feat->op_code = FEATURE_OP_AND;
+			list_append(detail_ptr->feature_list, feat);
+			feature = NULL;
+			count = 0;
+		} else if (tmp_requested[i] == '|') {
+			tmp_requested[i] = '\0';
+			have_or = true;
+			if (feature == NULL) {
+				info("Job %u invalid constraint %s", 
+					job_ptr->job_id, detail_ptr->features);
+				xfree(tmp_requested);
+				return ESLURM_INVALID_FEATURE;
+			}
+			feat = xmalloc(sizeof(struct feature_record));
+			feat->name = xstrdup(feature);
+			feat->count = count;
+			if (bracket)
+				feat->op_code = FEATURE_OP_XOR;
+			else
+				feat->op_code = FEATURE_OP_OR;
+			list_append(detail_ptr->feature_list, feat);
+			feature = NULL;
+			count = 0;
+		} else if (tmp_requested[i] == '[') {
+			tmp_requested[i] = '\0';
+			if ((feature != NULL) || bracket) {
+				info("Job %u invalid constraint %s", 
+					job_ptr->job_id, detail_ptr->features);
+				xfree(tmp_requested);
+				return ESLURM_INVALID_FEATURE;
+			}
+			bracket++;
+		} else if (tmp_requested[i] == ']') {
+			tmp_requested[i] = '\0';
+			if ((feature == NULL) || (bracket == 0)) {
+				info("Job %u invalid constraint %s", 
+					job_ptr->job_id, detail_ptr->features);
+				xfree(tmp_requested);
+				return ESLURM_INVALID_FEATURE;
+			}
+			bracket = 0;
+		} else if (tmp_requested[i] == '\0') {
+			if (feature) {
+				feat = xmalloc(sizeof(struct feature_record));
+				feat->name = xstrdup(feature);
+				feat->count = count;
+				feat->op_code = FEATURE_OP_END;
+				list_append(detail_ptr->feature_list, feat);
+			}
+			break;
+		} else if (feature == NULL) {
+			feature = &tmp_requested[i];
+		}
+	}
+	xfree(tmp_requested);
+	if (have_count && have_or) {
+		info("Job %u invalid constraint (OR with feature count): %s", 
+			job_ptr->job_id, detail_ptr->features);
+		return ESLURM_INVALID_FEATURE;
+	}
+
+	return _valid_feature_list(job_ptr->job_id, detail_ptr->feature_list);
+}
+
+static void _feature_list_delete(void *x)
+{
+	struct feature_record *feature = (struct feature_record *)x;
+	xfree(feature->name);
+	xfree(feature);
+}
+
+static int _valid_feature_list(uint32_t job_id, List feature_list)
+{
+	ListIterator feat_iter;
+	struct feature_record *feat_ptr;
+	char *buf = NULL, tmp[16];
+	int bracket = 0;
+	int rc = SLURM_SUCCESS;
+
+	if (feature_list == NULL) {
+		debug2("Job %u feature list is empty", job_id);
+		return rc;
+	}
+
+	feat_iter = list_iterator_create(feature_list);
+	while((feat_ptr = (struct feature_record *)list_next(feat_iter))) {
+		if (feat_ptr->op_code == FEATURE_OP_XOR) {
+			if (bracket == 0)
+				xstrcat(buf, "[");
+			bracket = 1;
+		}
+		xstrcat(buf, feat_ptr->name);
+		if (rc == SLURM_SUCCESS)
+			rc = _valid_node_feature(feat_ptr->name);
+		if (feat_ptr->count) {
+			snprintf(tmp, sizeof(tmp), "*%u", feat_ptr->count);
+			xstrcat(buf, tmp);
+		}
+		if (bracket && (feat_ptr->op_code != FEATURE_OP_XOR)) {
+			xstrcat(buf, "]");
+			bracket = 0;
+		}
+		if (feat_ptr->op_code == FEATURE_OP_AND)
+			xstrcat(buf, "&");
+		else if ((feat_ptr->op_code == FEATURE_OP_OR) ||
+			 (feat_ptr->op_code == FEATURE_OP_XOR))
+			xstrcat(buf, "|");
+	}
+	list_iterator_destroy(feat_iter);
+	if (rc == SLURM_SUCCESS)
+		debug("Job %u feature list: %s", job_id, buf);
+	else
+		info("Job %u has invalid feature list: %s", job_id, buf);
+	xfree(buf);
+	return rc;
+}
+
+static int _valid_node_feature(char *feature)
+{
+	int i, rc = ESLURM_INVALID_FEATURE;
+	ListIterator config_iterator;
+	struct config_record *config_ptr;
+
+	config_iterator = list_iterator_create(config_list);
+	if (config_iterator == NULL)
+		fatal("list_iterator_create malloc failure");
+	while ((config_ptr = (struct config_record *) 
+			list_next(config_iterator))) {
+		if (config_ptr->feature_array == NULL)
+			continue;
+		for (i=0; ; i++) {
+			if (config_ptr->feature_array[i] == NULL)
+				break;
+			if (strcmp(feature, config_ptr->feature_array[i]))
+				continue;
+			rc = SLURM_SUCCESS;
+			break;
+		}
+		if (rc == SLURM_SUCCESS)
+			break;
+	}
+	list_iterator_destroy(config_iterator);
+	return rc;
 }

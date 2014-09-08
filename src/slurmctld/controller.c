@@ -143,6 +143,7 @@ int bg_recover = DEFAULT_RECOVER;
 char *slurmctld_cluster_name = NULL; /* name of cluster */
 void *acct_db_conn = NULL;
 int accounting_enforce = 0;
+int association_based_accounting = 0;
 bool ping_nodes_now = false;
 
 /* Local variables */
@@ -302,15 +303,31 @@ int main(int argc, char *argv[])
 	 * memory, it will report 'HashBase' if it is not duped
 	 */
 	slurmctld_cluster_name = xstrdup(slurmctld_conf.cluster_name);
+	association_based_accounting =
+		slurm_get_is_association_based_accounting();
 	accounting_enforce = slurmctld_conf.accounting_storage_enforce;
-	acct_db_conn = acct_storage_g_get_connection(true, false);
+	acct_db_conn = acct_storage_g_get_connection(true, 0, false);
+
+	memset(&assoc_init_arg, 0, sizeof(assoc_init_args_t));
 	assoc_init_arg.enforce = accounting_enforce;
 	assoc_init_arg.remove_assoc_notify = _remove_assoc;
-	if (assoc_mgr_init(acct_db_conn, &assoc_init_arg) &&
-	    accounting_enforce) {
-		error("assoc_mgr_init failure");
-		fatal("slurmdbd and/or database must be up at "
-		      "slurmctld start time");
+	assoc_init_arg.cache_level = ASSOC_MGR_CACHE_ALL;
+
+	if (assoc_mgr_init(acct_db_conn, &assoc_init_arg)) {
+		if(accounting_enforce) 
+			error("Association database appears down, "
+			      "reading from state file.");
+		else
+			debug("Association database appears down, "
+			      "reading from state file.");
+			
+		if ((load_assoc_mgr_state(slurmctld_conf.state_save_location)
+		     != SLURM_SUCCESS) && accounting_enforce) {
+			error("Unable to get any information from "
+			      "the state file");
+			fatal("slurmdbd and/or database must be up at "
+			      "slurmctld start time");
+		}
 	}
 
 	info("slurmctld version %s started on cluster %s",
@@ -337,16 +354,12 @@ int main(int argc, char *argv[])
 	/*
 	 * Initialize plugins.
 	 */
-	if ( slurm_select_init() != SLURM_SUCCESS )
-		fatal( "failed to initialize node selection plugin" );
-	if ( checkpoint_init(slurmctld_conf.checkpoint_type) != 
-			SLURM_SUCCESS )
-		fatal( "failed to initialize checkpoint plugin" );
 	if (slurm_select_init() != SLURM_SUCCESS )
-		fatal( "failed to initialize node selection plugin");
+		fatal( "failed to initialize node selection plugin" );
+	if (checkpoint_init(slurmctld_conf.checkpoint_type) != SLURM_SUCCESS )
+		fatal( "failed to initialize checkpoint plugin" );
 	if (slurm_acct_storage_init(NULL) != SLURM_SUCCESS )
 		fatal( "failed to initialize accounting_storage plugin");
-
 	if (slurm_jobacct_gather_init() != SLURM_SUCCESS )
 		fatal( "failed to initialize jobacct_gather plugin");
 
@@ -396,9 +409,14 @@ int main(int argc, char *argv[])
 
 		if(!acct_db_conn) {
 			acct_db_conn = 
-				acct_storage_g_get_connection(true, false);
-			if (assoc_mgr_init(acct_db_conn, &assoc_init_arg) &&
-			    accounting_enforce) {
+				acct_storage_g_get_connection(true, 0, false);
+			/* We only send in a variable the first time
+			   we call this since we are setting up static
+			   variables inside the function sending a
+			   NULL will just use those set before.
+			*/
+			if (assoc_mgr_init(acct_db_conn, NULL) &&
+			    accounting_enforce && !running_cache) {
 				error("assoc_mgr_init failure");
 				fatal("slurmdbd and/or database must be up at "
 				      "slurmctld start time");
@@ -406,6 +424,10 @@ int main(int argc, char *argv[])
 		}
 
 		info("Running as primary controller");
+		clusteracct_storage_g_register_ctld(
+			slurmctld_cluster_name, 
+			slurmctld_conf.slurmctld_port);
+		
 		_accounting_cluster_ready();
 		if (slurm_sched_init() != SLURM_SUCCESS)
 			fatal("failed to initialize scheduling plugin");
@@ -422,10 +444,6 @@ int main(int argc, char *argv[])
 			fatal("pthread_create error %m");
 		slurm_attr_destroy(&thread_attr);
 
-		clusteracct_storage_g_register_ctld(
-			slurmctld_conf.cluster_name, 
-			slurmctld_conf.slurmctld_port);
-		
 		/*
 		 * create attached thread for signal handling
 		 */
@@ -508,6 +526,7 @@ int main(int argc, char *argv[])
 	part_fini();	/* part_fini() must preceed node_fini() */
 	node_fini();
 	trigger_fini();
+	assoc_mgr_fini(slurmctld_conf.state_save_location);
 
 	/* Plugins are needed to purge job/node data structures,
 	 * unplug after other data structures are purged */
@@ -519,7 +538,6 @@ int main(int argc, char *argv[])
 	checkpoint_fini();
 	slurm_auth_fini();
 	switch_fini();
-	assoc_mgr_fini();
 
 	/* purge remaining data structures */
 	slurm_cred_ctx_destroy(slurmctld_config.cred_ctx);
@@ -917,6 +935,14 @@ static int _accounting_cluster_ready()
 	rc = clusteracct_storage_g_cluster_procs(acct_db_conn,
 						 slurmctld_cluster_name,
 						 procs, event_time);
+	if(rc == ACCOUNTING_FIRST_REG) {
+		/* see if we are running directly to a database
+		 * instead of a slurmdbd.
+		 */
+		send_jobs_to_accounting(event_time);
+		send_nodes_to_accounting(event_time);
+		rc = SLURM_SUCCESS;
+	}
 
 	return rc;
 }
@@ -1211,6 +1237,7 @@ void save_all_state(void)
 	schedule_node_save();
 	schedule_trigger_save();
 	select_g_state_save(slurmctld_conf.state_save_location);
+	dump_assoc_mgr_state(slurmctld_conf.state_save_location);
 }
 
 /* 

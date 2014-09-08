@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmd/slurmd.c - main slurm node server daemon
- *  $Id: slurmd.c 14314 2008-06-23 20:57:56Z jette $
+ *  $Id: slurmd.c 15006 2008-09-08 20:47:15Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008 Lawrence Livermore National Security.
@@ -589,9 +589,11 @@ _read_config()
 	 * valid aliases */
 	if (conf->node_name == NULL)
 		conf->node_name = slurm_conf_get_aliased_nodename();
-	if (conf->node_name == NULL)
+	
+	if (conf->node_name == NULL) 
 		conf->node_name = slurm_conf_get_nodename("localhost");
-	if (conf->node_name == NULL)
+
+	if (conf->node_name == NULL) 
 		fatal("Unable to determine this slurmd's NodeName");
 
 	_massage_pathname(&conf->logfile);

@@ -2,7 +2,7 @@
  *  partition_mgr.c - manage the partition information of slurm
  *	Note: there is a global partition list (part_list) and
  *	time stamp (last_part_update)
- *  $Id: partition_mgr.c 14795 2008-08-15 21:54:22Z jette $
+ *  $Id: partition_mgr.c 15121 2008-09-19 18:31:06Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1093,11 +1093,12 @@ uid_t *_get_group_members(char *group_name)
 		}
 	}
 
-	setpwent();
 #ifdef HAVE_AIX
+	setpwent_r(&fp);
 	while (!getpwent_r(&pw, pw_buffer, PW_BUF_SIZE, &fp)) {
 		pwd_result = &pw;
 #else
+	setpwent();
 	while (!getpwent_r(&pw, pw_buffer, PW_BUF_SIZE, &pwd_result)) {
 #endif
  		if (pwd_result->pw_gid != my_gid)
@@ -1106,7 +1107,11 @@ uid_t *_get_group_members(char *group_name)
  		xrealloc(group_uids, ((j+1) * sizeof(uid_t)));
 		group_uids[j-1] = pwd_result->pw_uid;
 	}
+#ifdef HAVE_AIX
+	endpwent_r(&fp);
+#else
 	endpwent();
+#endif
 
 	return group_uids;
 }

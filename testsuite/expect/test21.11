@@ -47,7 +47,7 @@ set mod		modify
 set nams	Names
 set nam		Name
 set fs		Fairshare
-set mc		MaxCPUSecs
+set mc		MaxCPUMins
 set mj		MaxJobs
 set mn		MaxNodes
 set mw		MaxWall
@@ -70,7 +70,7 @@ set or1		"Account Org A1"
 set qs		QosLevel
 set qs1		normal
 set access_err  0
-
+set timeout 60
 print_header $test_id
 
 if { [test_account_storage] == 0 } {
@@ -78,6 +78,14 @@ if { [test_account_storage] == 0 } {
 	exit 0
 }
  
+#
+# Verify if Administrator privileges
+#
+ if { [string compare [check_accounting_admin_level] "Administrator"] } {
+	send_user "\nWARNING: This test can't be run without being an Accounting administrator.\nUse sacctmgr mod user \$USER_NAME admin=admin.\n"
+	exit 0
+}
+
 #
 # Use sacctmgr to create a cluster
 #

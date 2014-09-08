@@ -200,6 +200,7 @@ s_p_options_t slurm_conf_options[] = {
 	{"ResumeProgram", S_P_STRING},
 	{"ResumeRate", S_P_UINT16},
 	{"ReturnToService", S_P_UINT16},
+	{"SallocDefaultCommand", S_P_STRING},
 	{"SchedulerAuth", S_P_STRING, defunct_option},
 	{"SchedulerParameters", S_P_STRING},
 	{"SchedulerPort", S_P_UINT16},
@@ -809,6 +810,7 @@ static int _register_conf_node_aliases(slurm_conf_node_t *node_ptr)
 		      "in FRONT_END mode");
 		goto cleanup;
 	}
+
 	hostname = node_ptr->hostnames;
 	address = node_ptr->addresses;
 #else
@@ -824,15 +826,20 @@ static int _register_conf_node_aliases(slurm_conf_node_t *node_ptr)
 #endif
 
 	/* now build the individual node structures */
+#ifdef HAVE_FRONT_END
+	/* we always want the first on in the list to be the one
+	 * returned when looking for localhost
+	 */
+	while ((alias = hostlist_pop(alias_list))) {
+#else
 	while ((alias = hostlist_shift(alias_list))) {
-#ifndef HAVE_FRONT_END
 		hostname = hostlist_shift(hostname_list);
 		address = hostlist_shift(address_list);
 #endif
 
 		_push_to_hashtbls(alias, hostname, address, node_ptr->port,
-					node_ptr->cpus, node_ptr->sockets,
-					node_ptr->cores, node_ptr->threads);
+				  node_ptr->cpus, node_ptr->sockets,
+				  node_ptr->cores, node_ptr->threads);
 
 		free(alias);
 #ifndef HAVE_FRONT_END
@@ -1163,6 +1170,7 @@ free_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr, bool purge_node_hash)
 	xfree (ctl_conf_ptr->propagate_rlimits_except);
 	xfree (ctl_conf_ptr->propagate_rlimits);
 	xfree (ctl_conf_ptr->resume_program);
+	xfree (ctl_conf_ptr->salloc_default_command);
 	xfree (ctl_conf_ptr->slurm_conf);
 	xfree (ctl_conf_ptr->sched_params);
 	xfree (ctl_conf_ptr->schedtype);
@@ -1259,6 +1267,7 @@ init_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr)
 	xfree (ctl_conf_ptr->resume_program);
 	ctl_conf_ptr->resume_rate		= (uint16_t) NO_VAL;
 	ctl_conf_ptr->ret2service		= (uint16_t) NO_VAL;
+	xfree( ctl_conf_ptr->salloc_default_command);
 	xfree( ctl_conf_ptr->sched_params );
 	ctl_conf_ptr->sched_time_slice		= (uint16_t) NO_VAL;
 	xfree( ctl_conf_ptr->schedtype );
@@ -1874,6 +1883,9 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 	s_p_get_string(&conf->resume_program, "ResumeProgram", hashtbl);
 	if (!s_p_get_uint16(&conf->resume_rate, "ResumeRate", hashtbl))
 		conf->resume_rate = DEFAULT_RESUME_RATE;
+
+	s_p_get_string(&conf->salloc_default_command, "SallocDefaultCommand",
+			hashtbl);
 
 	s_p_get_string(&conf->sched_params, "SchedulerParameters", hashtbl);
 

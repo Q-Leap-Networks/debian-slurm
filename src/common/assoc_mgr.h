@@ -45,13 +45,20 @@
 
 #include "src/common/list.h"
 #include "src/common/slurm_accounting_storage.h"
+#include "src/common/slurmdbd_defs.h"
 #include "src/slurmctld/slurmctld.h"
 #include <slurm/slurm.h>
 #include <slurm/slurm_errno.h>
 
+#define ASSOC_MGR_CACHE_ASSOC 0x0001
+#define ASSOC_MGR_CACHE_QOS 0x0002
+#define ASSOC_MGR_CACHE_USER 0x0004
+#define ASSOC_MGR_CACHE_ALL 0xffff
+
 typedef struct {
-	int enforce;
-	void (*remove_assoc_notify) (acct_association_rec_t *rec);
+	uint16_t cache_level;
+	uint16_t enforce;
+ 	void (*remove_assoc_notify) (acct_association_rec_t *rec);
 } assoc_init_args_t;
 
 /* 
@@ -98,7 +105,7 @@ extern int assoc_mgr_is_user_acct_coord(void *db_conn, uint32_t uid,
 					char *acct);
 
 extern int assoc_mgr_init(void *db_conn, assoc_init_args_t *args);
-extern int assoc_mgr_fini(void);
+extern int assoc_mgr_fini(char *state_save_location);
 
 /* 
  * update associations in local cache 
@@ -137,5 +144,24 @@ extern int assoc_mgr_validate_assoc_id(void *db_conn,
  *	used on reconfiguration
  */
 extern void assoc_mgr_clear_used_info(void);
+
+
+/*
+ * Dump the state information of the association mgr just incase the
+ * database isn't up next time we run.
+ */
+extern int dump_assoc_mgr_state(char *state_save_location);
+
+/*
+ * Read in the information of the association mgr if the database
+ * isn't up when starting.
+ */
+extern int load_assoc_mgr_state(char *state_save_location);
+
+/*
+ * Refresh the lists if when running_cache is set this will load new
+ * information from the database (if any) and update the cached list.
+ */
+extern int assoc_mgr_refresh_lists(void *db_conn, assoc_init_args_t *args);
 
 #endif /* _SLURM_ASSOC_MGR_H */

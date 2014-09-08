@@ -78,6 +78,7 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn, uid_t uid,
 		"t1.gid",
 		"t1.partition",
 		"t1.blockid",
+		"t1.cluster",
 		"t1.account",
 		"t1.eligible",
 		"t1.submit",
@@ -96,6 +97,7 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn, uid_t uid,
 		"t1.qos",
 		"t2.user",
 		"t2.cluster",
+		"t2.acct",
 		"t2.lft"
 	};
 
@@ -142,7 +144,8 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn, uid_t uid,
 		JOB_REQ_GID,
 		JOB_REQ_PARTITION,
 		JOB_REQ_BLOCKID,
-		JOB_REQ_ACCOUNT,
+		JOB_REQ_CLUSTER1,
+		JOB_REQ_ACCOUNT1,
 		JOB_REQ_ELIGIBLE,
 		JOB_REQ_SUBMIT,
 		JOB_REQ_START,
@@ -160,6 +163,7 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn, uid_t uid,
 		JOB_REQ_QOS,
 		JOB_REQ_USER_NAME,
 		JOB_REQ_CLUSTER,
+		JOB_REQ_ACCOUNT,
 		JOB_REQ_LFT,
 		JOB_REQ_COUNT		
 	};
@@ -259,7 +263,7 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn, uid_t uid,
 		while((object = list_next(itr))) {
 			if(set) 
 				xstrcat(extra, " || ");
-			xstrfmtcat(extra, "t1.acct='%s'", object);
+			xstrfmtcat(extra, "t1.account='%s'", object);
 			set = 1;
 		}
 		list_iterator_destroy(itr);
@@ -379,17 +383,14 @@ extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn, uid_t uid,
 		while((object = list_next(itr))) {
 			if(set) 
 				xstrcat(extra, " || ");
-			xstrfmtcat(extra, "%s.cluster='%s'", 
-				   table_level, object);
+			xstrfmtcat(extra, 
+				   "(t1.cluster='%s' || %s.cluster='%s')", 
+				   object, table_level, object);
 			set = 1;
 		}
 		list_iterator_destroy(itr);
-		/* just incase the association is gone */
-		if(set) 
-			xstrcat(extra, " || ");
-		xstrfmtcat(extra, "%s.cluster is null)", table_level);
-	}
-
+		xstrcat(extra, ")");
+	} 
 no_cond:	
 
 	xfree(tmp);
@@ -463,7 +464,7 @@ no_cond:
 	if(job_cond && !job_cond->duplicates) 
 		xstrcat(query, " order by jobid, submit desc");
 
-	debug3("%d query\n%s", mysql_conn->conn, query);
+	debug3("%d(%d) query\n%s", mysql_conn->conn, __LINE__, query);
 	if(!(result = mysql_db_query_ret(
 		     mysql_conn->db_conn, query, 0))) {
 		xfree(query);
@@ -487,9 +488,11 @@ no_cond:
 		job->alloc_cpus = atoi(row[JOB_REQ_ALLOC_CPUS]);
 		job->associd = atoi(row[JOB_REQ_ASSOCID]);
 
-		if(row[JOB_REQ_CLUSTER])
+		if(row[JOB_REQ_CLUSTER] && row[JOB_REQ_CLUSTER][0])
 			job->cluster = xstrdup(row[JOB_REQ_CLUSTER]);
-
+		else if(row[JOB_REQ_CLUSTER1] && row[JOB_REQ_CLUSTER1][0])
+			job->cluster = xstrdup(row[JOB_REQ_CLUSTER1]);
+			
 		if(row[JOB_REQ_USER_NAME]) 
 			job->user = xstrdup(row[JOB_REQ_USER_NAME]);
 		else 
@@ -498,8 +501,11 @@ no_cond:
 		if(row[JOB_REQ_LFT])
 			job->lft = atoi(row[JOB_REQ_LFT]);
 
-		if(row[JOB_REQ_ACCOUNT])
+		if(row[JOB_REQ_ACCOUNT] && row[JOB_REQ_ACCOUNT][0])
 			job->account = xstrdup(row[JOB_REQ_ACCOUNT]);
+		else if(row[JOB_REQ_ACCOUNT1] && row[JOB_REQ_ACCOUNT1][0])
+			job->account = xstrdup(row[JOB_REQ_ACCOUNT1]);
+
 		if(row[JOB_REQ_BLOCKID])
 			job->blockid = xstrdup(row[JOB_REQ_BLOCKID]);
 
@@ -533,7 +539,8 @@ no_cond:
 					job_cond->usage_start,
 					id);
 				
-				debug4("%d query\n%s", mysql_conn->conn, query);
+				debug4("%d(%d) query\n%s", 
+				       mysql_conn->conn, __LINE__, query);
 				if(!(result2 = mysql_db_query_ret(
 					     mysql_conn->db_conn,
 					     query, 0))) {
@@ -569,11 +576,15 @@ no_cond:
 			}
 		} else {
 			job->suspended = atoi(row[JOB_REQ_SUSPENDED]);
-			if(!job->end) {
+
+			if(!job->start) {
+				job->elapsed = 0;
+			} else if(!job->end) {
 				job->elapsed = now - job->start;
 			} else {
 				job->elapsed = job->end - job->start;
 			}
+
 			job->elapsed -= job->suspended;
 		}
 
@@ -581,8 +592,13 @@ no_cond:
 		job->jobname = xstrdup(row[JOB_REQ_NAME]);
 		job->gid = atoi(row[JOB_REQ_GID]);
 		job->exitcode = atoi(row[JOB_REQ_COMP_CODE]);
-		job->partition = xstrdup(row[JOB_REQ_PARTITION]);
-		job->nodes = xstrdup(row[JOB_REQ_NODELIST]);
+
+		if(row[JOB_REQ_PARTITION])
+			job->partition = xstrdup(row[JOB_REQ_PARTITION]);
+
+		if(row[JOB_REQ_NODELIST])
+			job->nodes = xstrdup(row[JOB_REQ_NODELIST]);
+
 		if (!job->nodes || !strcmp(job->nodes, "(null)")) {
 			xfree(job->nodes);
 			job->nodes = xstrdup("(unknown)");

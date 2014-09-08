@@ -79,7 +79,7 @@ extern void slurm_msg_t_init(slurm_msg_t *msg)
 {
 	memset(msg, 0, sizeof(slurm_msg_t));
 
-	msg->msg_type = (slurm_msg_type_t)NO_VAL;
+	msg->msg_type = (uint16_t)NO_VAL;
 	msg->conn_fd = -1;
 
 	forward_init(&msg->forward, NULL);
@@ -141,24 +141,23 @@ extern int slurm_addto_char_list(List char_list, char *names)
 			else if (names[i] == '\"' || names[i] == '\'')
 				names[i] = '`';
 			else if(names[i] == ',') {
-				if((i-start) > 0) {
-					name = xmalloc((i-start+1));
-					memcpy(name, names+start, (i-start));
-					//info("got %s %d", name, i-start);
-
-					while((tmp_char = list_next(itr))) {
-						if(!strcasecmp(tmp_char, name))
-							break;
-					}
-
-					if(!tmp_char) {
-						_make_lower(name);
-						list_append(char_list, name);
-						count++;
-					} else 
-						xfree(name);
-					list_iterator_reset(itr);
+				name = xmalloc((i-start+1));
+				memcpy(name, names+start, (i-start));
+				//info("got %s %d", name, i-start);
+				
+				while((tmp_char = list_next(itr))) {
+					if(!strcasecmp(tmp_char, name))
+						break;
 				}
+				
+				if(!tmp_char) {
+					_make_lower(name);
+					list_append(char_list, name);
+					count++;
+				} else 
+					xfree(name);
+				list_iterator_reset(itr);
+				
 				i++;
 				start = i;
 				if(!names[i]) {
@@ -170,25 +169,48 @@ extern int slurm_addto_char_list(List char_list, char *names)
 			}
 			i++;
 		}
-		if((i-start) > 0) {
-			name = xmalloc((i-start)+1);
-			memcpy(name, names+start, (i-start));
-			while((tmp_char = list_next(itr))) {
-				if(!strcasecmp(tmp_char, name))
-					break;
-			}
-			
-			if(!tmp_char) {
-				_make_lower(name);
-				list_append(char_list, name);
-				count++;
-			} else 
-				xfree(name);
+
+		name = xmalloc((i-start)+1);
+		memcpy(name, names+start, (i-start));
+		while((tmp_char = list_next(itr))) {
+			if(!strcasecmp(tmp_char, name))
+				break;
 		}
+		
+		if(!tmp_char) {
+			_make_lower(name);
+			list_append(char_list, name);
+			count++;
+		} else 
+			xfree(name);
 	}	
 	list_iterator_destroy(itr);
 	return count;
 } 
+
+extern int slurm_sort_char_list_asc(char *name_a, char *name_b)
+{
+	int diff = strcmp(name_a, name_b);
+
+	if (diff < 0)
+		return -1;
+	else if (diff > 0)
+		return 1;
+	
+	return 0;
+}
+
+extern int slurm_sort_char_list_desc(char *name_a, char *name_b)
+{
+	int diff = strcmp(name_a, name_b);
+
+	if (diff > 0)
+		return -1;
+	else if (diff < 0)
+		return 1;
+	
+	return 0;
+}
 
 void slurm_free_last_update_msg(last_update_msg_t * msg)
 {
@@ -754,6 +776,9 @@ private_data_string(uint16_t private_data, char *str, int str_len)
 		strcat(str, "accounts"); //9 len
 	}
 	// total len 42
+
+	if (str[0] == '\0')
+		strcat(str, "none");
 }
 
 char *job_state_string(enum job_states inx)
@@ -1051,6 +1076,7 @@ void slurm_free_ctl_conf(slurm_ctl_conf_info_msg_t * config_ptr)
 		xfree(config_ptr->propagate_rlimits);
 		xfree(config_ptr->propagate_rlimits_except);
 		xfree(config_ptr->resume_program);
+		xfree(config_ptr->salloc_default_command);
 		xfree(config_ptr->sched_params);
 		xfree(config_ptr->schedtype);
 		xfree(config_ptr->select_type);
@@ -1441,6 +1467,7 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case RESPONSE_FORWARD_FAILED:
 	case REQUEST_DAEMON_STATUS:
 	case REQUEST_HEALTH_CHECK:
+	case ACCOUNTING_FIRST_REG:
 		/* No body to free */
 		break;
 	case ACCOUNTING_UPDATE_MSG:
