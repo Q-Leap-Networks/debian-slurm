@@ -740,7 +740,7 @@ _check_job_credential(launch_tasks_request_msg_t *req, uid_t uid,
 		if (i_last_bit <= i_first_bit)
 			error("step credential has no CPUs selected");
 		else {
-			i = conf->conf_cpus / (i_last_bit - i_first_bit);
+			i = conf->cpus / (i_last_bit - i_first_bit);
 			if (i > 1)
 				alloc_lps *= i;
 		}
@@ -1000,7 +1000,7 @@ _set_batch_job_limits(slurm_msg_t *msg)
 		if (last_bit < 1)
 			error("Batch job credential allocates no CPUs");
 		else {
-			i = conf->conf_cpus / last_bit;
+			i = conf->cpus / last_bit;
 			if (i > 1)
 				alloc_lps *= i;
 		}
@@ -2850,7 +2850,17 @@ _rpc_terminate_job(slurm_msg_t *msg)
 			slurm_send_rc_msg(msg,
 					  ESLURMD_KILL_JOB_ALREADY_COMPLETE);
 		slurm_cred_begin_expiration(conf->vctx, req->job_id);
+		save_cred_state(conf->vctx);
 		_waiter_complete(req->job_id);
+
+		/* 
+		 * The controller needs to get MESSAGE_EPILOG_COMPLETE to bring
+		 * the job out of "completing" state.  Otherwise, the job
+		 * could remain "completing" unnecessarily, until the request 
+		 * to terminate is resent.
+		 */
+		_sync_messages_kill(req);
+		_epilog_complete(req->job_id, rc);
 		return;
 	}
 #endif

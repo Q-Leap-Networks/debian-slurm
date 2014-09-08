@@ -46,12 +46,16 @@ TrackWckey being set.  By enforcing Associations no new job is allowed to run
 unless a corresponding association exists in the system.  If limits are 
 enforced users can be limited by association to how many nodes or how long 
 jobs can run or other limits.  With wckeys enforced jobs will not be scheduled 
-unless a valid workload characterization key is specified.
+unless a valid workload characterization key is specified.  This value may not 
+be reset via "scontrol reconfig". It only takes effect upon restart 
+of the slurmctld daemon.
 
 .TP
 \fBAccountingStorageBackupHost\fR
 The name of the backup machine hosting the accounting storage database.
-Only used for accounting_storage/slurmdbd plugin, ignored otherwise.
+If used with the accounting_storage/slurmdbd plugin, this is where the backup 
+slurmdbd would be running.
+Only used for database type storage plugins, ignored otherwise.
 
 .TP
 \fBAccountingStorageHost\fR
@@ -180,12 +184,24 @@ The default value is 0 to disable caching group data.
 The system\-initiated checkpoint method to be used for user jobs. 
 The slurmctld daemon must be restarted for a change in \fBCheckpointType\fR 
 to take effect. 
-Acceptable values at present include
-"checkpoint/aix" (only on AIX systems),
-"checkpoint/ompi" (requires OpenMPI version 1.3 or higher),
-"checkpoint/xlch" (for XLCH, requires that SlurmUser be root), and
-"checkpoint/none".
-The default value is "checkpoint/none".
+Supported values presently include:
+.RS
+.TP 18
+\fBcheckpoint/aix\fR
+for AIX systems only
+.TP
+\fBcheckpoint/blcr\fR
+Berkeley Lab Checkpoint Restart (BLCR)
+.TP
+\fBcheckpoint/none\fR
+no checkpoint support (default)
+.TP
+\fBcheckpoint/ompi\fR
+OpenMPI (version 1.3 or higher)
+.TP
+\fBcheckpoint/xlch\fR
+XLCH (requires that SlurmUser be root)
+.RE
 
 .TP
 \fBClusterName\fR
@@ -849,15 +865,14 @@ prevents regular users from viewing reservations.
 \fBusage\fR 
 (NON-SLURMDBD ACCOUNTING ONLY) prevents users from viewing 
 usage of any other user.  This applys to sreport.
+.TP
 \fBusers\fR 
 (NON-SLURMDBD ACCOUNTING ONLY) prevents users from viewing 
 information of any user other than themselves, this also makes it so users can 
 only see associations they deal with.  
 Coordinators can see associations of all users they are coordinator of, 
 but can only see themselves when listing users.
-.TP
 .RE
-
 
 .TP
 \fBProctrackType\fR
@@ -1006,7 +1021,7 @@ be removed from power savings mode (using SLURM's hostlist
 expression format).
 By default no program is run.
 Related configuration options include \fBResumeTimeout\fR, \fBResumeRate\fR, 
-\fBSuspendRate\fR, \fBSuspendTime\fR, \fBResumeTimeout\fR, \fBSuspendProgram\fR, 
+\fBSuspendRate\fR, \fBSuspendTime\fR, \fBSuspendTimeout\fR, \fBSuspendProgram\fR, 
 \fBSuspendExcNodes\fR, and \fBSuspendExcParts\fR.
 More information is available at the SLURM web site
 (https://computing.llnl.gov/linux/slurm/power_save.html).
@@ -1021,7 +1036,7 @@ assigned work at the same time (e.g. a large job starts).
 A value of zero results in no limits being imposed. 
 The default value is 300 nodes per minute.
 Related configuration options include \fBResumeTimeout\fR, \fBResumeProgram\fR, 
-\fBSuspendRate\fR, \fBSuspendTime\fR, \fBResumeTimeout\fR, \fBSuspendProgram\fR, 
+\fBSuspendRate\fR, \fBSuspendTime\fR, \fBSuspendTimeout\fR, \fBSuspendProgram\fR, 
 \fBSuspendExcNodes\fR, and \fBSuspendExcParts\fR.
 
 .TP
@@ -1061,11 +1076,10 @@ explicitly changes its state (even if the slurmd daemon registers
 and resumes communications).
 .TP
 \fB1\fR
-A non\-responding (DOWN) node will become available for use upon
-registration. Note that DOWN node's state will be changed only if
-it was set DOWN due to being non\-responsive. If the node was
-set DOWN for any other reason (low memory, prolog failure, epilog
-failure, etc.), its state will not automatically be changed.  
+A DOWN node will become available for use upon registration with a
+valid configuration only if it was set DOWN due to being non\-responsive. 
+If the node was set DOWN for any other reason (low memory, prolog failure, 
+epilog failure, etc.), its state will not automatically be changed.  
 .TP
 \fB2\fR
 A DOWN node will become available for use upon registration with a
@@ -1202,7 +1216,8 @@ The following values are supported for \fBSelectType=select/cons_res\fR:
 .TP
 \fBCR_CPU\fR
 CPUs are consumable resources.
-There is no notion of sockets, cores or threads.
+There is no notion of sockets, cores or threads; 
+do not define those values in the node specification.
 On a multi\-core system, each core will be considered a CPU.
 On a multi\-core and hyperthreaded system, each thread will be
 considered a CPU.
@@ -1210,6 +1225,8 @@ On single\-core systems, each CPUs will be considered a CPU.
 .TP
 \fBCR_CPU_Memory\fR
 CPUs and memory are consumable resources.
+There is no notion of sockets, cores or threads; 
+do not define those values in the node specification.
 Setting a value for \fBDefMemPerCPU\fR is strongly recommended.
 .TP
 \fBCR_Core\fR
@@ -1406,7 +1423,7 @@ Use SLURM's hostlist expression to identify nodes.
 By default no nodes are excluded.
 Related configuration options include \fBResumeTimeout\fR, \fBResumeProgram\fR, 
 \fBResumeRate\fR, \fBSuspendProgram\fR, \fBSuspendRate\fR, \fBSuspendTime\fR, 
-\fBResumeTimeout\fR, and \fBSuspendExcParts\fR.
+\fBSuspendTimeout\fR, and \fBSuspendExcParts\fR.
 
 .TP
 \fBSuspendExcParts\fR
@@ -1416,7 +1433,7 @@ Multiple partitions can be identified and separated by commas.
 By default no nodes are excluded.
 Related configuration options include \fBResumeTimeout\fR, \fBResumeProgram\fR, 
 \fBResumeRate\fR, \fBSuspendProgram\fR, \fBSuspendRate\fR, \fBSuspendTime\fR 
-\fBResumeTimeout\fR, and \fBSuspendExcNodes\fR.
+\fBSuspendTimeout\fR, and \fBSuspendExcNodes\fR.
 
 .TP
 \fBSuspendProgram\fR
@@ -1431,7 +1448,7 @@ be placed into power savings mode (using SLURM's hostlist
 expression format).
 By default, no program is run.
 Related configuration options include \fBResumeTimeout\fR, \fBResumeProgram\fR, 
-\fBResumeRate\fR, \fBSuspendRate\fR, \fBSuspendTime\fR, \fBResumeTimeout\fR, 
+\fBResumeRate\fR, \fBSuspendRate\fR, \fBSuspendTime\fR, \fBSuspendTimeout\fR, 
 \fBSuspendExcNodes\fR, and \fBSuspendExcParts\fR.
 
 .TP
@@ -2159,7 +2176,11 @@ The four options most likely to be used are:
 \fBProlog\fR and \fBEpilog\fR (executed once on each compute node
 for each job) plus \fBPrologSlurmctld\fR and \fBEpilogSlurmctld\fR
 (executed once on the \fBControlMachine\fR for each job).
- 
+
+NOTE:  Standard output and error messages are normally not preserved. 
+Explicitly write output and error messages to an appropriate location 
+if you which to preserve that information.
+
 NOTE:  The Prolog script is ONLY run on any individual
 node when it first sees a job step from a new allocation; it does not
 run the Prolog immediately when an allocation is granted.  If no job steps

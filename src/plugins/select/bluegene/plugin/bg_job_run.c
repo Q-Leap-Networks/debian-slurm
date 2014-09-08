@@ -2,7 +2,7 @@
  *  bg_job_run.c - blue gene job execution (e.g. initiation and termination) 
  *  functions.
  *
- *  $Id: bg_job_run.c 18063 2009-07-06 23:56:31Z da $ 
+ *  $Id: bg_job_run.c 18162 2009-07-15 23:23:06Z da $ 
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -163,7 +163,8 @@ static int _remove_job(db_job_id_t job_id)
 		else if(job_state == RM_JOB_DYING) {
 			if(count > MAX_POLL_RETRIES) 
 				error("Job %d isn't dying, trying for "
-				      "%d seconds", count*POLL_INTERVAL);
+				      "%d seconds", job_id, 
+				      count*POLL_INTERVAL);
 			continue;
 		} else if(job_state == RM_JOB_ERROR) {
 			error("job %d is in a error state.", job_id);
@@ -215,14 +216,16 @@ static int _reset_block(bg_record_t *bg_record)
 		/* remove user from list */		
 		
 		if(bg_record->target_name) {
-			if(strcmp(bg_record->target_name, bg_conf->slurm_user_name)) {
+			if(strcmp(bg_record->target_name, 
+				  bg_conf->slurm_user_name)) {
 				xfree(bg_record->target_name);
 				bg_record->target_name = 
 					xstrdup(bg_conf->slurm_user_name);
 			}
 			update_block_user(bg_record, 1);
 		} else {
-			bg_record->target_name = xstrdup(bg_conf->slurm_user_name);
+			bg_record->target_name = 
+				xstrdup(bg_conf->slurm_user_name);
 		}	
 		
 			
@@ -230,10 +233,17 @@ static int _reset_block(bg_record_t *bg_record)
 		bg_record->boot_count = 0;
 		
 		last_bg_update = time(NULL);
-		if(remove_from_bg_list(bg_lists->job_running, bg_record) 
-		   == SLURM_SUCCESS) {
-			num_unused_cpus += bg_record->cpu_cnt;
-		}
+		/* Only remove from the job_running list if
+		   job_running == NO_JOB_RUNNING, since blocks in
+		   error state could also be in this list and we don't
+		   want to remove them.
+		*/
+		if(bg_record->job_running == NO_JOB_RUNNING)
+			if(remove_from_bg_list(bg_lists->job_running,
+					       bg_record) 
+			   == SLURM_SUCCESS) {
+				num_unused_cpus += bg_record->cpu_cnt;
+			}
 	} else {
 		error("No block given to reset");
 		rc = SLURM_ERROR;

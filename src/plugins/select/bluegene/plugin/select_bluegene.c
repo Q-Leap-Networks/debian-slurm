@@ -657,17 +657,19 @@ extern int select_p_update_sub_node (update_part_msg_t *part_desc_ptr)
 				rc = SLURM_ERROR;
 				goto end_it;
 			}
+			/* make sure we are asking for a correct name */
 			for(i = 0; i < BA_SYSTEM_DIMENSIONS; i++) {
-				if((part_desc_ptr->name[i] >= '0'
-				    && part_desc_ptr->name[i] <= '9')
-				   || (part_desc_ptr->name[i] >= 'A'
-				      && part_desc_ptr->name[i] <= 'Z')) {
-					error("update_sub_node: "
-					      "misformatted name given %s",
-					      part_desc_ptr->name);
-					rc = SLURM_ERROR;
-					goto end_it;
-				}
+				if((part_desc_ptr->name[j+i] >= '0'
+				    && part_desc_ptr->name[j+i] <= '9')
+				   || (part_desc_ptr->name[j+i] >= 'A'
+				      && part_desc_ptr->name[j+i] <= 'Z')) 
+					continue;
+				
+				error("update_sub_node: "
+				      "misformatted name given %s",
+				      part_desc_ptr->name);
+				rc = SLURM_ERROR;
+				goto end_it;
 			}
 			
 			strncpy(coord, part_desc_ptr->name+j,
@@ -750,7 +752,6 @@ extern int select_p_update_node_config (int index)
 extern int select_p_update_node_state (int index, uint16_t state)
 {
 	int x, y, z;
-	
 	for (y = DIM_SIZE[Y] - 1; y >= 0; y--) {
 		for (z = 0; z < DIM_SIZE[Z]; z++) {
 			for (x = 0; x < DIM_SIZE[X]; x++) {

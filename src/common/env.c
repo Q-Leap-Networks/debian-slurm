@@ -305,7 +305,7 @@ char *getenvp(char **env, const char *name)
 	return NULL;
 }
 
-int setup_env(env_t *env)
+int setup_env(env_t *env, bool preserve_env)
 {
 	int rc = SLURM_SUCCESS;
 	char *dist = NULL, *lllp_dist = NULL;
@@ -320,7 +320,7 @@ int setup_env(env_t *env)
 		 rc = SLURM_FAILURE;
 	}
 
-	if (env->nprocs
+	if (!preserve_env && env->nprocs
 	   && setenvf(&env->env, "SLURM_NPROCS", "%d", env->nprocs)) {
 		error("Unable to set SLURM_NPROCS environment variable");
 		rc = SLURM_FAILURE;
@@ -686,7 +686,7 @@ int setup_env(env_t *env)
 		rc = SLURM_FAILURE;
 	}
 	
-	if (env->nhosts
+	if (!preserve_env && env->nhosts
 	    && setenvf(&env->env, "SLURM_NNODES", "%d", env->nhosts)) {
 		error("Unable to set SLURM_NNODES environment var");
 		rc = SLURM_FAILURE;
@@ -698,7 +698,7 @@ int setup_env(env_t *env)
 		rc = SLURM_FAILURE;
 	}
 	
-	if (env->task_count 
+	if (!preserve_env && env->task_count 
 	    && setenvf (&env->env, 
 			"SLURM_TASKS_PER_NODE", "%s", env->task_count)) {
 		error ("Can't set SLURM_TASKS_PER_NODE env variable");
@@ -882,7 +882,8 @@ extern char *uint32_compressed_to_str(uint32_t array_len,
  *	SLURM_JOB_NODELIST
  *	SLURM_JOB_CPUS_PER_NODE
  *	LOADLBATCH (AIX only)
- *	MPIRUN_PARTITION, MPIRUN_NOFREE, and MPIRUN_NOALLOCATE (BGL only)
+ *	SLURM_BG_NUM_NODES, MPIRUN_PARTITION, MPIRUN_NOFREE, and
+ *	MPIRUN_NOALLOCATE (BGL only)
  *
  * Sets OBSOLETE variables (needed for MPI, do not remove):
  *	SLURM_JOBID
@@ -890,7 +891,7 @@ extern char *uint32_compressed_to_str(uint32_t array_len,
  *	SLURM_NODELIST
  *	SLURM_TASKS_PER_NODE 
  */
-void
+int
 env_array_for_job(char ***dest, const resource_allocation_response_msg_t *alloc,
 		  const job_desc_msg_t *desc)
 {
@@ -901,6 +902,15 @@ env_array_for_job(char ***dest, const resource_allocation_response_msg_t *alloc,
 	char *dist = NULL, *lllp_dist = NULL;
 	slurm_step_layout_t *step_layout = NULL;
 	uint32_t num_tasks = desc->num_tasks;
+	int rc = SLURM_SUCCESS;
+
+#ifdef HAVE_BG
+	uint32_t node_cnt = alloc->node_cnt;
+	select_g_get_jobinfo(alloc->select_jobinfo, 
+			     SELECT_DATA_NODE_CNT,
+			     &node_cnt);
+	env_array_overwrite_fmt(dest, "SLURM_BG_NUM_NODES", "%u", node_cnt);
+#endif
 
 	env_array_overwrite_fmt(dest, "SLURM_JOB_ID", "%u", alloc->job_id);
 	env_array_overwrite_fmt(dest, "SLURM_JOB_NUM_NODES", "%u",
@@ -986,21 +996,32 @@ env_array_for_job(char ***dest, const resource_allocation_response_msg_t *alloc,
 		   && desc->cpus_per_task != (uint16_t)NO_VAL)
 			num_tasks /= desc->cpus_per_task;
 		//num_tasks = desc->num_procs;
-	}
+	} 
+
+	if(desc->task_dist == SLURM_DIST_ARBITRARY) {
+		tmp = desc->req_nodes;
+		env_array_overwrite_fmt(dest, "SLURM_ARBITRARY_NODELIST",
+					"%s", tmp);
+	} else
+		tmp = alloc->node_list;
 	//info("got %d and %d", num_tasks,  desc->cpus_per_task);
-	step_layout = slurm_step_layout_create(alloc->node_list,
-					       alloc->cpus_per_node,
-					       alloc->cpu_count_reps,
-					       alloc->node_cnt,
-					       num_tasks,
-					       desc->cpus_per_task,
-					       desc->task_dist,
-					       desc->plane_size);
+	if(!(step_layout = slurm_step_layout_create(tmp,
+						    alloc->cpus_per_node,
+						    alloc->cpu_count_reps,
+						    alloc->node_cnt,
+						    num_tasks,
+						    desc->cpus_per_task,
+						    desc->task_dist,
+						    desc->plane_size))) 
+		return SLURM_ERROR;
+	
+
 	tmp = _uint16_array_to_str(step_layout->node_cnt,
 				   step_layout->tasks);
 	slurm_step_layout_destroy(step_layout);
 	env_array_overwrite_fmt(dest, "SLURM_TASKS_PER_NODE", "%s", tmp);
 	xfree(tmp);
+	return rc;
 }
 
 /*
@@ -1026,7 +1047,7 @@ env_array_for_job(char ***dest, const resource_allocation_response_msg_t *alloc,
  *	SLURM_NPROCS
  *	SLURM_TASKS_PER_NODE 
  */
-extern void
+extern int
 env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch,
 			const char *node_name)
 {
@@ -1037,7 +1058,15 @@ env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch,
 	slurm_step_layout_t *step_layout = NULL;
 	uint32_t num_tasks = batch->nprocs;
 	uint16_t cpus_per_task;
+	uint16_t task_dist;
 
+#ifdef HAVE_BG
+	uint32_t node_cnt = 0;
+	select_g_get_jobinfo(batch->select_jobinfo, 
+			     SELECT_DATA_NODE_CNT,
+			     &node_cnt);
+	env_array_overwrite_fmt(dest, "SLURM_BG_NUM_NODES", "%u", node_cnt);
+#endif
 	/* There is no explicit node count in the batch structure,
 	 * so we need to calculate the node count. */
 	for (i = 0; i < batch->num_cpu_groups; i++) {
@@ -1050,8 +1079,8 @@ env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch,
 	env_array_overwrite_fmt(dest, "SLURM_JOB_NODELIST", "%s", batch->nodes);
 
 	tmp = uint32_compressed_to_str(batch->num_cpu_groups,
-					batch->cpus_per_node,
-					batch->cpu_count_reps);
+				       batch->cpus_per_node,
+				       batch->cpu_count_reps);
 	env_array_overwrite_fmt(dest, "SLURM_JOB_CPUS_PER_NODE", "%s", tmp);
 	xfree(tmp);
 
@@ -1080,21 +1109,33 @@ env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch,
 		env_array_overwrite_fmt(dest, "SLURM_CPUS_PER_TASK", "%u",
 					cpus_per_task);
 	}
-	num_tasks = num_cpus / cpus_per_task;
 	
-	step_layout = slurm_step_layout_create(batch->nodes,
-					       batch->cpus_per_node,
-					       batch->cpu_count_reps,
-					       num_nodes,
-					       num_tasks,
-					       cpus_per_task,
-					       (uint16_t)SLURM_DIST_BLOCK,
-					       (uint16_t)NO_VAL);
+	if((tmp = getenvp(*dest, "SLURM_ARBITRARY_NODELIST"))) {
+		task_dist = SLURM_DIST_ARBITRARY;
+		num_tasks = batch->nprocs;
+	} else {
+		tmp = batch->nodes;
+		task_dist = SLURM_DIST_BLOCK;
+		num_tasks = num_cpus / cpus_per_task;
+	}
+
+	if(!(step_layout = slurm_step_layout_create(tmp,
+						    batch->cpus_per_node,
+						    batch->cpu_count_reps,
+						    num_nodes,
+						    num_tasks,
+						    cpus_per_task,
+						    task_dist,
+						    (uint16_t)NO_VAL)))
+		return SLURM_ERROR;
+
 	tmp = _uint16_array_to_str(step_layout->node_cnt,
 				   step_layout->tasks);
 	slurm_step_layout_destroy(step_layout);
 	env_array_overwrite_fmt(dest, "SLURM_TASKS_PER_NODE", "%s", tmp);
 	xfree(tmp);
+	return SLURM_SUCCESS;
+
 }
 
 /*
@@ -1103,7 +1144,8 @@ env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch,
  * pointed to by "dest" is NULL, memory will automatically be xmalloc'ed.
  * The array is terminated by a NULL pointer, and thus is suitable for
  * use by execle() and other env_array_* functions.  If preserve_env is
- * true, the variables SLURM_NNODES and SLURM_NPROCS remain unchanged.
+ * true, the variables SLURM_NNODES, SLURM_NPROCS and SLURM_TASKS_PER_NODE
+ * remain unchanged.
  *
  * Sets variables:
  *	SLURM_STEP_ID
@@ -1156,8 +1198,9 @@ env_array_for_step(char ***dest,
 					"%hu", step->step_layout->node_cnt);
 		env_array_overwrite_fmt(dest, "SLURM_NPROCS",
 					"%u", step->step_layout->task_cnt);
+		env_array_overwrite_fmt(dest, "SLURM_TASKS_PER_NODE", "%s", 
+					tmp);
 	}
-	env_array_overwrite_fmt(dest, "SLURM_TASKS_PER_NODE", "%s", tmp);
 	env_array_overwrite_fmt(dest, "SLURM_SRUN_COMM_PORT",
 				"%hu", launcher_port);
 

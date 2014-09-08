@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/mgr.c - job manager functions for slurmstepd
- *  $Id: mgr.c 18075 2009-07-07 23:39:17Z jette $
+ *  $Id: mgr.c 18638 2009-09-08 21:54:27Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -290,7 +290,7 @@ slurmd_job_t *
 mgr_launch_batch_job_setup(batch_job_launch_msg_t *msg, slurm_addr *cli)
 {
 	slurmd_job_t *job = NULL;
-	
+
 	if (!(job = job_batch_job_create(msg))) {
 		error("job_batch_job_create() failed: %m");
 		return NULL;
@@ -332,8 +332,8 @@ cleanup1:
 	if (job->aborted)
 		verbose("job %u abort complete", job->jobid);
 	else if (msg->step_id == SLURM_BATCH_SCRIPT) {
-		_send_complete_batch_script_msg(job, 
-			ESLURMD_CREATE_BATCH_DIR_ERROR, -1);
+		_send_complete_batch_script_msg(
+			job, ESLURMD_CREATE_BATCH_DIR_ERROR, -1);
 	} else
 		_send_step_complete_msgs(job);
 
@@ -1388,7 +1388,7 @@ _wait_for_any_task(slurmd_job_t *job, bool waitflag)
 			
 			job->envtp->distribution = -1;
 			job->envtp->batch_flag = job->batch;
-			setup_env(job->envtp);
+			setup_env(job->envtp, false);
 			job->env = job->envtp->env;
 			if (job->task_epilog) {
 				_run_script_as_user("user task_epilog",

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  sfree.c - free specified block or all blocks.
- *  $Id: sfree.c 17366 2009-04-28 23:04:14Z da $
+ *  $Id: sfree.c 18185 2009-07-17 19:02:22Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -572,7 +572,8 @@ static int _remove_job(db_job_id_t job_id)
 		else if(job_state == RM_JOB_DYING) {
 			if(count > MAX_POLL_RETRIES) 
 				error("Job %d isn't dying, trying for "
-				      "%d seconds", count*POLL_INTERVAL);
+				      "%d seconds", job_id, 
+				      count*POLL_INTERVAL);
 			continue;
 		} else if(job_state == RM_JOB_ERROR) {
 			error("job %d is in a error state.", job_id);
