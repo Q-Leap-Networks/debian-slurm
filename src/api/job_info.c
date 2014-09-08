@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  job_info.c - get/print the job state information of slurm
- *  $Id: job_info.c 11315 2007-04-06 01:42:39Z morrone $
+ *  $Id: job_info.c 12249 2007-09-11 00:48:52Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -128,7 +128,7 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	char tmp1[128], tmp2[128];
 	char tmp_line[128];
 	char *ionodes = NULL;
-	uint16_t term_sig = 0;
+	uint16_t exit_status = 0, term_sig = 0;
 	char *out = NULL;
 	
 #ifdef HAVE_BG
@@ -193,9 +193,11 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	xstrcat(out, tmp_line);
 	if (WIFSIGNALED(job_ptr->exit_code))
 		term_sig = WTERMSIG(job_ptr->exit_code);
+	else
+		exit_status = WEXITSTATUS(job_ptr->exit_code);
 	snprintf(tmp_line, sizeof(tmp_line),
 		"ExitCode=%u:%u", 
-		WEXITSTATUS(job_ptr->exit_code), term_sig);
+		exit_status, term_sig);
 	xstrcat(out, tmp_line);
 	if (one_liner)
 		xstrcat(out, " ");

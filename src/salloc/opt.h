@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  opt.h - definitions for salloc option processing
- *  $Id: opt.h 11992 2007-08-10 18:59:15Z jette $
+ *  $Id: opt.h 12196 2007-08-31 21:28:28Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -78,6 +78,7 @@ typedef struct salloc_options {
 
 	bool hold;		/* --hold, -H			*/
 	bool no_kill;		/* --no-kill, -k		*/
+	bool overcommit;	/* --overcommit -O		*/
 	int kill_command_signal;/* --kill-command, -K           */
 	bool kill_command_signal_set;
 	uint16_t shared;	/* --share,   -s		*/

@@ -31,7 +31,7 @@
 ############################################################################
 source ./globals
 
-set test_id     "17.32"
+set test_id     "15.24"
 set exit_code   0
 set file_in     "test$test_id.input"
 set file_out    "test$test_id.output"
@@ -51,15 +51,25 @@ make_bash_script $file_in "
 #
 # Submit a slurm job that will execute 'id' on 1 node and over task_cnt tasks
 #
-spawn $sbatch --tasks=$task_cnt --overcommit -N1 --output=$file_out -t1 $file_in
+set timeout     $max_job_delay
+set matches     0
+set tasks       0
+spawn $salloc --tasks=$task_cnt --overcommit -N1 -t1 $file_in
 expect {
-	-re "Submitted batch job ($number)" {
+	-re "Granted job allocation ($number)" {
 		set job_id $expect_out(1,string)
 		exp_continue
 	}
-	-re "Batch job submission failed" {
-		send_user "\nNo worries, error not unexpected\n"
-		set no_run 1
+	-re "SLURM_NPROCS=$task_cnt" {
+		incr matches
+		exp_continue
+	}
+	-re "SLURM_OVERCOMMIT=1" {
+		incr matches
+		exp_continue
+	}
+	-re "uid=" {
+		incr tasks
 		exp_continue
 	}
 	timeout {
@@ -68,36 +78,6 @@ expect {
 	}
 	eof {
 		wait
-	}
-}
-
-#
-# Wait for job to complete
-#
-if {[wait_for_job $job_id "DONE"] != 0} {
-	send_user "\nFAILURE: waiting for job to complete\n"
-	set exit_code 1
-}
-set matches     0
-set tasks       0
-if {[wait_for_file $file_out] == 0} {
-	spawn $bin_cat $file_out
-	expect {
-		-re "SLURM_NPROCS=$task_cnt" {
-			incr matches
-			exp_continue
-		}
-		-re "SLURM_OVERCOMMIT=1" {
-			incr matches
-			exp_continue
-		}
-		-re "uid=" {
-			incr tasks
-			exp_continue
-		}
-		eof {
-			wait
-		}
 	}
 }
 if {$matches != 2} {

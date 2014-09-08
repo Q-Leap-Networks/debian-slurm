@@ -2,7 +2,7 @@
  *  select_cons_res.c - node selection plugin supporting consumable 
  *  resources policies.
  *
- *  $Id: select_cons_res.c 12189 2007-08-31 17:57:29Z jette $
+ *  $Id: select_cons_res.c 12266 2007-09-11 20:34:43Z jette $
  *****************************************************************************\
  *
  *  The following example below illustrates how four jobs are allocated
@@ -2099,7 +2099,6 @@ extern int select_p_job_suspend(struct job_record *job_ptr)
 			default:
 				break;
 			}
-			break;
 		}
 		rc = SLURM_SUCCESS;
 		break;
@@ -2179,7 +2178,6 @@ extern int select_p_job_resume(struct job_record *job_ptr)
 			default:
 				break;
 			}
-			break;
 		}
 		rc = SLURM_SUCCESS;
 		break;

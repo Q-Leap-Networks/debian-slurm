@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  opt.c - options processing for srun
- *  $Id: opt.c 12187 2007-08-31 16:07:57Z jette $
+ *  $Id: opt.c 12315 2007-09-13 23:56:02Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1098,6 +1098,7 @@ env_vars_t env_vars[] = {
 {"SLURM_STDERRMODE",    OPT_STRING,     &opt.efname,        NULL             },
 {"SLURM_STDINMODE",     OPT_STRING,     &opt.ifname,        NULL             },
 {"SLURM_STDOUTMODE",    OPT_STRING,     &opt.ofname,        NULL             },
+{"SLURM_THREADS",       OPT_INT,        &opt.max_threads,   NULL             },
 {"SLURM_TIMELIMIT",     OPT_STRING,     &opt.time_limit_str,NULL             },
 {"SLURM_WAIT",          OPT_INT,        &opt.max_wait,      NULL             },
 {"SLURM_DISABLE_STATUS",OPT_INT,        &opt.disable_status,NULL             },
@@ -2357,8 +2358,15 @@ static bool _opt_verify(void)
 			}
 		} else if (opt.nodes_set && opt.nprocs_set) {
 
+			/*
+			 * Make sure in a non allocate situation that
+			 * the number of max_nodes is <= number of tasks
+			 */
+			if (!opt.allocate && opt.nprocs < opt.max_nodes) 
+				opt.max_nodes = opt.nprocs;
+
 			/* 
-			 *  make sure # of procs >= min_nodes 
+			 *  make sure # of procs >= min_nodes || max_nodes 
 			 */
 			if (opt.nprocs < opt.min_nodes) {
 
