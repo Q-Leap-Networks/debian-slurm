@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  select_bluegene.c - node selection plugin for Blue Gene system.
  * 
- *  $Id: select_bluegene.c 14952 2008-09-03 16:08:14Z da $
+ *  $Id: select_bluegene.c 15551 2008-10-31 19:47:35Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -274,7 +274,7 @@ extern int select_p_state_save(char *dir_name)
 	slurm_mutex_lock(&block_state_mutex);
 	itr = list_iterator_create(bg_list);
 	while((bg_record = list_next(itr))) {
-		/* on real bgl systems we only want to keep track of
+		/* on real bluegene systems we only want to keep track of
 		 * the blocks in an error state
 		 */
 #ifdef HAVE_BG_FILES

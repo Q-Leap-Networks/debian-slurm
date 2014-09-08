@@ -55,6 +55,7 @@ static uint32_t	_get_job_end_time(struct job_record *job_ptr);
 static char *	_get_job_features(struct job_record *job_ptr);
 static uint32_t	_get_job_min_disk(struct job_record *job_ptr);
 static uint32_t	_get_job_min_mem(struct job_record *job_ptr);
+static uint32_t	_get_job_max_nodes(struct job_record *job_ptr);
 static uint32_t	_get_job_min_nodes(struct job_record *job_ptr);
 static char *	_get_job_state(struct job_record *job_ptr);
 static uint32_t	_get_job_submit_time(struct job_record *job_ptr);
@@ -92,13 +93,14 @@ reject_msg_t reject_msgs[REJECT_MSG_MAX];
  *					NOTE: OR operator not supported
  *	[HOSTLIST=<node1:node2>;]	list of required nodes, if any
  *	[STARTDATE=<uts>;]		earliest start time, if any
+ *	[MAXNODES=<nodes>;]		maximum number of nodes, 0 if no limit
  *	[TASKLIST=<node1:node2>;]	nodes in use, if running or completing
  *	[REJMESSAGE=<str>;]		reason job is not running, if any
  *	UPDATETIME=<uts>;		time last active
  *	[FLAGS=INTERACTIVE;]		set if interactive (not batch) job
  *	WCLIMIT=<secs>;			wall clock time limit, seconds
  *	TASKS=<cpus>;			CPUs required
- *	NODES=<nodes>;			count of nodes required
+ *	NODES=<nodes>;			count of nodes required or allocated
  *	DPROCS=<cpus_per_task>;		count of CPUs required per task
  *	QUEUETIME=<uts>;		submission time
  *	STARTTIME=<uts>;		time execution started
@@ -268,6 +270,11 @@ static char *	_dump_job(struct job_record *job_ptr, time_t update_time)
 			snprintf(tmp, sizeof(tmp),
 				"STARTDATE=%u;", (uint32_t)
 				job_ptr->details->begin_time);
+			xstrcat(buf, tmp);
+		}
+		if (job_ptr->details) {
+			snprintf(tmp, sizeof(tmp),
+				 "MAXNODES=%u;", _get_job_max_nodes(job_ptr));
 			xstrcat(buf, tmp);
 		}
 	} else if (!IS_JOB_FINISHED(job_ptr)) {
@@ -456,6 +463,33 @@ static uint32_t _get_job_min_disk(struct job_record *job_ptr)
 	if (job_ptr->details)
 		return job_ptr->details->job_min_tmp_disk;
 	return (uint32_t) 0;
+}
+
+static uint32_t	_get_job_max_nodes(struct job_record *job_ptr)
+{
+	uint32_t max_nodes = 0;
+
+	if (job_ptr->job_state > JOB_PENDING) {
+		/* return actual count of currently allocated nodes.
+		 * NOTE: gets decremented to zero while job is completing */
+		return job_ptr->node_cnt;
+	}
+
+	if ((job_ptr->details == NULL) || (job_ptr->part_ptr == NULL))
+		return max_nodes;	/* should never reach here */
+
+	if (job_ptr->details->max_nodes) {
+			max_nodes = job_ptr->details->max_nodes;
+		if (job_ptr->part_ptr->max_nodes != INFINITE) {
+			max_nodes = MIN(max_nodes, 
+					job_ptr->part_ptr->max_nodes);
+		}
+	} else if (job_ptr->part_ptr->max_nodes == INFINITE)
+		max_nodes = 0;	/* no limits on job or partition */
+	else	/* use partition limit */
+		max_nodes = job_ptr->part_ptr->max_nodes;
+
+	return max_nodes;
 }
 
 static uint32_t	_get_job_min_nodes(struct job_record *job_ptr)

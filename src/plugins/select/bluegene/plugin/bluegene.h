@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  bluegene.h - header for blue gene configuration processing module. 
  *
- *  $Id: bluegene.h 13924 2008-04-23 06:24:55Z da $
+ *  $Id: bluegene.h 15551 2008-10-31 19:47:35Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -51,7 +51,11 @@ typedef enum bg_layout_type {
 
 
 /* Global variables */
+#ifdef HAVE_BGP_FILES
+extern rm_BGP_t *bg;
+#else
 extern rm_BGL_t *bg;
+#endif
 extern char *default_blrtsimage;
 extern char *default_linuximage;
 extern char *default_mloaderimage;

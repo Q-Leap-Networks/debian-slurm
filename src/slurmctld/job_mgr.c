@@ -766,8 +766,7 @@ static int _load_job_state(Buf buffer)
 		if (IS_JOB_PENDING(job_ptr))
 			job_ptr->start_time = now;
 		job_ptr->end_time = now;
-		if(job_ptr->assoc_id)
-			jobacct_storage_g_job_complete(acct_db_conn, job_ptr);
+		job_completion_logger(job_ptr);
 	} else {
 		info("Recovered job %u", job_id);
 		job_ptr->assoc_ptr = (void *) assoc_ptr;
@@ -3642,26 +3641,25 @@ void reset_job_bitmaps(void)
 		FREE_NULL_BITMAP(job_ptr->node_bitmap);
 		if ((job_ptr->nodes_completing) &&
 		     (node_name2bitmap(job_ptr->nodes_completing,
-				     false,  &job_ptr->node_bitmap))) {
+				       false,  &job_ptr->node_bitmap))) {
 			error("Invalid nodes (%s) for job_id %u",
 			      job_ptr->nodes_completing,
 			      job_ptr->job_id);
 			job_fail = true;
 		} else if ((job_ptr->node_bitmap == NULL)  && job_ptr->nodes &&
 			   (node_name2bitmap(job_ptr->nodes, false,
-						 &job_ptr->node_bitmap))) {
+					     &job_ptr->node_bitmap))) {
 			error("Invalid nodes (%s) for job_id %u", 
 		    	      job_ptr->nodes, job_ptr->job_id);
 			job_fail = true;
 		}
+		_reset_step_bitmaps(job_ptr);
 		build_node_details(job_ptr);	/* set: num_cpu_groups, 
 						 * cpu_count_reps, node_cnt, 
 						 * cpus_per_node, node_addr */
 
 		if (_reset_detail_bitmaps(job_ptr))
 			job_fail = true;
-
-		_reset_step_bitmaps(job_ptr);
 
 		if ((job_ptr->kill_on_step_done)
 		    &&  (list_count(job_ptr->step_list) <= 1)) {
@@ -3754,8 +3752,12 @@ static void _reset_step_bitmaps(struct job_record *job_ptr)
 			      job_ptr->job_id, step_ptr->step_id);
 			delete_step_record (job_ptr, step_ptr->step_id);
 		}
-		if (step_ptr->step_node_bitmap)
-			step_alloc_lps(step_ptr);
+		if ((step_ptr->step_node_bitmap == NULL) &&
+		    (step_ptr->batch_step == 0)) {
+			error("Missing node_list for step_id %u.%u", 
+			      job_ptr->job_id, step_ptr->step_id);
+			delete_step_record (job_ptr, step_ptr->step_id);
+		}
 	}
 
 	list_iterator_destroy (step_iterator);
@@ -5112,6 +5114,7 @@ void job_fini (void)
 extern void job_completion_logger(struct job_record  *job_ptr)
 {
 	int base_state;
+
 	xassert(job_ptr);
 
 	if (accounting_enforce == ACCOUNTING_ENFORCE_WITH_LIMITS)
@@ -5133,6 +5136,24 @@ extern void job_completion_logger(struct job_record  *job_ptr)
 	}
 
 	g_slurm_jobcomp_write(job_ptr);
+
+	if(!job_ptr->assoc_id) {
+		acct_association_rec_t assoc_rec;
+		/* Just incase we turned on accounting after we
+		   started the job
+		*/
+		bzero(&assoc_rec, sizeof(acct_association_rec_t));
+		assoc_rec.acct      = job_ptr->account;
+		assoc_rec.partition = job_ptr->partition;
+		assoc_rec.uid       = job_ptr->user_id;
+
+		if(!(assoc_mgr_fill_in_assoc(acct_db_conn, &assoc_rec,
+					     accounting_enforce, 
+					     (acct_association_rec_t **)
+					     &job_ptr->assoc_ptr))) {
+			job_ptr->assoc_id = assoc_rec.id;
+		}
+	}
 
 	/* 
 	 * This means the job wasn't ever eligible, but we want to
@@ -5886,6 +5907,7 @@ extern int job_cancel_by_assoc_id(uint32_t assoc_id)
 		if ((job_ptr->assoc_id != assoc_id) || 
 		    IS_JOB_FINISHED(job_ptr))
 			continue;
+		job_ptr->assoc_ptr = NULL;
 		info("Association deleted, cancelling job %u", 
 		     job_ptr->job_id);
 		job_signal(job_ptr->job_id, SIGKILL, 0, 0);
@@ -5933,10 +5955,21 @@ extern int update_job_account(char *module, struct job_record *job_ptr,
 		assoc_rec.acct = NULL;
 		assoc_mgr_fill_in_assoc(acct_db_conn, &assoc_rec,
 					accounting_enforce, &assoc_ptr);
+		if(!assoc_ptr) {
+			debug("%s: we didn't have an association for account "
+			      "'%s' and user '%s', and we can't seem to find "
+			      "a default one either.  Keeping new account "
+			      "'%s'.  This will produce trash in accounting.  "
+			      "If this is not what you desire please put "
+			      "AccountStorageEnforce=1 in your slurm.conf "
+			      "file.", module, new_account,
+			      job_ptr->user_id, new_account);
+			assoc_rec.acct = new_account;
+		}
 	}
 
 	xfree(job_ptr->account);
-	if (assoc_rec.acct[0] != '\0') {
+	if (assoc_rec.acct && assoc_rec.acct[0] != '\0') {
 		job_ptr->account = xstrdup(assoc_rec.acct);
 		info("%s: setting account to %s for job_id %u",
 		     module, assoc_rec.acct, job_ptr->job_id);

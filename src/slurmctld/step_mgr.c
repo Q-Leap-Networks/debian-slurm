@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  step_mgr.c - manage the job step information of slurm
- *  $Id: step_mgr.c 15194 2008-09-26 20:15:00Z da $
+ *  $Id: step_mgr.c 15550 2008-10-31 18:52:47Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -712,6 +712,9 @@ extern void step_alloc_lps(struct step_record *step_ptr)
 	int i_node, i_first, i_last;
 	int job_node_inx = -1, step_node_inx = -1;
 
+	if (step_ptr->step_layout == NULL)	/* batch step */
+		return;
+
 	i_first = bit_ffs(job_ptr->node_bitmap);
 	i_last  = bit_fls(job_ptr->node_bitmap);
 	if (i_first == -1)	/* empty bitmap */
@@ -840,7 +843,8 @@ step_create(job_step_create_request_msg_t *step_specs,
 		step_specs->mem_per_task = 0;
 	} else if (step_specs->mem_per_task) {
 		if (slurmctld_conf.max_mem_per_task &&
-		    (step_specs->mem_per_task > slurmctld_conf.max_mem_per_task))
+		    (step_specs->mem_per_task > 
+		     slurmctld_conf.max_mem_per_task))
 			return ESLURM_INVALID_TASK_MEMORY;
 	} else
 		step_specs->mem_per_task = slurmctld_conf.def_mem_per_task;
@@ -860,11 +864,16 @@ step_create(job_step_create_request_msg_t *step_specs,
 		return ESLURM_TASKDIST_ARBITRARY_UNSUPPORTED;
 	}
 
-	if ((step_specs->host      && (strlen(step_specs->host)      > MAX_STR_LEN)) ||
-	    (step_specs->node_list && (strlen(step_specs->node_list) > MAX_STR_LEN)) ||
-	    (step_specs->network   && (strlen(step_specs->network)   > MAX_STR_LEN)) ||
-	    (step_specs->name      && (strlen(step_specs->name)      > MAX_STR_LEN)) ||
-	    (step_specs->ckpt_path && (strlen(step_specs->ckpt_path) > MAX_STR_LEN)))
+	if ((step_specs->host      && 
+	     (strlen(step_specs->host)      > MAX_STR_LEN)) ||
+	    (step_specs->node_list && 
+	     (strlen(step_specs->node_list) > MAX_STR_LEN)) ||
+	    (step_specs->network   && 
+	     (strlen(step_specs->network)   > MAX_STR_LEN)) ||
+	    (step_specs->name      && 
+	     (strlen(step_specs->name)      > MAX_STR_LEN)) ||
+	    (step_specs->ckpt_path && 
+	     (strlen(step_specs->ckpt_path) > MAX_STR_LEN)))
 		return ESLURM_PATHNAME_TOO_LONG;
 
 	/* if the overcommit flag is checked we 0 out the cpu_count

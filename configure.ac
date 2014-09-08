@@ -1,4 +1,4 @@
-# $Id: configure.ac 15324 2008-10-07 00:16:53Z da $
+# $Id: configure.ac 15551 2008-10-31 19:47:35Z da $
 # This file is to be processed with autoconf to generate a configure script
 
 dnl Prologue
@@ -133,7 +133,8 @@ LDFLAGS="$LDFLAGS "
 CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
 LIBS="$PTHREAD_LIBS $LIBS"
 
-X_AC_BLUEGENE
+X_AC_BGL
+X_AC_BGP
 X_AC_CFLAGS
 X_AC_XCPU
 X_AC_SLURM_SEMAPHORE
@@ -168,6 +169,15 @@ dnl check for slurmctld, slurmd and slurmdbd default ports
 dnl
 X_AC_SLURM_PORTS([6817], [6818], [6819])
 
+
+dnl add SLURM_PREFIX to config.h
+dnl
+if test "x$prefix" == "xNONE" ; then
+  AC_DEFINE_UNQUOTED(SLURM_PREFIX, "/usr/local", [Define Slurm installation prefix])
+else
+  AC_DEFINE_UNQUOTED(SLURM_PREFIX, "$prefix", [Define Slurm installation prefix])
+fi
+AC_SUBST(SLURM_PREFIX)
 
 dnl check for whether to include Elan support
 dnl

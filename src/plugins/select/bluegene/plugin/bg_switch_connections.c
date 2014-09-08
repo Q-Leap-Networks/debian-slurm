@@ -2,7 +2,7 @@
  *  bg_switch_connections.c - Blue Gene switch management functions, 
  *  establish switch connections
  *
- *  $Id: bg_switch_connections.c 11400 2007-04-24 18:50:38Z da $
+ *  $Id: bg_switch_connections.c 15551 2008-10-31 19:47:35Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -41,11 +41,12 @@
 
 
 #ifdef HAVE_BG_FILES
-static int _get_bp_by_location(rm_BGL_t* my_bg, 
+static int _get_bp_by_location(my_bluegene_t* my_bg, 
 			       int* curr_coord, 
 			       rm_BP_t** bp);
-static int _get_switches_by_bpid(rm_BGL_t* my_bg, const char *bpid,
+static int _get_switches_by_bpid(my_blugene_t* my_bg, const char *bpid,
 				 rm_switch_t **curr_switch);
+
 //static int _set_switch(rm_switch_t* curr_switch, ba_connection_t *int_wire);
 static int _add_switch_conns(rm_switch_t* curr_switch, 
 			     ba_switch_t *ba_switch);
@@ -58,7 +59,8 @@ static int _used_switches(ba_node_t *ba_node);
  * "NextBP" goes to, but we don't know, so we have to do this.
  */
 #ifdef HAVE_BG_FILES
-static int _get_bp_by_location(rm_BGL_t* my_bg, int* curr_coord, rm_BP_t** bp)
+static int _get_bp_by_location(my_bluegene_t* my_bg, int* curr_coord,
+			       rm_BP_t** bp)
 {
 	static int bp_num = 0;
 	int i, rc;
@@ -105,7 +107,7 @@ static int _get_bp_by_location(rm_BGL_t* my_bg, int* curr_coord, rm_BP_t** bp)
 }
 
 static int _get_switches_by_bpid(
-	rm_BGL_t* my_bg, const char *bpid,
+	my_bluegene_t* my_bg, const char *bpid,
 	rm_switch_t *coord_switch[BA_SYSTEM_DIMENSIONS])
 {
 	static int switch_num = 0;

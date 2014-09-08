@@ -3,7 +3,41 @@ documents those changes that are of interest to users and admins.
 
 * Changes in SLURM 1.3.10
 =========================
-
+ -- Fix several bugs in the hostlist functions:
+    - Fix hostset_insert_range() to do proper accounting of hl->nhosts (count).
+    - Avoid assertion failure when callinsg hostset_create(NULL).
+    - Fix return type of hostlist and hostset string functions from size_t to
+      ssize_t.
+    - Add check for NULL return from hostlist_create().
+    - Rewrite of hostrange_hn_within(), avoids reporting "tst0" in the hostlist
+      "tst".
+ -- Modify squeue to accept "--nodes=<hostlist>" rather than 
+    "--node=<node_name>" and report all jobs with any allocated nodes from set
+    of nodes specified. From Par Anderson, National Supercomputer Centre, 
+    Sweden.
+ -- Fix bug preventing use of TotalView debugger with TaskProlog configured or 
+    or srun's --task-prolog option.
+ -- Improve reliability of batch job requeue logic in the event that the slurmd
+    daemon is temporarily non-responsive (for longer than the configured
+    MessageTimeout value but less than the SlurmdTimeout value).
+ -- In sched/wiki2 (Moab) report a job's MAXNODES (maximum number of permitted
+    nodes).
+ -- Fixed SLURM_TASKS_PER_NODE to live up more to it's name on an allocation. 
+    Will now contain the number of tasks per node instead of the number of CPUs
+    per node.  This is only for a resource allocation. Job steps already have 
+    the environment variable set correctly.
+ -- Configuration parameter PropagateResourceLimits has new option of "NONE".
+ -- User's --propagate options take precidence over PropagateResourceLimits
+    configuration parameter in both srun and sbatch commands.
+ -- When Moab is in use (salloc or sbatch is executed with the --get-user-env
+    option to be more specific), load the user's default resource limits rather
+    than propagating the Moab daemon's limits.
+ -- Fix bug in slurmctld restart logic for recovery of batch jobs that are
+    initiated as a job step rather than an independent job (used for LSF).
+ -- Fix bug that can cause slurmctld restart to fail, bug introduced in SLURM
+    version 1.3.9. From Eygene Ryabinkin, Kurchatov Institute, Russia.
+ -- Permit slurmd configuration parameters to be set to new values from 
+    previously unset values.
 
 * Changes in SLURM 1.3.9
 ========================
@@ -3544,4 +3578,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 15393 2008-10-13 21:02:25Z da $
+$Id: NEWS 15572 2008-11-03 23:14:27Z jette $

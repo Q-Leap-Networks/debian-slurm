@@ -59,7 +59,6 @@ static int	_adjust_completing (job_info_t *j, node_info_msg_t **ni);
 static int	_filter_job(job_info_t * job);
 static int	_filter_step(job_step_info_t * step);
 static int	_get_node_cnt(job_info_t * job);
-static bool     _node_in_list(char *node_name, char *node_list);
 static int	_nodes_in_list(char *node_list);
 static int	_print_str(char *str, int width, bool right, bool cut_output);
 
@@ -490,8 +489,6 @@ int _print_job_time_start(job_info_t * job, int width, bool right,
 {
 	if (job == NULL)	/* Print the Header instead */
 		_print_str("START", width, right, true);
-	else if (job->job_state == JOB_PENDING)
-		_print_time((time_t) 0, 0, width, right);
 	else
 		_print_time(job->start_time, 0, width, right);
 	if (suffix)
@@ -775,18 +772,6 @@ static int _nodes_in_list(char *node_list)
 	int count = hostset_count(host_set);
 	hostset_destroy(host_set);
 	return count;
-}
-
-static bool _node_in_list(char *node_name, char *node_list)
-{
-	bool rc;
-	hostset_t host_set = hostset_create(node_list);
-	if (hostset_within(host_set, node_name) == 0)
-		rc = false;
-	else
-		rc = true;
-	hostset_destroy(host_set);
-	return rc;
 }
 
 int _print_job_shared(job_info_t * job, int width, bool right_justify, 
@@ -1309,8 +1294,9 @@ static int _filter_job(job_info_t * job)
 			return 4;
 	}
 
-	if ((params.node)
-	&&  (!_node_in_list(params.node, job->nodes)))
+	if ((params.nodes)
+	    && ((job->nodes == NULL)
+		|| (!hostset_intersects(params.nodes, job->nodes))))
 		return 5;
 
 	if (params.user_list) {
@@ -1383,8 +1369,9 @@ static int _filter_step(job_step_info_t * step)
 			return 3;
 	}
 
-	if ((params.node)
-	&&  (!_node_in_list(params.node, step->nodes)))
+	if ((params.nodes) 
+	    && ((step->nodes == NULL)
+		|| (!hostset_intersects(params.nodes, step->nodes))))
 		return 5;
 
 	if (params.user_list) {

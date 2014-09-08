@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmd/slurmd.c - main slurm node server daemon
- *  $Id: slurmd.c 15006 2008-09-08 20:47:15Z da $
+ *  $Id: slurmd.c 15572 2008-11-03 23:14:27Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008 Lawrence Livermore National Security.
@@ -95,7 +95,6 @@
 /* global, copied to STDERR_FILENO in tasks before the exec */
 int devnull = -1;
 slurmd_conf_t * conf;
-extern char *slurm_stepd_path;
 
 /*
  * count of active threads
@@ -526,16 +525,11 @@ _fill_registration_msg(slurm_node_registration_status_msg_t *msg)
 	return;
 }
 
-static inline int
+static inline void
 _free_and_set(char **confvar, char *newval)
 {
-	if (newval) {
-		if (*confvar)
-			xfree(*confvar);
-		*confvar = newval;
-		return 1;
-	} else
-		return 0;
+	xfree(*confvar);
+	*confvar = newval;
 }
 
 /* Replace first "%h" in path string with actual hostname.
@@ -895,7 +889,7 @@ _slurmd_init()
 	struct rlimit rlim;
 	slurm_ctl_conf_t *cf;
 	struct stat stat_buf;
-
+	char slurm_stepd_path[MAXPATHLEN];
 	/*
 	 * Process commandline arguments first, since one option may be
 	 * an alternate location for the slurm config file.
@@ -977,6 +971,8 @@ _slurmd_init()
 	fd_set_close_on_exec(devnull);
 
 	/* make sure we have slurmstepd installed */
+	snprintf(slurm_stepd_path, sizeof(slurm_stepd_path),
+		 "%s/sbin/slurmstepd", SLURM_PREFIX);
 	if (stat(slurm_stepd_path, &stat_buf)) {
 		fatal("Unable to find slurmstepd file at %s",
 			slurm_stepd_path);
