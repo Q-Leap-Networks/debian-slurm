@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/mgr.c - job manager functions for slurmstepd
- *  $Id: mgr.c 19858 2010-03-23 21:29:05Z jette $
+ *  $Id: mgr.c 20036 2010-04-15 18:52:13Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -1649,7 +1649,7 @@ _send_launch_resp(slurmd_job_t *job, int rc)
 	}
 
 	if (slurm_send_only_node_msg(&resp_msg) != SLURM_SUCCESS)
-		error("failed to send RESPONSE_LAUNCH_TASKS: %m"); 
+		error("failed to send RESPONSE_LAUNCH_TASKS: %m");
 
 	xfree(resp.local_pids);
 	xfree(resp.task_ids);

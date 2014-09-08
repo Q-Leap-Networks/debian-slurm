@@ -794,10 +794,10 @@ static void *_decay_thread(void *no_data)
 					debug4("adding %f new usage to "
 					       "assoc %u (user='%s' acct='%s') "
 					       "raw usage is now %Lf.  Group "
-					       "wall added %d making it %d.",
+					       "wall added %d making it %f.",
 					       real_decay, assoc->id,
 					       assoc->user, assoc->acct,
-					       assoc->usage_raw, run_delta,
+					       assoc->usage_raw, run_decay,
 					       assoc->grp_used_wall);
 
 					assoc = assoc->parent_assoc_ptr;

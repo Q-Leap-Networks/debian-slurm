@@ -271,7 +271,8 @@ extern List create_dynamic_block(List block_list,
 
 		debug3("removing %s for request %d",
 		       bg_record->nodes, request->size);
-		remove_block(bg_record->bg_block_list, (int)NO_VAL);
+		remove_block(bg_record->bg_block_list, (int)NO_VAL,
+			     (int)bg_record->conn_type);
 		/* need to set any unusable nodes that this last block
 		   used */
 		removable_set_bps(unusable_nodes);
@@ -404,7 +405,8 @@ extern bg_record_t *create_small_record(bg_record_t *bg_record,
 	found_record->ionode_bitmap = bit_copy(ionodes);
 	bit_fmt(bitstring, BITSIZE, found_record->ionode_bitmap);
 	found_record->ionodes = xstrdup(bitstring);
-
+	debug4("made small block of %s[%s]",
+	       found_record->nodes, found_record->ionodes);
 	return found_record;
 }
 
@@ -608,6 +610,7 @@ static int _breakup_blocks(List block_list, List new_blocks,
 	char tmp_char[256];
 	bitstr_t *ionodes = bit_alloc(bg_conf->numpsets);
 	int cnodes = request->procs / bg_conf->cpu_ratio;
+	int curr_bp_bit = -1;
 
 	debug2("proc count = %d cnodes = %d size = %d",
 	       request->procs, cnodes, request->size);
@@ -676,6 +679,36 @@ static int _breakup_blocks(List block_list, List new_blocks,
 		if(bg_record->node_cnt < cnodes) {
 			char bitstring[BITSIZE];
 			bitstr_t *bitstr = NULL;
+			int num_over = 0;
+			int num_cnodes = bg_record->node_cnt;
+			int rec_bp_bit = bit_ffs(bg_record->bitmap);
+
+			if(curr_bp_bit != rec_bp_bit) {
+				/* Got a different node than
+				 * previously, since the list should
+				 * be in order of nodes for small blocks
+				 * just clear here since the last node
+				 * doesn't have any more. */
+				curr_bp_bit = rec_bp_bit;
+				bit_nclear(ionodes, 0, (bg_conf->numpsets-1));
+				total_cnode_cnt = 0;
+			}
+
+			/* On really busy systems we can get
+			   overlapping blocks here.  If that is the
+			   case only add that which doesn't overlap.
+			*/
+			if((num_over = bit_overlap(
+				    ionodes, bg_record->ionode_bitmap))) {
+				/* Since the smallest block size is
+				   the number of cnodes in an io node,
+				   just multiply the num_over by that to
+				   get the number of cnodes to remove.
+				*/
+				if((num_cnodes -=
+				    num_over * bg_conf->smallest_block) <= 0)
+					continue;
+			}
 			bit_or(ionodes, bg_record->ionode_bitmap);
 
 			/* check and see if the bits set are a valid
@@ -690,15 +723,16 @@ static int _breakup_blocks(List block_list, List new_blocks,
 			if(!bitstr) {
 				bit_nclear(ionodes, 0, (bg_conf->numpsets-1));
 				bit_or(ionodes, bg_record->ionode_bitmap);
-				total_cnode_cnt = bg_record->node_cnt;
+				total_cnode_cnt = num_cnodes =
+					bg_record->node_cnt;
 			} else
-				total_cnode_cnt += bg_record->node_cnt;
+				total_cnode_cnt += num_cnodes;
 
 			bit_fmt(bitstring, BITSIZE, ionodes);
-			debug2("1 adding %s %d got %d set "
+			debug2("1 adding %s %s %d got %d set "
 			       "ionodes %s total is %s",
-			       bg_record->bg_block_id,
-			       bg_record->node_cnt, total_cnode_cnt,
+			       bg_record->bg_block_id, bg_record->nodes,
+			       num_cnodes, total_cnode_cnt,
 			       bg_record->ionodes, bitstring);
 			if(total_cnode_cnt == cnodes) {
 				request->save_name = xstrdup_printf(
