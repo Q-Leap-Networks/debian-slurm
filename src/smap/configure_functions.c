@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  configure_functions.c - Functions related to configure mode of smap.
- *  $Id: configure_functions.c 11985 2007-08-09 23:07:08Z da $
+ *  $Id: configure_functions.c 13270 2008-02-14 19:40:44Z da $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -213,7 +213,8 @@ static int _create_allocation(char *com, List allocated_blocks)
 	request->nodecards = 0;
 	request->quarters = 0;
 	request->passthrough = false;
-	
+	request->avail_node_bitmap = NULL;
+
 	while(i<len) {				
 		if(!strncasecmp(com+i, "mesh", 4)) {
 			request->conn_type=SELECT_MESH;
@@ -855,7 +856,8 @@ static int _copy_allocation(char *com, List allocated_blocks)
 		request->rotate_count= 0;
 		request->elongate_count = 0;
 	       	request->elongate_geos = list_create(NULL);
-	
+		request->avail_node_bitmap = NULL;
+
 		results_i = list_iterator_create(request->elongate_geos);
 		while ((geo_ptr = list_next(results_i)) != NULL) {
 			geo = xmalloc(sizeof(int)*3);
@@ -1098,6 +1100,7 @@ static int _add_bg_record(blockreq_t *blockreq, List allocated_blocks)
 			bp_count++;
 			if(nodes[j] != ',')
 				break;
+			j--;
 		}
 		j++;
 	}

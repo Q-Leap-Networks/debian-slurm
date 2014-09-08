@@ -2,7 +2,7 @@
  *  bg_job_run.c - blue gene job execution (e.g. initiation and termination) 
  *  functions.
  *
- *  $Id: bg_job_run.c 11274 2007-03-30 19:39:49Z da $ 
+ *  $Id: bg_job_run.c 13271 2008-02-14 20:02:00Z da $ 
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -589,9 +589,6 @@ static void _term_agent(bg_update_t *bg_update_ptr)
 		      bg_record->bg_block_id,
 		      bg_record->user_name);
 
-		if(bluegene_layout_mode == LAYOUT_DYNAMIC) 
-			remove_from_request_list();
-		
 		if(job_remove_failed) {
 			char time_str[32];
 			slurm_make_time_str(&now, time_str, sizeof(time_str));

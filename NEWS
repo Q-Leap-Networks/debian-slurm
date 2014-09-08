@@ -3,6 +3,31 @@ documents those changes that are of interest to users and admins.
 
 * Changes in SLURM 1.2.23
 =========================
+ -- Fix for libpmi to not export unneeded variables like xstr*
+ -- BLUEGENE - added per partition dynamic block creation
+ -- fix infinite loop bug in sview when there were multiple partitions
+ -- Send message to srun command when a job is requeued due to node failure.
+    Note this will be overwritten in the output file unless JobFileAppend
+    is set in slurm.conf. In slurm version 1.3, srun's --open-mode=append
+    option will offer this control for each job.
+ -- Change a node's default TmpDisk from 1MB to 0MB and change job's default 
+    disk space requirement from 1MB to 0MB.
+ -- In sched/wiki (Maui scheduler) specify a QOS (quality of service) by 
+    specifying an account of the form "qos-name".
+ -- In select/linear, fix bug in scheduling required nodes that already have
+    a job running on them (req.load.patch from Chris Holmes, HP).
+ -- For use with Moab only: change timeout for srun/sbatch --get-user-env 
+    option to 2 secs, don't get DISPLAY environment variables, but explicitly 
+    set ENVIRONMENT=BATCH and HOSTNAME to the execution host of the batch script.
+ -- Add configuration parameter GetEnvTimeout for use with Moab. See
+    "man slurm.conf" for details.
+ -- Modify salloc and sbatch to accept both "--tasks" and "--ntasks" as 
+    equivalent options for compatibility with srun.
+ -- If a partition's node list contains space separators, replace them with 
+    commas for easier parsing.
+ -- BLUEGENE - fixed bug in geometry specs when creating a block.
+ -- Add support for Moab and Maui to start jobs with select/cons_res plugin
+    and jobs requiring more than one CPU per task.
 
 * Changes in SLURM 1.2.22
 =========================
@@ -2790,4 +2815,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 13118 2008-01-29 19:09:00Z da $
+$Id: NEWS 13293 2008-02-15 21:51:16Z jette $

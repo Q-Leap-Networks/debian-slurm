@@ -3,7 +3,7 @@
  *	Note: there is a global job list (job_list), time stamp 
  *	(last_job_update), and hash table (job_hash)
  *
- *  $Id: job_mgr.c 13083 2008-01-24 16:28:23Z jette $
+ *  $Id: job_mgr.c 13176 2008-02-04 16:56:57Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1064,6 +1064,7 @@ extern int kill_running_job_by_node_name(char *node_name, bool step_test)
 			} else if (job_ptr->batch_flag && job_ptr->details &&
 			           (job_ptr->details->no_requeue == 0)) {
 				uint16_t save_state;
+				srun_node_fail(job_ptr->job_id, node_name);
 				info("requeue job %u due to failure of node %s",
 				     job_ptr->job_id, node_name);
 				_set_job_prio(job_ptr);
@@ -2741,7 +2742,7 @@ static int _validate_job_desc(job_desc_msg_t * job_desc_msg, int allocate,
 	if (job_desc_msg->job_max_memory == NO_VAL)
 		job_desc_msg->job_max_memory = 1;  /* default 1MB mem per node */
 	if (job_desc_msg->job_min_tmp_disk == NO_VAL)
-		job_desc_msg->job_min_tmp_disk = 1;/* default 1MB disk per node */
+		job_desc_msg->job_min_tmp_disk = 0;/* default 0MB disk per node */
 
 	return SLURM_SUCCESS;
 }

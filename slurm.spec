@@ -1,4 +1,4 @@
-# $Id: slurm.spec 13075 2008-01-23 20:39:30Z da $
+# $Id: slurm.spec 13266 2008-02-13 21:54:50Z da $
 #
 # Note that this package is not relocatable
 
@@ -60,14 +60,14 @@
 %endif
 
 Name:    slurm
-Version: 1.2.22
+Version: 1.2.23
 Release: 1
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL 
 Group: System Environment/Base
-Source: slurm-1.2.22.tar.bz2
+Source: slurm-1.2.23.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: https://computing.llnl.gov/linux/slurm/
 BuildRequires: openssl-devel >= 0.9.6 openssl >= 0.9.6
@@ -211,7 +211,7 @@ SLURM process tracking plugin for SGI job containers.
 #############################################################################
 
 %prep
-%setup -n slurm-1.2.22
+%setup -n slurm-1.2.23
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \
@@ -219,7 +219,7 @@ SLURM process tracking plugin for SGI job containers.
     %{?with_proctrack}	\
     %{?with_ssl}		\
     %{?with_munge}      \
-	%{!?with_readline:--without-readline} \
+	%{!?slurm_with_readline:--without-readline} \
     %{?with_cflags}
 
 make %{?_smp_mflags} 

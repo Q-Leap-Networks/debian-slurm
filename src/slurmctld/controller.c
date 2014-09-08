@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  controller.c - main control machine daemon for slurm
- *  $Id: controller.c 13077 2008-01-23 22:31:44Z da $
+ *  $Id: controller.c 13156 2008-02-01 17:43:01Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -842,8 +842,8 @@ static int _gold_mark_all_nodes_down(char *reason, time_t event_time)
 	state_file = xstrdup (slurmctld_conf.state_save_location);
 	xstrcat (state_file, "/node_state");
 	if (stat(state_file, &stat_buf)) {
-		error("_gold_mark_all_nodes_down: could not stat(%s) to record "
-		      "node down time", state_file);
+		debug("_gold_mark_all_nodes_down: could not stat(%s) "
+		      "to record node down time", state_file);
 		xfree(state_file);
 		return rc;
 	}

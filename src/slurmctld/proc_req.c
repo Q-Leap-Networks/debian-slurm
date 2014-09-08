@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  proc_req.c - process incomming messages to slurmctld
  *
- *  $Id: proc_req.c 12413 2007-09-26 17:32:47Z jette $
+ *  $Id: proc_req.c 13237 2008-02-08 23:16:16Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -324,6 +324,7 @@ void _fill_ctld_conf(slurm_ctl_conf_t * conf_ptr)
 	conf_ptr->job_credential_public_certificate = xstrdup(conf->
 					job_credential_public_certificate);
 	conf_ptr->job_file_append     = conf->job_file_append;
+	conf_ptr->get_env_timeout     = conf->get_env_timeout;
 	conf_ptr->kill_wait           = conf->kill_wait;
 	conf_ptr->mail_prog           = xstrdup(conf->mail_prog);
 	conf_ptr->max_job_cnt         = conf->max_job_cnt;

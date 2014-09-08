@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/mgr.c - job manager functions for slurmstepd
- *  $Id: mgr.c 12647 2007-11-12 17:09:47Z da $
+ *  $Id: mgr.c 13229 2008-02-08 01:02:06Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -280,7 +280,7 @@ mgr_launch_batch_job_setup(batch_job_launch_msg_t *msg, slurm_addr *cli)
 	}
 	
 	/* this is the new way of setting environment variables */
-	env_array_for_batch_job(&job->env, msg);
+	env_array_for_batch_job(&job->env, msg, conf->node_name);
 
 	/* this is the old way of setting environment variables */
 	job->envtp->nprocs = msg->nprocs;

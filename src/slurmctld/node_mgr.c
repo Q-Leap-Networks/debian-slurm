@@ -4,7 +4,7 @@
  *	hash table (node_hash_table), time stamp (last_node_update) and 
  *	configuration list (config_list)
  *
- *  $Id: node_mgr.c 13068 2008-01-23 18:41:54Z jette $
+ *  $Id: node_mgr.c 13274 2008-02-14 21:32:07Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1919,7 +1919,8 @@ void node_not_resp (char *name, time_t msg_time)
 		error ("node_not_resp unable to find node %s", name);
 		return;
 	}
-	error("Node %s not responding", node_ptr->name);
+	if ((node_ptr->node_state & NODE_STATE_BASE) != NODE_STATE_DOWN)
+		error("Node %s not responding", node_ptr->name);
 	_node_not_resp(node_ptr, msg_time);
 #endif
 }
