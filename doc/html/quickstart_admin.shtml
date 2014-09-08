@@ -5,6 +5,9 @@
 <p>Please see the <a href="quickstart.html">Quick Start User Guide</a> for a
 general overview.</p>
 
+<p>Also see <a href="platforms.html">Platforms</a> for a list of supported
+computer platforms.</p>
+
 <h2>Super Quick Start</h2>
 <ol>
 <li>Make sure that you have synchronized clocks plus consistent users and groups
@@ -44,6 +47,8 @@ NOTE: You will need to install this configuration file on all nodes of the clust
 <li><i>rpmbuild -ta slurm*.tar.bz2</i></li>
 <li><i>rpm --install &lt;the rpm files&gt;</i></li>
 </ol>
+
+<p>FreeBSD administrators should see the <a href="#FreeBSD">FreeBSD</a> section below.</p>
 
 <h2>Building and Installing SLURM</h2>
 
@@ -685,8 +690,53 @@ versions (e.g. 2.5.0-pre1 to 2.5.0-pre2).
 We'll try to note these cases in the NEWS file.
 Contents of major releases are also described in the RELEASE_NOTES file.</p>
 
+<p>Be mindful of your configured SlurmdTimeout and SlurmctldTimeout values.
+If your Slurm daemon down time associated with an upgrade take longer than
+the timeout value, nodes may be marked DOWN and their jobs killed.
+You can either increase timeout values during an upgrade or insure that your
+slurmd daemons on compute nodes are not down for longer than SlurmdTimeout.
+The recommended upgrade order is as follows:</p>
+<ol>
+<li>Shutdown the slurmdbd daemon</li>
+<li>Upgrade the slurmdbd daemon</li>
+<li>Restart the slurmdbd daemon</li>
+<li>Shutdown the slurmctld daemon(s)</li>
+<li>Shutdown the slurmd daemons on the compute nodes</li>
+<li>Upgrade the slurmctld and slurmd daemons</li>
+<li>Restart the slurmd daemons on the compute nodes</li>
+<li>Restart the slurmctld daemon(s)</li>
+</ol>
+<p><b>Note</b>: The slurmd daemons must be restarted before the slurmctld
+daemons or within the SlurmdTimeout value.
+It is also possible to update the slurmd daemons on a node-by-node basis
+after the slurmctld daemon(s) are upgraded, but do make sure their down
+time is below the SlurmdTimeout value.
+</p>
+
+<p>If you have built your own version of Slurm plugins, they will likely
+need modification to support a new version of Slurm. It is common for plugins
+to add new functions and function arguments during major updates.
+See the RELEASE_NOTES file for details.</p>
+
+<a name="FreeBSD"><h2>FreeBSD</h2></a>
+
+<p>FreeBSD administrators can install the latest stable slurm as a binary
+package using:</p>
+<pre>
+pkg install slurm-hpc
+</pre>
+
+<p>Or, it can be built and installed from source using:</p>
+<pre>
+cd /usr/ports/sysutils/slurm-hpc && make install
+</pre>
+
+<p>The binary package installs a minimal slurm configuration suitable for
+typical compute nodes.  Installing from source allows the user to enable
+options such as mysql, postgresql, and gui tools via a configuration menu.</p>
+
 </pre> <p class="footer"><a href="#top">top</a></p>
 
-<p style="text-align:center;">Last modified 29 August 2013</p>
+<p style="text-align:center;">Last modified 11 December 2013</p>
 
 <!--#include virtual="footer.txt"-->

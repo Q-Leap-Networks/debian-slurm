@@ -327,9 +327,6 @@ batch_finish(slurmd_job_t *job, int rc)
 
 	if (job->argv[0] && (unlink(job->argv[0]) < 0))
 		error("unlink(%s): %m", job->argv[0]);
-	if (job->batchdir && (rmdir(job->batchdir) < 0))
-		error("rmdir(%s): %m",  job->batchdir);
-	xfree(job->batchdir);
 
 #ifdef HAVE_CRAY
 	_call_select_plugin_from_stepd(job, 0, select_g_job_fini);
@@ -353,6 +350,13 @@ batch_finish(slurmd_job_t *job, int rc)
 			job->jobid, job->stepid, rc, step_complete.step_rc);
 		_send_step_complete_msgs(job);
 	}
+
+	/* Do not purge directory until slurmctld is notified of batch job
+	 * completion to avoid race condition with slurmd registering missing
+	 * batch job. */
+	if (job->batchdir && (rmdir(job->batchdir) < 0))
+		error("rmdir(%s): %m",  job->batchdir);
+	xfree(job->batchdir);
 }
 
 /*
@@ -373,13 +377,13 @@ mgr_launch_batch_job_setup(batch_job_launch_msg_t *msg, slurm_addr_t *cli)
 	_setargs(job);
 
 	if ((job->batchdir = _make_batch_dir(job)) == NULL) {
-		goto cleanup1;
+		goto cleanup;
 	}
 
 	xfree(job->argv[0]);
 
 	if ((job->argv[0] = _make_batch_script(msg, job->batchdir)) == NULL) {
-		goto cleanup2;
+		goto cleanup;
 	}
 
 	/* this is the new way of setting environment variables */
@@ -392,12 +396,7 @@ mgr_launch_batch_job_setup(batch_job_launch_msg_t *msg, slurm_addr_t *cli)
 
 	return job;
 
-cleanup2:
-	if (job->batchdir && (rmdir(job->batchdir) < 0))
-		error("rmdir(%s): %m",  job->batchdir);
-	xfree(job->batchdir);
-
-cleanup1:
+cleanup:
 	error("batch script setup failed for job %u.%u",
 	      msg->job_id, msg->step_id);
 
@@ -408,6 +407,13 @@ cleanup1:
 			job, ESLURMD_CREATE_BATCH_DIR_ERROR, -1);
 	} else
 		_send_step_complete_msgs(job);
+
+	/* Do not purge directory until slurmctld is notified of batch job
+	 * completion to avoid race condition with slurmd registering missing
+	 * batch job. */
+	if (job->batchdir && (rmdir(job->batchdir) < 0))
+		error("rmdir(%s): %m",  job->batchdir);
+	xfree(job->batchdir);
 
 	return NULL;
 }
@@ -998,7 +1004,9 @@ job_manager(slurmd_job_t *job)
 		goto fail2;
 	}
 
-	/* calls pam_setup() and requires pam_finish() if successful */
+	/* Calls pam_setup() and requires pam_finish() if
+	 * successful.  Only check for < 0 here since other slurm
+	 * error codes could come that are more descriptive. */
 	if ((rc = _fork_all_tasks(job, &io_initialized)) < 0) {
 		debug("_fork_all_tasks failed");
 		rc = ESLURMD_EXECVE_FAILED;
@@ -1006,10 +1014,12 @@ job_manager(slurmd_job_t *job)
 	}
 
 	/*
-	 * If IO initialization failed, return SLURM_SUCCESS
-	 * or the node will be drain otherwise
+	 * If IO initialization failed, return SLURM_SUCCESS (on a
+	 * batch step) or the node will be drain otherwise.  Regular
+	 * srun needs the error sent or it will hang waiting for the
+	 * launch to happen.
 	 */
-	if ((rc == SLURM_SUCCESS) && !io_initialized)
+	if ((rc != SLURM_SUCCESS) || !io_initialized)
 		goto fail2;
 
 	io_close_task_fds(job);
@@ -1131,6 +1141,7 @@ _pre_task_privileged(slurmd_job_t *job, int taskid, struct priv_state *sp)
 	if (pre_launch_priv(job) < 0)
 		return error("pre_launch_priv failed");
 
+	/* sp->gid_list should already be initialized */
 	return(_drop_privileges (job, true, sp, false));
 }
 
@@ -1361,7 +1372,8 @@ _fork_all_tasks(slurmd_job_t *job, bool *io_initialized)
 		error("IO setup failed: %m");
 		job->task[0]->estatus = 0x0100;
 		step_complete.step_rc = 0x0100;
-		rc = SLURM_SUCCESS;	/* drains node otherwise */
+		if (job->batch)
+			rc = SLURM_SUCCESS;	/* drains node otherwise */
 		goto fail1;
 	} else {
 		*io_initialized = true;
@@ -1433,7 +1445,9 @@ _fork_all_tasks(slurmd_job_t *job, bool *io_initialized)
 
 			/*
 			 *  Reclaim privileges and call any plugin hooks
-			 *   that may require elevated privs
+			 *  that may require elevated privs
+			 *  sprivs.gid_list is already set from the
+			 *  _drop_privileges call above, no not reinitialize.
 			 */
 			if (_pre_task_privileged(job, i, &sprivs) < 0)
 				exit(1);
@@ -1674,6 +1688,8 @@ _wait_for_any_task(slurmd_job_t *job, bool waitflag)
 	int completed = 0;
 	jobacctinfo_t *jobacct = NULL;
 	struct rusage rusage;
+	char **tmp_env;
+
 	do {
 		pid = wait3(&status, waitflag ? 0 : WNOHANG, &rusage);
 		if (pid == -1) {
@@ -1723,14 +1739,20 @@ _wait_for_any_task(slurmd_job_t *job, bool waitflag)
 
 			t->exited  = true;
 			t->estatus = status;
-			job->envtp->env = job->env;
 			job->envtp->procid = t->gtid;
 			job->envtp->localid = t->id;
-
 			job->envtp->distribution = -1;
 			job->envtp->batch_flag = job->batch;
+
+			/* Modify copy of job's environment. Do not alter in
+			 * place or concurrent searches of the environment can
+			 * generate invalid memory references. */
+			job->envtp->env = env_array_copy((const char **) job->env);
 			setup_env(job->envtp, false);
+			tmp_env = job->env;
 			job->env = job->envtp->env;
+			env_array_free(tmp_env);
+
 			if (job->task_epilog) {
 				_run_script_as_user("user task_epilog",
 						    job->task_epilog,
@@ -2116,7 +2138,9 @@ _send_complete_batch_script_msg(slurmd_job_t *job, int err, int status)
 	return SLURM_SUCCESS;
 }
 
-
+/* If get_list is false make sure ps->gid_list is initialized before
+ * hand to prevent xfree.
+ */
 static int
 _drop_privileges(slurmd_job_t *job, bool do_setuid,
 		 struct priv_state *ps, bool get_list)
@@ -2430,6 +2454,7 @@ _run_script_as_user(const char *name, const char *path, slurmd_job_t *job,
 		argv[0] = (char *)xstrdup(path);
 		argv[1] = NULL;
 
+		sprivs.gid_list = NULL;	/* initialize to prevent xfree */
 		if (_drop_privileges(job, true, &sprivs, false) < 0) {
 			error("run_script_as_user _drop_privileges: %m");
 			/* child process, should not return */

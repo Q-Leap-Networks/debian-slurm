@@ -64,6 +64,7 @@
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
+#include "src/slurmdbd/read_config.h"
 
 /*
 ** Define slurm-specific aliases for use by plugins, see slurm_xlator.h
@@ -242,7 +243,7 @@ extern int jobacct_gather_init(void)
 	char	*type = NULL;
 	int	retval=SLURM_SUCCESS;
 
-	if (init_run && g_context)
+	if (slurmdbd_conf || (init_run && g_context))
 		return retval;
 
 	slurm_mutex_lock(&g_context_lock);
@@ -1094,6 +1095,7 @@ extern int jobacctinfo_unpack(jobacctinfo_t **jobacct,
 {
 	uint32_t uint32_tmp;
 
+	jobacct_gather_init();
 	if (!plugin_polling && (protocol_type != PROTOCOL_TYPE_DBD))
 		return SLURM_SUCCESS;
 

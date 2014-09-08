@@ -5711,8 +5711,7 @@ static void _list_delete_job(void *job_entry)
 	xfree(job_ptr->gres_used);
 	FREE_NULL_LIST(job_ptr->gres_list);
 	xfree(job_ptr->licenses);
-	if (job_ptr->license_list)
-		list_destroy(job_ptr->license_list);
+	FREE_NULL_LIST(job_ptr->license_list);
 	xfree(job_ptr->mail_user);
 	xfree(job_ptr->name);
 	xfree(job_ptr->network);
@@ -5805,6 +5804,15 @@ static int _list_find_job_old(void *job_entry, void *key)
 	return 1;		/* Purge the job */
 }
 
+/* Determine if a given job should be seen by a specific user */
+static bool _hide_job(struct job_record *job_ptr, uid_t uid)
+{
+	if ((slurmctld_conf.private_data & PRIVATE_DATA_JOBS) &&
+	    (job_ptr->user_id != uid) && !validate_operator(uid) &&
+	    !assoc_mgr_is_user_acct_coord(acct_db_conn, uid, job_ptr->account))
+		return true;
+	return false;
+}
 
 /*
  * pack_all_jobs - dump all job information for all jobs in
@@ -5853,10 +5861,7 @@ extern void pack_all_jobs(char **buffer_ptr, int *buffer_size,
 		    (job_ptr->part_ptr->flags & PART_FLAG_HIDDEN))
 			continue;
 
-		if ((slurmctld_conf.private_data & PRIVATE_DATA_JOBS) &&
-		    (job_ptr->user_id != uid) && !validate_operator(uid) &&
-		    !assoc_mgr_is_user_acct_coord(acct_db_conn, uid,
-						  job_ptr->account))
+		if (_hide_job(job_ptr, uid))
 			continue;
 
 		if ((min_age > 0) && (job_ptr->end_time < min_age) &&
@@ -5913,23 +5918,32 @@ extern int pack_one_job(char **buffer_ptr, int *buffer_size,
 	pack32(jobs_packed, buffer);
 	pack_time(time(NULL), buffer);
 
-	job_iterator = list_iterator_create(job_list);
-	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
-		if ((job_ptr->job_id != job_id) &&
-		    ((job_ptr->array_task_id == (uint16_t) NO_VAL) ||
-		     (job_ptr->array_job_id  != job_id)))
-			continue;
+	job_ptr = find_job_record(job_id);
+	if (job_ptr && (job_ptr->array_task_id == (uint16_t) NO_VAL)) {
+		if (!_hide_job(job_ptr, uid)) {
+			pack_job(job_ptr, show_flags, buffer, protocol_version,
+				 uid);
+			jobs_packed++;
+		}
+	} else {
+		/* Job ID not found. It could reference a job array. */
+		job_iterator = list_iterator_create(job_list);
+		while ((job_ptr = (struct job_record *) 
+				  list_next(job_iterator))) {
+			if ((job_ptr->job_id != job_id) &&
+			    ((job_ptr->array_task_id == (uint16_t) NO_VAL) ||
+			     (job_ptr->array_job_id  != job_id)))
+				continue;
 
-		if ((slurmctld_conf.private_data & PRIVATE_DATA_JOBS) &&
-		    (job_ptr->user_id != uid) && !validate_operator(uid) &&
-		    !assoc_mgr_is_user_acct_coord(acct_db_conn, uid,
-						  job_ptr->account))
-			break;
+			if (_hide_job(job_ptr, uid))
+				break;
 
-		pack_job(job_ptr, show_flags, buffer, protocol_version, uid);
-		jobs_packed++;
+			pack_job(job_ptr, show_flags, buffer, protocol_version,
+				 uid);
+			jobs_packed++;
+		}
+		list_iterator_destroy(job_iterator);
 	}
-	list_iterator_destroy(job_iterator);
 
 	if (jobs_packed == 0) {
 		free_buf(buffer);
@@ -9293,59 +9307,62 @@ extern bool job_epilog_complete(uint32_t job_id, char *node_name,
 	/* nodes_completing is out of date, rebuild when next saved */
 	xfree(job_ptr->nodes_completing);
 	if (!IS_JOB_COMPLETING(job_ptr)) {	/* COMPLETED */
-		if (IS_JOB_PENDING(job_ptr) && (job_ptr->batch_flag)) {
-			time_t now = time(NULL);
-			info("requeue batch job %u", job_ptr->job_id);
-			/* Clear everything so this appears to be a new job
-			 * and then restart it in accounting. */
-			job_ptr->start_time = job_ptr->end_time = 0;
-			job_ptr->total_cpus = 0;
-			/* Current code (<= 2.1) has it so we start the new
-			 * job with the next step id.  This could be used
-			 * when restarting to figure out which step the
-			 * previous run of this job stopped on. */
-
-			//job_ptr->next_step_id = 0;
-			job_ptr->node_cnt = 0;
-#ifdef HAVE_BG
-			select_g_select_jobinfo_set(
-				job_ptr->select_jobinfo,
-				SELECT_JOBDATA_BLOCK_ID,
-				"unassigned");
-#endif
-			xfree(job_ptr->nodes);
-			xfree(job_ptr->nodes_completing);
-			FREE_NULL_BITMAP(job_ptr->node_bitmap);
-			if (job_ptr->details) {
-				/* the time stamp on the new batch launch
-				 * credential must be larger than the time
-				 * stamp on the revoke request. Also the
-				 * I/O must be all cleared out and the
-				 * named socket purged, so delay for at
-				 * least ten seconds. */
-				job_ptr->details->begin_time = time(NULL) + 10;
-				if (!with_slurmdbd)
-					jobacct_storage_g_job_start(
-						acct_db_conn, job_ptr);
-			}
-
-			/* Reset this after the batch step has
-			 * finished or the batch step information will
-			 * be attributed to the next run of the job. */
-			job_ptr->db_index = 0;
-
-			/* Since this could happen on a launch we need to make
-			 * sure the submit isn't the same as the last submit so
-			 * put now + 1 so we get different records in the
-			 * database */
-			if (now == job_ptr->details->submit_time)
-				now++;
-			job_ptr->details->submit_time = now;
-		}
+		batch_requeue_fini(job_ptr);
 		return true;
 	} else
 		return false;
 }
+
+/* Complete a batch job requeue logic after all steps complete so that
+ * subsequent jobs appear in a separate accounting record. */
+void batch_requeue_fini(struct job_record  *job_ptr)
+{
+	time_t now;
+
+	if (IS_JOB_COMPLETING(job_ptr) ||
+	    !IS_JOB_PENDING(job_ptr) || !job_ptr->batch_flag)
+		return;
+
+	info("requeue batch job %u", job_ptr->job_id);
+	now = time(NULL);
+	/* Clear everything so this appears to be a new job and then restart
+	 * it in accounting. */
+	job_ptr->start_time = job_ptr->end_time = 0;
+	job_ptr->total_cpus = 0;
+	/* Current code (<= 2.1) has it so we start the new job with the next
+	 * step id.  This could be used when restarting to figure out which
+	 * step the previous run of this job stopped on. */
+	//job_ptr->next_step_id = 0;
+
+	job_ptr->node_cnt = 0;
+#ifdef HAVE_BG
+	select_g_select_jobinfo_set(job_ptr->select_jobinfo,
+				    SELECT_JOBDATA_BLOCK_ID, "unassigned");
+#endif
+	xfree(job_ptr->nodes);
+	xfree(job_ptr->nodes_completing);
+	FREE_NULL_BITMAP(job_ptr->node_bitmap);
+	if (job_ptr->details) {
+		/* the time stamp on the new batch launch credential must be
+		 * larger than the time stamp on the revoke request. Also the
+		 * I/O must be all cleared out and the named socket purged,
+		 * so delay for at least ten seconds. */
+		job_ptr->details->begin_time = now + 10;
+		if (!with_slurmdbd)
+			jobacct_storage_g_job_start(acct_db_conn, job_ptr);
+		/* Since this could happen on a launch we need to make sure the
+		 * submit isn't the same as the last submit so put now + 1 so
+		 * we get different records in the database */
+		if (now == job_ptr->details->submit_time)
+			now++;
+		job_ptr->details->submit_time = now;
+	}
+
+	/* Reset this after the batch step has finished or the batch step
+	 * information will be attributed to the next run of the job. */
+	job_ptr->db_index = 0;
+}
+
 
 /* job_fini - free all memory associated with job records */
 void job_fini (void)

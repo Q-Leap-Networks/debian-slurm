@@ -1,6 +1,73 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in Slurm 2.6.5
+========================
+ -- Correction to hostlist parsing bug introduced in v2.6.4 for hostlists with
+    more than one numeric range in brackets (e.g. rack[0-3]_blade[0-63]").
+ -- Add notification if using proctrack/cgroup and task/cgroup when oom hits.
+ -- Corrections to advanced reservation logic with overlapping jobs.
+ -- job_submit/lua - add cpus_per_task field to those available.
+ -- Add cpu_load to the node information available using the Perl API.
+ -- Correct a job's GRES allocation data in accounting records for non-Cray
+    systems.
+ -- Substantial performance improvement for systems with Shared=YES or FORCE
+    and large numbers of running jobs (replace bubble sort with quick sort).
+ -- proctrack/cgroup - Add locking to prevent race condition where one job step
+    is ending for a user or job at the same time another job stepsis starting
+    and the user or job container is deleted from under the starting job step.
+ -- Fixed sh5util loop when there are no node-step files.
+ -- Fix race condition on batch job termination that could result in a job exit
+    code of 0xfffffffe if the slurmd on node zero registers its active jobs at
+    the same time that slurmstepd is recording the job's exit code.
+ -- Correct logic returning remaining job dependencies in job information
+    reported by scontrol and squeue. Eliminates vestigial descriptors with
+    no job ID values (e.g. "afterany").
+ -- Improve performance of REQUEST_JOB_INFO_SINGLE RPC by removing unnecessary
+    locks and use hash function to find the desired job.
+ -- jobcomp/filetxt - Reopen the file when slurmctld daemon is reconfigured
+    or gets SIGHUP.
+ -- Remove notice of CVE with very old/deprecated versions of Slurm in
+    news.html.
+ -- Fix if hwloc_get_nbobjs_by_type() returns zero core count (set to 1).
+ -- Added ApbasilTimeout parameter to the cray.conf configuration file.
+ -- Handle in the API if parts of the node structure are NULL.
+ -- Fix srun hang when IO fails to start at launch.
+ -- Fix for GRES bitmap not matching the GRES count resulting in abort
+    (requires manual resetting of GRES count, changes to gres.conf file,
+    and slurmd restarts).
+ -- Modify sview to better support job arrays.
+ -- Modify squeue to support longer job ID values (for many job array tasks).
+ -- Fix race condition in authentication credential creation that could corrupt
+    memory. (NOTE: This race condition has existed since 2003 and would be
+    exceedingly rare.)
+ -- HDF5 - Fix minor memory leak.
+ -- Slurmstepd variable initialization - Without this patch, free() is called
+    on a random memory location (i.e. whatever is on the stack), which can
+    result in slurmstepd dying and a completed job not being purged in a
+    timely fashion.
+ -- Fix slurmstepd race condition when separate threads are reading and 
+    modifying the job's environment, which can result in the slurmstepd failing
+    with an invalid memory reference.
+ -- Fix erroneous error messages when running gang scheduling.
+ -- Fix minor memory leak.
+ -- scontrol modified to suspend, resume, hold, uhold, or release multiple
+    jobs in a space separated list.
+ -- Minor debug error when a connection goes away at the end of a job.
+ -- Validate return code from calls to slurm_get_peer_addr
+ -- BGQ - Fix issues with making sure all cnodes are accounted for when mulitple
+    steps cause multiple cnodes in one allocation to go into error at the
+    same time.
+ -- scontrol show job - Correct NumNodes value calculated based upon job
+    specifications.
+ -- BGQ - Fix issue if user runs multiple sub-block jobs inside a multiple
+    midplane block that starts on a higher coordinate than it ends (i.e if a
+    block has midplanes [0010,0013] 0013 is the start even though it is
+    listed second in the hostlist).
+ -- BGQ - Add midplane to the total_cnodes used in the runjob_mux plugin
+    for better debug.
+ -- Update AllocNodes paragraph in slurm.conf.5.
+
 * Changes in Slurm 2.6.4
 ========================
  -- Fixed sh5util to print its usage.

@@ -199,7 +199,7 @@ execution of the command "sudo modprobe msr".
 \fBAcctGatherInfinibandType\fR
 Identifies the plugin to be used for infiniband network traffic accounting.
 The plugin is activated only when profiling on hdf5 files is activated and
-the user asks for network data collection for jobs through --profile=Network
+the user asks for network data collection for jobs through \-\-profile=Network
 (or =All). The collection of network traffic data takes place on node level,
 hence only in case of exclusive job allocation the collected values will
 reflect the jobs real traffic. All network traffic data are logged on hdf5 files
@@ -788,7 +788,7 @@ is provided by cgroups for virtual memory size ('vsize').
 In order to use the \fBsstat\fR tool, "jobacct_gather/aix", "jobacct_gather/linux",
 or "jobacct_gather/cgroup" must be configured.
 .br
-\fBNOTE:\fR Changing this configuration parameter changes the contents of 
+\fBNOTE:\fR Changing this configuration parameter changes the contents of
 the messages between Slurm daemons. Any previously running job steps are
 managed by a slurmstepd daemon that will persist through the lifetime of
 that job step and not change it's communication prototol. Only change this
@@ -1438,9 +1438,6 @@ which uses linux process tree using parent process IDs
 \fBproctrack/lua\fR
 which uses a site\-specific LUA script to track processes
 .TP
-\fBproctrack/rms\fR
-which uses Quadrics kernel patch and is the default if "SwitchType=switch/elan"
-.TP
 \fBproctrack/sgi_job\fR
 which uses SGI's Process Aggregates (PAGG) kernel module,
 see \fIhttp://oss.sgi.com/projects/pagg/\fR for more information
@@ -2051,6 +2048,9 @@ The default value is "root".
 \fBSlurmctldDebug\fR
 The level of detail to provide \fBslurmctld\fR daemon's logs.
 The default value is \fBinfo\fR.
+If the \fBslurmctld\fR daemon is initiated with \-v or \-\-verbose options,
+that debug level will be preserve or restored upon reconfiguration.
+
 .RS
 .TP 10
 \fBquiet\fR
@@ -3103,7 +3103,7 @@ The partition configuration file contains the following information:
 
 .TP
 \fBAllocNodes\fR
-Comma separated list of nodes from which users can execute jobs in the
+Comma separated list of nodes from which users can submit jobs in the
 partition.
 Node names may be specified using the node range expression syntax
 described above.
@@ -3344,6 +3344,8 @@ should be used for job allocations.
 Sharing of resources is typically useful only when using gang scheduling
 (\fBPreemptMode=suspend\fR or \fBPreemptMode=kill\fR).
 Possible values for \fBShared\fR are "EXCLUSIVE", "FORCE", "YES", and "NO".
+Note that a value of "YES" or "FORCE" can negatively impact performance
+for systems with many thousands of running jobs.
 The default value is "NO".
 For more information see the following web pages:
 .br
