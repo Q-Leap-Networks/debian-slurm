@@ -128,6 +128,7 @@ static int backfill_window = BACKFILL_WINDOW;
 static int max_backfill_job_cnt = 50;
 static int max_backfill_job_per_part = 0;
 static int max_backfill_job_per_user = 0;
+static int max_backfill_jobs_start = 0;
 static bool backfill_continue = false;
 
 /*********************** local functions *********************/
@@ -456,6 +457,13 @@ static void _load_config(void)
 		      max_backfill_job_per_part);
 	}
 
+	if (sched_params && (tmp_ptr=strstr(sched_params, "bf_max_job_start=")))
+		max_backfill_jobs_start = atoi(tmp_ptr + 17);
+	if (max_backfill_jobs_start < 0) {
+		fatal("Invalid backfill scheduler bf_max_job_start: %d",
+		      max_backfill_jobs_start);
+	}
+
 	if (sched_params && (tmp_ptr=strstr(sched_params, "bf_max_job_user=")))
 		max_backfill_job_per_user = atoi(tmp_ptr + 16);
 	if (max_backfill_job_per_user < 0) {
@@ -592,6 +600,7 @@ static int _attempt_backfill(void)
 	uint16_t *njobs = NULL;
 	bool already_counted;
 	uint32_t reject_array_job_id = 0;
+	uint32_t job_start_cnt = 0;
 	time_t config_update = slurmctld_conf.last_update;
 	time_t part_update = last_part_update;
 
@@ -644,7 +653,7 @@ static int _attempt_backfill(void)
 	slurmctld_diag_stats.bf_active = 1;
 
 	node_space = xmalloc(sizeof(node_space_map_t) *
-			     (max_backfill_job_cnt + 3));
+			     (max_backfill_job_cnt * 2 + 1));
 	node_space[0].begin_time = sched_start;
 	node_space[0].end_time = sched_start + backfill_window;
 	node_space[0].avail_bitmap = bit_copy(avail_node_bitmap);
@@ -689,6 +698,7 @@ static int _attempt_backfill(void)
 					     "jobs", job_test_count);
 				}
 				rc = 1;
+				xfree(job_queue_rec);
 				break;
 			}
 			/* Reset backfill scheduling timers, resume testing */
@@ -701,8 +711,10 @@ static int _attempt_backfill(void)
 		/* With bf_continue configured, the original job could have
 		 * been cancelled and purged. Validate pointer here. */
 		if ((job_ptr->magic  != JOB_MAGIC) ||
-		    (job_ptr->job_id != job_queue_rec->job_id))
+		    (job_ptr->job_id != job_queue_rec->job_id)) {
+			xfree(job_queue_rec);
 			continue;
+		}
 		orig_time_limit = job_ptr->time_limit;
 		part_ptr = job_queue_rec->part_ptr;
 		job_test_count++;
@@ -776,7 +788,7 @@ static int _attempt_backfill(void)
 					       "Total #users now %u",
 					       job_ptr->user_id, nuser);
 			} else {
-				if (njobs[j] > max_backfill_job_per_user) {
+				if (njobs[j] >= max_backfill_job_per_user) {
 					/* skip job */
 					if (debug_flags & DEBUG_FLAG_BACKFILL)
 						debug("backfill: have already "
@@ -1015,6 +1027,9 @@ static int _attempt_backfill(void)
 				if (save_time_limit != job_ptr->time_limit)
 					jobacct_storage_g_job_start(acct_db_conn,
 								    job_ptr);
+				if (max_backfill_jobs_start &&
+				    (++job_start_cnt >= max_backfill_jobs_start))
+					break;
 				continue;
 			}
 		} else
@@ -1225,19 +1240,22 @@ static void _add_reservation(uint32_t start_time, uint32_t end_reserve,
 			placed = true;
 		}
 		if (placed == true) {
-			j = node_space[j].next;
-			if (j && (end_reserve < node_space[j].end_time)) {
-				/* insert end entry record */
-				i = *node_space_recs;
-				node_space[i].begin_time = end_reserve;
-				node_space[i].end_time = node_space[j].
-							 end_time;
-				node_space[j].end_time = end_reserve;
-				node_space[i].avail_bitmap =
-					bit_copy(node_space[j].avail_bitmap);
-				node_space[i].next = node_space[j].next;
-				node_space[j].next = i;
-				(*node_space_recs)++;
+			while ((j = node_space[j].next)) {
+				if (end_reserve < node_space[j].end_time) {
+					/* insert end entry record */
+					i = *node_space_recs;
+					node_space[i].begin_time = end_reserve;
+					node_space[i].end_time = node_space[j].
+								 end_time;
+					node_space[j].end_time = end_reserve;
+					node_space[i].avail_bitmap =
+						bit_copy(node_space[j].
+							 avail_bitmap);
+					node_space[i].next = node_space[j].next;
+					node_space[j].next = i;
+					(*node_space_recs)++;
+					break;
+				}
 			}
 			break;
 		}

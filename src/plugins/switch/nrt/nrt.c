@@ -120,8 +120,10 @@ extern int drain_nodes ( char *nodes, char *reason, uint32_t reason_uid );
 /*
  * Definitions local to this module
  */
+#define NRT_NULL_MAGIC  	0xDEAFDEAF
 #define NRT_NODEINFO_MAGIC	0xc00cc00a
 #define NRT_JOBINFO_MAGIC	0xc00cc00b
+
 #define NRT_LIBSTATE_MAGIC	0xc00cc00c
 #define NRT_HOSTLEN		20
 #define NRT_NODECOUNT		128
@@ -246,7 +248,6 @@ typedef struct slurm_nrt_suspend_info {
 
 static int lid_cache_size = 0;
 static nrt_cache_entry_t lid_cache[NRT_MAX_ADAPTERS];
-static int  dynamic_window_cnt = 32;
 static bool dynamic_window_err = false;	/* print error only once */
 
 /* Keep track of local ID so slurmd can determine which switch tables
@@ -296,7 +297,8 @@ static void	_init_adapter_cache(void);
 static preemption_state_t _job_preempt_state(nrt_job_key_t job_key);
 static int	_job_step_window_state(slurm_nrt_jobinfo_t *jp,
 				       hostlist_t hl, win_state_t state);
-static void	_load_dynamic_window_cnt(void);
+static int	_load_min_window_id(char *adapter_name,
+				    nrt_adapter_t adapter_type);
 static void	_lock(void);
 static nrt_job_key_t _next_key(void);
 static int	_pack_libstate(slurm_nrt_libstate_t *lp, Buf buffer);
@@ -632,7 +634,13 @@ _job_step_window_state(slurm_nrt_jobinfo_t *jp, hostlist_t hl,
 	int err, rc = SLURM_SUCCESS;
 
 	xassert(!hostlist_is_empty(hl));
-	xassert(jp);
+
+	if ((jp == NULL) || (jp->magic == NRT_NULL_MAGIC)) {
+		debug2("(%s: %d: %s) job->switch_job was NULL",
+		       THIS_FILE, __LINE__, __FUNCTION__);
+		return SLURM_ERROR;
+	}
+
 	xassert(jp->magic == NRT_JOBINFO_MAGIC);
 
 	if ((jp == NULL) || (hostlist_is_empty(hl)))
@@ -1128,7 +1136,7 @@ _allocate_windows_all(slurm_nrt_jobinfo_t *jp, char *hostname,
 	assert(tableinfo);
 	assert(hostname);
 
-	debug("in _allocate_windows_all");
+	debug2("in _allocate_windows_all");
 	node = _find_node(nrt_state, hostname);
 	if (node == NULL) {
 		error("Failed to find node in node_list: %s", hostname);
@@ -1322,8 +1330,8 @@ _allocate_window_single(char *adapter_name, slurm_nrt_jobinfo_t *jp,
 
 	/* find the adapter */
 	for (i = 0; i < node->adapter_count; i++) {
-		debug("adapter %s at index %d",
-		      node->adapter_list[i].adapter_name, i);
+		debug2("adapter %s at index %d",
+		       node->adapter_list[i].adapter_name, i);
 		if (adapter_name) {
 			if (!strcasecmp(node->adapter_list[i].adapter_name,
 					adapter_name)) {
@@ -1794,7 +1802,12 @@ _print_jobinfo(slurm_nrt_jobinfo_t *j)
 	char buf[128];
 	nrt_adapter_t adapter_type;
 
-	assert(j);
+	if ((j == NULL) || (j->magic == NRT_NULL_MAGIC)) {
+		debug2("(%s: %d: %s) job->switch_job was NULL",
+		       THIS_FILE, __LINE__, __FUNCTION__);
+		return;
+	}
+
 	assert(j->magic == NRT_JOBINFO_MAGIC);
 
 	info("--Begin Jobinfo--");
@@ -2063,23 +2076,39 @@ static int _get_my_id(void)
 	return rc;
 }
 
-static void _load_dynamic_window_cnt(void)
+/* Load the minimum usable window ID on a given adapater.
+ *
+ * NOTES: Bill LePera, IBM: Out of 256 windows on each HFI device, the first
+ * 4 are reserved for the HFI device driver's use. Next are the dynamic windows 
+ * (default 32), followed by the windows available to be scheduled by PNSD
+ * and the job schedulers. This is why the output of nrt_status shows the
+ * first window number reported as 36. */
+static int
+_load_min_window_id(char *adapter_name, nrt_adapter_t adapter_type)
 {
 	FILE *fp;
-	char buf[128];
+	char buf[128], path[256];
 	size_t sz;
+	int min_window_id = 0;
 
-	fp = fopen("/sys/devices/virtual/hfi/hfi0/num_dynamic_win", "r");
+	if (adapter_type != NRT_HFI)
+		return min_window_id;
+
+	min_window_id = 4;
+	snprintf(path, sizeof(path),
+		 "/sys/devices/virtual/hfi/%s/num_dynamic_win", adapter_name);
+	fp = fopen(path, "r");
 	if (fp) {
 		memset(buf, 0, sizeof(buf));
 		sz = fread(buf, 1, sizeof(buf), fp);
 		if (sz) {
 			buf[sz] = '\0';
-			dynamic_window_cnt = strtol(buf, NULL, 0);
+			min_window_id += strtol(buf, NULL, 0);
 		}
 		(void) fclose(fp);
 	}
-	return;
+
+	return min_window_id;
 }
 
 static int
@@ -2096,7 +2125,8 @@ _get_adapters(slurm_nrt_nodeinfo_t *n)
 	nrt_adapter_info_t adapter_info;
 	nrt_status_t *status_array = NULL;
 	nrt_window_id_t window_count;
-	int min_window_id = 0;
+	int min_window_id = 0, total_adapters = 0;
+	slurm_nrt_adapter_t *adapter_ptr;
 
 	if (debug_flags & DEBUG_FLAG_SWITCH)
 		info("_get_adapters: begin");
@@ -2138,6 +2168,12 @@ _get_adapters(slurm_nrt_nodeinfo_t *n)
 			rc = SLURM_ERROR;
 			continue;
 		}
+
+		/* Get the total adapter count here and print afterwards. */
+		total_adapters += num_adapter_names;
+		if (total_adapters > NRT_MAXADAPTERS)
+			continue;
+
 		if (debug_flags & DEBUG_FLAG_SWITCH) {
 			for (j = 0; j < num_adapter_names; j++) {
 				info("nrt_cmd_wrap(adapter_names, %s, %s) "
@@ -2149,17 +2185,10 @@ _get_adapters(slurm_nrt_nodeinfo_t *n)
 			}
 		}
 
-		/* Bill LePera, IBM: Out of 256 windows on each HFI device, the
-		 * first 4 are reserved for the HFI device driver's use. Next
-		 * are the dynamic windows (default 32), followed by the windows
-		 * available to be scheduled by PNSD and the job schedulers.
-		 * This is why the output of nrt_status shows the first window
-		 * number reported as 36. */
-		/* FIXME: Add tests for each adapter type/name. */
-		min_window_id = dynamic_window_cnt + 4;
-
 		for (j = 0; j < num_adapter_names; j++) {
-			slurm_nrt_adapter_t *adapter_ptr;
+			min_window_id = _load_min_window_id(
+						adapter_names.adapter_names[j],
+						adapter_names.adapter_type);
 			if (status_array) {
 				free(status_array);
 				status_array = NULL;
@@ -2217,6 +2246,7 @@ _get_adapters(slurm_nrt_nodeinfo_t *n)
 				xmalloc(sizeof(slurm_nrt_window_t) *
 					window_count);
 			n->adapter_count++;
+
 			for (k = 0; k < window_count; k++) {
 				slurm_nrt_window_t *window_ptr;
 				window_ptr = adapter_ptr->window_list + k;
@@ -2229,9 +2259,9 @@ _get_adapters(slurm_nrt_nodeinfo_t *n)
 				    (window_ptr->window_id < min_window_id)) {
 					error("switch/nrt: Dynamic window "
 					      "configuration error, "
-					      "num_dynamic_win=%d window_id=%u",
-					      dynamic_window_cnt,
-					      window_ptr->window_id);
+					      "window_id=%u < min_window_id:%d",
+					      window_ptr->window_id,
+					      min_window_id);
 					dynamic_window_err = true;
 				}
 			}
@@ -2303,9 +2333,20 @@ _get_adapters(slurm_nrt_nodeinfo_t *n)
 			}
 			xfree(adapter_info.window_list);
 		}
+		if (status_array) {
+			free(status_array);
+			status_array = NULL;
+		}
+
 	}
-	if (status_array)
-		free(status_array);
+
+	if (total_adapters > NRT_MAXADAPTERS) {
+		fatal("switch/nrt: More adapters found (%u) on "
+		      "node than supported (%u). "
+		      "Increase NRT_MAXADAPTERS and rebuild slurm",
+		      total_adapters, NRT_MAXADAPTERS);
+	}
+
 	if (debug_flags & DEBUG_FLAG_SWITCH) {
 		_print_nodeinfo(n);
 		info("_get_adapters: complete: %d", rc);
@@ -2331,7 +2372,6 @@ nrt_build_nodeinfo(slurm_nrt_nodeinfo_t *n, char *name)
 
 	strncpy(n->name, name, NRT_HOSTLEN);
 	_lock();
-	_load_dynamic_window_cnt();
 	err = _get_adapters(n);
 	_unlock();
 
@@ -2799,7 +2839,12 @@ nrt_job_step_complete(slurm_nrt_jobinfo_t *jp, hostlist_t hl)
 	char *node_name;
 
 	xassert(!hostlist_is_empty(hl));
-	xassert(jp);
+	if ((jp == NULL) || (jp->magic == NRT_NULL_MAGIC)) {
+		debug2("(%s: %d: %s) job->switch_job was NULL",
+		       THIS_FILE, __LINE__, __FUNCTION__);
+		return SLURM_ERROR;
+	}
+
 	xassert(jp->magic == NRT_JOBINFO_MAGIC);
 
 	if ((jp == NULL) || (hostlist_is_empty(hl)))
@@ -2967,7 +3012,13 @@ nrt_build_jobinfo(slurm_nrt_jobinfo_t *jp, hostlist_t hl,
 	int def_adapter_count = 0;
 	int def_adapter_inx   = -1;
 
-	assert(jp);
+
+	if ((jp == NULL) || (jp->magic == NRT_NULL_MAGIC)) {
+		debug2("(%s: %d: %s) job->switch_job was NULL",
+		       THIS_FILE, __LINE__, __FUNCTION__);
+		return SLURM_ERROR;
+	}
+
 	assert(jp->magic == NRT_JOBINFO_MAGIC);
 	assert(tasks_per_node);
 
@@ -3118,7 +3169,7 @@ nrt_build_jobinfo(slurm_nrt_jobinfo_t *jp, hostlist_t hl,
 		info("Allocating windows: adapter_name:%s adapter_type:%s",
 		     adapter_name, _adapter_type_str(adapter_type));
 	} else {
-		debug("Allocating windows");
+		debug3("Allocating windows");
 	}
 
 	if (jp->tables_per_task) {
@@ -3269,9 +3320,18 @@ nrt_pack_jobinfo(slurm_nrt_jobinfo_t *j, Buf buf)
 {
 	int i;
 
-	assert(j);
-	assert(j->magic == NRT_JOBINFO_MAGIC);
-	assert(buf);
+	xassert(buf);
+
+	/*
+	 * There is nothing to pack, so pack in magic telling unpack not to
+	 * attempt to unpack anything.
+	 */
+	if ((j == NULL) || (j->magic == NRT_NULL_MAGIC)) {
+		pack32(NRT_NULL_MAGIC, buf);
+		return SLURM_SUCCESS;
+	}
+
+	xassert(j->magic == NRT_JOBINFO_MAGIC);
 
 	if (debug_flags & DEBUG_FLAG_SWITCH) {
 		info("nrt_pack_jobinfo:");
@@ -3421,10 +3481,16 @@ nrt_unpack_jobinfo(slurm_nrt_jobinfo_t *j, Buf buf)
 	int i;
 
 	assert(j);
-	assert(j->magic == NRT_JOBINFO_MAGIC);
 	assert(buf);
 
 	safe_unpack32(&j->magic, buf);
+
+	if (j->magic == NRT_NULL_MAGIC) {
+		debug2("(%s: %d: %s) Nothing to unpack.",
+		       THIS_FILE, __LINE__, __FUNCTION__);
+		return SLURM_SUCCESS;
+	}
+
 	assert(j->magic == NRT_JOBINFO_MAGIC);
 	safe_unpack32(&j->job_key, buf);
 	safe_unpack8(&j->bulk_xfer, buf);
@@ -3469,7 +3535,12 @@ nrt_copy_jobinfo(slurm_nrt_jobinfo_t *job)
 	int i;
 	int base_size = 0, table_size;
 
-	assert(job);
+	if ((job == NULL) || (job->magic == NRT_NULL_MAGIC)) {
+		debug2("(%s: %d: %s) job->switch_job was NULL",
+		       THIS_FILE, __LINE__, __FUNCTION__);
+		return NULL;
+	}
+
 	assert(job->magic == NRT_JOBINFO_MAGIC);
 
 	if (nrt_alloc_jobinfo(&new)) {
@@ -3550,7 +3621,12 @@ nrt_get_jobinfo(slurm_nrt_jobinfo_t *jp, int key, void *data)
 	int *tables_per = (int *) data;
 	int *job_key = (int *) data;
 
-	assert(jp);
+	if ((jp == NULL) || (jp->magic == NRT_NULL_MAGIC)) {
+		debug2("(%s: %d: %s) job->switch_job was NULL",
+		       THIS_FILE, __LINE__, __FUNCTION__);
+		return SLURM_SUCCESS;
+	}
+
 	assert(jp->magic == NRT_JOBINFO_MAGIC);
 
 	switch (key) {
@@ -3739,7 +3815,12 @@ nrt_load_table(slurm_nrt_jobinfo_t *jp, int uid, int pid, char *job_name)
 	nrt_cmd_load_table_t load_table;
 	nrt_table_info_t table_info;
 
-	assert(jp);
+	if ((jp == NULL) || (jp->magic == NRT_NULL_MAGIC)) {
+		debug2("(%s: %d: %s) job->switch_job was NULL",
+		       THIS_FILE, __LINE__, __FUNCTION__);
+		return SLURM_ERROR;
+	}
+
 	assert(jp->magic == NRT_JOBINFO_MAGIC);
 
 	if (debug_flags & DEBUG_FLAG_SWITCH) {
@@ -4018,7 +4099,12 @@ nrt_unload_table(slurm_nrt_jobinfo_t *jp)
 {
 	int rc = SLURM_SUCCESS;
 
-	assert(jp);
+	if ((jp == NULL) || (jp->magic == NRT_NULL_MAGIC)) {
+		debug2("(%s: %d: %s) job->switch_job was NULL",
+		       THIS_FILE, __LINE__, __FUNCTION__);
+		return SLURM_ERROR;
+	}
+
 	assert(jp->magic == NRT_JOBINFO_MAGIC);
 
 	if (debug_flags & DEBUG_FLAG_SWITCH) {

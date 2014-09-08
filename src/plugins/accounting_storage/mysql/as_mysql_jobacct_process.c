@@ -255,9 +255,12 @@ static void _state_time_string(char **extra, uint32_t state,
 					   "t1.time_eligible and "
 					   "t1.time_start) || "
 					   "(t1.time_eligible "
-					   "between %d and %d)))",
+					   "between %d and %d)) || "
+					   "(!t1.time_start && (%d between "
+					   "t1.time_eligible and "
+					   "t1.time_end)))",
 					   start, start,
-					   end);
+					   end, start);
 			}
 		} else if (end) {
 			xstrfmtcat(*extra, "(t1.time_eligible && "
@@ -916,8 +919,10 @@ extern List setup_cluster_list_with_inx(mysql_conn_t *mysql_conn,
 	if (!(row = mysql_fetch_row(result))) {
 		error("Couldn't get the dimensions of cluster '%s'.",
 		      (char *)list_peek(job_cond->cluster_list));
+		mysql_free_result(result);
 		return NULL;
 	}
+	mysql_free_result(result);
 
 	/* On a Cray System when dealing with hostlists as we are here
 	   this always needs to be 1.
