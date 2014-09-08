@@ -182,7 +182,7 @@ extern void parse_command_line(int argc, char *argv[]);
 extern smap_system_t *smap_system_ptr;
 extern int quiet_flag;
 
-extern void init_grid(node_info_msg_t *node_info_ptr);
+extern void init_grid(node_info_msg_t *node_info_ptr, int cols);
 extern void update_grid(node_info_msg_t *node_info_ptr);
 extern void clear_grid(void);
 extern void free_grid(void);
@@ -195,7 +195,7 @@ bitstr_t *get_requested_node_bitmap(void);
 extern void parse_command_line(int argc, char *argv[]);
 extern void print_date(void);
 extern void clear_window(WINDOW *win);
-extern char *resolve_mp(char *desc);
+extern char *resolve_mp(char *desc, node_info_msg_t *node_info_ptr);
 
 extern void get_slurm_part(void);
 extern void get_bg_part(void);

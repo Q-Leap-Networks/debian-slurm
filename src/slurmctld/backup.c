@@ -58,6 +58,7 @@
 #include "src/common/daemonize.h"
 #include "src/common/log.h"
 #include "src/common/macros.h"
+#include "src/common/node_select.h"
 #include "src/common/slurm_auth.h"
 #include "src/common/switch.h"
 #include "src/common/xsignal.h"
@@ -224,6 +225,7 @@ void run_backup(void)
 	}
 	slurmctld_config.shutdown_time = (time_t) 0;
 	unlock_slurmctld(config_write_lock);
+	select_g_select_nodeinfo_set_all(time(NULL));
 
 	return;
 }
@@ -370,9 +372,6 @@ static void *_background_rpc_mgr(void *no_data)
 
 		slurm_free_msg(msg);
 
-		/* close should only be called when the socket
-		 * implementation is being used the following call will
-		 * be a no-op in a message/mongo implementation */
 		slurm_close_accepted_conn(newsockfd);	/* close new socket */
 	}
 

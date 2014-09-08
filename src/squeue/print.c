@@ -614,7 +614,7 @@ int _print_job_nodes(job_info_t * job, int width, bool right, char* suffix)
 	if (job == NULL) {       /* Print the Header instead */
 		char *title = "NODELIST";
 		if(params.cluster_flags & CLUSTER_FLAG_BG)
-			title = "BP_LIST";
+			title = "MIDPLANELIST";
 		_print_str(title, width, right, false);
 	} else {
 		char *nodes = xstrdup(job->nodes);
@@ -645,7 +645,7 @@ int _print_job_reason_list(job_info_t * job, int width, bool right,
 	if (job == NULL) {	/* Print the Header instead */
 		char *title = "NODELIST(REASON)";
 		if(params.cluster_flags & CLUSTER_FLAG_BG)
-			title = "BP_LIST(REASON)";
+			title = "MIDPLANELIST(REASON)";
 		_print_str(title, width, right, false);
 	} else if (!IS_JOB_COMPLETING(job)
 		   && (IS_JOB_PENDING(job)
@@ -751,10 +751,18 @@ int _print_job_num_nodes(job_info_t * job, int width, bool right_justify,
 static int _get_node_cnt(job_info_t * job)
 {
 	int node_cnt = 0, round;
-	bool completing = job->job_state & JOB_COMPLETING;
-	uint16_t base_job_state = job->job_state & (~JOB_COMPLETING);
 
-	if (base_job_state == JOB_PENDING || completing) {
+	/*  For PENDING jobs, return the maximum of the requested nodelist,
+	 *   requested maximum number of nodes, or requested CPUs rounded
+	 *   to nearest node.
+	 *
+	 *  For COMPLETING jobs, the job->nodes nodelist has already been
+	 *   altered to list only the nodes still in the comp state, and
+	 *   thus we count only those nodes toward the total nodes still
+	 *   allocated to this job.
+	 */
+
+	if (IS_JOB_PENDING(job)) {
 		node_cnt = _nodes_in_list(job->req_nodes);
 		node_cnt = MAX(node_cnt, job->num_nodes);
 		round  = job->num_cpus + params.max_cpus - 1;
@@ -1309,7 +1317,7 @@ int _print_step_nodes(job_step_info_t * step, int width, bool right,
 	if (step == NULL) {	/* Print the Header instead */
 		char *title = "NODELIST";
 		if(params.cluster_flags & CLUSTER_FLAG_BG)
-			title = "BP_LIST";
+			title = "MIDPLANELIST";
 
 		_print_str(title, width, right, false);
 	} else {
@@ -1367,7 +1375,7 @@ static int _filter_job(job_info_t * job)
 	ListIterator iterator;
 	uint32_t *job_id, *user;
 	uint16_t *state_id;
-	char *account, *part, *qos;
+	char *account, *part, *qos, *name;
 
 	if (params.job_list) {
 		filter = 1;
@@ -1485,6 +1493,21 @@ static int _filter_job(job_info_t * job)
 		    (strcmp(job->resv_name, params.reservation))) {
 			return 7;
 		}
+	}
+
+	if (params.name_list) {
+		filter = 1;
+		iterator = list_iterator_create(params.name_list);
+		while ((name = list_next(iterator))) {
+			if ((job->name != NULL) &&
+			     (strcasecmp(name, job->name) == 0)) {
+				filter = 0;
+				break;
+			}
+		}
+		list_iterator_destroy(iterator);
+		if (filter == 1)
+			return 8;
 	}
 
 	return 0;

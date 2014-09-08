@@ -14,6 +14,7 @@ EXTRA_DIST = \
 	pkill				\
 	README				\
 	regression			\
+	regression.py			\
 	test1.1				\
 	test1.2				\
 	test1.3				\
@@ -50,8 +51,10 @@ EXTRA_DIST = \
 	test1.32.prog.c			\
 	test1.33			\
 	test1.34			\
+	test1.34.prog.c			\
 	test1.35			\
 	test1.36			\
+	test1.37			\
 	test1.38			\
 	test1.40			\
 	test1.41			\
@@ -66,6 +69,8 @@ EXTRA_DIST = \
 	test1.50			\
 	test1.51			\
 	test1.52			\
+	test1.53			\
+	test1.53.prog.c			\
 	test1.54			\
 	test1.55			\
 	test1.56			\
@@ -97,6 +102,9 @@ EXTRA_DIST = \
 	test1.91.prog.c			\
 	test1.92			\
 	test1.93			\
+	test1.94			\
+	test1.94.master.c		\
+	test1.94.slave.c		\
 	test2.1				\
 	test2.2				\
 	test2.3				\
@@ -209,6 +217,7 @@ EXTRA_DIST = \
 	test8.21.bash			\
 	test8.22			\
 	test8.23			\
+	test8.24			\
 	test9.1				\
 	test9.2				\
 	test9.3				\
@@ -218,6 +227,7 @@ EXTRA_DIST = \
 	test9.7				\
 	test9.7.bash			\
 	test9.8				\
+	test9.9				\
 	test10.1			\
 	test10.2			\
 	test10.3			\
@@ -241,6 +251,9 @@ EXTRA_DIST = \
 	test12.1			\
 	test12.2			\
 	test12.2.prog.c			\
+	test12.3			\
+	inc12.3.1			\
+	inc12.3.2			\
 	test12.4			\
 	test12.5			\
 	test13.1			\
@@ -323,6 +336,10 @@ EXTRA_DIST = \
 	test19.5			\
 	test19.6			\
 	test19.7			\
+	test20.1			\
+	test20.2			\
+	test20.3			\
+	test20.4			\
 	test21.1			\
 	test21.2			\
 	test21.3			\
@@ -362,6 +379,11 @@ EXTRA_DIST = \
 	test25.1			\
 	test26.1			\
 	test26.2			\
+	test27.1			\
+	test27.2			\
+	test27.3			\
+	test27.4			\
+	test27.5			\
 	usleep
 
 distclean-local:

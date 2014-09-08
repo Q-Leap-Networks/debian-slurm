@@ -113,6 +113,7 @@
 #define OPT_WCKEY       0x14
 #define OPT_SIGNAL      0x15
 #define OPT_KILL_CMD    0x16
+#define OPT_TIME_VAL	0x17
 
 /* generic getopt_long flags, integers and *not* valid characters */
 #define LONG_OPT_CPU_BIND    0x101
@@ -405,7 +406,7 @@ env_vars_t env_vars[] = {
   {"SALLOC_WAIT_ALL_NODES",OPT_INT,        &opt.wait_all_nodes,NULL          },
   {"SALLOC_WCKEY",         OPT_STRING,     &opt.wckey,         NULL          },
   {"SALLOC_REQ_SWITCH",    OPT_INT,        &opt.req_switch,    NULL          },
-  {"SALLOC_WAIT4SWITCH",   OPT_INT,        &opt.wait4switch,   NULL          },
+  {"SALLOC_WAIT4SWITCH",   OPT_TIME_VAL,   NULL,               NULL          },
   {NULL, 0, NULL, NULL}
 };
 
@@ -558,6 +559,11 @@ _process_env_var(env_vars_t *e, const char *val)
 		}
 		opt.kill_command_signal_set = true;
 		break;
+
+	case OPT_TIME_VAL:
+		opt.wait4switch = time_str2secs(val);
+		break;
+
 	default:
 		/* do nothing */
 		break;
@@ -945,7 +951,7 @@ void set_options(const int argc, char **argv)
 				error("duplicate --gid option");
 				exit(error_exit);
 			}
-			if (gid_from_string (optarg, &opt.euid) < 0) {
+			if (gid_from_string (optarg, &opt.egid) < 0) {
 				error("--gid=\"%s\" invalid", optarg);
 				exit(error_exit);
 			}
@@ -1060,6 +1066,13 @@ void set_options(const int argc, char **argv)
 			}
 			break;
 		case LONG_OPT_REBOOT:
+#if defined HAVE_BG && !defined HAVE_BG_L_P
+			info("WARNING: If your job is smaller than the block "
+			     "it is going to run on and other jobs are "
+			     "running on it the --reboot option will not be "
+			     "honored.  If this is the case, contact your "
+			     "admin to reboot the block for you.");
+#endif
 			opt.reboot = true;
 			break;
 		case LONG_OPT_BLRTS_IMAGE:
@@ -1141,8 +1154,7 @@ void set_options(const int argc, char **argv)
 			if (pos_delimit != NULL) {
 				pos_delimit[0] = '\0';
 				pos_delimit++;
-				opt.wait4switch = time_str2mins(pos_delimit) *
-						   60;
+				opt.wait4switch = time_str2secs(pos_delimit);
 			}
 			opt.req_switch = _get_int(optarg, "switches");
 			break;
@@ -1803,7 +1815,12 @@ static void _usage(void)
 "              [--contiguous] [--mincpus=n] [--mem=MB] [--tmp=MB] [-C list]\n"
 "              [--account=name] [--dependency=type:jobid] [--comment=name]\n"
 #ifdef HAVE_BG		/* Blue gene specific options */
-"              [--geometry=XxYxZ] [--conn-type=type] [--no-rotate] [ --reboot]\n"
+#ifdef HAVE_BG_L_P
+"              [--geometry=XxYxZ] "
+#else
+"              [--geometry=AxXxYxZ] "
+#endif
+"[--conn-type=type] [--no-rotate] [--reboot]\n"
 #ifdef HAVE_BGL
 "              [--blrts-image=path] [--linux-image=path]\n"
 "              [--mloader-image=path] [--ramdisk-image=path]\n"
@@ -1920,7 +1937,13 @@ static void _help(void)
 #endif
 #ifdef HAVE_BG				/* Blue gene specific options */
 "Blue Gene related options:\n"
+#ifdef HAVE_BG_L_P
 "  -g, --geometry=XxYxZ        geometry constraints of the job\n"
+#else
+"  -g, --geometry=AxXxYxZ      Midplane geometry constraints of the job,\n"
+"                              sub-block allocations can not be allocated\n"
+"                              with the geometry option\n"
+#endif
 "  -R, --no-rotate             disable geometry rotation\n"
 "      --reboot                reboot block before starting job\n"
 "      --conn-type=type        constraint on type of connection, MESH or TORUS\n"

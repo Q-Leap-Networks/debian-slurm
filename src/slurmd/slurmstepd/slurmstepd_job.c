@@ -369,7 +369,8 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 
 	job->state   = SLURMSTEPD_STEP_STARTING;
 	job->pwd     = pwd;
-	job->cpus    = msg->cpus_per_node[0];
+	if (msg->cpus_per_node)
+		job->cpus    = msg->cpus_per_node[0];
 	job->node_tasks  = 1;
 	job->ntasks  = msg->ntasks;
 	job->jobid   = msg->job_id;
@@ -408,7 +409,8 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 	job->envtp->ckpt_dir = NULL;
 	job->envtp->restart_cnt = msg->restart_cnt;
 
-	job->cpus_per_task = msg->cpus_per_node[0];
+	if (msg->cpus_per_node)
+		job->cpus    = msg->cpus_per_node[0];
 	format_core_allocs(msg->cred, conf->node_name,
 			   &job->job_alloc_cores, &job->step_alloc_cores,
 			   &job->job_mem, &job->step_mem);
@@ -520,7 +522,8 @@ _job_init_task_info(slurmd_job_t *job, uint32_t *gtid,
 		if (job->multi_prog) {
 			multi_prog_get_argv(job->argv[1], job->env, gtid[i],
 					    &job->task[i]->argc,
-					    &job->task[i]->argv);
+					    &job->task[i]->argv,
+					    job->argc, job->argv);
 		} else {
 			job->task[i]->argc = job->argc;
 			job->task[i]->argv = job->argv;

@@ -66,6 +66,10 @@ extern int bridge_handle_database_errors(
 	case bgsched::DatabaseErrors::ConnectionError:
 		error("%s: Can't connect to the database!", function);
 		break;
+	case bgsched::DatabaseErrors::UnexpectedError:
+		error("%s: UnexpectedError returned from the database!",
+		      function);
+		break;
 	default:
 		error("%s: Unexpected Database exception value %d",
 		      function, err);
@@ -150,6 +154,9 @@ extern int bridge_handle_input_errors(const char *function, const uint32_t err,
 	case bgsched::InputErrors::InvalidNodeBoardCount:
 		error("%s: Invalid NodeBoard count.", function);
 		break;
+	case bgsched::InputErrors::InvalidNodeBoardPosition:
+		error("%s: Invalid NodeBoard position.", function);
+		break;
 	case bgsched::InputErrors::InvalidMidplanes:
 		error("%s: Invalid midplanes given.", function);
 		break;
@@ -220,13 +227,49 @@ extern int bridge_handle_runtime_errors(const char *function,
 
 	switch (err) {
 	case bgsched::RuntimeErrors::BlockBootError:
-		error("%s: Error booting block %s.", function,
-		      bg_record->bg_block_id);
+	{
+		BlockFilter filter;
+		Block::Ptrs vec;
+
 		rc = BG_ERROR_BOOT_ERROR;
+
+		if ((bg_record->magic != BLOCK_MAGIC)
+		    || !bg_record->bg_block_id) {
+			error("%s: bad block given to booting.", function);
+			break;
+		}
+
+		filter.setName(string(bg_record->bg_block_id));
+
+		vec = bridge_get_blocks(filter);
+		if (vec.empty()) {
+			debug("%s: block %s not found, removing "
+			      "from slurm", function, bg_record->bg_block_id);
+			break;
+		}
+		const Block::Ptr &block_ptr = *(vec.begin());
+		uint16_t state = bridge_translate_status(
+			block_ptr->getStatus().toValue());
+		if (state == BG_BLOCK_FREE) {
+			error("%s: Block %s was free but we got an error "
+			      "while trying to boot it. (system=%s) (us=%s)",
+			      function, bg_record->bg_block_id,
+			      bg_block_state_string(state),
+			      bg_block_state_string(bg_record->state));
+		} else {
+			debug2("%s: tring to boot a block %s that wasn't "
+			       "free (system=%s) (us=%s), no real error.",
+			       function, bg_record->bg_block_id,
+			       bg_block_state_string(state),
+			       bg_block_state_string(bg_record->state));
+			rc = SLURM_SUCCESS;
+		}
+
 		break;
+	}
 	case bgsched::RuntimeErrors::BlockFreeError:
 		/* not a real error */
-		rc = BG_ERROR_INVALID_STATE;
+		rc = BG_ERROR_FREE;
 		debug2("%s: Error freeing block %s.", function,
 		       bg_record->bg_block_id);
 		break;
@@ -251,8 +294,146 @@ extern int bridge_handle_runtime_errors(const char *function,
 	case bgsched::RuntimeErrors::AuthorityError:
 	 	error("%s: Authority Error.", function);
 	        break;
+	case bgsched::RuntimeErrors::HardwareInUseError:
+		error("%s: Hardware in use Error.", function);
+	        break;
 	default:
 		error("%s: Unexpected Runtime exception value %d.",
+		      function, err);
+	}
+	return rc;
+}
+
+/* RealTime errors */
+
+extern int bridge_handle_realtime_client_errors(const char *function,
+						const uint32_t err)
+{
+	int rc = SLURM_ERROR;
+
+	switch (err) {
+	case bgsched::realtime::ClientStateErrors::MustBeConnected:
+		error("%s: The real-time client must be connected before "
+		      "this method is called, and apparently you are not",
+		      function);
+		break;
+	default:
+		error("%s: Unexpected Realtime client error: %d.",
+		      function, err);
+	}
+	return rc;
+}
+
+extern int bridge_handle_realtime_configuration_errors(const char *function,
+						       const uint32_t err)
+{
+	int rc = SLURM_ERROR;
+
+	switch (err) {
+	case bgsched::realtime::ConfigurationErrors::InvalidHost:
+		error("%s: The host value given is not in the correct format",
+		      function);
+		break;
+	case bgsched::realtime::ConfigurationErrors::MissingSecurityProperty:
+		error("%s: A required security configuration property is "
+		      "missing from the bg.properties file",
+		      function);
+		break;
+	default:
+		error("%s: Unexpected Realtime Configuration error: %d.",
+		      function, err);
+	}
+	return rc;
+}
+
+extern int bridge_handle_realtime_connection_errors(const char *function,
+						    const uint32_t err)
+{
+	int rc = SLURM_ERROR;
+
+	switch (err) {
+	case bgsched::realtime::ConnectionErrors::CannotResolve:
+		error("%s: Cannot resolve the real-time server host or port",
+		      function);
+		break;
+	case bgsched::realtime::ConnectionErrors::CannotConnect:
+		error("%s: Cannot connect to the real-time server",
+		      function);
+		break;
+	case bgsched::realtime::ConnectionErrors::LostConnection:
+		error("%s: Unexpectedly lost the connection to the "
+		      "real-time server",
+		      function);
+		break;
+	default:
+		error("%s: Unexpected Realtime Connection error: %d.",
+		      function, err);
+	}
+	return rc;
+}
+
+extern int bridge_handle_realtime_filter_errors(const char *function,
+						const uint32_t err)
+{
+	int rc = SLURM_ERROR;
+
+	switch (err) {
+	case bgsched::realtime::FilterErrors::PatternNotValid:
+		error("%s: The pattern supplied to the filter option "
+		      "is not valid", function);
+		break;
+	default:
+		error("%s: Unexpected Realtime Filter error: %d.",
+		      function, err);
+	}
+	return rc;
+}
+
+extern int bridge_handle_realtime_internal_errors(const char *function,
+						  const uint32_t err)
+{
+	int rc = SLURM_ERROR;
+
+	switch (err) {
+	case bgsched::realtime::InternalErrors::ApiUnexpectedFailure:
+		error("%s: An API called by the real-time client "
+		      "failed in an unexpected way.", function);
+		break;
+	default:
+		error("%s: Unexpected Realtime Internal error: %d.",
+		      function, err);
+	}
+	return rc;
+}
+
+extern int bridge_handle_realtime_protocol_errors(const char *function,
+						  const uint32_t err)
+{
+	int rc = SLURM_ERROR;
+
+	switch (err) {
+	case bgsched::realtime::ProtocolErrors::MessageTooLong:
+		error("%s: A message received from the real-time server is "
+		      "too long", function);
+		break;
+	case bgsched::realtime::ProtocolErrors::UnexpectedMessageType:
+		error("%s: The type of message received from the real-time "
+		      "server is not expected", function);
+		break;
+	case bgsched::realtime::ProtocolErrors::ErrorReadingMessage:
+		error("%s: An error occurred parsing a message received "
+		      "from the real-time server", function);
+		break;
+	case bgsched::realtime::ProtocolErrors::UnexpectedDbChangeType:
+		error("%s: The type of DB change message received "
+		      "from the real-time server is not expected", function);
+		break;
+	case bgsched::realtime::ProtocolErrors::MessageNotValid:
+		error("%s: A message received from the real-time server "
+		      "is not valid", function);
+		break;
+	default:
+		error("%s: Unexpected Realtime Protocol error: %d.",
 		      function, err);
 	}
 	return rc;
@@ -284,6 +465,28 @@ extern uint16_t bridge_translate_status(bgsched::Block::Status state_in)
 	return BG_BLOCK_NAV;
 }
 
+#if defined HAVE_BG_GET_ACTION
+extern uint16_t bridge_translate_action(bgsched::Block::Action::Value action_in)
+{
+	switch (action_in) {
+	case Block::Action::None:
+		return BG_BLOCK_ACTION_NONE;
+		break;
+	case Block::Action::Boot:
+		return BG_BLOCK_ACTION_BOOT;
+		break;
+	case Block::Action::Free:
+		return BG_BLOCK_ACTION_FREE;
+	default:
+		error("unknown block action %d", action_in);
+		return BG_BLOCK_ACTION_NAV;
+		break;
+	}
+	error("unknown block action %d", action_in);
+	return BG_BLOCK_ACTION_NAV;
+}
+#endif
+
 extern uint16_t bridge_translate_switch_usage(bgsched::Switch::InUse usage_in)
 {
 	switch (usage_in) {
@@ -314,5 +517,157 @@ extern uint16_t bridge_translate_switch_usage(bgsched::Switch::InUse usage_in)
 	}
 
 	return BG_SWITCH_NONE;
+}
+
+extern const char *bridge_hardware_state_string(const int state)
+{
+	switch(state) {
+	case Hardware::Available:
+		return "Available";
+	case Hardware::Missing:
+		return "Missing";
+	case Hardware::Error:
+		return "Error";
+	case Hardware::Service:
+		return "Service";
+	case Hardware::SoftwareFailure:
+		return "SoftwareFailure";
+	default:
+		return "Unknown";
+	}
+	return "Unknown";
+}
+
+/* helper functions */
+
+extern Block::Ptrs bridge_get_blocks(BlockFilter filter)
+{
+	Block::Ptrs vec;
+
+	try {
+		vec = getBlocks(filter);
+	} catch (const bgsched::DatabaseException& err) {
+		bridge_handle_database_errors("getBlocks",
+					      err.getError().toValue());
+	} catch (const bgsched::InternalException& err) {
+		bridge_handle_internal_errors("getBlocks",
+					      err.getError().toValue());
+	} catch (const bgsched::RuntimeException& err) {
+		bridge_handle_runtime_errors("getBlocks",
+					     err.getError().toValue(),
+					     NULL);
+	} catch (...) {
+              error("Unknown error from getBlocks().");
+	}
+
+	return vec;
+}
+
+extern Midplane::ConstPtr bridge_get_midplane(ComputeHardware::ConstPtr bgqsys,
+					      ba_mp_t *ba_mp)
+{
+	Midplane::ConstPtr mp_ptr;
+
+	assert(ba_mp);
+
+	try {
+		Coordinates::Coordinates coords(
+			ba_mp->coord[0], ba_mp->coord[1],
+			ba_mp->coord[2], ba_mp->coord[3]);
+		mp_ptr = bgqsys->getMidplane(coords);
+	} catch (const bgsched::InputException& err) {
+		bridge_handle_input_errors(
+			"ComputeHardware::getMidplane",
+			err.getError().toValue(), NULL);
+	} catch (...) {
+              error("Unknown error from ComputeHardware::getMidplane.");
+	}
+	return mp_ptr;
+}
+
+extern Node::ConstPtrs bridge_get_midplane_nodes(const std::string& loc)
+{
+	Node::ConstPtrs vec;
+
+	try {
+		vec = getMidplaneNodes(loc);
+	} catch (const bgsched::DatabaseException& err) {
+		bridge_handle_database_errors("getMidplaneNodes",
+					      err.getError().toValue());
+	} catch (const bgsched::InputException& err) {
+		bridge_handle_input_errors("getMidplaneNodes",
+					   err.getError().toValue(),
+					   NULL);
+	} catch (const bgsched::InternalException& err) {
+		bridge_handle_internal_errors("getMidplaneNodes",
+						   err.getError().toValue());
+	} catch (...) {
+                error("Unknown error from getMidplaneNodes.");
+	}
+	return vec;
+}
+
+extern NodeBoard::ConstPtr bridge_get_nodeboard(Midplane::ConstPtr mp_ptr,
+						int nodeboard_num)
+{
+	NodeBoard::ConstPtr nb_ptr;
+
+	try {
+		nb_ptr = mp_ptr->getNodeBoard(nodeboard_num);
+	} catch (const bgsched::InputException& err) {
+		bridge_handle_input_errors("Midplane::getNodeBoard",
+					   err.getError().toValue(),
+					   NULL);
+	} catch (...) {
+                error("Unknown error from Midplane::getNodeBoard.");
+	}
+	return nb_ptr;
+}
+
+extern NodeBoard::ConstPtrs bridge_get_nodeboards(const std::string& mp_loc)
+{
+	NodeBoard::ConstPtrs nb_ptr;
+
+	try {
+		nb_ptr = getNodeBoards(mp_loc);
+	} catch (const bgsched::InputException& err) {
+		bridge_handle_input_errors("getNodeBoards",
+					   err.getError().toValue(),
+					   NULL);
+	} catch (...) {
+                error("Unknown error from getNodeBoards.");
+	}
+	return nb_ptr;
+}
+
+extern Switch::ConstPtr bridge_get_switch(Midplane::ConstPtr mp_ptr, int dim)
+{
+	Switch::ConstPtr switch_ptr;
+
+	try {
+		switch_ptr = mp_ptr->getSwitch(dim);
+	} catch (const bgsched::InputException& err) {
+		bridge_handle_input_errors("Midplane::getSwitch",
+					   err.getError().toValue(),
+					   NULL);
+	} catch (...) {
+                error("Unknown error from Midplane::getSwitch.");
+	}
+	return switch_ptr;
+}
+
+extern ComputeHardware::ConstPtr bridge_get_compute_hardware()
+{
+	ComputeHardware::ConstPtr bgqsys;
+
+	try {
+		bgqsys = getComputeHardware();
+	} catch (const bgsched::InternalException& err) {
+		bridge_handle_internal_errors("getComputeHardware",
+					      err.getError().toValue());
+	} catch (...) {
+		error("Unknown error from getComputeHardware");
+	}
+	return bgqsys;
 }
 #endif

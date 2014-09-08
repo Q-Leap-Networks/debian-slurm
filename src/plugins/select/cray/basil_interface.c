@@ -6,12 +6,18 @@
  */
 #include "basil_interface.h"
 #include "basil_alps.h"
+#include "src/common/gres.h"
 #include "src/common/slurm_accounting_storage.h"
 
 #define _DEBUG 0
 
 int dim_size[3] = {0, 0, 0};
 
+typedef struct args_sig_basil {
+	uint32_t resv_id;
+	int      signal;
+	uint16_t delay;
+} args_sig_basil_t;
 
 /*
  * Following routines are from src/plugins/select/bluegene/plugin/jobinfo.c
@@ -252,7 +258,7 @@ extern int basil_inventory(void)
 				node_ptr->down_time = now;
 			if (IS_NODE_DOWN(node_ptr)) {
 				/* node still down */
-			} else if (slurmctld_conf.slurmd_timeout &&
+			} else if ((slurmctld_conf.slurmd_timeout == 0) ||
 				   ((now - node_ptr->down_time) <
 				    slurmctld_conf.slurmd_timeout)) {
 				node_ptr->node_state |= NODE_STATE_NO_RESPOND;
@@ -684,6 +690,36 @@ extern int basil_geometry(struct node_record *node_ptr_array, int node_cnt)
 	return SLURM_SUCCESS;
 }
 
+struct basil_accel_param* build_accel_param(struct job_record* job_ptr)
+{
+	int gpu_mem_req;
+	struct basil_accel_param* head,* bap_ptr;
+
+	gpu_mem_req = gres_plugin_get_job_value_by_type(job_ptr->gres_list,
+							"gpu_mem");
+
+	if (gpu_mem_req == NO_VAL)
+		gpu_mem_req = 0;
+
+	if (!job_ptr) {
+		info("The job_ptr is NULL; nothing to do!");
+		return NULL;
+	} else if (!job_ptr->details) {
+		info("The job_ptr->details is NULL; nothing to do!");
+		return NULL;
+	}
+
+	head = xmalloc(sizeof(struct basil_accel_param));
+	bap_ptr = head;
+	bap_ptr->type = BA_GPU;	/* Currently BASIL only permits
+				 * generic resources of type GPU. */
+	bap_ptr->memory_mb = gpu_mem_req;
+	bap_ptr->next = NULL;
+
+	return head;
+}
+
+
 /**
  * do_basil_reserve - create a BASIL reservation.
  * IN job_ptr - pointer to job which has just been allocated resources
@@ -701,6 +737,7 @@ extern int do_basil_reserve(struct job_record *job_ptr)
 	int i, first_bit, last_bit;
 	long rc;
 	char *user, batch_id[16];
+	struct basil_accel_param* bap;
 
 	if (!job_ptr->job_resrcs || job_ptr->job_resrcs->nhosts == 0)
 		return SLURM_SUCCESS;
@@ -747,7 +784,7 @@ extern int do_basil_reserve(struct job_record *job_ptr)
 			fatal("can not read basil_node_id from %s",
 			      node_ptr->name);
 
-		if (ns_add_node(&ns_head, basil_node_id) != 0) {
+		if (ns_add_node(&ns_head, basil_node_id, false) != 0) {
 			error("can not add node %s (nid%05u)", node_ptr->name,
 			      basil_node_id);
 			free_nodespec(ns_head);
@@ -775,8 +812,8 @@ extern int do_basil_reserve(struct job_record *job_ptr)
 			 * mppmem and use it as the level for all
 			 * nodes (mppmem is 0 when coming in).
 			 */
+			node_mem /= mppnppn ? mppnppn : node_cpus;
 			tmp_mppmem = node_min_mem = MIN(node_mem, node_min_mem);
-			tmp_mppmem /= mppnppn ? mppnppn : node_cpus;
 
 			/* If less than or equal to 0 make sure you
 			   have 1 at least since 0 means give all the
@@ -803,8 +840,14 @@ extern int do_basil_reserve(struct job_record *job_ptr)
 
 	snprintf(batch_id, sizeof(batch_id), "%u", job_ptr->job_id);
 	user = uid_to_string(job_ptr->user_id);
+
+	if (job_ptr->gres_list)
+		bap = build_accel_param(job_ptr);
+	else
+		bap = NULL;
+
 	rc   = basil_reserve(user, batch_id, mppwidth, mppdepth, mppnppn,
-			     mppmem, ns_head, NULL);
+			     mppmem, ns_head, bap);
 	xfree(user);
 	if (rc <= 0) {
 		/* errno value will be resolved by select_g_job_begin() */
@@ -913,6 +956,73 @@ extern int do_basil_signal(struct job_record *job_ptr, int signal)
 				basil_strerror(rc));
 	}
 	return SLURM_SUCCESS;
+}
+
+void *_sig_basil(void *args)
+{
+	args_sig_basil_t *args_sig_basil = (args_sig_basil_t *) args;
+	int rc;
+
+	sleep(args_sig_basil->delay);
+	rc = basil_signal_apids(args_sig_basil->resv_id,
+				args_sig_basil->signal, NULL);
+	if (rc) {
+		error("could not signal APIDs of resId %u: %s",
+		      args_sig_basil->resv_id, basil_strerror(rc));
+	}
+	xfree(args);
+	return NULL;
+}
+
+/**
+ * queue_basil_signal  -  queue job signal on to any APIDs
+ * IN job_ptr - job to be signalled
+ * IN signal  - signal(7) number
+ * IN delay   - how long to delay the signal, in seconds
+ * Only signal job if an ALPS reservation exists (non-0 reservation ID).
+ */
+extern void queue_basil_signal(struct job_record *job_ptr, int signal,
+			       uint16_t delay)
+{
+	args_sig_basil_t *args_sig_basil;
+	pthread_attr_t attr_sig_basil;
+	pthread_t thread_sig_basil;
+	uint32_t resv_id;
+
+	if (_get_select_jobinfo(job_ptr->select_jobinfo->data,
+			SELECT_JOBDATA_RESV_ID, &resv_id) != SLURM_SUCCESS) {
+		error("can not read resId for JobId=%u", job_ptr->job_id);
+		return;
+	}
+	if (resv_id == 0)
+		return;
+	if ((delay == 0) || (delay == (uint16_t) NO_VAL)) {
+		/* Send the signal now */
+		int rc = basil_signal_apids(resv_id, signal, NULL);
+
+		if (rc)
+			error("could not signal APIDs of resId %u: %s", resv_id,
+			      basil_strerror(rc));
+		return;
+	}
+
+	/* Create a thread to send the signal later */
+	slurm_attr_init(&attr_sig_basil);
+	if (pthread_attr_setdetachstate(&attr_sig_basil,
+					PTHREAD_CREATE_DETACHED)) {
+		error("pthread_attr_setdetachstate error %m");
+		return;
+	}
+	args_sig_basil = xmalloc(sizeof(args_sig_basil_t));
+	args_sig_basil->resv_id = resv_id;
+	args_sig_basil->signal  = signal;
+	args_sig_basil->delay   = delay;
+	if (pthread_create(&thread_sig_basil, &attr_sig_basil,
+			_sig_basil, (void *) args_sig_basil)) {
+		error("pthread_create error %m");
+		return;
+	}
+	slurm_attr_destroy(&attr_sig_basil);
 }
 
 /**

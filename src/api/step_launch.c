@@ -125,7 +125,7 @@ static struct io_operations message_socket_ops = {
  *      slurm_step_launch_params_t structure with default values.
  *	This function will NOT allocate any new memory.
  * IN ptr - pointer to a structure allocated by the user.
- *      The structure will be intialized.
+ *      The structure will be initialized.
  */
 void slurm_step_launch_params_t_init (slurm_step_launch_params_t *ptr)
 {
@@ -138,6 +138,17 @@ void slurm_step_launch_params_t_init (slurm_step_launch_params_t *ptr)
 	memcpy(&ptr->local_fds, &fds, sizeof(fds));
 	ptr->gid = getgid();
 	ptr->acctg_freq  = (uint16_t) NO_VAL;
+}
+
+/*
+ * Specify the plugin name to be used. This may be needed to specify the
+ * non-default MPI plugin when using SLURM API to launch tasks.
+ * IN plugin name - "none", "pmi2", etc.
+ * RET SLURM_SUCCESS or SLURM_ERROR (with errno set)
+ */
+extern int slurm_mpi_plugin_init(char *plugin_name)
+{
+	return mpi_hook_client_init(plugin_name);
 }
 
 /*
@@ -230,6 +241,7 @@ int slurm_step_launch (slurm_step_ctx_t *ctx,
 	} else {
 		launch.cwd = _lookup_cwd();
 	}
+	launch.alias_list	= params->alias_list;
 	launch.nnodes		= ctx->step_resp->step_layout->node_cnt;
 	launch.ntasks		= ctx->step_resp->step_layout->task_cnt;
 	launch.slurmd_debug	= params->slurmd_debug;
@@ -489,11 +501,13 @@ void slurm_step_launch_wait_finish(slurm_step_ctx_t *ctx)
 	eio_signal_shutdown(sls->msg_handle);
 
 	pthread_mutex_unlock(&sls->lock);
-	pthread_join(sls->msg_thread, NULL);
+	if (sls->msg_thread)
+		pthread_join(sls->msg_thread, NULL);
 	pthread_mutex_lock(&sls->lock);
 	pmi_kvs_free();
 
-	eio_handle_destroy(sls->msg_handle);
+	if (sls->msg_handle)
+		eio_handle_destroy(sls->msg_handle);
 
 	/* Shutdown the io timeout thread, if one exists */
 	if (sls->io_timeout_thread_created) {
@@ -820,7 +834,7 @@ static int _msg_thr_create(struct step_launch_state *sls, int num_nodes)
 
 	for (i = 0; i < sls->num_resp_port; i++) {
 		if (net_stream_listen(&sock, &port) < 0) {
-			error("unable to intialize step launch listening "
+			error("unable to initialize step launch listening "
 			      "socket: %m");
 			return SLURM_ERROR;
 		}
@@ -1161,6 +1175,16 @@ _step_missing_handler(struct step_launch_state *sls, slurm_msg_t *missing_msg)
 	hostset_destroy(all_nodes);
 }
 
+/* This RPC will probably only be used on BlueGene/Q systems to signal the
+ * runjob process */
+static void
+_step_step_signal(struct step_launch_state *sls, slurm_msg_t *signal_msg)
+{
+	job_step_kill_msg_t *step_signal = signal_msg->data;
+	debug2("Signal %u requested for step %u.%u", step_signal->signal,
+	       step_signal->job_id, step_signal->job_step_id);
+}
+
 /*
  * The TCP connection that was used to send the task_spawn_io_msg_t message
  * will be used as the user managed IO stream.  The remote end of the TCP stream
@@ -1269,6 +1293,11 @@ _handle_msg(void *arg, slurm_msg_t *msg)
 		_step_missing_handler(sls, msg);
 		slurm_free_srun_step_missing_msg(msg->data);
 		break;
+	case SRUN_STEP_SIGNAL:
+		debug2("received step signal RPC");
+		_step_step_signal(sls, msg);
+		slurm_free_job_step_kill_msg(msg->data);
+		break;
 	case PMI_KVS_PUT_REQ:
 		debug2("PMI_KVS_PUT_REQ received");
 		rc = pmi_kvs_put((struct kvs_comm_set *) msg->data);
@@ -1285,7 +1314,7 @@ _handle_msg(void *arg, slurm_msg_t *msg)
 		_task_user_managed_io_handler(sls, msg);
 		break;
 	default:
-		error("received spurious message type: %d",
+		error("received spurious message type: %u",
 		      msg->msg_type);
 		break;
 	}
@@ -1306,10 +1335,13 @@ static int _fail_step_tasks(slurm_step_ctx_t *ctx, char *node, int ret_code)
 	slurm_msg_t req;
 	step_complete_msg_t msg;
 	int rc = -1;
-	int nodeid = NO_VAL;
+	int nodeid = 0;
 	struct step_launch_state *sls = ctx->launch_state;
 
+#ifndef HAVE_FRONT_END
+	/* It is always 0 for front end systems */
 	nodeid = nodelist_find(ctx->step_resp->step_layout->node_list, node);
+#endif
 
 	pthread_mutex_lock(&sls->lock);
 	sls->abort = true;
@@ -1663,7 +1695,3 @@ _check_io_timeout(void *_sls)
 	pthread_mutex_unlock(&sls->lock);
 	return NULL;
 }
-
-
-
-

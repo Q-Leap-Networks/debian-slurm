@@ -68,6 +68,8 @@
 #if defined(HAVE_AIX) || defined(__sun) || defined(__APPLE__)
 #  include <sys/times.h>
 #  include <sys/types.h>
+#elif defined(__NetBSD__)
+#  include <sys/times.h> /* for times(3) */
 #else
 /* NOTE: Getting the system uptime on AIX uses completely different logic.
  * sys/sysinfo.h on AIX defines structures that conflict with SLURM code. */
@@ -98,108 +100,6 @@
 #include "src/slurmd/slurmd/get_mach_stat.h"
 
 /* #define DEBUG_DETAIL	1 */	/* enable detailed debugging within SLURM */
-
-#if DEBUG_MODULE
-#define DEBUG_DETAIL	1
-#define error 	printf
-#define debug 	printf
-#define debug1	printf
-#define debug2	printf
-#define debug3	printf
-#undef xmalloc
-#define xmalloc	malloc
-#undef xfree
-#define xfree	free
-/* main is used here for testing purposes only:				*/
-/* % gcc -DDEBUG_MODULE get_mach_stat.c -I../../.. -g -DUSE_CPU_SPEED	*/
-int
-main(int argc, char * argv[])
-{
-	int error_code;
-	uint16_t sockets, cores, threads;
-	uint16_t block_map_size;
-	uint16_t *block_map, *block_map_inv;
-	struct config_record this_node;
-	char node_name[MAX_SLURM_NAME];
-	float speed;
-	uint16_t testnumproc = 0;
-	uint32_t up_time = 0;
-	int days, hours, mins, secs;
-	char* _cpuinfo_path = "/proc/cpuinfo";
-
-	if (argc > 1) {
-	    	_cpuinfo_path = argv[1];
-		testnumproc = 1024;	/* since may not match test host */
-	}
-	debug3("%s:", _cpuinfo_path);
-
-	error_code = get_mach_name(node_name);
-	if (error_code != 0)
-		exit(1);    /* The show is all over without a node name */
-
-	error_code += get_procs(&this_node.cpus);
-	error_code += get_cpuinfo(MAX(this_node.cpus, testnumproc),
-				  &this_node.sockets,
-				  &this_node.cores,
-				  &this_node.threads,
-				  &block_map_size,
-				  &block_map, &block_map_inv);
-	xfree(block_map);	/* not used here */
-	xfree(block_map_inv);	/* not used here */
-	error_code += get_memory(&this_node.real_memory);
-	error_code += get_tmp_disk(&this_node.tmp_disk, "/tmp");
-	error_code += get_up_time(&up_time);
-#ifdef USE_CPU_SPEED
-	error_code += get_speed(&speed);
-#endif
-
-	debug3("");
-	debug3("NodeName=%s CPUs=%u Sockets=%u Cores=%u Threads=%u",
-		node_name, this_node.cpus,
-		this_node.sockets, this_node.cores, this_node.threads);
-	debug3("\tRealMemory=%u TmpDisk=%u Speed=%f",
-		this_node.real_memory, this_node.tmp_disk, speed);
-	secs  = up_time % 60;
-	mins  = (up_time / 60) % 60;
-	hours = (up_time / 3600) % 24;
-	days  = (up_time / 86400);
-	debug3("\tUpTime=%u=%u-%2.2u:%2.2u:%2.2u",
-	       up_time, days, hours, mins, secs);
-	if (error_code != 0)
-		debug3("get_mach_stat error_code=%d encountered", error_code);
-	exit (error_code);
-}
-
-
-/* gethostname_short - equivalent to gethostname, but return only the first
- * component of the fully qualified name
- * (e.g. "linux123.foo.bar" becomes "linux123")
- * OUT name
- */
-int
-gethostname_short (char *name, size_t len)
-{
-	int error_code, name_len;
-	char *dot_ptr, path_name[1024];
-
-	error_code = gethostname (path_name, sizeof(path_name));
-	if (error_code)
-		return error_code;
-
-	dot_ptr = strchr (path_name, '.');
-	if (dot_ptr == NULL)
-		dot_ptr = path_name + strlen(path_name);
-	else
-		dot_ptr[0] = '\0';
-
-	name_len = (dot_ptr - path_name);
-	if (name_len > len)
-		return ENAMETOOLONG;
-
-	strcpy (name, path_name);
-	return 0;
-}
-#endif
 
 #ifdef USE_OS_NAME
 /*
@@ -282,7 +182,7 @@ get_memory(uint32_t *real_memory)
 	int mem;
 	size_t len = sizeof(mem);
 	if (sysctlbyname("hw.physmem", &mem, &len, NULL, 0) == -1) {
-		error("get_procs: error running sysctl(HW_PHYSMEM)");
+		error("get_memory: error running sysctl(HW_PHYSMEM)");
 		return EINVAL;
 	}
 	*real_memory = mem;
@@ -343,7 +243,7 @@ get_tmp_disk(uint32_t *tmp_disk, char *tmp_fs)
 
 extern int get_up_time(uint32_t *up_time)
 {
-#if defined(HAVE_AIX) || defined(__sun)	|| defined(__APPLE__)
+#if defined(HAVE_AIX) || defined(__sun) || defined(__APPLE__) || defined(__NetBSD__)
 	clock_t tm;
 	struct tms buf;
 

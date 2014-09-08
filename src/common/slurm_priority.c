@@ -49,7 +49,7 @@ typedef struct slurm_priority_ops {
 	double   (*calc_fs_factor) (long double usage_efctv,
 				    long double shares_norm);
 	List	 (*get_priority_factors)
-	(priority_factors_request_msg_t *req_msg);
+	(priority_factors_request_msg_t *req_msg, uid_t uid);
 } slurm_priority_ops_t;
 
 typedef struct slurm_priority_context {
@@ -63,6 +63,7 @@ typedef struct slurm_priority_context {
 static slurm_priority_context_t * g_priority_context = NULL;
 static pthread_mutex_t		g_priority_context_lock =
 	PTHREAD_MUTEX_INITIALIZER;
+static bool init_run = false;
 
 /*
  * Local functions
@@ -198,6 +199,9 @@ extern int slurm_priority_init(void)
 	int retval = SLURM_SUCCESS;
 	char *priority_type = NULL;
 
+	if ( init_run && g_priority_context )
+		return retval;
+
 	slurm_mutex_lock( &g_priority_context_lock );
 
 	if ( g_priority_context )
@@ -218,7 +222,8 @@ extern int slurm_priority_init(void)
 		_priority_context_destroy( g_priority_context );
 		g_priority_context = NULL;
 		retval = SLURM_ERROR;
-	}
+	} else
+		init_run = true;
 
 done:
 	slurm_mutex_unlock( &g_priority_context_lock );
@@ -233,6 +238,7 @@ extern int slurm_priority_fini(void)
 	if (!g_priority_context)
 		return SLURM_SUCCESS;
 
+	init_run = false;
 	rc = _priority_context_destroy( g_priority_context );
 	g_priority_context = NULL;
 	return rc;
@@ -276,10 +282,10 @@ extern double priority_g_calc_fs_factor(long double usage_efctv,
 }
 
 extern List priority_g_get_priority_factors_list(
-	priority_factors_request_msg_t *req_msg)
+	priority_factors_request_msg_t *req_msg, uid_t uid)
 {
 	if (slurm_priority_init() < 0)
 		return NULL;
 
-	return (*(g_priority_context->ops.get_priority_factors))(req_msg);
+	return (*(g_priority_context->ops.get_priority_factors))(req_msg, uid);
 }

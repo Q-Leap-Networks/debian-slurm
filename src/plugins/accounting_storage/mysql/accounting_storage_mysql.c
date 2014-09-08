@@ -260,9 +260,8 @@ static void _process_running_jobs_result(char *cluster_name,
 }
 
 /* this function is here to see if any of what we are trying to remove
- * has jobs that are or were once running.  So if we have jobs and the
- * object is less than a day old we don't want to delete it only set
- * the deleted flag.
+ * has jobs that are not completed.  If we have jobs and the object is less
+ * than a day old we don't want to delete it, only set the deleted flag.
  */
 static bool _check_jobs_before_remove(mysql_conn_t *mysql_conn,
 				      char *cluster_name,
@@ -295,11 +294,11 @@ static bool _check_jobs_before_remove(mysql_conn_t *mysql_conn,
 			"where t1.lft between "
 			"t2.lft and t2.rgt && (%s) "
 			"and t0.id_assoc=t1.id_assoc "
-			"and t0.time_end=0 && t0.state=%d;",
+			"and t0.time_end=0 && t0.state<%d;",
 			object, cluster_name, job_table,
 			cluster_name, assoc_table,
 			cluster_name, assoc_table,
-			assoc_char, JOB_RUNNING);
+			assoc_char, JOB_COMPLETE);
 		xfree(object);
 	} else {
 		query = xstrdup_printf(
@@ -368,10 +367,10 @@ static bool _check_jobs_before_remove_assoc(mysql_conn_t *mysql_conn,
 		query = xstrdup_printf("select %s "
 				       "from \"%s_%s\" as t1, \"%s_%s\" as t2 "
 				       "where (%s) and t1.id_assoc=t2.id_assoc "
-				       "and t1.time_end=0 && t1.state=%d;",
+				       "and t1.time_end=0 && t1.state<%d;",
 				       object, cluster_name, job_table,
 				       cluster_name, assoc_table,
-				       assoc_char, JOB_RUNNING);
+				       assoc_char, JOB_COMPLETE);
 		xfree(object);
 	} else {
 		query = xstrdup_printf(
@@ -498,13 +497,14 @@ static int _as_mysql_acct_check_tables(mysql_conn_t *mysql_conn)
 		{ "grp_jobs", "int default NULL" },
 		{ "grp_submit_jobs", "int default NULL" },
 		{ "grp_cpus", "int default NULL" },
+		{ "grp_mem", "int default NULL" },
 		{ "grp_nodes", "int default NULL" },
 		{ "grp_wall", "int default NULL" },
 		{ "grp_cpu_mins", "bigint default NULL" },
 		{ "grp_cpu_run_mins", "bigint default NULL" },
 		{ "preempt", "text not null default ''" },
 		{ "preempt_mode", "int default 0" },
-		{ "priority", "int default 0" },
+		{ "priority", "int unsigned default 0" },
 		{ "usage_factor", "double default 1.0 not null" },
 		{ "usage_thres", "double default NULL" },
 		{ NULL, NULL}
@@ -867,6 +867,7 @@ extern int create_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name)
 		{ "grp_jobs", "int default NULL" },
 		{ "grp_submit_jobs", "int default NULL" },
 		{ "grp_cpus", "int default NULL" },
+		{ "grp_mem", "int default NULL" },
 		{ "grp_nodes", "int default NULL" },
 		{ "grp_wall", "int default NULL" },
 		{ "grp_cpu_mins", "bigint default NULL" },
@@ -938,7 +939,7 @@ extern int create_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name)
 		{ "nodes_alloc", "int unsigned not null" },
 		{ "node_inx", "text" },
 		{ "partition", "tinytext not null" },
-		{ "priority", "int not null" },
+		{ "priority", "int unsigned not null" },
 		{ "state", "smallint unsigned not null" },
 		{ "timelimit", "int unsigned default 0 not null" },
 		{ "time_submit", "int unsigned default 0 not null" },
@@ -1351,6 +1352,8 @@ extern int setup_association_limits(slurmdb_association_rec_t *assoc,
 			assoc->grp_cpus = INFINITE;
 		if (assoc->grp_jobs == NO_VAL)
 			assoc->grp_jobs = INFINITE;
+		if (assoc->grp_mem == NO_VAL)
+			assoc->grp_mem = INFINITE;
 		if (assoc->grp_nodes == NO_VAL)
 			assoc->grp_nodes = INFINITE;
 		if (assoc->grp_submit_jobs == NO_VAL)
@@ -1433,6 +1436,17 @@ extern int setup_association_limits(slurmdb_association_rec_t *assoc,
 		xstrcat(*cols, ", grp_jobs");
 		xstrfmtcat(*vals, ", %u", assoc->grp_jobs);
 		xstrfmtcat(*extra, ", grp_jobs=%u", assoc->grp_jobs);
+	}
+
+	if (assoc->grp_mem == INFINITE) {
+		xstrcat(*cols, ", grp_mem");
+		xstrcat(*vals, ", NULL");
+		xstrcat(*extra, ", grp_mem=NULL");
+	} else if ((assoc->grp_mem != NO_VAL)
+		   && ((int32_t)assoc->grp_mem >= 0)) {
+		xstrcat(*cols, ", grp_mem");
+		xstrfmtcat(*vals, ", %u", assoc->grp_mem);
+		xstrfmtcat(*extra, ", grp_mem=%u", assoc->grp_mem);
 	}
 
 	if (assoc->grp_nodes == INFINITE) {
@@ -2500,7 +2514,7 @@ end_it:
 	return ret_list;
 }
 
-extern List acct_storage_p_get_config(void *db_conn)
+extern List acct_storage_p_get_config(void *db_conn, char *config_name)
 {
 	return NULL;
 }

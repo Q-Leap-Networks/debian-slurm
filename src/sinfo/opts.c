@@ -269,13 +269,13 @@ extern void parse_command_line(int argc, char *argv[])
 		} else if ( params.node_flag ) {
 			params.node_field_flag = true;	/* compute size later */
 			params.format = params.long_output ?
-			  "%N %.6D %.9P %.11T %.4c %.8z %.6m %.8d %.6w %.8f %20R" :
+			  "%N %.6D %.9P %.11T %.4c %.8z %.6m %.8d %.6w %.8f %20E" :
 			  "%N %.6D %.9P %6t";
 
 		} else if (params.list_reasons) {
 			params.format = params.long_output ?
-			  "%20R %12U %19H %6t %N" :
-			  "%20R %9u %19H %N";
+			  "%20E %12U %19H %6t %N" :
+			  "%20E %9u %19H %N";
 
 		} else if ((env_val = getenv ("SINFO_FORMAT"))) {
 			params.format = xstrdup(env_val);
@@ -533,9 +533,13 @@ _parse_format( char* format )
 					field_size,
 					right_justify,
 					suffix );
-		}
-/*		else if (field[0] == 'E') see 'R' below */
-		else if (field[0] == 'f') {
+		} else if (field[0] == 'E') {
+			params.match_flags.reason_flag = true;
+			format_add_reason( params.format_list,
+					field_size,
+					right_justify,
+					suffix );
+		} else if (field[0] == 'f') {
 			params.match_flags.features_flag = true;
 			format_add_features( params.format_list,
 					field_size,
@@ -629,9 +633,9 @@ _parse_format( char* format )
 					field_size,
 					right_justify,
 					suffix );
-		} else if ((field[0] == 'E') || (field[0] == 'R')) {
-			params.match_flags.reason_flag = true;
-			format_add_reason( params.format_list,
+		} else if (field[0] == 'R') {
+			params.match_flags.partition_flag = true;
+			format_add_partition_name( params.format_list,
 					field_size,
 					right_justify,
 					suffix );

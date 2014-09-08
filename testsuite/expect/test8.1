@@ -56,8 +56,14 @@ if {$type == 0} {
 
 if {![string compare $type "Q"]} {
 	set geometry    "1x1x1x1"
+	set expect_geo  $geometry
+
+	if {[get_bluegene_allow_sub_blocks] == 1} {
+		set expect_geo  "4x4x4x4x2"
+	}
 } else {
 	set geometry    "1x1x1"
+	set expect_geo  $geometry
 }
 
 #
@@ -103,6 +109,15 @@ if {$job_id == 0} {
 }
 
 #
+# Wait for job to start
+#
+if {[wait_for_job $job_id "RUNNING"] != 0} {
+	send_user "\nFAILURE: waiting for job to start\n"
+	cancel_job $job_id
+	exit 1
+}
+
+#
 # Confirm parameters passed into SLURM
 #
 set matches 0
@@ -116,7 +131,7 @@ expect {
 		incr matches
 		exp_continue
 	}
-	-re "Geometry=$geometry" {
+	-re "Geometry=$expect_geo" {
 		incr matches
 		exp_continue
 	}
@@ -167,6 +182,15 @@ if {$job_id == 0} {
 }
 
 #
+# Wait for job to start
+#
+if {[wait_for_job $job_id "RUNNING"] != 0} {
+	send_user "\nFAILURE: waiting for job to start\n"
+	cancel_job $job_id
+	exit 1
+}
+
+#
 # Confirm parameters passed into SLURM
 #
 set matches 0
@@ -180,7 +204,7 @@ expect {
 		incr matches
 		exp_continue
 	}
-	-re "Geometry=$geometry" {
+	-re "Geometry=$expect_geo" {
 		incr matches
 		exp_continue
 	}

@@ -35,13 +35,18 @@ set test_id          "8.20"
 set exit_code        0
 set job_id           0
 set job_size         32
+set prompt           "PROMPT: "
 
 print_header $test_id
 
 if {([test_bluegene] == 0) || [string compare [get_bluegene_type] "Q"]} {
 	send_user "\nWARNING: This test is only compatable with Bluegene/Q systems\n"
 	exit $exit_code
+} elseif (![test_emulated]) {
+	send_user "\nWARNING: This test will only work on an emulated Blugene/Q system."
+	exit $exit_code
 }
+
 
 #
 # Spawn a job via salloc
@@ -52,9 +57,14 @@ set salloc_pid [spawn $salloc -N$job_size -t1 $bin_bash]
 expect {
 	-re "Granted job allocation ($number)" {
 		set job_id $expect_out(1,string)
+		send "export PS1=\"$prompt\"\r"
 		exp_continue
 	}
-	-re $prompt {
+	-re "\"$prompt" {
+		# skip this, just echo of setting prompt"
+		exp_continue
+	}
+	-re "$prompt" {
 		#send_user "Job initiated\n"
 	}
 	timeout {
@@ -79,7 +89,7 @@ set timeout 5
 set job_start1 -1
 send "$scontrol show job $job_id\r"
 expect {
-	-re "BP_List=($alpha_numeric).($digit)($digit)($digit)($digit)($digit)x($digit)($digit)($digit)($digit)($digit)" {
+	-re "MidplaneList=($alpha_numeric).($digit)($digit)($digit)($digit)($digit)x($digit)($digit)($digit)($digit)($digit)" {
 		set job_prefix $expect_out(1,string)
 		set job_start1 $expect_out(2,string)
 		set job_start2 $expect_out(3,string)
@@ -93,7 +103,7 @@ expect {
 		set job_fini5 $expect_out(11,string)
 		exp_continue
 	}
-	-re $prompt {
+	-re "$prompt" {
 		#break
 	}
 	timeout {
@@ -108,10 +118,10 @@ if {$job_start1 == -1} {
 }
 send_user "\nJob allocation\n"
 send_user "prefix: $job_prefix\n"
-send_user "dim 1:  $job_start1 to $job_fini1  "
-send_user "dim 2:  $job_start2 to $job_fini2  "
-send_user "dim 3:  $job_start3 to $job_fini3  "
-send_user "dim 4:  $job_start4 to $job_fini4  "
+send_user "dim 1:  $job_start1 to $job_fini1\n"
+send_user "dim 2:  $job_start2 to $job_fini2\n"
+send_user "dim 3:  $job_start3 to $job_fini3\n"
+send_user "dim 4:  $job_start4 to $job_fini4\n"
 send_user "dim 5:  $job_start5 to $job_fini5\n"
 
 set job_dim1 [expr $job_fini1 - $job_start1 + 1]
@@ -146,8 +156,10 @@ for {set step_size 1 } {$step_size <= $job_size} {set step_size [expr $step_size
 	send_user "\nRunning step $job_id.$step_id at size $step_size\n"
 	set step_start1 -1
 	send "$srun -N$step_size --test-only $scontrol show step $job_id.$step_id\r"
+	# sleep here just to make sure we get the scontrol output from the srun
+	sleep .25
 	expect {
-		-re "BP_List=($alpha_numeric).($digit)($digit)($digit)($digit)($digit)x($digit)($digit)($digit)($digit)($digit)" {
+		-re "MidplaneList=($alpha_numeric).($digit)($digit)($digit)($digit)($digit)x($digit)($digit)($digit)($digit)($digit)" {
 			set step_prefix $expect_out(1,string)
 			set step_start1 $expect_out(2,string)
 			set step_start2 $expect_out(3,string)
@@ -161,7 +173,7 @@ for {set step_size 1 } {$step_size <= $job_size} {set step_size [expr $step_size
 			set step_fini5 $expect_out(11,string)
 			exp_continue
 		}
-		-re "BP_List=($alpha_numeric).($digit)($digit)($digit)($digit)($digit)" {
+		-re "MidplaneList=($alpha_numeric).($digit)($digit)($digit)($digit)($digit)" {
 			set step_prefix $expect_out(1,string)
 			set step_start1 $expect_out(2,string)
 			set step_start2 $expect_out(3,string)
@@ -175,7 +187,7 @@ for {set step_size 1 } {$step_size <= $job_size} {set step_size [expr $step_size
 			set step_fini5 $step_start5
 			exp_continue
 		}
-		-re $prompt {
+		-re "$prompt" {
 			#break
 		}
 		timeout {
@@ -191,10 +203,10 @@ for {set step_size 1 } {$step_size <= $job_size} {set step_size [expr $step_size
 
 	send_user "\nStep allocation\n"
 	send_user "prefix: $step_prefix\n"
-	send_user "dim 1:  $step_start1 to $step_fini1  "
-	send_user "dim 2:  $step_start2 to $step_fini2  "
-	send_user "dim 3:  $step_start3 to $step_fini3  "
-	send_user "dim 4:  $step_start4 to $step_fini4  "
+	send_user "dim 1:  $step_start1 to $step_fini1\n"
+	send_user "dim 2:  $step_start2 to $step_fini2\n"
+	send_user "dim 3:  $step_start3 to $step_fini3\n"
+	send_user "dim 4:  $step_start4 to $step_fini4\n"
 	send_user "dim 5:  $step_start5 to $step_fini5\n"
 
 	set step_dim1 [expr $step_fini1 - $step_start1 + 1]

@@ -584,7 +584,7 @@ int _print_node_list(sinfo_data_t * sinfo_data, int width,
 	} else {
 		char *title = "NODELIST";
 		if(params.cluster_flags & CLUSTER_FLAG_BG)
-			title = "BP_LIST";
+			title = "MIDPLANELIST";
 
 		_print_str(title, width, right_justify, false);
 	}
@@ -716,13 +716,31 @@ int _print_partition(sinfo_data_t * sinfo_data, int width,
 			char *tmp;
 			tmp = xstrdup(sinfo_data->part_info->name);
 			if (sinfo_data->part_info->flags & PART_FLAG_DEFAULT) {
-				if (strlen(tmp) < width)
+				if ( (strlen(tmp) < width) || (width == 0) )
 					xstrcat(tmp, "*");
 				else if (width > 0)
 					tmp[width-1] = '*';
 			}
 			_print_str(tmp, width, right_justify, true);
 			xfree(tmp);
+		}
+	} else
+		_print_str("PARTITION", width, right_justify, true);
+
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
+int _print_partition_name(sinfo_data_t * sinfo_data, int width,
+			  bool right_justify, char *suffix)
+{
+	if (sinfo_data) {
+		if (sinfo_data->part_info == NULL)
+			_print_str("n/a", width, right_justify, true);
+		else {
+			_print_str(sinfo_data->part_info->name, width,
+				   right_justify, true);
 		}
 	} else
 		_print_str("PARTITION", width, right_justify, true);

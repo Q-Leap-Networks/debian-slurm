@@ -49,9 +49,8 @@ typedef struct {
 	char *bg_block_name;
 	uint16_t bg_conn_type[HIGHEST_DIMENSIONS];
 	uint16_t bg_node_use;
-	char *bg_user_name;
 	char *ionode_str;
-	int job_running;
+	List job_list;
 	int letter_num;
 	List nodelist;
 	char *mp_str;
@@ -66,7 +65,6 @@ static List block_list = NULL;
 
 static void _block_list_del(void *object);
 static int  _in_slurm_partition(List slurm_nodes, List bg_nodes);
-static int  _list_match_all(void *object, void *key);
 static int  _make_nodelist(char *nodes, List nodelist);
 static void _marknodes(db2_block_info_t *block_ptr, int count);
 static void _nodelist_del(void *object);
@@ -128,7 +126,7 @@ extern void get_slurm_part(void)
 	else
 		recs = 0;
 	if (!params.commandline)
-		if ((recs - text_line_cnt) < (text_win->_maxy - 3))
+		if ((recs - text_line_cnt) < (getmaxy(text_win) - 4))
 			text_line_cnt--;
 
 	if (params.hl)
@@ -256,7 +254,7 @@ extern void get_bg_part(void)
 	}
 	if (block_list) {
 		/* clear the old list */
-		list_delete_all(block_list, _list_match_all, NULL);
+		list_flush(block_list);
 	} else {
 		block_list = list_create(_block_list_del);
 		if (!block_list) {
@@ -266,7 +264,7 @@ extern void get_bg_part(void)
 	}
 	if (!params.commandline)
 		if ((new_bg_ptr->record_count - text_line_cnt)
-		   < (text_win->_maxy-3))
+		   < (getmaxy(text_win) - 4))
 			text_line_cnt--;
 	if (params.hl)
 		nodes_req = get_requested_node_bitmap();
@@ -301,8 +299,6 @@ extern void get_bg_part(void)
 		block_ptr->nodelist = list_create(_nodelist_del);
 		_make_nodelist(block_ptr->mp_str, block_ptr->nodelist);
 
-		block_ptr->bg_user_name
-			= xstrdup(new_bg_ptr->block_array[i].owner_name);
 		block_ptr->state = new_bg_ptr->block_array[i].state;
 
 		memcpy(block_ptr->bg_conn_type,
@@ -331,8 +327,21 @@ extern void get_bg_part(void)
 			last_count++;
 			_marknodes(block_ptr, last_count);
 		}
-		block_ptr->job_running =
-			new_bg_ptr->block_array[i].job_running;
+
+		block_ptr->job_list = list_create(slurm_free_block_job_info);
+		if (new_bg_ptr->block_array[i].job_list) {
+			block_job_info_t *found_job;
+			ListIterator itr = list_iterator_create(
+				new_bg_ptr->block_array[i].job_list);
+			while ((found_job = list_next(itr))) {
+				block_job_info_t *block_job =
+					xmalloc(sizeof(block_job_info_t));
+				block_job->job_id = found_job->job_id;
+				list_append(block_ptr->job_list, block_job);
+			}
+			list_iterator_destroy(itr);
+		}
+
 		if (block_ptr->bg_conn_type[0] >= SELECT_SMALL)
 			block_ptr->size = 0;
 
@@ -394,6 +403,32 @@ extern void get_bg_part(void)
 	part_info_ptr = new_part_ptr;
 	bg_info_ptr = new_bg_ptr;
 	return;
+}
+
+static char *_set_running_job_str(List job_list, bool compact)
+{
+	int cnt = list_count(job_list);
+	block_job_info_t *block_job;
+
+	if (!cnt) {
+		return xstrdup("-");
+	} else if (cnt == 1) {
+		block_job = list_peek(job_list);
+		return xstrdup_printf("%u", block_job->job_id);
+	} else if (compact)
+		return xstrdup("multiple");
+	else {
+		char *tmp_char = NULL;
+		ListIterator itr = list_iterator_create(job_list);
+		while ((block_job = list_next(itr))) {
+			if (tmp_char)
+				xstrcat(tmp_char, " ");
+			xstrfmtcat(tmp_char, "%u", block_job->job_id);
+		}
+		return tmp_char;
+	}
+
+	return NULL;
 }
 
 static void _marknodes(db2_block_info_t *block_ptr, int count)
@@ -464,15 +499,11 @@ static void _print_header_part(void)
 			mvwprintw(text_win,
 				  main_ycord,
 				  main_xcord, "STATE");
-			main_xcord += 7;
+			main_xcord += 8;
 			mvwprintw(text_win,
 				  main_ycord,
 				  main_xcord, "JOBID");
 			main_xcord += 8;
-			mvwprintw(text_win,
-				  main_ycord,
-				  main_xcord, "USER");
-			main_xcord += 9;
 			mvwprintw(text_win,
 				  main_ycord,
 				  main_xcord, "CONN");
@@ -490,7 +521,7 @@ static void _print_header_part(void)
 		main_xcord += 7;
 		if (params.cluster_flags & CLUSTER_FLAG_BG)
 			mvwprintw(text_win, main_ycord,
-				  main_xcord, "BP_LIST");
+				  main_xcord, "MIDPLANELIST");
 		else
 			mvwprintw(text_win, main_ycord,
 				  main_xcord, "NODELIST");
@@ -504,16 +535,15 @@ static void _print_header_part(void)
 		} else {
 			printf("        BG_BLOCK ");
 			printf("STATE ");
-			printf("   JOBID ");
-			printf("    USER ");
-			printf("    CONN ");
+			printf("    JOBID ");
+			printf("     CONN ");
 			if (params.cluster_flags & CLUSTER_FLAG_BGL)
 				printf(" NODE_USE ");
 		}
 
 		printf("NODES ");
 		if (params.cluster_flags & CLUSTER_FLAG_BG)
-			printf("BP_LIST\n");
+			printf("MIDPLANELIST\n");
 		else
 			printf("NODELIST\n");
 	}
@@ -589,6 +619,8 @@ static int _print_text_part(partition_info_t *part_ptr,
 
 		if (params.display == BGPART) {
 			if (db2_info_ptr) {
+				char *job_running = _set_running_job_str(
+					db2_info_ptr->job_list, 1);
 				mvwprintw(text_win,
 					  main_ycord,
 					  main_xcord, "%.16s",
@@ -596,30 +628,20 @@ static int _print_text_part(partition_info_t *part_ptr,
 				main_xcord += 18;
 				mvwprintw(text_win,
 					  main_ycord,
-					  main_xcord,
+					  main_xcord, "%.7s",
 					  bg_block_state_string(
 						  db2_info_ptr->state));
-				main_xcord += 7;
+				main_xcord += 8;
 
-				if (db2_info_ptr->job_running > NO_JOB_RUNNING)
-					snprintf(tmp_char, sizeof(tmp_char),
-						 "%d",
-						 db2_info_ptr->job_running);
-				else
-					snprintf(tmp_char, sizeof(tmp_char),
-						 "-");
+				snprintf(tmp_char, sizeof(tmp_char),
+					 "%s", job_running);
+				xfree(job_running);
 
 				mvwprintw(text_win,
 					  main_ycord,
 					  main_xcord,
 					  "%.8s", tmp_char);
 				main_xcord += 8;
-
-				mvwprintw(text_win,
-					  main_ycord,
-					  main_xcord, "%.8s",
-					  db2_info_ptr->bg_user_name);
-				main_xcord += 9;
 
 				conn_str = conn_type_string_full(
 					db2_info_ptr->bg_conn_type);
@@ -647,7 +669,7 @@ static int _print_text_part(partition_info_t *part_ptr,
 				mvwprintw(text_win,
 					  main_ycord,
 					  main_xcord, "?");
-				main_xcord += 7;
+				main_xcord += 8;
 				mvwprintw(text_win,
 					  main_ycord,
 					  main_xcord, "?");
@@ -681,8 +703,7 @@ static int _print_text_part(partition_info_t *part_ptr,
 		i = 0;
 		prefixlen = i;
 		while (nodes && nodes[i]) {
-			width = text_win->_maxx
-				- main_xcord;
+			width = getmaxx(text_win) - 1 - main_xcord;
 
 			if (!prefixlen && (nodes[i] == '[') &&
 			    (nodes[i - 1] == ','))
@@ -691,12 +712,10 @@ static int _print_text_part(partition_info_t *part_ptr,
 			if (nodes[i - 1] == ',' && (width - 12) <= 0) {
 				main_ycord++;
 				main_xcord = tempxcord + prefixlen;
-			} else if (main_xcord >
-				   text_win->_maxx) {
+			} else if (main_xcord >= getmaxx(text_win)) {
 				main_ycord++;
 				main_xcord = tempxcord + prefixlen;
 			}
-
 
 			if ((printed = mvwaddch(text_win,
 						main_ycord,
@@ -750,22 +769,16 @@ static int _print_text_part(partition_info_t *part_ptr,
 
 		if (params.display == BGPART) {
 			if (db2_info_ptr) {
+				char *job_running = _set_running_job_str(
+					db2_info_ptr->job_list, 1);
 				printf("%16.16s ",
 				       db2_info_ptr->bg_block_name);
-				printf("%5.5s ",
+				printf("%-7.7s ",
 				       bg_block_state_string(
 					       db2_info_ptr->state));
 
-				if (db2_info_ptr->job_running > NO_JOB_RUNNING)
-					snprintf(tmp_char, sizeof(tmp_char),
-						 "%d",
-						 db2_info_ptr->job_running);
-				else
-					snprintf(tmp_char, sizeof(tmp_char),
-						 "-");
-
-				printf("%8.8s ", tmp_char);
-				printf("%8.8s ", db2_info_ptr->bg_user_name);
+				printf("%8.8s ", job_running);
+				xfree(job_running);
 
 				conn_str = conn_type_string_full(
 					db2_info_ptr->bg_conn_type);
@@ -800,14 +813,16 @@ static void _block_list_del(void *object)
 	db2_block_info_t *block_ptr = (db2_block_info_t *)object;
 
 	if (block_ptr) {
-		xfree(block_ptr->bg_user_name);
 		xfree(block_ptr->bg_block_name);
 		xfree(block_ptr->slurm_part_name);
 		xfree(block_ptr->mp_str);
 		xfree(block_ptr->ionode_str);
 		if (block_ptr->nodelist)
 			list_destroy(block_ptr->nodelist);
-
+		if (block_ptr->job_list) {
+			list_destroy(block_ptr->job_list);
+			block_ptr->job_list = NULL;
+		}
 		xfree(block_ptr);
 
 	}
@@ -818,11 +833,6 @@ static void _nodelist_del(void *object)
 	int *coord = (int *)object;
 	xfree(coord);
 	return;
-}
-
-static int _list_match_all(void *object, void *key)
-{
-	return 1;
 }
 
 static int _in_slurm_partition(List slurm_nodes, List bg_nodes)

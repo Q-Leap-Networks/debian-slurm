@@ -58,6 +58,7 @@ bg_config_t *bg_conf;
 bg_lists_t *bg_lists;
 pthread_mutex_t block_state_mutex = PTHREAD_MUTEX_INITIALIZER;
 int bg_recover = 1;
+int num_unused_cpus = 0;
 
 extern int bridge_init(char *properties_file)
 {
@@ -77,6 +78,17 @@ extern int bridge_get_size(int *size)
 extern int bridge_setup_system()
 {
 	return SLURM_ERROR;
+}
+
+extern struct job_record *find_job_in_bg_record(bg_record_t *bg_record,
+						uint32_t job_id)
+{
+	return NULL;
+}
+
+extern int bridge_check_nodeboards(char *mp_loc)
+{
+	return 0;
 }
 
 /** */

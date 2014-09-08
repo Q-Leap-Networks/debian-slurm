@@ -107,8 +107,10 @@ parse_command_line( int argc, char* argv[] )
 		{"long",       no_argument,       0, 'l'},
 		{"cluster",    required_argument, 0, 'M'},
 		{"clusters",   required_argument, 0, 'M'},
-		{"node",       required_argument, 0, 'n'},
-		{"nodes",      required_argument, 0, 'n'},
+		{"name",       required_argument, 0, 'n'},
+		{"node",       required_argument, 0, 'w'},
+		{"nodes",      required_argument, 0, 'w'},
+		{"nodelist",   required_argument, 0, 'w'},
 		{"noheader",   no_argument,       0, 'h'},
 		{"partitions", required_argument, 0, 'p'},
 		{"qos",        required_argument, 0, 'q'},
@@ -142,7 +144,7 @@ parse_command_line( int argc, char* argv[] )
 	}
 
 	while ((opt_char = getopt_long(argc, argv,
-				       "A:ahi:j::ln:M:o:p:q:R:s::S:t:u:U:vV",
+				       "A:ahi:j::ln:M:o:p:q:R:s::S:t:u:U:vVw:",
 				       long_options, &option_index)) != -1) {
 		switch (opt_char) {
 		case (int)'?':
@@ -196,15 +198,9 @@ parse_command_line( int argc, char* argv[] )
 			working_cluster_rec = list_peek(params.clusters);
 			break;
 		case (int) 'n':
-			if (params.nodes)
-				hostset_destroy(params.nodes);
-
-			params.nodes = hostset_create(optarg);
-			if (params.nodes == NULL) {
-				error("'%s' invalid entry for --nodes",
-				      optarg);
-				exit(1);
-			}
+			xfree(params.names);
+			params.names = xstrdup(optarg);
+			params.name_list = _build_str_list( params.names );
 			break;
 		case (int) 'o':
 			xfree(params.format);
@@ -260,6 +256,17 @@ parse_command_line( int argc, char* argv[] )
 		case (int) 'V':
 			print_slurm_version();
 			exit(0);
+		case (int) 'w':
+			if (params.nodes)
+				hostset_destroy(params.nodes);
+
+			params.nodes = hostset_create(optarg);
+			if (params.nodes == NULL) {
+				error("'%s' invalid entry for --nodelist",
+				      optarg);
+				exit(1);
+			}
+			break;
 		case OPT_LONG_HELP:
 			_help();
 			exit(0);
@@ -342,6 +349,12 @@ parse_command_line( int argc, char* argv[] )
 	     ( env_val = getenv("SQUEUE_ACCOUNT") ) ) {
 		params.accounts = xstrdup(env_val);
 		params.account_list = _build_str_list( params.accounts );
+	}
+
+	if ( ( params.names == NULL ) &&
+	     ( env_val = getenv("SQUEUE_NAMES") ) ) {
+		params.names = xstrdup(env_val);
+		params.name_list = _build_str_list( params.names );
 	}
 
 	if ( ( params.partitions == NULL ) &&
@@ -843,7 +856,7 @@ _print_options(void)
 {
 	ListIterator iterator;
 	int i;
-	char *part;
+	char *part, *name;
 	uint32_t *user;
 	enum job_states *state_id;
 	squeue_job_step_t *job_step_id;
@@ -863,6 +876,7 @@ _print_options(void)
 	printf( "job_flag    = %d\n", params.job_flag );
 	printf( "jobs        = %s\n", params.jobs );
 	printf( "max_cpus    = %d\n", params.max_cpus ) ;
+	printf( "names       = %s\n", params.names );
 	printf( "nodes       = %s\n", hostlist ) ;
 	printf( "partitions  = %s\n", params.partitions ) ;
 	printf( "reservation = %s\n", params.reservation ) ;
@@ -879,6 +893,16 @@ _print_options(void)
 		iterator = list_iterator_create( params.job_list );
 		while ( (job_id = list_next( iterator )) ) {
 			printf( "job_list[%d] = %u\n", i++, *job_id);
+		}
+		list_iterator_destroy( iterator );
+	}
+
+
+	if ((params.verbose > 1) && params.name_list) {
+		i = 0;
+		iterator = list_iterator_create( params.name_list );
+		while ( (name = list_next( iterator )) ) {
+			printf( "name_list[%d] = %u\n", i++, *name);
 		}
 		list_iterator_destroy( iterator );
 	}
@@ -958,7 +982,8 @@ _build_job_list( char* str )
 }
 
 /*
- * _build_str_list- build a list of strings
+ * _build_str_list - convert a string of comma-separated elements
+ *		     into a list of strings
  * IN str - comma separated list of strings
  * RET List of strings
  */
@@ -973,11 +998,12 @@ _build_str_list( char* str )
 	my_list = list_create( NULL );
 	my_part_list = xstrdup( str );
 	part = strtok_r( my_part_list, ",", &tmp_char );
-	while (part)
-	{
+	while (part) {
 		list_append( my_list, part );
 		part = strtok_r( NULL, ",", &tmp_char );
 	}
+	/* NOTE: Do NOT xfree my_part_list or the elements just added to the
+	 * list will also be freed. */
 	return my_list;
 }
 
@@ -1119,9 +1145,9 @@ _build_user_list( char* str )
 static void _usage(void)
 {
 	printf("\
-Usage: squeue [-i seconds] [-S fields] [--start] [-t states]\n\
-	      [-p partitions] [-n node] [-o format] [-u user_name]\n\
-	      [-R reservation] [--usage] [-ahjlsv]\n");
+Usage: squeue [-i seconds] [-n name] [-o format] [-p partitions]\n\
+              [-R reservation] [-S fields] [--start] [-t states]\n\
+              [-u user_name] [--usage] [-w nodes] [-ahjlsv]\n");
 }
 
 static void _help(void)
@@ -1140,8 +1166,7 @@ Usage: squeue [OPTIONS]\n\
   -M, --clusters=cluster_name     cluster to issue commands to.  Default is\n\
                                   current cluster.  cluster with no name will\n\
                                   reset to default.\n\
-  -n, --nodes=hostlist            list of nodes to view, default is \n\
-				  all nodes\n\
+  -n, --name=job_name(s)          comma separated list of job names to view\n\
   -o, --format=format             format specification\n\
   -p, --partition=partition(s)    comma separated list of partitions\n\
 				  to view, default is all partitions\n\
@@ -1156,8 +1181,11 @@ Usage: squeue [OPTIONS]\n\
 				  default is pending and running,\n\
 				  '--states=all' reports all states\n\
   -u, --user=user_name(s)         comma separated list of users to view\n\
+      --name=job_name(s)          comma separated list of job names to view\n\
   -v, --verbose                   verbosity level\n\
   -V, --version                   output version information and exit\n\
+  -w, --nodelist=hostlist         list of nodes to view, default is \n\
+				  all nodes\n\
 \nHelp options:\n\
   --help                          show this help message\n\
   --usage                         display a brief summary of squeue options\n");

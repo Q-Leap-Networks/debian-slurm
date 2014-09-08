@@ -40,6 +40,8 @@
  *  This file is patterned after jobcomp_linux.c, written by Morris Jette and
  *  Copyright (C) 2002 The Regents of the University of California.
 \*****************************************************************************/
+
+#include <sys/resource.h> /* for struct rusage */
 #include <stdlib.h>
 #include <ctype.h>
 #include <sys/stat.h>
@@ -1129,6 +1131,20 @@ extern List filetxt_jobacct_process_get_jobs(slurmdb_job_cond_t *job_cond)
 			continue;	/* no match */
 		}
 	foundgid:
+
+		if (job_cond->jobname_list
+		    && list_count(job_cond->jobname_list)) {
+			itr = list_iterator_create(job_cond->jobname_list);
+			while((object = list_next(itr))) {
+				if (!strcasecmp(f[F_JOBNAME], object)) {
+					list_iterator_destroy(itr);
+					goto foundjobname;
+				}
+			}
+			list_iterator_destroy(itr);
+			continue;	/* no match */
+		}
+	foundjobname:
 
 		if (job_cond->step_list
 		    && list_count(job_cond->step_list)) {

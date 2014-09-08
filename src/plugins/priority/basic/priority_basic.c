@@ -119,6 +119,7 @@ extern uint32_t priority_p_set(uint32_t last_prio, struct job_record *job_ptr)
 	if (job_ptr->details)
 		new_prio -= (job_ptr->details->nice - NICE_OFFSET);
 
+	/* System hold is priority 0 */
 	if (new_prio < 1)
 		new_prio = 1;
 
@@ -155,7 +156,7 @@ extern double priority_p_calc_fs_factor(long double usage_efctv,
 }
 
 extern List priority_p_get_priority_factors_list(
-	priority_factors_request_msg_t *req_msg)
+	priority_factors_request_msg_t *req_msg, uid_t uid)
 {
 	return(list_create(NULL));
 }

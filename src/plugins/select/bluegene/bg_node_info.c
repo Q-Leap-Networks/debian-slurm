@@ -54,6 +54,17 @@ static void _free_node_subgrp(void *object)
 	}
 }
 
+static node_subgrp_t *_create_subgrp(List subgrp_list, enum node_states state,
+				     uint16_t size)
+{
+	node_subgrp_t *subgrp = xmalloc(sizeof(node_subgrp_t));
+	subgrp->state = state;
+	subgrp->bitmap = bit_alloc(size);
+	list_append(subgrp_list, subgrp);
+
+	return subgrp;
+}
+
 static node_subgrp_t *_find_subgrp(List subgrp_list, enum node_states state,
 				   uint16_t size)
 {
@@ -66,12 +77,9 @@ static node_subgrp_t *_find_subgrp(List subgrp_list, enum node_states state,
 			break;
 	}
 	list_iterator_destroy(itr);
-	if (!subgrp) {
-		subgrp = xmalloc(sizeof(node_subgrp_t));
-		subgrp->state = state;
-		subgrp->bitmap = bit_alloc(size);
-		list_append(subgrp_list, subgrp);
-	}
+
+	if (!subgrp)
+		subgrp = _create_subgrp(subgrp_list, state, size);
 
 	return subgrp;
 }
@@ -133,7 +141,31 @@ extern int select_nodeinfo_pack(select_nodeinfo_t *nodeinfo, Buf buffer,
 	node_subgrp_t *subgrp = NULL;
 	uint16_t count = 0;
 
-	if (protocol_version >= SLURM_2_1_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_2_4_PROTOCOL_VERSION) {
+		pack16(nodeinfo->bitmap_size, buffer);
+
+		packstr(nodeinfo->extra_info, buffer);
+		packstr(nodeinfo->failed_cnodes, buffer);
+
+		if (nodeinfo->ba_mp)
+			packstr(nodeinfo->ba_mp->loc, buffer);
+		else
+			packstr(nodeinfo->rack_mp, buffer);
+
+		if (nodeinfo->subgrp_list)
+			count = list_count(nodeinfo->subgrp_list);
+
+		pack16(count, buffer);
+
+		if (count > 0) {
+			itr = list_iterator_create(nodeinfo->subgrp_list);
+			while ((subgrp = list_next(itr))) {
+				_pack_node_subgrp(subgrp, buffer,
+						  protocol_version);
+			}
+			list_iterator_destroy(itr);
+		}
+	} else if (protocol_version >= SLURM_2_1_PROTOCOL_VERSION) {
 		pack16(nodeinfo->bitmap_size, buffer);
 
 		if (nodeinfo->subgrp_list)
@@ -150,6 +182,7 @@ extern int select_nodeinfo_pack(select_nodeinfo_t *nodeinfo, Buf buffer,
 			list_iterator_destroy(itr);
 		}
 	}
+
 	return SLURM_SUCCESS;
 }
 
@@ -159,8 +192,35 @@ extern int select_nodeinfo_unpack(select_nodeinfo_t **nodeinfo, Buf buffer,
 	uint16_t size = 0;
 	select_nodeinfo_t *nodeinfo_ptr = NULL;
 	uint32_t j = 0;
+	uint32_t uint32_tmp;
 
-	if (protocol_version >= SLURM_2_1_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_2_4_PROTOCOL_VERSION) {
+		safe_unpack16(&size, buffer);
+
+		nodeinfo_ptr = select_nodeinfo_alloc((uint32_t)size);
+		*nodeinfo = nodeinfo_ptr;
+
+		safe_unpackstr_xmalloc(&nodeinfo_ptr->extra_info,
+				       &uint32_tmp, buffer);
+
+		safe_unpackstr_xmalloc(&nodeinfo_ptr->failed_cnodes,
+				       &uint32_tmp, buffer);
+
+		safe_unpackstr_xmalloc(&nodeinfo_ptr->rack_mp,
+				       &uint32_tmp, buffer);
+
+		safe_unpack16(&size, buffer);
+		nodeinfo_ptr->subgrp_list = list_create(_free_node_subgrp);
+		for (j=0; j<size; j++) {
+			node_subgrp_t *subgrp = NULL;
+			if (_unpack_node_subgrp(&subgrp, buffer,
+						nodeinfo_ptr->bitmap_size,
+						protocol_version)
+			    != SLURM_SUCCESS)
+				goto unpack_error;
+			list_append(nodeinfo_ptr->subgrp_list, subgrp);
+		}
+	} else if (protocol_version >= SLURM_2_1_PROTOCOL_VERSION) {
 		safe_unpack16(&size, buffer);
 
 		nodeinfo_ptr = select_nodeinfo_alloc((uint32_t)size);
@@ -168,7 +228,7 @@ extern int select_nodeinfo_unpack(select_nodeinfo_t **nodeinfo, Buf buffer,
 
 		safe_unpack16(&size, buffer);
 		nodeinfo_ptr->subgrp_list = list_create(_free_node_subgrp);
-		for(j=0; j<size; j++) {
+		for (j=0; j<size; j++) {
 			node_subgrp_t *subgrp = NULL;
 			if (_unpack_node_subgrp(&subgrp, buffer,
 						nodeinfo_ptr->bitmap_size,
@@ -219,6 +279,9 @@ extern int select_nodeinfo_free(select_nodeinfo_t *nodeinfo)
 			return EINVAL;
 		}
 		nodeinfo->magic = 0;
+		xfree(nodeinfo->extra_info);
+		xfree(nodeinfo->failed_cnodes);
+		xfree(nodeinfo->rack_mp);
 		if (nodeinfo->subgrp_list)
 			list_destroy(nodeinfo->subgrp_list);
 		xfree(nodeinfo);
@@ -233,6 +296,10 @@ extern int select_nodeinfo_set_all(time_t last_query_time)
 	int i=0;
 	bg_record_t *bg_record = NULL;
 	static time_t last_set_all = 0;
+	ba_mp_t *ba_mp;
+	node_subgrp_t *subgrp = NULL;
+	int bit_count;
+
 	//uint32_t cluster_flags = slurmdb_setup_cluster_flags();
 
 	if (!blocks_are_created)
@@ -261,6 +328,7 @@ extern int select_nodeinfo_set_all(time_t last_query_time)
 	slurm_mutex_lock(&block_state_mutex);
 	for (i=0; i<node_record_count; i++) {
 		select_nodeinfo_t *nodeinfo;
+
 		node_ptr = &(node_record_table_ptr[i]);
 		xassert(node_ptr->select_nodeinfo);
 		nodeinfo = node_ptr->select_nodeinfo->data;
@@ -270,15 +338,47 @@ extern int select_nodeinfo_set_all(time_t last_query_time)
 		if (nodeinfo->bitmap_size != g_bitmap_size)
 			nodeinfo->bitmap_size = g_bitmap_size;
 	}
+
 	itr = list_iterator_create(bg_lists->main);
 	while ((bg_record = list_next(itr))) {
 		enum node_states state = NODE_STATE_UNKNOWN;
-		node_subgrp_t *subgrp = NULL;
 		select_nodeinfo_t *nodeinfo;
 		bitstr_t *bitmap;
+		ListIterator itr2 = NULL;
 
 		/* Only mark unidle blocks */
-		if (bg_record->job_running == NO_JOB_RUNNING)
+		if (bg_record->job_list && list_count(bg_record->job_list)) {
+			struct job_record *job_ptr;
+			select_jobinfo_t *jobinfo;
+			ListIterator itr =
+				list_iterator_create(bg_record->job_list);
+			ba_mp = list_peek(bg_record->ba_mp_list);
+			node_ptr = &(node_record_table_ptr[ba_mp->index]);
+			xassert(node_ptr->select_nodeinfo);
+			nodeinfo = node_ptr->select_nodeinfo->data;
+			xassert(nodeinfo);
+			xassert(nodeinfo->subgrp_list);
+			if (ba_mp->cnode_err_bitmap
+			    && (bit_count =
+				bit_set_count(ba_mp->cnode_err_bitmap))) {
+				subgrp = _find_subgrp(nodeinfo->subgrp_list,
+						      NODE_STATE_ERROR,
+						      g_bitmap_size);
+				/* FIXME: the subgrp->bitmap isn't set here. */
+				subgrp->cnode_cnt += bit_count;
+			}
+
+			subgrp = _find_subgrp(nodeinfo->subgrp_list,
+					      NODE_STATE_ALLOCATED,
+					      g_bitmap_size);
+			while ((job_ptr = list_next(itr))) {
+				jobinfo = job_ptr->select_jobinfo->data;
+				/* FIXME: the subgrp->bitmap isn't set here. */
+				subgrp->cnode_cnt += jobinfo->cnode_cnt;
+			}
+			list_iterator_destroy(itr);
+			continue;
+		} else if (bg_record->job_running == NO_JOB_RUNNING)
 			continue;
 
 		if (bg_record->state & BG_BLOCK_ERROR_FLAG)
@@ -299,17 +399,30 @@ extern int select_nodeinfo_set_all(time_t last_query_time)
 		/*     && (state != NODE_STATE_ERROR)) */
 		/* 	bitmap = bg_record->cnodes_used_bitmap; */
 		/* else */
-			bitmap = bg_record->ionode_bitmap;
+		bitmap = bg_record->ionode_bitmap;
 
-		for (i=0; i<node_record_count; i++) {
-			if (!bit_test(bg_record->mp_bitmap, i))
+		itr2 = list_iterator_create(bg_record->ba_mp_list);
+		while ((ba_mp = list_next(itr2))) {
+			if (!ba_mp->used)
 				continue;
-			node_ptr = &(node_record_table_ptr[i]);
+
+			node_ptr = &(node_record_table_ptr[ba_mp->index]);
 
 			xassert(node_ptr->select_nodeinfo);
 			nodeinfo = node_ptr->select_nodeinfo->data;
 			xassert(nodeinfo);
 			xassert(nodeinfo->subgrp_list);
+
+			if (ba_mp->cnode_err_bitmap
+			    && (state == NODE_STATE_ALLOCATED)
+			    && (bit_count =
+				bit_set_count(ba_mp->cnode_err_bitmap))) {
+				subgrp = _find_subgrp(nodeinfo->subgrp_list,
+						      NODE_STATE_ERROR,
+						      g_bitmap_size);
+				/* FIXME: the subgrp->bitmap isn't set here. */
+				subgrp->cnode_cnt += bit_count;
+			}
 
 			subgrp = _find_subgrp(nodeinfo->subgrp_list,
 					      state, g_bitmap_size);
@@ -333,6 +446,7 @@ extern int select_nodeinfo_set_all(time_t last_query_time)
 				}
 			}
 		}
+		list_iterator_destroy(itr2);
 	}
 	list_iterator_destroy(itr);
 	slurm_mutex_unlock(&block_state_mutex);
@@ -358,7 +472,7 @@ extern int select_nodeinfo_get(select_nodeinfo_t *nodeinfo,
 	}
 
 	if (nodeinfo->magic != NODEINFO_MAGIC) {
-		error("get_nodeinfo: jobinfo magic bad");
+		error("get_nodeinfo: nodeinfo magic bad");
 		return SLURM_ERROR;
 	}
 
@@ -398,6 +512,12 @@ extern int select_nodeinfo_get(select_nodeinfo_t *nodeinfo,
 		}
 		list_iterator_destroy(itr);
 		break;
+	case SELECT_NODEDATA_RACK_MP:
+		if (nodeinfo->ba_mp)
+			*tmp_char = xstrdup(nodeinfo->ba_mp->loc);
+		else if (nodeinfo->rack_mp)
+			*tmp_char = xstrdup(nodeinfo->rack_mp);
+		break;
 	case SELECT_NODEDATA_STR:
 		*tmp_char = NULL;
 		if (!nodeinfo->subgrp_list)
@@ -410,6 +530,13 @@ extern int select_nodeinfo_get(select_nodeinfo_t *nodeinfo,
 			}
 		}
 		list_iterator_destroy(itr);
+		break;
+	case SELECT_NODEDATA_EXTRA_INFO:
+		if (nodeinfo->extra_info)
+			*tmp_char = xstrdup(nodeinfo->extra_info);
+		if (nodeinfo->failed_cnodes)
+			xstrfmtcat(*tmp_char, "Failed cnodes=%s",
+				   nodeinfo->failed_cnodes);
 		break;
 	default:
 		error("Unsupported option %d for get_nodeinfo.", dinfo);

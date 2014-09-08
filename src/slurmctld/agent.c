@@ -397,14 +397,16 @@ static agent_info_t *_make_agent_info(agent_arg_t *agent_arg_ptr)
 	agent_info_ptr->msg_args_pptr  = &agent_arg_ptr->msg_args;
 
 	if ((agent_arg_ptr->msg_type != REQUEST_JOB_NOTIFY)	&&
-	    (agent_arg_ptr->msg_type != REQUEST_SHUTDOWN)	&&
+	    (agent_arg_ptr->msg_type != REQUEST_REBOOT_NODES)	&&
 	    (agent_arg_ptr->msg_type != REQUEST_RECONFIGURE)	&&
+	    (agent_arg_ptr->msg_type != REQUEST_SHUTDOWN)	&&
 	    (agent_arg_ptr->msg_type != SRUN_EXEC)		&&
 	    (agent_arg_ptr->msg_type != SRUN_TIMEOUT)		&&
 	    (agent_arg_ptr->msg_type != SRUN_NODE_FAIL)		&&
 	    (agent_arg_ptr->msg_type != SRUN_REQUEST_SUSPEND)	&&
 	    (agent_arg_ptr->msg_type != SRUN_USER_MSG)		&&
 	    (agent_arg_ptr->msg_type != SRUN_STEP_MISSING)	&&
+	    (agent_arg_ptr->msg_type != SRUN_STEP_SIGNAL)	&&
 	    (agent_arg_ptr->msg_type != SRUN_JOB_COMPLETE)) {
 #ifdef HAVE_FRONT_END
 		span = set_span(agent_arg_ptr->node_count,
@@ -524,13 +526,14 @@ static void *_wdog(void *args)
 	int i;
 	agent_info_t *agent_ptr = (agent_info_t *) args;
 	thd_t *thread_ptr = agent_ptr->thread_struct;
-	unsigned long usec = 125000;
+	unsigned long usec = 5000;
 	ListIterator itr;
 	thd_complete_t thd_comp;
 	ret_data_info_t *ret_data_info = NULL;
 
 	if ( (agent_ptr->msg_type == SRUN_JOB_COMPLETE)			||
 	     (agent_ptr->msg_type == SRUN_STEP_MISSING)			||
+	     (agent_ptr->msg_type == SRUN_STEP_SIGNAL)			||
 	     (agent_ptr->msg_type == SRUN_EXEC)				||
 	     (agent_ptr->msg_type == SRUN_NODE_FAIL)			||
 	     (agent_ptr->msg_type == SRUN_PING)				||
@@ -554,7 +557,7 @@ static void *_wdog(void *args)
 		slurm_mutex_lock(&agent_ptr->thread_mutex);
 		for (i = 0; i < agent_ptr->thread_count; i++) {
 			//info("thread name %s",thread_ptr[i].node_name);
-			if(!thread_ptr[i].ret_list) {
+			if (!thread_ptr[i].ret_list) {
 				_update_wdog_state(&thread_ptr[i],
 						   &thread_ptr[i].state,
 						   &thd_comp);
@@ -619,6 +622,7 @@ static void _notify_slurmctld_jobs(agent_info_t *agent_ptr)
 		step_id = NO_VAL;
 	} else if ((agent_ptr->msg_type == SRUN_JOB_COMPLETE)		||
 		   (agent_ptr->msg_type == SRUN_STEP_MISSING)		||
+		   (agent_ptr->msg_type == SRUN_STEP_SIGNAL)		||
 		   (agent_ptr->msg_type == SRUN_EXEC)			||
 		   (agent_ptr->msg_type == SRUN_USER_MSG)) {
 		return;		/* no need to note srun response */
@@ -819,6 +823,7 @@ static void *_thread_per_group_rpc(void *args)
 			(msg_type == SRUN_EXEC)			||
 			(msg_type == SRUN_JOB_COMPLETE)		||
 			(msg_type == SRUN_STEP_MISSING)		||
+			(msg_type == SRUN_STEP_SIGNAL)		||
 			(msg_type == SRUN_TIMEOUT)		||
 			(msg_type == SRUN_USER_MSG)		||
 			(msg_type == RESPONSE_RESOURCE_ALLOCATION) ||
@@ -1127,7 +1132,6 @@ static void _list_delete_retry(void *retry_entry)
 	xfree(queued_req_ptr);
 }
 
-
 /*
  * agent_retry - Agent for retrying pending RPCs. One pending request is
  *	issued if it has been pending for at least min_wait seconds
@@ -1376,8 +1380,9 @@ static void _purge_agent_args(agent_arg_t *agent_arg_ptr)
 				RESPONSE_RESOURCE_ALLOCATION)
 			slurm_free_resource_allocation_response_msg(
 					agent_arg_ptr->msg_args);
-		else if ((agent_arg_ptr->msg_type == REQUEST_ABORT_JOB)     ||
-			 (agent_arg_ptr->msg_type == REQUEST_TERMINATE_JOB) ||
+		else if ((agent_arg_ptr->msg_type == REQUEST_ABORT_JOB)      ||
+			 (agent_arg_ptr->msg_type == REQUEST_TERMINATE_JOB)  ||
+			 (agent_arg_ptr->msg_type == REQUEST_KILL_PREEMPTED) ||
 			 (agent_arg_ptr->msg_type == REQUEST_KILL_TIMELIMIT))
 			slurm_free_kill_job_msg(agent_arg_ptr->msg_args);
 		else if (agent_arg_ptr->msg_type == SRUN_USER_MSG)
@@ -1388,6 +1393,9 @@ static void _purge_agent_args(agent_arg_t *agent_arg_ptr)
 			slurm_free_srun_node_fail_msg(agent_arg_ptr->msg_args);
 		else if (agent_arg_ptr->msg_type == SRUN_STEP_MISSING)
 			slurm_free_srun_step_missing_msg(
+				agent_arg_ptr->msg_args);
+		else if (agent_arg_ptr->msg_type == SRUN_STEP_SIGNAL)
+			slurm_free_job_step_kill_msg(
 				agent_arg_ptr->msg_args);
 		else if (agent_arg_ptr->msg_type == REQUEST_JOB_NOTIFY)
 			slurm_free_job_notify_msg(agent_arg_ptr->msg_args);
@@ -1529,7 +1537,7 @@ static int _batch_launch_defer(queued_request_t *queued_req_ptr)
 	batch_job_launch_msg_t *launch_msg_ptr;
 	time_t now = time(NULL);
 	struct job_record  *job_ptr;
-	int delay_time, nodes_ready = 0;
+	int delay_time, nodes_ready = 0, tmp;
 
 	agent_arg_ptr = queued_req_ptr->agent_arg_ptr;
 	if (agent_arg_ptr->msg_type != REQUEST_BATCH_JOB_LAUNCH)
@@ -1551,7 +1559,21 @@ static int _batch_launch_defer(queued_request_t *queued_req_ptr)
 	}
 
 	if (job_ptr->wait_all_nodes) {
-		(void) job_node_ready(launch_msg_ptr->job_id, &nodes_ready);
+		(void) job_node_ready(launch_msg_ptr->job_id, &tmp);
+		if (tmp == (READY_JOB_STATE | READY_NODE_STATE)) {
+			nodes_ready = 1;
+			if (launch_msg_ptr->alias_list &&
+			    !strcmp(launch_msg_ptr->alias_list, "TBD")) {
+				/* Update launch RPC with correct node
+				 * aliases */
+				struct job_record *job_ptr;
+				job_ptr = find_job_record(launch_msg_ptr->
+							  job_id);
+				xfree(launch_msg_ptr->alias_list);
+				launch_msg_ptr->alias_list = xstrdup(job_ptr->
+								     alias_list);
+			}
+		}
 	} else {
 #ifdef HAVE_FRONT_END
 		nodes_ready = 1;
@@ -1611,4 +1633,12 @@ static int _batch_launch_defer(queued_request_t *queued_req_ptr)
 
 	queued_req_ptr->last_attempt  = now;
 	return 1;
+}
+
+/* Return length of agent's retry_list */
+extern int retry_list_size(void)
+{
+	if (retry_list == NULL)
+		return 0;
+	return list_count(retry_list);
 }

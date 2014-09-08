@@ -493,10 +493,6 @@ static void _remove_jobs_on_block_and_reset(rm_job_list_t *job_list,
 	slurm_mutex_lock(&block_state_mutex);
 	bg_record = find_bg_record_in_list(bg_lists->main, block_id);
 	if (bg_record) {
-		debug("got the record %s user is %s",
-		      bg_record->bg_block_id,
-		      bg_record->user_name);
-
 		if (job_remove_failed) {
 			if (bg_record->mp_str)
 				slurm_drain_nodes(
@@ -508,7 +504,7 @@ static void _remove_jobs_on_block_and_reset(rm_job_list_t *job_list,
 				      block_id);
 		}
 
-		bg_reset_block(bg_record);
+		bg_reset_block(bg_record, NULL);
 	} else if (bg_conf->layout_mode == LAYOUT_DYNAMIC) {
 		debug2("Hopefully we are destroying this block %s "
 		       "since it isn't in the bg_lists->main",
@@ -613,7 +609,6 @@ static int _post_allocate(bg_record_t *bg_record)
 #if defined HAVE_BG_FILES
 	int i;
 	pm_partition_id_t block_id;
-	uid_t my_uid;
 
 	/* Add partition record to the DB */
 	debug2("adding block");
@@ -654,20 +649,6 @@ static int _post_allocate(bg_record_t *bg_record)
 
 		free(block_id);
 
-		xfree(bg_record->target_name);
-
-
-		bg_record->target_name =
-			xstrdup(bg_conf->slurm_user_name);
-
-		xfree(bg_record->user_name);
-		bg_record->user_name =
-			xstrdup(bg_conf->slurm_user_name);
-
-		if (uid_from_string (bg_record->user_name, &my_uid) < 0)
-			error("uid_from_string(%s): %m", bg_record->user_name);
-		else
-			bg_record->user_uid = my_uid;
 	}
 	/* We are done with the block */
 	if ((rc = bridge_free_block(bg_record->bg_block)) != SLURM_SUCCESS)
@@ -1435,7 +1416,6 @@ extern int bridge_init(char *properties_file)
 #else
 	fatal("No BG_SERIAL is set, can't run.");
 #endif
-	bridge_status_init();
 #endif
 	return 1;
 
@@ -1666,7 +1646,7 @@ extern int bridge_block_remove(bg_record_t *bg_record)
 #endif
 }
 
-extern int bridge_block_add_user(bg_record_t *bg_record, char *user_name)
+extern int bridge_block_add_user(bg_record_t *bg_record, const char *user_name)
 {
 #if defined HAVE_BG_FILES
 	int rc = BG_ERROR_CONNECTION_ERROR;
@@ -1683,7 +1663,8 @@ extern int bridge_block_add_user(bg_record_t *bg_record, char *user_name)
 #endif
 }
 
-extern int bridge_block_remove_user(bg_record_t *bg_record, char *user_name)
+extern int bridge_block_remove_user(bg_record_t *bg_record,
+				    const char *user_name)
 {
 #if defined HAVE_BG_FILES
 	int rc = BG_ERROR_CONNECTION_ERROR;
@@ -1700,14 +1681,14 @@ extern int bridge_block_remove_user(bg_record_t *bg_record, char *user_name)
 #endif
 }
 
-extern int bridge_block_remove_all_users(bg_record_t *bg_record,
-					 char *user_name)
+extern int bridge_block_sync_users(bg_record_t *bg_record)
 {
-	int returnc = REMOVE_USER_NONE;
+	int returnc = SLURM_SUCCESS;
 #ifdef HAVE_BG_FILES
 	char *user;
 	rm_partition_t *block_ptr = NULL;
-	int rc, i, user_count;
+	int rc, i, user_count, found=0;
+	char *user_name = NULL;
 
 	/* We can't use bridge_get_block_info here because users are
 	   filled in there.  This function is very slow but necessary
@@ -1716,7 +1697,7 @@ extern int bridge_block_remove_all_users(bg_record_t *bg_record,
 	    != SLURM_SUCCESS) {
 		if (rc == BG_ERROR_INCONSISTENT_DATA
 		    && bg_conf->layout_mode == LAYOUT_DYNAMIC)
-			return REMOVE_USER_FOUND;
+			return SLURM_SUCCESS;
 
 		error("bridge_get_block(%s): %s",
 		      bg_record->bg_block_id,
@@ -1735,6 +1716,13 @@ extern int bridge_block_remove_all_users(bg_record_t *bg_record,
 		if (bg_conf->slurm_debug_flags & DEBUG_FLAG_SELECT_TYPE)
 			info("got %d users for %s", user_count,
 			     bg_record->bg_block_id);
+
+	if (bg_record->job_ptr) {
+		select_jobinfo_t *jobinfo =
+			bg_record->job_ptr->select_jobinfo->data;
+		user_name = jobinfo->user_name;
+	}
+
 	for(i=0; i<user_count; i++) {
 		if (i) {
 			if ((rc = bridge_get_data(block_ptr,
@@ -1759,21 +1747,27 @@ extern int bridge_block_remove_all_users(bg_record_t *bg_record,
 				break;
 			}
 		}
+
 		if (!user) {
 			error("No user was returned from database");
 			continue;
 		}
-		if (!strcmp(user, bg_conf->slurm_user_name)) {
+
+		/* It has been found on L the block owner is not
+		   needed as a regular user so we are now removing
+		   it.  It is unknown if this is the case for P but we
+		   believe it is.  If a problem does arise on P please
+		   report and just uncomment this check.
+		*/
+		/* if (!strcmp(user, bg_conf->slurm_user_name)) { */
+		/* 	free(user); */
+		/* 	continue; */
+		/* } */
+
+		if (user_name && !strcmp(user, user_name)) {
+			found=1;
 			free(user);
 			continue;
-		}
-
-		if (user_name) {
-			if (!strcmp(user, user_name)) {
-				returnc = REMOVE_USER_FOUND;
-				free(user);
-				continue;
-			}
 		}
 
 		info("Removing user %s from Block %s",
@@ -1786,6 +1780,17 @@ extern int bridge_block_remove_all_users(bg_record_t *bg_record,
 		}
 		free(user);
 	}
+
+	// no users currently, or we didn't find outselves in the lookup
+	if (!found && user_name) {
+		returnc = REMOVE_USER_FOUND;
+		if ((rc = bridge_block_add_user(bg_record, user_name))
+		    != SLURM_SUCCESS) {
+			debug("couldn't add user %s to block %s",
+			      user, bg_record->bg_block_id);
+		}
+	}
+
 	if ((rc = bridge_free_block(block_ptr)) != SLURM_SUCCESS) {
 		error("bridge_free_block(): %s", bg_err_str(rc));
 	}
@@ -1803,9 +1808,7 @@ extern int bridge_blocks_load_curr(List curr_block_list)
 
 	int mp_cnt;
 	rm_partition_t *block_ptr = NULL;
-	char *user_name = NULL;
 	bg_record_t *bg_record = NULL;
-	uid_t my_uid;
 
 	int block_number, block_count;
 	char *bg_block_id = NULL;
@@ -1915,107 +1918,13 @@ extern int bridge_blocks_load_curr(List curr_block_list)
 			      bg_err_str(rc));
 			continue;
 		}
-
-		xfree(bg_record->user_name);
-		xfree(bg_record->target_name);
-
-		if (mp_cnt==0) {
-			bg_record->user_name =
-				xstrdup(bg_conf->slurm_user_name);
-			bg_record->target_name =
-				xstrdup(bg_conf->slurm_user_name);
-		} else {
-			user_name = NULL;
-			if ((rc = bridge_get_data(block_ptr,
-						  RM_PartitionFirstUser,
-						  &user_name))
-			    != SLURM_SUCCESS) {
-				error("bridge_get_data"
-				      "(RM_PartitionFirstUser): %s",
-				      bg_err_str(rc));
-				continue;
-			}
-			if (!user_name) {
-				error("No user name was "
-				      "returned from database");
-				continue;
-			}
-			bg_record->user_name = xstrdup(user_name);
-
-			if (!bg_record->boot_state)
-				bg_record->target_name =
-					xstrdup(bg_conf->slurm_user_name);
-			else
-				bg_record->target_name = xstrdup(user_name);
-			free(user_name);
-		}
-		if (uid_from_string (bg_record->user_name, &my_uid)<0){
-			error("uid_from_string(%s): %m",
-			      bg_record->user_name);
-		} else {
-			bg_record->user_uid = my_uid;
-		}
 	}
 	bridge_free_block_list(block_list);
 #endif
 	return rc;
 }
 
-extern void bridge_reset_block_list(List block_list)
-{
-	ListIterator itr = NULL;
-	bg_record_t *bg_record = NULL;
-	rm_job_list_t *job_list = NULL;
-	int jobs = 0;
-
-#if defined HAVE_BG_FILES
-	int live_states, rc;
-#endif
-
-	if (!block_list)
-		return;
-
-#if defined HAVE_BG_FILES
-	debug2("getting the job info");
-	live_states = JOB_ALL_FLAG
-		& (~JOB_TERMINATED_FLAG)
-		& (~JOB_KILLED_FLAG)
-		& (~JOB_ERROR_FLAG);
-
-	if ((rc = _get_jobs(live_states, &job_list)) != SLURM_SUCCESS) {
-		error("bridge_get_jobs(): %s", bg_err_str(rc));
-
-		return;
-	}
-
-	if ((rc = bridge_get_data(job_list, RM_JobListSize, &jobs))
-	    != SLURM_SUCCESS) {
-		error("bridge_get_data(RM_JobListSize): %s", bg_err_str(rc));
-		jobs = 0;
-	}
-	debug2("job count %d",jobs);
-#endif
-	itr = list_iterator_create(block_list);
-	while ((bg_record = list_next(itr))) {
-		info("Queue clearing of users of BG block %s",
-		     bg_record->bg_block_id);
-#ifndef HAVE_BG_FILES
-		/* simulate jobs running and need to be cleared from MMCS */
-		if (bg_record->job_ptr)
-			jobs = 1;
-#endif
-		_remove_jobs_on_block_and_reset(job_list, jobs,
-						bg_record->bg_block_id);
-	}
-	list_iterator_destroy(itr);
-
-#if defined HAVE_BG_FILES
-	if ((rc = _free_job_list(job_list)) != SLURM_SUCCESS)
-		error("bridge_free_job_list(): %s", bg_err_str(rc));
-#endif
-}
-
-extern void bridge_block_post_job(char *bg_block_id)
+extern void bridge_block_post_job(char *bg_block_id, struct job_record *job_ptr)
 {
 	int jobs = 0;
 	rm_job_list_t *job_list = NULL;
@@ -2042,8 +1951,25 @@ extern void bridge_block_post_job(char *bg_block_id)
 		jobs = 0;
 	}
 	debug2("job count %d",jobs);
+#else
+	/* simulate jobs running and need to be cleared from MMCS */
+	jobs = 1;
 #endif
 	_remove_jobs_on_block_and_reset(job_list, jobs,	bg_block_id);
+	if (job_ptr) {
+		slurmctld_lock_t job_read_lock =
+			{ NO_LOCK, READ_LOCK, NO_LOCK, NO_LOCK };
+		lock_slurmctld(job_read_lock);
+		if (job_ptr->magic == JOB_MAGIC) {
+			/* This signals the job purger that the job
+			   actually finished in the system.
+			*/
+			select_jobinfo_t *jobinfo =
+				job_ptr->select_jobinfo->data;
+			jobinfo->bg_record = NULL;
+		}
+		unlock_slurmctld(job_read_lock);
+	}
 
 #if defined HAVE_BG_FILES
 	if ((rc = _free_job_list(job_list)) != SLURM_SUCCESS)
@@ -2075,6 +2001,16 @@ extern status_t bridge_free_bg(my_bluegene_t *bg)
 	slurm_mutex_unlock(&api_file_mutex);
 	return rc;
 
+}
+
+extern uint16_t bridge_block_get_action(char *bg_block_id)
+{
+	return BG_BLOCK_ACTION_NONE;
+}
+
+extern int bridge_check_nodeboards(char *mp_loc)
+{
+	return 0;
 }
 
 extern int bridge_set_log_params(char *api_file_name, unsigned int level)

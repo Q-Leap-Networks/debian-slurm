@@ -134,7 +134,7 @@ typedef struct slurm_acct_storage_ops {
 				    slurmdb_account_cond_t *acct_cond);
 	List (*get_clusters)       (void *db_conn, uint32_t uid,
 				    slurmdb_cluster_cond_t *cluster_cond);
-	List (*get_config)         (void *db_conn);
+	List (*get_config)         (void *db_conn, char *config_name);
 	List (*get_associations)   (void *db_conn, uint32_t uid,
 				    slurmdb_association_cond_t *assoc_cond);
 	List (*get_events)         (void *db_conn, uint32_t uid,
@@ -201,6 +201,7 @@ typedef struct slurm_acct_storage_context {
 static slurm_acct_storage_context_t * g_acct_storage_context = NULL;
 static pthread_mutex_t		g_acct_storage_context_lock =
 	PTHREAD_MUTEX_INITIALIZER;
+static bool init_run = false;
 
 /*
  * Local functions
@@ -388,6 +389,9 @@ extern int slurm_acct_storage_init(char *loc)
 	int retval = SLURM_SUCCESS;
 	char *acct_storage_type = NULL;
 
+	if ( init_run && g_acct_storage_context )
+		return retval;
+
 	slurm_mutex_lock( &g_acct_storage_context_lock );
 
 	if ( g_acct_storage_context )
@@ -411,7 +415,8 @@ extern int slurm_acct_storage_init(char *loc)
 		_acct_storage_context_destroy( g_acct_storage_context );
 		g_acct_storage_context = NULL;
 		retval = SLURM_ERROR;
-	}
+	} else
+		init_run = true;
 
 done:
 	slurm_mutex_unlock( &g_acct_storage_context_lock );
@@ -426,6 +431,7 @@ extern int slurm_acct_storage_fini(void)
 	if (!g_acct_storage_context)
 		return SLURM_SUCCESS;
 
+	init_run = false;
 //	(*(g_acct_storage_context->ops.acct_storage_fini))();
 	rc = _acct_storage_context_destroy( g_acct_storage_context );
 	g_acct_storage_context = NULL;
@@ -713,11 +719,11 @@ extern List acct_storage_g_get_clusters(void *db_conn, uint32_t uid,
 		(db_conn, uid, cluster_cond);
 }
 
-extern List acct_storage_g_get_config(void *db_conn)
+extern List acct_storage_g_get_config(void *db_conn, char *config_name)
 {
 	if (slurm_acct_storage_init(NULL) < 0)
 		return NULL;
-	return (*(g_acct_storage_context->ops.get_config))(db_conn);
+	return (*(g_acct_storage_context->ops.get_config))(db_conn, config_name);
 }
 
 extern List acct_storage_g_get_associations(

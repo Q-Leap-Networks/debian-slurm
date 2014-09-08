@@ -57,6 +57,7 @@
 #include <string.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "slurm/slurm_errno.h"
 
@@ -161,6 +162,10 @@ int association_based_accounting = 0;
 bool ping_nodes_now = false;
 uint32_t      cluster_cpus = 0;
 int   with_slurmdbd = 0;
+bool want_nodes_reboot = true;
+
+/* Next used for stats/diagnostics */
+diag_stats_t slurmctld_diag_stats;
 
 /* Local variables */
 static int	daemonize = DEFAULT_DAEMONIZE;
@@ -202,6 +207,7 @@ static void         _update_assoc(slurmdb_association_rec_t *rec);
 static void         _update_qos(slurmdb_qos_rec_t *rec);
 inline static int   _report_locks_set(void);
 static void *       _service_connection(void *arg);
+static void         _set_work_dir(void);
 static int          _shutdown_backup_controller(int wait_time);
 static void *       _slurmctld_background(void *no_data);
 static void *       _slurmctld_rpc_mgr(void *no_data);
@@ -216,6 +222,9 @@ static bool         _wait_for_server_thread(void);
 typedef struct connection_arg {
 	int newsockfd;
 } connection_arg_t;
+
+time_t last_proc_req_start = 0;
+time_t next_stats_reset = 0;
 
 /* main - slurmctld main function, start various threads and process RPCs */
 int main(int argc, char *argv[])
@@ -254,25 +263,6 @@ int main(int argc, char *argv[])
 		sched_log_alter(sched_log_opts, LOG_DAEMON,
 				slurmctld_conf.sched_logfile);
 		debug("sched: slurmctld starting");
-
-		if (slurmctld_conf.slurmctld_logfile &&
-		    (slurmctld_conf.slurmctld_logfile[0] == '/')) {
-			char *slash_ptr, *work_dir;
-			work_dir = xstrdup(slurmctld_conf.slurmctld_logfile);
-			slash_ptr = strrchr(work_dir, '/');
-			if (slash_ptr == work_dir)
-				work_dir[1] = '\0';
-			else
-				slash_ptr[0] = '\0';
-			if (chdir(work_dir) < 0)
-				fatal("chdir(%s): %m", work_dir);
-			xfree(work_dir);
-		} else {
-			if (chdir(slurmctld_conf.state_save_location) < 0) {
-				fatal("chdir(%s): %m",
-				      slurmctld_conf.state_save_location);
-			}
-		}
 	} else {
 		slurmctld_config.daemonize = 0;
 	}
@@ -287,6 +277,8 @@ int main(int argc, char *argv[])
 	 */
 	_init_pidfile();
 	_become_slurm_user();
+	if (daemonize)
+		_set_work_dir();
 
 	if (stat(slurmctld_conf.mail_prog, &stat_buf) != 0)
 		error("Configured MailProg is invalid");
@@ -397,6 +389,7 @@ int main(int argc, char *argv[])
 	   way.  If we get an error we can't do anything about it.
 	*/
 	load_assoc_usage(slurmctld_conf.state_save_location);
+	load_qos_usage(slurmctld_conf.state_save_location);
 
 	/* This thread is looking for when we get correct data from
 	   the database so we can update the assoc_ptr's in the jobs
@@ -686,6 +679,15 @@ int main(int argc, char *argv[])
 			break;
 		sleep(1);
 	}
+#ifdef HAVE_BG
+	/* Always call slurm_select_fini() on some systems like
+	   BlueGene we need to make sure other processes are ended
+	   or we could get a random core from within it's
+	   underlying infrastructure.
+	*/
+        slurm_select_fini();
+#endif
+
 #endif
 
 	xfree(slurmctld_cluster_name);
@@ -967,8 +969,9 @@ static void *_slurmctld_rpc_mgr(void *no_data)
 			no_thread = 0;
 
 		if (no_thread) {
-			_service_connection((void *) conn_arg);
-		}
+			slurmctld_diag_stats.proc_req_raw++;
+		       	_service_connection((void *) conn_arg);
+	       	}
 	}
 
 	debug3("_slurmctld_rpc_mgr shutting down");
@@ -998,17 +1001,14 @@ static void *_service_connection(void *arg)
 	 * slurm_receive_msg sets msg connection fd to accepted fd. This allows
 	 * possibility for slurmctld_req() to close accepted connection.
 	 */
-	if(slurm_receive_msg(conn->newsockfd, msg, 0) != 0) {
+	if (slurm_receive_msg(conn->newsockfd, msg, 0) != 0) {
 		error("slurm_receive_msg: %m");
-		/* close should only be called when the socket implementation
-		 * is being used the following call will be a no-op in a
-		 * message/mongo implementation */
 		/* close the new socket */
 		slurm_close_accepted_conn(conn->newsockfd);
 		goto cleanup;
 	}
 
-	if(errno != SLURM_SUCCESS) {
+	if (errno != SLURM_SUCCESS) {
 		if (errno == SLURM_PROTOCOL_VERSION_ERROR) {
 			slurm_send_rc_msg(msg, SLURM_PROTOCOL_VERSION_ERROR);
 		} else
@@ -1182,10 +1182,10 @@ static void _remove_assoc(slurmdb_association_rec_t *rec)
 {
 	int cnt = 0;
 
-	cnt = job_cancel_by_assoc_id(rec->id);
+	cnt = job_hold_by_assoc_id(rec->id);
 
 	if (cnt) {
-		info("Removed association id:%u user:%s, cancelled %u jobs",
+		info("Removed association id:%u user:%s, held %u jobs",
 		     rec->id, rec->user, cnt);
 	} else
 		debug("Removed association id:%u user:%s", rec->id, rec->user);
@@ -1195,10 +1195,10 @@ static void _remove_qos(slurmdb_qos_rec_t *rec)
 {
 	int cnt = 0;
 
-	cnt = job_cancel_by_qos_id(rec->id);
+	cnt = job_hold_by_qos_id(rec->id);
 
 	if (cnt) {
-		info("Removed QOS:%s cancelled %u jobs", rec->name, cnt);
+		info("Removed QOS:%s held %u jobs", rec->name, cnt);
 	} else
 		debug("Removed QOS:%s", rec->name);
 }
@@ -1251,6 +1251,57 @@ static void _update_qos(slurmdb_qos_rec_t *rec)
 	unlock_slurmctld(job_write_lock);
 }
 
+static void _queue_reboot_msg(void)
+{
+	agent_arg_t *reboot_agent_args = NULL;
+	struct node_record *node_ptr;
+	char *host_str;
+	time_t now = time(NULL);
+	int i;
+	bool want_reboot;
+
+	want_nodes_reboot = false;
+	for (i = 0, node_ptr = node_record_table_ptr;
+	     i < node_record_count; i++, node_ptr++) {
+		if (!IS_NODE_MAINT(node_ptr) || /* do it only if node */
+		    is_node_in_maint_reservation(i)) /*isn't in reservation */
+			continue;
+		want_nodes_reboot = true; /* mark it for the next cycle */
+		if (IS_NODE_IDLE(node_ptr) && !IS_NODE_NO_RESPOND(node_ptr) &&
+		    !IS_NODE_POWER_UP(node_ptr)) /* only active idle nodes */
+			want_reboot = true;
+		else if (IS_NODE_FUTURE(node_ptr) &&
+			 (node_ptr->last_response == (time_t) 0))
+			want_reboot = true; /* system just restarted */
+		else
+			want_reboot = false;
+		if (!want_reboot)
+			continue;
+		if (reboot_agent_args == NULL) {
+			reboot_agent_args = xmalloc(sizeof(agent_arg_t));
+			reboot_agent_args->msg_type = REQUEST_REBOOT_NODES;
+			reboot_agent_args->retry = 0;
+			reboot_agent_args->hostlist = hostlist_create("");
+		}
+		hostlist_push(reboot_agent_args->hostlist, node_ptr->name);
+		reboot_agent_args->node_count++;
+		node_ptr->node_state = NODE_STATE_FUTURE |
+				(node_ptr->node_state & NODE_STATE_FLAGS);
+		bit_clear(avail_node_bitmap, i);
+		bit_clear(idle_node_bitmap, i);
+		node_ptr->last_response = now;
+	}
+	if (reboot_agent_args != NULL) {
+		hostlist_uniq(reboot_agent_args->hostlist);
+		host_str = hostlist_ranged_string_xmalloc(
+				reboot_agent_args->hostlist);
+		debug("Queuing reboot request for nodes %s", host_str);
+		xfree(host_str);
+		agent_queue_request(reboot_agent_args);
+		last_node_update = now;
+	}
+}
+
 /*
  * _slurmctld_background - process slurmctld background activities
  *	purge defunct job records, save state, schedule jobs, and
@@ -1273,6 +1324,7 @@ static void *_slurmctld_background(void *no_data)
 	static time_t last_node_acct;
 	static time_t last_ctld_bu_ping;
 	static time_t last_uid_update;
+	static time_t last_reboot_msg_time;
 	static bool ping_msg_sent = false;
 	time_t now;
 	int no_resp_msg_interval, ping_interval, purge_job_interval;
@@ -1308,7 +1360,7 @@ static void *_slurmctld_background(void *no_data)
 	last_purge_job_time = last_trigger = last_health_check_time = now;
 	last_timelimit_time = last_assert_primary_time = now;
 	last_no_resp_msg_time = last_resv_time = last_ctld_bu_ping = now;
-	last_uid_update = now;
+	last_uid_update = last_reboot_msg_time = now;
 
 	if ((slurmctld_conf.min_job_age > 0) &&
 	    (slurmctld_conf.min_job_age < PURGE_JOB_INTERVAL)) {
@@ -1371,7 +1423,7 @@ static void *_slurmctld_background(void *no_data)
 			now = time(NULL);
 			last_resv_time = now;
 			lock_slurmctld(node_write_lock);
-			set_node_maint_mode();
+			set_node_maint_mode(false);
 			unlock_slurmctld(node_write_lock);
 		}
 
@@ -1434,6 +1486,14 @@ static void *_slurmctld_background(void *no_data)
 			lock_slurmctld(job_read_lock);
 			srun_ping();
 			unlock_slurmctld(job_read_lock);
+		}
+
+		if (want_nodes_reboot && (now > last_reboot_msg_time)) {
+			now = time(NULL);
+			last_reboot_msg_time = now;
+			lock_slurmctld(node_write_lock);
+			_queue_reboot_msg();
+			unlock_slurmctld(node_write_lock);
 		}
 
 		/* Process any pending agent work */
@@ -1500,6 +1560,24 @@ static void *_slurmctld_background(void *no_data)
 			now = time(NULL);
 			last_node_acct = now;
 			_accounting_cluster_ready();
+		}
+ 
+
+		if (last_proc_req_start == 0) {
+			/* Stats will reset at midnight (aprox).
+			 * Uhmmm... UTC time?... It is  not so important.
+			 * Just resetting during the night */
+			last_proc_req_start = now;
+			next_stats_reset = last_proc_req_start -
+					   (last_proc_req_start % 86400) +
+					   86400;
+		}
+
+		if ((next_stats_reset > 0) && (now > next_stats_reset)) {
+			/* Resetting stats values */
+			last_proc_req_start = now;
+			next_stats_reset = now - (now % 86400) + 86400;
+			reset_stats(0);
 		}
 
 		/* Reassert this machine as the primary controller.
@@ -1825,6 +1903,10 @@ static void _update_cred_key(void)
  * NOTE: READ lock_slurmctld config before entry */
 void update_logging(void)
 {
+	int rc;
+	uid_t slurm_user_id  = slurmctld_conf.slurm_user_id;
+	gid_t slurm_user_gid = gid_from_uid(slurm_user_id);
+
 	/* Preserve execute line arguments (if any) */
 	if (debug_level) {
 		slurmctld_conf.slurmctld_debug = MIN(
@@ -1859,6 +1941,25 @@ void update_logging(void)
 
 	sched_log_alter(sched_log_opts, LOG_DAEMON,
 			slurmctld_conf.sched_logfile);
+
+	if (slurmctld_conf.slurmctld_logfile) {
+		rc = chown(slurmctld_conf.slurmctld_logfile,
+			   slurm_user_id, slurm_user_gid);
+		if (rc) {
+			error("chown(%s, %d, %d): %m",
+			      slurmctld_conf.slurmctld_logfile,
+			      (int) slurm_user_id, (int) slurm_user_gid);
+		}
+	}
+	if (slurmctld_conf.sched_logfile) {
+		rc = chown(slurmctld_conf.sched_logfile,
+			   slurm_user_id, slurm_user_gid);
+		if (rc) {
+			error("chown(%s, %d, %d): %m",
+			      slurmctld_conf.sched_logfile,
+			      (int) slurm_user_id, (int) slurm_user_gid);
+		}
+	}
 }
 
 /* Reset slurmd nice value */
@@ -1972,7 +2073,7 @@ static void *_assoc_cache_mgr(void *no_data)
 	       list_count(job_list));
 	itr = list_iterator_create(job_list);
 	while ((job_ptr = list_next(itr))) {
-		if(job_ptr->assoc_id) {
+		if (job_ptr->assoc_id) {
 			memset(&assoc_rec, 0,
 			       sizeof(slurmdb_association_rec_t));
 			assoc_rec.id = job_ptr->assoc_id;
@@ -2145,4 +2246,42 @@ static int _ping_backup_controller(void)
 		debug2("_ping_backup_controller/response error %d", rc);
 
 	return rc;
+}
+
+static void  _set_work_dir(void)
+{
+	bool success = false;
+
+	if (slurmctld_conf.slurmctld_logfile &&
+	    (slurmctld_conf.slurmctld_logfile[0] == '/')) {
+		char *slash_ptr, *work_dir;
+		work_dir = xstrdup(slurmctld_conf.slurmctld_logfile);
+		slash_ptr = strrchr(work_dir, '/');
+		if (slash_ptr == work_dir)
+			work_dir[1] = '\0';
+		else
+			slash_ptr[0] = '\0';
+		if ((access(work_dir, W_OK) != 0) || (chdir(work_dir) < 0))
+			error("chdir(%s): %m", work_dir);
+		else
+			success = true;
+		xfree(work_dir);
+	}
+
+	if (!success) {
+		if ((access(slurmctld_conf.state_save_location, W_OK) != 0) ||
+		    (chdir(slurmctld_conf.state_save_location) < 0)) {
+			error("chdir(%s): %m",
+			      slurmctld_conf.state_save_location);
+		} else
+			success = true;
+	}
+
+	if (!success) {
+		if ((access("/var/tmp", W_OK) != 0) ||
+		    (chdir("/var/tmp") < 0)) {
+			error("chdir(/var/tmp): %m");
+		} else
+			info("chdir to /var/tmp");
+	}
 }

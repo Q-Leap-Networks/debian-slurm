@@ -39,7 +39,9 @@
  *  Copyright (C) 2002 The Regents of the University of California.
 \*****************************************************************************/
 
-#include "jobacct_common.h"
+#include <sys/resource.h>
+
+#include "src/common/jobacct_common.h"
 
 /*
 ** Define slurm-specific aliases for use by plugins, see slurm_xlator.h
@@ -60,8 +62,13 @@ uint32_t mult = 1000;
 static void _pack_jobacct_id(jobacct_id_t *jobacct_id,
 			     uint16_t rpc_version, Buf buffer)
 {
-	pack32((uint32_t)jobacct_id->nodeid, buffer);
-	pack16((uint16_t)jobacct_id->taskid, buffer);
+	if (jobacct_id) {
+		pack32((uint32_t) jobacct_id->nodeid, buffer);
+		pack16((uint16_t) jobacct_id->taskid, buffer);
+	} else {
+		pack32((uint32_t) 0, buffer);
+		pack16((uint16_t) 0, buffer);
+	}
 }
 
 static int _unpack_jobacct_id(jobacct_id_t *jobacct_id,
@@ -77,7 +84,7 @@ unpack_error:
 extern int jobacct_common_init_struct(struct jobacctinfo *jobacct,
 				      jobacct_id_t *jobacct_id)
 {
-	if(!jobacct_id) {
+	if (!jobacct_id) {
 		jobacct_id_t temp_id;
 		temp_id.taskid = (uint16_t)NO_VAL;
 		temp_id.nodeid = (uint32_t)NO_VAL;
@@ -266,45 +273,48 @@ extern void jobacct_common_aggregate(struct jobacctinfo *dest,
 				     struct jobacctinfo *from)
 {
 	xassert(dest);
-	xassert(from);
+
+	if (!from)
+		return;
 
 	slurm_mutex_lock(&jobacct_lock);
-	if(dest->max_vsize < from->max_vsize) {
+	if (dest->max_vsize < from->max_vsize) {
 		dest->max_vsize = from->max_vsize;
 		dest->max_vsize_id = from->max_vsize_id;
 	}
 	dest->tot_vsize += from->tot_vsize;
 
-	if(dest->max_rss < from->max_rss) {
+	if (dest->max_rss < from->max_rss) {
 		dest->max_rss = from->max_rss;
 		dest->max_rss_id = from->max_rss_id;
 	}
 	dest->tot_rss += from->tot_rss;
 
-	if(dest->max_pages < from->max_pages) {
+	if (dest->max_pages < from->max_pages) {
 		dest->max_pages = from->max_pages;
 		dest->max_pages_id = from->max_pages_id;
 	}
 	dest->tot_pages += from->tot_pages;
-	if((dest->min_cpu > from->min_cpu)
-	   || (dest->min_cpu == (uint32_t)NO_VAL)) {
-		if(from->min_cpu == (uint32_t)NO_VAL)
+
+	if ((dest->min_cpu > from->min_cpu)
+	    || (dest->min_cpu == (uint32_t)NO_VAL)) {
+		if (from->min_cpu == (uint32_t)NO_VAL)
 			from->min_cpu = 0;
 		dest->min_cpu = from->min_cpu;
 		dest->min_cpu_id = from->min_cpu_id;
 	}
 	dest->tot_cpu += from->tot_cpu;
 
-	if(dest->max_vsize_id.taskid == (uint16_t)NO_VAL)
+	if (dest->max_vsize_id.taskid == (uint16_t)NO_VAL)
 		dest->max_vsize_id = from->max_vsize_id;
 
-	if(dest->max_rss_id.taskid == (uint16_t)NO_VAL)
+	if (dest->max_rss_id.taskid == (uint16_t)NO_VAL)
 		dest->max_rss_id = from->max_rss_id;
 
-	if(dest->max_pages_id.taskid == (uint16_t)NO_VAL)
+	if (dest->max_pages_id.taskid == (uint16_t)NO_VAL)
 		dest->max_pages_id = from->max_pages_id;
 
-	if(dest->min_cpu_id.taskid == (uint16_t)NO_VAL)
+	if (dest->min_cpu_id.taskid == (uint16_t)NO_VAL)
 		dest->min_cpu_id = from->min_cpu_id;
 
 	dest->user_cpu_sec	+= from->user_cpu_sec;
@@ -351,15 +361,16 @@ extern void jobacct_common_2_stats(slurmdb_stats_t *stats,
 extern void jobacct_common_pack(struct jobacctinfo *jobacct,
 				uint16_t rpc_version, Buf buffer)
 {
-	int i=0;
+	int i = 0;
 
-	if(!jobacct) {
-		for(i=0; i<16; i++)
+	if (!jobacct) {
+		for (i = 0; i < 12; i++)
 			pack32((uint32_t) 0, buffer);
-		for(i=0; i<4; i++)
-			pack16((uint16_t) 0, buffer);
+		for (i = 0; i < 4; i++)
+			_pack_jobacct_id(NULL, rpc_version, buffer);
 		return;
 	}
+
 	slurm_mutex_lock(&jobacct_lock);
 	pack32((uint32_t)jobacct->user_cpu_sec, buffer);
 	pack32((uint32_t)jobacct->user_cpu_usec, buffer);
@@ -373,6 +384,7 @@ extern void jobacct_common_pack(struct jobacctinfo *jobacct,
 	pack32((uint32_t)jobacct->tot_pages, buffer);
 	pack32((uint32_t)jobacct->min_cpu, buffer);
 	pack32((uint32_t)jobacct->tot_cpu, buffer);
+
 	_pack_jobacct_id(&jobacct->max_vsize_id, rpc_version, buffer);
 	_pack_jobacct_id(&jobacct->max_rss_id, rpc_version, buffer);
 	_pack_jobacct_id(&jobacct->max_pages_id, rpc_version, buffer);
@@ -385,6 +397,7 @@ extern int jobacct_common_unpack(struct jobacctinfo **jobacct,
 				 uint16_t rpc_version, Buf buffer)
 {
 	uint32_t uint32_tmp;
+
 	*jobacct = xmalloc(sizeof(struct jobacctinfo));
 	safe_unpack32(&uint32_tmp, buffer);
 	(*jobacct)->user_cpu_sec = uint32_tmp;
@@ -402,22 +415,26 @@ extern int jobacct_common_unpack(struct jobacctinfo **jobacct,
 	safe_unpack32(&(*jobacct)->tot_pages, buffer);
 	safe_unpack32(&(*jobacct)->min_cpu, buffer);
 	safe_unpack32(&(*jobacct)->tot_cpu, buffer);
-	if(_unpack_jobacct_id(&(*jobacct)->max_vsize_id, rpc_version, buffer)
-	   != SLURM_SUCCESS)
+
+	if (_unpack_jobacct_id(&(*jobacct)->max_vsize_id, rpc_version, buffer)
+	    != SLURM_SUCCESS)
 		goto unpack_error;
-	if(_unpack_jobacct_id(&(*jobacct)->max_rss_id, rpc_version, buffer)
-	   != SLURM_SUCCESS)
+	if (_unpack_jobacct_id(&(*jobacct)->max_rss_id, rpc_version, buffer)
+	    != SLURM_SUCCESS)
 		goto unpack_error;
-	if(_unpack_jobacct_id(&(*jobacct)->max_pages_id, rpc_version, buffer)
-	   != SLURM_SUCCESS)
+	if (_unpack_jobacct_id(&(*jobacct)->max_pages_id, rpc_version, buffer)
+	    != SLURM_SUCCESS)
 		goto unpack_error;
-	if(_unpack_jobacct_id(&(*jobacct)->min_cpu_id, rpc_version, buffer)
-	   != SLURM_SUCCESS)
+	if (_unpack_jobacct_id(&(*jobacct)->min_cpu_id, rpc_version, buffer)
+	    != SLURM_SUCCESS)
 		goto unpack_error;
 
 	return SLURM_SUCCESS;
 
 unpack_error:
+	debug2("jobacct_common_unpack:"
+		"unpack_error: size_buf(buffer) %u",
+	size_buf(buffer));
 	xfree(*jobacct);
        	return SLURM_ERROR;
 }

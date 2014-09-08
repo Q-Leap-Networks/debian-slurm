@@ -111,8 +111,8 @@ time_t last_job_update;
  * minimum version for their plugins as the job completion logging API
  * matures.
  */
-const char plugin_name[]       	= "Priority MULTIFACTOR plugin";
-const char plugin_type[]       	= "priority/multifactor";
+const char plugin_name[]	= "Priority MULTIFACTOR plugin";
+const char plugin_type[]	= "priority/multifactor";
 const uint32_t plugin_version	= 100;
 
 static pthread_t decay_handler_thread;
@@ -128,6 +128,7 @@ static uint32_t weight_fs; /* weight for Fairshare factor */
 static uint32_t weight_js; /* weight for Job Size factor */
 static uint32_t weight_part; /* weight for Partition factor */
 static uint32_t weight_qos; /* weight for QOS factor */
+static uint32_t flags;      /* Priority Flags */
 
 extern void priority_p_set_assoc_usage(slurmdb_association_rec_t *assoc);
 extern double priority_p_calc_fs_factor(long double usage_efctv,
@@ -156,10 +157,11 @@ static int _apply_decay(double decay_factor)
 	else if (!calc_fairshare)
 		return SLURM_SUCCESS;
 
+	assoc_mgr_lock(&locks);
+
 	xassert(assoc_mgr_association_list);
 	xassert(assoc_mgr_qos_list);
 
-	assoc_mgr_lock(&locks);
 	itr = list_iterator_create(assoc_mgr_association_list);
 	/* We want to do this to all associations including
 	   root.  All usage_raws are calculated from the bottom up.
@@ -186,7 +188,7 @@ static int _apply_decay(double decay_factor)
  * This should be called every PriorityUsageResetPeriod
  * RET: SLURM_SUCCESS on SUCCESS, SLURM_ERROR else.
  */
-static int _reset_usage()
+static int _reset_usage(void)
 {
 	ListIterator itr = NULL;
 	slurmdb_association_rec_t *assoc = NULL;
@@ -197,9 +199,10 @@ static int _reset_usage()
 	if (!calc_fairshare)
 		return SLURM_SUCCESS;
 
+	assoc_mgr_lock(&locks);
+
 	xassert(assoc_mgr_association_list);
 
-	assoc_mgr_lock(&locks);
 	itr = list_iterator_create(assoc_mgr_association_list);
 	/* We want to do this to all associations including
 	   root.  All usage_raws are calculated from the bottom up.
@@ -458,12 +461,31 @@ static void _get_priority_factors(time_t start_time, struct job_record *job_ptr)
 	qos_ptr = (slurmdb_qos_rec_t *)job_ptr->qos_ptr;
 
 	if (weight_age) {
-		uint32_t diff = start_time - job_ptr->details->begin_time;
+		uint32_t diff = 0;
+		time_t use_time;
+
+		if (flags & PRIORITY_FLAGS_ACCRUE_ALWAYS)
+			use_time = job_ptr->details->submit_time;
+		else
+			use_time = job_ptr->details->begin_time;
+
+		/* Only really add an age priority if the use_time is
+		   past the start_time.
+		*/
+		if (start_time > use_time)
+			diff = start_time - use_time;
+
 		if (job_ptr->details->begin_time) {
-			if (diff < max_age)
+			if (diff < max_age) {
 				job_ptr->prio_factors->priority_age =
 					(double)diff / (double)max_age;
-			else
+			} else
+				job_ptr->prio_factors->priority_age = 1.0;
+		} else if (flags & PRIORITY_FLAGS_ACCRUE_ALWAYS) {
+			if (diff < max_age) {
+				job_ptr->prio_factors->priority_age =
+					(double)diff / (double)max_age;
+			} else
 				job_ptr->prio_factors->priority_age = 1.0;
 		}
 	}
@@ -533,7 +555,7 @@ static uint32_t _get_priority_internal(time_t start_time,
 	double priority		= 0.0;
 	priority_factors_object_t pre_factors;
 
-	if (job_ptr->direct_set_prio && (job_ptr->priority > 1))
+	if (job_ptr->direct_set_prio && (job_ptr->priority > 0))
 		return job_ptr->priority;
 
 	if (!job_ptr->details) {
@@ -542,23 +564,17 @@ static uint32_t _get_priority_internal(time_t start_time,
 		      job_ptr->job_id);
 		return 0;
 	}
-	/*
-	 * This means the job is not eligible yet
-	 */
-	if (!job_ptr->details->begin_time
-	    || (job_ptr->details->begin_time > start_time))
-		return 1;
 
 	/* figure out the priority */
 	_get_priority_factors(start_time, job_ptr);
 	memcpy(&pre_factors, job_ptr->prio_factors,
 	       sizeof(priority_factors_object_t));
 
-	job_ptr->prio_factors->priority_age *= (double)weight_age;
-	job_ptr->prio_factors->priority_fs *= (double)weight_fs;
-	job_ptr->prio_factors->priority_js *= (double)weight_js;
+	job_ptr->prio_factors->priority_age  *= (double)weight_age;
+	job_ptr->prio_factors->priority_fs   *= (double)weight_fs;
+	job_ptr->prio_factors->priority_js   *= (double)weight_js;
 	job_ptr->prio_factors->priority_part *= (double)weight_part;
-	job_ptr->prio_factors->priority_qos *= (double)weight_qos;
+	job_ptr->prio_factors->priority_qos  *= (double)weight_qos;
 
 	priority = job_ptr->prio_factors->priority_age
 		+ job_ptr->prio_factors->priority_fs
@@ -567,12 +583,9 @@ static uint32_t _get_priority_internal(time_t start_time,
 		+ job_ptr->prio_factors->priority_qos
 		- (double)(job_ptr->prio_factors->nice - NICE_OFFSET);
 
-	/*
-	 * 0 means the job is held; 1 means system hold
-	 * so 2 is the lowest non-held priority
-	 */
-	if (priority < 2)
-		priority = 2;
+	/* Priority 0 is reserved for held jobs */
+	if (priority < 1)
+		priority = 1;
 
 	if (priority_debug) {
 		info("Weighted Age priority is %f * %u = %.2f",
@@ -699,6 +712,7 @@ void _init_grp_used_cpu_run_secs(time_t last_ran)
 	if (itr == NULL)
 		fatal("list_iterator_create: malloc failure");
 
+	assoc_mgr_lock(&locks);
 	while ((job_ptr = list_next(itr))) {
 		if (priority_debug)
 			debug2("job: %u",job_ptr->job_id);
@@ -714,7 +728,6 @@ void _init_grp_used_cpu_run_secs(time_t last_ran)
 
 		delta = job_ptr->total_cpus * (last_ran - job_ptr->start_time);
 
-		assoc_mgr_lock(&locks);
 		qos = (slurmdb_qos_rec_t *) job_ptr->qos_ptr;
 		assoc = (slurmdb_association_rec_t *) job_ptr->assoc_ptr;
 
@@ -743,8 +756,8 @@ void _init_grp_used_cpu_run_secs(time_t last_ran)
 			assoc->usage->grp_used_cpu_run_secs -= delta;
 			assoc = assoc->usage->parent_assoc_ptr;
 		}
-		assoc_mgr_unlock(&locks);
 	}
+	assoc_mgr_unlock(&locks);
 	list_iterator_destroy(itr);
 	unlock_slurmctld(job_read_lock);
 }
@@ -1039,12 +1052,10 @@ static void *_decay_thread(void *no_data)
 			}
 
 			/*
-			 * This means the job is held, 0, or a system
-			 * hold, 1. Continue also if the job is not
-			 * pending.  There is no reason to set the
-			 * priority if the job isn't pending.
+			 * Priority 0 is reserved for held jobs. Also skip
+			 * priority calculation for non-pending jobs.
 			 */
-			if ((job_ptr->priority <= 1)
+			if ((job_ptr->priority == 0)
 			    || !IS_JOB_PENDING(job_ptr))
 				continue;
 
@@ -1140,6 +1151,7 @@ static void _internal_setup(void)
 	weight_js = slurm_get_priority_weight_job_size();
 	weight_part = slurm_get_priority_weight_partition();
 	weight_qos = slurm_get_priority_weight_qos();
+	flags = slurmctld_conf.priority_flags;
 
 	if (priority_debug) {
 		info("priority: Max Age is %u", max_age);
@@ -1148,6 +1160,7 @@ static void _internal_setup(void)
 		info("priority: Weight JobSize is %u", weight_js);
 		info("priority: Weight Part is %u", weight_part);
 		info("priority: Weight QOS is %u", weight_qos);
+		info("priority: Flags is %u", flags);
 	}
 }
 
@@ -1342,7 +1355,7 @@ extern double priority_p_calc_fs_factor(long double usage_efctv,
 }
 
 extern List priority_p_get_priority_factors_list(
-	priority_factors_request_msg_t *req_msg)
+	priority_factors_request_msg_t *req_msg, uid_t uid)
 {
 	List req_job_list;
 	List req_user_list;
@@ -1372,6 +1385,7 @@ extern List priority_p_get_priority_factors_list(
 			 */
 			if (!IS_JOB_PENDING(job_ptr))
 				continue;
+
 			/*
 			 * This means the job is not eligible yet
 			 */
@@ -1380,9 +1394,9 @@ extern List priority_p_get_priority_factors_list(
 				continue;
 
 			/*
-			 * 0 means the job is held; 1 means system hold
+			 * 0 means the job is held
 			 */
-			if (job_ptr->priority <= 1)
+			if (job_ptr->priority == 0)
 				continue;
 
 			/*
@@ -1395,10 +1409,10 @@ extern List priority_p_get_priority_factors_list(
 				continue;
 
 			if ((slurmctld_conf.private_data & PRIVATE_DATA_JOBS)
-			    && (job_ptr->user_id != req_msg->uid)
-			    && !validate_operator(req_msg->uid)
+			    && (job_ptr->user_id != uid)
+			    && !validate_operator(uid)
 			    && !assoc_mgr_is_user_acct_coord(
-				    acct_db_conn, req_msg->uid,
+				    acct_db_conn, uid,
 				    job_ptr->account))
 				continue;
 

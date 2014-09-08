@@ -107,6 +107,7 @@ typedef struct slurm_jobacct_gather_context {
 
 static slurm_jobacct_gather_context_t *g_jobacct_gather_context = NULL;
 static pthread_mutex_t g_jobacct_gather_context_lock = PTHREAD_MUTEX_INITIALIZER;
+static bool init_run = false;
 
 static int _slurm_jobacct_gather_init(void);
 
@@ -258,6 +259,9 @@ static int _slurm_jobacct_gather_init(void)
 	char	*jobacct_gather_type = NULL;
 	int	retval=SLURM_SUCCESS;
 
+	if (init_run &&  g_jobacct_gather_context )
+		return(retval);
+
 	slurm_mutex_lock( &g_jobacct_gather_context_lock );
 	if ( g_jobacct_gather_context )
 		goto done;
@@ -278,7 +282,8 @@ static int _slurm_jobacct_gather_init(void)
 			g_jobacct_gather_context);
 		g_jobacct_gather_context = NULL;
 		retval = SLURM_ERROR;
-	}
+	} else
+		init_run = true;
 
 done:
 	slurm_mutex_unlock( &g_jobacct_gather_context_lock );
@@ -297,13 +302,16 @@ extern int slurm_jobacct_gather_init(void)
 
 extern int slurm_jobacct_gather_fini(void)
 {
-	int rc;
+	int rc = SLURM_SUCCESS;
 
-	if (!g_jobacct_gather_context)
-		return SLURM_SUCCESS;
-
-	rc = _slurm_jobacct_gather_context_destroy(g_jobacct_gather_context);
-	g_jobacct_gather_context = NULL;
+	slurm_mutex_lock( &g_jobacct_gather_context_lock );
+	if (g_jobacct_gather_context) {
+		init_run = false;
+		rc = _slurm_jobacct_gather_context_destroy(
+				g_jobacct_gather_context);
+		g_jobacct_gather_context = NULL;
+	}
+	slurm_mutex_unlock( &g_jobacct_gather_context_lock );
 	return rc;
 }
 

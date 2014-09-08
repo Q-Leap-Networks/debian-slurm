@@ -66,6 +66,7 @@ static int select_context_default = -1;
 static slurm_select_context_t * select_context = NULL;
 static pthread_mutex_t		select_context_lock =
 	PTHREAD_MUTEX_INITIALIZER;
+static bool init_run = false;
 
 /*
  * Locate and load the appropriate plugin
@@ -117,6 +118,7 @@ static int _select_get_ops(char *select_type,
   		"select_p_select_jobinfo_xstrdup",
     		"select_p_update_block",
 		"select_p_update_sub_node",
+		"select_p_fail_cnode",
 		"select_p_get_info_from_plugin",
 		"select_p_update_node_config",
 		"select_p_update_node_state",
@@ -238,7 +240,7 @@ extern void print_select_ba_request(select_ba_request_t* ba_request)
 {
 	int dim;
 	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
-	uint16_t cluster_dims = slurmdb_setup_cluster_name_dims();
+	uint16_t cluster_dims = slurmdb_setup_cluster_dims();
 
 	if (ba_request == NULL){
 		error("print_ba_request Error, request is NULL");
@@ -280,6 +282,9 @@ extern int slurm_select_init(bool only_default)
 	DIR *dirp;
 	struct dirent *e;
 	char *dir_array = NULL, *head = NULL;
+
+	if ( init_run && select_context )
+		return retval;
 
 	slurm_mutex_lock( &select_context_lock );
 
@@ -449,6 +454,7 @@ skip_load_all:
 		}
 
 	}
+	init_run = true;
 
 done:
 	slurm_mutex_unlock( &select_context_lock );
@@ -465,6 +471,7 @@ extern int slurm_select_fini(void)
 	if (!select_context)
 		goto fini;
 
+	init_run = false;
 	for (i=0; i<select_context_cnt; i++) {
 		j = _select_context_destroy(select_context + i);
 		if (j != SLURM_SUCCESS)
@@ -1198,6 +1205,20 @@ extern int select_g_update_sub_node (update_block_msg_t *block_desc_ptr)
 }
 
 /*
+ * Fail certain cnodes in a blocks midplane (usually comes from the
+ *        IBM runjob mux)
+ * IN step_ptr - step that has failed cnodes
+ */
+extern int select_g_fail_cnode (struct step_record *step_ptr)
+{
+	if (slurm_select_init(0) < 0)
+		return SLURM_ERROR;
+
+	return (*(select_context[select_context_default].ops.
+		  fail_cnode))(step_ptr);
+}
+
+/*
  * Get select data from a plugin
  * IN dinfo     - type of data to get from the node record
  *                (see enum select_plugindata_info)
@@ -1285,18 +1306,11 @@ extern int select_g_reconfigure (void)
  */
 extern bitstr_t * select_g_resv_test(bitstr_t *avail_bitmap, uint32_t node_cnt)
 {
-#if 0
-	/* Wait for Danny to checkin select/bgq logic before using new plugin
-	 * function calls. The select_p_resv_test() function is currently only
-	 * available in select/linear and select/cons_res */
 	if (slurm_select_init(0) < 0)
 		return NULL;
 
 	return (*(select_context[select_context_default].ops.resv_test))
 		(avail_bitmap, node_cnt);
-#else
-	return bit_pick_cnt(avail_bitmap, node_cnt);
-#endif
 }
 
 extern void select_g_ba_init(node_info_msg_t *node_info_ptr, bool sanity_check)

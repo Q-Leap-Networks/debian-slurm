@@ -550,7 +550,8 @@ int load_all_part_state(void)
 			if ((flags & PART_FLAG_DEFAULT_CLR) ||
 			    (flags & PART_FLAG_HIDDEN_CLR)  ||
 			    (flags & PART_FLAG_NO_ROOT_CLR) ||
-			    (flags & PART_FLAG_ROOT_ONLY_CLR)) {
+			    (flags & PART_FLAG_ROOT_ONLY_CLR) ||
+			    (flags & PART_FLAG_REQ_RESV_CLR)) {
 				error("Invalid data for partition %s: flags=%u",
 				      part_name, flags);
 				error_code = EINVAL;
@@ -1159,6 +1160,16 @@ extern int update_part (update_part_msg_t * part_desc, bool create_flag)
 		part_ptr->flags &= (~PART_FLAG_HIDDEN);
 	}
 
+	if (part_desc->flags & PART_FLAG_REQ_RESV) {
+		info("update_part: setting req_resv for partition %s",
+		     part_desc->name);
+		part_ptr->flags |= PART_FLAG_REQ_RESV;
+	} else if (part_desc->flags & PART_FLAG_REQ_RESV_CLR) {
+		info("update_part: clearing req_resv for partition %s",
+		     part_desc->name);
+		part_ptr->flags &= (~PART_FLAG_REQ_RESV);
+	}
+
 	if (part_desc->flags & PART_FLAG_ROOT_ONLY) {
 		info("update_part: setting root_only for partition %s",
 		     part_desc->name);
@@ -1375,7 +1386,6 @@ extern int update_part (update_part_msg_t * part_desc, bool create_flag)
 	if (error_code == SLURM_SUCCESS) {
 		slurm_sched_partition_change();	/* notify sched plugin */
 		select_g_reconfigure();		/* notify select plugin too */
-		reset_job_priority();		/* free jobs */
 	}
 
 	return error_code;
@@ -1429,10 +1439,10 @@ extern int validate_alloc_node(struct part_record *part_ptr, char* alloc_node)
  	status=hostlist_find(hl,alloc_node);
  	hostlist_destroy(hl);
 
- 	if(status==-1)
-		status=0;
+ 	if (status == -1)
+		status = 0;
  	else
-		status=1;
+		status = 1;
 
  	return status;
 }
@@ -1577,7 +1587,40 @@ extern int delete_partition(delete_part_msg_t *part_desc_ptr)
 
 	slurm_sched_partition_change();	/* notify sched plugin */
 	select_g_reconfigure();		/* notify select plugin too */
-	reset_job_priority();		/* free jobs */
 
 	return SLURM_SUCCESS;
+}
+
+/*
+ * Determine of the specified job can execute right now or is currently
+ * blocked by a miscellaneous limit. This does not re-validate job state,
+ * but relies upon schedule() in src/slurmctld/job_scheduler.c to do so.
+ */
+extern bool misc_policy_job_runnable_state(struct job_record *job_ptr)
+{
+	if ((job_ptr->state_reason == FAIL_ACCOUNT) ||
+	    (job_ptr->state_reason == FAIL_QOS) ||
+	    (job_ptr->state_reason == WAIT_NODE_NOT_AVAIL)) {
+		return false;
+	}
+
+	return true;
+}
+
+/*
+ * Determine of the specified job can execute right now or is currently
+ * blocked by a partition state or limit. Execute job_limits_check() to
+ * re-validate job state.
+ */
+extern bool part_policy_job_runnable_state(struct job_record *job_ptr)
+{
+	if ((job_ptr->state_reason == WAIT_PART_DOWN) ||
+	    (job_ptr->state_reason == WAIT_PART_INACTIVE) ||
+	    (job_ptr->state_reason == WAIT_PART_NODE_LIMIT) ||
+	    (job_ptr->state_reason == WAIT_PART_TIME_LIMIT) ||
+	    (job_ptr->state_reason == WAIT_QOS_THRES)) {
+		return false;
+	}
+
+	return true;
 }

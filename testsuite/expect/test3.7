@@ -158,7 +158,7 @@ expect {
 		set host_name $expect_out(1,string)
 		exp_continue
 	}
-	-re "BP_List=($alpha_numeric_under)" {
+	-re "MidplaneList=($alpha_numeric_under)" {
 		set host_name $expect_out(1,string)
 		exp_continue
 	}
@@ -208,6 +208,7 @@ if {$job_id2 == 0} {
 sleep 5
 suspend_job $job_id1 suspend
 if {$not_supported == 1} {
+	exec $bin_rm -f $file_out1 $file_out2 $file_prog $file_prog_sh1 $file_prog_sh2
 	cancel_job $job_id1
 	exit 0
 }

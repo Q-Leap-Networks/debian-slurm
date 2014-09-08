@@ -45,6 +45,10 @@
 #  include <pthread.h>
 #endif
 
+#if defined(__NetBSD__)
+#include <sys/types.h> /* for pid_t */
+#include <sys/signal.h> /* for SIGKILL */
+#endif
 #include <errno.h>
 #include <fcntl.h>
 #include <grp.h>
@@ -68,7 +72,8 @@
 #define MAX_PROG_TIME 300	/* maximum run time for program */
 
 /* Change TRIGGER_STATE_VERSION value when changing the state save format */
-#define TRIGGER_STATE_VERSION      "VER003"
+#define TRIGGER_STATE_VERSION      "VER004"
+#define TRIGGER_2_4_STATE_VERSION  "VER004"	/* SLURM version 2.4 */
 #define TRIGGER_2_2_STATE_VERSION  "VER003"	/* SLURM version 2.2 */
 #define TRIGGER_2_1_STATE_VERSION  "VER002"	/* SLURM version 2.1 */
 
@@ -102,6 +107,8 @@ uint8_t db_failure = 0;
 uint8_t dbd_failure = 0;
 
 typedef struct trig_mgr_info {
+	uint32_t child_pid;	/* pid of child process */
+	uint16_t flags;		/* TRIGGER_FLAG_* */
 	uint32_t trig_id;	/* trigger ID */
 	uint16_t res_type;	/* TRIGGER_RES_TYPE_* */
 	char *   res_id;	/* node name or job_id (string) */
@@ -111,17 +118,24 @@ typedef struct trig_mgr_info {
 	uint32_t trig_type;	/* TRIGGER_TYPE_* */
 	time_t   trig_time;	/* offset (pending) or time stamp (complete) */
 	uint32_t user_id;	/* user requesting trigger */
-	uint32_t group_id;	/* user's group id (pending) or pid (complete) */
+	uint32_t group_id;	/* user's group id */
 	char *   program;	/* program to execute */
 	uint8_t  state;		/* 0=pending, 1=pulled, 2=completed */
+
+	/* The orig_ fields are used to save  and clone the orignal values */
+	bitstr_t *orig_bitmap;	/* bitmap of requested nodes (if applicable) */
+	char *   orig_res_id;	/* original node name or job_id (string) */
+	time_t   orig_time;	/* offset (pending) or time stamp (complete) */
 } trig_mgr_info_t;
 
 /* Prototype for ListDelF */
 void _trig_del(void *x) {
 	trig_mgr_info_t * tmp = (trig_mgr_info_t *) x;
 	xfree(tmp->res_id);
+	xfree(tmp->orig_res_id);
 	xfree(tmp->program);
 	FREE_NULL_BITMAP(tmp->nodes_bitmap);
+	FREE_NULL_BITMAP(tmp->orig_bitmap);
 	xfree(tmp);
 }
 
@@ -284,7 +298,7 @@ extern int trigger_clear(uid_t uid, trigger_info_msg_t *msg)
 			rc = ESLURM_INVALID_JOB_ID;
 			goto fini;
 		}
-	} else if ((trig_in->trig_id == 0) && (trig_in->user_id == 0)) {
+	} else if ((trig_in->trig_id == 0) && (trig_in->user_id == NO_VAL)) {
 		rc = EINVAL;
 		goto fini;
 	}
@@ -292,18 +306,20 @@ extern int trigger_clear(uid_t uid, trigger_info_msg_t *msg)
 	/* now look for a valid request, matching uid */
 	trig_iter = list_iterator_create(trigger_list);
 	while ((trig_test = list_next(trig_iter))) {
-		if ((trig_test->user_id != (uint32_t) uid) && (uid != 0))
-			continue;
 		if (trig_in->trig_id &&
 		    (trig_in->trig_id != trig_test->trig_id))
 			continue;
 		if (job_id && (job_id != trig_test->job_id))
 			continue;
-		if (trig_in->user_id &&
+		if ((trig_in->user_id != NO_VAL) &&
 		    (trig_in->user_id != trig_test->user_id))
 			continue;
 		if (trig_test->state == 2)	/* wait for proc termination */
 			continue;
+		if ((trig_test->user_id != (uint32_t) uid) && (uid != 0)) {
+			rc = ESLURM_ACCESS_DENIED;
+			continue;
+		}
 		list_delete_item(trig_iter);
 		rc = SLURM_SUCCESS;
 	}
@@ -335,8 +351,10 @@ extern trigger_info_msg_t * trigger_get(uid_t uid, trigger_info_msg_t *msg)
 	trig_out = resp_data->trigger_array;
 	while ((trig_in = list_next(trig_iter))) {
 		/* Note: Filtering currently done by strigger */
-		if (trig_in->state >= 1)
+		if ((trig_in->state >= 1) &&
+		    ((trig_out->flags & TRIGGER_FLAG_PERM) == 0))
 			continue;	/* no longer pending */
+		trig_out->flags     = trig_in->flags;
 		trig_out->trig_id   = trig_in->trig_id;
 		trig_out->res_type  = trig_in->res_type;
 		trig_out->res_id    = xstrdup(trig_in->res_id);
@@ -420,15 +438,22 @@ extern int trigger_set(uid_t uid, gid_t gid, trigger_info_msg_t *msg)
 		msg->trigger_array[i].trig_id = next_trigger_id;
 		trig_add->trig_id = next_trigger_id;
 		next_trigger_id++;
+		trig_add->flags = msg->trigger_array[i].flags;
 		trig_add->res_type = msg->trigger_array[i].res_type;
-		trig_add->nodes_bitmap = bitmap;
+		if (bitmap) {
+			trig_add->nodes_bitmap = bitmap;
+			trig_add->orig_bitmap  = bit_copy(bitmap);
+		}
 		trig_add->job_id = job_id;
 		trig_add->job_ptr = job_ptr;
-		/* move don't copy "res_id" */
-		trig_add->res_id = msg->trigger_array[i].res_id;
-		msg->trigger_array[i].res_id = NULL;
+		if (msg->trigger_array[i].res_id) {
+			trig_add->res_id = msg->trigger_array[i].res_id;
+			trig_add->orig_res_id = xstrdup(trig_add->res_id);
+			msg->trigger_array[i].res_id = NULL; /* moved */
+		}
 		trig_add->trig_type = msg->trigger_array[i].trig_type;
 		trig_add->trig_time = msg->trigger_array[i].offset;
+		trig_add->orig_time = msg->trigger_array[i].offset;
 		trig_add->user_id = (uint32_t) uid;
 		trig_add->group_id = (uint32_t) gid;
 		/* move don't copy "program" */
@@ -631,14 +656,15 @@ static void _dump_trigger_state(trig_mgr_info_t *trig_ptr, Buf buffer)
 	safe_pack8(dbd_failure,     buffer);
 	safe_pack8(db_failure,      buffer);
 
+	pack16   (trig_ptr->flags,     buffer);
 	pack32   (trig_ptr->trig_id,   buffer);
 	pack16   (trig_ptr->res_type,  buffer);
-	packstr  (trig_ptr->res_id,    buffer);
+	packstr  (trig_ptr->orig_res_id, buffer);  /* restores res_id too */
 	/* rebuild nodes_bitmap as needed from res_id */
 	/* rebuild job_id as needed from res_id */
 	/* rebuild job_ptr as needed from res_id */
 	pack32   (trig_ptr->trig_type, buffer);
-	pack_time(trig_ptr->trig_time, buffer);
+	pack_time(trig_ptr->orig_time, buffer);    /* restores trig_time too */
 	pack32   (trig_ptr->user_id,   buffer);
 	pack32   (trig_ptr->group_id,  buffer);
 	packstr  (trig_ptr->program,   buffer);
@@ -651,7 +677,28 @@ static int _load_trigger_state(Buf buffer, uint16_t protocol_version)
 	uint32_t str_len;
 
 	trig_ptr = xmalloc(sizeof(trig_mgr_info_t));
-	if (protocol_version >= SLURM_2_2_PROTOCOL_VERSION) {
+
+	if (protocol_version >= SLURM_2_4_PROTOCOL_VERSION) {
+		/* restore trigger pull state flags */
+		safe_unpack8(&ctld_failure, buffer);
+		safe_unpack8(&bu_ctld_failure, buffer);
+		safe_unpack8(&dbd_failure, buffer);
+		safe_unpack8(&db_failure, buffer);
+
+		safe_unpack16   (&trig_ptr->flags,     buffer);
+		safe_unpack32   (&trig_ptr->trig_id,   buffer);
+		safe_unpack16   (&trig_ptr->res_type,  buffer);
+		safe_unpackstr_xmalloc(&trig_ptr->res_id, &str_len, buffer);
+		/* rebuild nodes_bitmap as needed from res_id */
+		/* rebuild job_id as needed from res_id */
+		/* rebuild job_ptr as needed from res_id */
+		safe_unpack32   (&trig_ptr->trig_type, buffer);
+		safe_unpack_time(&trig_ptr->trig_time, buffer);
+		safe_unpack32   (&trig_ptr->user_id,   buffer);
+		safe_unpack32   (&trig_ptr->group_id,  buffer);
+		safe_unpackstr_xmalloc(&trig_ptr->program, &str_len, buffer);
+		safe_unpack8    (&trig_ptr->state,     buffer);
+	} else if (protocol_version >= SLURM_2_2_PROTOCOL_VERSION) {
 		/* restore trigger pull state flags */
 		safe_unpack8(&ctld_failure, buffer);
 		safe_unpack8(&bu_ctld_failure, buffer);
@@ -707,7 +754,12 @@ static int _load_trigger_state(Buf buffer, uint16_t protocol_version)
 				      &trig_ptr->nodes_bitmap) != 0))
 			goto unpack_error;
 	}
-
+	if (trig_ptr->nodes_bitmap)
+		trig_ptr->orig_bitmap = bit_copy(trig_ptr->nodes_bitmap);
+	if (trig_ptr->res_id)
+		trig_ptr->orig_res_id = xstrdup(trig_ptr->res_id);
+	trig_ptr->orig_time = trig_ptr->trig_time;
+	
 	slurm_mutex_lock(&trigger_mutex);
 	if (trigger_list == NULL)
 		trigger_list = list_create(_trig_del);
@@ -890,6 +942,8 @@ extern int trigger_state_restore(void)
 	if (ver_str) {
 		if (!strcmp(ver_str, TRIGGER_STATE_VERSION)) {
 			protocol_version = SLURM_PROTOCOL_VERSION;
+		} else if (!strcmp(ver_str, TRIGGER_2_2_STATE_VERSION)) {
+			protocol_version = SLURM_2_2_PROTOCOL_VERSION;
 		} else if (!strcmp(ver_str, TRIGGER_2_1_STATE_VERSION)) {
 			protocol_version = SLURM_2_1_PROTOCOL_VERSION;
 		}
@@ -1421,7 +1475,7 @@ static void _trigger_run_program(trig_mgr_info_t *trig_in)
 	char *pname, *uname;
 	uid_t uid;
 	gid_t gid;
-	pid_t child;
+	pid_t child_pid;
 
 	if (!_validate_trigger(trig_in))
 		return;
@@ -1439,10 +1493,10 @@ static void _trigger_run_program(trig_mgr_info_t *trig_in)
 	snprintf(user_name, sizeof(user_name), "%s", uname);
 	xfree(uname);
 
-	child = fork();
-	if (child > 0) {
-		trig_in->group_id = child;
-	} else if (child == 0) {
+	child_pid = fork();
+	if (child_pid > 0) {
+		trig_in->child_pid = child_pid;
+	} else if (child_pid == 0) {
 		int i;
 		bool run_as_self = (uid == getuid());
 
@@ -1509,6 +1563,34 @@ static void _clear_event_triggers(void)
 	trigger_pri_db_res_op = false;
 }
 
+/* Make a copy of a trigger and pre-pend it on our list */
+static void _trigger_clone(trig_mgr_info_t *trig_in)
+{
+	trig_mgr_info_t *trig_add;
+
+	trig_add = xmalloc(sizeof(trig_mgr_info_t));
+	trig_add->flags     = trig_in->flags;
+	trig_add->trig_id   = trig_in->trig_id;
+	trig_add->res_type  = trig_in->res_type;
+	if (trig_in->orig_res_id) {
+		trig_add->res_id = xstrdup(trig_in->orig_res_id);
+		trig_add->orig_res_id = xstrdup(trig_in->orig_res_id);
+	}
+	if (trig_in->orig_bitmap) {
+		trig_add->nodes_bitmap = bit_copy(trig_in->orig_bitmap);
+		trig_add->orig_bitmap  = bit_copy(trig_in->orig_bitmap);
+	}
+	trig_add->job_id    = trig_in->job_id;
+	trig_add->job_ptr   = trig_in->job_ptr;
+	trig_add->trig_type = trig_in->trig_type;
+	trig_add->trig_time = trig_in->orig_time;
+	trig_add->orig_time = trig_in->orig_time;
+	trig_add->user_id   = trig_in->user_id;
+	trig_add->group_id  = trig_in->group_id;
+	trig_add->program   = xstrdup(trig_in->program);;
+	list_prepend(trigger_list, trig_add);
+}
+
 extern void trigger_process(void)
 {
 	ListIterator trig_iter;
@@ -1551,6 +1633,9 @@ extern void trigger_process(void)
 				     trig_in->user_id, trig_in->group_id,
 				     trig_in->program, trig_in->res_id);
 			}
+			if (trig_in->flags & TRIGGER_FLAG_PERM) {
+				_trigger_clone(trig_in);
+			}
 			trig_in->state = 2;
 			trig_in->trig_time = now;
 			state_change = true;
@@ -1558,9 +1643,9 @@ extern void trigger_process(void)
 		} else if ((trig_in->state == 2) &&
 			   (difftime(now, trig_in->trig_time) >
 			    MAX_PROG_TIME)) {
-			if (trig_in->group_id != 0) {
-				killpg(trig_in->group_id, SIGKILL);
-				rc = waitpid(trig_in->group_id, &prog_stat,
+			if (trig_in->child_pid != 0) {
+				killpg(trig_in->child_pid, SIGKILL);
+				rc = waitpid(trig_in->child_pid, &prog_stat,
 					     WNOHANG);
 				if ((rc > 0) && prog_stat) {
 					info("trigger uid=%u type=%s:%s "
@@ -1571,12 +1656,12 @@ extern void trigger_process(void)
 					     WIFEXITED(prog_stat),
 					     WTERMSIG(prog_stat));
 				}
-				if ((rc == trig_in->group_id) ||
+				if ((rc == trig_in->child_pid) ||
 				    ((rc == -1) && (errno == ECHILD)))
-					trig_in->group_id = 0;
+					trig_in->child_pid = 0;
 			}
 
-			if (trig_in->group_id == 0) {
+			if (trig_in->child_pid == 0) {
 				if (slurm_get_debug_flags() &
 				    DEBUG_FLAG_TRIGGERS) {
 					info("purging trigger[%u]",
@@ -1588,7 +1673,7 @@ extern void trigger_process(void)
 		} else if (trig_in->state == 2) {
 			/* Elimiate zombie processes right away.
 			 * Purge trigger entry above MAX_PROG_TIME later */
-			rc = waitpid(trig_in->group_id, &prog_stat, WNOHANG);
+			rc = waitpid(trig_in->child_pid, &prog_stat, WNOHANG);
 			if ((rc > 0) && prog_stat) {
 				info("trigger uid=%u type=%s:%s exit=%u:%u",
 				     trig_in->user_id,
@@ -1597,9 +1682,9 @@ extern void trigger_process(void)
 				     WIFEXITED(prog_stat),
 				     WTERMSIG(prog_stat));
 			}
-			if ((rc == trig_in->group_id) ||
+			if ((rc == trig_in->child_pid) ||
 			    ((rc == -1) && (errno == ECHILD)))
-				trig_in->group_id = 0;
+				trig_in->child_pid = 0;
 		}
 	}
 	list_iterator_destroy(trig_iter);

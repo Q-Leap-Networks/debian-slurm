@@ -1,12 +1,9 @@
 /*****************************************************************************\
- *  slurm_protocol_mongo_common.h - alternative communications protocol to
- *	TCP sockets. As of 11/18/2002 it is unclear that this communications
- * 	protocol will be fully developed.
- ****************************************************************************
- *  Copyright (C) 2002 The Regents of the University of California.
- *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  Written by Kevin Tew <tew1@llnl.gov>
- *  CODE-OCEC-09-009. All rights reserved.
+ *  runjob_interface.cc
+ *
+ *****************************************************************************
+ *  Copyright (C) 2011 SchedMD LLC
+ *  Written by Danny Auble <da@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.schedmd.com/slurmdocs/>.
@@ -38,51 +35,44 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifndef _SLURM_PROTOCOL_MONGO_COMMON_H
-#define _SLURM_PROTOCOL_MONGO_COMMON_H
+extern "C" {
+#include "runjob_interface.h"
+}
 
-#if HAVE_CONFIG_H
-#  include "config.h"
-#  if HAVE_INTTYPES_H
-#    include <inttypes.h>
-#  else
-#    if HAVE_STDINT_H
-#      include <stdint.h>
-#    endif
-#  endif  /* HAVE_INTTYPES_H */
-#else   /* !HAVE_CONFIG_H */
-#  include <inttypes.h>
-#endif  /*  HAVE_CONFIG_H */
+#ifdef HAVE_BG_FILES
 
-#include <netinet/in.h>
+#include <bgsched/runjob/Client.h>
 
-#define AF_SLURM AF_INET
-#define SLURM_INADDR_ANY 0x00000000
+#include <iostream>
 
-/* LINUX SPECIFIC */
-/* this is the slurm equivalent of the operating system file descriptor,
- * which in linux is just an int */
-typedef uint32_t slurm_fd_t ;
+#include <sys/wait.h>
+#include <unistd.h>
 
-/* this is the slurm equivalent of the BSD sockets sockaddr */
-typedef struct mongo_addr_t slurm_addr_t ;
-/* this is the slurm equivalent of the BSD sockets fd_set */
-typedef fd_set slurm_fd_set ;
-/*struct kevin {
-	int16_t family ;
-	uint16_t port ;
-	uint32_t address ;
-	char pad[16 - sizeof ( int16_t ) -
-		sizeof (uint16_t) - sizeof (uint32_t) ] ;
-} ;
-*/
+static bgsched::runjob::Client *rj_client_ptr = NULL;
 
-/* SLURM datatypes */
-/* this is a custom data type to describe the slurm msg type type
- * that is placed in the slurm protocol header
- * while just an short now, it may change in the future */
-/* Now defined in ../../src/common/slurm_protocol_defs.h
- * typedef uint16_t slurm_msg_type_t ;
- */
+
+extern int runjob_launch(int argc, char **argv,
+			 int input, int output, int error)
+{
+	try {
+		rj_client_ptr = new(bgsched::runjob::Client)(argc, argv);
+		return rj_client_ptr->start(input, output, error);
+	} catch (const std::exception& e) {
+		std::cerr << "could not runjob: " << e.what() << std::endl;
+		return -1;
+	}
+}
+
+extern void runjob_signal(int signal)
+{
+	if (rj_client_ptr) {
+		try {
+			rj_client_ptr->kill(signal);
+		}  catch (const std::exception& e) {
+			std::cerr << "could send signal " << signal
+				  << " to job: " << e.what() << std::endl;
+		}
+	}
+}
 
 #endif

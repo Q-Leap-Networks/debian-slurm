@@ -57,6 +57,7 @@ bool ba_initialized = false;
 uint32_t ba_debug_flags = 0;
 int DIM_SIZE[HIGHEST_DIMENSIONS];
 bitstr_t *ba_main_mp_bitmap = NULL;
+pthread_mutex_t ba_system_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static void _pack_ba_connection(ba_connection_t *ba_connection,
 				Buf buffer, uint16_t protocol_version)
@@ -145,24 +146,6 @@ static bool _incr_geo(int *geo, ba_geo_system_t *my_geo_system)
 	return false;
 }
 
-/* Translate a multi-dimension coordinate (3-D, 4-D, 5-D, etc.) into a 1-D
- * offset in the cnode* bitmap */
-static void _ba_node_xlate_to_1d(int *offset_1d, int *full_offset,
-				 ba_geo_system_t *my_geo_system)
-{
-	int i, map_offset;
-
-	xassert(offset_1d);
-	xassert(full_offset);
-	i = my_geo_system->dim_count - 1;
-	map_offset = full_offset[i];
-	for (i-- ; i >= 0; i--) {
-		map_offset *= my_geo_system->dim_size[i];
-		map_offset += full_offset[i];
-	}
-	*offset_1d = map_offset;
-}
-
 #if DISPLAY_FULL_DIM
 /* Translate a 1-D offset in the cnode bitmap to a multi-dimension
  * coordinate (3-D, 4-D, 5-D, etc.) */
@@ -180,13 +163,11 @@ static void _ba_node_xlate_from_1d(int offset_1d, int *full_offset,
 }
 #endif
 
-static int _ba_node_map_set_range_internal(int level, int *coords,
+static int _ba_node_map_set_range_internal(int level, uint16_t *coords,
 					   int *start_offset, int *end_offset,
 					   bitstr_t *node_bitmap,
 					   ba_geo_system_t *my_geo_system)
 {
-	int offset_1d;
-
 	xassert(my_geo_system);
 
 	if (level > my_geo_system->dim_count)
@@ -206,8 +187,7 @@ static int _ba_node_map_set_range_internal(int level, int *coords,
 		return 1;
 	}
 
-	_ba_node_xlate_to_1d(&offset_1d, coords, my_geo_system);
-	bit_set(node_bitmap, offset_1d);
+	ba_node_map_set(node_bitmap, coords, my_geo_system);
 	return 1;
 }
 
@@ -345,7 +325,7 @@ static bitstr_t * _test_geo(bitstr_t *node_bitmap,
 {
 	int i;
 	bitstr_t *alloc_node_bitmap;
-	int offset[my_geo_system->dim_count];
+	uint16_t offset[my_geo_system->dim_count];
 
 	alloc_node_bitmap = bit_alloc(my_geo_system->total_size);
 	memset(offset, 0, sizeof(offset));
@@ -359,7 +339,8 @@ static bitstr_t * _test_geo(bitstr_t *node_bitmap,
 		}
 		/* Test if this coordinate is available for use */
 		if (i >= my_geo_system->dim_count) {
-			if (ba_node_map_test(node_bitmap,offset,my_geo_system))
+			if (ba_node_map_test(
+				    node_bitmap, offset, my_geo_system))
 				break;	/* not available */
 			/* Set it in our bitmap for this job */
 			ba_node_map_set(alloc_node_bitmap, offset,
@@ -486,9 +467,12 @@ static void _internal_removable_set_mps(int level, bitstr_t *bitmap,
 		}
 		return;
 	}
-	curr_mp = coord2ba_mp(coords);
-	if (!curr_mp)
+
+	slurm_mutex_lock(&ba_system_mutex);
+	if (!(curr_mp = coord2ba_mp(coords))) {
+		slurm_mutex_unlock(&ba_system_mutex);
 		return;
+	}
 	if (bitmap)
 		is_set = bit_test(bitmap, curr_mp->index);
 	if (!bitmap || (is_set && !except) || (!is_set && except)) {
@@ -496,13 +480,15 @@ static void _internal_removable_set_mps(int level, bitstr_t *bitmap,
 			if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
 				info("can't use %s", curr_mp->coord_str);
 			curr_mp->used |= BA_MP_USED_TEMP;
-			bit_set(ba_main_mp_bitmap, curr_mp->index);
+			bit_set(ba_main_mp_bitmap, curr_mp->ba_geo_index);
 		} else {
 			curr_mp->used &= (~BA_MP_USED_TEMP);
 			if (curr_mp->used == BA_MP_USED_FALSE)
-				bit_clear(ba_main_mp_bitmap, curr_mp->index);
+				bit_clear(ba_main_mp_bitmap,
+					  curr_mp->ba_geo_index);
 		}
 	}
+	slurm_mutex_unlock(&ba_system_mutex);
 }
 
 static void _internal_reset_ba_system(int level, uint16_t *coords,
@@ -523,14 +509,18 @@ static void _internal_reset_ba_system(int level, uint16_t *coords,
 		}
 		return;
 	}
-	curr_mp = coord2ba_mp(coords);
-	if (!curr_mp)
+	slurm_mutex_lock(&ba_system_mutex);
+	if (!(curr_mp = coord2ba_mp(coords))) {
+		slurm_mutex_unlock(&ba_system_mutex);
 		return;
+	}
 	ba_setup_mp(curr_mp, track_down_mps, false);
-	bit_clear(ba_main_mp_bitmap, curr_mp->index);
+	bit_clear(ba_main_mp_bitmap, curr_mp->ba_geo_index);
+	slurm_mutex_unlock(&ba_system_mutex);
 }
 
 #if defined HAVE_BG_FILES
+/* ba_system_mutex should be locked before calling. */
 static ba_mp_t *_internal_loc2ba_mp(int level, uint16_t *coords,
 				    const char *check)
 {
@@ -796,11 +786,12 @@ extern void ba_setup_wires(void)
 		_build_geo_bitmap_arrays(i);
 }
 
-extern void destroy_ba_mp(void *ptr)
+extern void free_internal_ba_mp(ba_mp_t *ba_mp)
 {
-	ba_mp_t *ba_mp = (ba_mp_t *)ptr;
 	if (ba_mp) {
 		FREE_NULL_BITMAP(ba_mp->cnode_bitmap);
+		FREE_NULL_BITMAP(ba_mp->cnode_err_bitmap);
+		FREE_NULL_BITMAP(ba_mp->cnode_usable_bitmap);
 		xfree(ba_mp->loc);
 		if (ba_mp->nodecard_loc) {
 			int i;
@@ -808,6 +799,15 @@ extern void destroy_ba_mp(void *ptr)
 				xfree(ba_mp->nodecard_loc[i]);
 			xfree(ba_mp->nodecard_loc);
 		}
+
+	}
+}
+
+extern void destroy_ba_mp(void *ptr)
+{
+	ba_mp_t *ba_mp = (ba_mp_t *)ptr;
+	if (ba_mp) {
+		free_internal_ba_mp(ba_mp);
 		xfree(ba_mp);
 	}
 }
@@ -817,21 +817,52 @@ extern void pack_ba_mp(ba_mp_t *ba_mp, Buf buffer, uint16_t protocol_version)
 	int dim;
 
 	xassert(ba_mp);
+	if (protocol_version >= SLURM_2_4_PROTOCOL_VERSION) {
+		for (dim = 0; dim < SYSTEM_DIMENSIONS; dim++) {
+			_pack_ba_switch(&ba_mp->axis_switch[dim], buffer,
+					protocol_version);
+			pack16(ba_mp->coord[dim], buffer);
+			/* No need to pack the coord_str, we can figure that
+			   out from the coords packed.
+			*/
+		}
+		/* currently there is no need to pack
+		 * ba_mp->cnode_bitmap */
 
-	for (dim = 0; dim < SYSTEM_DIMENSIONS; dim++) {
-		_pack_ba_switch(&ba_mp->axis_switch[dim], buffer,
-				protocol_version);
-		pack16(ba_mp->coord[dim], buffer);
-		/* No need to pack the coord_str, we can figure that
-		   out from the coords packed.
+		/* currently there is no need to pack
+		 * ba_mp->cnode_err_bitmap */
+
+		pack_bit_fmt(ba_mp->cnode_usable_bitmap, buffer);
+
+		pack16(ba_mp->used, buffer);
+		/* These are only used on the original, not in the
+		   block ba_mp's.
+		   ba_mp->alter_switch, ba_mp->index, ba_mp->loc,
+		   ba_mp->next_mp, ba_mp->nodecard_loc,
+		   ba_mp->prev_mp, ba_mp->state
+		*/
+	} else {
+		for (dim = 0; dim < SYSTEM_DIMENSIONS; dim++) {
+			_pack_ba_switch(&ba_mp->axis_switch[dim], buffer,
+					protocol_version);
+			pack16(ba_mp->coord[dim], buffer);
+			/* No need to pack the coord_str, we can figure that
+			   out from the coords packed.
+			*/
+		}
+		pack_bit_fmt(ba_mp->cnode_bitmap, buffer);
+
+		/* currently there is no need to pack
+		 * ba_mp->cnode_err_bitmap */
+
+		pack16(ba_mp->used, buffer);
+		/* These are only used on the original, not in the
+		   block ba_mp's.
+		   ba_mp->alter_switch, ba_mp->index, ba_mp->loc,
+		   ba_mp->next_mp, ba_mp->nodecard_loc,
+		   ba_mp->prev_mp, ba_mp->state
 		*/
 	}
-	pack_bit_fmt(ba_mp->cnode_bitmap, buffer);
-	pack16(ba_mp->used, buffer);
-	/* These are only used on the original, not in the block ba_mp's.
-	   ba_mp->alter_switch, ba_mp->index, ba_mp->loc, ba_mp->next_mp,
-	   ba_mp->nodecard_loc, ba_mp->prev_mp, ba_mp->state
-	*/
 }
 
 extern int unpack_ba_mp(ba_mp_t **ba_mp_pptr,
@@ -845,30 +876,68 @@ extern int unpack_ba_mp(ba_mp_t **ba_mp_pptr,
 
 	*ba_mp_pptr = ba_mp;
 
-	for (dim = 0; dim < SYSTEM_DIMENSIONS; dim++) {
-		if (_unpack_ba_switch(&ba_mp->axis_switch[dim], buffer,
-				      protocol_version)
-		    != SLURM_SUCCESS)
+	if (protocol_version >= SLURM_2_4_PROTOCOL_VERSION) {
+		for (dim = 0; dim < SYSTEM_DIMENSIONS; dim++) {
+			if (_unpack_ba_switch(&ba_mp->axis_switch[dim], buffer,
+					      protocol_version)
+			    != SLURM_SUCCESS)
+				goto unpack_error;
+			safe_unpack16(&ba_mp->coord[dim], buffer);
+			ba_mp->coord_str[dim] = alpha_num[ba_mp->coord[dim]];
+		}
+		ba_mp->coord_str[dim] = '\0';
+
+		safe_unpackstr_xmalloc(&bit_char, &uint32_tmp, buffer);
+		if (bit_char) {
+			ba_mp->cnode_usable_bitmap =
+				bit_alloc(bg_conf->mp_cnode_cnt);
+			bit_unfmt(ba_mp->cnode_usable_bitmap, bit_char);
+			xfree(bit_char);
+			ba_mp->cnode_bitmap =
+				bit_copy(ba_mp->cnode_usable_bitmap);
+		}
+		safe_unpack16(&ba_mp->used, buffer);
+
+		/* Since index could of changed here we will go figure
+		 * it out again. */
+		slurm_mutex_lock(&ba_system_mutex);
+		if (!(orig_mp = coord2ba_mp(ba_mp->coord))) {
+			slurm_mutex_unlock(&ba_system_mutex);
 			goto unpack_error;
-		safe_unpack16(&ba_mp->coord[dim], buffer);
-		ba_mp->coord_str[dim] = alpha_num[ba_mp->coord[dim]];
+		}
+		ba_mp->index = orig_mp->index;
+		ba_mp->ba_geo_index = orig_mp->ba_geo_index;
+		slurm_mutex_unlock(&ba_system_mutex);
+	} else {
+		for (dim = 0; dim < SYSTEM_DIMENSIONS; dim++) {
+			if (_unpack_ba_switch(&ba_mp->axis_switch[dim], buffer,
+					      protocol_version)
+			    != SLURM_SUCCESS)
+				goto unpack_error;
+			safe_unpack16(&ba_mp->coord[dim], buffer);
+			ba_mp->coord_str[dim] = alpha_num[ba_mp->coord[dim]];
+		}
+		ba_mp->coord_str[dim] = '\0';
+
+		safe_unpackstr_xmalloc(&bit_char, &uint32_tmp, buffer);
+		if (bit_char) {
+			ba_mp->cnode_bitmap = bit_alloc(bg_conf->mp_cnode_cnt);
+			bit_unfmt(ba_mp->cnode_bitmap, bit_char);
+			xfree(bit_char);
+		}
+		safe_unpack16(&ba_mp->used, buffer);
+
+		/* Since index could of changed here we will go figure
+		 * it out again. */
+		slurm_mutex_lock(&ba_system_mutex);
+		if (!(orig_mp = coord2ba_mp(ba_mp->coord))) {
+			slurm_mutex_unlock(&ba_system_mutex);
+			goto unpack_error;
+		}
+		ba_mp->index = orig_mp->index;
+		ba_mp->ba_geo_index = orig_mp->ba_geo_index;
+		slurm_mutex_unlock(&ba_system_mutex);
 	}
-	ba_mp->coord_str[dim] = '\0';
-
-	safe_unpackstr_xmalloc(&bit_char, &uint32_tmp, buffer);
-	if (bit_char) {
-		ba_mp->cnode_bitmap = bit_alloc(bg_conf->mp_cnode_cnt);
-		bit_unfmt(ba_mp->cnode_bitmap, bit_char);
-		xfree(bit_char);
-	}
-	safe_unpack16(&ba_mp->used, buffer);
-
-	/* Since index could of changed here we will go figure it out again. */
-	orig_mp = coord2ba_mp(ba_mp->coord);
-	if (!orig_mp)
-		goto unpack_error;
-	ba_mp->index = orig_mp->index;
-
 	return SLURM_SUCCESS;
 
 unpack_error:
@@ -877,7 +946,9 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
-
+/* If used in the bluegene plugin this ba_system_mutex must be
+ * locked. Don't work about it in programs like smap.
+ */
 extern ba_mp_t *str2ba_mp(const char *coords)
 {
 	uint16_t coord[cluster_dims];
@@ -905,11 +976,16 @@ extern ba_mp_t *str2ba_mp(const char *coords)
 		return NULL;
 	}
 
+	if (bridge_setup_system() != SLURM_SUCCESS)
+		return NULL;
+
 	return coord2ba_mp(coord);
 }
 
 /*
  * find a base blocks bg location (rack/midplane)
+ * If used in the bluegene plugin this ba_system_mutex must be
+ * locked. Don't work about it in programs like smap.
  */
 extern ba_mp_t *loc2ba_mp(const char* mp_id)
 {
@@ -970,11 +1046,12 @@ extern void ba_setup_mp(ba_mp_t *ba_mp, bool track_down_mps, bool wrap_it)
 	int i;
 	uint16_t node_base_state = ba_mp->state & NODE_STATE_BASE;
 
-	if (!track_down_mps ||((node_base_state != NODE_STATE_DOWN)
-			       && !(ba_mp->state & NODE_STATE_DRAIN)))
+	if (!track_down_mps || ((node_base_state != NODE_STATE_DOWN)
+				&& !(ba_mp->state & NODE_STATE_DRAIN)))
 		ba_mp->used = BA_MP_USED_FALSE;
 
-	for (i=0; i<cluster_dims; i++){
+	for (i=0; i<cluster_dims; i++) {
+		bool set_error = 0;
 #ifdef HAVE_BG_L_P
 		int j;
 		for (j=0;j<NUM_PORTS_PER_NODE;j++) {
@@ -987,10 +1064,22 @@ extern void ba_setup_mp(ba_mp_t *ba_mp, bool track_down_mps, bool wrap_it)
 			ba_mp->axis_switch[i].int_wire[j].port_tar = j;
 		}
 #endif
+		if (ba_mp->axis_switch[i].usage & BG_SWITCH_CABLE_ERROR)
+			set_error = 1;
+
 		if (wrap_it)
 			ba_mp->axis_switch[i].usage = BG_SWITCH_WRAPPED;
 		else
 			ba_mp->axis_switch[i].usage = BG_SWITCH_NONE;
+
+		if (set_error) {
+			if (track_down_mps)
+				ba_mp->axis_switch[i].usage
+					|= BG_SWITCH_CABLE_ERROR_FULL;
+			else
+				ba_mp->axis_switch[i].usage
+					|= BG_SWITCH_CABLE_ERROR;
+		}
 		ba_mp->alter_switch[i].usage = BG_SWITCH_NONE;
 	}
 }
@@ -1006,6 +1095,7 @@ extern ba_mp_t *ba_copy_mp(ba_mp_t *ba_mp)
 	ba_mp_t *new_ba_mp = (ba_mp_t *)xmalloc(sizeof(ba_mp_t));
 
 	memcpy(new_ba_mp, ba_mp, sizeof(ba_mp_t));
+
 	/* we have to set this or we would be pointing to the original */
 	memset(new_ba_mp->next_mp, 0, sizeof(new_ba_mp->next_mp));
 	/* we have to set this or we would be pointing to the original */
@@ -1014,6 +1104,8 @@ extern ba_mp_t *ba_copy_mp(ba_mp_t *ba_mp)
 	new_ba_mp->nodecard_loc = NULL;
 	new_ba_mp->loc = NULL;
 	new_ba_mp->cnode_bitmap = NULL;
+	new_ba_mp->cnode_err_bitmap = NULL;
+	new_ba_mp->cnode_usable_bitmap = NULL;
 
 	return new_ba_mp;
 }
@@ -1063,7 +1155,8 @@ extern void ba_print_geo_table(ba_geo_system_t *my_geo_system)
 	}
 }
 
-extern void ba_create_geo_table(ba_geo_system_t *my_geo_system)
+extern void ba_create_geo_table(ba_geo_system_t *my_geo_system,
+				bool avoid_three)
 {
 	ba_geo_table_t *geo_ptr;
 	int dim, inx[my_geo_system->dim_count], passthru, product;
@@ -1086,18 +1179,23 @@ extern void ba_create_geo_table(ba_geo_system_t *my_geo_system)
 					       (my_geo_system->total_size+1));
 
 	do {
+		bool found_three = 0;
 		/* Store new value */
 		geo_ptr = xmalloc(sizeof(ba_geo_table_t));
 		geo_ptr->geometry = xmalloc(sizeof(uint16_t) *
 					    my_geo_system->dim_count);
 		product = 1;
 		for (dim = 0; dim < my_geo_system->dim_count; dim++) {
+			if (avoid_three && (inx[dim] == 3)) {
+				found_three = 1;
+				goto next_geo;
+			}
 			geo_ptr->geometry[dim] = inx[dim];
 			product *= inx[dim];
-			passthru = inx[dim] - my_geo_system->dim_size[dim];
+			passthru = my_geo_system->dim_size[dim] - inx[dim];
 			if (passthru == 0)
 				geo_ptr->full_dim_cnt++;
-			else if (passthru > 1)
+			else if ((passthru > 1) && (inx[dim] > 1))
 				geo_ptr->passthru_cnt += passthru;
 		}
 		geo_ptr->size = product;
@@ -1118,6 +1216,11 @@ extern void ba_create_geo_table(ba_geo_system_t *my_geo_system)
 		}
 		geo_ptr->next_ptr = *last_pptr;
 		*last_pptr = geo_ptr;
+	next_geo:
+		if (found_three) {
+			xfree(geo_ptr->geometry);
+			xfree(geo_ptr);
+		}
 	} while (_incr_geo(inx, my_geo_system));   /* Generate next geometry */
 }
 
@@ -1174,13 +1277,10 @@ extern void ba_node_map_free(bitstr_t *node_bitmap,
  * IN full_offset - N-dimension zero-origin offset to set
  * IN my_geo_system - system geometry specification
  */
-extern void ba_node_map_set(bitstr_t *node_bitmap, int *full_offset,
+extern void ba_node_map_set(bitstr_t *node_bitmap, uint16_t *full_offset,
 			    ba_geo_system_t *my_geo_system)
 {
-	int offset_1d;
-
-	_ba_node_xlate_to_1d(&offset_1d, full_offset, my_geo_system);
-	bit_set(node_bitmap, offset_1d);
+	bit_set(node_bitmap, ba_node_xlate_to_1d(full_offset, my_geo_system));
 }
 
 /*
@@ -1194,7 +1294,7 @@ extern void ba_node_map_set_range(bitstr_t *node_bitmap,
 				  int *start_offset, int *end_offset,
 				  ba_geo_system_t *my_geo_system)
 {
-	int coords[5];
+	uint16_t coords[HIGHEST_DIMENSIONS];
 
 	_ba_node_map_set_range_internal(0, coords, start_offset, end_offset,
 					node_bitmap, my_geo_system);
@@ -1206,13 +1306,11 @@ extern void ba_node_map_set_range(bitstr_t *node_bitmap,
  * IN full_offset - N-dimension zero-origin offset to test
  * IN my_geo_system - system geometry specification
  */
-extern int ba_node_map_test(bitstr_t *node_bitmap, int *full_offset,
+extern int ba_node_map_test(bitstr_t *node_bitmap, uint16_t *full_offset,
 			    ba_geo_system_t *my_geo_system)
 {
-	int offset_1d;
-
-	_ba_node_xlate_to_1d(&offset_1d, full_offset, my_geo_system);
-	return bit_test(node_bitmap, offset_1d);
+	return bit_test(node_bitmap,
+			ba_node_xlate_to_1d(full_offset, my_geo_system));
 }
 
 /*
@@ -1398,6 +1496,24 @@ extern int ba_geo_test_all(bitstr_t *node_bitmap,
 	return rc;
 }
 
+/* Translate a multi-dimension coordinate (3-D, 4-D, 5-D, etc.) into a 1-D
+ * offset in the cnode* bitmap */
+extern int ba_node_xlate_to_1d(uint16_t *full_offset,
+			       ba_geo_system_t *my_geo_system)
+{
+	int i, map_offset;
+
+	xassert(full_offset);
+	xassert(my_geo_system);
+	i = my_geo_system->dim_count - 1;
+	map_offset = full_offset[i];
+	for (i-- ; i >= 0; i--) {
+		map_offset *= my_geo_system->dim_size[i];
+		map_offset += full_offset[i];
+	}
+	return map_offset;
+}
+
 /*
  * Used to set all midplanes in a special used state except the ones
  * we are able to use in a new allocation.
@@ -1496,27 +1612,51 @@ extern int validate_coord(uint16_t *coord)
 
 extern char *ba_switch_usage_str(uint16_t usage)
 {
-	switch (usage) {
+	bool error_set = (usage & BG_SWITCH_CABLE_ERROR);
+	uint16_t local_usage = usage;
+
+	if (error_set)
+		local_usage &= (~BG_SWITCH_CABLE_ERROR_FULL);
+
+	switch (local_usage) {
 	case BG_SWITCH_NONE:
+		if (error_set)
+			return "ErrorOut";
 		return "None";
 	case BG_SWITCH_WRAPPED_PASS:
+		if (error_set)
+			return "WrappedPass,ErrorOut";
 		return "WrappedPass";
 	case BG_SWITCH_TORUS:
+		if (error_set)
+			return "FullTorus,ErrorOut";
 		return "FullTorus";
 	case BG_SWITCH_PASS:
+		if (error_set)
+			return "Passthrough,ErrorOut";
 		return "Passthrough";
 	case BG_SWITCH_WRAPPED:
+		if (error_set)
+			return "Wrapped,ErrorOut";
 		return "Wrapped";
 	case (BG_SWITCH_OUT | BG_SWITCH_OUT_PASS):
+		if (error_set)
+			return "OutLeaving,ErrorOut";
 		return "OutLeaving";
 	case BG_SWITCH_OUT:
+		if (error_set)
+			return "ErrorOut";
 		return "Out";
 	case (BG_SWITCH_IN | BG_SWITCH_IN_PASS):
+		if (error_set)
+			return "InComming,ErrorOut";
 		return "InComming";
 	case BG_SWITCH_IN:
+		if (error_set)
+			return "In,ErrorOut";
 		return "In";
 	default:
-		error("unknown switch usage %u", usage);
+		error("unknown switch usage %u %u", usage, local_usage);
 		xassert(0);
 		break;
 	}

@@ -41,6 +41,16 @@
 
 #define ADMIN_SET_LIMIT 0xffff
 
+typedef struct {
+	uint16_t max_cpus;
+	uint16_t max_nodes;
+	uint16_t min_cpus;
+	uint16_t min_nodes;
+	uint16_t pn_min_memory;
+	uint16_t qos;
+	uint16_t time;
+} acct_policy_limit_set_t;
+
 /*
  * acct_policy_add_job_submit - Note that a job has been submitted for
  *	accounting policy purposes.
@@ -70,9 +80,10 @@ extern bool acct_policy_validate(job_desc_msg_t *job_desc,
 				 struct part_record *part_ptr,
 				 slurmdb_association_rec_t *assoc_in,
 				 slurmdb_qos_rec_t *qos_ptr,
-				 uint16_t *limit_set_max_cpus,
-				 uint16_t *limit_set_max_nodes,
-				 uint16_t *limit_set_time, bool update_call);
+				 uint16_t *state_reason,
+				 acct_policy_limit_set_t *acct_policy_limit_set,
+				 bool update_call);
+
 /*
  * acct_policy_job_runnable - Determine of the specified job can execute
  *	right now or not depending upon accounting policy (e.g. running
@@ -83,6 +94,12 @@ extern bool acct_policy_validate(job_desc_msg_t *job_desc,
 extern bool acct_policy_job_runnable(struct job_record *job_ptr);
 
 /*
+ * Determine of the specified job can execute right now or is currently
+ * blocked by an association or QOS limit. Does not re-validate job state.
+ */
+extern bool acct_policy_job_runnable_state(struct job_record *job_ptr);
+
+/*
  * acct_policy_update_pending_job - Make sure the limits imposed on a
  *	job on submission are correct after an update to a qos or
  *	association.  If the association/qos limits prevent
@@ -90,10 +107,5 @@ extern bool acct_policy_job_runnable(struct job_record *job_ptr);
  *	then cancel the job.
  */
 extern int acct_policy_update_pending_job(struct job_record *job_ptr);
-
-extern bool acct_policy_node_usable(struct job_record *job_ptr,
-				    uint32_t used_cpus,
-				    char *node_name, uint32_t node_cpus);
-
 
 #endif /* !_HAVE_ACCT_POLICY_H */

@@ -614,7 +614,7 @@ static int _resolve(char *com)
 	}
 	if (com[i] == 'r')
 		com[i] = 'R';
-	ret_str = resolve_mp(com+i);
+	ret_str = resolve_mp(com+i, NULL);
 	if (ret_str) {
 		snprintf(error_string, sizeof(error_string), "%s", ret_str);
 		xfree(ret_str);
@@ -911,8 +911,8 @@ static int _save_allocation(char *com, List allocated_blocks)
 			   "RamDiskImage=%s/ramdisk.elf\n",
 			   image_dir);
 
-		xstrcat(save_string, "Numpsets=8 # io poor\n");
-		xstrcat(save_string, "# Numpsets=64 # io rich\n");
+		xstrcat(save_string, "IONodesPerMP=8 # io poor\n");
+		xstrcat(save_string, "# IONodesPerMP=64 # io rich\n");
 #elif defined HAVE_BGP
 		image_dir = "/bgsys/drivers/ppcfloor/boot";
 		xstrfmtcat(save_string, "CnloadImage=%s/cns,%s/cnk\n",
@@ -922,14 +922,14 @@ static int _save_allocation(char *com, List allocated_blocks)
 		xstrfmtcat(save_string,
 			   "IoloadImage=%s/cns,%s/linux,%s/ramdisk\n",
 			   image_dir, image_dir, image_dir);
-		xstrcat(save_string, "Numpsets=4 # io poor\n");
-		xstrcat(save_string, "# Numpsets=32 # io rich\n");
+		xstrcat(save_string, "IONodesPerMP=4 # io poor\n");
+		xstrcat(save_string, "# IONodesPerMP=32 # io rich\n");
 #else
 		image_dir = "/bgsys/drivers/ppcfloor/boot";
-		xstrfmtcat(save_string, "MloaderImage=%s/uloader\n",
+		xstrfmtcat(save_string, "MloaderImage=%s/firmware\n",
 			   image_dir);
-		xstrcat(save_string, "Numpsets=4 # io semi-poor\n");
-		xstrcat(save_string, "# Numpsets=16 # io rich\n");
+		xstrcat(save_string, "IONodesPerMP=4 # io semi-poor\n");
+		xstrcat(save_string, "# IONodesPerMP=16 # io rich\n");
 #endif
 
 		xstrcat(save_string, "BridgeAPILogFile="
@@ -985,7 +985,7 @@ static int _save_allocation(char *com, List allocated_blocks)
 #endif
 			}
 
-			xstrfmtcat(save_string, "BPs=%s", request->save_name);
+			xstrfmtcat(save_string, "MPs=%s", request->save_name);
 
 			for (i=0; i<SYSTEM_DIMENSIONS; i++) {
 				if (request->conn_type[i] == (uint16_t)NO_VAL)
@@ -1200,11 +1200,14 @@ static int _load_configuration(char *com, List allocated_blocks)
 
 	if (strcasecmp(layout_mode, "DYNAMIC")) {
 		if (!s_p_get_array((void ***)&blockreq_array,
-				   &count, "BPs", tbl)) {
-			memset(error_string, 0, 255);
-			sprintf(error_string,
-				"WARNING: no blocks defined in "
-				"bluegene.conf");
+				   &count, "MPs", tbl)) {
+			if (!s_p_get_array((void ***)&blockreq_array,
+					   &count, "BPs", tbl)) {
+				memset(error_string, 0, 255);
+				sprintf(error_string,
+					"WARNING: no blocks defined in "
+					"bluegene.conf");
+			}
 		}
 
 		for (i = 0; i < count; i++) {
@@ -1237,7 +1240,7 @@ static void _print_header_command(void)
 	main_xcord += 7;
 #ifdef HAVE_BG
 	mvwprintw(text_win, main_ycord,
-		  main_xcord, "BP_COUNT");
+		  main_xcord, "MIDPLANES");
 #else
 	mvwprintw(text_win, main_ycord,
 		  main_xcord, "NODES");
@@ -1267,7 +1270,7 @@ static void _print_header_command(void)
 #endif
 #ifdef HAVE_BG
 	mvwprintw(text_win, main_ycord,
-		  main_xcord, "BP_LIST");
+		  main_xcord, "MIDPLANELIST");
 #else
 	mvwprintw(text_win, main_ycord,
 		  main_xcord, "NODELIST");
@@ -1397,6 +1400,9 @@ void get_command(void)
 		xfree(cluster_name);
 	}
 
+	/* make sure we don't get any noisy debug */
+	ba_configure_set_ba_debug_flags(0);
+
 	bg_configure_ba_setup_wires();
 
 	color_count = 0;
@@ -1407,9 +1413,6 @@ void get_command(void)
 		snprintf(com, sizeof(com), "%s", params.command);
 		goto run_command;
 	} else {
-		/* make sure we don't get any noisy debug */
-		ba_configure_set_ba_debug_flags(0);
-
 		text_width = text_win->_maxx;
 		text_startx = text_win->_begx;
 		command_win = newwin(3, text_width - 1, LINES - 4,

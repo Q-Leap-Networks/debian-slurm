@@ -114,6 +114,7 @@
 #define OPT_GET_USER_ENV  0x16
 #define OPT_EXPORT        0x17
 #define OPT_CLUSTERS      0x18
+#define OPT_TIME_VAL      0x19
 
 /* generic getopt_long flags, integers and *not* valid characters */
 #define LONG_OPT_PROPAGATE   0x100
@@ -479,7 +480,7 @@ env_vars_t env_vars[] = {
   {"SBATCH_GET_USER_ENV",  OPT_GET_USER_ENV, NULL,             NULL          },
   {"SBATCH_EXPORT",        OPT_STRING,     &opt.export_env,    NULL          },
   {"SBATCH_REQ_SWITCH",    OPT_INT,        &opt.req_switch,    NULL          },
-  {"SBATCH_WAIT4SWITCH",   OPT_INT,        &opt.wait4switch,   NULL          },
+  {"SBATCH_WAIT4SWITCH",   OPT_TIME_VAL,   NULL,               NULL          },
 
   {NULL, 0, NULL, NULL}
 };
@@ -647,6 +648,9 @@ _process_env_var(env_vars_t *e, const char *val)
 			      optarg);
 			exit(1);
 		}
+		break;
+	case OPT_TIME_VAL:
+		opt.wait4switch = time_str2secs(val);
 		break;
 	default:
 		/* do nothing */
@@ -1179,7 +1183,7 @@ static void _set_options(int argc, char **argv)
 			break;
 		case 'e':
 			xfree(opt.efname);
-			if (strncasecmp(optarg, "none", (size_t)4) == 0)
+			if (strcasecmp(optarg, "none") == 0)
 				opt.efname = xstrdup("/dev/null");
 			else
 				opt.efname = xstrdup(optarg);
@@ -1208,7 +1212,7 @@ static void _set_options(int argc, char **argv)
 			break;
 		case 'i':
 			xfree(opt.ifname);
-			if (strncasecmp(optarg, "none", (size_t)4) == 0)
+			if (strcasecmp(optarg, "none") == 0)
 				opt.ifname = xstrdup("/dev/null");
 			else
 				opt.ifname = xstrdup(optarg);
@@ -1267,7 +1271,7 @@ static void _set_options(int argc, char **argv)
 			break;
 		case 'o':
 			xfree(opt.ofname);
-			if (strncasecmp(optarg, "none", (size_t)4) == 0)
+			if (strcasecmp(optarg, "none") == 0)
 				opt.ofname = xstrdup("/dev/null");
 			else
 				opt.ofname = xstrdup(optarg);
@@ -1555,6 +1559,13 @@ static void _set_options(int argc, char **argv)
 			opt.ramdiskimage = xstrdup(optarg);
 			break;
 		case LONG_OPT_REBOOT:
+#if defined HAVE_BG && !defined HAVE_BG_L_P
+			info("WARNING: If your job is smaller than the block "
+			     "it is going to run on and other jobs are "
+			     "running on it the --reboot option will not be "
+			     "honored.  If this is the case, contact your "
+			     "admin to reboot the block for you.");
+#endif
 			opt.reboot = true;
 			break;
 		case LONG_OPT_WRAP:
@@ -1643,7 +1654,7 @@ static void _set_options(int argc, char **argv)
 			if (pos_delimit != NULL) {
 				pos_delimit[0] = '\0';
 				pos_delimit++;
-				opt.wait4switch = time_str2mins(pos_delimit) * 60;
+				opt.wait4switch = time_str2secs(pos_delimit);
 			}
 			opt.req_switch = _get_int(optarg, "switches");
 			break;
@@ -1737,7 +1748,7 @@ static void _set_pbs_options(int argc, char **argv)
 			break;
 		case 'e':
 			xfree(opt.efname);
-			if (strncasecmp(optarg, "none", (size_t) 4) == 0)
+			if (strcasecmp(optarg, "none") == 0)
 				opt.efname = xstrdup("/dev/null");
 			else
 				opt.efname = xstrdup(optarg);
@@ -1771,7 +1782,7 @@ static void _set_pbs_options(int argc, char **argv)
 			break;
 		case 'o':
 			xfree(opt.ofname);
-			if (strncasecmp(optarg, "none", (size_t) 4) == 0)
+			if (strcasecmp(optarg, "none") == 0)
 				opt.ofname = xstrdup("/dev/null");
 			else
 				opt.ofname = xstrdup(optarg);
@@ -2150,7 +2161,7 @@ static bool _opt_verify(void)
 		setenv("SLURM_JOB_NAME", opt.job_name, 0);
 
 	/* check for realistic arguments */
-	if (opt.ntasks <= 0) {
+	if (opt.ntasks < 0) {
 		error("invalid number of tasks (-n %d)", opt.ntasks);
 		verified = false;
 	}
@@ -2354,8 +2365,7 @@ static bool _opt_verify(void)
 		if(!opt.nodes_set) {
 			opt.nodes_set = 1;
 			hostlist_uniq(hl);
-			opt.min_nodes = opt.max_nodes
-				= hostlist_count(hl);
+			opt.min_nodes = opt.max_nodes = hostlist_count(hl);
 		}
 		hostlist_destroy(hl);
 	}
@@ -2788,7 +2798,12 @@ static void _usage(void)
 "              [--contiguous] [--mincpus=n] [--mem=MB] [--tmp=MB] [-C list]\n"
 "              [--account=name] [--dependency=type:jobid] [--comment=name]\n"
 #ifdef HAVE_BG		/* Blue gene specific options */
-"              [--geometry=XxYxZ] [--conn-type=type] [--no-rotate] [ --reboot]\n"
+#ifdef HAVE_BG_L_P
+"              [--geometry=XxYxZ] "
+#else
+"              [--geometry=AxXxYxZ] "
+#endif
+"[--conn-type=type] [--no-rotate] [--reboot]\n"
 #ifdef HAVE_BGL
 "              [--blrts-image=path] [--linux-image=path]\n"
 "              [--mloader-image=path] [--ramdisk-image=path]\n"
@@ -2913,7 +2928,13 @@ static void _help(void)
 #endif
 #ifdef HAVE_BG				/* Blue gene specific options */
 "Blue Gene related options:\n"
+#ifdef HAVE_BG_L_P
 "  -g, --geometry=XxYxZ        geometry constraints of the job\n"
+#else
+"  -g, --geometry=AxXxYxZ      Midplane geometry constraints of the job,\n"
+"                              sub-block allocations can not be allocated\n"
+"                              with the geometry option\n"
+#endif
 "  -R, --no-rotate             disable geometry rotation\n"
 "      --reboot                reboot block before starting job\n"
 "      --conn-type=type        constraint on type of connection, MESH or TORUS\n"

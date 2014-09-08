@@ -36,7 +36,7 @@ source ./globals
 set test_id       "10.6"
 set exit_code     0
 set matches       0
-set non_bg       0
+set non_bg        0
 
 print_header $test_id
 
@@ -67,10 +67,6 @@ expect {
 		incr matches
 		exp_continue
 	}
-	-re "USER" {
-		incr matches
-		exp_continue
-	}
 	-re "CONN" {
 		incr matches
 		exp_continue
@@ -79,11 +75,7 @@ expect {
 		incr matches
 		exp_continue
 	}
-	-re "NODELIST" {
-		incr matches
-		exp_continue
-	}
-	-re "BP_LIST" {
+	-re "MIDPLANELIST" {
 		incr matches
 		exp_continue
 	}
@@ -110,8 +102,8 @@ if {$non_bg != 0} {
 	send_user "\nWARNING: Must be on a BG SYSTEM to run this command\n"
 	exit 0
 }
-if {$matches != 7} {
-	send_user "\nFAILURE: smap bg partition display in commandline mode\n"
+if {$matches != 6} {
+	send_user "\nFAILURE: smap bg partition display in commandline mode $matches\n"
 	set exit_code 1
 }
 

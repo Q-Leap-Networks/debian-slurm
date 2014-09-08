@@ -193,6 +193,7 @@ test1.90   Test of memory affinity support for NUMA systems.
 test1.91   Test of CPU affinity for multi-core systems.
 test1.92   Test of task distribution support on multi-core systems.
 test1.93   Test of LAM-MPI functionality
+test1.94   Test of MPICH2 task spawn logic
 **NOTE**   The above tests for mutliple processor/partition systems only
 
 test2.#    Testing of scontrol options (to be run as unprivileged user).
@@ -261,7 +262,7 @@ test5.3    Test squeue iteration (--iterate option).
 test5.4    Test squeue formating options (--noheader, --format and --step
            options and SQUEUE_FORMAT environment variable).
 test5.5    Test squeue sorting (--sort option).
-test5.6    Test squeue filtering (--jobs, --node, --states, --steps and
+test5.6    Test squeue filtering (--jobs, --nodelist, --states, --steps and
            --user options).
 test5.7    Confirm that squeue verbose option works (--verbose option).
 test5.8    Confirm that squeue reports a proper version number (--version
@@ -318,7 +319,6 @@ test7.14   Verify the ability to modify the Derived Exit Code/String fields
            of a job record in the database
 test7.15   Verify signal mask of tasks have no ignored signals.
 
-
 test8.#    Test of Blue Gene specific functionality.
 =================================================
 test8.1    Test of Blue Gene specific sbatch command line options
@@ -338,6 +338,8 @@ test8.22   Bluegene/Q only: Stress test of running many job step allocations
            within the job's allocation
 test8.23   Bluegene/Q only: Test that multple jobs allocations are properly
            packed within a midplane
+test8.24   Bluegene/Q only: Test advanced reservation creation with mutliple
+           blocks.
 
 
 test9.#    System stress testing. Exercises all commands and daemons.
@@ -350,6 +352,7 @@ test9.5    Stress test of per-task input files.
 test9.6    Stress test of per-task output files.
 test9.7    Stress test multiple simultaneous commands via multiple threads.
 test9.8    Stress test with maximum slurmctld message concurrency.
+test9.9    Throughput test for 2000 jobs for timing
 
 
 test10.#   Testing of smap options.
@@ -387,7 +390,7 @@ test12.#   Testing of sacct command and options
 test12.1   Test sacct --help option.
 test12.2   Test validity/accuracy of accounting data for exit code,
            memory and real-time information along with stating a running job.
-test12.3   (EMPTY)
+test12.3   Test sacct filtering of records by account and job name.
 test12.4   Test sacct --b, g, j, l, n, p, u, v options.
 test12.5   Test sacct --helpformat option.
 
@@ -531,7 +534,7 @@ test20.4   pbsnodes command tests
 
 
 test21.#   Testing of sacctmgr commands and options.
-=================================================
+====================================================
 test21.1   sacctmgr --usage
 test21.2   sacctmgr --help
 test21.3   sacctmgr -V
@@ -563,28 +566,41 @@ test21.27  sacctmgr problems test
 test21.28  sacctmgr abort delete
 test21.29  sacctmgr clear (modify) QoS values
 
+
 test22.#   Testing of sreport commands and options.
            These also test the sacctmgr archive dump/load functions.
-=================================================
+==================================================
 test22.1   sreport cluster utilization report
 test22.2   sreport h, n, p, P, t, V options
+
 
 test23.#   Testing of sstat commands and options.
 =================================================
 test23.1   sstat -e, h, usage and V options
-test23.2   sstat --helpformat
-test23.3   sstat -a, n, o, p, P, v options
+test23.2   sstat -a, n, o, p, P, v options
+
 
 test24.#   Testing of sshare/priority multifactor plugin.
-=================================================
+=========================================================
 test24.1   multifactor plugin algo test
 test24.2   sshare h, n, p, P, v, and V options.
 
+
 test25.#   Testing of sprio command and options.
-=================================================
+================================================
 test25.1   sprio all options
+
 
 test26.#   Test of Cray specific functionality.
 ================================================
 test26.1   Validate scontrol update command for nodes is disabled.
 test26.2   Test of srun/aprun wrapper use of --alps= option
+
+
+test27.#   Testing of sdiag commands and options.
+=================================================
+test27.1   sdiag --usage
+test27.2   sdiag --help
+test27.3   sdiag --version
+test27.4   sdiag --all (default output)
+test27.5   sdiag --reset

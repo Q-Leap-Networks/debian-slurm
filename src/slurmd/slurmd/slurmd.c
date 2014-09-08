@@ -58,6 +58,9 @@
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <dlfcn.h>
+#if HAVE_HWLOC
+#include <hwloc.h>
+#endif
 
 #include "src/common/bitstring.h"
 #include "src/common/daemonize.h"
@@ -89,6 +92,7 @@
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 #include "src/common/xsignal.h"
+#include "src/common/plugstack.h"
 
 #include "src/slurmd/slurmd/slurmd.h"
 #include "src/slurmd/slurmd/req.h"
@@ -195,7 +199,7 @@ main (int argc, char *argv[])
 			      "setgroups: %m");
 		}
 	} else {
-		info("Not running as root. Can't drop supplementary groups");
+		debug("Not running as root. Can't drop supplementary groups");
 	}
 
 	/*
@@ -601,12 +605,12 @@ _fill_registration_msg(slurm_node_registration_status_msg_t *msg)
 
 	if (first_msg) {
 		first_msg = false;
-		info("Procs=%u Sockets=%u Cores=%u Threads=%u "
+		info("CPUs=%u Sockets=%u Cores=%u Threads=%u "
 		     "Memory=%u TmpDisk=%u Uptime=%u",
 		     msg->cpus, msg->sockets, msg->cores, msg->threads,
 		     msg->real_memory, msg->tmp_disk, msg->up_time);
 	} else {
-		debug3("Procs=%u Sockets=%u Cores=%u Threads=%u "
+		debug3("CPUs=%u Sockets=%u Cores=%u Threads=%u "
 		       "Memory=%u TmpDisk=%u Uptime=%u",
 		       msg->cpus, msg->sockets, msg->cores, msg->threads,
 		       msg->real_memory, msg->tmp_disk, msg->up_time);
@@ -691,6 +695,135 @@ _massage_pathname(char **path)
 	}
 }
 
+#if HAVE_HWLOC
+/*
+ * get_hwlocinfo - Return detailed cpuinfo on this system using hwloc library
+ *     compatible with get_cpuinfo() in common/xcpuinfo.c
+ * Input:  numproc - number of processors on the system
+ * Output: p_sockets - number of physical processor sockets
+ *         p_cores - total number of physical CPU cores
+ *         p_threads - total number of hardware execution threads
+ *         p_block_map - asbtract->physical block distribution map
+ *         p_block_map_inv - physical->abstract block distribution map (inverse)
+ *         return code - 0 if no error, otherwise errno
+ * NOTE: User must xfree *p_block_map and *p_block_map_inv
+ */
+static int
+_get_hwlocinfo(uint16_t *p_numproc,
+	       uint16_t *p_sockets, uint16_t *p_cores, uint16_t *p_threads,
+	       uint16_t *p_block_map_size,
+	       uint16_t **p_block_map, uint16_t **p_block_map_inv)
+{
+	enum { SOCKET=0, CORE=1, PU=2 };
+	hwloc_topology_t topology;
+	hwloc_obj_t obj;
+	hwloc_obj_type_t objtype[3];
+	unsigned idx[3];
+	int nobj[3];
+	int actual_cpus;
+	int macid;
+	int absid;
+	int i;
+
+	debug("hwloc_topology_init");
+	if (hwloc_topology_init(&topology)) {
+		/* error in initialize hwloc library */
+		debug("hwloc_topology_init() failed.");
+		return 1;
+	}
+
+	/* parse all system */
+	hwloc_topology_set_flags(topology, HWLOC_TOPOLOGY_FLAG_WHOLE_SYSTEM);
+
+	/* ignores cache, group, misc */
+	hwloc_topology_ignore_type (topology, HWLOC_OBJ_CACHE);
+	hwloc_topology_ignore_type (topology, HWLOC_OBJ_GROUP);
+	hwloc_topology_ignore_type (topology, HWLOC_OBJ_MISC);
+
+	/* load topology */
+	debug("hwloc_topology_load");
+	if (hwloc_topology_load(topology)) {
+		/* error in load hardware topology */
+		debug("hwloc_topology_load() failed.");
+		hwloc_topology_destroy(topology);
+		return 2;
+	}
+	
+	if ( hwloc_get_type_depth(topology, HWLOC_OBJ_NODE) >
+	     hwloc_get_type_depth(topology, HWLOC_OBJ_SOCKET) ) {
+		/* One socket contains multiple NUMA-nodes 
+		 * like AMD Opteron 6000 series etc.
+		 * In such case, use NUMA-node instead of socket. */
+		objtype[SOCKET] = HWLOC_OBJ_NODE;
+		objtype[CORE]   = HWLOC_OBJ_CORE;
+		objtype[PU]     = HWLOC_OBJ_PU;
+	} else {
+		objtype[SOCKET] = HWLOC_OBJ_SOCKET;
+		objtype[CORE]   = HWLOC_OBJ_CORE;
+		objtype[PU]     = HWLOC_OBJ_PU;
+	}
+
+	/* number of objects */
+	nobj[SOCKET] = hwloc_get_nbobjs_by_type(topology, objtype[SOCKET]);
+	nobj[CORE]   = hwloc_get_nbobjs_by_type(topology, objtype[CORE]);
+	actual_cpus  = hwloc_get_nbobjs_by_type(topology, objtype[PU]);
+	nobj[PU]     = actual_cpus/nobj[CORE];  /* threads per core */
+	nobj[CORE]  /= nobj[SOCKET];            /* cores per socket */
+
+	debug4("Total %d CPUs, %d sockets, %d core/socket, %d pu/core",
+	       actual_cpus, nobj[SOCKET], nobj[CORE], nobj[PU]);
+
+	/* allocate block_map */
+	*p_block_map_size = (uint16_t)actual_cpus;
+	if (p_block_map && p_block_map_inv) {
+		*p_block_map     = xmalloc(actual_cpus * sizeof(uint16_t));
+		*p_block_map_inv = xmalloc(actual_cpus * sizeof(uint16_t));
+
+		/* initialize default as linear mapping */
+		for (i = 0; i < actual_cpus; i++) {
+			(*p_block_map)[i]     = i;
+			(*p_block_map_inv)[i] = i;
+		}
+		
+		/* create map with hwloc */
+		for (idx[SOCKET]=0; idx[SOCKET]<nobj[SOCKET]; ++idx[SOCKET]) {
+			for (idx[CORE]=0; idx[CORE]<nobj[CORE]; ++idx[CORE]) {
+				for (idx[PU]=0; idx[PU]<nobj[PU]; ++idx[PU]) {
+					/* get hwloc_obj by indexes */
+					obj=hwloc_get_obj_below_array_by_type(
+					            topology, 3, objtype, idx);
+					if (!obj)
+						continue;
+					macid = obj->os_index;
+					absid = idx[SOCKET]*nobj[CORE]*nobj[PU]
+					      + idx[CORE]*nobj[PU]
+					      + idx[PU];
+
+					if ((macid >= actual_cpus) ||
+					    (absid >= actual_cpus)) {
+						/* physical or logical ID are
+						 * out of range */
+						continue;
+					}
+					debug4("CPU map[%d]=>%d", absid, macid);
+					(*p_block_map)[absid]     = macid;
+					(*p_block_map_inv)[macid] = absid;
+				}
+			 }
+		}
+	}
+
+	hwloc_topology_destroy(topology);
+
+	/* update output parameters */
+	*p_numproc = actual_cpus;
+	*p_sockets = nobj[SOCKET];
+	*p_cores   = nobj[CORE];
+	*p_threads = nobj[PU];
+	return 0;
+}
+#endif /* HAVE_HWLOC */
+
 /*
  * Read the slurm configuration file (slurm.conf) and substitute some
  * values into the slurmd configuration in preference of the defaults.
@@ -766,6 +899,14 @@ _read_config(void)
 	_update_logging();
 	_update_nice();
 
+#if HAVE_HWLOC
+	_get_hwlocinfo(&conf->actual_cpus,
+	               &conf->actual_sockets,
+	               &conf->actual_cores,
+	               &conf->actual_threads,
+	               &conf->block_map_size,
+	               &conf->block_map, &conf->block_map_inv);
+#else
 	get_procs(&conf->actual_cpus);
 	get_cpuinfo(conf->actual_cpus,
 		    &conf->actual_sockets,
@@ -773,6 +914,7 @@ _read_config(void)
 		    &conf->actual_threads,
 		    &conf->block_map_size,
 		    &conf->block_map, &conf->block_map_inv);
+#endif
 #ifdef HAVE_FRONT_END
 	/*
 	 * When running with multiple frontends, the slurmd S:C:T values are not
@@ -785,6 +927,12 @@ _read_config(void)
 	conf->cores   = conf->actual_cores;
 	conf->threads = conf->actual_threads;
 #else
+	/* If the actual resources on a node differ than what is in
+	   the configuration file and we are using
+	   cons_res or gang scheduling we have to use what is in the
+	   configuration file because the slurmctld creates bitmaps
+	   for scheduling before these nodes check in.
+	*/
 	if (((cf->fast_schedule == 0) && !cr_flag && !gang_flag) ||
 	    ((cf->fast_schedule == 1) &&
 	     (conf->actual_cpus < conf->conf_cpus))) {
@@ -798,21 +946,37 @@ _read_config(void)
 		conf->cores   = conf->conf_cores;
 		conf->threads = conf->conf_threads;
 	}
-#endif
 
-	if (cf->fast_schedule &&
-	    ((conf->cpus    != conf->actual_cpus)    ||
-	     (conf->sockets != conf->actual_sockets) ||
-	     (conf->cores   != conf->actual_cores)   ||
-	     (conf->threads != conf->actual_threads))) {
-		info("Node configuration differs from hardware\n"
-		     "   Procs=%u:%u(hw) Sockets=%u:%u(hw)\n"
-		     "   CoresPerSocket=%u:%u(hw) ThreadsPerCore=%u:%u(hw)",
-		     conf->cpus,    conf->actual_cpus,
-		     conf->sockets, conf->actual_sockets,
-		     conf->cores,   conf->actual_cores,
-		     conf->threads, conf->actual_threads);
+	if ((conf->cpus    != conf->actual_cpus)    ||
+	    (conf->sockets != conf->actual_sockets) ||
+	    (conf->cores   != conf->actual_cores)   ||
+	    (conf->threads != conf->actual_threads)) {
+		if (cf->fast_schedule) {
+			info("Node configuration differs from hardware\n"
+			     "   CPUs=%u:%u(hw) Sockets=%u:%u(hw)\n"
+			     "   CoresPerSocket=%u:%u(hw) "
+			     "ThreadsPerCore=%u:%u(hw)",
+			     conf->cpus,    conf->actual_cpus,
+			     conf->sockets, conf->actual_sockets,
+			     conf->cores,   conf->actual_cores,
+			     conf->threads, conf->actual_threads);
+		} else if ((cf->fast_schedule == 0) && (cr_flag || gang_flag)) {
+			error("You are using cons_res or gang scheduling with "
+			      "Fastschedule=0 and node configuration differs "
+			      "from hardware.  The node configuration used "
+			      "will be what is in the slurm.conf because of "
+			      "the bitmaps the slurmctld must create before "
+			      "the slurmd registers.\n"
+			      "   CPUs=%u:%u(hw) Sockets=%u:%u(hw)\n"
+			      "   CoresPerSocket=%u:%u(hw) "
+			      "ThreadsPerCore=%u:%u(hw)",
+			      conf->cpus,    conf->actual_cpus,
+			      conf->sockets, conf->actual_sockets,
+			      conf->cores,   conf->actual_cores,
+			      conf->threads, conf->actual_threads);
+		}
 	}
+#endif
 
 	get_memory(&conf->real_memory_size);
 	get_up_time(&conf->up_time);
@@ -1068,11 +1232,19 @@ _destroy_conf(void)
 static void
 _print_config(void)
 {
+	int days, hours, mins, secs;
 	char name[128];
 
 	gethostname_short(name, sizeof(name));
 	printf("NodeName=%s ", name);
-
+#if HAVE_HWLOC
+	_get_hwlocinfo(&conf->actual_cpus,
+	               &conf->actual_sockets,
+	               &conf->actual_cores,
+	               &conf->actual_threads,
+	               &conf->block_map_size,
+	               &conf->block_map, &conf->block_map_inv);
+#else
 	get_procs(&conf->actual_cpus);
 	get_cpuinfo(conf->actual_cpus,
 		    &conf->actual_sockets,
@@ -1080,7 +1252,8 @@ _print_config(void)
 		    &conf->actual_threads,
 		    &conf->block_map_size,
 		    &conf->block_map, &conf->block_map_inv);
-	printf("Procs=%u Sockets=%u CoresPerSocket=%u ThreadsPerCore=%u ",
+#endif
+	printf("CPUs=%u Sockets=%u CoresPerSocket=%u ThreadsPerCore=%u ",
 	       conf->actual_cpus, conf->actual_sockets, conf->actual_cores,
 	       conf->actual_threads);
 
@@ -1088,6 +1261,13 @@ _print_config(void)
 	get_tmp_disk(&conf->tmp_disk_space, "/tmp");
 	printf("RealMemory=%u TmpDisk=%u\n",
 	       conf->real_memory_size, conf->tmp_disk_space);
+
+	get_up_time(&conf->up_time);
+	secs  =  conf->up_time % 60;
+	mins  = (conf->up_time / 60) % 60;
+	hours = (conf->up_time / 3600) % 24;
+	days  = (conf->up_time / 86400);
+	printf("UpTime=%u-%2.2u:%2.2u:%2.2u\n", days, hours, mins, secs);
 }
 
 static void
@@ -1150,6 +1330,14 @@ _process_cmdline(int ac, char **av)
 			break;
 		}
 	}
+
+	/*
+	 *  If slurmstepd path wasn't overridden by command line, set
+	 *   it to the default here:
+	 */
+	if (!conf->stepd_loc)
+		conf->stepd_loc =
+			xstrdup_printf("%s/sbin/slurmstepd", SLURM_PREFIX);
 }
 
 
@@ -1188,7 +1376,6 @@ _slurmd_init(void)
 	struct rlimit rlim;
 	slurm_ctl_conf_t *cf;
 	struct stat stat_buf;
-	char slurm_stepd_path[MAXPATHLEN];
 	uint32_t cpu_cnt;
 
 	/*
@@ -1235,11 +1422,15 @@ _slurmd_init(void)
 	_set_topo_info();
 
 	_print_conf();
+	if (slurm_jobacct_gather_init() != SLURM_SUCCESS)
+		return SLURM_FAILURE;
 	if (slurm_proctrack_init() != SLURM_SUCCESS)
 		return SLURM_FAILURE;
 	if (slurmd_task_init() != SLURM_SUCCESS)
 		return SLURM_FAILURE;
 	if (slurm_auth_init(NULL) != SLURM_SUCCESS)
+		return SLURM_FAILURE;
+	if (spank_slurmd_init() < 0)
 		return SLURM_FAILURE;
 
 	if (getrlimit(RLIMIT_CPU, &rlim) == 0) {
@@ -1286,6 +1477,8 @@ _slurmd_init(void)
 	}
 
 	if (conf->daemonize) {
+		bool success = false;
+
 		if (conf->logfile && (conf->logfile[0] == '/')) {
 			char *slash_ptr, *work_dir;
 			work_dir = xstrdup(conf->logfile);
@@ -1294,17 +1487,29 @@ _slurmd_init(void)
 				work_dir[1] = '\0';
 			else
 				slash_ptr[0] = '\0';
-			if (chdir(work_dir) < 0) {
+			if ((access(work_dir, W_OK) != 0) ||
+			    (chdir(work_dir) < 0)) {
 				error("Unable to chdir to %s", work_dir);
-				xfree(work_dir);
-				return SLURM_FAILURE;
-			}
+			} else
+				success = true;
 			xfree(work_dir);
-		} else {
-			if (chdir(conf->spooldir) < 0) {
+		}
+
+		if (!success) {
+			if ((access(conf->spooldir, W_OK) != 0) ||
+			    (chdir(conf->spooldir) < 0)) {
 				error("Unable to chdir to %s", conf->spooldir);
+			} else
+				success = true;
+		}
+
+		if (!success) {
+			if ((access("/var/tmp", W_OK) != 0) ||
+			    (chdir("/var/tmp") < 0)) {
+				error("chdir(/var/tmp): %m");
 				return SLURM_FAILURE;
-			}
+			} else
+				info("chdir to /var/tmp");
 		}
 	}
 
@@ -1325,21 +1530,10 @@ _slurmd_init(void)
 	fd_set_close_on_exec(devnull);
 
 	/* make sure we have slurmstepd installed */
-	if (conf->stepd_loc) {
-		snprintf(slurm_stepd_path, sizeof(slurm_stepd_path),
-			 "%s", conf->stepd_loc);
-	} else {
-		snprintf(slurm_stepd_path, sizeof(slurm_stepd_path),
-			 "%s/sbin/slurmstepd", SLURM_PREFIX);
-	}
-	if (stat(slurm_stepd_path, &stat_buf)) {
-		fatal("Unable to find slurmstepd file at %s",
-			slurm_stepd_path);
-	}
-	if (!S_ISREG(stat_buf.st_mode)) {
-		fatal("slurmstepd not a file at %s",
-			slurm_stepd_path);
-	}
+	if (stat(conf->stepd_loc, &stat_buf))
+		fatal("Unable to find slurmstepd file at %s", conf->stepd_loc);
+	if (!S_ISREG(stat_buf.st_mode))
+		fatal("slurmstepd not a file at %s", conf->stepd_loc);
 
 	return SLURM_SUCCESS;
 }
@@ -1410,6 +1604,7 @@ _slurmd_fini(void)
 	fini_setproctitle();
 	slurm_select_fini();
 	slurm_jobacct_gather_fini();
+	spank_slurmd_exit();
 	return SLURM_SUCCESS;
 }
 

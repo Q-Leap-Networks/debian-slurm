@@ -5,12 +5,14 @@
 #
 # build options      .rpmmacros options      change to default action
 # ===============    ====================    ========================
+# --enable-salloc-background %_with_salloc_background 1 on a cray system alloc salloc to execute as a background process.
+# --prefix           %_prefix        path    install path for commands, libraries, etc.
 # --with aix         %_with_aix         1    build aix RPM
 # --with authd       %_with_authd       1    build auth-authd RPM
 # --with auth_none   %_with_auth_none   1    build auth-none RPM
 # --with blcr        %_with_blcr        1    require blcr support
 # --with bluegene    %_with_bluegene    1    build bluegene RPM
-# --with cray_xt     %_with_cray_xt     1    build for Cray XT system
+# --with cray        %_with_cray        1    build for a Cray system
 # --with debug       %_with_debug       1    enable extra debugging within SLURM
 # --with elan        %_with_elan        1    build switch-elan RPM
 # --with lua         %_with_lua         1    build SLURM lua bindings (proctrack only for now)
@@ -23,7 +25,6 @@
 # --with sgijob      %_with_sgijob      1    build proctrack-sgi-job RPM
 # --with sun_const   %_with_sun_const   1    build for Sun Constellation system
 # --with-srun2aprun  %_with_srun2aprun  1    build srun as aprun wrapper
-
 #
 #  Allow defining --with and --without build options or %_with and %without in .rpmmacors
 #    slurm_with    builds option by default unless --without is specified
@@ -45,6 +46,7 @@
 %slurm_without_opt elan
 %slurm_without_opt sun_const
 %slurm_without_opt srun2aprun
+%slurm_without_opt salloc_background
 
 # These options are only here to force there to be these on the build.
 # If they are not set they will still be compiled if the packages exist.
@@ -87,15 +89,19 @@
 %slurm_with_opt sgijob
 %endif
 
+%if %{slurm_with cray}
+%slurm_with_opt sgijob
+%endif
+
 Name:    slurm
-Version: 2.3.4
+Version: 2.4.5
 Release: 1%{?dist}
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL
 Group: System Environment/Base
-Source: slurm-2.3.4.tar.bz2
+Source: slurm-2.4.5.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: http://www.schedmd.com/slurmdocs/
 
@@ -144,6 +150,11 @@ BuildRequires: mysql-devel >= 5.0.0
 
 %if %{slurm_with postgres}
 BuildRequires: postgresql-devel >= 8.0.0
+%endif
+
+%if %{slurm_with cray}
+BuildRequires: cray-MySQL-devel-enterprise
+Requires: cray-MySQL-devel-enterprise
 %endif
 
 %ifnos aix5.3
@@ -379,11 +390,10 @@ Gives the ability for SLURM to use Berkeley Lab Checkpoint/Restart
 #############################################################################
 
 %prep
-%setup -n slurm-2.3.4
+%setup -n slurm-2.4.5
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \
-	%{?slurm_with_cray_xt:--enable-cray-xt} \
 	%{?slurm_with_debug:--enable-debug} \
 	%{?slurm_with_partial_attach:--enable-partial-attach} \
 	%{?slurm_with_sun_const:--enable-sun-const} \
@@ -398,6 +408,8 @@ Gives the ability for SLURM to use Berkeley Lab Checkpoint/Restart
 	%{?with_ssl}		\
 	%{?with_munge}      \
 	%{?with_blcr}      \
+	%{?slurm_with_srun2aprun:--with-srun2aprun} \
+	%{?slurm_with_salloc_background:--enable-salloc-background} \
 	%{!?slurm_with_readline:--without-readline} \
 	%{?with_cflags}
 
@@ -417,6 +429,15 @@ DESTDIR="$RPM_BUILD_ROOT" make install-contrib
       install -D -m755 etc/init.d.slurmdbd $RPM_BUILD_ROOT/etc/init.d/slurmdbd
    fi
 %endif
+
+%if %{slurm_with cray}
+   if [ -d /opt/modulefiles ]; then
+      install -D -m755 contribs/cray/opt_modulefiles_slurm $RPM_BUILD_ROOT/opt/modulefiles/slurm/opt_modulefiles_slurm
+   fi
+%else
+   rm -f contribs/cray/opt_modulefiles_slurm
+%endif
+
 install -D -m644 etc/slurm.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/slurm.conf.example
 install -D -m644 etc/cgroup.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/cgroup.conf.example
 install -D -m755 etc/cgroup_allowed_devices_file.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/cgroup_allowed_devices_file.conf.example
@@ -469,6 +490,10 @@ rm -f ${RPM_BUILD_ROOT}%{_bindir}/srun_cr
 rm -f ${RPM_BUILD_ROOT}%{_libexecdir}/slurm/cr_*
 %endif
 
+%if ! %{slurm_with sgijob}
+rm -f ${RPM_BUILD_ROOT}%{_libdir}/slurm/proctrack_sgi_job.so
+%endif
+
 # Build man pages that are generated directly by the tools
 rm -f $RPM_BUILD_ROOT/%{_mandir}/man1/sjobexitmod.1
 ${RPM_BUILD_ROOT}%{_bindir}/sjobexitmod --roff > $RPM_BUILD_ROOT/%{_mandir}/man1/sjobexitmod.1
@@ -482,8 +507,9 @@ LIST=./slurm.files
 touch $LIST
 test -f $RPM_BUILD_ROOT/etc/init.d/slurm			&&
   echo /etc/init.d/slurm				>> $LIST
-test -f $RPM_BUILD_ROOT/%{_bindir}/sview			&&
-  echo %{_bindir}/sview					>> $LIST
+
+test -f $RPM_BUILD_ROOT/opt/modulefiles/slurm/opt_modulefiles_slurm &&
+  echo /opt/modulefiles/slurm/opt_modulefiles_slurm	>> $LIST
 
 %if %{slurm_with aix}
 install -D -m644 etc/federation.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/federation.conf.example
@@ -560,13 +586,7 @@ rm -rf $RPM_BUILD_ROOT
 
 %files -f slurm.files
 %defattr(-,root,root,0755)
-%doc AUTHORS
-%doc NEWS
-%doc README.rst
-%doc RELEASE_NOTES
-%doc DISCLAIMER
-%doc COPYING
-%doc doc/html
+%{_mandir}/../doc
 %{_bindir}/s*
 %{_sbindir}/slurmctld
 %{_sbindir}/slurmd
@@ -589,6 +609,9 @@ rm -rf $RPM_BUILD_ROOT
 %{_mandir}/man8/spank*
 %dir %{_sysconfdir}
 %dir %{_libdir}/slurm/src
+%if %{slurm_with cray}
+%dir /opt/modulefiles/slurm
+%endif
 %config %{_sysconfdir}/slurm.conf.example
 %config %{_sysconfdir}/cgroup.conf.example
 %config %{_sysconfdir}/cgroup_allowed_devices_file.conf.example
@@ -703,6 +726,7 @@ rm -rf $RPM_BUILD_ROOT
 %{_libdir}/slurm/gres_gpu.so
 %{_libdir}/slurm/gres_nic.so
 %{_libdir}/slurm/jobacct_gather_aix.so
+%{_libdir}/slurm/jobacct_gather_cgroup.so
 %{_libdir}/slurm/jobacct_gather_linux.so
 %{_libdir}/slurm/jobacct_gather_none.so
 %{_libdir}/slurm/jobcomp_none.so
@@ -719,6 +743,7 @@ rm -rf $RPM_BUILD_ROOT
 %{_libdir}/slurm/mpi_mvapich.so
 %{_libdir}/slurm/mpi_none.so
 %{_libdir}/slurm/mpi_openmpi.so
+%{_libdir}/slurm/mpi_pmi2.so
 %{_libdir}/slurm/preempt_none.so
 %{_libdir}/slurm/preempt_partition_prio.so
 %{_libdir}/slurm/preempt_qos.so

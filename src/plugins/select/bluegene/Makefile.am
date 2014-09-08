@@ -3,7 +3,7 @@
 AUTOMAKE_OPTIONS = foreign
 CLEANFILES = core.*
 
-CPPFLAGS = -DBLUEGENE_CONFIG_FILE=\"$(sysconfdir)/bluegene.conf\"
+AM_CPPFLAGS = -DBLUEGENE_CONFIG_FILE=\"$(sysconfdir)/bluegene.conf\"
 
 PLUGIN_FLAGS = -module -avoid-version --export-dynamic -lm
 
@@ -13,7 +13,8 @@ pkglib_LTLIBRARIES = select_bluegene.la
 
 noinst_LTLIBRARIES = libba_common.la libconfigure_api.la
 
-convenience_libs = $(top_builddir)/src/api/libslurm.o $(DL_LIBS)
+convenience_libs = $(top_builddir)/src/api/libslurmhelper.la \
+	-lpthread $(DL_LIBS)
 
 # These are needed for pack/unpack of structures for cross-cluster stuff
 select_bluegene_la_SOURCES = select_bluegene.c \
@@ -22,7 +23,7 @@ select_bluegene_la_SOURCES = select_bluegene.c \
 
 libba_common_la_SOURCES = ba_common.c ba_common.h
 
-libconfigure_api_la_SOURCES = configure_api.c
+libconfigure_api_la_SOURCES = configure_api.c configure_api.h
 
 select_bluegene_la_LDFLAGS = $(SO_LDFLAGS) $(PLUGIN_FLAGS)
 select_bluegene_la_LIBADD = libba_common.la
@@ -57,16 +58,32 @@ if BGQ_LOADED
 
   pkglib_LTLIBRARIES += runjob_plugin.la
   runjob_plugin_la_SOURCES = runjob_plugin.cc
-  runjob_plugin_la_LDFLAGS = -export-dynamic $(SO_LDFLAGS) $(PLUGIN_FLAGS) \
-	$(convenience_libs) -lpthread
-
+  runjob_plugin_la_LDFLAGS = $(SO_LDFLAGS) $(PLUGIN_FLAGS)
+  runjob_plugin_la_LIBADD = $(convenience_libs)
 endif
 
-select_bluegene_la_SOURCES += bg_core.c bg_defined_block.c \
-			bg_dynamic_block.c bg_job_place.c \
-			bg_job_run.c bg_list_functions.c \
-			bg_read_config.c bg_record_functions.c \
-			bg_status.c
+select_bluegene_la_SOURCES +=			\
+			bg_core.c		\
+			bg_core.h		\
+			bg_defined_block.c	\
+			bg_defined_block.h	\
+			bg_dynamic_block.c	\
+			bg_dynamic_block.h	\
+			bg_enums.h		\
+			bg_job_place.c		\
+			bg_job_place.h		\
+			bg_job_run.c		\
+			bg_job_run.h		\
+			bg_list_functions.c	\
+			bg_list_functions.h	\
+			bg_read_config.c	\
+			bg_read_config.h	\
+			bg_record_functions.c	\
+			bg_record_functions.h	\
+			bg_status.c		\
+			bg_status.h		\
+			bg_structs.h		\
+			bridge_linker.h
 
 select_bluegene_la_LIBADD += $(block_allocator_lib) $(BG_LDFLAGS)
 

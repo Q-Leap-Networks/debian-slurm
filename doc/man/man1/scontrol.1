@@ -1,4 +1,4 @@
-.TH SCONTROL "1" "July 2011" "scontrol 2.3" "Slurm components"
+.TH SCONTROL "1" "August 2011" "scontrol 2.4" "Slurm components"
 
 .SH "NAME"
 scontrol \- Used view and modify Slurm configuration and state.
@@ -30,7 +30,9 @@ that are configured as hidden and partitions that are unavailable to user's
 group.
 .TP
 \fB\-d\fR, \fB\-\-details\fR
-Causes the \fBshow\fR command to provide additional details where available.
+Causes the \fIshow\fR command to provide additional details where available.
+Repeating the option more than once (e.g., "\-dd") will cause the \fIshow job\fR
+command to also list the batch script, if the job was a batch job.
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print a help message describing the usage of scontrol.
@@ -151,8 +153,6 @@ If the specified partition is in use, the request is denied.
 .TP
 \fBdetails\fP
 Causes the \fIshow\fP command to provide additional details where available.
-Batch job information will include the batch script for jobs the user is
-authorized to view.
 Job information will include CPUs and NUMA memory allocated on each node.
 Note that on computers with hyperthreading enabled and SLURM configured to
 allocate cores, each listed CPU represents one physical core.
@@ -161,7 +161,8 @@ CPU count and task count may differ.
 See the \fB\-\-cpu_bind\fR and \fB\-\-mem_bind\fR option descriptions in
 srun man pages for more information.
 The \fBdetails\fP option is currently only supported for the \fIshow job\fP
-command.
+command. To also list the batch script for batch jobs, in addition to the
+details, use the \fBscript\fP option described below instead of this option.
 
 .TP
 \fBexit\fP
@@ -232,6 +233,12 @@ Print no warning or informational messages, only fatal error messages.
 Terminate the execution of scontrol.
 
 .TP
+\fBreboot_nodes\fP [\fINodeList\fP]
+Reboot all nodes in the system when they become idle using the
+\fBRebootProgram\fP as configured in SLURM's slurm.conf file.
+Accepts an option list of nodes to reboot. By default all nodes are rebooted.
+
+.TP
 \fBreconfigure\fP
 Instruct all Slurm daemons to re\-read the configuration file.
 This command does not restart the daemons.
@@ -270,6 +277,12 @@ is restarted or \fBscontrol reconfigure\fR is executed) if the
 SlurmSchedLogLevel parameter is present.
 
 .TP
+\fBscript\fP
+Causes the \fIshow job\fP command to list the batch script for batch
+jobs in addition to the detail information described under the
+\fBdetails\fP option above.
+
+.TP
 \fBsetdebug\fP \fILEVEL\fP
 Change the debug level of the slurmctld daemon.
 \fILEVEL\fP may be an integer value between zero and nine (using the
@@ -295,7 +308,7 @@ Display the state of the specified entity with the specified identification.
 \fIENTITY\fP may be \fIaliases\fP, \fIconfig\fP, \fIdaemons\fP, \fIfrontend\fP,
 \fIjob\fP, \fInode\fP, \fIpartition\fP, \fIreservation\fP, \fIslurmd\fP,
 \fIstep\fP, \fItopology\fP, \fIhostlist\fP or \fIhostnames\fP
-(also \fIblock\fP or \fIsubbp\fP on BlueGene systems).
+(also \fIblock\fP or \fIsubmp\fP on BlueGene systems).
 \fIID\fP can be used to identify a specific element of the identified
 entity: the configuration parameter name, job ID, node name, partition name,
 reservation name, or job step ID for \fIconfig\fP, \fIjob\fP, \fInode\fP,
@@ -1005,6 +1018,13 @@ This can be used to restrict control of the partition to some meta\-scheduler.
 Possible values are "YES" and "NO".
 
 .TP
+\fIReqResv\fP=<yes|no>
+Specify if only allocation requests designating a reservation will be
+satisfied.  This is used to restrict partition usage to be allowed only
+within a reservation.
+Possible values are "YES" and "NO".
+
+.TP
 \fIShared\fP=<yes|no|exclusive|force>[:<job_count>]
 Specify if nodes in this partition can be shared by multiple jobs.
 Possible values are "YES", "NO", "EXCLUSIVE" and "FORCE".
@@ -1055,7 +1075,9 @@ For create, if you do not want to give a reservation name, use
 List of accounts permitted to use the reserved nodes.
 E.g.  Accounts=physcode1,physcode2.  A user in any of the accounts
 may use the reserved nodes.
-A new reservation must specify Users and/or Accounts.
+A new reservation must specify Users and/or Accounts.  You can add or
+remove individual accounts from an existing reservation by adding
+a '+' or '\-' sign before the '=' sign.
 
 .TP
 \fILicenses\fP=<license>
@@ -1066,12 +1088,20 @@ License names can be followed by an asterisk and count
 Multiple license names should be comma separated (e.g. "Licenses=foo*4,bar").
 A new reservation must specify one or more resource to be included: NodeCnt,
 Nodes and/or Licenses.
+If a reservation includes Licenses, but no NodeCnt or Nodes, then the option
+\fIFlags=LICENSE_ONLY\fP must also be specified.
 
 .TP
-\fINodeCnt\fP=<num>
-Identify number of nodes to be reserved.
-On BlueGene systems, this number represents a cnode (compute node) count and
-will be rounded up as needed to represent whole nodes (midplanes).
+\fINodeCnt\fP=<num>[,num,...]
+Identify number of nodes to be reserved. The number can include a suffix of
+"k" or "K", in which case the number specified is multiplied by 1024.
+On BlueGene systems, this number represents a c\-node (compute node) count and
+will be rounded up as needed to reserve whole nodes (midplanes).
+In order to optimize the topology of the resource allocation on a new
+reservation (not on an updated reservation), specific sizes
+required for the reservation may be specified. For example, if you want to
+reserve 4096 c\-nodes on a BlueGene system that can be used to allocate two
+jobs each with 2048 c\-nodes, specify "NodeCnt=2k,2k".
 A new reservation must specify one or more resource to be included: NodeCnt,
 Nodes and/or Licenses.
 
@@ -1081,7 +1111,7 @@ Identify the node(s) to be reserved. Multiple node names
 may be specified using simple node range expressions (e.g. "Nodes=lx[10\-20]").
 Specify a blank data value to remove all nodes from a reservation: "Nodes=".
 A new reservation must specify one or more resource to be included: NodeCnt,
-Nodes and/or Licenses.
+Nodes and/or Licenses. A specification of "ALL" will reserve all nodes.
 
 .TP
 \fIStartTime\fP=<time_spec>
@@ -1122,9 +1152,9 @@ Identify the partition to be reserved.
 .TP
 \fIFlags\fP=<flags>
 Flags associated with the reservation.
-In order to remove a flag with the update option, precede the name with
-a minus sign. For example: Flags=\-DAILY (NOTE: this option is not supported
-for all flags).
+You can add or remove individual flags from an existing reservation by
+adding a '+' or '\-' sign before the '=' sign.  For example:
+Flags\-=DAILY (NOTE: this shortcut is not supported for all flags).
 Currently supported flags include:
 .RS
 .TP 12
@@ -1157,6 +1187,11 @@ Repeat the reservation at the same time every week
 .TP
 \fISPEC_NODES\fR
 Reservation is for specific nodes (output only)
+.TP
+\fISTATIC_ALLOC\fR
+Make it so after the nodes are selected for a reservation they don't
+change.  Without this option when nodes are selected for a reservation
+and one goes down the reservation will select a new node to fill the spot.
 .RE
 
 .TP
@@ -1170,27 +1205,50 @@ Value may be cleared with blank data value, "Features=".
 \fIUsers\fP=<user list>
 List of users permitted to use the reserved nodes.
 E.g.  Users=jones1,smith2.
-A new reservation must specify Users and/or Accounts.
+A new reservation must specify Users and/or Accounts.  You can add or
+remove individual users from an existing reservation by adding a '+'
+or '\-' sign before the '=' sign.
 
 .TP
-\fBSPECIFICATIONS FOR UPDATE, BLOCK \fR
+\fBSPECIFICATIONS FOR UPDATE BLOCK/SUBMP \fR
 .TP
 Bluegene systems only!
 .TP
 \fIBlockName\fP=<name>
 Identify the bluegene block to be updated. This specification is required.
 .TP
-\fIState\fP=<free|error|remove>
-This will update the state of a bluegene block to either FREE or ERROR.
-(i.e. update BlockName=RMP0 STATE=ERROR) State error will not allow jobs
-to run on the block. \fBWARNING!!!!\fR This will cancel any
-running job on the block!  On dynamically laid out systems REMOVE will
-free and remove the block from the system.  If the block is smaller
-than a midplane every block on that midplane will be removed.
+\fIState\fP=<free|error|recreate|remove|resume>
+This will update the state of a bluegene block.
+(i.e. update BlockName=RMP0 STATE=ERROR)
+\fBWARNING!!!!\fR With the exception of the RESUME state, all other
+state values will cancel any running job on the block!
+.RS
+.TP 10
+\fIFREE\fP
+Return the block to a free state.
 .TP
-\fISubBPName\fP=<name>
+\fIERROR\fP
+Make it so jobs don't run on the block.
+.TP
+\fIRECREATE\fP
+Destroy the current block and create a new one to take its place.
+.TP
+\fIREMOVE\fP
+Free and remove the block from the system.  If the block is smaller
+than a midplane every block on that midplane will be removed. (only
+available on dynamic laid out systems)
+.TP
+\fIRESUME\fP
+If a block is in ERROR state RESUME will return the block to its
+previous usable state (FREE or READY).
+.RE
+
+.TP
+\fISubMPName\fP=<name>
 Identify the bluegene ionodes to be updated (i.e. bg000[0\-3]). This
 specification is required.
+NOTE: Even on BGQ where node names are given in bg0000[00000] format
+this option takes an ionode name bg0000[0].
 .TP
 
 .SH "ENVIRONMENT VARIABLES"

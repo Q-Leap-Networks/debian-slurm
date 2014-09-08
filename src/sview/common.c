@@ -355,7 +355,7 @@ cleanup:
 
 /* Translate a three-digit alpha-numeric value into it's
  * base 36 equivalent number */
-static int _xlate_bp_coord(const char *name)
+static int _xlate_mp_coord(const char *name)
 {
 	int i, rc = 0;
 
@@ -368,38 +368,52 @@ static int _xlate_bp_coord(const char *name)
 
 /* Make a BlueGene node name into a numeric representation of
  * its location.
- * Value is low_node_coordinate * 1,000 + I/O node (999 if none)
- * with use of base 36 for the node coordinate:
+ * Value is (low_node_coordinate * io_val_max) + I/O node (io_val if none)
+ * with use of base 36 for the node coordinate on an L/P:
  * (e.g. bg123[4]    ->  1,371,004
  *       bg[234x235] ->  2,704,999
  *       bglZZZ      -> 46,655,999
  */
-static int _bp_coordinate(const char *name)
+static int _mp_coordinate(const char *name)
 {
-	int i, io_val = 999, low_val = -1;
+	int i, io_val, io_val_max, low_val = -1;
+
+	/* Since io_val needs to handle all dimensions of the ionode
+	   field with Q the number could be much bigger that 999.
+	   This will have to be handled when a new system comes with
+	   more dims.
+	*/
+	if (cluster_flags & CLUSTER_FLAG_BGQ) {
+		io_val = 99999;
+		io_val_max = 100000;
+	} else {
+		io_val = 999;
+		io_val_max = 1000;
+	}
 
 	for (i=0; name[i]; i++) {
 		if (name[i] == '[') {
 			i++;
 			if (low_val < 0)
-				low_val = _xlate_bp_coord(name+i);
+				low_val = _xlate_mp_coord(name+i);
 			else
 				io_val = atoi(name+i);
 			break;
 		} else if ((low_val < 0) &&
 			   ((name[i] >= '0' && (name[i] <= '9')) ||
 			    (name[i] >= 'A' && (name[i] <= 'Z')))) {
-			low_val = _xlate_bp_coord(name+i);
+			low_val = _xlate_mp_coord(name+i);
 			i += 2;
 		}
 	}
 
 	if (low_val < 0)
 		return low_val;
-	return ((low_val * 1000) + io_val);
+
+	return ((low_val * io_val_max) + io_val);
 }
 
-static int _sort_iter_compare_func_bp_list(GtkTreeModel *model,
+static int _sort_iter_compare_func_mp_list(GtkTreeModel *model,
 					   GtkTreeIter  *a,
 					   GtkTreeIter  *b,
 					   gpointer      userdata)
@@ -417,7 +431,7 @@ static int _sort_iter_compare_func_bp_list(GtkTreeModel *model,
 		ret = (name1 == NULL) ? -1 : 1;
 	else {
 		/* Sort in numeric order based upon coordinates */
-		ret = _bp_coordinate(name1) - _bp_coordinate(name2);
+		ret = _mp_coordinate(name1) - _mp_coordinate(name2);
 	}
 cleanup:
 	g_free(name1);
@@ -954,13 +968,11 @@ extern void set_page_opts(int page, display_data_t *display_data,
 		replus(col_name);
 		if (strstr(col_name, "list")) {
 			char *orig_ptr = col_name;
-			if (cluster_flags & CLUSTER_FLAG_BG) {
-				xstrsubstitute(col_name, "node", "bp ");
-				xstrsubstitute(col_name, "midplane", "bp ");
-			} else {
-				xstrsubstitute(col_name, "bp ", "node");
+			xstrsubstitute(col_name, "bp ", "midplane");
+			if (cluster_flags & CLUSTER_FLAG_BG)
+				xstrsubstitute(col_name, "node", "midplane");
+			else
 				xstrsubstitute(col_name, "midplane", "node");
-			}
 
 			/* Make sure we have the correct pointer here
 			   since xstrsubstitute() could of changed it
@@ -980,7 +992,8 @@ extern void set_page_opts(int page, display_data_t *display_data,
 				break;
 			if (!display_data->name)
 				continue;
-			if (!strcasecmp(col_name, display_data->name)) {
+			if (!strncasecmp(col_name, display_data->name,
+					 strlen(col_name))) {
 				display_data->show = TRUE;
 				break;
 			}
@@ -1254,11 +1267,11 @@ extern GtkTreeStore *create_treestore(GtkTreeView *tree_view,
 					NULL);
 				break;
 			} else if (!strcasecmp(display_data[i].name,
-					       "BP List")) {
+					       "MidplaneList")) {
 				gtk_tree_sortable_set_sort_func(
 					GTK_TREE_SORTABLE(treestore),
 					display_data[i].id,
-					_sort_iter_compare_func_bp_list,
+					_sort_iter_compare_func_mp_list,
 					GINT_TO_POINTER(display_data[i].id),
 					NULL);
 				break;
@@ -1874,13 +1887,35 @@ extern void *popup_thr(popup_info_t *popup_win)
 	return NULL;
 }
 
+extern void set_for_update(GtkTreeModel *model, int updated)
+{
+	GtkTreePath *path = gtk_tree_path_new_first();
+	GtkTreeIter iter;
+
+	/* mark all current rows as in need of an update. */
+	if (path && gtk_tree_model_get_iter(model, &iter, path)) {
+		/* This process will make sure all iter's in the
+		 * tree_store will be mark as needing to be updated.
+		 * If it is still 0 after the update then it is old
+		 * data and will be removed with remove_old()
+		 */
+		while (1) {
+			gtk_tree_store_set(GTK_TREE_STORE(model), &iter,
+					   updated, 0, -1);
+			if (!gtk_tree_model_iter_next(model, &iter)) {
+				break;
+			}
+		}
+	}
+}
+
 extern void remove_old(GtkTreeModel *model, int updated)
 {
 	GtkTreePath *path = gtk_tree_path_new_first();
 	GtkTreeIter iter;
 	int i;
 
-	/* remove all old partitions */
+	/* remove all old objects */
 	if (gtk_tree_model_get_iter(model, &iter, path)) {
 		while (1) {
 			gtk_tree_model_get(model, &iter, updated, &i, -1);

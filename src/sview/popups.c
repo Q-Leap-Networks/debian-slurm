@@ -72,7 +72,7 @@ void _search_entry(sview_search_info_t *sview_search_info)
 	char *type;
 
 	if (cluster_flags & CLUSTER_FLAG_BG)
-		type = "Base partition";
+		type = "Midplane";
 	else
 		type = "Node";
 
@@ -523,8 +523,8 @@ extern void create_create_popup(GtkAction *action, gpointer user_data)
 			"More fields will be made available later.");
 		job_msg = xmalloc(sizeof(job_desc_msg_t));
 		slurm_init_job_desc_msg(job_msg);
-		job_msg->group_id = getuid();
-		job_msg->user_id  = getgid();
+		job_msg->group_id = getgid();
+		job_msg->user_id  = getuid();
 		job_msg->work_dir = xmalloc(1024);
 		if (!getcwd(job_msg->work_dir, 1024))
 			goto end_it;
@@ -544,13 +544,14 @@ extern void create_create_popup(GtkAction *action, gpointer user_data)
 			"Reservation creation specifications\n\n"
 			"Specify Time_Start and either Duration or Time_End.\n"
 #ifdef HAVE_BG
-			"Specify either Node_Count or BP_List.\n"
+			"Specify either Node_Count or Midplane_List.\n"
 #else
 			"Specify either Node_Count or Node_List.\n"
 #endif
 			"Specify either Accounts or Users.\n\n"
 			"Supported Flags include: Maintenance, Overlap,\n"
-			"Ignore_Jobs, Daily and Weekly.\n"
+			"Ignore_Jobs, Daily and Weekly, License_Only\n"
+			"and Static_Alloc.\n"
 			"All other fields are optional.");
 		resv_msg = xmalloc(sizeof(resv_desc_msg_t));
 		slurm_init_resv_desc_msg(resv_msg);
@@ -712,7 +713,7 @@ extern void create_search_popup(GtkAction *action, gpointer user_data)
 		sview_search_info.search_type = SEARCH_NODE_NAME;
 		entry = create_entry();
 		if (cluster_flags & CLUSTER_FLAG_BG)
-			label = gtk_label_new("Which base partition(s)?\n"
+			label = gtk_label_new("Which Midplane(s)?\n"
 					      "(ranged or comma separated)");
 		else
 			label = gtk_label_new("Which node(s)?\n"
@@ -992,6 +993,8 @@ extern void change_grid_popup(GtkAction *action, gpointer user_data)
 		working_sview_config.grid_vert =
 			gtk_spin_button_get_value_as_int(
 				GTK_SPIN_BUTTON(vert_sb));
+		memcpy(&default_sview_config, &working_sview_config,
+		       sizeof(sview_config_t));
 		if ((width == working_sview_config.grid_x_width)
 		    && (hori == working_sview_config.grid_hori)
 		    && (vert == working_sview_config.grid_vert)) {

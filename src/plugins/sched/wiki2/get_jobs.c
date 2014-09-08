@@ -326,8 +326,16 @@ static char *	_dump_job(struct job_record *job_ptr, time_t update_time)
 
 	if (!IS_JOB_FINISHED(job_ptr) && job_ptr->details &&
 	    job_ptr->details->work_dir) {
-		snprintf(tmp, sizeof(tmp), "IWD=%s;",
-			 job_ptr->details->work_dir);
+		if ((quote = strchr(job_ptr->details->work_dir, (int) '\"'))) {
+			/* Moab does not like strings containing a quote */
+			*quote = '\0';
+			snprintf(tmp, sizeof(tmp), "IWD=\"%s\";",
+				 job_ptr->details->work_dir);
+			*quote = '\"';
+		} else {
+			snprintf(tmp, sizeof(tmp), "IWD=\"%s\";",
+				 job_ptr->details->work_dir);
+		}
 		xstrcat(buf, tmp);
 	}
 
@@ -335,12 +343,27 @@ static char *	_dump_job(struct job_record *job_ptr, time_t update_time)
 		xstrcat(buf, "FLAGS=INTERACTIVE;");
 
 	if (job_ptr->gres) {
-		snprintf(tmp, sizeof(tmp),"GRES=%s;", job_ptr->gres);
+		snprintf(tmp, sizeof(tmp),"GRES=\"%s\";", job_ptr->gres);
+		xstrcat(buf, tmp);
+	}
+
+	if (job_ptr->resp_host) {
+		snprintf(tmp, sizeof(tmp),"SUBMITHOST=\"%s\";", job_ptr->resp_host);
 		xstrcat(buf, tmp);
 	}
 
 	if (job_ptr->wckey) {
-		snprintf(tmp, sizeof(tmp),"WCKEY=%s;", job_ptr->wckey);
+		if ((quote = strchr(job_ptr->wckey, (int) '\"'))) {
+			/* Moab does not like strings containing a quote */
+			*quote = '\0';
+			snprintf(tmp, sizeof(tmp),
+				"WCKEY=\"%s\";", job_ptr->wckey);
+			*quote = '\"';
+			xstrcat(buf, tmp);
+		} else {
+			snprintf(tmp, sizeof(tmp),
+				"WCKEY=\"%s\";", job_ptr->wckey);
+		}
 		xstrcat(buf, tmp);
 	}
 
@@ -368,7 +391,7 @@ static char *	_dump_job(struct job_record *job_ptr, time_t update_time)
 	else
 		pname = "UNKNOWN";	/* should never see this */
 	snprintf(tmp, sizeof(tmp),
-		"QUEUETIME=%u;STARTTIME=%u;RCLASS=%s;",
+		"QUEUETIME=%u;STARTTIME=%u;RCLASS=\"%s\";",
 		_get_job_submit_time(job_ptr),
 		(uint32_t) job_ptr->start_time, pname);
 	xstrcat(buf, tmp);
@@ -402,7 +425,7 @@ static char *	_dump_job(struct job_record *job_ptr, time_t update_time)
 
 	if (job_ptr->account) {
 		snprintf(tmp, sizeof(tmp),
-			"ACCOUNT=%s;", job_ptr->account);
+			"ACCOUNT=\"%s\";", job_ptr->account);
 		xstrcat(buf, tmp);
 	}
 

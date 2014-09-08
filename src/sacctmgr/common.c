@@ -298,6 +298,11 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("GrpJobs");
 		field->len = 7;
 		field->print_routine = print_fields_uint;
+	} else if (!strncasecmp("GrpMemory", object, MAX(command_len, 4))) {
+		field->type = PRINT_GRPMEM;
+		field->name = xstrdup("GrpMem");
+		field->len = 7;
+		field->print_routine = print_fields_uint;
 	} else if (!strncasecmp("GrpNodes", object, MAX(command_len, 4))) {
 		field->type = PRINT_GRPN;
 		field->name = xstrdup("GrpNodes");
@@ -334,10 +339,11 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("MaxCPUMins");
 		field->len = 11;
 		field->print_routine = print_fields_uint64;
-	} else if (!strncasecmp("MaxCPURunMins", object, MAX(command_len, 7))) {
+	} else if (!strncasecmp("MaxCPURunMinsPerUser",
+				object, MAX(command_len, 7))) {
 		field->type = PRINT_MAXCRM;
-		field->name = xstrdup("MaxCPURunMins");
-		field->len = 13;
+		field->name = xstrdup("MaxCPURunMinsPU");
+		field->len = 15;
 		field->print_routine = print_fields_uint64;
 	} else if (!strncasecmp("MaxCPUsPerJob", object, MAX(command_len, 7))) {
 		field->type = PRINT_MAXC;
@@ -347,13 +353,19 @@ static print_field_t *_get_print_field(char *object)
 	} else if (!strncasecmp("MaxCPUsPerUser", object,
 				MAX(command_len, 11))) {
 		field->type = PRINT_MAXCU;
-		field->name = xstrdup("MaxCPUsPerUser");
-		field->len = 14;
+		field->name = xstrdup("MaxCPUsPU");
+		field->len = 9;
 		field->print_routine = print_fields_uint;
 	} else if (!strncasecmp("MaxJobs", object, MAX(command_len, 4))) {
 		field->type = PRINT_MAXJ;
 		field->name = xstrdup("MaxJobs");
 		field->len = 7;
+		field->print_routine = print_fields_uint;
+	} else if (!strncasecmp("MaxJobsPerUser",
+				object, MAX(command_len, 8))) {
+		field->type = PRINT_MAXJ; /* used same as MaxJobs */
+		field->name = xstrdup("MaxJobsPU");
+		field->len = 9;
 		field->print_routine = print_fields_uint;
 	} else if (!strncasecmp("MaxNodesPerJob", object,
 				MAX(command_len, 4))) {
@@ -364,13 +376,19 @@ static print_field_t *_get_print_field(char *object)
 	} else if (!strncasecmp("MaxNodesPerUser", object,
 				MAX(command_len, 12))) {
 		field->type = PRINT_MAXNU;
-		field->name = xstrdup("MaxNodesPerUser");
-		field->len = 15;
+		field->name = xstrdup("MaxNodesPU");
+		field->len = 10;
 		field->print_routine = print_fields_uint;
 	} else if (!strncasecmp("MaxSubmitJobs", object, MAX(command_len, 4))) {
 		field->type = PRINT_MAXS;
 		field->name = xstrdup("MaxSubmit");
 		field->len = 9;
+		field->print_routine = print_fields_uint;
+	} else if (!strncasecmp("MaxSubmitJobsPerUser",
+				object, MAX(command_len, 10))) {
+		field->type = PRINT_MAXS; /* used same as MaxSubmitJobs */
+		field->name = xstrdup("MaxSubmitPU");
+		field->len = 11;
 		field->print_routine = print_fields_uint;
 	} else if (!strncasecmp("MaxWallDurationPerJob", object,
 				MAX(command_len, 4))) {
@@ -434,7 +452,7 @@ static print_field_t *_get_print_field(char *object)
 		field->type = PRINT_PRIO;
 		field->name = xstrdup("Priority");
 		field->len = 10;
-		field->print_routine = print_fields_int;
+		field->print_routine = print_fields_uint;
 	} else if (!strncasecmp("Problem", object, MAX(command_len, 1))) {
 		field->type = PRINT_PROBLEM;
 		field->name = xstrdup("Problem");
@@ -1333,6 +1351,11 @@ extern void sacctmgr_print_assoc_limits(slurmdb_association_rec_t *assoc)
 	else if (assoc->grp_jobs != NO_VAL)
 		printf("  GrpJobs       = %u\n", assoc->grp_jobs);
 
+	if (assoc->grp_mem == INFINITE)
+		printf("  GrpMemory     = NONE\n");
+	else if (assoc->grp_mem != NO_VAL)
+		printf("  GrpMemory     = %u\n", assoc->grp_mem);
+
 	if (assoc->grp_nodes == INFINITE)
 		printf("  GrpNodes      = NONE\n");
 	else if (assoc->grp_nodes != NO_VAL)
@@ -1430,6 +1453,11 @@ extern void sacctmgr_print_qos_limits(slurmdb_qos_rec_t *qos)
 		printf("  GrpJobs        = NONE\n");
 	else if (qos->grp_jobs != NO_VAL)
 		printf("  GrpJobs        = %u\n", qos->grp_jobs);
+
+	if (qos->grp_mem == INFINITE)
+		printf("  GrpMemory      = NONE\n");
+	else if (qos->grp_mem != NO_VAL)
+		printf("  GrpMemory      = %u\n", qos->grp_mem);
 
 	if (qos->grp_nodes == INFINITE)
 		printf("  GrpNodes       = NONE\n");

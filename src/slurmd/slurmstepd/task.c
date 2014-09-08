@@ -41,6 +41,10 @@
 #  include "config.h"
 #endif
 
+#ifndef _GNU_SOURCE
+#  define _GNU_SOURCE
+#endif
+
 #include <assert.h>
 #include <ctype.h>
 #include <fcntl.h>
@@ -480,16 +484,30 @@ _make_tmpdir(slurmd_job_t *job)
 	if (!(tmpdir = getenvp(job->env, "TMPDIR")))
 		setenvf(&job->env, "TMPDIR", "/tmp"); /* task may want it set */
 	else if (mkdir(tmpdir, 0700) < 0) {
-		if (errno == EEXIST) {
-			struct stat st;
+		struct stat st;
+		int mkdir_errno = errno;
 
-			if (stat(tmpdir, &st) == 0 && /* does user have access? */
-			    S_ISDIR(st.st_mode) && /* is it a directory? */
-			    ((st.st_mode & S_IWOTH) || /* can user write there? */
-			     (st.st_uid == job->uid && (st.st_mode & S_IWUSR))))
-				return;
+		if (stat(tmpdir, &st)) { /* does the file exist ? */
+			/* show why we were not able to create it */
+			error("Unable to create TMPDIR [%s]: %s",
+			      tmpdir, strerror(mkdir_errno));
+		} else if (!S_ISDIR(st.st_mode)) {  /* is it a directory? */
+			error("TMPDIR [%s] is not a directory", tmpdir);
 		}
-		error("Unable to create TMPDIR [%s]: %m", tmpdir);
+
+		/* Eaccess wasn't introduced until glibc 2.4 but euidaccess
+		 * has been around for a while.  So to make sure we
+		 * still work with older systems we include this check.
+		 */
+#if defined __GLIBC__ && __GLIBC_PREREQ(2, 4)
+		else if (eaccess(tmpdir, X_OK|W_OK)) /* check permissions */
+#else
+		else if (euidaccess(tmpdir, X_OK|W_OK))
+#endif
+			error("TMPDIR [%s] is not writeable", tmpdir);
+		else
+			return;
+
 		error("Setting TMPDIR to /tmp");
 		setenvf(&job->env, "TMPDIR", "/tmp");
 	}

@@ -73,14 +73,15 @@
  * about node allocation to be passed to _job_create_structure()
  */
 typedef struct allocation_info {
-	uint32_t                jobid;
-	uint32_t                stepid;
-	char                   *nodelist;
-	uint32_t                nnodes;
-	uint32_t                num_cpu_groups;
+	char                   *alias_list;
 	uint16_t               *cpus_per_node;
 	uint32_t               *cpu_count_reps;
+	uint32_t                jobid;
+	uint32_t                nnodes;
+	char                   *nodelist;
+	uint32_t                num_cpu_groups;
 	dynamic_plugin_data_t  *select_jobinfo;
+	uint32_t                stepid;
 } allocation_info_t;
 
 /*
@@ -101,7 +102,7 @@ srun_job_t *
 job_create_noalloc(void)
 {
 	srun_job_t *job = NULL;
-	allocation_info_t *ai = xmalloc(sizeof(*ai));
+	allocation_info_t *ai = xmalloc(sizeof(allocation_info_t));
 	uint16_t cpn = 1;
 	hostlist_t  hl = hostlist_create(opt.nodelist);
 
@@ -145,15 +146,17 @@ job_step_create_allocation(resource_allocation_response_msg_t *resp)
 {
 	uint32_t job_id = resp->job_id;
 	srun_job_t *job = NULL;
-	allocation_info_t *ai = xmalloc(sizeof(*ai));
+	allocation_info_t *ai = xmalloc(sizeof(allocation_info_t));
 	hostlist_t hl = NULL;
 	char *buf = NULL;
 	int count = 0;
 	uint32_t alloc_count = 0;
+	char *step_nodelist = NULL;
 
 	ai->jobid          = job_id;
 	ai->stepid         = NO_VAL;
-	ai->nodelist = opt.alloc_nodelist;
+	ai->alias_list     = resp->alias_list;
+	ai->nodelist       = opt.alloc_nodelist;
 	hl = hostlist_create(ai->nodelist);
 	hostlist_uniq(hl);
 	alloc_count = hostlist_count(hl);
@@ -178,7 +181,7 @@ job_step_create_allocation(resource_allocation_response_msg_t *resp)
 				hostlist_delete_nth(hl, inx);
 				ai->nnodes--;	/* decrement node count */
 			}
-			if(inc_hl) {
+			if (inc_hl) {
 				inx = hostlist_find(inc_hl, node_name);
 				if (inx >= 0) {
 					error("Requested node %s is also "
@@ -211,20 +214,20 @@ job_step_create_allocation(resource_allocation_response_msg_t *resp)
 				opt.min_nodes = ai->nnodes;
 			opt.nodes_set = true;
 		}
-		if(!opt.max_nodes)
+		if (!opt.max_nodes)
 			opt.max_nodes = opt.min_nodes;
-		if((opt.max_nodes > 0) && (opt.max_nodes < ai->nnodes))
+		if ((opt.max_nodes > 0) && (opt.max_nodes < ai->nnodes))
 			ai->nnodes = opt.max_nodes;
 
 		count = hostlist_count(hl);
-		if(!count) {
+		if (!count) {
 			error("Hostlist is now nothing!  Can't run job.");
 			hostlist_destroy(hl);
 			goto error;
 		}
-		if(inc_hl) {
+		if (inc_hl) {
 			count = hostlist_count(inc_hl);
-			if(count < ai->nnodes) {
+			if (count < ai->nnodes) {
 				/* add more nodes to get correct number for
 				   allocation */
 				hostlist_t tmp_hl = hostlist_copy(hl);
@@ -264,15 +267,15 @@ job_step_create_allocation(resource_allocation_response_msg_t *resp)
 			 * know it is less than the number of nodes
 			 * in the allocation
 			 */
-			if(opt.ntasks_set && (opt.ntasks < ai->nnodes))
+			if (opt.ntasks_set && (opt.ntasks < ai->nnodes))
 				opt.min_nodes = opt.ntasks;
 			else
 				opt.min_nodes = ai->nnodes;
 			opt.nodes_set = true;
 		}
-		if(!opt.max_nodes)
+		if (!opt.max_nodes)
 			opt.max_nodes = opt.min_nodes;
-		if((opt.max_nodes > 0) && (opt.max_nodes < ai->nnodes))
+		if ((opt.max_nodes > 0) && (opt.max_nodes < ai->nnodes))
 			ai->nnodes = opt.max_nodes;
 		/* Don't reset the ai->nodelist because that is the
 		 * nodelist we want to say the allocation is under
@@ -283,8 +286,12 @@ job_step_create_allocation(resource_allocation_response_msg_t *resp)
 	}
 
 	/* get the correct number of hosts to run tasks on */
-	if (opt.nodelist) {
-		hl = hostlist_create(opt.nodelist);
+	if (opt.nodelist)
+		step_nodelist = opt.nodelist;
+	else if ((opt.distribution == SLURM_DIST_ARBITRARY) && (count == 0))
+		step_nodelist = getenv("SLURM_ARBITRARY_NODELIST");
+	if (step_nodelist) {
+		hl = hostlist_create(step_nodelist);
 		if (opt.distribution != SLURM_DIST_ARBITRARY)
 			hostlist_uniq(hl);
 		if (!hostlist_count(hl)) {
@@ -306,12 +313,11 @@ job_step_create_allocation(resource_allocation_response_msg_t *resp)
 		opt.nodelist = buf;
 	}
 
-	if (opt.distribution == SLURM_DIST_ARBITRARY) {
-		if (count != opt.ntasks) {
-			error("You asked for %d tasks but specified %d nodes",
-			      opt.ntasks, count);
-			goto error;
-		}
+	if ((opt.distribution == SLURM_DIST_ARBITRARY) &&
+	    (count != opt.ntasks)) {
+		error("You asked for %d tasks but specified %d nodes",
+		      opt.ntasks, count);
+		goto error;
 	}
 
 	if (ai->nnodes == 0) {
@@ -342,8 +348,9 @@ extern srun_job_t *
 job_create_allocation(resource_allocation_response_msg_t *resp)
 {
 	srun_job_t *job;
-	allocation_info_t *i = xmalloc(sizeof(*i));
+	allocation_info_t *i = xmalloc(sizeof(allocation_info_t));
 
+	i->alias_list     = resp->alias_list;
 	i->nodelist       = _normalize_hostlist(resp->node_list);
 	i->nnodes	  = resp->node_cnt;
 	i->jobid          = resp->job_id;
@@ -424,7 +431,6 @@ _compute_task_count(allocation_info_t *ainfo)
 #if defined HAVE_BGQ
 //#if defined HAVE_BGQ && HAVE_BG_FILES
 	/* always return the ntasks here for Q */
-	info("returning %d", opt.ntasks);
 	return opt.ntasks;
 #endif
 	if (opt.cpus_set) {
@@ -461,13 +467,55 @@ _job_create_structure(allocation_info_t *ainfo)
 	pthread_cond_init(&job->state_cond, NULL);
 	job->state = SRUN_JOB_INIT;
 
+ 	job->alias_list = xstrdup(ainfo->alias_list);
  	job->nodelist = xstrdup(ainfo->nodelist);
 	job->stepid  = ainfo->stepid;
 
-#if defined HAVE_BGQ
+#if defined HAVE_BG && !defined HAVE_BG_L_P
 //#if defined HAVE_BGQ && defined HAVE_BG_FILES
-	job->nhosts   = ainfo->nnodes;
-	select_g_alter_node_cnt(SELECT_APPLY_NODE_MAX_OFFSET, &job->nhosts);
+	/* Since the allocation will have the correct cnode count get
+	   it if it is available.  Else grab it from opt.min_nodes
+	   (meaning the allocation happened before).
+	*/
+	if (ainfo->select_jobinfo)
+		select_g_select_jobinfo_get(ainfo->select_jobinfo,
+					    SELECT_JOBDATA_NODE_CNT,
+					    &job->nhosts);
+	else
+		job->nhosts   = opt.min_nodes;
+	/* If we didn't ask for nodes set it up correctly here so the
+	   step allocation does the correct thing.
+	*/
+	if (!opt.nodes_set) {
+		opt.min_nodes = opt.max_nodes = job->nhosts;
+		opt.nodes_set = true;
+		opt.ntasks_per_node = NO_VAL;
+		bg_figure_nodes_tasks();
+
+#if defined HAVE_BG_FILES
+		/* Replace the runjob line with correct information. */
+		int i, matches = 0;
+		for (i = 0; i < opt.argc; i++) {
+			if (!strcmp(opt.argv[i], "-p")) {
+				i++;
+				xfree(opt.argv[i]);
+				opt.argv[i]  = xstrdup_printf(
+					"%d", opt.ntasks_per_node);
+				matches++;
+			} else if (!strcmp(opt.argv[i], "--np")) {
+				i++;
+				xfree(opt.argv[i]);
+				opt.argv[i]  = xstrdup_printf(
+					"%d", opt.ntasks);
+				matches++;
+			}
+			if (matches == 2)
+				break;
+		}
+		xassert(matches == 2);
+#endif
+	}
+
 #elif defined HAVE_FRONT_END	/* Limited job step support */
 	opt.overcommit = true;
 	job->nhosts = 1;
@@ -520,12 +568,14 @@ job_update_io_fnames(srun_job_t *job)
 static char *
 _normalize_hostlist(const char *hostlist)
 {
-	char *buf = NULL; 
+	char *buf = NULL;
 	hostlist_t hl = hostlist_create(hostlist);
 
-	if (hl)	
+	if (hl)	{
 		buf = hostlist_ranged_string_xmalloc(hl);
-	if (!hl || !buf)
+		hostlist_destroy(hl);
+	}
+	if (!buf)
 		return xstrdup(hostlist);
 
 	return buf;

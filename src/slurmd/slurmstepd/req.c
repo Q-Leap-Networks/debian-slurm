@@ -83,7 +83,8 @@ static int _handle_notify_job(int fd, slurmd_job_t *job, uid_t uid);
 static int _handle_suspend(int fd, slurmd_job_t *job, uid_t uid);
 static int _handle_resume(int fd, slurmd_job_t *job, uid_t uid);
 static int _handle_terminate(int fd, slurmd_job_t *job, uid_t uid);
-static int _handle_completion(int fd, slurmd_job_t *job, uid_t uid);
+static int _handle_completion(int fd, slurmd_job_t *job, uid_t uid,
+			      int protocol);
 static int _handle_stat_jobacct(int fd, slurmd_job_t *job, uid_t uid);
 static int _handle_task_info(int fd, slurmd_job_t *job);
 static int _handle_list_pids(int fd, slurmd_job_t *job);
@@ -457,7 +458,7 @@ _handle_request(int fd, slurmd_job_t *job, uid_t uid, gid_t gid)
 		if (rc == 0) { /* EOF, normal */
 			return -1;
 		} else {
-			debug3("Leaving _handle_request on read error");
+			debug3("Leaving _handle_request on read error: %m");
 			return SLURM_FAILURE;
 		}
 	}
@@ -517,7 +518,11 @@ _handle_request(int fd, slurmd_job_t *job, uid_t uid, gid_t gid)
 		break;
 	case REQUEST_STEP_COMPLETION:
 		debug("Handling REQUEST_STEP_COMPLETION");
-		rc = _handle_completion(fd, job, uid);
+		rc = _handle_completion(fd, job, uid, 1);
+		break;
+	case REQUEST_STEP_COMPLETION_V2:
+		debug("Handling REQUEST_STEP_COMPLETION_V2");
+		rc = _handle_completion(fd, job, uid, 2);
 		break;
 	case REQUEST_STEP_TASK_INFO:
 		debug("Handling REQUEST_STEP_TASK_INFO");
@@ -1273,7 +1278,7 @@ rwfail:
 }
 
 static int
-_handle_completion(int fd, slurmd_job_t *job, uid_t uid)
+_handle_completion(int fd, slurmd_job_t *job, uid_t uid, int protocol)
 {
 	int rc = SLURM_SUCCESS;
 	int errnum = 0;
@@ -1281,6 +1286,11 @@ _handle_completion(int fd, slurmd_job_t *job, uid_t uid)
 	int last;
 	jobacctinfo_t *jobacct = NULL;
 	int step_rc;
+	char* buf;
+	int len;
+	Buf buffer;
+	int version;	/* For future use */
+	bool lock_set = false;
 
 	debug("_handle_completion for job %u.%u",
 	      job->jobid, job->stepid);
@@ -1297,16 +1307,38 @@ _handle_completion(int fd, slurmd_job_t *job, uid_t uid)
 		return SLURM_SUCCESS;
 	}
 
+	if (protocol >= 2)
+		safe_read(fd, &version, sizeof(int));
 	safe_read(fd, &first, sizeof(int));
 	safe_read(fd, &last, sizeof(int));
 	safe_read(fd, &step_rc, sizeof(int));
-	jobacct = jobacct_gather_g_create(NULL);
-	jobacct_gather_g_getinfo(jobacct, JOBACCT_DATA_PIPE, &fd);
+	if (protocol >= 2) {
+		/*
+		 * We must not use getinfo over a pipe with slurmd here 
+		 * Indeed, slurmstepd does a large use of setinfo over a pipe
+		 * with slurmd and doing the reverse can result in a deadlock
+		 * scenario with slurmd : 
+		 * slurmd(lockforread,write)/slurmstepd(write,lockforread)
+		 * Do pack/unpack instead to be sure of independances of 
+		 * slurmd and slurmstepd
+		 */
+		safe_read(fd, &len, sizeof(int));
+		buf = xmalloc(len);
+		safe_read(fd, buf, len);
+		buffer = create_buf(buf, len);
+		jobacct_gather_g_unpack(&jobacct, SLURM_PROTOCOL_VERSION,
+					buffer);
+		free_buf(buffer);
+	} else {
+		jobacct = jobacct_gather_g_create(NULL);
+		jobacct_gather_g_getinfo(jobacct, JOBACCT_DATA_PIPE, &fd);
+	}
 
 	/*
 	 * Record the completed nodes
 	 */
 	pthread_mutex_lock(&step_complete.lock);
+	lock_set = true;
 	if (! step_complete.wait_children) {
 		rc = -1;
 		errnum = ETIMEDOUT; /* not used anyway */
@@ -1350,7 +1382,12 @@ timeout:
 	pthread_mutex_unlock(&step_complete.lock);
 
 	return SLURM_SUCCESS;
-rwfail:
+
+
+rwfail:	if (lock_set) {
+		pthread_cond_signal(&step_complete.cond);
+		pthread_mutex_unlock(&step_complete.lock);
+	}
 	return SLURM_FAILURE;
 }
 

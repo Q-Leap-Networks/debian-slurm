@@ -130,7 +130,7 @@ display_data_t main_display_data[] = {
 	 refresh_main, NULL, NULL,
 	 get_info_block, specific_info_block,
 	 set_menus_block, NULL},
-	{G_TYPE_NONE, NODE_PAGE, "Base Partitions", FALSE, -1,
+	{G_TYPE_NONE, NODE_PAGE, "Midplanes", FALSE, -1,
 	 refresh_main, NULL, NULL,
 	 get_info_node, specific_info_node,
 	 set_menus_node, NULL},
@@ -592,6 +592,14 @@ static void _get_current_debug_flags(GtkToggleAction *action)
 		gtk_toggle_action_set_active(toggle_action, new_state);
 
 	debug_action = gtk_action_group_get_action(menu_action_group,
+						  "flags_no_real_time");
+	toggle_action = GTK_TOGGLE_ACTION(debug_action);
+	orig_state = gtk_toggle_action_get_active(toggle_action);
+	new_state = debug_flags & DEBUG_FLAG_NO_REALTIME;
+	if (orig_state != new_state)
+		gtk_toggle_action_set_active(toggle_action, new_state);
+
+	debug_action = gtk_action_group_get_action(menu_action_group,
 						  "flags_prio");
 	toggle_action = GTK_TOGGLE_ACTION(debug_action);
 	orig_state = gtk_toggle_action_get_active(toggle_action);
@@ -722,6 +730,10 @@ static void _set_flags_gres(GtkToggleAction *action)
 static void _set_flags_no_conf_hash(GtkToggleAction *action)
 {
 	_set_flags(action, DEBUG_FLAG_NO_CONF_HASH);
+}
+static void _set_flags_no_real_time(GtkToggleAction *action)
+{
+	_set_flags(action, DEBUG_FLAG_NO_REALTIME);
 }
 static void _set_flags_prio(GtkToggleAction *action)
 {
@@ -874,6 +886,7 @@ static char *_get_ui_description()
 		"        <menuitem action='flags_gang'/>"
 		"        <menuitem action='flags_gres'/>"
 		"        <menuitem action='flags_no_conf_hash'/>"
+		"        <menuitem action='flags_no_real_time'/>"
 		"        <menuitem action='flags_prio'/>"
 		"        <menuitem action='flags_reservation'/>"
 		"        <menuitem action='flags_select_type'/>"
@@ -892,7 +905,8 @@ static char *_get_ui_description()
 		"      <menuitem action='topoorder'/>"
 #endif
 		"      <menuitem action='ruled'/>");
-	if (!(cluster_flags & CLUSTER_FLAG_BG))
+	if (!(cluster_flags & CLUSTER_FLAG_BG) &&
+	    !(cluster_flags & CLUSTER_FLAG_CRAYXT))
 		xstrcat(ui_description,
 			"      <menuitem action='grid_specs'/>");
 
@@ -1004,12 +1018,12 @@ static GtkWidget *_get_menubar_menu(GtkWidget *window, GtkWidget *notebook)
 		 "Search for BG Blocks having given state",
 		 G_CALLBACK(create_search_popup)},
 		{"node_name_bg", NULL,
-		 "Base Partition(s) Name",
-		 "", "Search for a specific Base Partition(s)",
+		 "Midplane(s) Name",
+		 "", "Search for a specific Midplane(s)",
 		 G_CALLBACK(create_search_popup)},
 		{"node_state_bg", NULL,
-		 "Base Partition State",
-		 "", "Search for a Base Partition in a given state",
+		 "Midplane State",
+		 "", "Search for a Midplane in a given state",
 		 G_CALLBACK(create_search_popup)},
 	};
 
@@ -1110,6 +1124,8 @@ static GtkWidget *_get_menubar_menu(GtkWidget *window, GtkWidget *notebook)
 		 "Gres", G_CALLBACK(_set_flags_gres), FALSE},
 		{"flags_no_conf_hash", NULL, "NO CONF HASH", NULL,
 		 "NO_CONF_HASH", G_CALLBACK(_set_flags_no_conf_hash), FALSE},
+		{"flags_no_real_time", NULL, "NoRealTime", NULL,
+		 "NoRealTime", G_CALLBACK(_set_flags_no_real_time), FALSE},
 		{"flags_prio", NULL, "Priority", NULL,
 		 "Priority", G_CALLBACK(_set_flags_prio), FALSE},
 		{"flags_reservation", NULL, "Reservation", NULL,
@@ -1324,6 +1340,8 @@ extern void _change_cluster_main(GtkComboBox *combo, gpointer extra)
 		working_sview_config.grid_hori = default_sview_config.grid_hori;
 		working_sview_config.grid_vert = default_sview_config.grid_vert;
 	}
+	gtk_table_set_col_spacings(main_grid_table, 0);
+	gtk_table_set_row_spacings(main_grid_table, 0);
 
 	if (!orig_cluster_name)
 		orig_cluster_name = slurm_get_cluster_name();
@@ -1344,7 +1362,7 @@ extern void _change_cluster_main(GtkComboBox *combo, gpointer extra)
 				display_data->show = TRUE;
 				break;
 			case NODE_PAGE:
-				display_data->name = "Base Partitions";
+				display_data->name = "Midplanes";
 				break;
 			default:
 				break;
@@ -1481,7 +1499,7 @@ extern void _change_cluster_main(GtkComboBox *combo, gpointer extra)
 	g_free(tmp);
 }
 
-static GtkWidget *_create_cluster_combo()
+static GtkWidget *_create_cluster_combo(void)
 {
 	GtkListStore *model = NULL;
 	GtkWidget *combo = NULL;

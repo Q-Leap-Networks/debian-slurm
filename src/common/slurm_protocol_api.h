@@ -503,6 +503,12 @@ uint32_t slurm_get_jobcomp_port(void);
  */
 int slurm_set_jobcomp_port(uint32_t port);
 
+/* slurm_get_kill_wait
+ * returns kill_wait from slurmctld_conf object
+ * RET uint16_t        - kill_wait
+ */
+uint16_t slurm_get_kill_wait(void);
+
 /* slurm_get_preempt_type
  * get PreemptType from slurmctld_conf object
  * RET char *   - preempt type, MUST be xfreed by caller
@@ -1082,4 +1088,18 @@ extern void parse_int_to_array(int in, int *out);
 extern int slurm_job_step_create (
 	job_step_create_request_msg_t *slurm_step_alloc_req_msg,
 	job_step_create_response_msg_t **slurm_step_alloc_resp_msg);
+
+
+/* Should this be in <slurm/slurm.h> ? */
+/*
+ * slurm_forward_data - forward arbitrary data to unix domain sockets on nodes
+ * IN nodelist: nodes to forward data to
+ * IN address: address of unix domain socket
+ * IN len: length of data
+ * IN data: real data
+ * RET: error code
+ */
+extern int slurm_forward_data(char *nodelist, char *address, uint32_t len, 
+	char *data);
+
 #endif

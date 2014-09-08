@@ -117,6 +117,7 @@
 #define OPT_ACCTG_FREQ  0x15
 #define OPT_WCKEY       0x16
 #define OPT_SIGNAL      0x17
+#define OPT_TIME_VAL    0x18
 
 /* generic getopt_long flags, integers and *not* valid characters */
 #define LONG_OPT_HELP        0x100
@@ -183,6 +184,7 @@
 #define LONG_OPT_GRES            0x151
 #define LONG_OPT_ALPS            0x152
 #define LONG_OPT_REQ_SWITCH      0x153
+#define LONG_OPT_RUNJOB_OPTS     0x154
 
 extern char **environ;
 
@@ -193,10 +195,6 @@ int error_exit = 1;
 int immediate_exit = 1;
 
 /*---- forward declarations of static functions  ----*/
-#if defined HAVE_BG_FILES && HAVE_BGQ
-static const char *runjob_loc = "/bgsys/drivers/ppcfloor/hlcs/bin/runjob";
-#endif
-
 typedef struct env_vars env_vars_t;
 
 
@@ -456,6 +454,7 @@ static void _opt_default()
 	opt.wckey = NULL;
 	opt.req_switch = -1;
 	opt.wait4switch = -1;
+	opt.runjob_opts = NULL;
 }
 
 /*---[ env var processing ]-----------------------------------------------*/
@@ -541,7 +540,7 @@ env_vars_t env_vars[] = {
 {"SLURM_WCKEY",         OPT_STRING,     &opt.wckey,         NULL             },
 {"SLURM_WORKING_DIR",   OPT_STRING,     &opt.cwd,           &opt.cwd_set     },
 {"SLURM_REQ_SWITCH",    OPT_INT,        &opt.req_switch,    NULL             },
-{"SLURM_WAIT4SWITCH",   OPT_INT,        &opt.wait4switch,   NULL             },
+{"SLURM_WAIT4SWITCH",   OPT_TIME_VAL,   NULL,               NULL             },
 {NULL, 0, NULL, NULL}
 };
 
@@ -689,6 +688,10 @@ _process_env_var(env_vars_t *e, const char *val)
 		}
 		break;
 
+	case OPT_TIME_VAL:
+		opt.wait4switch = time_str2secs(val);
+		break;
+
 	default:
 		/* do nothing */
 		break;
@@ -820,10 +823,11 @@ static void set_options(const int argc, char **argv)
 		{"reservation",      required_argument, 0, LONG_OPT_RESERVATION},
 		{"restart-dir",      required_argument, 0, LONG_OPT_RESTART_DIR},
 		{"resv-ports",       optional_argument, 0, LONG_OPT_RESV_PORTS},
+		{"runjob-opts",      required_argument, 0, LONG_OPT_RUNJOB_OPTS},
 		{"signal",	     required_argument, 0, LONG_OPT_SIGNAL},
 		{"slurmd-debug",     required_argument, 0, LONG_OPT_DEBUG_SLURMD},
 		{"sockets-per-node", required_argument, 0, LONG_OPT_SOCKETSPERNODE},
-		{"switches",         optional_argument, 0, LONG_OPT_REQ_SWITCH},
+		{"switches",         required_argument, 0, LONG_OPT_REQ_SWITCH},
 		{"task-epilog",      required_argument, 0, LONG_OPT_TASK_EPILOG},
 		{"task-prolog",      required_argument, 0, LONG_OPT_TASK_PROLOG},
 		{"tasks-per-node",   required_argument, 0, LONG_OPT_NTASKSPERNODE},
@@ -920,7 +924,7 @@ static void set_options(const int argc, char **argv)
 				exit(error_exit);
 			}
 			xfree(opt.efname);
-			if (strncasecmp(optarg, "none", (size_t) 4) == 0)
+			if (strcasecmp(optarg, "none") == 0)
 				opt.efname = xstrdup("/dev/null");
 			else
 				opt.efname = xstrdup(optarg);
@@ -942,7 +946,7 @@ static void set_options(const int argc, char **argv)
 				exit(error_exit);
 			}
 			xfree(opt.ifname);
-			if (strncasecmp(optarg, "none", (size_t) 4) == 0)
+			if (strcasecmp(optarg, "none") == 0)
 				opt.ifname = xstrdup("/dev/null");
 			else
 				opt.ifname = xstrdup(optarg);
@@ -1012,7 +1016,7 @@ static void set_options(const int argc, char **argv)
 				exit(error_exit);
 			}
 			xfree(opt.ofname);
-			if (strncasecmp(optarg, "none", (size_t) 4) == 0)
+			if (strcasecmp(optarg, "none") == 0)
 				opt.ofname = xstrdup("/dev/null");
 			else
 				opt.ofname = xstrdup(optarg);
@@ -1222,7 +1226,13 @@ static void set_options(const int argc, char **argv)
 			/* make other parameters look like debugger
 			 * is really attached */
 			opt.parallel_debug   = true;
+#if defined HAVE_BG_FILES && !defined HAVE_BGL && !defined HAVE_BGP
+			/* Use symbols from the runjob.so library provided by
+			 * IBM. Do NOT use debugger symbols local to the srun
+			 * command */
+#else
 			MPIR_being_debugged  = 1;
+#endif
 			opt.max_launch_time = 120;
 			opt.max_threads     = 1;
 			pmi_server_max_threads(opt.max_threads);
@@ -1386,6 +1396,13 @@ static void set_options(const int argc, char **argv)
 			opt.ramdiskimage = xstrdup(optarg);
 			break;
 		case LONG_OPT_REBOOT:
+#if defined HAVE_BG && !defined HAVE_BG_L_P
+			info("WARNING: If your job is smaller than the block "
+			     "it is going to run on and other jobs are "
+			     "running on it the --reboot option will not be "
+			     "honored.  If this is the case, contact your "
+			     "admin to reboot the block for you.");
+#endif
 			opt.reboot = true;
 			break;
 		case LONG_OPT_GET_USER_ENV:
@@ -1440,6 +1457,10 @@ static void set_options(const int argc, char **argv)
 			xfree(opt.reservation);
 			opt.reservation = xstrdup(optarg);
 			break;
+		case LONG_OPT_RUNJOB_OPTS:
+			xfree(opt.runjob_opts);
+			opt.runjob_opts = xstrdup(optarg);
+			break;
 		case LONG_OPT_CHECKPOINT_DIR:
 			xfree(opt.ckpt_dir);
 			opt.ckpt_dir = xstrdup(optarg);
@@ -1477,7 +1498,7 @@ static void set_options(const int argc, char **argv)
 			if (pos_delimit != NULL) {
 				pos_delimit[0] = '\0';
 				pos_delimit++;
-				opt.wait4switch = time_str2mins(pos_delimit) * 60;
+				opt.wait4switch = time_str2secs(pos_delimit);
 			}
 			opt.req_switch = _get_int(optarg, "switches",
 				true);
@@ -1527,11 +1548,141 @@ static void _load_multi(int *argc, char **argv)
 			data_read += i;
 	}
 	close(config_fd);
-	for (i=1; i<*argc; i++)
-		xfree(argv[i]);
+
+	for (i = *argc+1; i > 1; i--)
+		argv[i] = argv[i-1];
 	argv[1] = data_buf;
-	*argc = 2;
+	*argc += 1;
 }
+
+#if defined HAVE_BG && !defined HAVE_BG_L_P
+static bool _check_is_pow_of_2(int32_t n) {
+	/* Bitwise ANDing a power of 2 number like 16 with its
+	 * negative (-16) gives itself back.  Only integers which are power of
+	 * 2 behave like that.
+	 */
+	return ((n!=0) && (n&(-n))==n);
+}
+
+extern void bg_figure_nodes_tasks()
+{
+	/* A bit of setup for IBM's runjob.  runjob only has so many
+	   options, so it isn't that bad.
+	*/
+	int32_t node_cnt;
+	if (opt.max_nodes)
+		node_cnt = opt.max_nodes;
+	else
+		node_cnt = opt.min_nodes;
+
+	if (!opt.ntasks_set) {
+		if (opt.ntasks_per_node != NO_VAL)
+			opt.ntasks = node_cnt * opt.ntasks_per_node;
+		else {
+			opt.ntasks = node_cnt;
+			opt.ntasks_per_node = 1;
+		}
+		opt.ntasks_set = true;
+	} else {
+		int32_t ntpn;
+		bool figured = false;
+
+		if (opt.nodes_set) {
+			if (node_cnt > opt.ntasks) {
+				if (opt.nodes_set_opt)
+					info("You asked for %d nodes, "
+					     "but only %d tasks, resetting "
+					     "node count to %u.",
+					     node_cnt, opt.ntasks, opt.ntasks);
+				opt.max_nodes = opt.min_nodes = node_cnt
+					= opt.ntasks;
+			}
+		}
+		/* If nodes not set do not try to set min/max nodes
+		   yet since that would result in an incorrect
+		   allocation.  For a step allocation it is figured
+		   out later in srun_job.c _job_create_structure().
+		*/
+
+		if (!opt.ntasks_per_node || (opt.ntasks_per_node == NO_VAL)) {
+			/* We always want the next larger number if
+			   there is a fraction so we try to stay in
+			   the allocation requested.
+			*/
+			opt.ntasks_per_node =
+				(opt.ntasks + node_cnt - 1) / node_cnt;
+			figured = true;
+		}
+
+		/* On a Q we need ntasks_per_node to be a multiple of 2 */
+		ntpn = opt.ntasks_per_node;
+		while (!_check_is_pow_of_2(ntpn))
+			ntpn++;
+		if (!figured && (ntpn != opt.ntasks_per_node)) {
+			info("You requested --ntasks-per-node=%d, which is not "
+			     "a power of 2.  Setting --ntasks-per-node=%d "
+			     "for you.", opt.ntasks_per_node, ntpn);
+			figured = true;
+		}
+		opt.ntasks_per_node = ntpn;
+
+		ntpn = opt.ntasks / opt.ntasks_per_node;
+		/* Make sure we are requesting the correct number of nodes. */
+		if (node_cnt < ntpn) {
+			opt.max_nodes = opt.min_nodes = ntpn;
+			if (opt.nodes_set && !figured) {
+				fatal("You requested -N %d and -n %d "
+				      "with --ntasks-per-node=%d.  "
+				      "This isn't a valid request.",
+				      node_cnt, opt.ntasks,
+				      opt.ntasks_per_node);
+			}
+			node_cnt = opt.max_nodes;
+		}
+
+		/* Do this again to make sure we have a legitimate
+		   ratio. */
+		ntpn = opt.ntasks_per_node;
+		if ((node_cnt * ntpn) < opt.ntasks) {
+			ntpn++;
+			while (!_check_is_pow_of_2(ntpn))
+				ntpn++;
+			if (!figured && (ntpn != opt.ntasks_per_node))
+				info("You requested --ntasks-per-node=%d, "
+				     "which cannot spread across %d nodes "
+				     "correctly.  Setting --ntasks-per-node=%d "
+				     "for you.",
+				     opt.ntasks_per_node, node_cnt, ntpn);
+			opt.ntasks_per_node = ntpn;
+		}
+
+		if (opt.nodes_set) {
+			if ((opt.ntasks_per_node != 1)
+			    && (opt.ntasks_per_node != 2)
+			    && (opt.ntasks_per_node != 4)
+			    && (opt.ntasks_per_node != 8)
+			    && (opt.ntasks_per_node != 16)
+			    && (opt.ntasks_per_node != 32)
+			    && (opt.ntasks_per_node != 64))
+				fatal("You requested -N %d and -n %d "
+				      "which gives --ntasks-per-node=%d.  "
+				      "This isn't a valid request.",
+				      node_cnt, opt.ntasks,
+				      opt.ntasks_per_node);
+			else if (!opt.overcommit
+				 && ((opt.ntasks_per_node == 32)
+				     || (opt.ntasks_per_node == 64)))
+				fatal("You requested -N %d and -n %d "
+				      "which gives --ntasks-per-node=%d.  "
+				      "This isn't a valid request "
+				      "without --overcommit.",
+				      node_cnt, opt.ntasks,
+				      opt.ntasks_per_node);
+		}
+	}
+}
+
+#endif
 
 /*
  * _opt_args() : set options via commandline args and popt
@@ -1602,88 +1753,83 @@ static void _opt_args(int argc, char **argv)
 		while (rest[opt.argc] != NULL)
 			opt.argc++;
 	}
-#if defined HAVE_BGQ
-	/* A bit of setup for IBM's runjob.  runjob only has so many
-	   options, so it isn't that bad.
-	*/
-	int32_t node_cnt;
-	if (opt.max_nodes)
-		node_cnt = opt.max_nodes;
-	else
-		node_cnt = opt.min_nodes;
 
-	if (!opt.ntasks_set) {
-		if (opt.ntasks_per_node != NO_VAL)
-			opt.ntasks = node_cnt * opt.ntasks_per_node;
-		else
-			opt.ntasks = node_cnt;
-		opt.ntasks_set = true;
-	} else {
-		if (opt.nodes_set) {
-			if (node_cnt > opt.ntasks) {
-				info("You asked for %d nodes, but only "
-				     "%d tasks, resetting node count to %u",
-				     node_cnt, opt.ntasks, opt.ntasks);
-				opt.max_nodes = opt.min_nodes = node_cnt
-					= opt.ntasks;
-			}
-		} else if (node_cnt > opt.ntasks)
-			opt.max_nodes = opt.min_nodes = node_cnt = opt.ntasks;
+#if defined HAVE_BG && !defined HAVE_BG_L_P
 
-		if (!opt.ntasks_per_node || (opt.ntasks_per_node == NO_VAL))
-			opt.ntasks_per_node = opt.ntasks / node_cnt;
-		else if ((opt.ntasks / opt.ntasks_per_node) != node_cnt)
-			fatal("You are requesting for %d tasks, but are "
-			      "also asking for %d tasks per node and %d nodes.",
-			      opt.ntasks, opt.ntasks_per_node, node_cnt);
-	}
+	bg_figure_nodes_tasks();
 
 #if defined HAVE_BG_FILES
+	uint32_t taskid = NO_VAL;
 	if (!opt.test_only) {
 	 	/* Since we need the opt.argc to allocate the opt.argv array
 		 * we need to do this before actually messing with
 		 * things. All the extra options added to argv will be
 		 * handled after the allocation. */
 
-		/* Default location of the actual command to be ran. We always
-		 * have to add 3 options no matter what. */
-		command_pos = 3;
+		/* We are always going to set ntasks_per_node and ntasks */
+		xassert(opt.ntasks_per_node != NO_VAL);
+		xassert(opt.ntasks_set);
 
-		if (opt.ntasks_per_node != NO_VAL)
-			command_pos += 2;
-		if (opt.ntasks_set)
-			command_pos += 2;
+		/* Default location of the actual command to be ran. We always
+		 * have to add 5 options (calling prog, '-p', '--np',
+		 * '--env-all' and ':') no matter what. */
+		command_pos = 7;
+
 		if (opt.cwd_set)
 			command_pos += 2;
 		if (opt.labelio)
 			command_pos += 2;
+		if (_verbose)
+			command_pos += 2;
+		if (opt.quiet)
+			command_pos += 2;
+		if (opt.ifname) {
+			if (!parse_uint32(opt.ifname, &taskid)
+			    && ((int) taskid < opt.ntasks)) {
+				command_pos += 2;
+			}
+		}
+		if (opt.runjob_opts) {
+			char *save_ptr = NULL, *tok;
+			char *tmp = xstrdup(opt.runjob_opts);
+			tok = strtok_r(tmp, " ", &save_ptr);
+			while (tok) {
+				command_pos++;
+				tok = strtok_r(NULL, " ", &save_ptr);
+			}
+			xfree(tmp);
+		}
+
 		opt.argc += command_pos;
 	}
 #endif
 
 #endif
 
-	opt.argv = (char **) xmalloc((opt.argc + 1) * sizeof(char *));
+	/* One extra pointer is for a trailing NULL and a
+	 * second extra pointer is for arguments from the multi-prog file */
+	opt.argv = (char **) xmalloc((opt.argc + 2) * sizeof(char *));
 
-#if defined HAVE_BGQ
+#if defined HAVE_BG && !defined HAVE_BG_L_P
 #if defined HAVE_BG_FILES
 	if (!opt.test_only) {
 		i = 0;
-		/* Instead of running the actual job, the slurmstepd will be
-		   running runjob to run the job.  srun is just wrapping it
-		   making things all kosher.
+		/* First arg has to be something when sending it to the
+		   runjob api.  This can be anything, srun seemed most
+		   logical, but it doesn't matter.
 		*/
-		opt.argv[i++] = xstrdup(runjob_loc);
-		if (opt.ntasks_per_node != NO_VAL) {
-			opt.argv[i++]  = xstrdup("-p");
-			opt.argv[i++]  = xstrdup_printf("%d",
-							opt.ntasks_per_node);
-		}
+		opt.argv[i++] = xstrdup("srun");
+		/* srun launches tasks using runjob API. Slurmd is not used */
+		/* We are always going to set ntasks_per_node and ntasks */
+		// if (opt.ntasks_per_node != NO_VAL) {
+		opt.argv[i++]  = xstrdup("-p");
+		opt.argv[i++]  = xstrdup_printf("%d", opt.ntasks_per_node);
+		// }
 
-		if (opt.ntasks_set) {
-			opt.argv[i++]  = xstrdup("--np");
-			opt.argv[i++]  = xstrdup_printf("%d", opt.ntasks);
-		}
+		// if (opt.ntasks_set) {
+		opt.argv[i++]  = xstrdup("--np");
+		opt.argv[i++]  = xstrdup_printf("%d", opt.ntasks);
+		// }
 
 		if (opt.cwd_set) {
 			opt.argv[i++]  = xstrdup("--cwd");
@@ -1699,9 +1845,35 @@ static void _opt_args(int argc, char **argv)
 			opt.labelio = 0;
 		}
 
+		if (_verbose) {
+			opt.argv[i++]  = xstrdup("--verbose");
+			opt.argv[i++]  = xstrdup_printf("%d", _verbose);
+		}
+
+		if (opt.quiet) {
+			opt.argv[i++]  = xstrdup("--verbose");
+			opt.argv[i++]  = xstrdup("OFF");
+		}
+
+		if (taskid != NO_VAL) {
+			opt.argv[i++]  = xstrdup("--stdinrank");
+			opt.argv[i++]  = xstrdup_printf("%u", taskid);
+		}
+
+		if (opt.runjob_opts) {
+			char *save_ptr = NULL, *tok;
+			char *tmp = xstrdup(opt.runjob_opts);
+			tok = strtok_r(tmp, " ", &save_ptr);
+			while (tok) {
+				opt.argv[i++]  = xstrdup(tok);
+				tok = strtok_r(NULL, " ", &save_ptr);
+			}
+			xfree(tmp);
+		}
+
 		/* Export all the environment so the runjob_mux will get the
 		 * correct info about the job, namely the block. */
-		opt.argv[i++] = xstrdup("--env_all");
+		opt.argv[i++] = xstrdup("--env-all");
 
 		/* With runjob anything after a ':' is treated as the actual
 		 * job, which in this case is exactly what it is.  So, very
@@ -2416,7 +2588,13 @@ static void _opt_list(void)
 /* Determine if srun is under the control of a parallel debugger or not */
 static bool _under_parallel_debugger (void)
 {
+#if defined HAVE_BG_FILES && !defined HAVE_BGL && !defined HAVE_BGP
+	/* Use symbols from the runjob.so library provided by IBM.
+	 * Do NOT use debugger symbols local to the srun command */
+	return false;
+#else
 	return (MPIR_being_debugged != 0);
+#endif
 }
 
 
@@ -2438,13 +2616,21 @@ static void _usage(void)
 "            [--ntasks-per-node=n] [--ntasks-per-socket=n] [reservation=name]\n"
 "            [--ntasks-per-core=n] [--mem-per-cpu=MB] [--preserve-env]\n"
 #ifdef HAVE_BG		/* Blue gene specific options */
-"            [--geometry=XxYxZ] [--conn-type=type] [--no-rotate] [--reboot]\n"
+#ifdef HAVE_BG_L_P
+"            [--geometry=XxYxZ] "
+#else
+"            [--geometry=AxXxYxZ] "
+#endif
+"[--conn-type=type] [--no-rotate] [--reboot]\n"
 #ifdef HAVE_BGL
 "            [--blrts-image=path] [--linux-image=path]\n"
 "            [--mloader-image=path] [--ramdisk-image=path]\n"
 #else
 "            [--cnload-image=path]\n"
 "            [--mloader-image=path] [--ioload-image=path]\n"
+#endif
+#ifdef HAVE_BGQ
+"            [--runjob-opts=options]\n"
 #endif
 #endif
 "            [--mail-type=type] [--mail-user=user] [--nice[=value]]\n"
@@ -2582,7 +2768,13 @@ static void _help(void)
 #endif
 #ifdef HAVE_BG				/* Blue gene specific options */
 "Blue Gene related options:\n"
+#ifdef HAVE_BG_L_P
 "  -g, --geometry=XxYxZ        geometry constraints of the job\n"
+#else
+"  -g, --geometry=AxXxYxZ      Midplane geometry constraints of the job,\n"
+"                              sub-block allocations can not be allocated\n"
+"                              with the geometry option\n"
+#endif
 "  -R, --no-rotate             disable geometry rotation\n"
 "      --reboot                reboot block before starting job\n"
 "      --conn-type=type        constraint on type of connection, MESH or TORUS\n"
@@ -2600,6 +2792,9 @@ static void _help(void)
 "      --linux-image=path      path to linux image for bluegene block.  Default if not set\n"
 "      --mloader-image=path    path to mloader image for bluegene block.  Default if not set\n"
 "      --ramdisk-image=path    path to ramdisk image for bluegene block.  Default if not set\n"
+#endif
+#ifdef HAVE_BGQ
+"      --runjob-opts=options   options for the runjob command\n"
 #endif
 #endif
 "\n"

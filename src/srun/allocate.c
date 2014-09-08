@@ -110,6 +110,10 @@ static void _set_pending_job_id(uint32_t job_id)
 
 static void _signal_while_allocating(int signo)
 {
+	debug("Got signal %d", signo);
+	if (signo == SIGCONT)
+		return;
+
 	destroy_job = 1;
 	if (pending_job_id != 0) {
 		slurm_complete_job(pending_job_id, NO_VAL);
@@ -317,7 +321,7 @@ static int _wait_nodes_ready(resource_allocation_response_msg_t *alloc)
 
 	pending_job_id = alloc->job_id;
 
-	for (i=0; (cur_delay < max_delay); i++) {
+	for (i = 0; (cur_delay < max_delay); i++) {
 		if (i) {
 			if (i == 1)
 				verbose("Waiting for nodes to boot");
@@ -343,8 +347,18 @@ static int _wait_nodes_ready(resource_allocation_response_msg_t *alloc)
 			break;
 	}
 	if (is_ready) {
+		resource_allocation_response_msg_t *resp;
+		char *tmp_str;
 		if (i > 0)
      			verbose("Nodes %s are ready for job", alloc->node_list);
+		if (alloc->alias_list && !strcmp(alloc->alias_list, "TBD") &&
+		    (slurm_allocation_lookup_lite(pending_job_id, &resp)
+		     == SLURM_SUCCESS)) {
+			tmp_str = alloc->alias_list;
+			alloc->alias_list = resp->alias_list;
+			resp->alias_list = tmp_str;
+			slurm_free_resource_allocation_response_msg(resp);
+		}
 	} else if (!destroy_job)
 		error("Nodes %s are still not ready", alloc->node_list);
 	else	/* allocation_interrupted and slurmctld not responing */
@@ -430,7 +444,7 @@ allocate_nodes(void)
 		}
 #else
 		if (!_wait_nodes_ready(resp)) {
-			if(!destroy_job)
+			if (!destroy_job)
 				error("Something is wrong with the "
 				      "boot of the nodes.");
 			goto relinquish;
@@ -462,7 +476,7 @@ ignore_signal(int signo)
 }
 
 int
-cleanup_allocation()
+cleanup_allocation(void)
 {
 	slurm_allocation_msg_thr_destroy(msg_thr);
 	return SLURM_SUCCESS;
@@ -536,7 +550,6 @@ job_desc_msg_create_from_opts (void)
 {
 	job_desc_msg_t *j = xmalloc(sizeof(*j));
 	hostlist_t hl = NULL;
-	int i;
 
 	slurm_init_job_desc_msg(j);
 
@@ -546,9 +559,9 @@ job_desc_msg_create_from_opts (void)
 	if (opt.immediate == 1)
 		j->immediate = opt.immediate;
 	if (opt.job_name)
-		j->name   = xstrdup(opt.job_name);
+		j->name   = opt.job_name;
 	else
-		j->name   = xstrdup(opt.cmd_name);
+		j->name   = opt.cmd_name;
 	if (opt.argc > 0) {
 		j->argc    = 1;
 		j->argv    = (char **) xmalloc(sizeof(char *) * 2);
@@ -556,8 +569,8 @@ job_desc_msg_create_from_opts (void)
 	}
 	if (opt.acctg_freq >= 0)
 		j->acctg_freq     = opt.acctg_freq;
-	j->reservation    = xstrdup(opt.reservation);
-	j->wckey          = xstrdup(opt.wckey);
+	j->reservation    = opt.reservation;
+	j->wckey          = opt.wckey;
 
 	j->req_nodes      = xstrdup(opt.nodelist);
 
@@ -617,21 +630,21 @@ job_desc_msg_create_from_opts (void)
 		j->ntasks_per_core   = opt.ntasks_per_core;
 
 	if (opt.mail_user)
-		j->mail_user = xstrdup(opt.mail_user);
+		j->mail_user = opt.mail_user;
 	if (opt.begin)
 		j->begin_time = opt.begin;
 	if (opt.licenses)
-		j->licenses = xstrdup(opt.licenses);
+		j->licenses = opt.licenses;
 	if (opt.network)
-		j->network = xstrdup(opt.network);
+		j->network = opt.network;
 	if (opt.account)
-		j->account = xstrdup(opt.account);
+		j->account = opt.account;
 	if (opt.comment)
-		j->comment = xstrdup(opt.comment);
+		j->comment = opt.comment;
 	if (opt.qos)
-		j->qos = xstrdup(opt.qos);
+		j->qos = opt.qos;
 	if (opt.cwd)
-		j->work_dir = xstrdup(opt.cwd);
+		j->work_dir = opt.cwd;
 
 	if (opt.hold)
 		j->priority     = 0;
@@ -639,29 +652,27 @@ job_desc_msg_create_from_opts (void)
 		j->job_id	= opt.jobid;
 #ifdef HAVE_BG
 	if (opt.geometry[0] > 0) {
-		for (i=0; i<SYSTEM_DIMENSIONS; i++)
+		int i;
+		for (i = 0; i < SYSTEM_DIMENSIONS; i++)
 			j->geometry[i] = opt.geometry[i];
 	}
 #endif
 
-	for (i=0; i<HIGHEST_DIMENSIONS; i++) {
-		if (opt.conn_type[i] == (uint16_t)NO_VAL)
-			break;
-		j->conn_type[i] = opt.conn_type[i];
-	}
+	memcpy(j->conn_type, opt.conn_type, sizeof(j->conn_type));
+
 	if (opt.reboot)
 		j->reboot = 1;
 	if (opt.no_rotate)
 		j->rotate = 0;
 
 	if (opt.blrtsimage)
-		j->blrtsimage = xstrdup(opt.blrtsimage);
+		j->blrtsimage = opt.blrtsimage;
 	if (opt.linuximage)
-		j->linuximage = xstrdup(opt.linuximage);
+		j->linuximage = opt.linuximage;
 	if (opt.mloaderimage)
-		j->mloaderimage = xstrdup(opt.mloaderimage);
+		j->mloaderimage = opt.mloaderimage;
 	if (opt.ramdiskimage)
-		j->ramdiskimage = xstrdup(opt.ramdiskimage);
+		j->ramdiskimage = opt.ramdiskimage;
 
 	if (opt.max_nodes)
 		j->max_nodes    = opt.max_nodes;
@@ -727,9 +738,7 @@ void
 job_desc_msg_destroy(job_desc_msg_t *j)
 {
 	if (j) {
-		xfree(j->account);
-		xfree(j->comment);
-		xfree(j->qos);
+		xfree(j->req_nodes);
 		xfree(j);
 	}
 }
@@ -745,10 +754,13 @@ create_job_step(srun_job_t *job, bool use_all_cpus)
 	job->ctx_params.job_id = job->jobid;
 	job->ctx_params.uid = opt.uid;
 
+#if defined HAVE_BG_FILES && !defined HAVE_BG_L_P
+	/* On a Q and onward this we don't add this. */
+#else
 	/* set the jobid for totalview */
 	totalview_jobid = NULL;
 	xstrfmtcat(totalview_jobid, "%u", job->ctx_params.job_id);
-
+#endif
 	/* Validate minimum and maximum node counts */
 	if (opt.min_nodes && opt.max_nodes &&
 	    (opt.min_nodes > opt.max_nodes)) {
@@ -835,6 +847,7 @@ create_job_step(srun_job_t *job, bool use_all_cpus)
 		job->ctx_params.name = opt.job_name;
 	else
 		job->ctx_params.name = opt.cmd_name;
+	job->ctx_params.features = opt.constraints;
 
 	debug("requesting job %u, user %u, nodes %u including (%s)",
 	      job->ctx_params.job_id, job->ctx_params.uid,

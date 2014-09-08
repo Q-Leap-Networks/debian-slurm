@@ -46,6 +46,8 @@ the <i>slurm-dev</i> mailing list?</a></li>
 running?</a></li>
 <li><a href="#mpi_symbols">Why is my MPIHCH2 or MVAPICH2 job not running with
 SLURM? Why does the DAKOTA program not run with SLURM?</a></li>
+<li><a href="#estimated_start_time">Why does squeue (and "scontrol show
+jobid") sometimes not display a job's estimated start time?</a></li>
 </ol>
 
 <h2>For Administrators</h2>
@@ -134,6 +136,8 @@ SLURM? Why does the DAKOTA program not run with SLURM?</a></li>
 core file?</a></li>
 <li><a href="#totalview">How can TotalView be configured to operate with
 SLURM?</a></li>
+<li><a href="#git_patch">How can a patch file be generated from a SLURM commit
+in github?</a></li>
 </ol>
 
 
@@ -562,8 +566,25 @@ locked memory limit ulimit to be unlimited on the compute nodes (see
 <i>"man limits.conf"</i>) and insuring that <i>slurmd</i> takes
 full advantage of this limit (e.g. by adding something like
 <i>"ulimit -l unlimited"</i> to the <i>/etc/init.d/slurm</i>
-script used to initiate <i>slurmd</i>).
+script used to initiate <i>slurmd</i>). It may also be desirable to lock
+the slurmd daemon's memory to help insure that it keeps responding if memory
+swapping begings. A sample <i>/etc/sysconfig/slurm</i> file is shown below.
 Related information about <a href="#pam">PAM</a> is also available.</p>
+<pre>
+#
+# Example /etc/sysconfig/slurm
+#
+# Increase the memlock limit so that user tasks can get
+# unlimited memlock
+ulimit -l unlimited
+#
+# Increase the open file limit
+ulimit -n 8192
+#
+# Memlocks the slurmd process's memory so that if a node
+# starts swapping, the slurmd will continue to respond
+SLURMD_OPTIONS="-M"
+</pre>
 
 <p><a name="inactive"><b>19. Why is my batch job that launches no
 job steps being killed?</b></a><br>
@@ -797,6 +818,17 @@ rather than the appropriate library, the application will fail. In the case of
 Rename DAKOTA's function and references from regcomp to something else to make
 it work properly.</p>
 
+<p><a name="estimated_start_time"><b>26. Why does squeue (and "scontrol show
+jobid") sometimes not display a job's  estimated start time?</b></a><br>
+When the backfill scheduler is configured, it provides an estimated start time
+for jobs that are candidates for backfill. Pending jobs with dependencies
+will not have an estimate as it is difficult to predict what resources will
+be available when the jobs they are dependent on terminate. Also note that
+the estimate is better for jobs expected to start soon, as most running jobs
+end before their estimated time. There are other restrictions on backfill that
+may apply. See the <a href="#backfill">backfill</a> section for more details.
+</p>
+
 <p class="footer"><a href="#top">top</a></p>
 
 
@@ -1008,9 +1040,10 @@ names used only by SLURM) as <i>NodeName</i> along with the actual
 address of the physical node in <i>NodeHostname</i>. Multiple
 <i>NodeName</i> values can be mapped to a single
 <i>NodeHostname</i>.  Note that each <i>NodeName</i> on a single
-physical node needs to be configured to use a different port number.  You
+physical node needs to be configured to use a different port number
+(set <i>Port</i> to a unique value on each line for each node).  You
 will also want to use the "%n" symbol in slurmd related path options in
-slurm.conf. </li>
+slurm.conf (<i>SlurmdLogFile</i> and <i>SlurmdPidFile</i>). </li>
 <li>When starting the <i>slurmd</i> daemon, include the <i>NodeName</i>
 of the node that it is supposed to serve on the execute line (e.g.
 "slurmd -N hostname").</li>
@@ -1082,7 +1115,9 @@ any desired node resource specifications (<i>CPUs</i>, <i>Sockets</i>,
 <i>CoresPerSocket</i>, <i>ThreadsPerCore</i>, and/or <i>TmpDisk</i>).
 SLURM will use the resource specification for each node that is
 given in <i>slurm.conf</i> and will not check these specifications
-against those actually found on the node.
+against those actually found on the node. The system would best be configured
+with <i>TaskPlugin=task/none</i>, so that launched tasks can run on any
+available CPU under operating system control.
 
 <p><a name="credential_replayed"><b>16. What does a
 &quot;credential replayed&quot;
@@ -1467,8 +1502,17 @@ dset TV::parallel_configs {
 	force_env: false;
 }
 </pre></p>
+
+<p><a name="git_patch"><b>44. How can a patch file be generated from a SLURM
+commit in github?</b></a></br>
+<p>Find and open the commit in github then append ".patch" to the URL and save
+the resutling file. For an example, see:
+<a href="https://github.com/SchedMD/slurm/commit/91e543d433bed11e0df13ce0499be641774c99a3.patch">
+https://github.com/SchedMD/slurm/commit/91e543d433bed11e0df13ce0499be641774c99a3.patch</a>
+</p>
+
 <p class="footer"><a href="#top">top</a></p>
 
-<p style="text-align:center;">Last modified 4 September 2011</p>
+<p style="text-align:center;">Last modified 24 June 2012</p>
 
 <!--#include virtual="footer.txt"-->

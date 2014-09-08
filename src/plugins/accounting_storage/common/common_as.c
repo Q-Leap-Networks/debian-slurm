@@ -153,6 +153,8 @@ extern int addto_update_list(List update_list, slurmdb_update_type_t type,
 			assoc->grp_cpus = INFINITE;
 		if(assoc->grp_jobs == NO_VAL)
 			assoc->grp_jobs = INFINITE;
+		if(assoc->grp_mem == NO_VAL)
+			assoc->grp_mem = INFINITE;
 		if(assoc->grp_nodes == NO_VAL)
 			assoc->grp_nodes = INFINITE;
 		if(assoc->grp_submit_jobs == NO_VAL)
@@ -192,6 +194,8 @@ extern int addto_update_list(List update_list, slurmdb_update_type_t type,
 			qos->grp_cpus = INFINITE;
 		if(qos->grp_jobs == NO_VAL)
 			qos->grp_jobs = INFINITE;
+		if(qos->grp_mem == NO_VAL)
+			qos->grp_mem = INFINITE;
 		if(qos->grp_nodes == NO_VAL)
 			qos->grp_nodes = INFINITE;
 		if(qos->grp_submit_jobs == NO_VAL)
@@ -827,10 +831,10 @@ extern int archive_write_file(Buf buffer, char *cluster_name,
 	else {			/* file shuffle */
 		(void) unlink(old_file);
 		if (link(reg_file, old_file))
-			error("Link(%s, %s): %m", reg_file, old_file);
+			debug4("Link(%s, %s): %m", reg_file, old_file);
 		(void) unlink(reg_file);
 		if (link(new_file, reg_file))
-			error("Link(%s, %s): %m", new_file, reg_file);
+			debug4("Link(%s, %s): %m", new_file, reg_file);
 		(void) unlink(new_file);
 	}
 	xfree(old_file);

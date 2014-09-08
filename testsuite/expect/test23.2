@@ -68,6 +68,11 @@ if { [test_account_storage] == 0 } {
 	exit 0
 }
 
+if { [test_front_end] == 1 } {
+	send_user "\nWARNING: This test can't be run on a front-end system\n"
+	exit 0
+}
+
 if { [string compare [check_accounting_admin_level] "Administrator"] } {
 	send_user "\nWARNING: This test can't be run without being an Accounting administrator.\nUse sacctmgr mod user \$USER_NAME set admin=admin.\n"
 	exit 0
@@ -189,7 +194,7 @@ $srun sleep 10
 # Spawn a job via srun using this account
 #
 set job_id3 0
-spawn $sbatch -N1 -v --account=$test_acct $file_in1
+spawn $sbatch -N1 -t1 -v --account=$test_acct --output=/dev/null $file_in1
 expect {
 	-re "Submitted batch job ($number)" {
 		set job_id3 $expect_out(1,string)
@@ -639,7 +644,6 @@ if {$matches != 6} {
 	set exit_code 1
 }
 
-
 #
 # Use sacctmgr to delete the test account (shouldn't work, because of running jobs)
 #
@@ -651,7 +655,7 @@ expect {
 		incr damatches
 		exp_continue
 	}
-	"Job(s) running, cancel job(s) before remove" {
+	"Job(s) active, cancel job(s) before remove" {
 		send_user "This error was expected, no worries\n"
 		set needtodel 1
 	}
@@ -677,7 +681,11 @@ if {$needtodel == 1} {
 		}
 	}
 
-	sleep 1
+	if {[wait_for_job $job_id3 DONE] != 0} {
+		send_user "\nFAILURE: error completing job $job_id3\n"
+		cancel_job $job_id3
+		set exit_code 1
+	}
 
 	#
 	# Use sacctmgr to delete the test account

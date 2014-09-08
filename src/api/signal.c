@@ -277,8 +277,8 @@ slurm_signal_job_step (uint32_t job_id, uint32_t step_id, uint16_t signal)
  		goto fail;
  	}
 	for (i = 0; i < step_info->job_step_count; i++) {
-		if (step_info->job_steps[i].job_id == job_id
-		    && step_info->job_steps[i].step_id == step_id) {
+		if ((step_info->job_steps[i].job_id == job_id) &&
+		    (step_info->job_steps[i].step_id == step_id)) {
  			rc = _signal_job_step(&step_info->job_steps[i],
  					      alloc_info, signal);
  			save_errno = rc;
@@ -373,8 +373,8 @@ slurm_terminate_job_step (uint32_t job_id, uint32_t step_id)
 		goto fail;
 	}
 	for (i = 0; i < step_info->job_step_count; i++) {
-		if (step_info->job_steps[i].job_id == job_id
-		    && step_info->job_steps[i].step_id == step_id) {
+		if ((step_info->job_steps[i].job_id == job_id) &&
+		    (step_info->job_steps[i].step_id == step_id)) {
 			rc = _terminate_job_step(&step_info->job_steps[i],
 						 alloc_info);
 			save_errno = errno;

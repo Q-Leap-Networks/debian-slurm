@@ -47,7 +47,9 @@
 #include <stdlib.h>
 
 static s_p_options_t bg_conf_file_options[] = {
-#ifdef HAVE_BGL
+#ifndef HAVE_BG_L_P
+	{"AllowSubBlockAllocations", S_P_BOOLEAN},
+#elif defined HAVE_BGL
 	{"BlrtsImage", S_P_STRING},
 	{"LinuxImage", S_P_STRING},
 	{"RamDiskImage", S_P_STRING},
@@ -60,20 +62,25 @@ static s_p_options_t bg_conf_file_options[] = {
 	{"AltCnloadImage", S_P_ARRAY, parse_image, NULL},
 	{"AltIoloadImage", S_P_ARRAY, parse_image, NULL},
 #endif
+	{"DefaultConnType", S_P_STRING},
 	{"DenyPassthrough", S_P_STRING},
 	{"LayoutMode", S_P_STRING},
 	{"MloaderImage", S_P_STRING},
 	{"BridgeAPILogFile", S_P_STRING},
 	{"BridgeAPIVerbose", S_P_UINT16},
 	{"BasePartitionNodeCnt", S_P_UINT16},
+	{"MidplaneNodeCnt", S_P_UINT16},
 	{"NodeCardNodeCnt", S_P_UINT16},
+	{"NodeBoardNodeCnt", S_P_UINT16},
 	{"Numpsets", S_P_UINT16},
 	{"IONodesPerMP", S_P_UINT16},
+	{"MaxBlockInError", S_P_UINT16},
 	{"BPs", S_P_ARRAY, parse_blockreq, destroy_select_ba_request},
 	{"MPs", S_P_ARRAY, parse_blockreq, destroy_select_ba_request},
 	/* these are just going to be put into a list that will be
 	   freed later don't free them after reading them */
 	{"AltMloaderImage", S_P_ARRAY, parse_image, NULL},
+	{"SubMidplaneSystem", S_P_BOOLEAN},
 	{NULL}
 };
 
@@ -162,11 +169,13 @@ extern int parse_blockreq(void **dest, slurm_parser_enum_t type,
 		{"LinuxImage", S_P_STRING},
 		{"RamDiskImage", S_P_STRING},
 #else
+#ifdef HAVE_BGP
 		{"16CNBlocks", S_P_UINT16},
-		{"64CNBlocks", S_P_UINT16},
-		{"256CNBlocks", S_P_UINT16},
 		{"CnloadImage", S_P_STRING},
 		{"IoloadImage", S_P_STRING},
+#endif
+		{"64CNBlocks", S_P_UINT16},
+		{"256CNBlocks", S_P_UINT16},
 #endif
 		{"MloaderImage", S_P_STRING},
 		{NULL}
@@ -189,7 +198,7 @@ extern int parse_blockreq(void **dest, slurm_parser_enum_t type,
 	s_p_get_string(&n->blrtsimage, "BlrtsImage", tbl);
 	s_p_get_string(&n->linuximage, "LinuxImage", tbl);
 	s_p_get_string(&n->ramdiskimage, "RamDiskImage", tbl);
-#else
+#elif defined HAVE_BGP
 	s_p_get_string(&n->linuximage, "CnloadImage", tbl);
 	s_p_get_string(&n->ramdiskimage, "IoloadImage", tbl);
 #endif
@@ -217,7 +226,9 @@ extern int parse_blockreq(void **dest, slurm_parser_enum_t type,
 	}
 
 #ifndef HAVE_BGL
+#ifdef HAVE_BGP
 	s_p_get_uint16(&n->small16, "16CNBlocks", tbl);
+#endif
 	s_p_get_uint16(&n->small64, "64CNBlocks", tbl);
 	s_p_get_uint16(&n->small256, "256CNBlocks", tbl);
 #endif
@@ -232,29 +243,31 @@ extern int parse_blockreq(void **dest, slurm_parser_enum_t type,
 		}
 	} else {
 		if (n->conn_type[0] == (uint16_t)NO_VAL) {
-			n->conn_type[0] = SELECT_TORUS;
+			n->conn_type[0] = bg_conf->default_conn_type[0];
 		} else if (n->conn_type[0] >= SELECT_SMALL) {
 			error("Block def on midplane(s) %s is given "
 			      "TYPE=%s but isn't asking for any small "
-			      "blocks.  Giving it Torus.",
-			      n->save_name, conn_type_string(n->conn_type[0]));
-			n->conn_type[0] = SELECT_TORUS;
+			      "blocks.  Giving it %s.",
+			      n->save_name, conn_type_string(n->conn_type[0]),
+			      conn_type_string(
+				      bg_conf->default_conn_type[0]));
+			n->conn_type[0] = bg_conf->default_conn_type[0];
 		}
 #ifndef HAVE_BG_L_P
 		int i;
-		int first_conn_type = n->conn_type[0];
 
 		for (i=1; i<SYSTEM_DIMENSIONS; i++) {
 			if (n->conn_type[i] == (uint16_t)NO_VAL)
-				n->conn_type[i] = first_conn_type;
+				n->conn_type[i] = bg_conf->default_conn_type[i];
 			else if (n->conn_type[i] >= SELECT_SMALL) {
 				error("Block def on midplane(s) %s dim %d "
 				      "is given TYPE=%s but isn't asking "
 				      "for any small blocks.  Giving it %s.",
 				      n->save_name, i,
 				      conn_type_string(n->conn_type[i]),
-				      conn_type_string(first_conn_type));
-				n->conn_type[1] = first_conn_type;
+				      conn_type_string(
+					      bg_conf->default_conn_type[i]));
+				n->conn_type[i] = bg_conf->default_conn_type[i];
 			}
 		}
 #endif
@@ -329,9 +342,10 @@ extern int parse_image(void **dest, slurm_parser_enum_t type,
 extern int read_bg_conf(void)
 {
 	int i;
+	bool tmp_bool = 0;
 	int count = 0;
 	s_p_hashtbl_t *tbl = NULL;
-	char *layout = NULL;
+	char *tmp_char = NULL;
 	select_ba_request_t **blockreq_array = NULL;
 	image_t **image_array = NULL;
 	image_t *image = NULL;
@@ -567,26 +581,28 @@ extern int read_bg_conf(void)
 		list_push(bg_conf->mloader_list, image);
 	}
 
-	if (!s_p_get_uint16(
-		    &bg_conf->mp_cnode_cnt, "BasePartitionNodeCnt", tbl)) {
-		error("BasePartitionNodeCnt not configured in bluegene.conf "
-		      "defaulting to 512 as BasePartitionNodeCnt");
-		bg_conf->mp_cnode_cnt = 512;
-		bg_conf->quarter_cnode_cnt = 128;
-	} else {
-		if (bg_conf->mp_cnode_cnt <= 0)
-			fatal("You should have more than 0 nodes "
-			      "per base partition");
-
-		bg_conf->quarter_cnode_cnt = bg_conf->mp_cnode_cnt/4;
+	if (!s_p_get_uint16(&bg_conf->mp_cnode_cnt, "MidplaneNodeCnt", tbl)) {
+		if (!s_p_get_uint16(&bg_conf->mp_cnode_cnt,
+				    "BasePartitionNodeCnt", tbl)) {
+			error("MidplaneNodeCnt not configured in bluegene.conf "
+			      "defaulting to 512 as MidplaneNodeCnt");
+			bg_conf->mp_cnode_cnt = 512;
+		}
 	}
+
+	if (bg_conf->mp_cnode_cnt <= 0)
+		fatal("You should have more than 0 nodes "
+		      "per base partition");
+	bg_conf->actual_cnodes_per_mp = bg_conf->mp_cnode_cnt;
+	bg_conf->quarter_cnode_cnt = bg_conf->mp_cnode_cnt/4;
+
 	/* bg_conf->cpus_per_mp should had already been set from the
 	 * node_init */
 	if (bg_conf->cpus_per_mp < bg_conf->mp_cnode_cnt) {
 		fatal("For some reason we have only %u cpus per mp, but "
 		      "have %u cnodes per mp.  You need at least the same "
 		      "number of cpus as you have cnodes per mp.  "
-		      "Check the NodeName Procs= "
+		      "Check the NodeName CPUs= "
 		      "definition in the slurm.conf.",
 		      bg_conf->cpus_per_mp, bg_conf->mp_cnode_cnt);
 	}
@@ -603,41 +619,83 @@ extern int read_bg_conf(void)
 	for (i = 0; i<SYSTEM_DIMENSIONS; i++)
 		num_unused_cpus *= dims[i];
 	num_unused_cpus *= bg_conf->cpus_per_mp;
+	num_possible_unused_cpus = num_unused_cpus;
 
-	if (!s_p_get_uint16(
-		    &bg_conf->nodecard_cnode_cnt, "NodeCardNodeCnt", tbl)) {
-		error("NodeCardNodeCnt not configured in bluegene.conf "
-		      "defaulting to 32 as NodeCardNodeCnt");
-		bg_conf->nodecard_cnode_cnt = 32;
+	if (!s_p_get_uint16(&bg_conf->nodecard_cnode_cnt,
+			    "NodeBoardNodeCnt", tbl)) {
+		if (!s_p_get_uint16(&bg_conf->nodecard_cnode_cnt,
+				    "NodeCardNodeCnt", tbl)) {
+			error("NodeCardNodeCnt not configured in bluegene.conf "
+			      "defaulting to 32 as NodeCardNodeCnt");
+			bg_conf->nodecard_cnode_cnt = 32;
+		}
 	}
 
-	if (bg_conf->nodecard_cnode_cnt<=0)
+	if (bg_conf->nodecard_cnode_cnt <= 0)
 		fatal("You should have more than 0 nodes per nodecard");
 
 	bg_conf->mp_nodecard_cnt =
 		bg_conf->mp_cnode_cnt / bg_conf->nodecard_cnode_cnt;
 
-	if (!s_p_get_uint16(&bg_conf->ionodes_per_mp, "Numpsets", tbl))
-		fatal("Warning: Numpsets not configured in bluegene.conf");
-	if (!bg_conf->ionodes_per_mp) {
-		if (!s_p_get_uint16(&bg_conf->ionodes_per_mp,
-				    "IONodesPerMP", tbl))
+	if (!s_p_get_uint16(&bg_conf->ionodes_per_mp, "IONodesPerMP", tbl))
+		if (!s_p_get_uint16(&bg_conf->ionodes_per_mp, "Numpsets", tbl))
 			fatal("Warning: IONodesPerMP not configured "
 			      "in bluegene.conf");
-	}
+
+	s_p_get_uint16(&bg_conf->max_block_err, "MaxBlockInError", tbl);
+
+	tmp_bool = 0;
+	s_p_get_boolean(&tmp_bool, "SubMidplaneSystem", tbl);
+	bg_conf->sub_mp_sys = tmp_bool;
 
 #ifdef HAVE_BGQ
+	tmp_bool = 0;
+	s_p_get_boolean(&tmp_bool, "AllowSubBlockAllocations", tbl);
+	bg_conf->sub_blocks = tmp_bool;
+
 	/* You can only have 16 ionodes per midplane */
 	if (bg_conf->ionodes_per_mp > bg_conf->mp_nodecard_cnt)
 		bg_conf->ionodes_per_mp = bg_conf->mp_nodecard_cnt;
+#endif
+
+	for (i=0; i<SYSTEM_DIMENSIONS; i++)
+		bg_conf->default_conn_type[i] = (uint16_t)NO_VAL;
+	s_p_get_string(&tmp_char, "DefaultConnType", tbl);
+	if (tmp_char) {
+		verify_conn_type(tmp_char, bg_conf->default_conn_type);
+		if ((bg_conf->default_conn_type[0] != SELECT_MESH)
+		    && (bg_conf->default_conn_type[0] != SELECT_TORUS))
+			fatal("Can't have a DefaultConnType of %s "
+			      "(only Mesh or Torus values are valid).",
+			      tmp_char);
+		xfree(tmp_char);
+	} else
+		bg_conf->default_conn_type[0] = SELECT_TORUS;
+
+#ifndef HAVE_BG_L_P
+	int first_conn_type = bg_conf->default_conn_type[0];
+	for (i=1; i<SYSTEM_DIMENSIONS; i++) {
+		if (bg_conf->default_conn_type[i] == (uint16_t)NO_VAL)
+			bg_conf->default_conn_type[i] = first_conn_type;
+		else if (bg_conf->default_conn_type[i] >= SELECT_SMALL)
+			fatal("Can't have a DefaultConnType of %s "
+			      "(only Mesh or Torus values are valid).",
+			      tmp_char);
+	}
 #endif
 
 	if (bg_conf->ionodes_per_mp) {
 		bitstr_t *tmp_bitmap = NULL;
 		int small_size = 1;
 
-		/* THIS IS A HACK TO MAKE A 1 NODECARD SYSTEM WORK */
-		if (bg_conf->mp_cnode_cnt == bg_conf->nodecard_cnode_cnt) {
+		/* THIS IS A HACK TO MAKE A 1 NODECARD SYSTEM WORK,
+		 * Sometime on a Q system the nodecard isn't in the 0
+		 * spot so only do this if you know it is in that
+		 * spot.  Otherwise say the whole midplane is there
+		 * and just make blocks over the whole thing.  They
+		 * you can error out the blocks that aren't usable. */
+		if (bg_conf->sub_mp_sys
+		    && bg_conf->mp_cnode_cnt == bg_conf->nodecard_cnode_cnt) {
 #ifdef HAVE_BGQ
 			bg_conf->quarter_ionode_cnt = 1;
 			bg_conf->nodecard_ionode_cnt = 1;
@@ -773,58 +831,64 @@ no_calc:
 	else
 		_reopen_bridge_log();
 
-	if (s_p_get_string(&layout, "DenyPassthrough", tbl)) {
-		if (strstr(layout, "A"))
+	if (s_p_get_string(&tmp_char, "DenyPassthrough", tbl)) {
+		if (strstr(tmp_char, "A"))
 			ba_deny_pass |= PASS_DENY_A;
-		if (strstr(layout, "X"))
+		if (strstr(tmp_char, "X"))
 			ba_deny_pass |= PASS_DENY_X;
-		if (strstr(layout, "Y"))
+		if (strstr(tmp_char, "Y"))
 			ba_deny_pass |= PASS_DENY_Y;
-		if (strstr(layout, "Z"))
+		if (strstr(tmp_char, "Z"))
 			ba_deny_pass |= PASS_DENY_Z;
-		if (!strcasecmp(layout, "ALL"))
+		if (!strcasecmp(tmp_char, "ALL"))
 			ba_deny_pass |= PASS_DENY_ALL;
 		bg_conf->deny_pass = ba_deny_pass;
-		xfree(layout);
+		xfree(tmp_char);
 	}
 
-	if (!s_p_get_string(&layout, "LayoutMode", tbl)) {
+	if (!s_p_get_string(&tmp_char, "LayoutMode", tbl)) {
 		info("Warning: LayoutMode was not specified in bluegene.conf "
 		     "defaulting to STATIC partitioning");
 		bg_conf->layout_mode = LAYOUT_STATIC;
 	} else {
-		if (!strcasecmp(layout,"STATIC"))
+		if (!strcasecmp(tmp_char,"STATIC"))
 			bg_conf->layout_mode = LAYOUT_STATIC;
-		else if (!strcasecmp(layout,"OVERLAP"))
+		else if (!strcasecmp(tmp_char,"OVERLAP"))
 			bg_conf->layout_mode = LAYOUT_OVERLAP;
-		else if (!strcasecmp(layout,"DYNAMIC"))
+		else if (!strcasecmp(tmp_char,"DYNAMIC"))
 			bg_conf->layout_mode = LAYOUT_DYNAMIC;
 		else {
 			fatal("I don't understand this LayoutMode = %s",
-			      layout);
+			      tmp_char);
 		}
-		xfree(layout);
+		xfree(tmp_char);
 	}
 
 	/* add blocks defined in file */
 	if (bg_conf->layout_mode != LAYOUT_DYNAMIC) {
 		if (!s_p_get_array((void ***)&blockreq_array,
-				   &count, "BPs", tbl)) {
-			info("WARNING: no blocks defined in bluegene.conf, "
-			     "only making full system block");
-			if (bg_conf->mp_cnode_cnt
-			    == bg_conf->nodecard_cnode_cnt)
-				fatal("On a sub-midplane system you need to "
-				      "define the blocks you want on your "
-				      "system.");
-			/* create_full_system_block(NULL); */
+				   &count, "MPs", tbl)) {
+			if (!s_p_get_array((void ***)&blockreq_array,
+					   &count, "BPs", tbl)) {
+				info("WARNING: no blocks defined in "
+				     "bluegene.conf, "
+				     "only making full system block");
+				/* create_full_system_block(NULL); */
+				if (bg_conf->sub_mp_sys ||
+				    (bg_conf->mp_cnode_cnt ==
+				     bg_conf->nodecard_cnode_cnt))
+					fatal("On a sub-midplane system you "
+					      "need to define the blocks you "
+					      "want on your system.");
+			}
 		}
 
 		for (i = 0; i < count; i++) {
 			add_bg_record(bg_lists->main, NULL,
 				      blockreq_array[i], 0, 0);
 		}
-	} else if (bg_conf->mp_cnode_cnt == bg_conf->nodecard_cnode_cnt)
+	} else if (bg_conf->sub_mp_sys ||
+		   (bg_conf->mp_cnode_cnt == bg_conf->nodecard_cnode_cnt))
 		/* we can't do dynamic here on a sub-midplane system */
 		fatal("On a sub-midplane system we can only do OVERLAP or "
 		      "STATIC LayoutMode.  Please update your bluegene.conf.");

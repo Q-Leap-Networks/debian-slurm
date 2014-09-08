@@ -122,8 +122,13 @@ static void _partial_free_dbd_job_start(void *object)
 {
 	dbd_job_start_msg_t *req = (dbd_job_start_msg_t *)object;
 	if (req) {
-		xfree(req->node_inx);
+		xfree(req->account);
 		xfree(req->block_id);
+		xfree(req->name);
+		xfree(req->nodes);
+		xfree(req->partition);
+		xfree(req->node_inx);
+		xfree(req->wckey);
 	}
 }
 
@@ -147,7 +152,7 @@ static int _setup_job_start_msg(dbd_job_start_msg_t *req,
 	}
 	memset(req, 0, sizeof(dbd_job_start_msg_t));
 
-	req->account       = job_ptr->account;
+	req->account       = xstrdup(job_ptr->account);
 	req->assoc_id      = job_ptr->assoc_id;
 #ifdef HAVE_BG
 	select_g_select_jobinfo_get(job_ptr->select_jobinfo,
@@ -175,8 +180,8 @@ static int _setup_job_start_msg(dbd_job_start_msg_t *req,
 	req->db_index      = job_ptr->db_index;
 
 	req->job_state     = job_ptr->job_state;
-	req->name          = job_ptr->name;
-	req->nodes         = job_ptr->nodes;
+	req->name          = xstrdup(job_ptr->name);
+	req->nodes         = xstrdup(job_ptr->nodes);
 
 	if (job_ptr->node_bitmap) {
 		char temp_bit[BUF_SIZE];
@@ -184,13 +189,13 @@ static int _setup_job_start_msg(dbd_job_start_msg_t *req,
 						job_ptr->node_bitmap));
 	}
 	req->alloc_cpus    = job_ptr->total_cpus;
-	req->partition     = job_ptr->partition;
+	req->partition     = xstrdup(job_ptr->partition);
 	if (job_ptr->details)
 		req->req_cpus = job_ptr->details->min_cpus;
 	req->resv_id       = job_ptr->resv_id;
 	req->priority      = job_ptr->priority;
 	req->timelimit     = job_ptr->time_limit;
-	req->wckey         = job_ptr->wckey;
+	req->wckey         = xstrdup(job_ptr->wckey);
 	req->uid           = job_ptr->user_id;
 	req->qos_id        = job_ptr->qos_id;
 
@@ -202,6 +207,9 @@ static void *_set_db_inx_thread(void *no_data)
 {
 	struct job_record *job_ptr = NULL;
 	ListIterator itr;
+	/* Read lock on jobs */
+	slurmctld_lock_t job_read_lock =
+		{ NO_LOCK, READ_LOCK, NO_LOCK, NO_LOCK };
 	/* Write lock on jobs */
 	slurmctld_lock_t job_write_lock =
 		{ NO_LOCK, WRITE_LOCK, NO_LOCK, NO_LOCK };
@@ -232,7 +240,7 @@ static void *_set_db_inx_thread(void *no_data)
 		 * job db_index here we use a read lock since the
 		 * data isn't that sensitive and will only be updated
 		 * later in this function. */
-		lock_slurmctld(job_write_lock);
+		lock_slurmctld(job_read_lock);	/* USE READ LOCK, SEE ABOVE */
 		itr = list_iterator_create(job_list);
 		while ((job_ptr = list_next(itr))) {
 			if (!job_ptr->db_index) {
@@ -269,15 +277,21 @@ static void *_set_db_inx_thread(void *no_data)
 					local_job_list = list_create(
 						_partial_destroy_dbd_job_start);
 				list_append(local_job_list, req);
+				/* Just so we don't have a crazy
+				   amount of messages at once.
+				*/
+				if (list_count(local_job_list) > 1000)
+					break;
 			}
 		}
 		list_iterator_destroy(itr);
-		unlock_slurmctld(job_write_lock);
+		unlock_slurmctld(job_read_lock);
 
 		if (local_job_list) {
 			slurmdbd_msg_t req, resp;
 			dbd_list_msg_t send_msg, *got_msg;
 			int rc = SLURM_SUCCESS;
+			bool reset = 0;
 
 			memset(&send_msg, 0, sizeof(dbd_list_msg_t));
 
@@ -288,20 +302,23 @@ static void *_set_db_inx_thread(void *no_data)
 			rc = slurm_send_recv_slurmdbd_msg(
 				SLURMDBD_VERSION, &req, &resp);
 			list_destroy(local_job_list);
-			if (rc != SLURM_SUCCESS)
+			if (rc != SLURM_SUCCESS) {
 				error("slurmdbd: DBD_SEND_MULT_JOB_START "
 				      "failure: %m");
-			else if (resp.msg_type == DBD_RC) {
+				reset = 1;
+			} else if (resp.msg_type == DBD_RC) {
 				dbd_rc_msg_t *msg = resp.data;
 				if (msg->return_code == SLURM_SUCCESS) {
 					info("%s", msg->comment);
 				} else
 					error("%s", msg->comment);
 				slurmdbd_free_rc_msg(msg);
+				reset = 1;
 			} else if (resp.msg_type != DBD_GOT_MULT_JOB_START) {
 				error("slurmdbd: response type not "
 				      "DBD_GOT_MULT_JOB_START: %u",
 				      resp.msg_type);
+				reset = 1;
 			} else {
 				dbd_id_rc_msg_t *id_ptr = NULL;
 				got_msg = (dbd_list_msg_t *) resp.data;
@@ -317,6 +334,19 @@ static void *_set_db_inx_thread(void *no_data)
 				unlock_slurmctld(job_write_lock);
 
 				slurmdbd_free_list_msg(got_msg);
+			}
+
+			if (reset) {
+				lock_slurmctld(job_read_lock);
+				/* USE READ LOCK, SEE ABOVE on first
+				 * read lock */
+				itr = list_iterator_create(job_list);
+				while ((job_ptr = list_next(itr))) {
+					if (job_ptr->db_index == NO_VAL)
+						job_ptr->db_index = 0;
+				}
+				list_iterator_destroy(itr);
+				unlock_slurmctld(job_read_lock);
 			}
 		}
 
@@ -1280,7 +1310,7 @@ extern int acct_storage_p_remove_reservation(void *db_conn,
 	rc = slurm_send_slurmdbd_recv_rc_msg(SLURMDBD_VERSION,
 					     &req, &resp_code);
 
-	if (resp_code != SLURM_SUCCESS)
+	if ((rc == SLURM_SUCCESS) && (resp_code != SLURM_SUCCESS))
 		rc = resp_code;
 
 	return rc;
@@ -1411,7 +1441,7 @@ extern List acct_storage_p_get_clusters(void *db_conn, uid_t uid,
 	return ret_list;
 }
 
-extern List acct_storage_p_get_config(void *db_conn)
+extern List acct_storage_p_get_config(void *db_conn, char *config_name)
 {
 	slurmdbd_msg_t req, resp;
 	dbd_list_msg_t *got_msg;
@@ -1419,7 +1449,7 @@ extern List acct_storage_p_get_config(void *db_conn)
 	List ret_list = NULL;
 
 	req.msg_type = DBD_GET_CONFIG;
-	req.data = NULL;
+	req.data = config_name;
 	rc = slurm_send_recv_slurmdbd_msg(SLURMDBD_VERSION, &req, &resp);
 
 	if (rc != SLURM_SUCCESS)

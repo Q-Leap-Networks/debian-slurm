@@ -99,6 +99,7 @@ static int _addto_used_info(slurmdb_association_rec_t *assoc1,
 		return SLURM_ERROR;
 
 	assoc1->usage->grp_used_cpus += assoc2->usage->grp_used_cpus;
+	assoc1->usage->grp_used_mem += assoc2->usage->grp_used_mem;
 	assoc1->usage->grp_used_nodes += assoc2->usage->grp_used_nodes;
 	assoc1->usage->grp_used_wall += assoc2->usage->grp_used_wall;
 	assoc1->usage->grp_used_cpu_run_secs +=
@@ -117,6 +118,7 @@ static int _clear_used_assoc_info(slurmdb_association_rec_t *assoc)
 		return SLURM_ERROR;
 
 	assoc->usage->grp_used_cpus = 0;
+	assoc->usage->grp_used_mem = 0;
 	assoc->usage->grp_used_nodes = 0;
 	assoc->usage->grp_used_cpu_run_secs = 0;
 
@@ -163,6 +165,7 @@ static int _clear_used_qos_info(slurmdb_qos_rec_t *qos)
 		return SLURM_ERROR;
 
 	qos->usage->grp_used_cpus = 0;
+	qos->usage->grp_used_mem = 0;
 	qos->usage->grp_used_nodes = 0;
 	qos->usage->grp_used_cpu_run_secs = 0;
 
@@ -488,7 +491,7 @@ static int _set_assoc_parent_and_user(slurmdb_association_rec_t *assoc,
 			    && !bit_test(assoc->usage->valid_qos,
 					 assoc->def_qos_id)) {
 				error("assoc %u doesn't have access "
-				      "to it's default %s",
+				      "to it's default qos '%s'",
 				      assoc->id,
 				      slurmdb_qos_str(assoc_mgr_qos_list,
 						      assoc->def_qos_id));
@@ -1312,18 +1315,23 @@ extern int assoc_mgr_get_user_assocs(void *db_conn,
 	xassert(assoc->uid != NO_VAL);
 	xassert(assoc_list);
 
-	if (!assoc_mgr_association_list) {
-		if (_get_assoc_mgr_association_list(db_conn, enforce)
-		    == SLURM_ERROR)
+	/* Call assoc_mgr_refresh_lists instead of just getting the
+	   association list because we need qos and user lists before
+	   the association list can be made.
+	*/
+	if (!assoc_mgr_association_list)
+		if (assoc_mgr_refresh_lists(db_conn, NULL) == SLURM_ERROR)
 			return SLURM_ERROR;
-	}
+
+	assoc_mgr_lock(&locks);
 
 	if ((!assoc_mgr_association_list
 	     || !list_count(assoc_mgr_association_list))
-	    && !(enforce & ACCOUNTING_ENFORCE_ASSOCS))
+	    && !(enforce & ACCOUNTING_ENFORCE_ASSOCS)) {
+		assoc_mgr_unlock(&locks);
 		return SLURM_SUCCESS;
+	}
 
-	assoc_mgr_lock(&locks);
 	itr = list_iterator_create(assoc_mgr_association_list);
 	while ((found_assoc = list_next(itr))) {
 		if (assoc->uid != found_assoc->uid) {
@@ -1338,12 +1346,12 @@ extern int assoc_mgr_get_user_assocs(void *db_conn,
 	list_iterator_destroy(itr);
 	assoc_mgr_unlock(&locks);
 
-	if (set)
-		return SLURM_SUCCESS;
-	else {
-		debug("user %u does not have any associations", assoc->uid);
-		return SLURM_ERROR;
+	if (!set) {
+		debug("UID %u has no associations", assoc->uid);
+		if (enforce & ACCOUNTING_ENFORCE_ASSOCS)
+			return SLURM_ERROR;
 	}
+	return SLURM_SUCCESS;
 }
 
 extern int assoc_mgr_fill_in_assoc(void *db_conn,
@@ -1359,11 +1367,15 @@ extern int assoc_mgr_fill_in_assoc(void *db_conn,
 
 	if (assoc_pptr)
 		*assoc_pptr = NULL;
-	if (!assoc_mgr_association_list) {
-		if (_get_assoc_mgr_association_list(db_conn, enforce)
-		    == SLURM_ERROR)
+
+	/* Call assoc_mgr_refresh_lists instead of just getting the
+	   association list because we need qos and user lists before
+	   the association list can be made.
+	*/
+	if (!assoc_mgr_association_list)
+		if (assoc_mgr_refresh_lists(db_conn, NULL) == SLURM_ERROR)
 			return SLURM_ERROR;
-	}
+
 	if ((!assoc_mgr_association_list
 	     || !list_count(assoc_mgr_association_list))
 	    && !(enforce & ACCOUNTING_ENFORCE_ASSOCS))
@@ -1502,6 +1514,7 @@ extern int assoc_mgr_fill_in_assoc(void *db_conn,
 	assoc->grp_cpu_run_mins= ret_assoc->grp_cpu_run_mins;
 	assoc->grp_cpus        = ret_assoc->grp_cpus;
 	assoc->grp_jobs        = ret_assoc->grp_jobs;
+	assoc->grp_mem         = ret_assoc->grp_mem;
 	assoc->grp_nodes       = ret_assoc->grp_nodes;
 	assoc->grp_submit_jobs = ret_assoc->grp_submit_jobs;
 	assoc->grp_wall        = ret_assoc->grp_wall;
@@ -1589,11 +1602,13 @@ extern int assoc_mgr_fill_in_user(void *db_conn, slurmdb_user_rec_t *user,
 		if (_get_assoc_mgr_user_list(db_conn, enforce) == SLURM_ERROR)
 			return SLURM_ERROR;
 
-	if ((!assoc_mgr_user_list || !list_count(assoc_mgr_user_list))
-	    && !(enforce & ACCOUNTING_ENFORCE_ASSOCS))
-		return SLURM_SUCCESS;
-
 	assoc_mgr_lock(&locks);
+	if ((!assoc_mgr_user_list || !list_count(assoc_mgr_user_list))
+	    && !(enforce & ACCOUNTING_ENFORCE_ASSOCS)) {
+		assoc_mgr_unlock(&locks);
+		return SLURM_SUCCESS;
+	}
+
 	itr = list_iterator_create(assoc_mgr_user_list);
 	while ((found_user = list_next(itr))) {
 		if (user->uid != NO_VAL) {
@@ -1657,11 +1672,13 @@ extern int assoc_mgr_fill_in_qos(void *db_conn, slurmdb_qos_rec_t *qos,
 		if (_get_assoc_mgr_qos_list(db_conn, enforce) == SLURM_ERROR)
 			return SLURM_ERROR;
 
-	if ((!assoc_mgr_qos_list || !list_count(assoc_mgr_qos_list))
-	    && !(enforce & ACCOUNTING_ENFORCE_QOS))
-		return SLURM_SUCCESS;
-
 	assoc_mgr_lock(&locks);
+	if ((!assoc_mgr_qos_list || !list_count(assoc_mgr_qos_list))
+	    && !(enforce & ACCOUNTING_ENFORCE_QOS)) {
+		assoc_mgr_unlock(&locks);
+		return SLURM_SUCCESS;
+	}
+
 	itr = list_iterator_create(assoc_mgr_qos_list);
 	while ((found_qos = list_next(itr))) {
 		if (qos->id == found_qos->id)
@@ -1693,6 +1710,7 @@ extern int assoc_mgr_fill_in_qos(void *db_conn, slurmdb_qos_rec_t *qos,
 	qos->grp_cpu_run_mins= found_qos->grp_cpu_run_mins;
 	qos->grp_cpus        = found_qos->grp_cpus;
 	qos->grp_jobs        = found_qos->grp_jobs;
+	qos->grp_mem         = found_qos->grp_mem;
 	qos->grp_nodes       = found_qos->grp_nodes;
 	qos->grp_submit_jobs = found_qos->grp_submit_jobs;
 	qos->grp_wall        = found_qos->grp_wall;
@@ -1925,10 +1943,12 @@ extern slurmdb_admin_level_t assoc_mgr_get_admin_level(void *db_conn,
 		if (_get_assoc_mgr_user_list(db_conn, 0) == SLURM_ERROR)
 			return SLURMDB_ADMIN_NOTSET;
 
-	if (!assoc_mgr_user_list)
-		return SLURMDB_ADMIN_NOTSET;
-
 	assoc_mgr_lock(&locks);
+	if (!assoc_mgr_user_list) {
+		assoc_mgr_unlock(&locks);
+		return SLURMDB_ADMIN_NOTSET;
+	}
+
 	itr = list_iterator_create(assoc_mgr_user_list);
 	while ((found_user = list_next(itr))) {
 		if (uid == found_user->uid)
@@ -1957,10 +1977,12 @@ extern bool assoc_mgr_is_user_acct_coord(void *db_conn,
 		if (_get_assoc_mgr_user_list(db_conn, 0) == SLURM_ERROR)
 			return false;
 
-	if (!assoc_mgr_user_list)
-		return false;
-
 	assoc_mgr_lock(&locks);
+	if (!assoc_mgr_user_list) {
+		assoc_mgr_unlock(&locks);
+		return false;
+	}
+
 	itr = list_iterator_create(assoc_mgr_user_list);
 	while ((found_user = list_next(itr))) {
 		if (uid == found_user->uid)
@@ -2115,6 +2137,9 @@ extern List assoc_mgr_get_shares(void *db_conn,
 		share->shares_norm = assoc->usage->shares_norm;
 		share->usage_raw = (uint64_t)assoc->usage->usage_raw;
 
+		share->grp_cpu_mins = assoc->grp_cpu_mins;
+		share->cpu_run_mins = assoc->usage->grp_used_cpu_run_secs / 60;
+
 		if (assoc->user) {
 			/* We only calculate user effective usage when
 			 * we need it
@@ -2225,10 +2250,12 @@ extern int assoc_mgr_update_assocs(slurmdb_update_object_t *update)
 	assoc_mgr_lock_t locks = { WRITE_LOCK, NO_LOCK,
 				   WRITE_LOCK, WRITE_LOCK, NO_LOCK };
 
-	if (!assoc_mgr_association_list)
-		return SLURM_SUCCESS;
-
 	assoc_mgr_lock(&locks);
+	if (!assoc_mgr_association_list) {
+		assoc_mgr_unlock(&locks);
+		return SLURM_SUCCESS;
+	}
+
 	itr = list_iterator_create(assoc_mgr_association_list);
 	while ((object = list_pop(update->objects))) {
 		bool update_jobs = false;
@@ -2326,6 +2353,10 @@ extern int assoc_mgr_update_assocs(slurmdb_update_object_t *update)
 			}
 			if (object->grp_jobs != NO_VAL)
 				rec->grp_jobs = object->grp_jobs;
+			if (object->grp_mem != NO_VAL) {
+				update_jobs = true;
+				rec->grp_mem = object->grp_mem;
+			}
 			if (object->grp_nodes != NO_VAL) {
 				update_jobs = true;
 				rec->grp_nodes = object->grp_nodes;
@@ -2414,8 +2445,10 @@ extern int assoc_mgr_update_assocs(slurmdb_update_object_t *update)
 			    && !bit_test(rec->usage->valid_qos,
 					 rec->def_qos_id)) {
 				error("assoc %u doesn't have access "
-				      "to it's default %d",
-				      rec->id, rec->def_qos_id);
+				      "to it's default qos '%s'",
+				      rec->id,
+				      slurmdb_qos_str(assoc_mgr_qos_list,
+						      rec->def_qos_id));
 				rec->def_qos_id = 0;
 			}
 
@@ -2628,10 +2661,12 @@ extern int assoc_mgr_update_wckeys(slurmdb_update_object_t *update)
 	assoc_mgr_lock_t locks = { NO_LOCK, NO_LOCK,
 				   NO_LOCK, WRITE_LOCK, WRITE_LOCK };
 
-	if (!assoc_mgr_wckey_list)
-		return SLURM_SUCCESS;
-
 	assoc_mgr_lock(&locks);
+	if (!assoc_mgr_wckey_list) {
+		assoc_mgr_unlock(&locks);
+		return SLURM_SUCCESS;
+	}
+
 	itr = list_iterator_create(assoc_mgr_wckey_list);
 	while ((object = list_pop(update->objects))) {
 		if (object->cluster && assoc_mgr_cluster_name) {
@@ -2747,10 +2782,12 @@ extern int assoc_mgr_update_users(slurmdb_update_object_t *update)
 	assoc_mgr_lock_t locks = { WRITE_LOCK, NO_LOCK,
 				   NO_LOCK, WRITE_LOCK, WRITE_LOCK };
 
-	if (!assoc_mgr_user_list)
-		return SLURM_SUCCESS;
-
 	assoc_mgr_lock(&locks);
+	if (!assoc_mgr_user_list) {
+		assoc_mgr_unlock(&locks);
+		return SLURM_SUCCESS;
+	}
+
 	itr = list_iterator_create(assoc_mgr_user_list);
 	while ((object = list_pop(update->objects))) {
 		list_iterator_reset(itr);
@@ -2869,10 +2906,12 @@ extern int assoc_mgr_update_qos(slurmdb_update_object_t *update)
 	assoc_mgr_lock_t locks = { WRITE_LOCK, NO_LOCK,
 				   WRITE_LOCK, NO_LOCK, NO_LOCK };
 
-	if (!assoc_mgr_qos_list)
-		return SLURM_SUCCESS;
-
 	assoc_mgr_lock(&locks);
+	if (!assoc_mgr_qos_list) {
+		assoc_mgr_unlock(&locks);
+		return SLURM_SUCCESS;
+	}
+
 	itr = list_iterator_create(assoc_mgr_qos_list);
 	while ((object = list_pop(update->objects))) {
 		bool update_jobs = false;
@@ -2949,6 +2988,10 @@ extern int assoc_mgr_update_qos(slurmdb_update_object_t *update)
 			}
 			if (object->grp_jobs != NO_VAL)
 				rec->grp_jobs = object->grp_jobs;
+			if (object->grp_mem != NO_VAL) {
+				update_jobs = true;
+				rec->grp_mem = object->grp_mem;
+			}
 			if (object->grp_nodes != NO_VAL) {
 				update_jobs = true;
 				rec->grp_nodes = object->grp_nodes;
@@ -3158,17 +3201,22 @@ extern int assoc_mgr_validate_assoc_id(void *db_conn,
 	assoc_mgr_lock_t locks = { READ_LOCK, NO_LOCK,
 				   NO_LOCK, NO_LOCK, NO_LOCK };
 
+	/* Call assoc_mgr_refresh_lists instead of just getting the
+	   association list because we need qos and user lists before
+	   the association list can be made.
+	*/
 	if (!assoc_mgr_association_list)
-		if (_get_assoc_mgr_association_list(db_conn, enforce)
-		    == SLURM_ERROR)
+		if (assoc_mgr_refresh_lists(db_conn, NULL) == SLURM_ERROR)
 			return SLURM_ERROR;
 
+	assoc_mgr_lock(&locks);
 	if ((!assoc_mgr_association_list
 	     || !list_count(assoc_mgr_association_list))
-	    && !(enforce & ACCOUNTING_ENFORCE_ASSOCS))
+	    && !(enforce & ACCOUNTING_ENFORCE_ASSOCS)) {
+		assoc_mgr_unlock(&locks);
 		return SLURM_SUCCESS;
+	}
 
-	assoc_mgr_lock(&locks);
 	itr = list_iterator_create(assoc_mgr_association_list);
 	while ((found_assoc = list_next(itr))) {
 		if (assoc_id == found_assoc->id)

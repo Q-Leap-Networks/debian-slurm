@@ -102,6 +102,8 @@ struct assoc_mgr_association_usage {
 
 	uint32_t grp_used_cpus; /* count of active jobs in the group
 				 * (DON'T PACK) */
+	uint32_t grp_used_mem; /* count of active memory in the group
+				 * (DON'T PACK) */
 	uint32_t grp_used_nodes; /* count of active jobs in the group
 				  * (DON'T PACK) */
 	double grp_used_wall;   /* group count of time used in
@@ -139,6 +141,8 @@ struct assoc_mgr_qos_usage {
 	uint64_t grp_used_cpu_run_secs; /* count of running cpu secs
 					 * (DON'T PACK) */
 	uint32_t grp_used_jobs;	/* count of active jobs (DON'T PACK) */
+	uint32_t grp_used_mem; /* count of memory in use in this qos
+				* (DON'T PACK) */
 	uint32_t grp_used_nodes; /* count of nodes in use in this qos
 				  * (DON'T PACK) */
 	uint32_t grp_used_submit_jobs; /* count of jobs pending or running
@@ -343,10 +347,14 @@ extern void assoc_mgr_remove_assoc_usage(slurmdb_association_rec_t *assoc);
 extern int dump_assoc_mgr_state(char *state_save_location);
 
 /*
- * Read in the usage for association if the database
- * is up when starting.
+ * Read in the past usage for associations.
  */
 extern int load_assoc_usage(char *state_save_location);
+
+/*
+ * Read in the past usage for qos.
+ */
+extern int load_qos_usage(char *state_save_location);
 
 /*
  * Read in the information of the association mgr if the database
