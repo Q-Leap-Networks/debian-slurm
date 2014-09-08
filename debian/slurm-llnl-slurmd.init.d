@@ -41,7 +41,7 @@ if [ ! -f $CONFDIR/slurm.conf ] ; then
     fi
       echo slurm.conf was not found in $CONFDIR
       echo Please follow the instructions in \
-            /usr/share/doc/slurm-llnl/README.Debian.gz
+            /usr/share/doc/slurm-llnl-base/README.Debian
     exit 0
 fi
 
@@ -91,7 +91,7 @@ checkcertkey()
     echo Not starting slurm-llnl
     echo $MISSING not found
     echo Please follow the instructions in \
-      /usr/share/doc/slurm-llnl/README.cryptotype-openssl
+      /usr/share/doc/slurm-llnl-base/README.cryptotype-openssl
     exit 0
   fi
 }

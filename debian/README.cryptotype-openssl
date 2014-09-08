@@ -19,7 +19,7 @@ openssl rsa -in /etc/slurm-llnl/slurm.key -pubout -out \
 You will also need a configuration file for your cluster that need to
 be stored under /etc/slurm-llnl/slurm.conf on every node.
 You can point your browser to
-file:///usr/share/doc/slurm-llnl/slurm-llnl-configurator.html
+file:///usr/share/doc/slurm-llnl-base/slurm-llnl-configurator.html
 for an automatic configuration tool.
 Please leave red fields untouched and change green field
 to fit your cluster configuration.
@@ -27,7 +27,7 @@ to fit your cluster configuration.
 You can also find a simple sample configuration that provides a
 control machine to run the Slurm's central management daemon and
 a single node for job execution under
-/usr/share/doc/slurm-llnl/examples/slurm.conf.simple.gz
+/usr/share/doc/slurm-llnl-base/examples/slurm.conf.simple.gz
 
 Openssl Key Vulnerability
 =========================
@@ -36,8 +36,8 @@ random number generator), the Debian Security Team disclosed a
 vulnerability in the openssl package that makes many cryptographic keys
 that are used for authentication (e.g. through SSH) or signing (e.g. web
 server certificates) potentially vulnerable.
-The init.d script of the slurm-llnl package can detect this weakness by
-using an openssl keys blacklist.
+The init.d scripts of the slurm-llnl-* packages can detect this
+weakness by using an openssl keys blacklist.
 To fix this, first aptitude update && aptitude upgrade to install the
 new version of the openssl and libssl0.9.8 packages (the vulnerability
 is fixed in version 0.9.8c-4etch3 for etch and version 0.9.8g-9 for
