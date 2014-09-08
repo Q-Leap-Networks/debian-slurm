@@ -4380,7 +4380,6 @@ static int _job_create(job_desc_msg_t * job_desc, int allocate, int will_run,
 		       char **err_msg)
 {
 	static int launch_type_poe = -1;
-	static uint32_t acct_freq_task = NO_VAL;
 	int error_code = SLURM_SUCCESS, i, qos_error;
 	struct part_record *part_ptr = NULL;
 	List part_ptr_list = NULL;
@@ -4394,7 +4393,6 @@ static int _job_create(job_desc_msg_t * job_desc, int allocate, int will_run,
 	static uint32_t node_scaling = 1;
 	static uint32_t cpus_per_mp = 1;
 	acct_policy_limit_set_t acct_policy_limit_set;
-	int acctg_freq;
 
 #ifdef HAVE_BG
 	uint16_t geo[SYSTEM_DIMENSIONS];
@@ -4439,25 +4437,6 @@ static int _job_create(job_desc_msg_t * job_desc, int allocate, int will_run,
 					      err_msg);
 	if (error_code != SLURM_SUCCESS)
 		return error_code;
-
-	/* Validate a job's accounting frequency, if specified */
-	if (acct_freq_task == NO_VAL) {
-		char *acct_freq = slurm_get_jobacct_gather_freq();
-		int i = acct_gather_parse_freq(PROFILE_TASK, acct_freq);
-		xfree(acct_freq);
-		if (i != -1)
-			acct_freq_task = i;
-		else
-			acct_freq_task = (uint16_t) NO_VAL;
-	}
-	acctg_freq = acct_gather_parse_freq(PROFILE_TASK, job_desc->acctg_freq);
-	if ((acctg_freq != -1) &&
-	    ((acctg_freq == 0) || (acctg_freq > acct_freq_task))) {
-		error("Invalid accounting frequency (%d > %u)",
-		      acctg_freq, acct_freq_task);
-		error_code = ESLURMD_INVALID_ACCT_FREQ;
-		goto cleanup_fail;
-	}
 
 	/* insure that selected nodes are in this partition */
 	if (job_desc->req_nodes) {
@@ -5988,6 +5967,11 @@ static int _validate_job_desc(job_desc_msg_t * job_desc_msg, int allocate,
 		}
 	} else if (!_validate_min_mem_partition(job_desc_msg, part_ptr, part_list))
 		return ESLURM_INVALID_TASK_MEMORY;
+
+	/* Validate a job's accounting frequency, if specified */
+	if (acct_gather_check_acct_freq_task(
+		    job_desc_msg->pn_min_memory, job_desc_msg->acctg_freq))
+		return ESLURMD_INVALID_ACCT_FREQ;
 
 	if (job_desc_msg->min_nodes == NO_VAL)
 		job_desc_msg->min_nodes = 1;	/* default node count of 1 */
@@ -8259,6 +8243,7 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 			time_t old_time =  job_ptr->time_limit;
 			if (old_time == INFINITE)	/* one year in mins */
 				old_time = (365 * 24 * 60);
+			acct_policy_alter_job(job_ptr, job_specs->time_limit);
 			job_ptr->time_limit = job_specs->time_limit;
 			if (IS_JOB_RUNNING(job_ptr) ||
 			    IS_JOB_SUSPENDED(job_ptr)) {
@@ -8432,14 +8417,20 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 					job_ptr->state_reason = WAIT_HELD;
 			}
 		} else if ((job_ptr->priority == 0) &&
-			   (job_ptr->state_reason == WAIT_HELD_USER)) {
+			   (job_specs->priority == INFINITE) &&
+			   (authorized ||
+			    (job_ptr->state_reason == WAIT_HELD_USER))) {
 			job_ptr->direct_set_prio = 0;
 			set_job_prio(job_ptr);
-			info("sched: update_job: releasing user hold "
-			     "for job_id %u", job_specs->job_id);
+			info("sched: update_job: releasing hold for job_id %u",
+			     job_specs->job_id);
 			job_ptr->state_reason = WAIT_NO_REASON;
 			job_ptr->job_state &= ~JOB_SPECIAL_EXIT;
 			xfree(job_ptr->state_desc);
+		} else if ((job_ptr->priority == 0) &&
+			   (job_specs->priority != INFINITE)) {
+			info("ignore priority reset request on held job %u",
+			     job_specs->job_id);
 		} else if (authorized ||
 			 (job_ptr->priority > job_specs->priority)) {
 			if (job_specs->priority != 0)
@@ -8462,11 +8453,6 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 					job_ptr->state_reason = WAIT_HELD_USER;
 				} else
 					job_ptr->state_reason = WAIT_HELD;
-				xfree(job_ptr->state_desc);
-			} else if ((job_ptr->state_reason == WAIT_HELD) ||
-				   (job_ptr->state_reason == WAIT_HELD_USER)) {
-				job_ptr->state_reason = WAIT_NO_REASON;
-				job_ptr->job_state &= ~JOB_SPECIAL_EXIT;
 				xfree(job_ptr->state_desc);
 			}
 		} else if (job_specs->priority == INFINITE
@@ -9009,8 +8995,11 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 			error_code = SLURM_SUCCESS;
 		else
 			error_code = ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE;
-		job_ptr->state_reason = fail_reason;
-		xfree(job_ptr->state_desc);
+		if ((job_ptr->state_reason != WAIT_HELD) &&
+		    (job_ptr->state_reason != WAIT_HELD_USER)) {
+			job_ptr->state_reason = fail_reason;
+			xfree(job_ptr->state_desc);
+		}
 		return error_code;
 	} else if ((job_ptr->state_reason != WAIT_HELD) &&
 		   (job_ptr->state_reason != WAIT_HELD_USER)) {

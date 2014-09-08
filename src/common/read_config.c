@@ -344,7 +344,7 @@ static bool _is_valid_path (char *path, char *msg)
 	 *  Allocate temporary space for walking the list of dirs:
 	 */
 	int pathlen;
-	char *buf, *p, *entry;
+	char *buf = NULL, *p, *entry;
 
 	if (path == NULL) {
 		error ("is_valid_path: path is NULL!");
@@ -2388,8 +2388,9 @@ static int _config_is_storage(s_p_hashtbl_t *hashtbl, char *name)
 	port = strrchr(&host[1], ':');
 	if (port == NULL)
 		return (-1);
-	conf_ptr->accounting_storage_type = xstrdup_printf("accounting_storage/%.*s",
-							   (int)(cluster - name), name);
+	conf_ptr->accounting_storage_type =
+		xstrdup_printf("accounting_storage/%.*s",
+			       (int)(cluster - name), name);
 	cluster++;
 	cluster = xstrndup(cluster, host - cluster);
 	host++;
