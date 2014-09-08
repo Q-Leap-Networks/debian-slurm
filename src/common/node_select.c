@@ -9,7 +9,7 @@
  *  the plugin. This is because functions required by the plugin can not be 
  *  resolved on the front-end nodes, so we can't load the plugins there.
  *
- *  $Id: node_select.c 15345 2008-10-07 23:21:00Z da $
+ *  $Id: node_select.c 15717 2008-11-17 23:20:37Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -727,12 +727,14 @@ static int _unpack_node_info(bg_info_record_t *bg_info_record, Buf buffer)
 	bg_info_record->state     = (int) uint16_tmp;
 	safe_unpack16(&uint16_tmp, buffer);
 	bg_info_record->conn_type = (int) uint16_tmp;
+#ifdef HAVE_BGL
 	safe_unpack16(&uint16_tmp, buffer);
 	bg_info_record->node_use = (int) uint16_tmp;
 	safe_unpack16(&uint16_tmp, buffer);
 	bg_info_record->quarter = (int) uint16_tmp;
 	safe_unpack16(&uint16_tmp, buffer);
 	bg_info_record->nodecard = (int) uint16_tmp;
+#endif
 	safe_unpack32(&uint32_tmp, buffer);
 	bg_info_record->node_cnt = (int) uint32_tmp;
 	safe_unpackstr_xmalloc(&bp_inx_str, &uint32_tmp, buffer);
@@ -749,8 +751,10 @@ static int _unpack_node_info(bg_info_record_t *bg_info_record, Buf buffer)
 		bg_info_record->ionode_inx = bitfmt2int(bp_inx_str);
 		xfree(bp_inx_str);
 	}
+#ifdef HAVE_BGL
 	safe_unpackstr_xmalloc(&bg_info_record->blrtsimage,   &uint32_tmp, 
 			       buffer);
+#endif
 	safe_unpackstr_xmalloc(&bg_info_record->linuximage,   &uint32_tmp, 
 			       buffer);
 	safe_unpackstr_xmalloc(&bg_info_record->mloaderimage, &uint32_tmp, 

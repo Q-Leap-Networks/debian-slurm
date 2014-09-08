@@ -69,6 +69,7 @@
 #include "src/common/xstring.h"
 #include "src/common/assoc_mgr.h"
 
+#include "src/slurmctld/acct_policy.h"
 #include "src/slurmctld/agent.h"
 #include "src/slurmctld/job_scheduler.h"
 #include "src/slurmctld/licenses.h"
@@ -80,6 +81,7 @@
 #include "src/slurmctld/srun_comm.h"
 #include "src/slurmctld/trigger_mgr.h"
 
+#define BATCH_JOB_LAUNCH_TIME 1200	/* seconds for prolog & env var load */
 #define DETAILS_FLAG 0xdddd
 #define MAX_RETRIES  10
 #define SLURM_CREATE_JOB_FLAG_NO_ALLOCATE_0 0
@@ -106,9 +108,6 @@ static bool     wiki_sched_test = false;
 
 /* Local functions */
 static void _add_job_hash(struct job_record *job_ptr);
-
-static void _acct_add_job_submit(struct job_record *job_ptr);
-static void _acct_remove_job_submit(struct job_record *job_ptr);
 
 static int  _copy_job_desc_to_file(job_desc_msg_t * job_desc,
 				   uint32_t job_id);
@@ -563,7 +562,7 @@ static int _load_job_state(Buf buffer)
 	struct part_record *part_ptr;
 	int error_code;
 	select_jobinfo_t select_jobinfo = NULL;
-	acct_association_rec_t assoc_rec, *assoc_ptr = NULL;
+	acct_association_rec_t assoc_rec;
 
 	safe_unpack32(&assoc_id, buffer);
 	safe_unpack32(&job_id, buffer);
@@ -740,7 +739,7 @@ static int _load_job_state(Buf buffer)
 	job_ptr->tot_sus_time = tot_sus_time;
 	job_ptr->user_id      = user_id;
 
-	bzero(&assoc_rec, sizeof(acct_association_rec_t));
+	memset(&assoc_rec, 0, sizeof(acct_association_rec_t));
 
 	/* 
 	 * For speed and accurracy we will first see if we once had an
@@ -757,7 +756,8 @@ static int _load_job_state(Buf buffer)
 
 	if (assoc_mgr_fill_in_assoc(acct_db_conn, &assoc_rec,
 				    accounting_enforce,
-				    &assoc_ptr) &&
+				    (acct_association_rec_t **)
+				    &job_ptr->assoc_ptr) &&
 	    accounting_enforce && (!IS_JOB_FINISHED(job_ptr))) {
 		info("Cancelling job %u with invalid association",
 		     job_id);
@@ -769,8 +769,7 @@ static int _load_job_state(Buf buffer)
 		job_completion_logger(job_ptr);
 	} else {
 		info("Recovered job %u", job_id);
-		job_ptr->assoc_ptr = (void *) assoc_ptr;
-
+		job_ptr->assoc_id = assoc_rec.id;
 		/* make sure we have started this job in accounting */
 		if(job_ptr->assoc_id && !job_ptr->db_index && job_ptr->nodes) {
 			debug("starting job %u in accounting", job_ptr->job_id);
@@ -780,6 +779,10 @@ static int _load_job_state(Buf buffer)
 				jobacct_storage_g_job_suspend(acct_db_conn,
 							      job_ptr);
 		}
+		/* make sure we have this job completed in the
+		   database */
+		if(IS_JOB_FINISHED(job_ptr))
+			jobacct_storage_g_job_complete(acct_db_conn, job_ptr);
 	}
 
 	safe_unpack16(&step_flag, buffer);
@@ -996,44 +999,6 @@ void _add_job_hash(struct job_record *job_ptr)
 	job_ptr->job_next = job_hash[inx];
 	job_hash[inx] = job_ptr;
 }
-
-/*
- * _acct_add_job_submit - Note that a job has been submitted
- *      for accounting policy purposes.
- */
-static void _acct_add_job_submit(struct job_record *job_ptr)
-{
-	acct_association_rec_t *assoc_ptr = NULL;
-
-	assoc_ptr = job_ptr->assoc_ptr;
-	while(assoc_ptr) {
-		assoc_ptr->used_submit_jobs++;	
-		/* now handle all the group limits of the parents */
-		assoc_ptr = assoc_ptr->parent_assoc_ptr;
-	}
-}
-
-/*
- * _acct_remove_job_submit - Note that a job has finished (might
- *      not had started or been allocated resources) for accounting
- *      policy purposes.
- */
-static void _acct_remove_job_submit(struct job_record *job_ptr)
-{
-	acct_association_rec_t *assoc_ptr = NULL;
-
-	assoc_ptr = job_ptr->assoc_ptr;
-	while(assoc_ptr) {
-		if (assoc_ptr->used_submit_jobs) 
-			assoc_ptr->used_submit_jobs--;
-		else
-			debug2("_acct_remove_job_submit: "
-			       "used_submit_jobs underflow for account %s",
-			       assoc_ptr->acct);
-		assoc_ptr = assoc_ptr->parent_assoc_ptr;
-	}
-}
-
 
 /* 
  * find_job_record - return a pointer to the job record with the given job_id
@@ -1579,7 +1544,7 @@ extern int job_allocate(job_desc_msg_t * job_specs, int immediate,
 	if (will_run && resp) {
 		job_desc_msg_t job_desc_msg;
 		int rc;
-		bzero(&job_desc_msg, sizeof(job_desc_msg_t));
+		memset(&job_desc_msg, 0, sizeof(job_desc_msg_t));
 		job_desc_msg.job_id = job_ptr->job_id;
 		rc = job_start_data(&job_desc_msg, resp);
 		job_ptr->job_state  = JOB_FAILED;
@@ -1592,14 +1557,16 @@ extern int job_allocate(job_desc_msg_t * job_specs, int immediate,
 
 	no_alloc = test_only || too_fragmented || 
 		(!top_prio) || (!independent);
+
 	error_code = select_nodes(job_ptr, no_alloc, NULL);
+
 	if (!test_only) {
 		last_job_update = now;
 		slurm_sched_schedule();	/* work for external scheduler */
 	}
 
 	if (accounting_enforce == ACCOUNTING_ENFORCE_WITH_LIMITS)
-		_acct_add_job_submit(job_ptr);
+		acct_policy_add_job_submit(job_ptr);
 
 	if ((error_code == ESLURM_NODES_BUSY) ||
 	    (error_code == ESLURM_JOB_HELD) ||
@@ -1629,7 +1596,7 @@ extern int job_allocate(job_desc_msg_t * job_specs, int immediate,
 		job_completion_logger(job_ptr);
 		return error_code;
 	}
-
+	
 	if (will_run) {		/* job would run, flag job destruction */
 		job_ptr->job_state  = JOB_FAILED;
 		job_ptr->exit_code  = 1;
@@ -2061,7 +2028,7 @@ static int _job_create(job_desc_msg_t * job_desc, int allocate, int will_run,
 		return error_code;
 	}
 
-	bzero(&assoc_rec, sizeof(acct_association_rec_t));
+	memset(&assoc_rec, 0, sizeof(acct_association_rec_t));
 	assoc_rec.uid       = job_desc->user_id;
 	assoc_rec.partition = part_ptr->name;
 	assoc_rec.acct      = job_desc->account;
@@ -2318,7 +2285,6 @@ static int _job_create(job_desc_msg_t * job_desc, int allocate, int will_run,
 		job_ptr->priority = 1;      /* Move to end of queue */
 		job_ptr->state_reason = fail_reason;
 	}
-	
 	
 cleanup:
 	if (license_list)
@@ -2915,7 +2881,9 @@ _copy_job_desc_to_job_record(job_desc_msg_t * job_desc,
 	if (job_desc->task_dist != (uint16_t) NO_VAL)
 		detail_ptr->task_dist = job_desc->task_dist;
 	if (job_desc->cpus_per_task != (uint16_t) NO_VAL)
-		detail_ptr->cpus_per_task = MIN(job_desc->cpus_per_task, 1);
+		detail_ptr->cpus_per_task = MAX(job_desc->cpus_per_task, 1);
+	else
+		detail_ptr->cpus_per_task = 1;
 	if (job_desc->ntasks_per_node != (uint16_t) NO_VAL)
 		detail_ptr->ntasks_per_node = job_desc->ntasks_per_node;
 	if (job_desc->requeue != (uint16_t) NO_VAL)
@@ -3953,8 +3921,10 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 		mc_ptr = detail_ptr->mc_ptr;
 	last_job_update = now;
 
-	if ((job_specs->time_limit != NO_VAL) && (!IS_JOB_FINISHED(job_ptr))) {
-		if (job_ptr->time_limit == job_specs->time_limit) {
+	if (job_specs->time_limit != NO_VAL) {
+		if (IS_JOB_FINISHED(job_ptr)) 
+			error_code = ESLURM_DISABLED;
+		else if (job_ptr->time_limit == job_specs->time_limit) {
 			verbose("update_job: new time limit identical to old "
 				"time limit %u", job_specs->job_id);
 		} else if (super_user ||
@@ -3963,21 +3933,26 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 			if (old_time == INFINITE)	/* one year in mins */
 				old_time = (365 * 24 * 60);
 			job_ptr->time_limit = job_specs->time_limit;
-			if (job_ptr->time_limit == INFINITE) {	/* one year */
-				job_ptr->end_time = now +
-					(365 * 24 * 60 * 60);
-			} else {
-				/* Update end_time based upon change
-				 * to preserve suspend time info */
-				job_ptr->end_time = job_ptr->end_time +
-					((job_ptr->time_limit -
-					  old_time) * 60);
+			if ((job_ptr->job_state == JOB_RUNNING) ||
+			    (job_ptr->job_state == JOB_SUSPENDED)) {
+				if (job_ptr->time_limit == INFINITE) {
+					/* Set end time in one year */
+					job_ptr->end_time = now +
+						(365 * 24 * 60 * 60);
+				} else {
+					/* Update end_time based upon change
+					 * to preserve suspend time info */
+					job_ptr->end_time = job_ptr->end_time +
+						((job_ptr->time_limit -
+						  old_time) * 60);
+				}
+				if (job_ptr->end_time < now)
+					job_ptr->end_time = now;
+				if ((job_ptr->job_state == JOB_RUNNING) &&
+				    (list_is_empty(job_ptr->step_list) == 0)) {
+					_xmit_new_end_time(job_ptr);
+				}
 			}
-			if (job_ptr->end_time < now)
-				job_ptr->end_time = now;
-			if ((job_ptr->job_state == JOB_RUNNING) &&
-			    (list_is_empty(job_ptr->step_list) == 0))
-				_xmit_new_end_time(job_ptr);
 			info("update_job: setting time_limit to %u for "
 			     "job_id %u", job_specs->time_limit, 
 			     job_specs->job_id);
@@ -4319,14 +4294,15 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 		else if (tmp_part_ptr == NULL)
 			error_code = ESLURM_INVALID_PARTITION_NAME;
 		else if (super_user) {
-			acct_association_rec_t assoc_rec, *assoc_ptr;
-			bzero(&assoc_rec, sizeof(acct_association_rec_t));
+			acct_association_rec_t assoc_rec;
+			memset(&assoc_rec, 0, sizeof(acct_association_rec_t));
 			assoc_rec.uid       = job_ptr->user_id;
 			assoc_rec.partition = job_specs->partition;
 			assoc_rec.acct      = job_ptr->account;
 			if (assoc_mgr_fill_in_assoc(acct_db_conn, &assoc_rec,
-						    accounting_enforce, 
-						    &assoc_ptr)) {
+						    accounting_enforce,
+						    (acct_association_rec_t **)
+						    &job_ptr->assoc_ptr)) {
 				info("job_update: invalid account %s "
 				     "for job %u",
 				     job_specs->account, job_ptr->job_id);
@@ -4335,7 +4311,6 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 				 * association ID for accounting purposes */
 			} else {
 				job_ptr->assoc_id = assoc_rec.id;
-				job_ptr->assoc_ptr = (void *) assoc_ptr;
 			}
 			xfree(job_ptr->partition);
 			job_ptr->partition = xstrdup(job_specs->partition);
@@ -4743,6 +4718,7 @@ static void _purge_lost_batch_jobs(int node_inx, time_t now)
 {
 	ListIterator job_iterator;
 	struct job_record *job_ptr;
+	time_t recent = now - BATCH_JOB_LAUNCH_TIME;
 
 	job_iterator = list_iterator_create(job_list);
 	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
@@ -4751,10 +4727,11 @@ static void _purge_lost_batch_jobs(int node_inx, time_t now)
 		if ((!job_active)                       ||
 		    (job_ptr->batch_flag == 0)          ||
 		    (job_ptr->time_last_active == now)  ||
+		    (job_ptr->start_time >= recent)     ||
 		    (node_inx != bit_ffs(job_ptr->node_bitmap)))
 			continue;
 
-		info("Master node lost JobId=%u, killing it", 
+		info("Batch JobId=%u missing from master node, killing it", 
 			job_ptr->job_id);
 		job_complete(job_ptr->job_id, 0, false, 0);
 	}
@@ -5118,7 +5095,7 @@ extern void job_completion_logger(struct job_record  *job_ptr)
 	xassert(job_ptr);
 
 	if (accounting_enforce == ACCOUNTING_ENFORCE_WITH_LIMITS)
-		_acct_remove_job_submit(job_ptr);
+		acct_policy_remove_job_submit(job_ptr);
 
 	/* make sure all parts of the job are notified */
 	srun_job_complete(job_ptr);
@@ -5142,7 +5119,7 @@ extern void job_completion_logger(struct job_record  *job_ptr)
 		/* Just incase we turned on accounting after we
 		   started the job
 		*/
-		bzero(&assoc_rec, sizeof(acct_association_rec_t));
+		memset(&assoc_rec, 0, sizeof(acct_association_rec_t));
 		assoc_rec.acct      = job_ptr->account;
 		assoc_rec.partition = job_ptr->partition;
 		assoc_rec.uid       = job_ptr->user_id;
@@ -5152,6 +5129,11 @@ extern void job_completion_logger(struct job_record  *job_ptr)
 					     (acct_association_rec_t **)
 					     &job_ptr->assoc_ptr))) {
 			job_ptr->assoc_id = assoc_rec.id;
+			/* we have to call job start again because the
+			   associd does not get updated in job
+			   complete */
+			jobacct_storage_g_job_start(
+				acct_db_conn, slurmctld_cluster_name, job_ptr);
 		}
 	}
 
@@ -5694,7 +5676,8 @@ extern void update_job_nodes_completing(void)
 		    (job_ptr->node_bitmap == NULL))
 			continue;
 		xfree(job_ptr->nodes_completing);
-		job_ptr->nodes_completing = bitmap2node_name(job_ptr->node_bitmap);
+		job_ptr->nodes_completing = 
+			bitmap2node_name(job_ptr->node_bitmap);
 	}
 	list_iterator_destroy(job_iterator);
 }
@@ -5937,7 +5920,7 @@ extern int update_job_account(char *module, struct job_record *job_ptr,
 	}
 
 
-	bzero(&assoc_rec, sizeof(acct_association_rec_t));
+	memset(&assoc_rec, 0, sizeof(acct_association_rec_t));
 	assoc_rec.uid       = job_ptr->user_id;
 	assoc_rec.partition = job_ptr->partition;
 	assoc_rec.acct      = new_account;
@@ -5994,12 +5977,45 @@ extern int send_jobs_to_accounting(time_t event_time)
 {
 	ListIterator itr = NULL;
 	struct job_record *job_ptr;
+	slurmctld_lock_t job_write_lock = { 
+		NO_LOCK, WRITE_LOCK, READ_LOCK, READ_LOCK };
+	time_t now = time(NULL);
+
 	/* send jobs in pending or running state */
+	lock_slurmctld(job_write_lock);
 	itr = list_iterator_create(job_list);
 	while ((job_ptr = list_next(itr))) {
+		if(!job_ptr->assoc_id) {
+			acct_association_rec_t assoc_rec;
+			memset(&assoc_rec, 0, sizeof(acct_association_rec_t));
+			assoc_rec.uid       = job_ptr->user_id;
+			assoc_rec.partition = job_ptr->partition;
+			assoc_rec.acct      = job_ptr->account;
+
+			if(assoc_mgr_fill_in_assoc(acct_db_conn, &assoc_rec,
+						   accounting_enforce,
+						   (acct_association_rec_t **)
+						   &job_ptr->assoc_ptr) &&
+			   accounting_enforce 
+			   && (!IS_JOB_FINISHED(job_ptr))) {
+				info("Cancelling job %u with "
+				     "invalid association",
+				     job_ptr->job_id);
+				job_ptr->job_state = JOB_CANCELLED;
+				job_ptr->state_reason = FAIL_BANK_ACCOUNT;
+				if (IS_JOB_PENDING(job_ptr))
+					job_ptr->start_time = now;
+				job_ptr->end_time = now;
+				job_completion_logger(job_ptr);
+				continue;
+			} else 
+				job_ptr->assoc_id = assoc_rec.id;
+		}
+
 		/* we only want active, un accounted for jobs */
-		if(job_ptr->db_index && job_ptr->job_state > JOB_SUSPENDED) 
+		if(job_ptr->db_index || IS_JOB_FINISHED(job_ptr)) 
 			continue;
+		
 		debug("first reg: starting job %u in accounting",
 		      job_ptr->job_id);
 		jobacct_storage_g_job_start(
@@ -6009,6 +6025,7 @@ extern int send_jobs_to_accounting(time_t event_time)
 			jobacct_storage_g_job_suspend(acct_db_conn, job_ptr);
 	}
 	list_iterator_destroy(itr);
+	unlock_slurmctld(job_write_lock);
 
 	return SLURM_SUCCESS;
 }

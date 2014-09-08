@@ -265,11 +265,8 @@ static void _attempt_backfill(void)
 		if ((part_ptr->root_only) && filter_root)
 			continue;
 
-		if (!acct_policy_job_runnable(job_ptr))
-			continue;
-		if (license_job_test(job_ptr) != SLURM_SUCCESS)
-			continue;
-		if (job_independent(job_ptr) != true)
+		if ((!job_independent(job_ptr)) ||
+		    (license_job_test(job_ptr) != SLURM_SUCCESS))
 			continue;
 
 		/* Determine minimum and maximum node counts */
@@ -353,10 +350,14 @@ static void _attempt_backfill(void)
 		if (j != SLURM_SUCCESS)
 			continue;	/* not runable */
 
-		if ((job_ptr->start_time <= now) &&
-		    (_start_job(job_ptr, avail_bitmap) != SLURM_SUCCESS)) {
-			/* Planned to start job, but something bad happended */
-			break;
+		if (job_ptr->start_time <= now) {
+			int rc = _start_job(job_ptr, avail_bitmap);
+			if(rc == ESLURM_ACCOUNTING_POLICY) 
+				continue;
+			else if(rc != SLURM_SUCCESS)
+				/* Planned to start job, but something
+				 * bad happended */
+				break;
 		}
 		if (job_ptr->start_time > (now + BACKFILL_WINDOW)) {
 			/* Starts too far in the future to worry about */
@@ -416,7 +417,8 @@ static int _start_job(struct job_record *job_ptr, bitstr_t *avail_bitmap)
 #if __DEBUG
 		info("backfill: Jobs backfilled: %d", backfilled_jobs);
 #endif
-	} else if (job_ptr->job_id != fail_jobid) {
+	} else if ((job_ptr->job_id != fail_jobid)
+		   && (rc != ESLURM_ACCOUNTING_POLICY)) {
 		char *node_list = bitmap2node_name(avail_bitmap);
 		/* This happens when a job has sharing disabled and
 		 * a selected node is still completing some job, 
@@ -426,7 +428,8 @@ static int _start_job(struct job_record *job_ptr, bitstr_t *avail_bitmap)
 		xfree(node_list);
 		fail_jobid = job_ptr->job_id;
 	} else {
-		debug3("backfill: Failed to start JobId=%u", job_ptr->job_id);
+		debug3("backfill: Failed to start JobId=%u: %s",
+		       job_ptr->job_id, slurm_strerror(rc));
 	}
 
 	return rc;

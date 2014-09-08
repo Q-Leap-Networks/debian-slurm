@@ -77,9 +77,10 @@
 #define MAX_DBD_MSG_LEN		16384
 #define SLURMDBD_TIMEOUT	300	/* Seconds SlurmDBD for response */
 
-bool running_cache = 0;
+uint16_t running_cache = 0;
+pthread_mutex_t assoc_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t assoc_cache_cond = PTHREAD_COND_INITIALIZER;
 
-static pthread_mutex_t replace_cache = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t agent_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  agent_cond = PTHREAD_COND_INITIALIZER;
 static List      agent_list     = (List) NULL;
@@ -251,6 +252,10 @@ extern int slurm_send_recv_slurmdbd_msg(uint16_t rpc_version,
 		
 	rc = unpack_slurmdbd_msg(rpc_version, resp, buffer);
 
+	/* check for the rc of the start job message */
+	if (rc == SLURM_SUCCESS && resp->msg_type == DBD_JOB_START_RC) 
+		rc = ((dbd_job_start_rc_msg_t *)resp->data)->return_code;
+	
 	free_buf(buffer);
 	slurm_mutex_unlock(&slurmdbd_lock);
 	
@@ -319,9 +324,10 @@ static void _open_slurmdbd_fd(void)
 	if (slurmdbd_host == NULL)
 		slurmdbd_host = xstrdup(DEFAULT_STORAGE_HOST);
 	
-	if (slurmdbd_port == 0) 
+	if (slurmdbd_port == 0) {
 		slurmdbd_port = SLURMDBD_PORT;
-	
+		slurm_set_accounting_storage_port(slurmdbd_port);
+	}
 	slurm_set_addr(&dbd_addr, slurmdbd_port, slurmdbd_host);
 	if (dbd_addr.sin_port == 0)
 		error("Unable to locate SlurmDBD host %s:%u", 
@@ -1518,15 +1524,11 @@ static void *_agent(void *x)
 		if (buffer == NULL) {
 			slurm_mutex_unlock(&slurmdbd_lock);
 
-			slurm_mutex_lock(&replace_cache);
-			/* It is ok to send a NULL as the first value since
-			 * this will most likely only happen when talking with
-			 * the DBD 
-			 */
+			slurm_mutex_lock(&assoc_cache_mutex);
 			if(slurmdbd_fd >= 0 && running_cache)
-				assoc_mgr_refresh_lists(NULL, NULL);		
-			slurm_mutex_unlock(&replace_cache);
-			
+				pthread_cond_signal(&assoc_cache_cond);
+			slurm_mutex_unlock(&assoc_cache_mutex);
+
 			continue;
 		}
 
@@ -1535,28 +1537,28 @@ static void *_agent(void *x)
 		 * complete. */
 		rc = _send_msg(buffer);
 		if (rc != SLURM_SUCCESS) {
-			if (agent_shutdown)
+			if (agent_shutdown) {
+				slurm_mutex_unlock(&slurmdbd_lock);
 				break;
+			}
 			error("slurmdbd: Failure sending message");
 		} else {
 			rc = _get_return_code(SLURMDBD_VERSION, read_timeout);
 			if (rc == EAGAIN) {
-				if (agent_shutdown)
+				if (agent_shutdown) {
+					slurm_mutex_unlock(&slurmdbd_lock);
 					break;
+				}
 				error("slurmdbd: Failure with "
 				      "message need to resend");
 			}
 		}
 		slurm_mutex_unlock(&slurmdbd_lock);
 		
-		slurm_mutex_lock(&replace_cache);
-		/* It is ok to send a NULL as the first value since
-		 * this will most likely only happen when talking with
-		 * the DBD 
-		 */
+		slurm_mutex_lock(&assoc_cache_mutex);
 		if(slurmdbd_fd >= 0 && running_cache)
-			assoc_mgr_refresh_lists(NULL, NULL);		
-		slurm_mutex_unlock(&replace_cache);
+			pthread_cond_signal(&assoc_cache_cond);
+		slurm_mutex_unlock(&assoc_cache_mutex);
 
 		slurm_mutex_lock(&agent_lock);
 		if (agent_list && (rc == SLURM_SUCCESS)) {
@@ -1584,6 +1586,8 @@ static void _save_dbd_state(void)
 	char *dbd_fname;
 	Buf buffer;
 	int fd, rc, wrote = 0;
+	uint16_t msg_type;
+	uint32_t offset;
 
 	dbd_fname = slurm_get_state_save_location();
 	xstrcat(dbd_fname, "/dbd.messages");
@@ -1592,6 +1596,24 @@ static void _save_dbd_state(void)
 		error("slurmdbd: Creating state save file %s", dbd_fname);
 	} else if (agent_list) {
 		while ((buffer = list_dequeue(agent_list))) {
+			/* We do not want to store registration
+			   messages.  If an admin puts in an incorrect
+			   cluster name we can get a deadlock unless
+			   they add the bogus cluster name to the
+			   accounting system.
+			*/
+			offset = get_buf_offset(buffer);
+			if (offset < 2) {
+				free_buf(buffer);
+				continue;
+			}
+			set_buf_offset(buffer, 0);
+			unpack16(&msg_type, buffer);
+			set_buf_offset(buffer, offset);
+			if(msg_type == DBD_REGISTER_CTLD) {
+				free_buf(buffer);
+				continue;
+			}
 			rc = _save_dbd_rec(fd, buffer);
 			free_buf(buffer);
 			if (rc != SLURM_SUCCESS)

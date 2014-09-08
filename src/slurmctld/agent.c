@@ -471,6 +471,8 @@ static void _update_wdog_state(thd_t *thread_ptr,
 			       thread_ptr->thread);
 			if (pthread_kill(thread_ptr->thread, SIGUSR1) == ESRCH)
 				*state = DSH_NO_RESP;
+			else
+				thread_ptr->end_time += COMMAND_TIMEOUT;
 		}
 		break;
 	case DSH_NEW:
@@ -857,8 +859,9 @@ static void *_thread_per_group_rpc(void *args)
 			if(slurm_conf_get_addr(thread_ptr->nodelist,
 					       &msg.address) == SLURM_ERROR) {
 				error("_thread_per_group_rpc: "
-				      "can't get address for "
-				      "host %s", thread_ptr->nodelist);
+				      "can't find address for host %s, "
+				      "check slurm.conf", 
+				      thread_ptr->nodelist);
 				goto cleanup;
 			}
 		}

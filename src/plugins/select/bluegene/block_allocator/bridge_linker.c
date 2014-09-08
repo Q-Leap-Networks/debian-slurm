@@ -81,6 +81,9 @@ typedef struct {
   
 	/* all the pm functions */
 	status_t (*create_partition)(pm_partition_id_t pid);
+#ifndef HAVE_BGL
+	status_t (*reboot_partition)(pm_partition_id_t pid);
+#endif
 	status_t (*destroy_partition)(pm_partition_id_t pid);
 	
 	/* set say message stuff */
@@ -97,9 +100,9 @@ void *handle = NULL;
 int _get_syms(int n_syms, const char *names[], void *ptrs[])
 {
         int i, count;
-	void *db_handle = NULL;
-#ifndef HAVE_BGP_FILES	
+#ifdef HAVE_BGL	
 #ifdef BG_DB2_SO
+	void *db_handle = NULL;
 	db_handle = dlopen (BG_DB2_SO, RTLD_LAZY);
 	if (!db_handle) {
 		have_db2 = false;
@@ -110,7 +113,7 @@ int _get_syms(int n_syms, const char *names[], void *ptrs[])
 #else
 	fatal("No BG_DB2_SO is set, can't run.");
 #endif
-#endif // HAVE_BGP_FILES
+#endif // HAVE_BGL
 
 #ifdef BG_BRIDGE_SO
 	handle = dlopen (BG_BRIDGE_SO, RTLD_LAZY);
@@ -139,40 +142,7 @@ int _get_syms(int n_syms, const char *names[], void *ptrs[])
 
 extern int bridge_init()
 {
-#ifdef HAVE_BGP_FILES
-	static const char *syms[] = {
-		"rm_set_serial",
-		"rm_get_BGP",
-		"rm_add_partition",
-		"rm_get_partition",
-		"rm_get_partition_info",
-		"rm_modify_partition",
-		"rm_set_part_owner",
-		"rm_add_part_user",
-		"rm_remove_part_user",
-		"rm_remove_partition",
-		"rm_get_partitions",
-		"rm_get_partitions_info",
-		"rm_get_job",
-		"rm_get_jobs",
-		"rm_remove_job",
-		"rm_get_nodecards",
-		"rm_new_partition",
-		"rm_free_partition",
-		"rm_free_job",
-		"rm_free_BGP",
-		"rm_free_partition_list",
-		"rm_free_job_list",
-		"rm_free_nodecard_list",
-		"rm_get_data",
-		"rm_set_data",
-		"jm_signal_job",
-		"jm_cancel_job",
-		"pm_create_partition",
-		"pm_destroy_partition",
-		"setSayMessageParams"
-	};
-#else
+#ifdef HAVE_BGL
 	static const char *syms[] = {
 		"rm_set_serial",
 		"rm_get_BGL",
@@ -202,6 +172,40 @@ extern int bridge_init()
 		"jm_signal_job",
 		"jm_cancel_job",
 		"pm_create_partition",
+		"pm_destroy_partition",
+		"setSayMessageParams"
+	};
+#else
+	static const char *syms[] = {
+		"rm_set_serial",
+		"rm_get_BG",
+		"rm_add_partition",
+		"rm_get_partition",
+		"rm_get_partition_info",
+		"rm_modify_partition",
+		"rm_set_part_owner",
+		"rm_add_part_user",
+		"rm_remove_part_user",
+		"rm_remove_partition",
+		"rm_get_partitions",
+		"rm_get_partitions_info",
+		"rm_get_job",
+		"rm_get_jobs",
+		"rm_remove_job",
+		"rm_get_nodecards",
+		"rm_new_partition",
+		"rm_free_partition",
+		"rm_free_job",
+		"rm_free_BG",
+		"rm_free_partition_list",
+		"rm_free_job_list",
+		"rm_free_nodecard_list",
+		"rm_get_data",
+		"rm_set_data",
+		"jm_signal_job",
+		"jm_cancel_job",
+		"pm_create_partition",
+		"pm_reboot_partition",
 		"pm_destroy_partition",
 		"setSayMessageParams"
 	};
@@ -596,6 +600,21 @@ extern status_t bridge_create_block(pm_partition_id_t pid)
 	return rc;
 
 }
+
+#ifndef HAVE_BGL
+extern status_t bridge_reboot_block(pm_partition_id_t pid)
+{
+	int rc = CONNECTION_ERROR;
+	if(!bridge_init())
+		return rc;
+	
+	slurm_mutex_lock(&api_file_mutex);
+	rc = (*(bridge_api.reboot_partition))(pid);
+	slurm_mutex_unlock(&api_file_mutex);
+	return rc;
+
+}
+#endif
 
 extern status_t bridge_destroy_block(pm_partition_id_t pid)
 {

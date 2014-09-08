@@ -233,13 +233,26 @@ extern time_t last_bitmap_update;	/* time of last node creation or
 					 * deletion */
 extern time_t last_node_update;		/* time of last node record update */
 extern int node_record_count;		/* count in node_record_table_ptr */
-extern bitstr_t *avail_node_bitmap;	/* bitmap of available nodes, 
-					 * not DOWN, DRAINED or DRAINING */
 extern uint32_t total_cpus;		/* count of CPUs in the entire cluster */
+extern bool ping_nodes_now;		/* if set, ping nodes immediately */
+
+/*****************************************************************************\
+ *  NODE states and bitmaps
+ *  
+ *  avail_node_bitmap       Set if node's state is not DOWN, DRAINING/DRAINED, 
+ *                          FAILING or NO_RESPOND (i.e. available to run a job)
+ *  idle_node_bitmap        Set if node has no jobs allocated to it
+ *  share_node_bitmap       Set if any job allocated resources on that node
+ *                          is configured to not share the node with other 
+ *                          jobs (--exclusive option specified by job or
+ *                          Shared=NO configured for the job's partition)
+ *  up_node_bitmap          Set if the node's state is not DOWN
+\*****************************************************************************/
+extern bitstr_t *avail_node_bitmap;	/* bitmap of available nodes, 
+					 * state not DOWN, DRAIN or FAILING */
 extern bitstr_t *idle_node_bitmap;	/* bitmap of idle nodes */
 extern bitstr_t *share_node_bitmap;	/* bitmap of sharable nodes */
 extern bitstr_t *up_node_bitmap;	/* bitmap of up nodes, not DOWN */
-extern bool ping_nodes_now;		/* if set, ping nodes immediately */
 
 /*****************************************************************************\
  *  PARTITION parameters and data structures
@@ -489,6 +502,7 @@ struct 	step_record {
 	check_jobinfo_t check_job;	/* checkpoint context, opaque */
 	char *name;			/* name of job step */
 	char *network;			/* step's network specification */
+	uint16_t cpus_per_task;		/* cpus per task initiated */
 	uint32_t exit_code;		/* highest exit code from any task */
 	bitstr_t *exit_node_bitmap;	/* bitmap of exited nodes */
 	jobacctinfo_t *jobacct;         /* keep track of process info in the 
@@ -1387,6 +1401,7 @@ extern int step_create ( job_step_create_request_msg_t *step_specs,
  * IN job_ptr - job record step belongs to
  * IN step_node_list - node list of hosts in step
  * IN num_tasks - number of tasks in step
+ * IN cpus_per_task - number of cpus per task
  * IN task_dist - type of task distribution
  * IN plane_size - size of plane (only needed for the plane distribution)
  * RET - NULL or slurm_step_layout_t *
@@ -1397,6 +1412,7 @@ extern slurm_step_layout_t *step_layout_create(struct step_record *step_ptr,
 					       char *step_node_list,
 					       uint16_t node_count,
 					       uint32_t num_tasks,
+					       uint16_t cpus_per_task,
 					       uint16_t task_dist,
 					       uint32_t plane_size);
 /*

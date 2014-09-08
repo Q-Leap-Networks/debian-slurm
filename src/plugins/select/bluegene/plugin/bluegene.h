@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  bluegene.h - header for blue gene configuration processing module. 
  *
- *  $Id: bluegene.h 15551 2008-10-31 19:47:35Z da $
+ *  $Id: bluegene.h 15717 2008-11-17 23:20:37Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -51,19 +51,25 @@ typedef enum bg_layout_type {
 
 
 /* Global variables */
-#ifdef HAVE_BGP_FILES
-extern rm_BGP_t *bg;
-#else
-extern rm_BGL_t *bg;
-#endif
+
+extern my_bluegene_t *bg;
+#ifdef HAVE_BGL
 extern char *default_blrtsimage;
+#endif
 extern char *default_linuximage;
 extern char *default_mloaderimage;
 extern char *default_ramdiskimage;
 extern char *bridge_api_file;
+extern char *bg_slurm_user_name;
+extern char *bg_slurm_node_prefix;
 extern bg_layout_t bluegene_layout_mode;
+extern double bluegene_io_ratio;
+extern double bluegene_nc_ratio;
+extern uint32_t bluegene_smallest_block;
+extern uint16_t bluegene_proc_ratio;
 extern uint16_t bluegene_numpsets;
 extern uint16_t bluegene_bp_node_cnt;
+extern uint16_t bluegene_bp_nodecard_cnt;
 extern uint16_t bluegene_nodecard_node_cnt;
 extern uint16_t bluegene_nodecard_ionode_cnt;
 extern uint16_t bluegene_quarter_node_cnt;
@@ -76,10 +82,16 @@ extern List bg_list;			/* List of configured BG blocks */
 extern List bg_job_block_list;  	/* jobs running in these blocks */
 extern List bg_booted_block_list;  	/* blocks that are booted */
 extern List bg_freeing_list;  	        /* blocks that being freed */
+#ifdef HAVE_BGL
 extern List bg_blrtsimage_list;
+#endif
 extern List bg_linuximage_list;
 extern List bg_mloaderimage_list;
 extern List bg_ramdiskimage_list;
+extern List bg_valid_small32;
+extern List bg_valid_small64;
+extern List bg_valid_small128;
+extern List bg_valid_small256;
 
 extern bool agent_fini;
 extern pthread_mutex_t block_state_mutex;
@@ -124,8 +136,9 @@ extern int set_block_user(bg_record_t *bg_record);
 
 /* Return strings representing blue gene data types */
 extern char *convert_conn_type(rm_connection_type_t conn_type);
+#ifdef HAVE_BGL
 extern char *convert_node_use(rm_partition_mode_t pt);
-
+#endif
 /* sort a list of bg_records by size (node count) */
 extern void sort_bg_record_inc_size(List records);
 
@@ -134,6 +147,11 @@ extern void sort_bg_record_inc_size(List records);
 extern void *bluegene_agent(void *args);
 
 extern int bg_free_block(bg_record_t *bg_record);
+
+#ifndef HAVE_BGL
+extern int bg_reboot_block(bg_record_t *bg_record);
+#endif
+
 extern int remove_from_bg_list(List my_bg_list, bg_record_t *bg_record);
 extern bg_record_t *find_and_remove_org_from_bg_list(List my_list, 
 						     bg_record_t *bg_record);

@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  select_bluegene.c - node selection plugin for Blue Gene system.
  * 
- *  $Id: select_bluegene.c 15551 2008-10-31 19:47:35Z da $
+ *  $Id: select_bluegene.c 15763 2008-11-24 23:32:46Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -122,9 +122,11 @@ extern int init ( void )
 	||  (SELECT_NAV   != RM_NAV))
 		fatal("enum conn_type out of sync with rm_api.h");
 
+#ifdef HAVE_BGL
 	if ((SELECT_COPROCESSOR_MODE  != RM_PARTITION_COPROCESSOR_MODE)
 	||  (SELECT_VIRTUAL_NODE_MODE != RM_PARTITION_VIRTUAL_NODE_MODE))
 		fatal("enum node_use_type out of sync with rm_api.h");
+#endif
 	
 #endif
 
@@ -217,6 +219,16 @@ extern int fini ( void )
  */
  extern int select_p_block_init(List part_list)
 {
+	xfree(bg_slurm_user_name);
+	xfree(bg_slurm_node_prefix);
+
+	slurm_conf_lock();
+	xassert(slurmctld_conf.slurm_user_name);
+	xassert(slurmctld_conf.node_prefix);
+	bg_slurm_user_name = xstrdup(slurmctld_conf.slurm_user_name);
+	bg_slurm_node_prefix = xstrdup(slurmctld_conf.node_prefix);
+	slurm_conf_unlock();	
+
 #ifdef HAVE_BG
 	if(read_bg_conf() == SLURM_ERROR) {
 		fatal("Error, could not read the file");
@@ -296,12 +308,15 @@ extern int select_p_state_save(char *dir_name)
 	\* unlock_slurmctld(part_read_lock);          - see below      */
 
 	/* write the buffer to file */
+	slurm_conf_lock();
 	old_file = xstrdup(slurmctld_conf.state_save_location);
 	xstrcat(old_file, "/block_state.old");
 	reg_file = xstrdup(slurmctld_conf.state_save_location);
 	xstrcat(reg_file, "/block_state");
 	new_file = xstrdup(slurmctld_conf.state_save_location);
 	xstrcat(new_file, "/block_state.new");
+	slurm_conf_unlock();
+
 	log_fd = creat(new_file, 0600);
 	if (log_fd == 0) {
 		error("Can't save state, error creating file %s, %m",
@@ -427,7 +442,7 @@ extern int select_p_state_restore(char *dir_name)
 		return EFAULT;
 	}
 	xfree(ver_str);
-	if(select_g_unpack_node_info(&node_select_ptr, buffer) == SLURM_ERROR) { 
+	if(select_g_unpack_node_info(&node_select_ptr, buffer) == SLURM_ERROR) {
 		error("select_p_state_restore: problem unpacking node_info");
 		goto unpack_error;
 	}
@@ -514,8 +529,10 @@ extern int select_p_state_restore(char *dir_name)
 				xstrdup(bg_info_record->ionodes);
 			bg_record->ionode_bitmap = bit_copy(ionode_bitmap);
 			bg_record->state = bg_info_record->state;
+#ifdef HAVE_BGL
 			bg_record->quarter = bg_info_record->quarter;
 			bg_record->nodecard = bg_info_record->nodecard;
+#endif
 			if(bg_info_record->state == RM_PARTITION_ERROR)
 				bg_record->job_running = BLOCK_ERROR_STATE;
 			else
@@ -530,18 +547,20 @@ extern int select_p_state_restore(char *dir_name)
 			} else {
 				bg_record->cpus_per_bp = procs_per_node;
 			}
+#ifdef HAVE_BGL
 			bg_record->node_use = bg_info_record->node_use;
+#endif
 			bg_record->conn_type = bg_info_record->conn_type;
 			bg_record->boot_state = 0;
 
 			process_nodes(bg_record, true);
 
-			slurm_conf_lock();
+			
 			bg_record->target_name = 
-				xstrdup(slurmctld_conf.slurm_user_name);
+				xstrdup(bg_slurm_user_name);
 			bg_record->user_name = 
-				xstrdup(slurmctld_conf.slurm_user_name);
-			slurm_conf_unlock();
+				xstrdup(bg_slurm_user_name);
+			
 			my_uid = uid_from_string(bg_record->user_name);
 			if (my_uid == (uid_t) -1) {
 				error("uid_from_strin(%s): %m", 
@@ -550,8 +569,10 @@ extern int select_p_state_restore(char *dir_name)
 				bg_record->user_uid = my_uid;
 			} 
 				
+#ifdef HAVE_BGL
 			bg_record->blrtsimage =
 				xstrdup(bg_info_record->blrtsimage);
+#endif
 			bg_record->linuximage = 
 				xstrdup(bg_info_record->linuximage);
 			bg_record->mloaderimage =
@@ -576,11 +597,11 @@ extern int select_p_state_restore(char *dir_name)
 				continue;
 			}
 
-			slurm_conf_lock();
+			
 			snprintf(temp, sizeof(temp), "%s%s",
-				 slurmctld_conf.node_prefix,
+				 bg_slurm_node_prefix,
 				 name);
-			slurm_conf_unlock();
+			
 
 			xfree(name);
 			if(strcmp(temp, bg_record->nodes)) {
@@ -816,6 +837,7 @@ extern int select_p_update_block (update_part_msg_t *part_desc_ptr)
 	bg_record = find_bg_record_in_list(bg_list, part_desc_ptr->name);
 	if(!bg_record)
 		return SLURM_ERROR;
+
 	now = time(NULL);
 	slurm_make_time_str(&now, time_str, sizeof(time_str));
 	snprintf(tmp, sizeof(tmp), "[SLURM@%s]", time_str);
@@ -824,12 +846,78 @@ extern int select_p_update_block (update_part_msg_t *part_desc_ptr)
 		 "Admin set block %s state to %s %s",
 		 bg_record->bg_block_id, 
 		 _block_state_str(part_desc_ptr->state_up), tmp); 
+	
+	/* First fail any job running on this block */
 	if(bg_record->job_running > NO_JOB_RUNNING) {
 		slurm_fail_job(bg_record->job_running);	
+		/* need to set the job_ptr to NULL
+		   here or we will get error message
+		   about us trying to free this block
+		   with a job in it.
+		*/
+		bg_record->job_ptr = NULL;
+	} 
+	
+	/* Free all overlapping blocks and kill any jobs only
+	 * if we are going into an error state */ 
+	if (bluegene_layout_mode != LAYOUT_DYNAMIC
+	    && !part_desc_ptr->state_up) {
+		bg_record_t *found_record = NULL;
+		ListIterator itr;
+		List delete_list = list_create(NULL);
+		
+		slurm_mutex_lock(&block_state_mutex);
+		itr = list_iterator_create(bg_list);
+		while ((found_record = list_next(itr))) {
+			if (bg_record == found_record)
+				continue;
+			
+			if(!blocks_overlap(bg_record, found_record)) {
+				debug2("block %s isn't part of errored %s",
+				       found_record->bg_block_id, 
+				       bg_record->bg_block_id);
+				continue;
+			}
+			if(found_record->job_running > NO_JOB_RUNNING) {
+				info("Failing job %u block %s "
+				     "failed because overlapping block %s "
+				     "is in an error state.", 
+				     found_record->job_running, 
+				     found_record->bg_block_id,
+				     bg_record->bg_block_id);
+				/* We need to fail this job first to
+				   get the correct result even though
+				   we are freeing the block later */
+				slurm_fail_job(found_record->job_running);
+				/* need to set the job_ptr to NULL
+				   here or we will get error message
+				   about us trying to free this block
+				   with a job in it.
+				*/
+				found_record->job_ptr = NULL;
+			} else {
+				debug2("block %s is part of errored %s "
+				       "but no running job",
+				       found_record->bg_block_id, 
+				       bg_record->bg_block_id);	
+			}
+			list_push(delete_list, found_record);
+			num_block_to_free++;
+		}		
+		list_iterator_destroy(itr);
+		free_block_list(delete_list);
+		list_destroy(delete_list);
+		slurm_mutex_unlock(&block_state_mutex);
+	}
+
+	if(!part_desc_ptr->state_up) {
+		/* Since we are putting this block in an error state we need
+		   to wait for the job to be removed.  We don't really
+		   need to free the block though since we may just
+		   want it to be in an error state for some reason. */
 		while(bg_record->job_running > NO_JOB_RUNNING) 
 			sleep(1);
-	}
-	if(!part_desc_ptr->state_up) {
+		
 		slurm_mutex_lock(&block_state_mutex);
 		bg_record->job_running = BLOCK_ERROR_STATE;
 		bg_record->state = RM_PARTITION_ERROR;
@@ -843,7 +931,8 @@ extern int select_p_update_block (update_part_msg_t *part_desc_ptr)
 	} else {
 		return rc;
 	}
-	info("%s",reason);
+				
+	info("%s", reason);
 	last_bg_update = time(NULL);
 	return rc;
 }
@@ -954,15 +1043,12 @@ extern int select_p_update_sub_node (update_part_msg_t *part_desc_ptr)
 	bit_unfmt(ionode_bitmap, ionodes);		
 
 	requests = list_create(destroy_bg_record);
-	
+	memset(&blockreq, 0, sizeof(blockreq_t));
+
 	blockreq.block = coord;
-	blockreq.blrtsimage = NULL;
-	blockreq.linuximage = NULL;
-	blockreq.mloaderimage = NULL;
-	blockreq.ramdiskimage = NULL;
 	blockreq.conn_type = SELECT_SMALL;
-	blockreq.nodecards = 16;
-	blockreq.quarters = 0;
+	blockreq.small32 = bluegene_bp_nodecard_cnt;
+
 	add_bg_record(requests, NULL, &blockreq);
 	
 	delete_list = list_create(NULL);
@@ -1173,7 +1259,7 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 	uint32_t *nodes = (uint32_t *)data, tmp;
 	int i;
 	uint16_t req_geometry[BA_SYSTEM_DIMENSIONS];
-	
+
 	if(!bluegene_bp_node_cnt) {
 		fatal("select_g_alter_node_cnt: This can't be called "
 		      "before select_g_block_init");
@@ -1266,6 +1352,7 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 			job_desc->min_nodes = tmp;
 			job_desc->num_procs = procs_per_node * tmp;
 		} else { 
+#ifdef HAVE_BGL
 			if(job_desc->min_nodes <= bluegene_nodecard_node_cnt
 			   && bluegene_nodecard_ionode_cnt)
 				job_desc->min_nodes = 
@@ -1286,6 +1373,24 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 			
 			job_desc->num_procs = procs_per_node/tmp;
 			job_desc->min_nodes = 1;
+#else
+			i = bluegene_smallest_block;
+			while(i <= bluegene_bp_node_cnt) {
+				if(job_desc->min_nodes <= i) {
+					job_desc->min_nodes = i;
+					break;
+				}
+				i *= 2;
+			}
+			
+			select_g_set_jobinfo(job_desc->select_jobinfo,
+					     SELECT_DATA_NODE_CNT,
+					     &job_desc->min_nodes);
+
+			job_desc->num_procs = job_desc->min_nodes 
+				* bluegene_proc_ratio;
+			job_desc->min_nodes = 1;
+#endif
 		}
 		
 		if(job_desc->max_nodes == (uint32_t) NO_VAL) 
@@ -1302,6 +1407,7 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 			job_desc->max_nodes = tmp;
 			tmp = NO_VAL;
 		} else {
+#ifdef HAVE_BGL
 			if(job_desc->max_nodes <= bluegene_nodecard_node_cnt
 			   && bluegene_nodecard_ionode_cnt)
 				job_desc->max_nodes = 
@@ -1321,6 +1427,23 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 					     SELECT_DATA_MAX_PROCS, 
 					     &tmp);
 			job_desc->max_nodes = 1;
+#else
+			i = bluegene_smallest_block;
+			while(i <= bluegene_bp_node_cnt) {
+				if(job_desc->max_nodes <= i) {
+					job_desc->max_nodes = i;
+					break;
+				}
+				i *= 2;
+			}
+			
+			tmp = job_desc->max_nodes * bluegene_proc_ratio;
+			select_g_set_jobinfo(job_desc->select_jobinfo,
+					     SELECT_DATA_MAX_PROCS,
+					     &tmp);
+
+			job_desc->max_nodes = 1;
+#endif
 		}
 		tmp = NO_VAL;
 			

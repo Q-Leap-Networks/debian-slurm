@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  block_allocator.c - Assorted functions for layout of bluegene blocks, 
  *	 wiring, mapping for smap, etc.
- *  $Id: block_allocator.c 15551 2008-10-31 19:47:35Z da $
+ *  $Id: block_allocator.c 15668 2008-11-12 22:37:27Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -75,13 +75,22 @@ int DIM_SIZE[BA_SYSTEM_DIMENSIONS] = {0};
 #endif
 
 s_p_options_t bg_conf_file_options[] = {
+#ifdef HAVE_BGL
 	{"BlrtsImage", S_P_STRING}, 
 	{"LinuxImage", S_P_STRING},
-	{"MloaderImage", S_P_STRING},
 	{"RamDiskImage", S_P_STRING},
-	{"BridgeAPILogFile", S_P_STRING},
-	{"RamDiskImage", S_P_STRING},
+	{"AltBlrtsImage", S_P_ARRAY, parse_image, NULL}, 
+	{"AltLinuxImage", S_P_ARRAY, parse_image, NULL},
+	{"AltRamDiskImage", S_P_ARRAY, parse_image, NULL},
+#else
+	{"CnloadImage", S_P_STRING},
+	{"IoloadImage", S_P_STRING},
+	{"AltCnloadImage", S_P_ARRAY, parse_image, NULL},
+	{"AltIoloadImage", S_P_ARRAY, parse_image, NULL},
+#endif
 	{"LayoutMode", S_P_STRING},
+	{"MloaderImage", S_P_STRING},
+	{"BridgeAPILogFile", S_P_STRING},
 	{"BridgeAPIVerbose", S_P_UINT16},
 	{"BasePartitionNodeCnt", S_P_UINT16},
 	{"NodeCardNodeCnt", S_P_UINT16},
@@ -89,10 +98,7 @@ s_p_options_t bg_conf_file_options[] = {
 	{"BPs", S_P_ARRAY, parse_blockreq, destroy_blockreq},
 	/* these are just going to be put into a list that will be
 	   freed later don't free them after reading them */
-	{"AltBlrtsImage", S_P_ARRAY, parse_image, NULL}, 
-	{"AltLinuxImage", S_P_ARRAY, parse_image, NULL},
 	{"AltMloaderImage", S_P_ARRAY, parse_image, NULL},
-	{"AltRamDiskImage", S_P_ARRAY, parse_image, NULL},
 	{NULL}
 };
 
@@ -206,8 +212,13 @@ extern char *bg_block_state_string(rm_partition_state_t state)
 
 #ifdef HAVE_BG
 	switch (state) {
+#ifdef HAVE_BGL
 		case RM_PARTITION_BUSY: 
 			return "BUSY";
+#else
+		case RM_PARTITION_REBOOTING: 
+			return "REBOOTING";
+#endif
 		case RM_PARTITION_CONFIGURING:
 			return "CONFIG";
 		case RM_PARTITION_DEALLOCATING:
@@ -233,12 +244,22 @@ extern int parse_blockreq(void **dest, slurm_parser_enum_t type,
 {
 	s_p_options_t block_options[] = {
 		{"Type", S_P_STRING},
+		{"32CNBlocks", S_P_UINT16},
+		{"128CNBlocks", S_P_UINT16},
+#ifdef HAVE_BGL
 		{"Nodecards", S_P_UINT16},
 		{"Quarters", S_P_UINT16},
 		{"BlrtsImage", S_P_STRING},
 		{"LinuxImage", S_P_STRING},
-		{"MloaderImage", S_P_STRING},
 		{"RamDiskImage", S_P_STRING},
+#else
+		{"16CNBlocks", S_P_UINT16},
+		{"64CNBlocks", S_P_UINT16},
+		{"256CNBlocks", S_P_UINT16},
+		{"CnloadImage", S_P_STRING},
+		{"IoloadImage", S_P_STRING},
+#endif
+		{"MloaderImage", S_P_STRING},
 		{NULL}
 	};
 	s_p_hashtbl_t *tbl;
@@ -246,6 +267,7 @@ extern int parse_blockreq(void **dest, slurm_parser_enum_t type,
 	blockreq_t *n = NULL;
 	hostlist_t hl = NULL;
 	char temp[BUFSIZE];
+
 	tbl = s_p_hashtbl_create(block_options);
 	s_p_parse_line(tbl, *leftover, leftover);
 	if(!value) {
@@ -257,10 +279,15 @@ extern int parse_blockreq(void **dest, slurm_parser_enum_t type,
 	hostlist_destroy(hl);
 
 	n->block = xstrdup(temp);
+#ifdef HAVE_BGL
 	s_p_get_string(&n->blrtsimage, "BlrtsImage", tbl);
 	s_p_get_string(&n->linuximage, "LinuxImage", tbl);
-	s_p_get_string(&n->mloaderimage, "MloaderImage", tbl);
 	s_p_get_string(&n->ramdiskimage, "RamDiskImage", tbl);
+#else
+	s_p_get_string(&n->linuximage, "CnloadImage", tbl);
+	s_p_get_string(&n->ramdiskimage, "IoloadImage", tbl);
+#endif
+	s_p_get_string(&n->mloaderimage, "MloaderImage", tbl);
 	
 	s_p_get_string(&tmp, "Type", tbl);
 	if (!tmp || !strcasecmp(tmp,"TORUS"))
@@ -271,10 +298,26 @@ extern int parse_blockreq(void **dest, slurm_parser_enum_t type,
 		n->conn_type = SELECT_SMALL;
 	xfree(tmp);
 	
-	if (!s_p_get_uint16(&n->nodecards, "Nodecards", tbl))
-		n->nodecards = 0;
-	if (!s_p_get_uint16(&n->quarters, "Quarters", tbl))
-		n->quarters = 0;
+	if (!s_p_get_uint16(&n->small32, "32CNBlocks", tbl)) {
+#ifdef HAVE_BGL
+		s_p_get_uint16(&n->small32, "Nodecards", tbl);
+#else
+		;
+#endif
+	}
+	if (!s_p_get_uint16(&n->small128, "128CNBlocks", tbl)) {
+#ifdef HAVE_BGL
+		s_p_get_uint16(&n->small128, "Quarters", tbl);
+#else
+		;
+#endif
+	}
+
+#ifndef HAVE_BGL
+	s_p_get_uint16(&n->small16, "16CNBlocks", tbl);
+	s_p_get_uint16(&n->small64, "64CNBlocks", tbl);
+	s_p_get_uint16(&n->small256, "256CNBlocks", tbl);
+#endif
 
 	s_p_hashtbl_destroy(tbl);
 
@@ -287,7 +330,9 @@ extern void destroy_blockreq(void *ptr)
 	blockreq_t *n = (blockreq_t *)ptr;
 	if(n) {
 		xfree(n->block);
+#ifdef HAVE_BGL
 		xfree(n->blrtsimage);
+#endif
 		xfree(n->linuximage);
 		xfree(n->mloaderimage);
 		xfree(n->ramdiskimage);
@@ -340,7 +385,8 @@ extern int parse_image(void **dest, slurm_parser_enum_t type,
 			snprintf(image_group->name, (i-j)+1, "%s", tmp+j);
 			image_group->gid = gid_from_string(image_group->name);
 			if (image_group->gid == (gid_t) -1) {
-				fatal("Invalid bluegene.conf parameter Groups=%s", 
+				fatal("Invalid bluegene.conf parameter "
+				      "Groups=%s", 
 				      image_group->name);
 			} else {
 				debug3("adding group %s %d", image_group->name,
@@ -745,7 +791,9 @@ extern void delete_ba_request(void *arg)
 		xfree(ba_request->save_name);
 		if(ba_request->elongate_geos)
 			list_destroy(ba_request->elongate_geos);
+#ifdef HAVE_BGL
 		xfree(ba_request->blrtsimage);
+#endif
 		xfree(ba_request->linuximage);
 		xfree(ba_request->mloaderimage);
 		xfree(ba_request->ramdiskimage);
@@ -1882,6 +1930,10 @@ extern char *bg_err_str(status_t inx)
 		return "Base partition not found";
 	case SWITCH_NOT_FOUND:
 		return "Switch not found";
+#ifndef HAVE_BGL
+	case PARTITION_ALREADY_DEFINED:
+		return "Partition already defined";
+#endif
 	case JOB_ALREADY_DEFINED:
 		return "Job already defined";
 	case CONNECTION_ERROR:

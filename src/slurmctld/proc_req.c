@@ -1861,9 +1861,14 @@ static void _slurm_rpc_step_layout(slurm_msg_t *msg)
 	/* return result */
 	if (error_code || (job_ptr == NULL)) {
 		unlock_slurmctld(job_read_lock);
-		debug2("_slurm_rpc_step_layout: JobId=%u, uid=%u: %s",
-			req->job_id, uid, 
-			slurm_strerror(error_code));
+		if (error_code == ESLURM_ACCESS_DENIED) {
+			error("Security vioation, REQUEST_STEP_LAYOUT for "
+			      "JobId=%u from uid=%u", req->job_id, uid);
+		} else {
+			debug2("_slurm_rpc_step_layout: JobId=%u, uid=%u: %s",
+				req->job_id, uid, 
+				slurm_strerror(error_code));
+		}
 		slurm_send_rc_msg(msg, error_code);
 		return;
 	}
@@ -2987,12 +2992,14 @@ inline static void  _slurm_rpc_accounting_first_reg(slurm_msg_t *msg)
 	START_TIMER;
 	debug2("Processing RPC: ACCOUNTING_FIRST_REG from uid=%u",
 		(unsigned int) uid);
-	if (!validate_super_user(uid)) {
-		error("Update Association request from non-super user uid=%d", 
+	if (!validate_super_user(uid) 
+	    && (assoc_mgr_get_admin_level(acct_db_conn, uid)
+		< ACCT_ADMIN_SUPER_USER)) {
+		error("First Registration request from non-super user uid=%d", 
 		      uid);
 		return;
 	}
-
+	
 	send_jobs_to_accounting(event_time);
 	send_nodes_to_accounting(event_time);
 	

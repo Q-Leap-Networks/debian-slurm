@@ -2,7 +2,7 @@
  *  bg_job_place.c - blue gene job placement (e.g. base block selection)
  *  functions.
  *
- *  $Id: bg_job_place.c 15372 2008-10-10 15:52:40Z da $ 
+ *  $Id: bg_job_place.c 15759 2008-11-21 23:38:34Z da $ 
  *****************************************************************************
  *  Copyright (C) 2004-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -75,9 +75,15 @@ static int _get_user_groups(uint32_t user_id, uint32_t group_id,
 			     gid_t *groups, int max_groups, int *ngroups);
 static int _test_image_perms(char *image_name, List image_list, 
 			      struct job_record* job_ptr);
+#ifdef HAVE_BGL
 static int _check_images(struct job_record* job_ptr,
 			 char **blrtsimage, char **linuximage,
 			 char **mloaderimage, char **ramdiskimage);
+#else
+static int _check_images(struct job_record* job_ptr,
+			 char **linuximage,
+			 char **mloaderimage, char **ramdiskimage);
+#endif
 static bg_record_t *_find_matching_block(List block_list, 
 					 struct job_record* job_ptr, 
 					 bitstr_t* slurm_block_bitmap,
@@ -156,6 +162,7 @@ static int _bg_record_sort_aval_inc(bg_record_t* rec_a, bg_record_t* rec_b)
 		else if (size_a > 0)
 			return 1;
 	}
+#ifdef HAVE_BGL
 	if (rec_a->quarter < rec_b->quarter)
 		return -1;
 	else if (rec_a->quarter > rec_b->quarter)
@@ -165,7 +172,7 @@ static int _bg_record_sort_aval_inc(bg_record_t* rec_a, bg_record_t* rec_b)
 		return -1;
 	else if(rec_a->nodecard > rec_b->nodecard)
 		return 1;
-
+#endif
 	return 0;
 }
 
@@ -177,9 +184,6 @@ static int _bg_record_sort_aval_inc(bg_record_t* rec_a, bg_record_t* rec_b)
  */
 static int _bg_record_sort_aval_dec(bg_record_t* rec_a, bg_record_t* rec_b)
 {
-	int size_a = rec_a->node_cnt;
-	int size_b = rec_b->node_cnt;
-
 	if(rec_a->job_ptr && !rec_b->job_ptr)
 		return 1;
 	else if(!rec_a->job_ptr && rec_b->job_ptr)
@@ -191,28 +195,7 @@ static int _bg_record_sort_aval_dec(bg_record_t* rec_a, bg_record_t* rec_b)
 			return 1;
 	}
 
-	if (size_a < size_b)
-		return -1;
-	else if (size_a > size_b)
-		return 1;
-	if(rec_a->nodes && rec_b->nodes) {
-		size_a = strcmp(rec_a->nodes, rec_b->nodes);
-		if (size_a < 0)
-			return -1;
-		else if (size_a > 0)
-			return 1;
-	}
-	if (rec_a->quarter < rec_b->quarter)
-		return -1;
-	else if (rec_a->quarter > rec_b->quarter)
-		return 1;
-
-	if(rec_a->nodecard < rec_b->nodecard)
-		return -1;
-	else if(rec_a->nodecard > rec_b->nodecard)
-		return 1;
-
-	return 0;
+	return bg_record_cmpf_inc(rec_a, rec_b);
 }
 
 /*
@@ -297,12 +280,19 @@ static int _test_image_perms(char *image_name, List image_list,
 	return allow;
 }
 
+#ifdef HAVE_BGL
 static int _check_images(struct job_record* job_ptr,
 			 char **blrtsimage, char **linuximage,
 			 char **mloaderimage, char **ramdiskimage)
+#else
+static int _check_images(struct job_record* job_ptr,
+			 char **linuximage,
+			 char **mloaderimage, char **ramdiskimage)
+#endif
 {
 	int allow = 0;
 
+#ifdef HAVE_BGL
 	select_g_get_jobinfo(job_ptr->select_jobinfo,
 			     SELECT_DATA_BLRTS_IMAGE, blrtsimage);
 	
@@ -311,12 +301,13 @@ static int _check_images(struct job_record* job_ptr,
 					  job_ptr);
 		if (!allow) {
 			error("User %u:%u is not allowed to use BlrtsImage %s",
-			      job_ptr->user_id, job_ptr->group_id, *blrtsimage);
+			      job_ptr->user_id, job_ptr->group_id,
+			      *blrtsimage);
 			return SLURM_ERROR;
 		       
 		}
 	}
-
+#endif
 	select_g_get_jobinfo(job_ptr->select_jobinfo,
 			     SELECT_DATA_LINUX_IMAGE, linuximage);
 	if (*linuximage) {
@@ -451,22 +442,29 @@ static bg_record_t *_find_matching_block(List block_list,
 			continue;
 		
 		if(check_image) {
+#ifdef HAVE_BGL
 			if(request->blrtsimage &&
 			   strcasecmp(request->blrtsimage,
 				      bg_record->blrtsimage)) {
 				*allow = 1;
 				continue;
-			} else if(request->linuximage &&
+			} 
+#endif
+			if(request->linuximage &&
 			   strcasecmp(request->linuximage,
 				      bg_record->linuximage)) {
 				*allow = 1;
 				continue;
-			} else if(request->mloaderimage &&
+			}
+
+			if(request->mloaderimage &&
 			   strcasecmp(request->mloaderimage, 
 				      bg_record->mloaderimage)) {
 				*allow = 1;
 				continue;
-			} else if(request->ramdiskimage &&
+			}
+
+			if(request->ramdiskimage &&
 			   strcasecmp(request->ramdiskimage,
 				      bg_record->ramdiskimage)) {
 				*allow = 1;
@@ -815,7 +813,9 @@ static int _find_best_block_match(List block_list,
 	char tmp_char[256];
 	int start_req = 0;
 	static int total_cpus = 0;
+#ifdef HAVE_BGL
 	char *blrtsimage = NULL;        /* BlrtsImage for this request */
+#endif
 	char *linuximage = NULL;        /* LinuxImage for this request */
 	char *mloaderimage = NULL;      /* mloaderImage for this request */
 	char *ramdiskimage = NULL;      /* RamDiskImage for this request */
@@ -860,9 +860,15 @@ static int _find_best_block_match(List block_list,
 			     SELECT_DATA_MAX_PROCS, &max_procs);
 
 	
+#ifdef HAVE_BGL
 	if((rc = _check_images(job_ptr, &blrtsimage, &linuximage,
 			       &mloaderimage, &ramdiskimage)) == SLURM_ERROR)
 		goto end_it;
+#else
+	if((rc = _check_images(job_ptr, &linuximage,
+			       &mloaderimage, &ramdiskimage)) == SLURM_ERROR)
+		goto end_it;
+#endif
 	
 	if(req_geometry[X] != 0 && req_geometry[X] != (uint16_t)NO_VAL) {
 		target_size = 1;
@@ -900,16 +906,16 @@ static int _find_best_block_match(List block_list,
 				tmp_record = xmalloc(sizeof(bg_record_t));
 				tmp_record->bg_block_list =
 					list_create(destroy_ba_node);
-				slurm_conf_lock();
-				len += strlen(slurmctld_conf.node_prefix)+1;
+				
+				len += strlen(bg_slurm_node_prefix)+1;
 				tmp_record->nodes = xmalloc(len);
 				
 				snprintf(tmp_record->nodes,
 					 len,
 					 "%s%s", 
-					 slurmctld_conf.node_prefix, 
+					 bg_slurm_node_prefix, 
 					 tmp_nodes+i);
-				slurm_conf_unlock();
+				
 			
 				process_nodes(tmp_record, false);
 				for(i=0; i<BA_SYSTEM_DIMENSIONS; i++) {
@@ -950,7 +956,9 @@ static int _find_best_block_match(List block_list,
 	request.rotate = rotate;
 	request.elongate = true;
 	request.start_req = start_req;
+#ifdef HAVE_BGL
 	request.blrtsimage = blrtsimage;
+#endif
 	request.linuximage = linuximage;
 	request.mloaderimage = mloaderimage;
 	request.ramdiskimage = ramdiskimage;
@@ -1164,7 +1172,9 @@ no_match:
 	rc = SLURM_ERROR;
 
 end_it:
+#ifdef HAVE_BGL
 	xfree(blrtsimage);
+#endif
 	xfree(linuximage);
 	xfree(mloaderimage);
 	xfree(ramdiskimage);
@@ -1227,7 +1237,6 @@ extern int submit_job(struct job_record *job_ptr, bitstr_t *slurm_block_bitmap,
 {
 	int rc = SLURM_SUCCESS;
 #ifdef HAVE_BG
-	int i=0;
 	bg_record_t* bg_record = NULL;
 	char buf[100];
 	uint16_t tmp16 = (uint16_t)NO_VAL;
@@ -1254,17 +1263,27 @@ extern int submit_job(struct job_record *job_ptr, bitstr_t *slurm_block_bitmap,
 	      buf, min_nodes, req_nodes, max_nodes);
 	select_g_sprint_jobinfo(job_ptr->select_jobinfo, buf, sizeof(buf), 
 				SELECT_PRINT_BLRTS_IMAGE);
+#ifdef HAVE_BGL
 	debug2("BlrtsImage=%s", buf);
 	select_g_sprint_jobinfo(job_ptr->select_jobinfo, buf, sizeof(buf), 
 				SELECT_PRINT_LINUX_IMAGE);
+#endif
+#ifdef HAVE_BGL
 	debug2("LinuxImage=%s", buf);
+#else
+	debug2("ComputNodeImage=%s", buf);
+#endif
+
 	select_g_sprint_jobinfo(job_ptr->select_jobinfo, buf, sizeof(buf), 
 				SELECT_PRINT_MLOADER_IMAGE);
 	debug2("MloaderImage=%s", buf);
 	select_g_sprint_jobinfo(job_ptr->select_jobinfo, buf, sizeof(buf), 
 				SELECT_PRINT_RAMDISK_IMAGE);
+#ifdef HAVE_BGL
 	debug2("RamDiskImage=%s", buf);
-	
+#else
+	debug2("RamDiskIoLoadImage=%s", buf);
+#endif	
 	slurm_mutex_lock(&block_state_mutex);
 	block_list = copy_bg_list(bg_list);
 	slurm_mutex_unlock(&block_state_mutex);
@@ -1313,13 +1332,16 @@ extern int submit_job(struct job_record *job_ptr, bitstr_t *slurm_block_bitmap,
 				select_g_set_jobinfo(job_ptr->select_jobinfo,
 					     SELECT_DATA_BLOCK_ID,
 					     "unassigned");
-				if(job_ptr->num_procs < bluegene_bp_node_cnt 
-				   && job_ptr->num_procs > 0) {
-					i = procs_per_node/job_ptr->num_procs;
-					debug2("divide by %d", i);
-				} else 
-					i = 1;
-				min_nodes *= bluegene_bp_node_cnt/i;
+				/* if(job_ptr->num_procs < bluegene_bp_node_cnt  */
+/* 				   && job_ptr->num_procs > 0) { */
+/* 					i = procs_per_node/job_ptr->num_procs; */
+/* 					debug2("divide by %d", i); */
+/* 				} else  */
+/* 					i = 1; */
+/* 				min_nodes *= bluegene_bp_node_cnt/i; */
+				/* this seems to do the same thing as
+				 * above */
+				min_nodes = bg_record->node_cnt;
 				select_g_set_jobinfo(job_ptr->select_jobinfo,
 					     SELECT_DATA_NODE_CNT,
 					     &min_nodes);
