@@ -54,6 +54,14 @@
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 
+static int _nodes_in_list(char *node_list)
+{
+	hostset_t host_set = hostset_create(node_list);
+	int count = hostset_count(host_set);
+	hostset_destroy(host_set);
+	return count;
+}
+
 static int _sort_pids_by_name(job_step_pids_t *rec_a, job_step_pids_t *rec_b)
 {
 	int diff = 0;
@@ -134,6 +142,7 @@ char *
 slurm_sprint_job_step_info ( job_step_info_t * job_step_ptr,
 			    int one_liner )
 {
+	char tmp_node_cnt[40];
 	char time_str[32];
 	char limit_str[32];
 	char tmp_line[128];
@@ -164,15 +173,22 @@ slurm_sprint_job_step_info ( job_step_info_t * job_step_ptr,
 		select_g_select_jobinfo_get(job_step_ptr->select_jobinfo,
 					    SELECT_JOBDATA_IONODES,
 					    &io_nodes);
-		snprintf(tmp_line, sizeof(tmp_line),
-			"Partition=%s MidplaneList=%s[%s] Gres=%s",
-			job_step_ptr->partition,
-			job_step_ptr->nodes, io_nodes,
-			job_step_ptr->gres);
-		xfree(io_nodes);
+		if (io_nodes) {
+			snprintf(tmp_line, sizeof(tmp_line),
+				 "Partition=%s MidplaneList=%s[%s] Gres=%s",
+				 job_step_ptr->partition,
+				 job_step_ptr->nodes, io_nodes,
+				 job_step_ptr->gres);
+			xfree(io_nodes);
+		} else
+			snprintf(tmp_line, sizeof(tmp_line),
+				 "Partition=%s MidplaneList=%s Gres=%s",
+				 job_step_ptr->partition,
+				 job_step_ptr->nodes,
+				 job_step_ptr->gres);
 	} else {
 		snprintf(tmp_line, sizeof(tmp_line),
-			"Partition=%s Nodes=%s Gres=%s",
+			"Partition=%s NodeList=%s Gres=%s",
 			job_step_ptr->partition, job_step_ptr->nodes,
 			job_step_ptr->gres);
 	}
@@ -183,9 +199,23 @@ slurm_sprint_job_step_info ( job_step_info_t * job_step_ptr,
 		xstrcat(out, "\n   ");
 
 	/****** Line 3 ******/
+
+	if (cluster_flags & CLUSTER_FLAG_BGQ) {
+		uint32_t nodes = 0;
+		select_g_select_jobinfo_get(job_step_ptr->select_jobinfo,
+					    SELECT_JOBDATA_NODE_CNT,
+					    &nodes);
+		convert_num_unit((float)nodes, tmp_node_cnt,
+				 sizeof(tmp_node_cnt), UNIT_NONE);
+	} else {
+		convert_num_unit((float)_nodes_in_list(job_step_ptr->nodes),
+				 tmp_node_cnt, sizeof(tmp_node_cnt),
+				 UNIT_NONE);
+	}
+
 	snprintf(tmp_line, sizeof(tmp_line),
-		"Tasks=%u Name=%s Network=%s",
-		job_step_ptr->num_tasks, job_step_ptr->name,
+		"Nodes=%s Tasks=%u Name=%s Network=%s",
+		 tmp_node_cnt, job_step_ptr->num_tasks, job_step_ptr->name,
 		job_step_ptr->network);
 	xstrcat(out, tmp_line);
 	if (one_liner)
@@ -195,9 +225,42 @@ slurm_sprint_job_step_info ( job_step_info_t * job_step_ptr,
 
 	/****** Line 4 ******/
 	snprintf(tmp_line, sizeof(tmp_line),
-		"ResvPorts=%s Checkpoint=%u CheckpointDir=%s\n\n",
+		"ResvPorts=%s Checkpoint=%u CheckpointDir=%s",
 		 job_step_ptr->resv_ports,
 		 job_step_ptr->ckpt_interval, job_step_ptr->ckpt_dir);
+	xstrcat(out, tmp_line);
+	if (one_liner)
+		xstrcat(out, " ");
+	else
+		xstrcat(out, "\n   ");
+
+	/****** Line 5 ******/
+	if (job_step_ptr->cpu_freq == NO_VAL)
+		snprintf(tmp_line, sizeof(tmp_line), 
+			 "CPUFreqReq=Default\n\n");
+	else if (job_step_ptr->cpu_freq & CPU_FREQ_RANGE_FLAG) {
+		switch (job_step_ptr->cpu_freq) 
+		{
+		case CPU_FREQ_LOW :
+			snprintf(tmp_line, sizeof(tmp_line),
+				 "CPUFreqReq=Low\n\n");
+			break;
+		case CPU_FREQ_MEDIUM :
+			snprintf(tmp_line, sizeof(tmp_line),
+				 "CPUFreqReq=Medium\n\n");
+			break;
+		case CPU_FREQ_HIGH :
+			snprintf(tmp_line, sizeof(tmp_line),
+				 "CPUFreqReq=High\n\n");
+			break;
+		default :
+			snprintf(tmp_line, sizeof(tmp_line),
+				 "CPUFreqReq=Unknown\n\n");
+		}
+	}
+	else 
+		snprintf(tmp_line, sizeof(tmp_line),
+			 "CPUFreqReq=%u\n\n", job_step_ptr->cpu_freq);
 	xstrcat(out, tmp_line);
 
 	return out;
@@ -372,10 +435,17 @@ extern int slurm_job_step_stat(uint32_t job_id, uint32_t step_id,
 		case RESPONSE_SLURM_RC:
 			rc = slurm_get_return_code(ret_data_info->type,
 						   ret_data_info->data);
-			error("slurm_job_step_stat: "
-			      "there was an error with the request to "
-			      "%s rc = %s",
-			      ret_data_info->node_name, slurm_strerror(rc));
+			if (rc == ESLURM_INVALID_JOB_ID) {
+				debug("slurm_job_step_stat: job step %u.%u "
+				      "has already completed",
+				      job_id, step_id);
+			} else {
+				error("slurm_job_step_stat: "
+				      "there was an error with the request to "
+				      "%s rc = %s",
+				      ret_data_info->node_name,
+				      slurm_strerror(rc));
+			}
 			break;
 		default:
 			rc = slurm_get_return_code(ret_data_info->type,

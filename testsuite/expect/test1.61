@@ -85,18 +85,18 @@ if {[wait_for_job $job_id DONE] != 0} {
 }
 
 if {[wait_for_file $file_out] == 0} {
-	set tl 0
+	set timed_out 0
 	spawn cat $file_out
 	expect {
 		-re " TimeLimit=00:01:00" {
-			set tl 1
+			set timed_out 1
 			exp_continue
 		}
 		eof {
 			wait
 		}
 	}
-	if {$tl == 0} {
+	if {$timed_out == 0} {
 		send_user "\nFAILURE: srun time limit not found\n"
 		set exit_code 1
 	}
@@ -105,19 +105,24 @@ if {[wait_for_file $file_out] == 0} {
 	set exit_code 1
 }
 
+if {[test_launch_poe]} {
+	set step_id 2
+} else {
+	set step_id 1
+}
 if {[wait_for_file $file_err] == 0} {
-	set tl 0
+	set timed_out 0
 	spawn cat $file_err
 	expect {
-		-re " STEP $job_id.1 CANCELLED AT.*DUE TO TIME LIMIT " {
-			set tl 1
+		-re " STEP $job_id.$step_id CANCELLED AT.*DUE TO TIME LIMIT " {
+			set timed_out 1
 			exp_continue
 		}
 		eof {
 			wait
 		}
 	}
-	if {$tl == 0} {
+	if {$timed_out == 0} {
 		send_user "\nFAILURE: srun time limit not enforced\n"
 		set exit_code 1
 	}

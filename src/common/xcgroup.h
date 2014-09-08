@@ -48,6 +48,15 @@
 #define XCGROUP_ERROR    1
 #define XCGROUP_SUCCESS  0
 
+// http://lists.debian.org/debian-boot/2012/04/msg00047.html
+#if defined(__FreeBSD__)
+#define	MS_NOSUID	MNT_NOSUID
+#define	MS_NOEXEC	MNT_NOEXEC
+#define	MS_NODEV	0
+
+#define	umount(d)	unmount(d, 0)
+#endif
+
 typedef struct xcgroup_ns {
 
 	char* mnt_point;  /* mount point to use for the associated cgroup */
@@ -62,11 +71,12 @@ typedef struct xcgroup_ns {
 typedef struct xcgroup {
 
 	xcgroup_ns_t* ns; /* xcgroup namespace of this xcgroup */
-	char* name;       /* name of the xcgroup relative to the ns */
-	char* path;       /* absolute path of the xcgroup in the ns */
-	uid_t uid;        /* uid of the owner */
-	gid_t gid;        /* gid of the owner */
-	int   fd;         /* used for locking */
+	char*    name;    /* name of the xcgroup relative to the ns */
+	char*    path;    /* absolute path of the xcgroup in the ns */
+	uid_t    uid;     /* uid of the owner */
+	gid_t    gid;     /* gid of the owner */
+	int      fd;      /* used for locking */
+	uint32_t notify;  /* toggle notify_on_release flag (default=1) */
 
 } xcgroup_t;
 
@@ -78,9 +88,8 @@ typedef struct xcgroup {
  *  - XCGROUP_SUCCESS
  */
 int xcgroup_ns_create(slurm_cgroup_conf_t *conf,
-		      xcgroup_ns_t* cgns,
-		      char* mnt_point,char* mnt_args,
-		      char* subsys,char* notify_prog);
+		      xcgroup_ns_t* cgns, char* mnt_args,
+		      char* subsys);
 
 /*
  * destroy a cgroup namespace

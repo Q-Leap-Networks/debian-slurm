@@ -41,6 +41,13 @@ set job_id2     0
 
 print_header $test_id
 
+if {[test_launch_poe]} {
+	set step_id 1
+} else {
+	set step_id 0
+}
+set is_bluegene [test_bluegene]
+
 #
 # Build input script file
 #
@@ -102,6 +109,9 @@ exec $bin_rm -f $file_in
 # NOTE: Running "scontrol show job" and looking for these job IDs
 # may not work due to a bug in awk not scanning large output buffers
 #
+# NOTE: Match "JobId=" only
+#
+send_user "\nGetting more info for job id 1 ($job_id1)\n"
 set matches 0
 spawn $scontrol show job $job_id1
 expect {
@@ -109,17 +119,11 @@ expect {
 		incr matches
 		exp_continue
 	}
-	timeout {
-		send_user "\nFAILURE: scontrol not responding\n"
-		set exit_code 1
+	-re "CPU_IDs=" {
+		incr matches
+		exp_continue
 	}
-	eof {
-		wait
-	}
-}
-spawn $scontrol show job $job_id2
-expect {
-	-re "JobId=$job_id2 " {
+	-re "BatchScript=" {
 		incr matches
 		exp_continue
 	}
@@ -131,8 +135,157 @@ expect {
 		wait
 	}
 }
+send_user "\nGetting more info for job id 2 ($job_id2)\n"
+spawn $scontrol show job $job_id2
+expect {
+	-re "JobId=$job_id2 " {
+		incr matches
+		exp_continue
+	}
+	-re "CPU_IDs=" {
+		incr matches
+		exp_continue
+	}
+	-re "BatchScript=" {
+		incr matches
+		exp_continue
+	}
+	timeout {
+		send_user "\nFAILURE: scontrol not responding\n"
+		set exit_code 1
+	}
+	eof {
+		wait
+	}
+}
+
+
 if {$matches != 2} {
-	send_user "\nFAILURE: scontrol found $matches of 2 jobs\n"
+	send_user "\nFAILURE: scontrol failed to find matching job ($matches != 2)\n"
+	set exit_code 1
+}
+
+#
+# using the scontrol -d option to display more info about job
+#
+send_user "\nGetting more info for job id 1 ($job_id1) with -d option\n"
+set matches 0
+spawn $scontrol -d show job $job_id1
+expect {
+	-re "JobId=$job_id1 " {
+		incr matches
+		exp_continue
+	}
+	-re "CPU_IDs=" {
+		incr matches
+		exp_continue
+	}
+	-re "BatchScript=" {
+		incr matches
+		exp_continue
+	}
+	timeout {
+		send_user "\n FAILURE scontrol not responding\n"
+		set exit_code 1
+	}
+	eof {
+		wait
+	}
+}
+send_user "\nGetting more info for job id 2 ($job_id2) with -d option\n"
+spawn $scontrol -d show job $job_id2
+expect {
+	-re "JobId=$job_id2 " {
+		incr matches
+		exp_continue
+	}
+	-re "CPU_IDs=" {
+		incr matches
+		exp_continue
+	}
+	-re "BatchScript=" {
+		incr matches
+		exp_continue
+	}
+	timeout {
+		send_user "\nFAILURE: scontrol not responding\n"
+		set exit_code 1
+	}
+	eof {
+		wait
+	}
+
+}
+if {$is_bluegene == 0} {
+	set match_target 4
+} else {
+#	No CPU_IDs on Bluegene
+	set match_target 2
+}
+if {$matches != $match_target} {
+	send_user "\nFAILURE: scontrol failed to find matching job ($matches != $match_target)\n"
+	set exit_code 1
+}
+
+#
+# using the scontrol -dd option to display more info about job
+#
+send_user "\nGetting more info for job id 1 ($job_id1) with -dd option\n"
+set matches 0
+spawn $scontrol -dd show job $job_id1
+expect {
+	-re "JobId=$job_id1 " {
+		incr matches
+		exp_continue
+	}
+	-re "CPU_IDs=" {
+		incr matches
+		exp_continue
+	}
+	-re "BatchScript=" {
+		incr matches
+		exp_continue
+	}
+	timeout {
+		send_user "\n FAILURE scontrol not responding\n"
+		set exit_code 1
+	}
+	eof {
+		wait
+	}
+}
+send_user "\nGetting more info for job id 2 ($job_id2) with -dd option\n"
+spawn $scontrol -dd show job $job_id2
+expect {
+	-re "JobId=$job_id2 " {
+		incr matches
+		exp_continue
+	}
+	-re "CPU_IDs=" {
+		incr matches
+		exp_continue
+	}
+	-re "BatchScript=" {
+		incr matches
+		exp_continue
+	}
+	timeout {
+		send_user "\nFAILURE: scontrol not responding\n"
+		set exit_code 1
+	}
+	eof {
+		wait
+	}
+
+}
+if {$is_bluegene == 0} {
+	set match_target 6
+} else {
+#	No CPU_IDs on Bluegene
+	set match_target 4
+}
+if {$matches != $match_target} {
+	send_user "\nFAILURE: scontrol failed to find matching job ($matches != $match_target)\n"
 	set exit_code 1
 }
 
@@ -179,7 +332,7 @@ exec $bin_sleep 10
 set matches 0
 spawn $scontrol show step
 expect {
-	-re "StepId=$job_id1.0 " {
+	-re "StepId=$job_id1.$step_id " {
 		incr matches
 		exp_continue
 	}
@@ -200,9 +353,9 @@ if {[test_cray] == 0 && $matches != 1} {
 # Look at specific job step with scontrol
 #
 set matches 0
-spawn $scontrol show step $job_id1.0
+spawn $scontrol show step $job_id1.$step_id
 expect {
-	-re "StepId=$job_id1.0 " {
+	-re "StepId=$job_id1.$step_id " {
 		incr matches
 		exp_continue
 	}
@@ -230,9 +383,9 @@ if {[test_cray] == 0 && $matches != 1} {
 #
 set matches 0
 set job_id3 [expr $job_id1 + 10000]
-spawn $scontrol show step $job_id3.0
+spawn $scontrol show step $job_id3.$step_id
 expect {
-	-re "StepId=$job_id3.0 " {
+	-re "StepId=$job_id3.$step_id " {
 		send_user "\nFAILURE: scontrol found unexpected job step\n"
 		set exit_code 1
 		exp_continue

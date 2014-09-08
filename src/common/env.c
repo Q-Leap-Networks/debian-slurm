@@ -655,6 +655,39 @@ int setup_env(env_t *env, bool preserve_env)
 		}
 	}
 
+	if ((env->cpu_freq != NO_VAL) && /* Default value from srun */
+	    (env->cpu_freq != 0)) {      /* Default value from slurmstepd
+					  * for batch jobs */
+		int sts;
+		char *str;
+
+		if (env->cpu_freq & CPU_FREQ_RANGE_FLAG) {
+			switch (env->cpu_freq) 
+			{
+			case CPU_FREQ_LOW :
+				str="low";
+				break;
+			case CPU_FREQ_MEDIUM :
+				str="medium";
+				break;
+			case CPU_FREQ_HIGH :
+				str="high";
+				break;
+			default :
+				str="unknown";
+				break;
+			}
+			sts = setenvf(&env->env, "SLURM_CPU_FREQ_REQ", str);
+		} else {
+			sts = setenvf(&env->env, "SLURM_CPU_FREQ_REQ", "%d",
+				      env->cpu_freq);
+		}
+		if (sts) {
+			error("Unable to set SLURM_CPU_FREQ_REQ");
+			rc = SLURM_FAILURE;
+		}
+	}
+
 	if (env->overcommit
 	    && (setenvf(&env->env, "SLURM_OVERCOMMIT", "1"))) {
 		error("Unable to set SLURM_OVERCOMMIT environment variable");
@@ -980,8 +1013,8 @@ env_array_for_job(char ***dest, const resource_allocation_response_msg_t *alloc,
 		env_array_overwrite_fmt(dest, "SLURM_MEM_PER_CPU", "%u",
 					tmp_mem);
 #ifdef HAVE_CRAY
-		env_array_overwrite_fmt(dest, "CRAY_AUTO_APRUN_OPTIONS",
-					"\"-m%u\"", tmp_mem);
+		env_array_overwrite_fmt(dest, "APRUN_DEFAULT_MEMORY", "%u",
+					tmp_mem);
 #endif
 	} else if (alloc->pn_min_memory) {
 		uint32_t tmp_mem = alloc->pn_min_memory;
@@ -993,13 +1026,14 @@ env_array_for_job(char ***dest, const resource_allocation_response_msg_t *alloc,
 				max_cpus_per_node = alloc->cpus_per_node[i];
 			}
 		}
-#endif
+		tmp_mem /= max_cpus_per_node;
+		env_array_overwrite_fmt(dest, "APRUN_DEFAULT_MEMORY", "%u",
+					tmp_mem);
+		env_array_overwrite_fmt(dest, "SLURM_MEM_PER_CPU", "%u",
+					tmp_mem);
+#else
 		env_array_overwrite_fmt(dest, "SLURM_MEM_PER_NODE", "%u",
 					tmp_mem);
-#ifdef HAVE_CRAY
-		tmp_mem /= max_cpus_per_node;
-		env_array_overwrite_fmt(dest, "CRAY_AUTO_APRUN_OPTIONS",
-					"\"-m%u\"", tmp_mem);
 #endif
 	}
 

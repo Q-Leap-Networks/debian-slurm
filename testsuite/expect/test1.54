@@ -40,7 +40,13 @@ set exit_code   0
 print_header $test_id
 
 if {[test_front_end] != 0} {
-        send_user "\nWARNING: This test is incompatible with front-end systems\n"
+	send_user "\nWARNING: This test is incompatible with front-end systems\n"
+	exit 0
+} elseif {[test_serial]} {
+	send_user "\nWARNING: This test is incompatible with serial systems\n"
+	exit 0
+} elseif {[test_launch_poe]} {
+	send_user "\nWARNING: This test is incompatible with POE systems\n"
 	exit 0
 }
 
@@ -64,7 +70,7 @@ set matches 0
 set timeout $max_job_delay
 set srun_pid [spawn $srun -N1 -n4 --overcommit -l -t1 --multi-prog ./$file_in]
 expect {
-	-re "($number): task:($number):offset:($number)" {
+	-re "($number): *task:($number):offset:($number)" {
 		set label       $expect_out(1,string)
 		set task_id     $expect_out(2,string)
 		set task_offset $expect_out(3,string)

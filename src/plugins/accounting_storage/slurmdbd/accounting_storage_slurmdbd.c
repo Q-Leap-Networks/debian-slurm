@@ -54,7 +54,6 @@
 #include "slurm/slurm_errno.h"
 
 #include "src/common/slurm_xlator.h"
-#include "src/common/jobacct_common.h"
 #include "src/common/read_config.h"
 #include "src/common/slurm_accounting_storage.h"
 #include "src/common/slurmdbd_defs.h"
@@ -62,6 +61,8 @@
 #include "src/common/xstring.h"
 #include "src/slurmctld/slurmctld.h"
 #include "src/slurmctld/locks.h"
+
+#define BUFFER_SIZE 4096
 
 /* These are defined here so when we link with something other than
  * the slurmctld we will have these symbols defined.  They will get
@@ -129,6 +130,9 @@ static void _partial_free_dbd_job_start(void *object)
 		xfree(req->partition);
 		xfree(req->node_inx);
 		xfree(req->wckey);
+		xfree(req->gres_alloc);
+		xfree(req->gres_req);
+		xfree(req->gres_used);
 	}
 }
 
@@ -198,6 +202,9 @@ static int _setup_job_start_msg(dbd_job_start_msg_t *req,
 	req->wckey         = xstrdup(job_ptr->wckey);
 	req->uid           = job_ptr->user_id;
 	req->qos_id        = job_ptr->qos_id;
+	req->gres_alloc    = xstrdup(job_ptr->gres_alloc);
+	req->gres_req      = xstrdup(job_ptr->gres_req);
+	req->gres_used     = xstrdup(job_ptr->gres_used);
 
 	return SLURM_SUCCESS;
 }
@@ -2242,26 +2249,25 @@ extern int jobacct_storage_p_step_start(void *db_conn,
 extern int jobacct_storage_p_step_complete(void *db_conn,
 					   struct step_record *step_ptr)
 {
-	uint32_t cpus = 0, tasks = 0;
+	uint32_t tasks = 0;
 	slurmdbd_msg_t msg;
 	dbd_step_comp_msg_t req;
 
-#ifdef HAVE_BG_L_P
-	if (step_ptr->job_ptr->details)
-		tasks = cpus = step_ptr->job_ptr->details->min_cpus;
-	else
-		tasks = cpus = step_ptr->job_ptr->cpu_cnt;
-#else
-	if (!step_ptr->step_layout || !step_ptr->step_layout->task_cnt) {
-		cpus = tasks = step_ptr->job_ptr->total_cpus;
-	} else {
-		cpus = step_ptr->cpu_count;
-		tasks = step_ptr->step_layout->task_cnt;
-	}
-#endif
-
 	if (step_ptr->step_id == SLURM_BATCH_SCRIPT)
-		cpus = tasks = 1;
+		tasks = 1;
+	else {
+#ifdef HAVE_BG_L_P
+		if (step_ptr->job_ptr->details)
+			tasks = step_ptr->job_ptr->details->min_cpus;
+		else
+			tasks = step_ptr->job_ptr->cpu_cnt;
+#else
+		if (!step_ptr->step_layout || !step_ptr->step_layout->task_cnt)
+			tasks = step_ptr->job_ptr->total_cpus;
+		else
+			tasks = step_ptr->step_layout->task_cnt;
+#endif
+	}
 
 	if (!step_ptr->job_ptr->db_index
 	    && ((!step_ptr->job_ptr->details
@@ -2291,7 +2297,6 @@ extern int jobacct_storage_p_step_complete(void *db_conn,
 	else if (step_ptr->job_ptr->details)
 		req.job_submit_time   = step_ptr->job_ptr->details->submit_time;
 	req.step_id     = step_ptr->step_id;
-	req.total_cpus = cpus;
 	req.total_tasks = tasks;
 
 	msg.msg_type    = DBD_STEP_COMPLETE;

@@ -49,6 +49,7 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/param.h>	/* MAXPATHLEN */
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -56,6 +57,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include "src/common/fd.h"
 #include "src/common/list.h"
 #include "src/common/macros.h"
 #include "src/common/pack.h"
@@ -114,7 +116,7 @@ _handle_stray_socket(const char *socket_name)
 	}
 
 	now = time(NULL);
-	if ((now-buf.st_mtime) > 300) {
+	if ((now - buf.st_mtime) > 300) {
 		/* remove the socket */
 		if (unlink(socket_name) == -1) {
 			if (errno != ENOENT) {
@@ -125,6 +127,17 @@ _handle_stray_socket(const char *socket_name)
 			debug("Cleaned up stray socket %s", socket_name);
 		}
 	}
+}
+
+static void _handle_stray_script(const char *directory, uint32_t job_id)
+{
+	char dir_path[MAXPATHLEN], file_path[MAXPATHLEN];
+
+	snprintf(dir_path, sizeof(dir_path), "%s/job%05u", directory, job_id);
+	snprintf(file_path, sizeof(file_path), "%s/slurm_script", dir_path);
+	info("Purging vestigal job script %s", file_path);
+	(void) unlink(file_path);
+	(void) rmdir(dir_path);
 }
 
 static int
@@ -150,6 +163,8 @@ _step_connect(const char *directory, const char *nodename,
 	if (connect(fd, (struct sockaddr *) &addr, len) < 0) {
 		if (errno == ECONNREFUSED) {
 			_handle_stray_socket(name);
+			if (stepid == NO_VAL)
+				_handle_stray_script(directory, jobid);
 		} else {
 			debug("_step_connect: connect: %m");
 		}
@@ -299,18 +314,14 @@ stepd_get_info(int fd)
 	safe_read(fd, &step_info->stepid, sizeof(uint32_t));
 
 	safe_read(fd, &protocol_version, sizeof(uint16_t));
-	if (protocol_version >= SLURM_2_2_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_2_3_PROTOCOL_VERSION) {
 		safe_read(fd, &step_info->nodeid, sizeof(uint32_t));
 		safe_read(fd, &step_info->job_mem_limit, sizeof(uint32_t));
 		safe_read(fd, &step_info->step_mem_limit, sizeof(uint32_t));
 	} else {
-		step_info->nodeid  = protocol_version << 16;
-		safe_read(fd, &protocol_version, sizeof(uint16_t));
-		step_info->nodeid |= protocol_version;
-		safe_read(fd, &step_info->job_mem_limit, sizeof(uint32_t));
-		step_info->step_mem_limit = step_info->job_mem_limit;
-		verbose("Old version slurmstepd for step %u.%u", 
-			step_info->jobid, step_info->stepid);
+		error("stepd_get_info: protocol_version "
+		      "%hu not supported", protocol_version);
+		goto rwfail;
 	}
 	return step_info;
 
@@ -872,29 +883,6 @@ rwfail:
 int
 stepd_completion(int fd, step_complete_msg_t *sent)
 {
-#if (SLURM_PROTOCOL_VERSION <= SLURM_2_4_PROTOCOL_VERSION)
-/* FIXME: Remove this code plus the read code from src/slurmd/slurmstepd/req.c
- * in SLURM version 2.5 */
-	int req = REQUEST_STEP_COMPLETION;
-	int rc;
-	int errnum = 0;
-
-	debug("Entering stepd_completion, range_first = %d, range_last = %d",
-	      sent->range_first, sent->range_last);
-	safe_write(fd, &req, sizeof(int));
-	safe_write(fd, &sent->range_first, sizeof(int));
-	safe_write(fd, &sent->range_last, sizeof(int));
-	safe_write(fd, &sent->step_rc, sizeof(int));
-	jobacct_gather_g_setinfo(sent->jobacct, JOBACCT_DATA_PIPE, &fd);
-	/* Receive the return code and errno */
-	safe_read(fd, &rc, sizeof(int));
-	safe_read(fd, &errnum, sizeof(int));
-
-	errno = errnum;
-	return rc;
-rwfail:
-	return -1;
-#else
 	int req = REQUEST_STEP_COMPLETION_V2;
 	int rc;
 	int errnum = 0;
@@ -920,7 +908,8 @@ rwfail:
 	 * Do pack/unpack instead to be sure of independances of 
 	 * slurmd and slurmstepd
 	 */
-	jobacct_gather_g_pack(sent->jobacct, SLURM_PROTOCOL_VERSION, buffer);
+	jobacctinfo_pack(sent->jobacct, SLURM_PROTOCOL_VERSION,
+			 PROTOCOL_TYPE_SLURM, buffer);
 	len = get_buf_offset(buffer);
 	safe_write(fd, &len, sizeof(int));
 	safe_write(fd, get_buf_data(buffer), len);
@@ -934,39 +923,6 @@ rwfail:
 	return rc;
 rwfail:
 	return -1;
-#endif
-}
-
-/* Wait for a file descriptor to be readable (up to 300 seconds).
- * Return 0 when readable or -1 on error */
-static int _wait_fd_readable(int fd)
-{
-	fd_set except_fds, read_fds;
-	struct timeval timeout;
-	int rc;
-
-	FD_ZERO(&except_fds);
-	FD_SET(fd, &except_fds);
-	FD_ZERO(&read_fds);
-	FD_SET(fd, &read_fds);
-	timeout.tv_sec  = 300;
-	timeout.tv_usec = 0;
-	while (1) {
-		rc = select(fd+1, &read_fds, NULL, &except_fds, &timeout);
-
-		if (rc > 0) {	/* activity on this fd */
-			if (FD_ISSET(fd, &read_fds))
-				return 0;
-			else	/* Exception */
-				return -1;
-		} else if (rc == 0) {
-			error("Timeout waiting for slurmstepd");
-			return -1;
-		} else if (errno == EINTR) {
-			error("select(): %m");
-			return -1;
-		}
-	}
 }
 
 /*
@@ -986,14 +942,14 @@ stepd_stat_jobacct(int fd, job_step_id_msg_t *sent, job_step_stat_t *resp)
 	safe_write(fd, &req, sizeof(int));
 
 	/* Receive the jobacct struct and return */
-	resp->jobacct = jobacct_gather_g_create(NULL);
+	resp->jobacct = jobacctinfo_create(NULL);
 
 	/* Do not attempt reading data until there is something to read.
 	 * Avoid locking the jobacct_gather plugin early and creating
 	 * possible deadlock. */
-	if (_wait_fd_readable(fd))
+	if (wait_fd_readable(fd, 300))
 		goto rwfail;
-	rc = jobacct_gather_g_getinfo(resp->jobacct, JOBACCT_DATA_PIPE, &fd);
+	rc = jobacctinfo_getinfo(resp->jobacct, JOBACCT_DATA_PIPE, &fd);
 
 	safe_read(fd, &tasks, sizeof(int));
 	resp->num_tasks = tasks;
@@ -1001,7 +957,7 @@ stepd_stat_jobacct(int fd, job_step_id_msg_t *sent, job_step_stat_t *resp)
 	return rc;
 rwfail:
 	error("gathering job accounting: %d", rc);
-	jobacct_gather_g_destroy(resp->jobacct);
+	jobacctinfo_destroy(resp->jobacct);
 	resp->jobacct = NULL;
 	return rc;
 }
@@ -1085,4 +1041,3 @@ rwfail:
 	*pids_array = NULL;
 	return SLURM_ERROR;
 }
-

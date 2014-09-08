@@ -143,6 +143,7 @@ typedef enum {
 #define	QOS_FLAG_ENFORCE_USAGE_THRES 0x00000008
 #define	QOS_FLAG_NO_RESERVE          0x00000010
 #define	QOS_FLAG_REQ_RESV            0x00000020
+#define	QOS_FLAG_DENY_LIMIT          0x00000040
 
 /* Archive / Purge time flags */
 #define SLURMDB_PURGE_BASE    0x0000ffff   /* Apply to get the number
@@ -282,7 +283,9 @@ typedef struct {
  * slurmdb_step_rec_t.
  */
 typedef struct {
+	double act_cpufreq;	/* contains actual average cpu frequency */
 	double cpu_ave;
+	double consumed_energy; /* contains energy consumption in joules */
 	uint32_t cpu_min;
 	uint32_t cpu_min_nodeid; /* contains which node number it was on */
 	uint16_t cpu_min_taskid; /* contains which task number it was on */
@@ -684,6 +687,7 @@ typedef struct {
 	char *nodes;
 	uint32_t ntasks;
 	char *pid_str;
+	uint32_t req_cpufreq;
 	uint32_t requid;
 	time_t start;
 	enum job_states	state;

@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include "mpi.h"
 
 
@@ -35,7 +36,7 @@ if ((k+i*j) >= MAXLEN) continue;
    MPI_Barrier(MPI_COMM_WORLD);
 
    if ((!errcount) && (!myself)) {
-     printf ("PASSED!\n");
+     printf ("PASSED\n");
      fflush(stdout);
    }
    MPI_Finalize();

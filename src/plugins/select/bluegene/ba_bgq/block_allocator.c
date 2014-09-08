@@ -639,12 +639,13 @@ extern int check_and_set_mp_list(List mps)
 				continue;
 			else if (ba_switch->usage
 				 & BG_SWITCH_CABLE_ERROR_FULL) {
-				error("check_and_set_mp_list: Somehow we got "
-				      "a switch with an error set in it.  "
-				      "This should never happen except "
-				      "on a system with missing cables such "
-				      "as a half rack system. %u",
-				      ba_switch->usage);
+				debug2("check_and_set_mp_list: We have "
+				       "a switch with an error set in it.  "
+				       "This can happen on a system with "
+				       "missing cables such as a half rack "
+				       "system, or when a nodeboard has "
+				       "been set in a service state. %u",
+				       ba_switch->usage);
 				continue;
 			}
 
@@ -847,11 +848,10 @@ extern char *set_bg_block(List results, select_ba_request_t* ba_request)
 		   small block allocations.
 		*/
 		for (dim=0; dim<cluster_dims; dim++) {
-			if (((ba_request->conn_type[dim] == SELECT_MESH)
-			      || (ba_request->conn_type[dim] == SELECT_NAV))
-			     && ((ba_geo_table->geometry[dim] == 1)
-				 || (ba_geo_table->geometry[dim]
-				     == DIM_SIZE[dim]))) {
+			if ((ba_geo_table->geometry[dim] == 1)
+			    || ((ba_geo_table->geometry[dim] == DIM_SIZE[dim])
+				&& (ba_request->conn_type[dim]
+				    == SELECT_NAV))) {
 				/* On a Q all single midplane blocks
 				 * must be a TORUS.
 				 *
@@ -1634,7 +1634,13 @@ again:
 			      in_job_ptr->job_id, bg_record->bg_block_id);
 		}
 		bad_magic = 1;
-		used_cnodes = bit_copy(ba_mp->cnode_bitmap);
+		if ((bg_record->conn_type[0] >= SELECT_SMALL)
+		    && ba_mp->cnode_usable_bitmap) {
+			bit_not(ba_mp->cnode_usable_bitmap);
+			used_cnodes = bit_copy(ba_mp->cnode_usable_bitmap);
+			bit_not(ba_mp->cnode_usable_bitmap);
+		} else
+			used_cnodes = bit_copy(ba_mp->cnode_bitmap);
 		goto again;
 	}
 

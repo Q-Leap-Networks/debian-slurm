@@ -1099,7 +1099,7 @@ extern int assoc_mgr_init(void *db_conn, assoc_init_args_t *args,
 
 	if (!checked_prio) {
 		char *prio = slurm_get_priority_type();
-		if (prio && !strcmp(prio, "priority/multifactor"))
+		if (prio && !strncmp(prio, "priority/multifactor", 20))
 			setup_children = 1;
 
 		xfree(prio);
@@ -1972,6 +1972,9 @@ extern bool assoc_mgr_is_user_acct_coord(void *db_conn,
 	slurmdb_user_rec_t * found_user = NULL;
 	assoc_mgr_lock_t locks = { NO_LOCK, NO_LOCK,
 				   NO_LOCK, READ_LOCK, NO_LOCK };
+
+	if (!acct_name)
+		return false;
 
 	if (!assoc_mgr_user_list)
 		if (_get_assoc_mgr_user_list(db_conn, 0) == SLURM_ERROR)

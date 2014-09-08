@@ -40,6 +40,9 @@
 #  include "config.h"
 #endif
 
+#if HAVE_FLOAT_H
+#  include <float.h>
+#endif
 #if HAVE_STDINT_H
 #  include <stdint.h>
 #endif
@@ -49,6 +52,9 @@
 #ifdef WITH_PTHREADS
 #  include <pthread.h>
 #endif				/* WITH_PTHREADS */
+#if HAVE_VALUES_H
+#  include <values.h>
+#endif
 
 #include <sys/stat.h>
 #include <stdio.h>
@@ -75,11 +81,13 @@ void *acct_db_conn  __attribute__((weak_import)) = NULL;
 uint32_t cluster_cpus __attribute__((weak_import)) = NO_VAL;
 List job_list  __attribute__((weak_import)) = NULL;
 time_t last_job_update __attribute__((weak_import));
+slurm_ctl_conf_t slurmctld_conf __attribute__((weak_import));
 #else
 void *acct_db_conn = NULL;
 uint32_t cluster_cpus = NO_VAL;
 List job_list = NULL;
 time_t last_job_update;
+slurm_ctl_conf_t slurmctld_conf;
 #endif
 
 /*
@@ -154,7 +162,7 @@ static int _apply_decay(double decay_factor)
 	   everything out so don't waste time doing it */
 	if (!decay_factor)
 		return SLURM_ERROR;
-	else if (!calc_fairshare)
+	else if (!calc_fairshare || (decay_factor == 1))
 		return SLURM_SUCCESS;
 
 	assoc_mgr_lock(&locks);
@@ -772,8 +780,7 @@ static int _apply_new_usage(struct job_record *job_ptr, double decay_factor,
 {
 	slurmdb_qos_rec_t *qos;
 	slurmdb_association_rec_t *assoc;
-	int run_delta = 0;
-	double run_decay = 0.0, real_decay = 0.0;
+	double run_delta = 0.0, run_decay = 0.0, real_decay = 0.0;
 	uint64_t cpu_run_delta = 0;
 	uint64_t job_time_limit_ends = 0;
 	assoc_mgr_lock_t locks = { WRITE_LOCK, NO_LOCK,
@@ -799,7 +806,7 @@ static int _apply_new_usage(struct job_record *job_ptr, double decay_factor,
 	    && (end_period > job_ptr->end_time))
 		end_period = job_ptr->end_time;
 
-	run_delta = (int) (end_period - start_period);
+	run_delta = difftime(end_period, start_period);
 
 	/* job already has been accounted for
 	   go to next */
@@ -828,11 +835,11 @@ static int _apply_new_usage(struct job_record *job_ptr, double decay_factor,
 		cpu_run_delta = job_ptr->total_cpus * run_delta;
 
 	if (priority_debug)
-		info("job %u ran for %d seconds on %u cpus",
+		info("job %u ran for %g seconds on %u cpus",
 		     job_ptr->job_id, run_delta, job_ptr->total_cpus);
 
 	/* get the time in decayed fashion */
-	run_decay = run_delta * pow(decay_factor, (double)run_delta);
+	run_decay = run_delta * pow(decay_factor, run_delta);
 
 	real_decay = run_decay * (double)job_ptr->total_cpus;
 
@@ -921,9 +928,6 @@ static void *_decay_thread(void *no_data)
 	struct job_record *job_ptr = NULL;
 	ListIterator itr;
 	time_t start_time = time(NULL);
-	time_t next_time;
-/* 	int sigarray[] = {SIGUSR1, 0}; */
-	struct tm tm;
 	time_t last_ran = 0;
 	time_t last_reset = 0, next_reset = 0;
 	uint32_t calc_period = slurm_get_priority_calc_period();
@@ -943,13 +947,6 @@ static void *_decay_thread(void *no_data)
 	(void) pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 	(void) pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 
-	if (!localtime_r(&start_time, &tm)) {
-		fatal("_decay_thread: "
-		      "Couldn't get localtime for rollup handler %ld",
-		      (long)start_time);
-		return NULL;
-	}
-
 	_read_last_decay_ran(&last_ran, &last_reset);
 	if (last_reset == 0)
 		last_reset = start_time;
@@ -957,9 +954,8 @@ static void *_decay_thread(void *no_data)
 	_init_grp_used_cpu_run_secs(last_ran);
 
 	while (1) {
-		time_t now = time(NULL);
-		int run_delta = 0;
-		double real_decay = 0.0;
+		time_t now = start_time;
+		double run_delta = 0.0, real_decay = 0.0;
 
 		slurm_mutex_lock(&decay_lock);
 		running_decay = 1;
@@ -1021,21 +1017,23 @@ static void *_decay_thread(void *no_data)
 		if (!last_ran)
 			goto get_usage;
 		else
-			run_delta = (start_time - last_ran);
+			run_delta = difftime(start_time, last_ran);
 
 		if (run_delta <= 0)
 			goto get_usage;
-
 		real_decay = pow(decay_factor, (double)run_delta);
-
+#ifdef DBL_MIN
+		if (real_decay < DBL_MIN)
+			real_decay = DBL_MIN;
+#endif
 		if (priority_debug)
-			info("Decay factor over %d seconds goes "
+			info("Decay factor over %g seconds goes "
 			     "from %.15f -> %.15f",
 			     run_delta, decay_factor, real_decay);
 
 		/* first apply decay to used time */
 		if (_apply_decay(real_decay) != SLURM_SUCCESS) {
-			error("problem applying decay");
+			error("priority/multifactor: problem applying decay");
 			running_decay = 0;
 			slurm_mutex_unlock(&decay_lock);
 			break;
@@ -1076,12 +1074,14 @@ static void *_decay_thread(void *no_data)
 		running_decay = 0;
 		slurm_mutex_unlock(&decay_lock);
 
-		/* sleep for calc_period secs */
-		tm.tm_sec += calc_period;
-		tm.tm_isdst = -1;
-		next_time = mktime(&tm);
-		sleep((next_time-start_time));
-		start_time = next_time;
+		/* Sleep until the next time. */
+		now = time(NULL);
+		double elapsed = difftime(now, start_time);
+		if (elapsed < calc_period) {
+			sleep(calc_period - elapsed);
+			start_time = time(NULL);
+		} else
+			start_time = now;
 		/* repeat ;) */
 	}
 	return NULL;

@@ -76,8 +76,8 @@ static char * _process_plus_minus(char plus_or_minus, char *src)
 
 /*
  *  _parse_flags  is used to parse the Flags= option.  It handles
- *  daily, weekly, static_alloc, and maint, optionally preceded by + or -,
- *  separated by a comma but no spaces.
+ *  daily, weekly, static_alloc, part_nodes, and maint, optionally 
+ *  preceded by + or -, separated by a comma but no spaces.
  */
 static uint32_t _parse_flags(const char *flagstr, const char *msg)
 {
@@ -144,6 +144,13 @@ static uint32_t _parse_flags(const char *flagstr, const char *msg)
 				outflags |= RESERVE_FLAG_NO_STATIC;
 			else
 				outflags |= RESERVE_FLAG_STATIC;
+		} else if (strncasecmp(curr, "Part_Nodes", MAX(taglen,1))
+			   == 0) {
+			curr += taglen;
+			if (flip)
+				outflags |= RESERVE_FLAG_NO_PART_NODES;
+			else
+				outflags |= RESERVE_FLAG_PART_NODES;
 		} else {
 			error("Error parsing flags %s.  %s", flagstr, msg);
 			return 0xffffffff;
@@ -207,7 +214,7 @@ scontrol_parse_res_options(int argc, char *argv[], const char *msg,
 
 		} else if (strncasecmp(tag, "StartTime", MAX(taglen, 1)) == 0){
 			time_t  t = parse_time(val, 0);
-			if (t == 0) {
+			if (errno == ESLURM_INVALID_TIME_VALUE) {
 				exit_code = 1;
 				error("Invalid start time %s.  %s",
 				      argv[i], msg);
@@ -217,7 +224,7 @@ scontrol_parse_res_options(int argc, char *argv[], const char *msg,
 
 		} else if (strncasecmp(tag, "EndTime", MAX(taglen, 1)) == 0) {
 			time_t  t = parse_time(val, 0);
-			if (t == 0) {
+			if (errno == ESLURM_INVALID_TIME_VALUE) {
 				exit_code = 1;
 				error("Invalid end time %s.  %s", argv[i],msg);
 				return -1;
@@ -283,6 +290,14 @@ scontrol_parse_res_options(int argc, char *argv[], const char *msg,
 				tok = strtok_r(NULL, ",", &ptrptr);
 			}
 			xfree(node_cnt);
+
+		} else if (strncasecmp(tag, "CoreCnt",   MAX(taglen,5)) == 0 ||
+		           strncasecmp(tag, "CoreCount", MAX(taglen,5)) == 0 ||
+		           strncasecmp(tag, "CPUCnt",    MAX(taglen,5)) == 0 ||
+			   strncasecmp(tag, "CPUCount",  MAX(taglen,5)) == 0) {
+			char *endptr = NULL;
+			resv_msg_ptr->core_cnt = strtol(val, &endptr, 10);
+
 		} else if (strncasecmp(tag, "Nodes", MAX(taglen, 5)) == 0) {
 			resv_msg_ptr->node_list = val;
 
@@ -474,18 +489,33 @@ scontrol_create_res(int argc, char *argv[])
 			resv_msg.node_list = NULL;
 		}
 	}
+	/*
+	 * If "all" is specified for the nodes and RESERVE_FLAG_PART_NODES
+	 * flag is set make sure a partition name is specified.
+	 */
+
+	if ((resv_msg.partition == NULL) && (resv_msg.node_list != NULL) &&
+	    (strcasecmp(resv_msg.node_list, "ALL") == 0) &&
+	    (resv_msg.flags != (uint16_t) NO_VAL) &&
+	    (resv_msg.flags & RESERVE_FLAG_PART_NODES)) {
+		exit_code = 1;
+		error("Part_Nodes flag requires specifying a Partition. "
+		      "No reservation created.");
+		goto SCONTROL_CREATE_RES_CLEANUP;
+	}
 
 	/*
 	 * If  the following parameters are null, but a partition is named, then
 	 * make the reservation for the whole partition.
 	 */
-	if ((resv_msg.node_cnt  == NULL || resv_msg.node_cnt[0]  == 0)    &&
+	if ((resv_msg.core_cnt == 0) &&
+	    (resv_msg.node_cnt  == NULL || resv_msg.node_cnt[0]  == 0)    &&
 	    (resv_msg.node_list == NULL || resv_msg.node_list[0] == '\0') &&
 	    (resv_msg.licenses  == NULL || resv_msg.licenses[0]  == '\0')) {
 		if (resv_msg.partition == NULL) {
 			exit_code = 1;
-			error("Nodes, NodeCnt or Licenses must be specified.  "
-			      "No reservation created.");
+			error("CoreCnt, Nodes, NodeCnt or Licenses must be "
+			      "specified. No reservation created.");
 			goto SCONTROL_CREATE_RES_CLEANUP;
 		} else if ((node_count = _partition_node_count(resv_msg.partition))
 			    == NO_VAL) {

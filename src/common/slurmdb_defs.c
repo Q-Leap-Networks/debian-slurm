@@ -302,6 +302,9 @@ static int _setup_cluster_rec(slurmdb_cluster_rec_t *cluster_rec)
 
 static uint32_t _str_2_qos_flags(char *flags)
 {
+	if (slurm_strcasestr(flags, "DenyOnLimit"))
+		return QOS_FLAG_DENY_LIMIT;
+
 	if (slurm_strcasestr(flags, "EnforceUsageThreshold"))
 		return QOS_FLAG_ENFORCE_USAGE_THRES;
 
@@ -1201,6 +1204,8 @@ extern char *slurmdb_qos_flags_str(uint32_t flags)
 		xstrcat(qos_flags, "Add,");
 	if (flags & QOS_FLAG_REMOVE)
 		xstrcat(qos_flags, "Remove,");
+	if (flags & QOS_FLAG_DENY_LIMIT)
+		xstrcat(qos_flags, "DenyOnLimit,");
 	if (flags & QOS_FLAG_ENFORCE_USAGE_THRES)
 		xstrcat(qos_flags, "EnforceUsageThreshold,");
 	if (flags & QOS_FLAG_NO_RESERVE)
@@ -2188,7 +2193,7 @@ extern int slurmdb_send_accounting_update(List update_list, char *cluster,
 	accounting_update_msg_t msg;
 	slurm_msg_t req;
 	slurm_msg_t resp;
-	int rc;
+	int i, rc;
 
 	// Set highest version that we can use
 	if (rpc_version > SLURMDBD_VERSION) {
@@ -2209,7 +2214,12 @@ extern int slurmdb_send_accounting_update(List update_list, char *cluster,
 	req.data = &msg;
 	slurm_msg_t_init(&resp);
 
-	rc = slurm_send_recv_node_msg(&req, &resp, 0);
+	for (i = 0; i < 4; i++) {
+		/* Retry if the slurmctld can connect, but is not responding */
+		rc = slurm_send_recv_node_msg(&req, &resp, 0);
+		if ((rc == 0) || (errno != SLURM_PROTOCOL_SOCKET_IMPL_TIMEOUT))
+			break;
+	}
 	if ((rc != 0) || ! resp.auth_cred) {
 		error("update cluster: %m to %s at %s(%hu)",
 		      cluster, host, port);
@@ -2231,4 +2241,35 @@ extern int slurmdb_send_accounting_update(List update_list, char *cluster,
 	}
 	//info("got rc of %d", rc);
 	return rc;
+}
+
+extern slurmdb_report_cluster_rec_t *slurmdb_cluster_rec_2_report(
+	slurmdb_cluster_rec_t *cluster)
+{
+	slurmdb_report_cluster_rec_t *slurmdb_report_cluster;
+	slurmdb_cluster_accounting_rec_t *accting = NULL;
+	ListIterator cluster_itr = NULL;
+	int count;
+
+	xassert(cluster);
+	slurmdb_report_cluster = xmalloc(sizeof(slurmdb_report_cluster_rec_t));
+	slurmdb_report_cluster->name = xstrdup(cluster->name);
+
+	if (!(count = list_count(cluster->accounting_list)))
+		return slurmdb_report_cluster;
+
+	/* get the amount of time and the average cpu count
+	   during the time we are looking at */
+	cluster_itr = list_iterator_create(cluster->accounting_list);
+	while((accting = list_next(cluster_itr))) {
+		slurmdb_report_cluster->cpu_secs += accting->alloc_secs
+			+ accting->down_secs + accting->idle_secs
+			+ accting->resv_secs + accting->pdown_secs;
+		slurmdb_report_cluster->cpu_count += accting->cpu_count;
+	}
+	list_iterator_destroy(cluster_itr);
+
+	slurmdb_report_cluster->cpu_count /= count;
+
+	return slurmdb_report_cluster;
 }

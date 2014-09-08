@@ -544,7 +544,7 @@ extern void admin_edit_front_end(GtkCellRendererText *cell,
 	}
 no_input:
 	gtk_tree_path_free(path);
-	g_static_mutex_unlock(&sview_mutex);
+	g_mutex_unlock(sview_mutex);
 }
 
 extern void get_info_front_end(GtkTable *table, display_data_t *display_data)
@@ -911,7 +911,7 @@ extern void popup_all_front_end(GtkTreeModel *model, GtkTreeIter *iter, int id)
 	default:
 		g_print("resv got unknown type %d\n", id);
 	}
-	if (!g_thread_create((gpointer)popup_thr, popup_win, FALSE, &error)) {
+	if (!sview_thread_new((gpointer)popup_thr, popup_win, FALSE, &error)) {
 		g_printerr ("Failed to create resv popup thread: %s\n",
 			    error->message);
 		return;

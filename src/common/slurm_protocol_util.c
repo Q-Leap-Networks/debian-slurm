@@ -52,18 +52,12 @@ uint16_t _get_slurm_version(uint32_t rpc_version)
 {
 	uint16_t version;
 
-	if (rpc_version >= 10)
+	if (rpc_version >= 11)
 		version = SLURM_PROTOCOL_VERSION;
-	else if (rpc_version >= 9)
-		version = SLURM_2_3_PROTOCOL_VERSION;
-	else if (rpc_version >= 8)
-		version = SLURM_2_2_PROTOCOL_VERSION;
-	else if (rpc_version >= 6)
-		version = SLURM_2_1_PROTOCOL_VERSION;
-	else if (rpc_version >= 5)
-		version = SLURM_2_0_PROTOCOL_VERSION;
+	else if (rpc_version >= 10)
+		version = SLURM_2_4_PROTOCOL_VERSION;
 	else
-		version = SLURM_1_3_PROTOCOL_VERSION;
+		version = SLURM_2_3_PROTOCOL_VERSION;
 
 	return version;
 }
@@ -84,14 +78,15 @@ int check_header_version(header_t * header)
 
 	if (slurmdbd_conf) {
 		if ((header->version != SLURM_PROTOCOL_VERSION)     &&
-		    (header->version != SLURM_2_3_PROTOCOL_VERSION) &&
-		    (header->version != SLURM_2_2_PROTOCOL_VERSION) &&
-		    (header->version != SLURM_2_1_PROTOCOL_VERSION))
+		    (header->version != SLURM_2_4_PROTOCOL_VERSION) &&
+		    (header->version != SLURM_2_3_PROTOCOL_VERSION))
 			slurm_seterrno_ret(SLURM_PROTOCOL_VERSION_ERROR);
 	} else if (header->version != check_version) {
 		/* Starting with 2.2 we will handle previous versions
 		 * of SLURM for some calls */
 		switch(header->msg_type) {
+		case MESSAGE_NODE_REGISTRATION_STATUS:
+		case REQUEST_ACCT_GATHER_UPDATE:
 		case REQUEST_BLOCK_INFO:
 		case REQUEST_BUILD_INFO:
 		case REQUEST_CANCEL_JOB_STEP:
@@ -147,9 +142,11 @@ int check_header_version(header_t * header)
 		case REQUEST_UPDATE_NODE:
 		case REQUEST_UPDATE_PARTITION:
 		case REQUEST_UPDATE_RESERVATION:
-			if ((header->version == SLURM_2_3_PROTOCOL_VERSION)
-			    || (header->version == SLURM_2_2_PROTOCOL_VERSION)
-			    || (header->version == SLURM_2_1_PROTOCOL_VERSION))
+		case RESPONSE_ACCT_GATHER_UPDATE:
+		case RESPONSE_SLURM_RC:
+			if ((header->version == SLURM_2_5_PROTOCOL_VERSION) ||
+			    (header->version == SLURM_2_4_PROTOCOL_VERSION) ||
+			    (header->version == SLURM_2_3_PROTOCOL_VERSION))
 				break;
 		default:
 			debug("unsupported RPC %d", header->msg_type);

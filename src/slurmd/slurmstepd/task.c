@@ -358,6 +358,7 @@ exec_task(slurmd_job_t *job, int i)
 	job->envtp->distribution = job->task_dist;
 	job->envtp->cpu_bind = xstrdup(job->cpu_bind);
 	job->envtp->cpu_bind_type = job->cpu_bind_type;
+	job->envtp->cpu_freq = job->cpu_freq;
 	job->envtp->mem_bind = xstrdup(job->mem_bind);
 	job->envtp->mem_bind_type = job->mem_bind_type;
 	job->envtp->distribution = -1;
@@ -499,6 +500,11 @@ _make_tmpdir(slurmd_job_t *job)
 		 * has been around for a while.  So to make sure we
 		 * still work with older systems we include this check.
 		 */
+
+#if defined(__FreeBSD__)
+#define	__GLIBC__ 		(1)
+#define __GLIBC_PREREQ(a,b)	(1)
+#endif
 #if defined __GLIBC__ && __GLIBC_PREREQ(2, 4)
 		else if (eaccess(tmpdir, X_OK|W_OK)) /* check permissions */
 #else

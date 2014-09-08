@@ -253,9 +253,8 @@ NOTE: This value is only meaningful for QOS PreemptMode=CANCEL)
 
 .TP
 \fIGrpCPUMins\fP=<max cpu minutes>
-Maximum number of CPU minutes running jobs are able to be allocated in
-aggregate for this association and all associations which are children
-of this association.
+The total number of cpu minutes that can possibly be used by past,
+present and future jobs running from this association and its children.
 To clear a previously set value use the modify command with a new
 value of \-1.
 .P
@@ -272,11 +271,11 @@ they are able to run inside the limit.
 
 .TP
 \fIGrpCPURunMins\fP=<max cpu run minutes>
-Maximum number of CPU minutes all jobs
-running with this association and all it's child associations can run
-at the same time.  This takes into consideration time limit of running
-jobs.  If the limit is reached no new jobs are started until other
-jobs finish to allow time to free up.
+Used to limit the combined total number of CPU minutes used by all
+jobs running with this association and its children.  This takes into
+consideration time limit of running jobs and consumes it, if the limit
+is reached no new jobs are started until other jobs finish to allow
+time to free up.
 
 .TP
 \fIGrpCPUs\fP=<max cpus>
@@ -426,6 +425,8 @@ An arbitrary string describing an account.
 .TP
 \fIName\fP=<name>
 The name of a bank account.
+Note the name must be unique and can not be represent different bank
+accounts at different points in the account hierarchy.
 
 .TP
 \fIOrganization\fP=<org>
@@ -568,17 +569,16 @@ parent association is used for fairshare.
 
 .TP
 \fIGrpCPUMins\fP
-Maximum number of CPU minutes running jobs are able to be allocated in
-aggregate for this association and all associations which are children
-of this association.
+The total number of cpu minutes that can possibly be used by past,
+present and future jobs running from this association and its children.
 
 .TP
 \fIGrpCPURunMins\fP
-Maximum number of CPU minutes all jobs
-running with this association and all it's child associations can run
-at the same time.  This takes into consideration time limit of running
-jobs.  If the limit is reached no new jobs are started until other
-jobs finish to allow time to free up.
+Used to limit the combined total number of CPU minutes used by all
+jobs running with this association and its children.  This takes into
+consideration time limit of running jobs and consumes it, if the limit
+is reached no new jobs are started until other jobs finish to allow
+time to free up.
 
 .TP
 \fIGrpCPUs\fP
@@ -934,6 +934,11 @@ Used by the slurmctld to override or enforce certain characteristics.
 Valid options are
 .RS
 .TP
+\fIDenyOnLimit\fP
+If set jobs using this QOS will be rejected at
+submission time if they do not conform to the QOS 'Max' limits.  By default
+jobs that go over these limits will pend until they conform.
+.TP
 \fIEnforceUsageThreshold\fP
 If set, and the QOS also has a UsageThreshold,
 any jobs submitted with this QOS that fall below the UsageThreshold
@@ -973,15 +978,15 @@ selected for preemption.
 
 .TP
 \fIGrpCPUMins\fP
-Maximum number of CPU minutes running jobs are able to be allocated in
-aggregate for this QOS.
+The total number of cpu minutes that can possibly be used by past,
+present and future jobs running from this QOS.
 
 .TP
-\fIGrpCPURunMins\fP Maximum number of CPU minutes all jobs
-running with this QOS can run at the same time.  This takes into
-consideration time limit of running jobs.  If the limit is reached
-no new jobs are started until other jobs finish to allow time to
-free up.
+\fIGrpCPURunMins\fP Used to limit the combined total number of CPU
+minutes used by all jobs running with this QOS.  This takes into
+consideration time limit of running jobs and consumes it, if the limit
+is reached no new jobs are started until other jobs finish to allow
+time to free up.
 
 .TP
 \fIGrpCPUs\fP
@@ -1097,8 +1102,8 @@ NOTE: This value is only meaningful for QOS PreemptMode=CANCEL.
 
 .TP
 \fIGrpCPUMins\fP
-Maximum number of CPU minutes running jobs are able to be allocated in
-aggregate for this QOS.
+The total number of cpu minutes that can possibly be used by past,
+present and future jobs running from this QOS.
 To clear a previously set value use the modify command with a new
 value of \-1.
 NOTE: This limit only applies when using the Priority Multifactor
@@ -1455,18 +1460,20 @@ Anything included on this line will be the defaults for all
 associations on this cluster.  These options are as follows...
 .TP
 \fIGrpCPUMins=\fP
-Maximum number of CPU hours running jobs are able to
-be allocated in aggregate for this association and all associations
-which are children of this association. (NOTE: This limit is not
-currently enforced in SLURM. You can still set this, but have to wait
-for future versions of SLURM before it is enforced.)
+The total number of cpu minutes that can possibly be used by past,
+present and future jobs running from this association and its children.
+.TP
+\fIGrpCPURunMins=\fP
+Used to limit the combined total number of CPU minutes used by all
+jobs running with this association and its children.  This takes into
+consideration time limit of running jobs and consumes it, if the limit
+is reached no new jobs are started until other jobs finish to allow
+time to free up.
 .TP
 \fIGrpCPUs=\fP
 Maximum number of CPUs running jobs are able to be
 allocated in aggregate for this association and all associations which
-are children of this association. (NOTE: This limit is not currently
-enforced in SLURM. You can still set this, but have to wait for future
-versions of SLURM before it is enforced.)
+are children of this association.
 .TP
 \fIGrpJobs=\fP
 Maximum number of running jobs in aggregate for this
@@ -1531,16 +1538,18 @@ A brief description of the account.
 \fIGrpCPUMins=\fP
 Maximum number of CPU hours running jobs are able to
 be allocated in aggregate for this association and all associations
-which are children of this association. (NOTE: This limit is not
-currently enforced in SLURM. You can still set this, but have to wait
-for future versions of SLURM before it is enforced.)
+which are children of this association.
+\fIGrpCPURunMins=\fP
+Used to limit the combined total number of CPU minutes used by all
+jobs running with this association and its children.  This takes into
+consideration time limit of running jobs and consumes it, if the limit
+is reached no new jobs are started until other jobs finish to allow
+time to free up.
 .TP
 \fIGrpCPUs=\fP
 Maximum number of CPUs running jobs are able to be
 allocated in aggregate for this association and all associations which
-are children of this association. (NOTE: This limit is not currently
-enforced in SLURM. You can still set this, but have to wait for future
-versions of SLURM before it is enforced.)
+are children of this association.
 .TP
 \fIGrpJobs=\fP
 Maximum number of running jobs in aggregate for this
@@ -1786,7 +1795,7 @@ Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 CODE\-OCEC\-09\-009. All rights reserved.
 .LP
 This file is part of SLURM, a resource management program.
-For details, see <http://www.schedmd.com/slurmdocs/>.
+For details, see <http://slurm.schedmd.com/>.
 .LP
 SLURM is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free

@@ -111,8 +111,8 @@
 #define DEFAULT_RECOVER   1	/* Default state recovery on restart
 				 * 0 = use no saved state information
 				 * 1 = recover saved job state,
-				 *     node DOWN/DRAIN state and reason information
-				 * 2 = recover all state saved from last shutdown */
+				 *     node DOWN/DRAIN state & reason information
+				 * 2 = recover state saved from last shutdown */
 #define MIN_CHECKIN_TIME  3	/* Nodes have this number of seconds to
 				 * check-in before we ping them */
 #define SHUTDOWN_WAIT     2	/* Time to wait for backup server shutdown */
@@ -238,6 +238,7 @@ int main(int argc, char *argv[])
 	assoc_init_args_t assoc_init_arg;
 	pthread_t assoc_cache_thread;
 	slurm_trigger_callbacks_t callbacks;
+	char *dir_name;
 
 	/*
 	 * Establish initial configuration
@@ -438,7 +439,7 @@ int main(int argc, char *argv[])
 		fatal( "failed to initialize checkpoint plugin" );
 	if (slurm_acct_storage_init(NULL) != SLURM_SUCCESS )
 		fatal( "failed to initialize accounting_storage plugin");
-	if (slurm_jobacct_gather_init() != SLURM_SUCCESS )
+	if (jobacct_gather_init() != SLURM_SUCCESS )
 		fatal( "failed to initialize jobacct_gather plugin");
 	if (job_submit_plugin_init() != SLURM_SUCCESS )
 		fatal( "failed to initialize job_submit plugin");
@@ -469,7 +470,7 @@ int main(int argc, char *argv[])
 					slurm_strerror(error_code));
 			}
 			unlock_slurmctld(config_write_lock);
-			select_g_select_nodeinfo_set_all(time(NULL));
+			select_g_select_nodeinfo_set_all();
 
 			if (recover == 0)
 				_accounting_mark_all_nodes_down("cold-start");
@@ -570,6 +571,9 @@ int main(int argc, char *argv[])
 		_slurmctld_background(NULL);
 
 		/* termination of controller */
+		dir_name = slurm_get_state_save_location();
+		switch_save(dir_name);
+		xfree(dir_name);
 		slurm_priority_fini();
 		shutdown_state_save();
 		pthread_join(slurmctld_config.thread_id_sig,  NULL);
@@ -620,7 +624,7 @@ int main(int argc, char *argv[])
 {
 	/* This should purge all allocated memory,   *\
 	\*   Anything left over represents a leak.   */
-	char *dir_name;
+
 
 	/* Give running agents a chance to complete and free memory.
 	 * Wait up to 60 seconds (3 seconds * 20) */
@@ -654,7 +658,7 @@ int main(int argc, char *argv[])
 	job_submit_plugin_fini();
 	slurm_preempt_fini();
 	g_slurm_jobcomp_fini();
-	slurm_jobacct_gather_fini();
+	jobacct_gather_fini();
 	slurm_select_fini();
 	slurm_topo_fini();
 	checkpoint_fini();
@@ -1263,10 +1267,13 @@ static void _queue_reboot_msg(void)
 	want_nodes_reboot = false;
 	for (i = 0, node_ptr = node_record_table_ptr;
 	     i < node_record_count; i++, node_ptr++) {
-		if (!IS_NODE_MAINT(node_ptr) || /* do it only if node */
-		    is_node_in_maint_reservation(i)) /*isn't in reservation */
+		if (!IS_NODE_MAINT(node_ptr))
 			continue;
-		want_nodes_reboot = true; /* mark it for the next cycle */
+		if (is_node_in_maint_reservation(i)) {
+			/* defer if node isn't in reservation */
+			want_nodes_reboot = true;
+			continue;
+		}
 		if (IS_NODE_IDLE(node_ptr) && !IS_NODE_NO_RESPOND(node_ptr) &&
 		    !IS_NODE_POWER_UP(node_ptr)) /* only active idle nodes */
 			want_reboot = true;
@@ -1275,8 +1282,10 @@ static void _queue_reboot_msg(void)
 			want_reboot = true; /* system just restarted */
 		else
 			want_reboot = false;
-		if (!want_reboot)
+		if (!want_reboot) {
+			want_nodes_reboot = true;	/* defer reboot */
 			continue;
+		}
 		if (reboot_agent_args == NULL) {
 			reboot_agent_args = xmalloc(sizeof(agent_arg_t));
 			reboot_agent_args->msg_type = REQUEST_REBOOT_NODES;
@@ -1313,6 +1322,7 @@ static void *_slurmctld_background(void *no_data)
 	static time_t last_checkpoint_time;
 	static time_t last_group_time;
 	static time_t last_health_check_time;
+	static time_t last_acct_gather_node_time;
 	static time_t last_no_resp_msg_time;
 	static time_t last_ping_node_time;
 	static time_t last_ping_srun_time;
@@ -1360,7 +1370,8 @@ static void *_slurmctld_background(void *no_data)
 	last_purge_job_time = last_trigger = last_health_check_time = now;
 	last_timelimit_time = last_assert_primary_time = now;
 	last_no_resp_msg_time = last_resv_time = last_ctld_bu_ping = now;
-	last_uid_update = last_reboot_msg_time = now;
+	last_uid_update = last_reboot_msg_time = last_acct_gather_node_time
+		= now;
 
 	if ((slurmctld_conf.min_job_age > 0) &&
 	    (slurmctld_conf.min_job_age < PURGE_JOB_INTERVAL)) {
@@ -1456,6 +1467,18 @@ static void *_slurmctld_background(void *no_data)
 			run_health_check();
 			unlock_slurmctld(node_write_lock);
 		}
+
+		if (slurmctld_conf.acct_gather_node_freq &&
+		    (difftime(now, last_acct_gather_node_time) >=
+		     slurmctld_conf.acct_gather_node_freq) &&
+		    is_ping_done()) {
+			now = time(NULL);
+			last_acct_gather_node_time = now;
+			lock_slurmctld(node_write_lock);
+			update_nodes_acct_gather_data();
+			unlock_slurmctld(node_write_lock);
+		}
+
 		if (((difftime(now, last_ping_node_time) >= ping_interval) ||
 		     ping_nodes_now) && is_ping_done()) {
 			now = time(NULL);

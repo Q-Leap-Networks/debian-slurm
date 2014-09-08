@@ -183,6 +183,11 @@ extern int bg_status_update_block_state(bg_record_t *bg_record,
 			|| !list_count(bg_record->job_list)))
 			bg_reset_block(bg_record, NULL);
 		remove_from_bg_list(bg_lists->booted, bg_record);
+		bg_record->action = BG_BLOCK_ACTION_NONE;
+		/* This means the reason could of been set by the
+		   action on the block, so clear it. */
+		if (!(bg_record->state & BG_BLOCK_ERROR_FLAG))
+			xfree(bg_record->reason);
 	} else if (real_state & BG_BLOCK_ERROR_FLAG) {
 		if (bg_record->boot_state)
 			error("Block %s in an error state while booting.",
@@ -369,5 +374,110 @@ extern void bg_status_process_kill_job_list(List kill_job_list,
 		debug2("Trying to requeue job %u", freeit->jobid);
 		bg_requeue_job(freeit->jobid, 0, slurmctld_locked);
 		_destroy_kill_struct(freeit);
+	}
+}
+
+extern void bg_status_add_job_kill_list(
+	struct job_record *job_ptr, List *killing_list)
+{
+	kill_job_struct_t *freeit;
+	ListIterator kill_job_itr;
+
+	if (!job_ptr || !job_ptr->kill_on_node_fail)
+		return;
+
+	if (!*killing_list)
+		*killing_list = bg_status_create_kill_job_list();
+
+	kill_job_itr = list_iterator_create(*killing_list);
+	/* Since lots of cnodes could fail at
+	   the same time effecting the same
+	   job make sure we only add it once
+	   since there is no reason to do the
+	   same process over and over again.
+	*/
+	while ((freeit = (kill_job_struct_t *)list_next(kill_job_itr))) {
+		if (freeit->jobid == job_ptr->job_id)
+			break;
+	}
+	list_iterator_destroy(kill_job_itr);
+
+	if (!freeit) {
+		freeit = (kill_job_struct_t *)xmalloc(sizeof(freeit));
+		freeit->jobid = job_ptr->job_id;
+		list_push(*killing_list, freeit);
+	}
+}
+
+extern void bg_status_remove_jobs_from_failed_block(
+	bg_record_t *bg_record, int inx,
+	bool midplane, List *delete_list,
+	List *killing_list)
+{
+	struct job_record *job_ptr = NULL;
+
+	if (bg_record->free_cnt) /* Already handled */
+		return;
+
+	if (!bg_record->modifying || !delete_list) {
+		/* If the block is being modified (pending job), and
+		   there is a delete_list just add it to the
+		   list so it gets freed and clear up the cnodes so
+		   the new job can start.
+		*/
+		if (bg_record->job_ptr)
+			bg_status_add_job_kill_list(
+				bg_record->job_ptr, killing_list);
+		else if (bg_record->job_list
+			 && list_count(bg_record->job_list)) {
+			ListIterator job_itr =
+				list_iterator_create(bg_record->job_list);
+			while ((job_ptr = list_next(job_itr))) {
+				if (midplane) {
+					if (bit_test(job_ptr->node_bitmap, inx))
+						bg_status_add_job_kill_list(
+							bg_record->job_ptr,
+							killing_list);
+				} else {
+					select_jobinfo_t *jobinfo =
+						(select_jobinfo_t *)
+						job_ptr->select_jobinfo->data;
+					/* (Handling cnodes, so only one job.)
+					   If no units_avail we are
+					   using the whole thing, else
+					   check the index.
+					*/
+					if (!jobinfo->units_avail
+					    || bit_test(jobinfo->units_avail,
+							inx)) {
+						bg_status_add_job_kill_list(
+							bg_record->job_ptr,
+							killing_list);
+						break;
+					}
+				}
+			}
+			list_iterator_destroy(job_itr);
+		}
+	} else if (delete_list) {
+		if (!*delete_list)
+			*delete_list = list_create(NULL);
+		/* If there are no jobs running just
+		   free the thing. (This rarely
+		   happens when a mmcs job goes into
+		   error right after it finishes.
+		   Weird, I know.)  Here we are going
+		   to just remove the block since else
+		   wise we could try to free this
+		   block over and over again, which
+		   only needs to happen once.
+		*/
+		if (!block_ptr_exist_in_list(*delete_list, bg_record)) {
+			debug("_remove_jobs_from_failed_block: going to "
+			      "remove block %s, bad hardware "
+			      "and no jobs running",
+			      bg_record->bg_block_id);
+			list_push(*delete_list, bg_record);
+		}
 	}
 }

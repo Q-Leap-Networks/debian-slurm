@@ -446,13 +446,13 @@ static void _editing_started(GtkCellRenderer *cell,
 			     gpointer         data)
 {
 	gdk_threads_leave();
-	g_static_mutex_lock(&sview_mutex);
+	g_mutex_lock(sview_mutex);
 }
 
 static void _editing_canceled(GtkCellRenderer *cell,
 			      gpointer         data)
 {
-	g_static_mutex_unlock(&sview_mutex);
+	g_mutex_unlock(sview_mutex);
 }
 
 static void *_editing_thr(gpointer arg)
@@ -1764,7 +1764,7 @@ extern void destroy_popup_info(void *arg)
 
 	if (popup_win) {
 		*popup_win->running = 0;
-		g_static_mutex_lock(&sview_mutex);
+		g_mutex_lock(sview_mutex);
 		/* these are all childern of each other so must
 		   be freed in this order */
 		if (popup_win->grid_button_list) {
@@ -1791,7 +1791,7 @@ extern void destroy_popup_info(void *arg)
 		destroy_specific_info(popup_win->spec_info);
 		xfree(popup_win->display_data);
 		xfree(popup_win);
-		g_static_mutex_unlock(&sview_mutex);
+		g_mutex_unlock(sview_mutex);
 	}
 
 }
@@ -2135,8 +2135,8 @@ extern void display_edit_note(char *edit_note)
 	msg_id = gtk_statusbar_push(GTK_STATUSBAR(main_statusbar),
 				    STATUS_ADMIN_EDIT,
 				    edit_note);
-	if (!g_thread_create(_editing_thr, GINT_TO_POINTER(msg_id),
-			     FALSE, &error))
+	if (!sview_thread_new(_editing_thr, GINT_TO_POINTER(msg_id),
+			      FALSE, &error))
 		g_printerr("Failed to create edit thread: %s\n",
 			   error->message);
 

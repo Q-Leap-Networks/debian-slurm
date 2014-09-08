@@ -39,6 +39,14 @@ set file_prog2       "test$test_id.prog2"
 
 print_header $test_id
 
+if {[test_launch_poe]} {
+	send_user "\nWARNING: This test is incompatible with launch/poe systems\n"
+	exit 0
+} elseif {[test_cray]} {
+        send_user "\nWARNING: This test is incompatible with Cray systems\n"
+        exit $exit_code
+}
+
 #
 # Delete left-over programs and rebuild them.
 #
@@ -95,7 +103,7 @@ if {[wait_for_job $job_id "DONE"] != 0} {
 set matches 0
 spawn $scontrol --detail show job $job_id
 expect {
-	-re "ExitCode=0:0" {
+	-re " ExitCode=0:0" {
 		incr matches
 		exp_continue
 	}
@@ -201,7 +209,7 @@ if {[wait_for_job $job_id "DONE"] != 0} {
 set matches 0
 spawn $scontrol --detail show job $job_id
 expect {
-	-re "ExitCode=33:0" {
+	-re " ExitCode=33:0" {
 		incr matches
 		exp_continue
 	}

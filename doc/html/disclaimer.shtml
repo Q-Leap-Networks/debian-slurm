@@ -46,14 +46,15 @@ can be found at the <a href="team.html">SLURM Team</a> web page.</p>
 including a copyright notice, the following copyright notices are found in
 SLURM's code and documenation files:<br>
 Copyright (C) 2011 Trinity Centre for High Performance Computing<br>
-Copyright (C) 2010-2011 SchedMD LLC<br>
+Copyright (C) 2010-2012 SchedMD LLC<br>
 Copyright (C) 2009 CEA/DAM/DIF<br>
+Copyright (C) 2012 CSC-IT Center for Science Ltd.<br>
 Copyright (C) 2009-2011 Centro Svizzero di Calcolo Scientifico (CSCS)<br>
 Copyright (C) 2008-2011 Lawrence Livermore National Security<br>
 Copyright (C) 2008 Vijay Ramasubramanian<br>
 Copyright (C) 2007-2008 Red Hat, Inc.<br>
 Copyright (C) 2007-2009 National University of Defense Technology, China<br>
-Copyright (C) 2007-2011 Bull<br>
+Copyright (C) 2007-2012 Bull<br>
 Copyright (C) 2005-2008 Hewlett-Packard Development Company, L.P.<br>
 Copyright (C) 2004-2009, Marcus Holland-Moritz<br>
 Copyright (C) 2002-2007 The Regents of the University of California<br>
@@ -61,10 +62,11 @@ Copyright (C) 2002-2003 Linux NetworX<br>
 Copyright (C) 2002 University of Chicago<br>
 Copyright (C) 2001 Paul Marquess<br>
 Copyright (C) 2000 Markus Friedl<br>
+Copyright (C) 2000, 2004 by Martin Pool (mbp sourcefrog net)<br>
 Copyright (C) 1999 Kenneth Albanowski<br>
-Copyright (C) 1998 Todd C. Miller <Todd.Miller@courtesan.com><br>
+Copyright (C) 1998 Todd C. Miller (Todd.Miller@courtesan.com)<br>
 Copyright (C) 1996-2003 Maximum Entropy Data Consultants Ltd,<br>
-Copyright (C) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland<br>
+Copyright (C) 1995 Tatu Ylonen (ylo@cs.hut.fi), Espoo, Finland<br>
 Copyright (C) 1989-1994, 1996-1999, 2001 Free Software Foundation, Inc.</p>
 
 <p>Much of the work was performed under the auspices of the U.S. Department of
@@ -84,7 +86,7 @@ necessarily state or reflect those of the United States government or
 Lawrence Livermore National Security, LLC, and shall not be used for 
 advertising or product endorsement purposes.</p>
 
-<p style="text-align: center;">Last modified 27 June 2010</p>
+<p style="text-align: center;">Last modified 7 December 2012</p>
 
 <!--#include virtual="footer.txt"-->
 

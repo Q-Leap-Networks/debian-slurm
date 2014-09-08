@@ -41,14 +41,14 @@ set matches     0
 
 print_header $test_id
 
-if {[test_cray]} {
-	send_user "\nWARNING: This test is incompatible with Cray systems\n"
+if { [string compare [test_launch_type] "slurm"] } {
+	send_user "\nWARNING: This test is only compatible with systems using launch/slurm\n"
 	exit $exit_code
-}
-if { [test_xcpu] } {
+} elseif { [test_xcpu] } {
 	send_user "\nWARNING: This test is incompatible with XCPU systems\n"
 	exit 0
 }
+
 if { [test_bluegene] } {
 	if { [test_emulated] } {
 		set node_cnt 1
@@ -73,7 +73,7 @@ exec $bin_chmod 700 $file_prog
 # Spawn initial program via srun
 #
 set timeout $max_job_delay
-set salloc_pid [spawn $salloc -N $node_cnt -t2 $srun -n $task_cnt --overcommit $file_prog]
+set salloc_pid [spawn $salloc -N $node_cnt -t2 $srun -n $task_cnt --overcommit ./$file_prog]
 set init_id $spawn_id
 expect {
         -i $init_id

@@ -330,7 +330,7 @@ void *_fwd_tree_thread(void *arg)
 		}
 
 		send_msg.forward.timeout = fwd_tree->timeout;
-		if((send_msg.forward.cnt = hostlist_count(fwd_tree->tree_hl))) {
+		if ((send_msg.forward.cnt = hostlist_count(fwd_tree->tree_hl))){
 			buf = hostlist_ranged_string_xmalloc(
 					fwd_tree->tree_hl);
 			send_msg.forward.nodelist = buf;
@@ -348,16 +348,50 @@ void *_fwd_tree_thread(void *arg)
 
 		xfree(send_msg.forward.nodelist);
 
-		if(ret_list) {
+		if (ret_list) {
+			int ret_cnt = list_count(ret_list);
+			/* This is most common if a slurmd is running
+			   an older version of Slurm than the
+			   originator of the message.
+			*/
+			if ((ret_cnt <= send_msg.forward.cnt) &&
+			    (errno != SLURM_COMMUNICATIONS_CONNECTION_ERROR)) {
+				error("fwd_tree_thread: %s failed to forward "
+				      "the message, expecting %d ret got only "
+				      "%d",
+				      name, send_msg.forward.cnt + 1, ret_cnt);
+				if (ret_cnt > 1) { /* not likely */
+					ret_data_info_t *ret_data_info = NULL;
+					ListIterator itr =
+						list_iterator_create(ret_list);
+					while ((ret_data_info =
+						list_next(itr))) {
+						if (strcmp(ret_data_info->
+							   node_name, name))
+							hostlist_delete_host(
+								fwd_tree->
+								tree_hl,
+								ret_data_info->
+								node_name);
+					}
+					list_iterator_destroy(itr);
+				}
+			}
+
 			slurm_mutex_lock(fwd_tree->tree_mutex);
 			list_transfer(fwd_tree->ret_list, ret_list);
 			pthread_cond_signal(fwd_tree->notify);
 			slurm_mutex_unlock(fwd_tree->tree_mutex);
 			list_destroy(ret_list);
+			/* try next node */
+			if (ret_cnt <= send_msg.forward.cnt) {
+				free(name);
+				continue;
+			}
 		} else {
 			/* This should never happen (when this was
-			   written slurm_send_addr_recv_msgs always
-			   returned a list */
+			 * written slurm_send_addr_recv_msgs always
+			 * returned a list */
 			error("fwd_tree_thread: no return list given from "
 			      "slurm_send_addr_recv_msgs spawned for %s",
 			      name);
@@ -560,7 +594,7 @@ extern List start_msg_tree(hostlist_t hl, slurm_msg_t *msg, int timeout)
 		fwd_tree->notify = &notify;
 		fwd_tree->tree_mutex = &tree_mutex;
 
-		if(fwd_tree->timeout <= 0) {
+		if (fwd_tree->timeout <= 0) {
 			/* convert secs to msec */
 			fwd_tree->timeout  = slurm_get_msg_timeout() * 1000;
 		}

@@ -98,6 +98,7 @@ strong_alias(log_init,		slurm_log_init);
 strong_alias(log_reinit,	slurm_log_reinit);
 strong_alias(log_fini,		slurm_log_fini);
 strong_alias(log_alter,		slurm_log_alter);
+strong_alias(log_alter_with_fp, slurm_log_alter_with_fp);
 strong_alias(log_set_fpfx,	slurm_log_set_fpfx);
 strong_alias(log_fp,		slurm_log_fp);
 strong_alias(log_has_data,	slurm_log_has_data);
@@ -171,6 +172,49 @@ static bool at_forked = false;
 #  define atfork_install_handlers() (NULL)
 #endif
 static void _log_flush(log_t *log);
+
+
+/* Write the current local time into the provided buffer. Returns the
+ * number of characters written into the buffer. */
+static size_t _make_timestamp(char *timestamp_buf, size_t max, 
+			      const char *timestamp_fmt)
+{
+	time_t timestamp_t = time(NULL);
+	struct tm timestamp_tm;
+	if (!localtime_r(&timestamp_t, &timestamp_tm)) {
+		fprintf(stderr, "localtime_r() failed\n");
+		return 0;
+	}
+	return strftime(timestamp_buf, max, timestamp_fmt, &timestamp_tm);
+}
+
+size_t rfc2822_timestamp(char *s, size_t max)
+{
+	return _make_timestamp(s, max, "%a, %d %b %Y %H:%M:%S %z");
+}
+
+size_t log_timestamp(char *s, size_t max)
+{
+#ifdef USE_RFC5424_TIME
+	size_t written = _make_timestamp(s, max, "%Y-%m-%dT%T%z");
+	if (max >= 26 && written == 24) {
+		/* The strftime %z format creates timezone offsets of
+		 * the form (+/-)hhmm, whereas the RFC 5424 format is
+		 * (+/-)hh:mm. So shift the minutes one step back and
+		 * insert the semicolon. */
+		s[25] = '\0';
+		s[24] = s[23];
+		s[23] = s[22];
+		s[22] = ':';
+		return written + 1;
+	}
+	return written;
+#elif defined USE_ISO_8601
+	return _make_timestamp(s, max, "%Y-%m-%dT%T");
+#else
+	return _make_timestamp(s, max, "%b %d %T");
+#endif
+}
 
 /* check to see if a file is writeable,
  * RET 1 if file can be written now,
@@ -257,10 +301,14 @@ _log_init(char *prog, log_options_t opt, log_facility_t fac, char *logfile )
 
 	log->opt = opt;
 
-	if (log->buf)
+	if (log->buf) {
 		cbuf_destroy(log->buf);
-	if (log->fbuf)
+		log->buf = NULL;
+	}
+	if (log->fbuf) {
 		cbuf_destroy(log->fbuf);
+		log->fbuf = NULL;
+	}
 
 	if (log->opt.buffered) {
 		log->buf  = cbuf_create(128, 8192);
@@ -341,10 +389,14 @@ _sched_log_init(char *prog, log_options_t opt, log_facility_t fac,
 
 	sched_log->opt = opt;
 
-	if (sched_log->buf)
+	if (sched_log->buf) {
 		cbuf_destroy(sched_log->buf);
-	if (sched_log->fbuf)
+		sched_log->buf = NULL;
+	}
+	if (sched_log->fbuf) {
 		cbuf_destroy(sched_log->fbuf);
+		sched_log->fbuf = NULL;
+	}
 
 	if (sched_log->opt.buffered) {
 		sched_log->buf  = cbuf_create(128, 8192);
@@ -409,7 +461,7 @@ int sched_log_init(char *prog, log_options_t opt, log_facility_t fac, char *logf
 	return rc;
 }
 
-void log_fini()
+void log_fini(void)
 {
 	if (!log)
 		return;
@@ -489,6 +541,28 @@ int log_alter(log_options_t opt, log_facility_t fac, char *logfile)
 	return rc;
 }
 
+/* reinitialize log data structures. Like log_init, but do not init
+ * the log mutex
+ */
+int log_alter_with_fp(log_options_t opt, log_facility_t fac, FILE *fp_in)
+{
+	int rc = 0;
+	slurm_mutex_lock(&log_lock);
+	rc = _log_init(NULL, opt, fac, NULL);
+	if (log->logfp)
+		fclose(log->logfp); /* Ignore errors */
+	log->logfp = fp_in;
+	if (log->logfp) {
+		int fd;
+		if ((fd = fileno(log->logfp)) < 0)
+			log->logfp = NULL;
+		/* don't close fd on out since this fd was made
+		 * outside of the logger */
+	}
+	slurm_mutex_unlock(&log_lock);
+	return rc;
+}
+
 /* reinitialize scheduler log data structures. Like sched_log_init,
  * but do not init the log mutex
  */
@@ -509,7 +583,7 @@ FILE *log_fp(void)
 {
 	FILE *fp;
 	slurm_mutex_lock(&log_lock);
-	if (log->logfp)
+	if (log && log->logfp)
 		fp = log->logfp;
 	else
 		fp = stderr;
@@ -523,7 +597,7 @@ FILE *log_fp(void)
  * args are like printf, with the addition of the following format chars:
  * - %m expands to strerror(errno)
  * - %t expands to strftime("%x %X") [ locally preferred short date/time ]
- * - %T expands to rfc822 date time  [ "dd Mon yyyy hh:mm:ss GMT offset" ]
+ * - %T expands to rfc2822 date time  [ "dd, Mon yyyy hh:mm:ss GMT offset" ]
  *
  * simple format specifiers are handled explicitly to avoid calls to
  * vsnprintf and allow dynamic sizing of the message buffer. If a call
@@ -568,15 +642,24 @@ static char *vxstrfmt(const char *fmt, va_list ap)
 			case 't': 	/* "%t" => locally preferred date/time*/
 				xstrftimecat(buf, "%x %X");
 				break;
-			case 'T': 	/* "%T" => "dd Mon yyyy hh:mm:ss off" */
-				xstrftimecat(buf, "%a %d %b %Y %H:%M:%S %z");
+			case 'T': 	/* "%T" => "dd, Mon yyyy hh:mm:ss off" */
+				xstrftimecat(buf, "%a, %d %b %Y %H:%M:%S %z");
 				break;
-#ifdef USE_ISO_8601
-			case 'M':       /* "%M" => "yyyy-mm-ddThh:mm:ss"          */
+#if defined USE_USEC_CLOCK
+			case 'M':       /* "%M" => "usec"                    */
+				snprintf(tmp, sizeof(tmp), "%ld", clock());
+				xstrcat(buf, tmp);
+				break;
+#elif defined USE_RFC5424_TIME
+			case 'M': /* "%M" => "yyyy-mm-ddThh:mm:ss(+/-)hh:mm" */
+				xrfc5424timecat(buf);
+				break;
+#elif defined USE_ISO_8601
+			case 'M':       /* "%M" => "yyyy-mm-ddThh:mm:ss"     */
 				xstrftimecat(buf, "%Y-%m-%dT%T");
 				break;
 #else
-			case 'M':       /* "%M" => "Mon DD hh:mm:ss"          */
+			case 'M':       /* "%M" => "Mon DD hh:mm:ss"         */
 				xstrftimecat(buf, "%b %d %T");
 				break;
 #endif
@@ -728,7 +811,12 @@ _log_printf(log_t *log, cbuf_t cb, FILE *stream, const char *fmt, ...)
 	va_list ap;
 	int fd = fileno(stream);
 
-	xassert(fd >= 0);
+	/* If the fd is less than 0 just return sense we can't do
+	   anything here.  This can happen if a calling program is the
+	   one that set up the io.
+	*/
+	if (fd < 0)
+		return;
 
 	/* If the socket has gone away we just return like all is
 	   well. */

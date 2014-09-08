@@ -85,6 +85,7 @@
 #include "slurm/slurm_errno.h"
 
 #include "src/common/cbuf.h"
+#include "src/common/cpu_frequency.h"
 #include "src/common/env.h"
 #include "src/common/fd.h"
 #include "src/common/forward.h"
@@ -291,7 +292,7 @@ static int _call_select_plugin_from_stepd(slurmd_job_t *job, uint64_t pagg_id,
 				    SELECT_JOBDATA_RESV_ID, &job->resv_id);
 	if (pagg_id)
 		select_g_select_jobinfo_set(fake_job_record.select_jobinfo,
-				    SELECT_JOBDATA_PAGG_ID, &pagg_id);
+					    SELECT_JOBDATA_PAGG_ID, &pagg_id);
 	rc = (*select_fn)(&fake_job_record);
 	select_g_select_jobinfo_free(fake_job_record.select_jobinfo);
 	return rc;
@@ -668,7 +669,7 @@ _wait_for_children_slurmstepd(slurmd_job_t *job)
 
 		while((left = bit_clear_count(step_complete.bits)) > 0) {
 			debug3("Rank %d waiting for %d (of %d) children",
-			     step_complete.rank, left, step_complete.children);
+			       step_complete.rank, left, step_complete.children);
 			rc = pthread_cond_timedwait(&step_complete.cond,
 						    &step_complete.lock, &ts);
 			if (rc == ETIMEDOUT) {
@@ -719,12 +720,12 @@ _one_step_complete_msg(slurmd_job_t *job, int first, int last)
 	msg.range_first = first;
 	msg.range_last = last;
 	msg.step_rc = step_complete.step_rc;
-	msg.jobacct = jobacct_gather_g_create(NULL);
+	msg.jobacct = jobacctinfo_create(NULL);
 	/************* acct stuff ********************/
 	if (!acct_sent) {
-		jobacct_gather_g_aggregate(step_complete.jobacct, job->jobacct);
-		jobacct_gather_g_getinfo(step_complete.jobacct,
-					 JOBACCT_DATA_TOTAL, msg.jobacct);
+		jobacctinfo_aggregate(step_complete.jobacct, job->jobacct);
+		jobacctinfo_getinfo(step_complete.jobacct,
+				    JOBACCT_DATA_TOTAL, msg.jobacct);
 		acct_sent = true;
 	}
 	/*********************************************/
@@ -781,7 +782,7 @@ _one_step_complete_msg(slurmd_job_t *job, int first, int last)
 	}
 
 finished:
-	jobacct_gather_g_destroy(msg.jobacct);
+	jobacctinfo_destroy(msg.jobacct);
 }
 
 /* Given a starting bit in the step_complete.bits bitstring, "start",
@@ -906,7 +907,7 @@ job_manager(slurmd_job_t *job)
 	    (slurmd_task_init() != SLURM_SUCCESS)		||
 	    (slurm_proctrack_init() != SLURM_SUCCESS)		||
 	    (checkpoint_init(ckpt_type) != SLURM_SUCCESS)	||
-	    (slurm_jobacct_gather_init() != SLURM_SUCCESS)) {
+	    (jobacct_gather_init() != SLURM_SUCCESS)) {
 		rc = SLURM_PLUGIN_NAME_INVALID;
 		goto fail1;
 	}
@@ -970,8 +971,8 @@ job_manager(slurmd_job_t *job)
 	debug2("After call to spank_init()");
 
 	/* Call interconnect_init() before becoming user */
-	if (!job->batch &&
-	    (interconnect_init(job->switch_job, job->uid) < 0)) {
+	if (!job->batch && job->argv &&
+	    (interconnect_init(job->switch_job, job->uid, job->argv[0]) < 0)) {
 		/* error("interconnect_init: %m"); already logged */
 		rc = ESLURM_INTERCONNECT_FAILURE;
 		goto fail2;
@@ -1016,14 +1017,14 @@ job_manager(slurmd_job_t *job)
 	/* if we are not polling then we need to make sure we get some
 	 * information here
 	 */
-	if(!conf->job_acct_gather_freq)
-		jobacct_gather_g_stat_task(0);
+	if (!conf->job_acct_gather_freq)
+		jobacct_gather_stat_task(0);
 
 	/* Send job launch response with list of pids */
 	_send_launch_resp(job, 0);
 
 	_wait_for_all_tasks(job);
-	jobacct_gather_g_endpoll();
+	jobacct_gather_endpoll();
 
 	job->state = SLURMSTEPD_STEP_ENDING;
 
@@ -1032,7 +1033,7 @@ job_manager(slurmd_job_t *job)
 		error("interconnect_fini: %m");
 	}
 
-    fail2:
+fail2:
 	/*
 	 * First call interconnect_postfini() - In at least one case,
 	 * this will clean up any straggling processes. If this call
@@ -1052,7 +1053,7 @@ job_manager(slurmd_job_t *job)
 	step_terminate_monitor_stop();
 	if (!job->batch) {
 		if (interconnect_postfini(job->switch_job, job->jmgr_pid,
-				job->jobid, job->stepid) < 0)
+					  job->jobid, job->stepid) < 0)
 			error("interconnect_postfini: %m");
 	}
 
@@ -1063,8 +1064,16 @@ job_manager(slurmd_job_t *job)
 		_wait_for_io(job);
 
 	/*
+	 * Reset cpu frequency if it was changed
+	 */
+
+	if (job->cpu_freq != NO_VAL)
+		cpu_freq_reset(job);
+
+	/*
 	 * Warn task plugin that the user's step have terminated
 	 */
+
 	post_step(job);
 
 	/*
@@ -1082,7 +1091,7 @@ job_manager(slurmd_job_t *job)
 	}
 	debug2("After call to spank_fini()");
 
-    fail1:
+fail1:
 	/* If interactive job startup was abnormal,
 	 * be sure to notify client.
 	 */
@@ -1103,13 +1112,16 @@ job_manager(slurmd_job_t *job)
 }
 
 static int
-_spank_task_privileged(slurmd_job_t *job, int taskid, struct priv_state *sp)
+_pre_task_privileged(slurmd_job_t *job, int taskid, struct priv_state *sp)
 {
 	if (_reclaim_privileges(sp) < 0)
 		return SLURM_ERROR;
 
 	if (spank_task_privileged (job, taskid) < 0)
 		return error("spank_task_init_privileged failed");
+
+	if (pre_launch_priv(job) < 0)
+		return error("pre_launch_priv failed");
 
 	return(_drop_privileges (job, true, sp));
 }
@@ -1403,7 +1415,7 @@ _fork_all_tasks(slurmd_job_t *job, bool *io_initialized)
 #ifdef HAVE_AIX
 			(void) mkcrid(0);
 #endif
-			/* jobacct_gather_g_endpoll();
+			/* jobacctinfo_endpoll();
 			 * closing jobacct files here causes deadlock */
 
 			if (conf->propagate_prio)
@@ -1413,7 +1425,7 @@ _fork_all_tasks(slurmd_job_t *job, bool *io_initialized)
 			 *  Reclaim privileges and call any plugin hooks
 			 *   that may require elevated privs
 			 */
-			if (_spank_task_privileged(job, i, &sprivs) < 0)
+			if (_pre_task_privileged(job, i, &sprivs) < 0)
 				exit(1);
 
  			if (_become_user(job, &sprivs) < 0) {
@@ -1452,9 +1464,9 @@ _fork_all_tasks(slurmd_job_t *job, bool *io_initialized)
 
 		list_append (exec_wait_list, ei);
 
-		LOG_TIMESTAMP(time_stamp);
+		log_timestamp(time_stamp, sizeof(time_stamp));
 		verbose ("task %lu (%lu) started %s",
-			(unsigned long) job->task[i]->gtid,
+			 (unsigned long) job->task[i]->gtid,
 			 (unsigned long) pid, time_stamp);
 
 		job->task[i]->pid = pid;
@@ -1493,12 +1505,12 @@ _fork_all_tasks(slurmd_job_t *job, bool *io_initialized)
 		 * has already set its process group as desired
 		 */
 		if ((job->pty == 0)
-		&&  (setpgid (job->task[i]->pid, job->pgid) < 0)) {
+		    &&  (setpgid (job->task[i]->pid, job->pgid) < 0)) {
 			error("Unable to put task %d (pid %d) into "
 			      "pgrp %d: %m",
-				i,
-				job->task[i]->pid,
-				job->pgid);
+			      i,
+			      job->task[i]->pid,
+			      job->pgid);
 		}
 
 		if (slurm_container_add(job, job->task[i]->pid)
@@ -1510,16 +1522,23 @@ _fork_all_tasks(slurmd_job_t *job, bool *io_initialized)
 		jobacct_id.nodeid = job->nodeid;
 		jobacct_id.taskid = job->task[i]->gtid;
 		jobacct_id.job    = job;
-		jobacct_gather_g_add_task(job->task[i]->pid,
-				   &jobacct_id);
-
+		if (i == (job->node_tasks - 1)) {
+			/* start polling on the last task */
+			jobacct_gather_set_proctrack_container_id(job->cont_id);
+			jobacct_gather_add_task(job->task[i]->pid, &jobacct_id,
+						1);
+		} else {
+			/* don't poll yet */
+			jobacct_gather_add_task(job->task[i]->pid, &jobacct_id,
+						0);
+		}
 		if (spank_task_post_fork (job, i) < 0) {
 			error ("spank task %d post-fork failed", i);
 			rc = SLURM_ERROR;
 			goto fail2;
 		}
 	}
-	jobacct_gather_g_set_proctrack_container_id(job->cont_id);
+//	jobacct_gather_set_proctrack_container_id(job->cont_id);
 
 	/*
 	 * Now it's ok to unblock the tasks, so they may call exec.
@@ -1533,7 +1552,7 @@ _fork_all_tasks(slurmd_job_t *job, bool *io_initialized)
 		 * (if specified and able)
 		 */
 		if (pdebug_trace_process(job, job->task[i]->pid)
-				== SLURM_ERROR)
+		    == SLURM_ERROR)
 			rc = SLURM_ERROR;
 	}
 
@@ -1665,12 +1684,24 @@ _wait_for_any_task(slurmd_job_t *job, bool waitflag)
 		}
 
 		/************* acct stuff ********************/
-		jobacct = jobacct_gather_g_remove_task(pid);
+		jobacct = jobacct_gather_remove_task(pid);
 		if (jobacct) {
-			jobacct_gather_g_setinfo(jobacct,
-						 JOBACCT_DATA_RUSAGE, &rusage);
-			jobacct_gather_g_aggregate(job->jobacct, jobacct);
-			jobacct_gather_g_destroy(jobacct);
+			jobacctinfo_setinfo(jobacct,
+					    JOBACCT_DATA_RUSAGE, &rusage);
+			/* Since we currently don't track energy
+			   usage per task (only per step).  We take
+			   into account only the last poll of the last task.
+			   Odds are it is the only one with
+			   information anyway, but just to be safe we
+			   will zero out the previous value since this
+			   one will over ride it.
+			   If this ever changes in the future this logic
+			   will need to change.
+			*/
+			if (jobacct->energy.consumed_energy)
+				job->jobacct->energy.consumed_energy = 0;
+			jobacctinfo_aggregate(job->jobacct, jobacct);
+			jobacctinfo_destroy(jobacct);
 		}
 		/*********************************************/
 
@@ -1845,7 +1876,7 @@ _make_batch_dir(slurmd_job_t *job)
 
 	return xstrdup(path);
 
-   error:
+error:
 	return NULL;
 }
 
@@ -1862,7 +1893,7 @@ _make_batch_script(batch_job_launch_msg_t *msg, char *path)
 
 	snprintf(script, sizeof(script), "%s/%s", path, "slurm_script");
 
-  again:
+again:
 	if ((fp = safeopen(script, "w", SAFEOPEN_CREATE_ONLY)) == NULL) {
 		if ((errno != EEXIST) || (unlink(script) < 0))  {
 			error("couldn't open `%s': %m", script);
@@ -1894,7 +1925,7 @@ _make_batch_script(batch_job_launch_msg_t *msg, char *path)
 
 	return xstrdup(script);
 
-  error:
+error:
 	(void) unlink(script);
 	return NULL;
 
@@ -2019,15 +2050,22 @@ _send_launch_resp(slurmd_job_t *job, int rc)
 static int
 _send_complete_batch_script_msg(slurmd_job_t *job, int err, int status)
 {
-	int		rc, i;
+	int		rc, i, msg_rc;
 	slurm_msg_t	req_msg;
 	complete_batch_script_msg_t req;
+	char *		select_type;
+	bool		msg_to_ctld;
+
+	select_type = slurm_get_select_type();
+	msg_to_ctld = strcmp(select_type, "select/serial");
+	xfree(select_type);
 
 	req.job_id	= job->jobid;
 	req.job_rc      = status;
-	req.slurm_rc	= err;
 	req.jobacct	= job->jobacct;
 	req.node_name	= job->node_name;
+	req.slurm_rc	= err;
+	req.user_id	= (uint32_t) job->uid;
 	slurm_msg_t_init(&req_msg);
 	req_msg.msg_type= REQUEST_COMPLETE_BATCH_SCRIPT;
 	req_msg.data	= &req;
@@ -2035,8 +2073,19 @@ _send_complete_batch_script_msg(slurmd_job_t *job, int err, int status)
 	info("sending REQUEST_COMPLETE_BATCH_SCRIPT, error:%u", err);
 
 	/* Note: these log messages don't go to slurmd.log from here */
-	for (i=0; i<=MAX_RETRY; i++) {
-		if (slurm_send_recv_controller_rc_msg(&req_msg, &rc) == 0)
+	for (i = 0; i <= MAX_RETRY; i++) {
+		if (msg_to_ctld) {
+			msg_rc = slurm_send_recv_controller_rc_msg(&req_msg,
+								   &rc);
+		} else {
+			if (i == 0) {
+				slurm_set_addr_char(&req_msg.address,
+						    conf->port, "localhost");
+			}
+			msg_rc = slurm_send_recv_rc_msg_only_one(&req_msg,
+								 &rc, 0);
+		}
+		if (msg_rc == SLURM_SUCCESS)
 			break;
 		info("Retrying job complete RPC for %u.%u",
 		     job->jobid, job->stepid);
@@ -2284,10 +2333,10 @@ _initgroups(slurmd_job_t *job)
 	if ((rc = initgroups(username, gid))) {
 		if ((errno == EPERM) && (getuid() != (uid_t) 0)) {
 			debug("Error in initgroups(%s, %ld): %m",
-				username, (long)gid);
+			      username, (long)gid);
 		} else {
 			error("Error in initgroups(%s, %ld): %m",
-				username, (long)gid);
+			      username, (long)gid);
 		}
 		return -1;
 	}

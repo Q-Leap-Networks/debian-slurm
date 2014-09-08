@@ -79,7 +79,6 @@
 /* #DEFINES */
 #define _DEBUG	0
 #define MAX_SHUTDOWN_RETRY 5
-#define MAX_RETRIES 3
 
 /* STATIC VARIABLES */
 /* static pthread_mutex_t config_lock = PTHREAD_MUTEX_INITIALIZER; */
@@ -234,16 +233,16 @@ uint16_t slurm_get_batch_start_timeout(void)
  */
 uint16_t slurm_get_suspend_timeout(void)
 {
-        uint16_t suspend_timeout = 0;
-        slurm_ctl_conf_t *conf;
+	uint16_t suspend_timeout = 0;
+	slurm_ctl_conf_t *conf;
 
-        if (slurmdbd_conf) {
-        } else {
-                conf = slurm_conf_lock();
-                suspend_timeout = conf->suspend_timeout;
-                slurm_conf_unlock();
-        }
-        return suspend_timeout;
+	if (slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		suspend_timeout = conf->suspend_timeout;
+		slurm_conf_unlock();
+	}
+	return suspend_timeout;
 }
 
 /* slurm_get_resume_timeout
@@ -251,16 +250,16 @@ uint16_t slurm_get_suspend_timeout(void)
  */
 uint16_t slurm_get_resume_timeout(void)
 {
-        uint16_t resume_timeout = 0;
-        slurm_ctl_conf_t *conf;
+	uint16_t resume_timeout = 0;
+	slurm_ctl_conf_t *conf;
 
-        if (slurmdbd_conf) {
-        } else {
-                conf = slurm_conf_lock();
-                resume_timeout = conf->resume_timeout;
-                slurm_conf_unlock();
-        }
-        return resume_timeout;
+	if (slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		resume_timeout = conf->resume_timeout;
+		slurm_conf_unlock();
+	}
+	return resume_timeout;
 }
 
 /* slurm_get_suspend_time
@@ -1373,6 +1372,39 @@ uint16_t slurm_get_jobacct_gather_freq(void)
 	return freq;
 }
 
+/* slurm_get_energy_accounting_type
+ * get EnergyAccountingType from slurmctld_conf object
+ * RET char *   - energy_accounting type, MUST be xfreed by caller
+ */
+char *slurm_get_acct_gather_energy_type(void)
+{
+	char *acct_gather_energy_type = NULL;
+	slurm_ctl_conf_t *conf;
+
+	if (slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		acct_gather_energy_type =
+			xstrdup(conf->acct_gather_energy_type);
+		slurm_conf_unlock();
+	}
+	return acct_gather_energy_type;
+}
+
+extern uint16_t slurm_get_acct_gather_node_freq(void)
+{
+	uint16_t freq = 0;
+	slurm_ctl_conf_t *conf;
+
+	if (slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		freq = conf->acct_gather_node_freq;
+		slurm_conf_unlock();
+	}
+	return freq;
+}
+
 /* slurm_get_jobcomp_type
  * returns the job completion logger type from slurmctld_conf object
  * RET char *    - job completion type,  MUST be xfreed by caller
@@ -1506,7 +1538,7 @@ int slurm_set_jobcomp_port(uint32_t port)
 
 /* slurm_get_kill_wait
  * returns kill_wait from slurmctld_conf object
- * RET uint16_t        - kill_wait
+ * RET uint16_t	- kill_wait
  */
 uint16_t slurm_get_kill_wait(void)
 {
@@ -1520,6 +1552,42 @@ uint16_t slurm_get_kill_wait(void)
 		slurm_conf_unlock();
 	}
 	return kill_wait;
+}
+
+/* slurm_get_launch_type
+ * get launch_type from slurmctld_conf object
+ * RET char *   - launch_type, MUST be xfreed by caller
+ */
+char *slurm_get_launch_type(void)
+{
+	char *launch_type = NULL;
+	slurm_ctl_conf_t *conf;
+
+	if (slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		launch_type = xstrdup(conf->launch_type);
+		slurm_conf_unlock();
+	}
+	return launch_type;
+}
+
+/* slurm_set_launch_type
+ * set launch_type in slurmctld_conf object
+ * RET 0 or error code
+ */
+int slurm_set_launch_type(char *launch_type)
+{
+	slurm_ctl_conf_t *conf;
+
+	if (slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		xfree(conf->launch_type);
+		conf->launch_type = xstrdup(launch_type);
+		slurm_conf_unlock();
+	}
+	return 0;
 }
 
 /* slurm_get_preempt_type
@@ -1900,7 +1968,7 @@ slurm_fd_t slurm_init_msg_engine_port(uint16_t port)
  */
 slurm_fd_t slurm_init_msg_engine_addrname_port(char *addr_name, uint16_t port)
 {
-        slurm_addr_t addr;
+	slurm_addr_t addr;
 
 #ifdef BIND_SPECIFIC_ADDR
 	if (addr_name != NULL)
@@ -1908,7 +1976,7 @@ slurm_fd_t slurm_init_msg_engine_addrname_port(char *addr_name, uint16_t port)
 	else
 		slurm_set_addr_any(&addr, port);
 #else
-        slurm_set_addr_any(&addr, port);
+	slurm_set_addr_any(&addr, port);
 #endif
 
 	return _slurm_init_msg_engine(&addr);
@@ -2193,7 +2261,6 @@ int slurm_receive_msg(slurm_fd_t fd, slurm_msg_t *msg, int timeout)
 		header.ret_list = NULL;
 	}
 
-
 	/* Forward message to other nodes */
 	if (header.forward.cnt > 0) {
 		error("We need to forward this to other nodes use "
@@ -2250,6 +2317,7 @@ total_return:
 		msg->auth_cred = (void *) NULL;
 		error("slurm_receive_msg: %s", slurm_strerror(rc));
 		rc = -1;
+		usleep(10000);	/* Discourage brute force attack */
 	} else {
 		rc = 0;
 	}
@@ -2420,6 +2488,7 @@ total_return:
 			list_push(ret_list, ret_data_info);
 		}
 		error("slurm_receive_msgs: %s", slurm_strerror(rc));
+		usleep(10000);	/* Discourage brute force attack */
 	} else {
 		if (!ret_list)
 			ret_list = list_create(destroy_data_info);
@@ -2650,6 +2719,7 @@ total_return:
 		msg->data = NULL;
 		error("slurm_receive_msg_and_forward: %s",
 		      slurm_strerror(rc));
+		usleep(10000);	/* Discourage brute force attack */
 	} else {
 		rc = 0;
 	}
@@ -3428,12 +3498,27 @@ List slurm_send_recv_msgs(const char *nodelist, slurm_msg_t *msg,
  */
 List slurm_send_addr_recv_msgs(slurm_msg_t *msg, char *name, int timeout)
 {
+	static uint16_t conn_timeout = (uint16_t) NO_VAL;
 	List ret_list = NULL;
 	slurm_fd_t fd = -1;
 	ret_data_info_t *ret_data_info = NULL;
 	ListIterator itr;
+	int i;
 
-	if ((fd = slurm_open_msg_conn(&msg->address)) < 0) {
+	if (conn_timeout == (uint16_t) NO_VAL)
+		conn_timeout = MIN(slurm_get_msg_timeout(), 10);
+	/* This connect retry logic permits Slurm hierarchical communications
+	 * to better survive slurmd restarts */
+	for (i = 0; i <= conn_timeout; i++) {
+		if (i > 0)
+			sleep(1);
+		fd = slurm_open_msg_conn(&msg->address);
+		if ((fd >= 0) || (errno != ECONNREFUSED))
+			break;
+		if (i == 0)
+			debug3("connect refused, retrying");
+	}
+	if (fd < 0) {
 		mark_as_failed_forward(&ret_list, name,
 				       SLURM_COMMUNICATIONS_CONNECTION_ERROR);
 		errno = SLURM_COMMUNICATIONS_CONNECTION_ERROR;
@@ -3448,6 +3533,8 @@ List slurm_send_addr_recv_msgs(slurm_msg_t *msg, char *name, int timeout)
 		return ret_list;
 	} else {
 		itr = list_iterator_create(ret_list);
+		if (!itr)
+			fatal("list_iterator_create: malloc failure");
 		while ((ret_data_info = list_next(itr)))
 			if (!ret_data_info->node_name) {
 				ret_data_info->node_name = xstrdup(name);

@@ -49,8 +49,7 @@ if {[test_front_end] != 0} {
 # Delete left-over program and rebuild it
 #
 file delete $test_prog
-
-exec $bin_make -f /dev/null $test_prog
+exec $bin_cc -o $test_prog ${test_prog}.c
 exec $bin_chmod 700 $test_prog
 
 #
@@ -58,7 +57,7 @@ exec $bin_chmod 700 $test_prog
 #
 set matches 0
 set timeout $max_job_delay
-set srun_pid [spawn $srun -n1 -O $test_prog]
+set srun_pid [spawn $srun -n1 -t1 ./$test_prog]
 expect {
 	-re "Segmentation fault" {
 		send_user "\nThis Seg Fault was expected, no worries\n"
@@ -83,8 +82,15 @@ if {$matches != 1} {
 # Post-processing
 #
 if {$exit_code == 0} {
-	make_bash_script $file_in "$bin_rm -f *${test_prog}*core"
-	exec ./$file_in
+	make_bash_script $file_in "$bin_rm -f *${test_prog}*core /tmp/*${test_prog}*core"
+#	Run with "spawn" rather than "exec" to better handle other user's core
+#	files that we can not delete
+	spawn ./$file_in
+	expect {
+		eof {
+			wait
+		}
+	}
 	exec $bin_rm -f $file_in $test_prog
 	send_user "\nSUCCESS\n"
 }

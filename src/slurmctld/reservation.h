@@ -58,7 +58,8 @@ extern int update_resv(resv_desc_msg_t *resv_desc_ptr);
 extern int delete_resv(reservation_name_msg_t *resv_desc_ptr);
 
 /* Dump the reservation records to a buffer */
-extern void show_resv(char **buffer_ptr, int *buffer_size, uid_t uid);
+extern void show_resv(char **buffer_ptr, int *buffer_size, uid_t uid,
+		      uint16_t protocol_version);
 
 /* Save the state of all reservations to file */
 extern int dump_all_resv_state(void);
@@ -81,6 +82,12 @@ extern bool is_node_in_maint_reservation(int nodenum);
 
 /* After an assocation has been added or removed update the lists. */
 extern void update_assocs_in_resvs(void);
+
+/*
+ * Update reserved nodes for all reservations using a specific partition if the
+ * resevation has NodeList=ALL and RESERVE_FLAGS_PART_NODES.
+*/
+extern void update_part_nodes_in_resv(struct part_record *part_ptr);
 
 /*
  * Load the reservation state from file, recover on slurmctld restart.
@@ -123,6 +130,7 @@ extern int job_test_lic_resv(struct job_record *job_ptr, char *lic_name,
  * IN move_time    - if true, then permit the start time to advance from
  *                   "when" as needed IF job has no reservervation
  * OUT node_bitmap - nodes which the job can use, caller must free
+ * OUT exc_core_bitmap - cores which the job can NOT use, caller must free
  * RET	SLURM_SUCCESS if runable now
  *	ESLURM_RESERVATION_ACCESS access to reservation denied
  *	ESLURM_RESERVATION_INVALID reservation invalid
@@ -131,7 +139,16 @@ extern int job_test_lic_resv(struct job_record *job_ptr, char *lic_name,
  *			  reserved
  */
 extern int job_test_resv(struct job_record *job_ptr, time_t *when,
-			 bool move_time, bitstr_t **node_bitmap);
+			 bool move_time, bitstr_t **node_bitmap,
+			 bitstr_t **exc_core_bitmap);
+
+/*
+ * Determine the time of the first reservation to end after some time.
+ * return zero of no reservation ends after that time.
+ * IN start_time - look for reservations ending after this time
+ * RET the reservation end time or zero of none found
+ */
+extern time_t find_resv_end(time_t start_time);
 
 /*
  * Determine if a job can start now based only upon its reservations

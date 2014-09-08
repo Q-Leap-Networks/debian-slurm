@@ -75,7 +75,9 @@ static bool _match_part_data(sinfo_data_t *sinfo_ptr,
 static int  _multi_cluster(List clusters);
 static int  _query_server(partition_info_msg_t ** part_pptr,
 			  node_info_msg_t ** node_pptr,
-			  block_info_msg_t ** block_pptr, bool clear_old);
+			  block_info_msg_t ** block_pptr,
+			  reserve_info_msg_t ** reserv_pptr, bool clear_old);
+static int _reservation_report(reserve_info_msg_t *resv_ptr);
 static void _sort_hostlist(List sinfo_list);
 static int  _strcmp(char *data1, char *data2);
 static void _update_sinfo(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr,
@@ -148,13 +150,17 @@ static int _get_info(bool clear_old)
 	partition_info_msg_t *partition_msg = NULL;
 	node_info_msg_t *node_msg = NULL;
 	block_info_msg_t *block_msg = NULL;
+	reserve_info_msg_t *reserv_msg = NULL;
 	List sinfo_list = NULL;
 	int rc = 0;
 
-	if (_query_server(&partition_msg, &node_msg, &block_msg, clear_old))
+	if (_query_server(&partition_msg, &node_msg, &block_msg, &reserv_msg,
+			  clear_old))
 		rc = 1;
 	else if (params.bg_flag)
 		(void) _bg_report(block_msg);
+	else if (params.reservation_flag)
+		(void) _reservation_report(reserv_msg);
 	else {
 		sinfo_list = list_create(_sinfo_list_delete);
 		_build_sinfo_data(sinfo_list, partition_msg, node_msg);
@@ -201,10 +207,27 @@ static int _bg_report(block_info_msg_t *block_ptr)
 }
 
 /*
+ * _reservation_report - print current reservation information
+ */
+static int _reservation_report(reserve_info_msg_t *resv_ptr)
+{
+	if (!resv_ptr) {
+		slurm_perror("No resv_ptr given\n");
+		return SLURM_ERROR;
+	}
+	if (resv_ptr->record_count != 0) {
+		print_sinfo_reservation(resv_ptr);
+	} else
+		printf ("No reservations in the system\n");
+	return SLURM_SUCCESS;
+}
+
+/*
  * _query_server - download the current server state
  * part_pptr IN/OUT - partition information message
  * node_pptr IN/OUT - node information message
  * block_pptr IN/OUT - BlueGene block data
+ * reserv_pptr IN/OUT - reservation information message
  * clear_old IN - If set, then always replace old data, needed when going
  *		  between clusters.
  * RET zero or error code
@@ -212,11 +235,14 @@ static int _bg_report(block_info_msg_t *block_ptr)
 static int
 _query_server(partition_info_msg_t ** part_pptr,
 	      node_info_msg_t ** node_pptr,
-	      block_info_msg_t ** block_pptr, bool clear_old)
+	      block_info_msg_t ** block_pptr,
+	      reserve_info_msg_t ** reserv_pptr,
+	      bool clear_old)
 {
 	static partition_info_msg_t *old_part_ptr = NULL, *new_part_ptr;
 	static node_info_msg_t *old_node_ptr = NULL, *new_node_ptr;
 	static block_info_msg_t *old_bg_ptr = NULL, *new_bg_ptr;
+	static reserve_info_msg_t *old_resv_ptr = NULL, *new_resv_ptr;
 
 	int error_code;
 	uint16_t show_flags = 0;
@@ -269,6 +295,29 @@ _query_server(partition_info_msg_t ** part_pptr,
 	}
 	old_node_ptr = new_node_ptr;
 	*node_pptr = new_node_ptr;
+
+	if (old_resv_ptr) {
+		if (clear_old)
+			old_resv_ptr->last_update = 0;
+		error_code = slurm_load_reservations(old_resv_ptr->last_update,
+						     &new_resv_ptr);
+		if (error_code == SLURM_SUCCESS)
+			slurm_free_reservation_info_msg(old_resv_ptr);
+		else if (slurm_get_errno() == SLURM_NO_CHANGE_IN_DATA) {
+			error_code = SLURM_SUCCESS;
+			new_resv_ptr = old_resv_ptr;
+		}
+	} else {
+		error_code = slurm_load_reservations((time_t) NULL,
+						     &new_resv_ptr);
+	}
+
+	if (error_code) {
+		slurm_perror("slurm_load_reservations");
+		return error_code;
+	}
+	old_resv_ptr = new_resv_ptr;
+	*reserv_pptr = new_resv_ptr;
 
 	if (!params.bg_flag)
 		return SLURM_SUCCESS;
@@ -341,7 +390,45 @@ static int _build_sinfo_data(List sinfo_list,
 		if (params.filtering && params.partition &&
 		    _strcmp(part_ptr->name, params.partition))
 			continue;
+                if (node_msg->record_count == 1) { /* node_name_single */
+                        int pos = -1;
+                        uint16_t subgrp_size = 0;
+                        hostlist_t hl;
 
+                        node_ptr = &(node_msg->node_array[0]);
+                        if ((node_ptr->name == NULL) ||
+			    (part_ptr->nodes == NULL) ||
+                            (params.filtering &&
+                             _filter_out(node_ptr)))
+                                continue;
+                        hl = hostlist_create(part_ptr->nodes);
+                        pos = hostlist_find(hl, node_msg->node_array[0].name);
+                        hostlist_destroy(hl);
+                        if (pos < 0)
+                                continue;
+                        if (select_g_select_nodeinfo_get(
+                                   node_ptr->select_nodeinfo,
+                                   SELECT_NODEDATA_SUBGRP_SIZE,
+                                   0,
+                                   &subgrp_size) == SLURM_SUCCESS
+                            && subgrp_size) {
+                                _handle_subgrps(sinfo_list,
+                                                (uint16_t) j,
+                                                part_ptr,
+                                                node_ptr,
+                                                node_msg->
+                                                node_scaling);
+                        } else {
+                                _insert_node_ptr(sinfo_list,
+                                                 (uint16_t) j,
+                                                 part_ptr,
+                                                 node_ptr,
+                                                 node_msg->
+                                                 node_scaling);
+                        }
+                        continue;
+                }
+		
 		j2 = 0;
 		while(part_ptr->node_inx[j2] >= 0) {
 			int i2 = 0;
@@ -544,7 +631,7 @@ static bool _match_node_data(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr)
 		return true;
 
 	if (params.match_flags.cpus_flag &&
-	    ((node_ptr->cpus / g_node_scaling) != sinfo_ptr->min_cpus))
+	    (node_ptr->cpus        != sinfo_ptr->min_cpus))
 		return false;
 
 	if (params.match_flags.sockets_flag &&
@@ -569,6 +656,9 @@ static bool _match_node_data(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr)
 		return false;
 	if (params.match_flags.weight_flag &&
 	    (node_ptr->weight      != sinfo_ptr->min_weight))
+		return false;
+	if (params.match_flags.cpu_load_flag &&
+	    (node_ptr->cpu_load        != sinfo_ptr->min_cpu_load))
 		return false;
 
 	return true;
@@ -637,8 +727,8 @@ static void _update_sinfo(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr,
 	uint16_t base_state;
 	uint16_t used_cpus = 0, error_cpus = 0;
 	int total_cpus = 0, total_nodes = 0;
-	/* since node_scaling could be less here we need to use the
-	   global node scaling which should never change. */
+	/* since node_scaling could be less here, we need to use the
+	 * global node scaling which should never change. */
 	int single_node_cpus = (node_ptr->cpus / g_node_scaling);
 
  	base_state = node_ptr->node_state & NODE_STATE_BASE;
@@ -650,8 +740,8 @@ static void _update_sinfo(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr,
 		sinfo_ptr->reason     = node_ptr->reason;
 		sinfo_ptr->reason_time= node_ptr->reason_time;
 		sinfo_ptr->reason_uid = node_ptr->reason_uid;
-		sinfo_ptr->min_cpus   = single_node_cpus;
-		sinfo_ptr->max_cpus   = single_node_cpus;
+		sinfo_ptr->min_cpus    = node_ptr->cpus;
+		sinfo_ptr->max_cpus    = node_ptr->cpus;
 		sinfo_ptr->min_sockets = node_ptr->sockets;
 		sinfo_ptr->max_sockets = node_ptr->sockets;
 		sinfo_ptr->min_cores   = node_ptr->cores;
@@ -664,15 +754,17 @@ static void _update_sinfo(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr,
 		sinfo_ptr->max_mem    = node_ptr->real_memory;
 		sinfo_ptr->min_weight = node_ptr->weight;
 		sinfo_ptr->max_weight = node_ptr->weight;
+		sinfo_ptr->min_cpu_load = node_ptr->cpu_load;
+		sinfo_ptr->max_cpu_load = node_ptr->cpu_load;
 	} else if (hostlist_find(sinfo_ptr->nodes, node_ptr->name) != -1) {
 		/* we already have this node in this record,
 		 * just return, don't duplicate */
 		return;
 	} else {
-		if (sinfo_ptr->min_cpus > single_node_cpus)
-			sinfo_ptr->min_cpus = single_node_cpus;
-		if (sinfo_ptr->max_cpus < single_node_cpus)
-			sinfo_ptr->max_cpus = single_node_cpus;
+		if (sinfo_ptr->min_cpus > node_ptr->cpus)
+			sinfo_ptr->min_cpus = node_ptr->cpus;
+		if (sinfo_ptr->max_cpus < node_ptr->cpus)
+			sinfo_ptr->max_cpus = node_ptr->cpus;
 
 		if (sinfo_ptr->min_sockets > node_ptr->sockets)
 			sinfo_ptr->min_sockets = node_ptr->sockets;
@@ -703,6 +795,11 @@ static void _update_sinfo(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr,
 			sinfo_ptr->min_weight = node_ptr->weight;
 		if (sinfo_ptr->max_weight < node_ptr->weight)
 			sinfo_ptr->max_weight = node_ptr->weight;
+
+		if (sinfo_ptr->min_cpu_load > node_ptr->cpu_load)
+			sinfo_ptr->min_cpu_load = node_ptr->cpu_load;
+		if (sinfo_ptr->max_cpu_load < node_ptr->cpu_load)
+			sinfo_ptr->max_cpu_load = node_ptr->cpu_load;
 	}
 
 	hostlist_push(sinfo_ptr->nodes,     node_ptr->name);
@@ -725,16 +822,16 @@ static void _update_sinfo(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr,
 		if (!params.match_flags.state_flag &&
 		    (used_cpus || error_cpus)) {
 			/* We only get one shot at this (because all states
-			   are combined together), so we need to make
-			   sure we get all the subgrps accounted. (So use
-			   g_node_scaling for safe measure) */
+			 * are combined together), so we need to make
+			 * sure we get all the subgrps accounted. (So use
+			 * g_node_scaling for safe measure) */
 			total_nodes = g_node_scaling;
 
 			sinfo_ptr->nodes_alloc += used_cpus;
 			sinfo_ptr->nodes_other += error_cpus;
 			sinfo_ptr->nodes_idle +=
 				(total_nodes - (used_cpus + error_cpus));
-			used_cpus *= single_node_cpus;
+			used_cpus  *= single_node_cpus;
 			error_cpus *= single_node_cpus;
 		} else {
 			/* process only for this subgrp and then return */

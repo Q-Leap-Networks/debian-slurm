@@ -473,6 +473,7 @@ env_vars_t env_vars[] = {
   {"SBATCH_QOS",           OPT_STRING,     &opt.qos,           NULL          },
   {"SBATCH_RAMDISK_IMAGE", OPT_STRING,     &opt.ramdiskimage,  NULL          },
   {"SBATCH_REQUEUE",       OPT_REQUEUE,    NULL,               NULL          },
+  {"SBATCH_RESERVATION",   OPT_STRING,     &opt.reservation,   NULL          },
   {"SBATCH_SIGNAL",        OPT_SIGNAL,     NULL,               NULL          },
   {"SBATCH_TIMELIMIT",     OPT_STRING,     &opt.time_limit_str,NULL          },
   {"SBATCH_WAIT_ALL_NODES",OPT_INT,        &opt.wait_all_nodes,NULL          },
@@ -641,11 +642,7 @@ _process_env_var(env_vars_t *e, const char *val)
 		break;
 	case OPT_CLUSTERS:
 		if (!(opt.clusters = slurmdb_get_info_cluster((char *)val))) {
-			error("'%s' can't be reached now, "
-			      "or it is an invalid entry for "
-			      "--cluster.  Use 'sacctmgr --list "
-			      "cluster' to see available clusters.",
-			      optarg);
+			print_db_notok(val, 1);
 			exit(1);
 		}
 		break;
@@ -1245,11 +1242,7 @@ static void _set_options(int argc, char **argv)
 				list_destroy(opt.clusters);
 			if (!(opt.clusters =
 			      slurmdb_get_info_cluster(optarg))) {
-				error("'%s' can't be reached now, "
-				      "or it is an invalid entry for "
-				      "--cluster.  Use 'sacctmgr --list "
-				      "cluster' to see available clusters.",
-				      optarg);
+				print_db_notok(optarg, 0);
 				exit(1);
 			}
 			break;
@@ -1515,7 +1508,7 @@ static void _set_options(int argc, char **argv)
 			break;
 		case LONG_OPT_NTASKSPERNODE:
 			opt.ntasks_per_node = _get_int(optarg,
-				"ntasks-per-node");
+						       "ntasks-per-node");
 			setenvf(NULL, "SLURM_NTASKS_PER_NODE", "%d",
 				opt.ntasks_per_node);
 			break;
@@ -2137,6 +2130,7 @@ static bool _opt_verify(void)
 {
 	bool verified = true;
 	char *dist = NULL, *lllp_dist = NULL;
+	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
 
 	if (opt.quiet && opt.verbose) {
 		error ("don't specify both --verbose (-v) and --quiet (-Q)");
@@ -2147,7 +2141,14 @@ static bool _opt_verify(void)
 	_fullpath(&opt.ifname, opt.cwd);
 	_fullpath(&opt.ofname, opt.cwd);
 
-	if ((opt.ntasks_per_node > 0) && (!opt.ntasks_set)) {
+	if (cluster_flags & CLUSTER_FLAG_BGQ)
+		bg_figure_nodes_tasks(&opt.min_nodes, &opt.max_nodes,
+				      &opt.ntasks_per_node, &opt.ntasks_set,
+				      &opt.ntasks, opt.nodes_set, opt.nodes_set,
+				      opt.overcommit, 0);
+
+	if ((opt.ntasks_per_node > 0) && (!opt.ntasks_set) &&
+	    (opt.max_nodes == 0)) {
 		opt.ntasks = opt.min_nodes * opt.ntasks_per_node;
 		opt.ntasks_set = 1;
 	}
@@ -2263,7 +2264,7 @@ static bool _opt_verify(void)
 		error("Can't set SLURM_DIST_LLLP env variable");
 	}
 
-	
+
 
 	/* bound threads/cores from ntasks_cores/sockets */
 	if (opt.ntasks_per_core > 0) {

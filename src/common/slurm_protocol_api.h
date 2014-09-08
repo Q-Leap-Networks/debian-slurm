@@ -443,6 +443,18 @@ uint32_t slurm_get_accounting_storage_port(void);
  */
 int slurm_set_accounting_storage_port(uint32_t storage_port);
 
+/* slurm_get_launch_type
+ * get launch_type from slurmctld_conf object
+ * RET char *   - launch_type, MUST be xfreed by caller
+ */
+char *slurm_get_launch_type(void);
+
+/* slurm_set_launch_type
+ * set launch_type in slurmctld_conf object
+ * RET 0 or error code
+ */
+int slurm_set_launch_type(char *launch_type);
+
 /* slurm_get_preempt_mode
  * returns the PreemptMode value from slurmctld_conf object
  * RET uint16_t   - PreemptMode value (See PREEMPT_MODE_* in slurm.h)
@@ -525,6 +537,19 @@ extern uint16_t slurm_get_propagate_prio_process(void);
  * RET char *   - proctrack type, MUST be xfreed by caller
  */
 char *slurm_get_proctrack_type(void);
+
+/* slurm_get_acct_gather_energy_type
+ * get EnergyAccountingType from slurmctld_conf object
+ * RET char *   - acct_gather_energy type, MUST be xfreed by caller
+ */
+char *slurm_get_acct_gather_energy_type(void);
+
+/* slurm_get_acct_gather_node_freq
+ * returns the accounting poll frequency for requesting info from a
+ * node from the slurmctld_conf object
+ * RET int    - accounting node frequency
+ */
+extern uint16_t slurm_get_acct_gather_node_freq(void);
 
 /* slurm_get_root_filter
  * RET uint16_t  - Value of SchedulerRootFilter */

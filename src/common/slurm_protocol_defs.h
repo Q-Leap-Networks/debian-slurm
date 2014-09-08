@@ -180,6 +180,9 @@ typedef enum {
 	REQUEST_SET_SCHEDLOG_LEVEL,
 	REQUEST_SET_DEBUG_FLAGS,
 	REQUEST_REBOOT_NODES,
+	RESPONSE_PING_SLURMD,
+	REQUEST_ACCT_GATHER_UPDATE,
+	RESPONSE_ACCT_GATHER_UPDATE,
 
 	REQUEST_BUILD_INFO = 2001,
 	RESPONSE_BUILD_INFO,
@@ -286,6 +289,8 @@ typedef enum {
 	REQUEST_JOB_STEP_PIDS,
 	RESPONSE_JOB_STEP_PIDS,
 	REQUEST_FORWARD_DATA,
+	REQUEST_COMPLETE_BATCH_JOB,
+	REQUEST_SUSPEND_INT,
 
 	REQUEST_LAUNCH_TASKS = 6001,
 	RESPONSE_LAUNCH_TASKS,
@@ -539,6 +544,7 @@ typedef struct complete_batch_script {
 	uint32_t job_rc;
 	uint32_t slurm_rc;
 	char *node_name;
+	uint32_t user_id;	/* user the job runs as */
 } complete_batch_script_msg_t;
 
 typedef struct step_complete_msg {
@@ -595,6 +601,7 @@ typedef struct job_step_specs {
 	uint16_t ckpt_interval;	/* checkpoint creation interval (minutes) */
 	char *ckpt_dir; 	/* path to store checkpoint image files */
 	uint32_t cpu_count;	/* count of required processors */
+	uint32_t cpu_freq;	/* requested cpu frequency */
 	uint16_t exclusive;	/* 1 if CPUs not shared with other steps */
 	char *features;		/* required node features, default NONE */
 	char *gres;		/* generic resources required */
@@ -674,6 +681,7 @@ typedef struct launch_tasks_request_msg {
 	uint8_t open_mode;	/* stdout/err append or truncate */
 	uint8_t pty;		/* use pseudo tty */
 	uint16_t acctg_freq;	/* accounting polling interval */
+	uint32_t cpu_freq;	/* requested cpu frequency */
 
 	/********** START "normal" IO only options **********/
 	/* These options are ignored if user_managed_io is 1 */
@@ -806,6 +814,7 @@ typedef struct batch_job_launch_msg {
 				  * real memory per CPU | MEM_PER_CPU,
 				  * default=0 (no limit) */
 	uint16_t acctg_freq;	/* accounting polling interval	*/
+	uint32_t cpu_freq;	/* requested cpu frequency */
 	uint32_t job_mem;	/* memory limit for job		*/
 	uint16_t restart_cnt;	/* batch job restart count	*/
 	char **spank_job_env;	/* SPANK job environment variables */
@@ -883,10 +892,13 @@ typedef struct file_bcast_msg {
 } file_bcast_msg_t;
 
 typedef struct multi_core_data {
+	uint16_t boards_per_node;	/* boards per node required by job   */
+	uint16_t sockets_per_board;	/* sockets per board required by job */
 	uint16_t sockets_per_node;	/* sockets per node required by job */
 	uint16_t cores_per_socket;	/* cores per cpu required by job */
 	uint16_t threads_per_core;	/* threads per core required by job */
 
+	uint16_t ntasks_per_board;  /* number of tasks to invoke on each board*/
 	uint16_t ntasks_per_socket; /* number of tasks to invoke on each socket */
 	uint16_t ntasks_per_core;   /* number of tasks to invoke on each core */
 	uint16_t plane_size;        /* plane size when task_dist = SLURM_DIST_PLANE */
@@ -911,6 +923,18 @@ typedef struct forward_data_msg {
 	char *data;
 } forward_data_msg_t;
 
+/* suspend_msg_t variant for internal slurm daemon communications */
+typedef struct suspend_int_msg {
+	uint16_t op;            /* suspend operation, see enum suspend_opts */
+	uint32_t job_id;        /* slurm job_id */
+	uint8_t  indf_susp;     /* non-zero if being suspended indefinitely */
+	void *   switch_info;	/* opaque data for switch plugin */
+} suspend_int_msg_t;
+
+typedef struct ping_slurmd_resp_msg {
+	uint32_t cpu_load;	/* CPU load * 100 */
+} ping_slurmd_resp_msg_t;
+
 /*****************************************************************************\
  * Slurm API Message Types
 \*****************************************************************************/
@@ -918,12 +942,15 @@ typedef struct slurm_node_registration_status_msg {
 	char *arch;
 	uint16_t cores;
 	uint16_t cpus;
+	uint32_t cpu_load;	/* CPU load * 100 */
+	acct_gather_energy_t *energy;
 	Buf gres_info;		/* generic resource info */
 	uint32_t hash_val;      /* hash value of slurm.conf file
 				   existing on node */
 	uint32_t job_count;	/* number of associate job_id's */
 	uint32_t *job_id;	/* IDs of running job (if any) */
 	char *node_name;
+	uint16_t boards;
 	char *os;
 	uint32_t real_memory;
 	time_t slurmd_start_time;
@@ -1012,6 +1039,7 @@ extern void slurm_free_priority_factors_request_msg(
 extern void slurm_free_priority_factors_response_msg(
 	priority_factors_response_msg_t *msg);
 extern void slurm_free_forward_data_msg(forward_data_msg_t *msg);
+extern void slurm_free_ping_slurmd_resp(ping_slurmd_resp_msg_t *msg);
 
 #define	slurm_free_timelimit_msg(msg) \
 	slurm_free_kill_job_msg(msg)
@@ -1081,6 +1109,7 @@ extern void slurm_free_checkpoint_comp_msg(checkpoint_comp_msg_t *msg);
 extern void slurm_free_checkpoint_task_comp_msg(checkpoint_task_comp_msg_t *msg);
 extern void slurm_free_checkpoint_resp_msg(checkpoint_resp_msg_t *msg);
 extern void slurm_free_suspend_msg(suspend_msg_t *msg);
+extern void slurm_free_suspend_int_msg(suspend_int_msg_t *msg);
 extern void slurm_free_update_step_msg(step_update_request_msg_t * msg);
 extern void slurm_free_resource_allocation_response_msg (
 		resource_allocation_response_msg_t * msg);
@@ -1116,7 +1145,8 @@ extern void slurm_free_block_info(block_info_t *block_info);
 extern void slurm_free_block_info_msg(block_info_msg_t *block_info_msg);
 extern void slurm_free_block_info_request_msg(
 		block_info_request_msg_t *msg);
-
+extern void slurm_free_acct_gather_node_resp_msg(
+	acct_gather_node_resp_msg_t *msg);
 extern void slurm_free_job_notify_msg(job_notify_msg_t * msg);
 
 extern void slurm_free_accounting_update_msg(accounting_update_msg_t *msg);

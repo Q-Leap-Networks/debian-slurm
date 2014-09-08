@@ -419,8 +419,14 @@ static bg_record_t *_translate_info_2_record(block_info_t *block_info)
 	bg_record->ramdiskimage = block_info->ramdiskimage;
 	block_info->ramdiskimage = NULL;
 
-	bg_record->reason = block_info->reason;
-	block_info->reason = NULL;
+	/* Only transfer the reason if the state is in and Error
+	 * state.  It will be set automatically otherwise.  This is to
+	 * prevent old state on an action.
+	 */
+	if ((bg_record->state & BG_BLOCK_ERROR_FLAG)) {
+		bg_record->reason = block_info->reason;
+		block_info->reason = NULL;
+	}
 
 	slurm_free_block_info_members(block_info);
 	return bg_record;
@@ -569,47 +575,6 @@ static void _pack_block(bg_record_t *bg_record, Buf buffer,
 		packstr(bg_record->reason, buffer);
 		pack16((uint16_t)bg_record->state, buffer);
 		packnull(buffer); /* for mp_used_inx */
-	} else if (protocol_version >= SLURM_2_2_PROTOCOL_VERSION) {
-		packstr(bg_record->bg_block_id, buffer);
-#ifdef HAVE_BGL
-		packstr(bg_record->blrtsimage, buffer);
-#endif
-		pack_bit_fmt(bg_record->mp_bitmap, buffer);
-		pack16((uint16_t)bg_record->conn_type[0], buffer);
-		packstr(bg_record->ionode_str, buffer);
-		pack_bit_fmt(bg_record->ionode_bitmap, buffer);
-		pack32((uint32_t)bg_record->job_running, buffer);
-		packstr(bg_record->linuximage, buffer);
-		packstr(bg_record->mloaderimage, buffer);
-		packstr(bg_record->mp_str, buffer);
-		pack32((uint32_t)bg_record->cnode_cnt, buffer);
-#ifdef HAVE_BGL
-		pack16((uint16_t)bg_record->node_use, buffer);
-#endif
-		packnull(buffer); /* for user_name */
-		packstr(bg_record->ramdiskimage, buffer);
-		packstr(bg_record->reason, buffer);
-		pack16((uint16_t)bg_record->state, buffer);
-	} else if (protocol_version >= SLURM_2_1_PROTOCOL_VERSION) {
-		packstr(bg_record->bg_block_id, buffer);
-#ifdef HAVE_BGL
-		packstr(bg_record->blrtsimage, buffer);
-#endif
-		pack_bit_fmt(bg_record->mp_bitmap, buffer);
-		pack16((uint16_t)bg_record->conn_type[0], buffer);
-		packstr(bg_record->ionode_str, buffer);
-		pack_bit_fmt(bg_record->ionode_bitmap, buffer);
-		pack32((uint32_t)bg_record->job_running, buffer);
-		packstr(bg_record->linuximage, buffer);
-		packstr(bg_record->mloaderimage, buffer);
-		packstr(bg_record->mp_str, buffer);
-		pack32((uint32_t)bg_record->cnode_cnt, buffer);
-#ifdef HAVE_BGL
-		pack16((uint16_t)bg_record->node_use, buffer);
-#endif
-		packnull(buffer); /* for user_name */
-		packstr(bg_record->ramdiskimage, buffer);
-		pack16((uint16_t)bg_record->state, buffer);
 	}
 }
 
@@ -764,10 +729,6 @@ static int _load_state_file(List curr_block_list, char *dir_name)
 	if (ver_str) {
 		if (!strcmp(ver_str, BLOCK_STATE_VERSION)) {
 			protocol_version = SLURM_PROTOCOL_VERSION;
-		} else if (!strcmp(ver_str, BLOCK_2_2_STATE_VERSION)) {
-			protocol_version = SLURM_2_2_PROTOCOL_VERSION;
-		} else if (!strcmp(ver_str, BLOCK_2_1_STATE_VERSION)) {
-			protocol_version = SLURM_2_1_PROTOCOL_VERSION;
 		}
 	}
 
@@ -782,16 +743,6 @@ static int _load_state_file(List curr_block_list, char *dir_name)
 	}
 	xfree(ver_str);
 	safe_unpack32(&record_count, buffer);
-
-	/* In older versions of the code we stored things in a
-	   block_info_msg_t.  This isn't the case anymore so in the
-	   newer code we don't store the timestamp since it isn't
-	   really needed.
-	*/
-	if (protocol_version <= SLURM_2_2_PROTOCOL_VERSION) {
-		time_t last_save;
-		safe_unpack_time(&last_save, buffer);
-	}
 
 	slurm_mutex_lock(&block_state_mutex);
 	reset_ba_system(true);
@@ -1409,8 +1360,6 @@ extern int select_p_state_save(char *dir_name)
 	char *old_file, *new_file, *reg_file;
 	uint32_t blocks_packed = 0, tmp_offset, block_offset;
 	Buf buffer = init_buf(BUF_SIZE);
-	slurmctld_lock_t job_read_lock =
-		{ NO_LOCK, READ_LOCK, NO_LOCK, NO_LOCK };
 
 	DEF_TIMERS;
 
@@ -1738,6 +1687,7 @@ extern int select_p_block_init(List part_list)
  * IN/OUT preemptee_job_list - Pointer to list of job pointers. These are the
  *		jobs to be preempted to initiate the pending job. Not set
  *		if mode=SELECT_MODE_TEST_ONLY or input pointer is NULL.
+ * IN exc_core_bitmap - bitmap of cores being reserved.
  * RET zero on success, EINVAL otherwise
  * NOTE: bitmap must be a superset of req_nodes at the time that
  *	select_p_job_test is called
@@ -1746,7 +1696,8 @@ extern int select_p_job_test(struct job_record *job_ptr, bitstr_t *bitmap,
 			     uint32_t min_nodes, uint32_t max_nodes,
 			     uint32_t req_nodes, uint16_t mode,
 			     List preemptee_candidates,
-			     List *preemptee_job_list)
+			     List *preemptee_job_list,
+			     bitstr_t *exc_core_bitmap)
 {
 #ifdef HAVE_BG
 	/* submit_job - is there a block where we have:
@@ -2209,11 +2160,8 @@ extern int select_p_pack_select_info(time_t last_query_time,
 		pack32(blocks_packed, buffer);
 		pack_time(last_bg_update, buffer);
 
-		if (protocol_version >= SLURM_2_1_PROTOCOL_VERSION) {
+		if (protocol_version >= SLURM_2_3_PROTOCOL_VERSION) {
 			if (bg_lists->main) {
-				slurmctld_lock_t job_read_lock =
-					{ NO_LOCK, READ_LOCK,
-					  NO_LOCK, NO_LOCK };
 				/* Lock job read before block to avoid
 				 * deadlock job lock is needed because
 				 * we look at the job_ptr's to send
@@ -2279,12 +2227,12 @@ extern int select_p_select_nodeinfo_free(select_nodeinfo_t *nodeinfo)
 	return select_nodeinfo_free(nodeinfo);
 }
 
-extern int select_p_select_nodeinfo_set_all(time_t last_query_time)
+extern int select_p_select_nodeinfo_set_all(void)
 {
         if (bg_recover != NOT_FROM_CONTROLLER)
                 bridge_status_init();
 
-	return select_nodeinfo_set_all(last_query_time);
+	return select_nodeinfo_set_all();
 }
 
 extern int select_p_select_nodeinfo_set(struct job_record *job_ptr)
@@ -2480,7 +2428,14 @@ extern int select_p_update_block(update_block_msg_t *block_desc_ptr)
 			if (found_record->job_running > NO_JOB_RUNNING) {
 				if (found_record->job_ptr
 				    && IS_JOB_CONFIGURING(
-					    found_record->job_ptr))
+					    found_record->job_ptr)) {
+					/* If the block is waiting for
+					   a block that isn't freeing
+					   we have to remove the
+					   modifying flag or the block
+					   won't be freed correctly.
+					*/
+					found_record->modifying = 0;
 					info("Pending job %u on block %s "
 					     "will try to be requeued "
 					     "because overlapping block %s "
@@ -2488,7 +2443,7 @@ extern int select_p_update_block(update_block_msg_t *block_desc_ptr)
 					     found_record->job_running,
 					     found_record->bg_block_id,
 					     bg_record->bg_block_id);
-				else
+				} else
 					info("Failing job %u on block %s "
 					     "because overlapping block %s "
 					     "is in an error state.",
@@ -2898,7 +2853,11 @@ extern int select_p_fail_cnode(struct step_record *step_ptr)
 	for (i=0; i<bit_size(step_ptr->step_node_bitmap); i++) {
 		if (!bit_test(step_ptr->step_node_bitmap, i))
 			continue;
-		ba_mp = ba_inx2ba_mp(i);
+		node_ptr = &(node_record_table_ptr[i]);
+		xassert(node_ptr->select_nodeinfo);
+		nodeinfo = (select_nodeinfo_t *)node_ptr->select_nodeinfo->data;
+		xassert(nodeinfo);
+		ba_mp = nodeinfo->ba_mp;
 		xassert(ba_mp);
 
 		if (!ba_mp->cnode_err_bitmap)
@@ -2906,16 +2865,23 @@ extern int select_p_fail_cnode(struct step_record *step_ptr)
 				bit_alloc(bg_conf->mp_cnode_cnt);
 
 		if (jobinfo->units_avail) {
-			bit_or(ba_mp->cnode_err_bitmap,
-			       step_jobinfo->units_used);
+			/* If step_id == NO_VAL it means we got this
+			   after the step was already wiped from
+			   memory.  So the step_jobinfo is really the
+			   jobinfo where units_used is not set, so use
+			   the avail instead.
+			*/
+			if (step_ptr->step_id != NO_VAL)
+				bit_or(ba_mp->cnode_err_bitmap,
+				       step_jobinfo->units_used);
+			else
+				bit_or(ba_mp->cnode_err_bitmap,
+				       step_jobinfo->units_avail);
 		} else {
 			bit_nset(ba_mp->cnode_err_bitmap, 0,
 				 bit_size(ba_mp->cnode_err_bitmap)-1);
 		}
-		node_ptr = &(node_record_table_ptr[ba_mp->index]);
-		xassert(node_ptr->select_nodeinfo);
-		nodeinfo = (select_nodeinfo_t *)node_ptr->select_nodeinfo->data;
-		xassert(nodeinfo);
+
 		xfree(nodeinfo->failed_cnodes);
 		nodeinfo->failed_cnodes = ba_node_map_ranged_hostlist(
 			ba_mp->cnode_err_bitmap, ba_mp_geo_system);
@@ -2981,6 +2947,9 @@ extern int select_p_fail_cnode(struct step_record *step_ptr)
 	list_iterator_destroy(itr);
 	slurm_mutex_unlock(&ba_system_mutex);
 	slurm_mutex_unlock(&block_state_mutex);
+	if (step_ptr->job_ptr->kill_on_node_fail)
+		bg_requeue_job(step_ptr->job_ptr->job_id, 0, 1);
+
 #endif
 	return SLURM_SUCCESS;
 }
@@ -3126,14 +3095,22 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 
 		if (job_desc->min_nodes == (uint32_t) NO_VAL)
 			return SLURM_SUCCESS;
-		else if ((job_desc->min_nodes == 1)
+
+#ifdef HAVE_BG_L_P
+		/* This code might not be relavant anymore.  It was
+		   originally done for L and P to protect against
+		   unaware users now since one can actually ask for 1
+		   cnode this code doesn't do the correct thing.
+		*/
+		if ((job_desc->min_nodes == 1)
 			 && (job_desc->min_cpus != NO_VAL)) {
 			job_desc->min_nodes = job_desc->min_cpus;
 			if (job_desc->ntasks_per_node
-			    && job_desc->ntasks_per_node != NO_VAL)
+			    && job_desc->ntasks_per_node != (uint16_t)NO_VAL)
 				job_desc->min_nodes /=
 					job_desc->ntasks_per_node;
 		}
+#endif
 
 		get_select_jobinfo(job_desc->select_jobinfo->data,
 				   SELECT_JOBDATA_GEOMETRY, &req_geometry);
@@ -3171,7 +3148,7 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 					 * validated beforehand. */
 					if (job_desc->ntasks_per_node
 					    && (job_desc->ntasks_per_node
-						!= NO_VAL))
+						!= (uint16_t)NO_VAL))
 						divisor = (float)job_desc->
 							ntasks_per_node
 							/ bg_conf->cpu_ratio;
@@ -3361,7 +3338,8 @@ extern int select_p_reconfigure(void)
 #endif
 }
 
-extern bitstr_t *select_p_resv_test(bitstr_t *avail_bitmap, uint32_t node_cnt)
+extern bitstr_t *select_p_resv_test(bitstr_t *avail_bitmap, uint32_t node_cnt,
+				    bitstr_t **core_bitmap)
 {
 #ifdef HAVE_BG
 	/* Reserve a block of appropriate geometry by issuing a fake job

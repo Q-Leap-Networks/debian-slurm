@@ -42,9 +42,11 @@ int g_node_scaling = 1;
 enum {
 	SORTID_POS = POS_LOC,
 	SORTID_ARCH,
+	SORTID_BOARDS,
 	SORTID_BOOT_TIME,
 	SORTID_COLOR,
 	SORTID_CPUS,
+	SORTID_CPU_LOAD,
 	SORTID_CORES,
 	SORTID_ERR_CPUS,
 	SORTID_FEATURES,
@@ -108,9 +110,11 @@ static display_data_t display_data_node[] = {
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
 	{G_TYPE_STRING, SORTID_ERR_CPUS, "Error CPU Count", FALSE,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
-	{G_TYPE_INT, SORTID_CORES, "CoresPerSocket", FALSE,
+	{G_TYPE_INT, SORTID_BOARDS, "Boards", FALSE,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
 	{G_TYPE_INT, SORTID_SOCKETS, "Sockets", FALSE,
+	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
+	{G_TYPE_INT, SORTID_CORES, "CoresPerSocket", FALSE,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
 	{G_TYPE_INT, SORTID_THREADS, "ThreadsPerCore", FALSE,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
@@ -120,6 +124,8 @@ static display_data_t display_data_node[] = {
 	 create_model_node, admin_edit_node},
 	{G_TYPE_INT, SORTID_WEIGHT,"Weight", FALSE, EDIT_NONE, refresh_node,
 	 create_model_node, admin_edit_node},
+	{G_TYPE_STRING, SORTID_CPU_LOAD, "CPU Load", FALSE, EDIT_NONE,
+	 refresh_node, create_model_node, admin_edit_node},
 	{G_TYPE_STRING, SORTID_ARCH, "Arch", FALSE,
 	 EDIT_NONE, refresh_node, create_model_node, admin_edit_node},
 	{G_TYPE_STRING, SORTID_FEATURES, "Features", FALSE,
@@ -212,6 +218,17 @@ static void _layout_node_record(GtkTreeView *treeview,
 						 SORTID_CPUS),
 				   tmp_cnt);
 
+	if (node_ptr->cpu_load == NO_VAL) {
+		snprintf(tmp_cnt, sizeof(tmp_cnt), "N/A");
+	} else {
+		snprintf(tmp_cnt, sizeof(tmp_cnt), "%.2f",
+			 (node_ptr->cpu_load / 100.0));
+	}
+	add_display_treestore_line(update, treestore, &iter,
+				   find_col_name(display_data_node,
+						 SORTID_CPU_LOAD),
+				   tmp_cnt);
+
 	select_g_select_nodeinfo_get(node_ptr->select_nodeinfo,
 				     SELECT_NODEDATA_SUBCNT,
 				     NODE_STATE_ALLOCATED,
@@ -256,12 +273,11 @@ static void _layout_node_record(GtkTreeView *treeview,
 				   lower);
 	xfree(lower);
 
-
-	convert_num_unit((float)node_ptr->cores, tmp_cnt, sizeof(tmp_cnt),
+	convert_num_unit((float)node_ptr->boards, tmp_cnt, sizeof(tmp_cnt),
 			 UNIT_NONE);
 	add_display_treestore_line(update, treestore, &iter,
 				   find_col_name(display_data_node,
-						 SORTID_CORES),
+						 SORTID_BOARDS),
 				   tmp_cnt);
 
 	convert_num_unit((float)node_ptr->sockets, tmp_cnt, sizeof(tmp_cnt),
@@ -269,6 +285,13 @@ static void _layout_node_record(GtkTreeView *treeview,
 	add_display_treestore_line(update, treestore, &iter,
 				   find_col_name(display_data_node,
 						 SORTID_SOCKETS),
+				   tmp_cnt);
+
+	convert_num_unit((float)node_ptr->cores, tmp_cnt, sizeof(tmp_cnt),
+			 UNIT_NONE);
+	add_display_treestore_line(update, treestore, &iter,
+				   find_col_name(display_data_node,
+						 SORTID_CORES),
 				   tmp_cnt);
 
 	convert_num_unit((float)node_ptr->threads, tmp_cnt, sizeof(tmp_cnt),
@@ -329,8 +352,15 @@ static void _update_node_record(sview_node_info_t *sview_node_info_ptr,
 	uint16_t alloc_cpus = 0, err_cpus = 0, idle_cpus;
 	node_info_t *node_ptr = sview_node_info_ptr->node_ptr;
 	char tmp_disk[20], tmp_cpus[20], tmp_err_cpus[20],
-		tmp_mem[20], tmp_used_cpus[20];
+		tmp_mem[20], tmp_used_cpus[20], tmp_cpu_load[20];
 	char *tmp_state_lower, *tmp_state_upper;
+
+	if (node_ptr->cpu_load == NO_VAL) {
+		strcpy(tmp_cpu_load, "N/A");
+	} else {
+		snprintf(tmp_cpu_load, sizeof(tmp_cpu_load),
+			 "%.2f", (node_ptr->cpu_load / 100.0));
+	}
 
 	convert_num_unit((float)node_ptr->cpus, tmp_cpus,
 			 sizeof(tmp_cpus), UNIT_NONE);
@@ -382,12 +412,14 @@ static void _update_node_record(sview_node_info_t *sview_node_info_ptr,
 	/* Combining these records provides a slight performance improvement */
 	gtk_tree_store_set(treestore, &sview_node_info_ptr->iter_ptr,
 			   SORTID_ARCH,      node_ptr->arch,
+			   SORTID_BOARDS,    node_ptr->boards,
 			   SORTID_BOOT_TIME, sview_node_info_ptr->boot_time,
 			   SORTID_COLOR,
 				sview_colors[sview_node_info_ptr->pos
 				% sview_colors_cnt],
 			   SORTID_CORES,     node_ptr->cores,
 			   SORTID_CPUS,      tmp_cpus,
+			   SORTID_CPU_LOAD,  tmp_cpu_load,
 			   SORTID_DISK,      tmp_disk,
 			   SORTID_ERR_CPUS,  tmp_err_cpus,
 			   SORTID_FEATURES,  node_ptr->features,
@@ -463,15 +495,15 @@ static void _update_info_node(List info_list, GtkTreeView *tree_view)
 			if (gtk_tree_model_get_iter(
 				    model, &sview_node_info->iter_ptr, path)) {
 				do {
-					/* search for the jobid and
-					   check to see if it is in
-					   the list */
+					/* search for the node name and check
+					 * to see if it is in the list */
 					gtk_tree_model_get(
 						model,
 						&sview_node_info->iter_ptr,
 						SORTID_NAME,
 						&name, -1);
-					if (!strcmp(name, node_ptr->name)) {
+					if (name && node_ptr->name &&
+					    !strcmp(name, node_ptr->name)) {
 						/* update with new info */
 						g_free(name);
 						_update_node_record(
@@ -735,13 +767,24 @@ extern int get_new_info_node(node_info_msg_t **info_ptr, int force)
 	node_info_msg_t *new_node_ptr = NULL;
 	uint16_t show_flags = 0;
 	int error_code = SLURM_NO_CHANGE_IN_DATA;
-	time_t now = time(NULL);
+	time_t now = time(NULL), delay;
 	static time_t last;
 	static bool changed = 0;
 	static uint16_t last_flags = 0;
 
-	if (g_node_info_ptr && !force
-	    && ((now - last) < working_sview_config.refresh_delay)) {
+	delay = now - last;
+	if (delay < 2) {
+		/* Avoid re-loading node information within 2 secs as the data
+		 * may still be in use. If we load new node data and free the
+		 * old data while it it still in use, the result is likely
+		 * invalid memory references. */
+		force = 0;
+		/* FIXME: Add an "in use" flag, copy the data, or otherwise
+		 * permit the timely loading of new node information. */
+	}
+
+	if (g_node_info_ptr && !force &&
+	    (delay < working_sview_config.refresh_delay)) {
 		if (*info_ptr != g_node_info_ptr)
 			error_code = SLURM_SUCCESS;
 		*info_ptr = g_node_info_ptr;
@@ -1226,7 +1269,7 @@ extern void admin_edit_node(GtkCellRendererText *cell,
 	}
 no_input:
 	gtk_tree_path_free(path);
-	g_static_mutex_unlock(&sview_mutex);
+	g_mutex_unlock(sview_mutex);
 }
 
 extern void get_info_node(GtkTable *table, display_data_t *display_data)
@@ -1264,12 +1307,15 @@ extern void get_info_node(GtkTable *table, display_data_t *display_data)
 		display_data_node->set_menu = local_display_data->set_menu;
 		goto reset_curs;
 	}
-	if (display_widget && toggled) {
-		gtk_widget_destroy(display_widget);
-		display_widget = NULL;
-		goto display_it;
-	}
-
+	/* Since the node_info_ptr could change out from under us we
+	   always need to check if it is new or not.
+	*/
+	/* if (display_widget && toggled) { */
+	/* 	gtk_widget_destroy(display_widget); */
+	/* 	display_widget = NULL; */
+	/* 	info("going to display it"); */
+	/* 	goto display_it; */
+	/* } */
 	if ((error_code = get_new_info_node(&node_info_ptr, force_refresh))
 	    == SLURM_NO_CHANGE_IN_DATA) {
 		if (!display_widget || view == ERROR_VIEW)
@@ -1390,11 +1436,14 @@ extern void specific_info_node(popup_info_t *popup_win)
 	if (!spec_info->display_widget)
 		setup_popup_info(popup_win, display_data_node, SORTID_CNT);
 
-	if (node_info_ptr && popup_win->toggled) {
-		gtk_widget_destroy(spec_info->display_widget);
-		spec_info->display_widget = NULL;
-		goto display_it;
-	}
+	/* Since the node_info_ptr could change out from under us we
+	   always need to check if it is new or not.
+	*/
+	/* if (node_info_ptr && popup_win->toggled) { */
+	/* 	gtk_widget_destroy(spec_info->display_widget); */
+	/* 	spec_info->display_widget = NULL; */
+	/* 	goto display_it; */
+	/* } */
 
 	if ((error_code = get_new_info_node(&node_info_ptr,
 					    popup_win->force_refresh))
@@ -1670,9 +1719,8 @@ extern void popup_all_node_name(char *name, int id)
 		else
 			popup_win = create_popup_info(NODE_PAGE, id, title);
 		popup_win->spec_info->search_info->gchar_data = g_strdup(name);
-		if (!g_thread_create((gpointer)popup_thr, popup_win,
-				     FALSE, &error))
-		{
+		if (!sview_thread_new((gpointer)popup_thr, popup_win,
+				      FALSE, &error)) {
 			g_printerr ("Failed to create node popup thread: "
 				    "%s\n",
 				    error->message);

@@ -30,6 +30,7 @@ EXTRA_DIST = \
 	test1.13			\
 	test1.14			\
 	test1.15			\
+	test1.15.bash			\
 	test1.16			\
 	test1.17			\
 	test1.18			\
@@ -84,6 +85,7 @@ EXTRA_DIST = \
 	test1.63			\
 	test1.63.prog.c			\
 	test1.64			\
+	test1.65			\
 	test1.80			\
 	test1.81			\
 	test1.82			\
@@ -105,6 +107,10 @@ EXTRA_DIST = \
 	test1.94			\
 	test1.94.master.c		\
 	test1.94.slave.c		\
+	test1.95			\
+	test1.95.prog.upc		\
+	test1.96			\
+	test1.96.prog.c			\
 	test2.1				\
 	test2.2				\
 	test2.3				\
@@ -132,6 +138,14 @@ EXTRA_DIST = \
 	test3.9				\
 	test3.10			\
 	test3.11			\
+	inc3.11.1                      \
+	inc3.11.2                      \
+	inc3.11.3                      \
+	inc3.11.4                      \
+	inc3.11.5                      \
+	inc3.11.6                      \
+	inc3.11.7                      \
+	inc3.11.8                      \
 	test3.12			\
 	test4.1				\
 	test4.2				\
@@ -201,6 +215,7 @@ EXTRA_DIST = \
 	test7.14.prog2.c		\
 	test7.15			\
 	test7.15.prog.c			\
+	test7.16			\
 	test8.1				\
 	test8.2				\
 	test8.3				\
@@ -212,12 +227,16 @@ EXTRA_DIST = \
 	test8.7.crypto.c		\
 	test8.7.prog.c			\
 	test8.8				\
+	test8.9				\
+	test8.10			\
+	test8.11			\
 	test8.20			\
 	test8.21			\
 	test8.21.bash			\
 	test8.22			\
 	test8.23			\
 	test8.24			\
+	test8.25			\
 	test9.1				\
 	test9.2				\
 	test9.3				\
@@ -228,6 +247,8 @@ EXTRA_DIST = \
 	test9.7.bash			\
 	test9.8				\
 	test9.9				\
+	test9.9.bash			\
+	test9.9.prog.c			\
 	test10.1			\
 	test10.2			\
 	test10.3			\
@@ -248,6 +269,7 @@ EXTRA_DIST = \
 	test11.5			\
 	test11.6			\
 	test11.7			\
+	test11.8			\
 	test12.1			\
 	test12.2			\
 	test12.2.prog.c			\
@@ -257,6 +279,7 @@ EXTRA_DIST = \
 	test12.4			\
 	test12.5			\
 	test13.1			\
+	test13.2			\
 	test14.1			\
 	test14.2			\
 	test14.3			\
@@ -265,6 +288,7 @@ EXTRA_DIST = \
 	test14.6			\
 	test14.7			\
 	test14.8			\
+	test14.9			\
 	test15.1			\
 	test15.2			\
 	test15.3			\
@@ -361,6 +385,10 @@ EXTRA_DIST = \
 	test21.19			\
 	test21.20			\
 	test21.21			\
+	inc21.21.1                      \
+	inc21.21.2                      \
+	inc21.21.3                      \
+	inc21.21.4                      \
 	test21.22			\
 	test21.23			\
 	test21.24			\
@@ -369,7 +397,20 @@ EXTRA_DIST = \
 	test21.27			\
 	test21.28			\
 	test21.29			\
+	test21.30                       \
+	inc21.30.1                      \
+	inc21.30.2                      \
+	inc21.30.3                      \
+	inc21.30.4                      \
+	inc21.30.5                      \
+	inc21.30.6                      \
+	inc21.30.7                      \
+	inc21.30.8                      \
 	test22.1			\
+	inc22.1.1                       \
+	inc22.1.2                       \
+	inc22.1.3                       \
+	inc22.1.4                       \
 	test22.2			\
 	test23.1			\
 	test23.2			\
