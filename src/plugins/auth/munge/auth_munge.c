@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  auth_munge.c - SLURM auth implementation via Chris Dunlap's Munge
- *  $Id: auth_munge.c 19303 2010-01-21 22:42:24Z da $
+ *  $Id: auth_munge.c 19789 2010-03-18 18:04:15Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -527,6 +527,8 @@ _decode_cred(slurm_auth_credential_t *c, char *socket)
 			error ("Munge decode failed: %s",
 			       munge_ctx_strerror(ctx));
 			_print_cred(ctx);
+			if (e == EMUNGE_CRED_REWOUND)
+				error("Check for out of sync clocks");
 
 			c->cr_errno = e + MUNGE_ERRNO_OFFSET;
 #ifdef MULTIPLE_SLURMD

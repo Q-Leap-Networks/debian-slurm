@@ -228,7 +228,9 @@ extern void reset_node_bitmap(job_resources_t *job_resrcs_ptr,
 		if (new_node_bitmap) {
 			job_resrcs_ptr->node_bitmap =
 				bit_copy(new_node_bitmap);
-		}
+			job_resrcs_ptr->nhosts = bit_set_count(new_node_bitmap);
+		} else
+			job_resrcs_ptr->nhosts = 0;
 	}
 }
 
@@ -902,6 +904,7 @@ extern void add_job_to_cores(job_resources_t *job_resrcs_ptr,
 {
 	uint32_t i, n, count = 1, last_bit = 0;
 	uint32_t c = 0, j = 0, k = 0;
+	int node_len;
 
 	if (!job_resrcs_ptr->core_bitmap)
 		return;
@@ -917,11 +920,16 @@ extern void add_job_to_cores(job_resources_t *job_resrcs_ptr,
 			fatal("add_job_to_cores: bitmap memory error");
 	}
 
+	node_len = bit_size(job_resrcs_ptr->node_bitmap);
 	for (i = 0, n = 0; i < job_resrcs_ptr->nhosts; n++) {
 		last_bit += cores_per_node[k];
 		if (++count > core_rep_count[k]) {
 			k++;
 			count = 1;
+		}
+		if (n >= node_len) {
+			error("add_job_to_cores: Invalid nhosts");
+			break;
 		}
 		if (bit_test(job_resrcs_ptr->node_bitmap, n) == 0) {
 			c = last_bit;
@@ -933,4 +941,50 @@ extern void add_job_to_cores(job_resources_t *job_resrcs_ptr,
 		}
 		i++;
 	}
+}
+
+/* Given a job pointer and a global node index, return the index of that
+ * node in the job_resrcs_ptr->cpu_array_value. Return -1 if invalid */
+extern int job_resources_node_inx_to_cpu_array_inx(
+	job_resources_t *job_resrcs_ptr, int node_inx)
+{
+	int first_inx, i, node_cnt, node_sum;
+
+	/* Test for error cases */
+	if (!job_resrcs_ptr || !job_resrcs_ptr->node_bitmap) {
+		error("job_resources_node_inx_to_cpu_array_inx: "
+		      "no job_resrcs or node_bitmap");
+		return -1;
+	}
+	if (!bit_test(job_resrcs_ptr->node_bitmap, node_inx)) {
+		error("job_resources_node_inx_to_cpu_array_inx: "
+		      "Invalid node_inx");
+		return -1;
+	}
+	if (job_resrcs_ptr->cpu_array_cnt == 0) {
+		error("job_resources_node_inx_to_cpu_array_inx: "
+		      "Invalid cpu_array_cnt");
+		return -1;
+	}
+
+	/* Only one record, no need to search */
+	if (job_resrcs_ptr->cpu_array_cnt == 1)
+		return 0;
+
+	/* Scan bitmap, convert node_inx to node_cnt within job's allocation */
+	first_inx = bit_ffs(job_resrcs_ptr->node_bitmap);
+	for (i=first_inx, node_cnt=0; i<node_inx; i++) {
+		if (bit_test(job_resrcs_ptr->node_bitmap, i))
+			node_cnt++;
+	}
+	/* if (bit_test(job_resrcs_ptr->node_bitmap, node_inx)) */
+	node_cnt++;
+
+	for (i=0, node_sum=0; i<job_resrcs_ptr->cpu_array_cnt; i++) {
+		node_sum += job_resrcs_ptr->cpu_array_reps[i];
+		if (node_sum >= node_cnt)
+			return i;
+	}
+
+	return -1;
 }

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  jobcomp_script.c - Script running slurm job completion logging plugin.
- *  $Id: jobcomp_script.c 19095 2009-12-01 22:59:18Z da $
+ *  $Id: jobcomp_script.c 19896 2010-03-26 21:49:42Z jette $
  *****************************************************************************
  *  Produced at Center for High Performance Computing, North Dakota State
  *  University
@@ -214,7 +214,10 @@ static struct jobcomp_info * _jobcomp_info_create (struct job_record *job)
 	j->jobstate = xstrdup (job_state_string (state));
 
 	j->partition = xstrdup (job->partition);
-	j->limit = job->time_limit;
+	if ((job->time_limit == NO_VAL) && job->part_ptr)
+		j->limit = job->part_ptr->max_time;
+	else
+		j->limit = job->time_limit;
 	j->start = job->start_time;
 	j->end = job->end_time;
 	j->submit = job->details ? job->details->submit_time:job->start_time;

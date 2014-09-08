@@ -1,6 +1,28 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 2.1.6
+========================
+ -- For newly submitted jobs, report expected start time in squeue --start as
+    "N/A" rather than current time.
+ -- Correct sched/backfill logic so that it runs in a more timely fashion.
+ -- Fixed issue if running on accounting cache and priority/multifactor to
+    initialize the root association when the database comes back up.
+ -- Emulated BLUEGENE - fixed issue where blocks weren't always created
+    correctly when loading from state.  This does not apply to a real
+    bluegene system, only emulated.
+ -- Fixed bug when job is completing and its cpu_cnt would be calculated
+    incorrectly, possibly resulting in an underflow being logged.
+ -- Fixed bug where if there are pending jobs in a partition which was
+    updated to have no nodes in it the slurmctld would dump core.
+ -- Fixed smap and sview to display partitions with no nodes in them.
+ -- Improve configure script's logic to detect LUA libraries.
+ -- Fix bug that could cause slurmctld to abort if select/cons_res is used AND a
+    job is submitted using the --no-kill option AND one of the job's nodes goes
+    DOWN AND slurmctld restarts while that job is still running.
+ -- In jobcomp plugins, job time limit was sometimes recorded improperly if not
+    set by user (recorded huge number rather than partition's time limit).
+
 * Changes in SLURM 2.1.5
 ========================
  -- BLUEGENE - Fixed display of draining nodes for sinfo -R.
@@ -4935,4 +4957,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 19780 2010-03-17 23:56:43Z jette $
+$Id: NEWS 19896 2010-03-26 21:49:42Z jette $

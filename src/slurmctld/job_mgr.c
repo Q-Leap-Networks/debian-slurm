@@ -3854,49 +3854,35 @@ void job_time_limit(void)
 
 extern int job_update_cpu_cnt(struct job_record *job_ptr, int node_inx)
 {
-	uint16_t cpu_cnt=0, i=0;
-	int curr_node_inx;
+	int offset;
+
+	xassert(job_ptr);
+
 #ifdef HAVE_BG
 	/* This function doesn't apply to a bluegene system since the
-	   cpu count isn't set up on that system. */
+	 * cpu count isn't set up on that system. */
 	return SLURM_SUCCESS;
 #endif
-	xassert(job_ptr);
-	if(!job_ptr->job_resrcs || !job_ptr->job_resrcs->node_bitmap) {
-		error("job_update_cpu_cnt: "
-		      "no job_resrcs or node_bitmap for job %u",
+	if((offset = job_resources_node_inx_to_cpu_array_inx(
+		    job_ptr->job_resrcs, node_inx)) < 0) {
+		error("job_update_cpu_cnt: problem getting offset of job %u",
 		      job_ptr->job_id);
 		return SLURM_ERROR;
 	}
-	/* Figure out what the first bit is in the job to get the
-	   correct offset. unlike the job_ptr->node_bitmap which gets
-	   cleared, job_ptr->job_resrcs->node_bitmap never gets cleared.
-	*/
-	curr_node_inx = bit_ffs(job_ptr->job_resrcs->node_bitmap);
-	if(curr_node_inx != -1) {
-		for (i=0; i<job_ptr->job_resrcs->cpu_array_cnt; i++) {
-			cpu_cnt = job_ptr->job_resrcs->cpu_array_value[i];
-			if(curr_node_inx >= node_inx)
-				break;
-			curr_node_inx += job_ptr->job_resrcs->cpu_array_reps[i];
-		}
-		/* info("removing %u from %u", cpu_cnt, job_ptr->cpu_cnt); */
-		job_ptr->cpu_cnt -= cpu_cnt;
-		if((int)job_ptr->cpu_cnt < 0) {
-			error("job_update_cpu_cnt: "
-			      "cpu_cnt underflow on job_id %u",
-			      job_ptr->job_id);
-			job_ptr->cpu_cnt = 0;
-			return SLURM_ERROR;
-		}
-	} else {
-		error("job_update_cpu_cnt: "
-		      "no nodes set yet in job %u", job_ptr->job_id);
+	/* info("cpu for %d is %d out of %d", */
+	/*      node_inx, job_ptr->job_resrcs->cpu_array_value[offset], */
+	/*      job_ptr->cpu_cnt); */
+
+	if (job_ptr->job_resrcs->cpu_array_value[offset] > job_ptr->cpu_cnt) {
+		error("job_update_cpu_cnt: cpu_cnt underflow on job_id %u",
+		      job_ptr->job_id);
+		job_ptr->cpu_cnt = 0;
 		return SLURM_ERROR;
 	}
+
+	job_ptr->cpu_cnt -= job_ptr->job_resrcs->cpu_array_value[offset];
 	return SLURM_SUCCESS;
 }
-
 
 /* Terminate a job that has exhausted its time limit */
 static void _job_timed_out(struct job_record *job_ptr)
@@ -4288,9 +4274,10 @@ void pack_job(struct job_record *dump_job_ptr, uint16_t show_flags, Buf buffer)
 	pack_time(begin_time, buffer);
 
 	/* Actual or expected start time */
-	if(dump_job_ptr->start_time >= begin_time)
+	if((dump_job_ptr->start_time) ||  /* estimated start time set OR */
+	   (begin_time <= time(NULL)))    /* earliest start time in past */
 		pack_time(dump_job_ptr->start_time, buffer);
-	else
+	else	/* earliest start time in the future */ 
 		pack_time(begin_time, buffer);
 
 	pack_time(dump_job_ptr->end_time, buffer);
