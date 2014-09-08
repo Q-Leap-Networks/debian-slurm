@@ -61,6 +61,7 @@ static char *assoc_mgr_cluster_name = NULL;
 static int setup_childern = 0;
 
 void (*remove_assoc_notify) (acct_association_rec_t *rec) = NULL;
+void (*remove_qos_notify) (acct_qos_rec_t *rec) = NULL;
 
 pthread_mutex_t assoc_mgr_association_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -802,6 +803,8 @@ extern int assoc_mgr_init(void *db_conn, assoc_init_args_t *args)
 		enforce = args->enforce;
 		if(args->remove_assoc_notify)
 			remove_assoc_notify = args->remove_assoc_notify;
+		if(args->remove_qos_notify)
+			remove_qos_notify = args->remove_qos_notify;
 		cache_level = args->cache_level;
 		assoc_mgr_refresh_lists(db_conn, args);
 	}
@@ -1685,6 +1688,10 @@ extern int assoc_mgr_update_assocs(acct_update_object_t *update)
 	if(!assoc_mgr_association_list)
 		return SLURM_SUCCESS;
 
+	/* Since we could possibly need the qos lock handle it
+	   now to avoid deadlock.  Always do QOS first.
+	*/
+	slurm_mutex_lock(&assoc_mgr_qos_lock);
 	slurm_mutex_lock(&assoc_mgr_association_lock);
 	itr = list_iterator_create(assoc_mgr_association_list);
 	while((object = list_pop(update->objects))) {
@@ -1814,7 +1821,11 @@ extern int assoc_mgr_update_assocs(acct_update_object_t *update)
 							rec->valid_qos);
 						rec->valid_qos =
 							bit_alloc(g_qos_count);
-					}
+					} else
+						bit_nclear(rec->valid_qos, 0,
+							   (bit_size(rec->
+								     valid_qos)
+							    - 1));
 					set_qos_bitstr_from_list(
 						rec->valid_qos, rec->qos_list);
 				}
@@ -1822,9 +1833,7 @@ extern int assoc_mgr_update_assocs(acct_update_object_t *update)
 
 			if(!slurmdbd_conf && !parents_changed) {
 				debug("updating assoc %u", rec->id);
-				slurm_mutex_lock(&assoc_mgr_qos_lock);
 				log_assoc_rec(rec, assoc_mgr_qos_list);
-				slurm_mutex_unlock(&assoc_mgr_qos_lock);
 			}
 			break;
 		case ACCT_ADD_ASSOC:
@@ -1942,18 +1951,17 @@ extern int assoc_mgr_update_assocs(acct_update_object_t *update)
 		}
 		if(setup_childern) {
 			/* Now normalize the static shares */
-			slurm_mutex_lock(&assoc_mgr_qos_lock);
 			list_iterator_reset(itr);
 			while((object = list_next(itr))) {
 				_normalize_assoc_shares(object);
 				log_assoc_rec(object, assoc_mgr_qos_list);
 			}
-			slurm_mutex_unlock(&assoc_mgr_qos_lock);
 		}
 	}
 
 	list_iterator_destroy(itr);
 	slurm_mutex_unlock(&assoc_mgr_association_lock);
+	slurm_mutex_unlock(&assoc_mgr_qos_lock);
 
 	/* This needs to happen outside of the
 	   assoc_mgr_association_lock */
@@ -2173,11 +2181,16 @@ extern int assoc_mgr_update_qos(acct_update_object_t *update)
 	acct_association_rec_t *assoc = NULL;
 	int rc = SLURM_SUCCESS;
 	bool resize_qos_bitstr = 0;
+	List remove_list = NULL;
 
 	if(!assoc_mgr_qos_list)
 		return SLURM_SUCCESS;
 
 	slurm_mutex_lock(&assoc_mgr_qos_lock);
+	/* Since we could possibly need the association lock handle it
+	   now to avoid deadlock. Always do QOS first.
+	*/
+	slurm_mutex_lock(&assoc_mgr_association_lock);
 	itr = list_iterator_create(assoc_mgr_qos_list);
 	while((object = list_pop(update->objects))) {
 		list_iterator_reset(itr);
@@ -2269,7 +2282,22 @@ extern int assoc_mgr_update_qos(acct_update_object_t *update)
 
 			break;
 		case ACCT_REMOVE_QOS:
-			if(rec)
+			if(!rec) {
+				//rc = SLURM_ERROR;
+				break;
+			}
+
+			if(remove_qos_notify) {
+				/* since there are some deadlock
+				   issues while inside our lock here
+				   we have to process a notify later
+				*/
+				if(!remove_list)
+					remove_list = list_create(
+						destroy_acct_qos_rec);
+				list_remove(itr);
+				list_append(remove_list, rec);
+			} else
 				list_delete_item(itr);
 
 			if(!assoc_mgr_association_list)
@@ -2277,7 +2305,6 @@ extern int assoc_mgr_update_qos(acct_update_object_t *update)
 			/* Remove this qos from all the associations
 			   on this cluster.
 			*/
-			slurm_mutex_lock(&assoc_mgr_association_lock);
 			assoc_itr = list_iterator_create(
 				assoc_mgr_association_list);
 			while((assoc = list_next(assoc_itr))) {
@@ -2288,7 +2315,6 @@ extern int assoc_mgr_update_qos(acct_update_object_t *update)
 					bit_clear(assoc->valid_qos, object->id);
 			}
 			list_iterator_destroy(assoc_itr);
-			slurm_mutex_unlock(&assoc_mgr_association_lock);
 
 			break;
 		default:
@@ -2310,7 +2336,6 @@ extern int assoc_mgr_update_qos(acct_update_object_t *update)
 					    g_qos_count);
 		}
 		if(assoc_mgr_association_list) {
-			slurm_mutex_lock(&assoc_mgr_association_lock);
 			assoc_itr = list_iterator_create(
 				assoc_mgr_association_list);
 			while((assoc = list_next(assoc_itr))) {
@@ -2321,12 +2346,24 @@ extern int assoc_mgr_update_qos(acct_update_object_t *update)
 						    g_qos_count);
 			}
 			list_iterator_destroy(assoc_itr);
-			slurm_mutex_unlock(&assoc_mgr_association_lock);
 		}
 	}
 	list_iterator_destroy(itr);
 
+	slurm_mutex_unlock(&assoc_mgr_association_lock);
 	slurm_mutex_unlock(&assoc_mgr_qos_lock);
+
+	/* This needs to happen outside of the
+	   assoc_mgr_association_lock */
+	if(remove_list) {
+		itr = list_iterator_create(remove_list);
+
+		while((rec = list_next(itr)))
+			remove_qos_notify(rec);
+
+		list_iterator_destroy(itr);
+		list_destroy(remove_list);
+	}
 
 	return rc;
 }
@@ -2708,13 +2745,16 @@ extern int load_assoc_usage(char *state_save_location)
 			if(assoc->id == assoc_id)
 				break;
 
+		/* We want to do this all the way up to and including
+		   root.  This way we can keep track of how much usage
+		   has occured on the entire system and use that to
+		   normalize against.
+		*/
 		while(assoc) {
 			assoc->grp_used_wall += grp_used_wall;
 			assoc->usage_raw += (long double)usage_raw;
 
 			assoc = assoc->parent_assoc_ptr;
-			if(assoc == assoc_mgr_root_assoc)
-				break;
 		}
 		list_iterator_reset(itr);
 	}

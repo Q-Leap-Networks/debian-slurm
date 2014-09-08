@@ -101,7 +101,6 @@
 #  endif
 #endif
 
-#include "src/common/slurm_xlator.h"
 #include "select_cons_res.h"
 #include "dist_tasks.h"
 #include "job_test.h"
@@ -1182,7 +1181,7 @@ static int _run_now(struct job_record *job_ptr, bitstr_t *bitmap,
 					    preemptee_candidates)) {
 				/* Remove preemptable job now */
 				_rm_job_from_res(future_part, future_usage,
-						 tmp_job_ptr, 2);
+						 tmp_job_ptr, 0);
 				bit_or(bitmap, orig_map);
 				rc = cr_job_test(job_ptr, bitmap, min_nodes,
 						 max_nodes, req_nodes,

@@ -71,6 +71,7 @@ int _setup_assoc_list()
 {
 	acct_update_object_t update;
 	acct_association_rec_t *assoc = NULL;
+
 	/* make the main list */
 	assoc_mgr_association_list = list_create(destroy_acct_association_rec);
 
@@ -155,7 +156,7 @@ int _setup_assoc_list()
 	assoc = xmalloc(sizeof(acct_association_rec_t));
 	assoc->id = 3;
 	assoc->parent_id = 1;
-	assoc->shares_raw = 60;
+	assoc->shares_raw = 30;
 	assoc->acct = xstrdup("AccountD");
 	list_push(update.objects, assoc);
 
@@ -195,8 +196,26 @@ int _setup_assoc_list()
 	assoc->user = xstrdup("User5");
 	list_push(update.objects, assoc);
 
+	assoc = xmalloc(sizeof(acct_association_rec_t));
+	assoc->id = 4;
+	assoc->parent_id = 1;
+	assoc->shares_raw = 30;
+	assoc->acct = xstrdup("AccountG");
+	list_push(update.objects, assoc);
+
+	/* sub of AccountG id 4 */
+	assoc = xmalloc(sizeof(acct_association_rec_t));
+	assoc->id = 41;
+	assoc->parent_id = 4;
+	assoc->shares_raw = 1;
+	assoc->usage_raw = 30;
+	assoc->acct = xstrdup("AccountG");
+	assoc->user = xstrdup("User6");
+	list_push(update.objects, assoc);
+
 	assoc_mgr_update_assocs(&update);
 	list_destroy(update.objects);
+
 	return SLURM_SUCCESS;
 }
 
@@ -250,7 +269,7 @@ int main (int argc, char **argv)
 	if (slurm_priority_init() != SLURM_SUCCESS)
 		fatal("failed to initialize priority plugin");
 	/* on some systems that don't have multiple cores we need to
-	   sleep to make sure the tread get started. */
+	   sleep to make sure the thread get started. */
 	sleep(1);
 	memset(&resp, 0, sizeof(shares_response_msg_t));
 	resp.assoc_shares_list = assoc_mgr_get_shares(NULL, 0, NULL, NULL);
