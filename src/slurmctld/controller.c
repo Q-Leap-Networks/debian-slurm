@@ -87,6 +87,7 @@
 #include "src/common/uid.h"
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
+#include "src/common/slurm_protocol_interface.h"
 
 #include "src/slurmctld/acct_policy.h"
 #include "src/slurmctld/agent.h"
@@ -975,6 +976,15 @@ static void *_slurmctld_rpc_mgr(void *no_data)
 		conn_arg->newsockfd = newsockfd;
 		memcpy(&conn_arg->cli_addr, &cli_addr, sizeof(slurm_addr_t));
 
+		if (slurmctld_conf.debug_flags & DEBUG_FLAG_PROTOCOL) {
+			char inetbuf[64];
+
+			_slurm_print_slurm_addr(&cli_addr,
+						inetbuf,
+						sizeof(inetbuf));
+			info("%s: accept() connection from %s", __func__, inetbuf);
+		}
+
 		if (slurmctld_config.shutdown_time)
 			no_thread = 1;
 		else if (pthread_create(&thread_id_rpc_req,
@@ -1613,19 +1623,11 @@ static void *_slurmctld_background(void *no_data)
 			_accounting_cluster_ready();
 		}
 
+		/* Stats will reset at midnight (approx) local time. */
 		if (last_proc_req_start == 0) {
-			/* Stats will reset at midnight (aprox).
-			 * Uhmmm... UTC time?... It is  not so important.
-			 * Just resetting during the night */
 			last_proc_req_start = now;
-			next_stats_reset = last_proc_req_start -
-					   (last_proc_req_start % 86400) +
-					   86400;
-		}
-
-		if ((next_stats_reset > 0) && (now > next_stats_reset)) {
-			/* Resetting stats values */
-			last_proc_req_start = now;
+			next_stats_reset = now - (now % 86400) + 86400;
+		} else if (now >= next_stats_reset) {
 			next_stats_reset = now - (now % 86400) + 86400;
 			reset_stats(0);
 		}
