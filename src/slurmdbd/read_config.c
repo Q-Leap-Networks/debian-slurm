@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -59,6 +59,7 @@
 #include "src/common/xstring.h"
 #include "src/common/slurmdb_defs.h"
 #include "src/slurmdbd/read_config.h"
+#include "src/common/slurm_strcasestr.h"
 
 /* Global variables */
 pthread_mutex_t conf_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -66,7 +67,6 @@ pthread_mutex_t conf_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* Local functions */
 static void _clear_slurmdbd_conf(void);
-static char * _get_conf_path(void);
 
 static time_t boot_time;
 
@@ -101,6 +101,7 @@ static void _clear_slurmdbd_conf(void)
 		slurmdbd_conf->private_data = 0;
 		slurmdbd_conf->purge_event = 0;
 		slurmdbd_conf->purge_job = 0;
+		slurmdbd_conf->purge_resv = 0;
 		slurmdbd_conf->purge_step = 0;
 		slurmdbd_conf->purge_suspend = 0;
 		slurmdbd_conf->slurm_user_id = NO_VAL;
@@ -129,6 +130,7 @@ extern int read_slurmdbd_conf(void)
 		{"ArchiveDir", S_P_STRING},
 		{"ArchiveEvents", S_P_BOOLEAN},
 		{"ArchiveJobs", S_P_BOOLEAN},
+		{"ArchiveResvs", S_P_BOOLEAN},
 		{"ArchiveScript", S_P_STRING},
 		{"ArchiveSteps", S_P_BOOLEAN},
 		{"ArchiveSuspend", S_P_BOOLEAN},
@@ -148,6 +150,7 @@ extern int read_slurmdbd_conf(void)
 		{"PrivateData", S_P_STRING},
 		{"PurgeEventAfter", S_P_STRING},
 		{"PurgeJobAfter", S_P_STRING},
+		{"PurgeResvAfter", S_P_STRING},
 		{"PurgeStepAfter", S_P_STRING},
 		{"PurgeSuspendAfter", S_P_STRING},
 		{"PurgeEventMonths", S_P_UINT32},
@@ -181,11 +184,12 @@ extern int read_slurmdbd_conf(void)
 	_clear_slurmdbd_conf();
 
 	/* Get the slurmdbd.conf path and validate the file */
-	conf_path = _get_conf_path();
+	conf_path = get_extra_conf_path("slurmdbd.conf");
 	if ((conf_path == NULL) || (stat(conf_path, &buf) == -1)) {
 		info("No slurmdbd.conf file (%s)", conf_path);
 	} else {
-		bool a_events = 0, a_jobs = 0, a_steps = 0, a_suspend = 0;
+		bool a_events = 0, a_jobs = 0, a_resv = 0,
+			a_steps = 0, a_suspend = 0;
 		debug("Reading slurmdbd.conf file %s", conf_path);
 
 		tbl = s_p_hashtbl_create(options);
@@ -201,6 +205,7 @@ extern int read_slurmdbd_conf(void)
 				xstrdup(DEFAULT_SLURMDBD_ARCHIVE_DIR);
 		s_p_get_boolean(&a_events, "ArchiveEvents", tbl);
 		s_p_get_boolean(&a_jobs, "ArchiveJobs", tbl);
+		s_p_get_boolean(&a_resv, "ArchiveResvs", tbl);
 		s_p_get_string(&slurmdbd_conf->archive_script, "ArchiveScript",
 			       tbl);
 		s_p_get_boolean(&a_steps, "ArchiveSteps", tbl);
@@ -243,28 +248,28 @@ extern int read_slurmdbd_conf(void)
 
 		slurmdbd_conf->private_data = 0; /* default visible to all */
 		if (s_p_get_string(&temp_str, "PrivateData", tbl)) {
-			if (strstr(temp_str, "account"))
+			if (slurm_strcasestr(temp_str, "account"))
 				slurmdbd_conf->private_data
 					|= PRIVATE_DATA_ACCOUNTS;
-			if (strstr(temp_str, "job"))
+			if (slurm_strcasestr(temp_str, "job"))
 				slurmdbd_conf->private_data
 					|= PRIVATE_DATA_JOBS;
-			if (strstr(temp_str, "node"))
+			if (slurm_strcasestr(temp_str, "node"))
 				slurmdbd_conf->private_data
 					|= PRIVATE_DATA_NODES;
-			if (strstr(temp_str, "partition"))
+			if (slurm_strcasestr(temp_str, "partition"))
 				slurmdbd_conf->private_data
 					|= PRIVATE_DATA_PARTITIONS;
-			if (strstr(temp_str, "reservation"))
+			if (slurm_strcasestr(temp_str, "reservation"))
 				slurmdbd_conf->private_data
 					|= PRIVATE_DATA_RESERVATIONS;
-			if (strstr(temp_str, "usage"))
+			if (slurm_strcasestr(temp_str, "usage"))
 				slurmdbd_conf->private_data
 					|= PRIVATE_DATA_USAGE;
-			if (strstr(temp_str, "user"))
+			if (slurm_strcasestr(temp_str, "user"))
 				slurmdbd_conf->private_data
 					|= PRIVATE_DATA_USERS;
-			if (strstr(temp_str, "all"))
+			if (slurm_strcasestr(temp_str, "all"))
 				slurmdbd_conf->private_data = 0xffff;
 			xfree(temp_str);
 		}
@@ -282,6 +287,15 @@ extern int read_slurmdbd_conf(void)
   			if ((slurmdbd_conf->purge_job =
 			     slurmdb_parse_purge(temp_str)) == NO_VAL) {
 				fatal("Bad value \"%s\" for PurgeJobAfter",
+				      temp_str);
+			}
+			xfree(temp_str);
+		}
+		if (s_p_get_string(&temp_str, "PurgeResvAfter", tbl)) {
+			/* slurmdb_parse_purge will set SLURMDB_PURGE_FLAGS */
+			if ((slurmdbd_conf->purge_resv =
+			     slurmdb_parse_purge(temp_str)) == NO_VAL) {
+				fatal("Bad value \"%s\" for PurgeResvAfter",
 				      temp_str);
 			}
 			xfree(temp_str);
@@ -379,6 +393,8 @@ extern int read_slurmdbd_conf(void)
 			slurmdbd_conf->purge_event |= SLURMDB_PURGE_ARCHIVE;
 		if (a_jobs)
 			slurmdbd_conf->purge_job |= SLURMDB_PURGE_ARCHIVE;
+		if (a_resv)
+			slurmdbd_conf->purge_resv |= SLURMDB_PURGE_ARCHIVE;
 		if (a_steps)
 			slurmdbd_conf->purge_step |= SLURMDB_PURGE_ARCHIVE;
 		if (a_suspend)
@@ -418,6 +434,11 @@ extern int read_slurmdbd_conf(void)
 
 	if (slurmdbd_conf->storage_type == NULL)
 		fatal("StorageType must be specified");
+	if (!strcmp(slurmdbd_conf->storage_type,
+		    "accounting_storage/slurmdbd")) {
+		fatal("StorageType=%s is invalid in slurmdbd.conf",
+		      slurmdbd_conf->storage_type);
+	}
 
 	if (!slurmdbd_conf->storage_host)
 		slurmdbd_conf->storage_host = xstrdup(DEFAULT_STORAGE_HOST);
@@ -482,7 +503,7 @@ extern int read_slurmdbd_conf(void)
 		slurmdbd_conf->purge_step = NO_VAL;
 	if (!slurmdbd_conf->purge_suspend)
 		slurmdbd_conf->purge_suspend = NO_VAL;
-	
+
 	slurm_mutex_unlock(&conf_mutex);
 	return SLURM_SUCCESS;
 }
@@ -527,6 +548,13 @@ extern void log_config(void)
 		sprintf(tmp_str, "NONE");
 	debug2("PurgeJobAfter     = %s", tmp_str);
 
+	if (slurmdbd_conf->purge_resv != NO_VAL)
+		slurmdb_purge_string(slurmdbd_conf->purge_resv,
+				     tmp_str, sizeof(tmp_str), 1);
+	else
+		sprintf(tmp_str, "NONE");
+	debug2("PurgeResvAfter    = %s", tmp_str);
+
 	if (slurmdbd_conf->purge_step != NO_VAL)
 		slurmdb_purge_string(slurmdbd_conf->purge_step,
 				     tmp_str, sizeof(tmp_str), 1);
@@ -539,7 +567,7 @@ extern void log_config(void)
 				     tmp_str, sizeof(tmp_str), 1);
 	else
 		sprintf(tmp_str, "NONE");
-	debug2("PurgeSuspendAfter     = %s", tmp_str);
+	debug2("PurgeSuspendAfter = %s", tmp_str);
 
 	debug2("SlurmUser         = %s(%u)",
 	       slurmdbd_conf->slurm_user_name, slurmdbd_conf->slurm_user_id);
@@ -578,40 +606,12 @@ extern void slurmdbd_conf_unlock(void)
 }
 
 
-/* Return the pathname of the slurmdbd.conf file.
- * xfree() the value returned */
-static char * _get_conf_path(void)
-{
-	char *val = getenv("SLURM_CONF");
-	char *path = NULL;
-	int i;
-
-	if (!val)
-		val = default_slurm_config_file;
-
-	/* Replace file name on end of path */
-	i = strlen(val) + 15;
-	path = xmalloc(i);
-	strcpy(path, val);
-	val = strrchr(path, (int)'/');
-	if (val)	/* absolute path */
-		val++;
-	else		/* not absolute path */
-		val = path;
-	strcpy(val, "slurmdbd.conf");
-
-	return path;
-}
-
 /* Dump the configuration in name,value pairs for output to
  *	"statsmgr show config", caller must call list_destroy() */
 extern List dump_config(void)
 {
 	config_key_pair_t *key_pair;
 	List my_list = list_create(destroy_config_key_pair);
-
-	if (!my_list)
-		fatal("malloc failure on list_create");
 
 	key_pair = xmalloc(sizeof(config_key_pair_t));
 	key_pair->name = xstrdup("ArchiveDir");
@@ -749,6 +749,16 @@ extern List dump_config(void)
 	list_append(my_list, key_pair);
 
 	key_pair = xmalloc(sizeof(config_key_pair_t));
+	key_pair->name = xstrdup("PurgeResvAfter");
+	if (slurmdbd_conf->purge_resv != NO_VAL) {
+		key_pair->value = xmalloc(32);
+		slurmdb_purge_string(slurmdbd_conf->purge_resv,
+				     key_pair->value, 32, 1);
+	} else
+		key_pair->value = xstrdup("NONE");
+	list_append(my_list, key_pair);
+
+	key_pair = xmalloc(sizeof(config_key_pair_t));
 	key_pair->name = xstrdup("PurgeStepAfter");
 	if (slurmdbd_conf->purge_step != NO_VAL) {
 		key_pair->value = xmalloc(32);
@@ -770,7 +780,7 @@ extern List dump_config(void)
 
 	key_pair = xmalloc(sizeof(config_key_pair_t));
 	key_pair->name = xstrdup("SLURMDBD_CONF");
-	key_pair->value = _get_conf_path();
+	key_pair->value = get_extra_conf_path("slurmdbd.conf");
 	list_append(my_list, key_pair);
 
 	key_pair = xmalloc(sizeof(config_key_pair_t));

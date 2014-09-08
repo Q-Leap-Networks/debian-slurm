@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -100,7 +100,7 @@ static int	_job_modify(uint32_t jobid, char *bank_ptr,
 	}
 
 	if (bank_ptr) {
-		if(update_job_account("wiki", job_ptr, bank_ptr)
+		if (update_job_account("wiki", job_ptr, bank_ptr)
 		   != SLURM_SUCCESS)
 			return EINVAL;
 		else
@@ -202,7 +202,7 @@ host_fini:	if (rc) {
 		}
 	}
 
-	if(update_accounting) {
+	if (update_accounting) {
 		if (job_ptr->details && job_ptr->details->begin_time) {
 			/* Update job record in accounting to reflect changes */
 			jobacct_storage_g_job_start(acct_db_conn, job_ptr);

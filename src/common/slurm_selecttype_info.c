@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -81,6 +81,9 @@ int parse_select_type_param(char *select_type_parameters, uint16_t *param)
 			*param |= CR_CPU;
 			*param |= CR_MEMORY;
 			param_cnt++;
+		} else if (!strcasecmp(str_parameters,
+				       "CR_ALLOCATE_FULL_SOCKET")) {
+			*param |= CR_ALLOCATE_FULL_SOCKET;
 		} else if (!strcasecmp(str_parameters,
 				       "CR_ONE_TASK_PER_CORE")) {
 			*param |= CR_ONE_TASK_PER_CORE;

@@ -13,7 +13,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -620,8 +620,6 @@ static void *_init_power_save(void *arg)
 		goto fini;
 
 	suspend_node_bitmap = bit_alloc(node_record_count);
-	if (suspend_node_bitmap == NULL)
-		fatal("power_save: malloc error");
 
 	while (slurmctld_config.shutdown_time == 0) {
 		sleep(1);

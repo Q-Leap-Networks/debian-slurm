@@ -7,7 +7,7 @@
  *  Written by Danny Auble <da@llnl.gov>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -554,8 +554,6 @@ static int _post_association_list(List assoc_list)
 				continue;
 			itr2 = list_iterator_create(
 				assoc->usage->childern_list);
-			if (itr2 == NULL)
-				fatal("list_iterator_create: malloc failure");
 			while ((assoc2 = list_next(itr2))) {
 				if (assoc2->shares_raw != SLURMDB_FS_USE_PARENT)
 					count += assoc2->shares_raw;

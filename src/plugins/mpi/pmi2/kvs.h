@@ -6,7 +6,7 @@
  *  All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -50,6 +50,8 @@
 
 extern int tasks_to_wait;
 extern int children_to_wait;
+extern int kvs_seq;
+extern int waiting_kvs_resp;
 
 extern int   temp_kvs_init(void);
 extern int   temp_kvs_add(char *key, char *val);

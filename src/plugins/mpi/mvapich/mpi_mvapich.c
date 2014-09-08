@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -101,14 +101,18 @@ int p_mpi_hook_slurmstepd_task (const mpi_plugin_task_info_t *job,
 	env_array_overwrite_fmt(env, "MPIRUN_MPD", "0");
 
 	debug2("init for mpi rank %u", job->gtaskid);
-	/*
-	 * Fake MPIRUN_PROCESSES env var -- we don't need this for
-	 *  SLURM at this time. (what a waste)
-	 */
-	for (i = 0; i < job->ntasks; i++)
-		xstrcat (processes, "x:");
 
-	env_array_overwrite_fmt(env, "MPIRUN_PROCESSES", "%s", processes);
+	if (getenvp (*env, "SLURM_NEED_MVAPICH_MPIRUN_PROCESSES")) {
+		/*
+		 * Fake MPIRUN_PROCESSES env var -- we don't need this for
+		 *  SLURM at this time. (what a waste)
+		 */
+		for (i = 0; i < job->ntasks; i++)
+			xstrcat (processes, "x:");
+
+		env_array_overwrite_fmt(env, "MPIRUN_PROCESSES", "%s",
+			processes);
+	}
 
 	/*
 	 * Some mvapich versions will ignore MPIRUN_PROCESSES If

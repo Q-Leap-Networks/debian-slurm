@@ -6,7 +6,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -121,4 +121,15 @@ extern int acct_gather_energy_p_set_data(enum acct_energy_type data_type,
 					 acct_gather_energy_t *energy)
 {
 	return SLURM_SUCCESS;
+}
+
+extern void acct_gather_energy_p_conf_options(s_p_options_t **full_options,
+					      int *full_options_cnt)
+{
+	return;
+}
+
+extern void acct_gather_energy_p_conf_set(s_p_hashtbl_t *tbl)
+{
+	return;
 }

@@ -6,7 +6,7 @@
  *  All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -99,5 +99,7 @@ extern void client_resp_free(client_resp_t *resp);
 		xstrfmtcat(msg->buf, fmt, ## __VA_ARGS__);	\
 	} while (0)
 
+
+extern int send_kvs_fence_resp_to_clients(int rc, char *errmsg);
 
 #endif	/* _CLIENT_H */

@@ -1,4 +1,4 @@
-#
+# Makefile for srun_cr
 
 AUTOMAKE_OPTIONS = foreign
 CLEANFILES = core.*

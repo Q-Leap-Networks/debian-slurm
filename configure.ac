@@ -73,9 +73,9 @@ dnl aliases for plugins.
 dnl
 case "$host" in
 	*-*-aix*) AC_DEFINE(USE_ALIAS, 0,
-                 	[Define slurm_ prefix function aliases for plugins]) ;;
+			[Define slurm_ prefix function aliases for plugins]) ;;
 	*darwin*) AC_DEFINE(USE_ALIAS, 0,
-                  	[Define slurm_ prefix function aliases for plugins]) ;;
+			[Define slurm_ prefix function aliases for plugins]) ;;
 	*)        AC_DEFINE(USE_ALIAS, 1,
 			[Define slurm_ prefix function aliases for plugins]) ;;
 esac
@@ -119,12 +119,12 @@ AC_SEARCH_LIBS([kstat_open],    [kstat])
 dnl Checks for header files.
 dnl
 AC_CHECK_HEADERS(mcheck.h values.h socket.h sys/socket.h  \
-                 stdbool.h sys/ipc.h sys/shm.h sys/sem.h errno.h \
-                 stdlib.h dirent.h pthread.h sys/prctl.h \
-                 sysint.h inttypes.h termcap.h netdb.h sys/socket.h  \
-                 sys/systemcfg.h ncurses.h curses.h sys/dr.h sys/vfs.h \
-                 pam/pam_appl.h security/pam_appl.h sys/sysctl.h \
-                 pty.h utmp.h \
+		 stdbool.h sys/ipc.h sys/shm.h sys/sem.h errno.h \
+		 stdlib.h dirent.h pthread.h sys/prctl.h \
+		 sysint.h inttypes.h termcap.h netdb.h sys/socket.h  \
+		 sys/systemcfg.h ncurses.h curses.h sys/dr.h sys/vfs.h \
+		 pam/pam_appl.h security/pam_appl.h sys/sysctl.h \
+		 pty.h utmp.h \
 		 sys/syslog.h linux/sched.h \
 		 kstat.h paths.h limits.h sys/statfs.h sys/ptrace.h \
 		 sys/termios.h float.h
@@ -221,13 +221,32 @@ X_AC_SUN_CONST
 X_AC_DIMENSIONS
 
 X_AC_CFLAGS
+X_AC_OFED
+
+AX_LIB_HDF5()
+AM_CONDITIONAL(BUILD_HDF5, test "$with_hdf5" = "yes")
+# Some older systems (Debian/Ubuntu/...) configure HDF5 with
+# --with-default-api-version=v16 which creates problems for slurm
+# because slurm uses the 1.8 API. By defining this CPP macro we get
+# the 1.8 API.
+AC_DEFINE([H5_NO_DEPRECATED_SYMBOLS], [1], [Make sure we get the 1.8 HDF5 API])
+
 X_AC_HWLOC
+X_AC_FREEIPMI
 X_AC_XCPU
 X_AC_SLURM_SEMAPHORE
+X_AC_RRDTOOL
 
 X_AC_NCURSES
 AM_CONDITIONAL(HAVE_SOME_CURSES, test "x$ac_have_some_curses" = "xyes")
 AC_SUBST(HAVE_SOME_CURSES)
+
+#
+#  Tests for Check
+#
+
+PKG_CHECK_MODULES([CHECK], [check >= 0.9.8], [ac_have_check="yes"], [ac_have_check="no"])
+AM_CONDITIONAL(HAVE_CHECK, test "x$ac_have_check" = "xyes")
 
 #
 #  Tests for GTK+
@@ -376,10 +395,6 @@ AC_CHECK_LIB(util, openpty, [UTIL_LIBS="-lutil"], [])
 AC_SUBST(UTIL_LIBS)
 LIBS="$savedLIBS"
 
-dnl Add LSD-Tools defines:
-AC_DEFINE(WITH_LSD_FATAL_ERROR_FUNC, 1, [Have definition of lsd_fatal_error()])
-AC_DEFINE(WITH_LSD_NOMEM_ERROR_FUNC, 1, [Have definition of lsd_nomem_error()])
-
 dnl
 dnl Check for compilation of SLURM with BLCR support:
 dnl
@@ -400,10 +415,10 @@ AC_CONFIG_FILES([Makefile
 		 config.xml
 		 auxdir/Makefile
 		 contribs/Makefile
-		 contribs/arrayrun/Makefile
 		 contribs/cray/Makefile
 		 contribs/cray/opt_modulefiles_slurm
 		 contribs/lua/Makefile
+		 contribs/mic/Makefile
 		 contribs/pam/Makefile
 		 contribs/perlapi/Makefile
 		 contribs/perlapi/libslurm/Makefile
@@ -415,6 +430,7 @@ AC_CONFIG_FILES([Makefile
 		 contribs/phpext/slurm_php/config.m4
 		 contribs/sjobexit/Makefile
 		 contribs/slurmdb-direct/Makefile
+		 contribs/pmi2/Makefile
 		 doc/Makefile
 		 doc/man/Makefile
 		 doc/man/man1/Makefile
@@ -481,6 +497,9 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/crypto/Makefile
 		 src/plugins/crypto/munge/Makefile
 		 src/plugins/crypto/openssl/Makefile
+		 src/plugins/ext_sensors/Makefile
+		 src/plugins/ext_sensors/rrd/Makefile
+		 src/plugins/ext_sensors/none/Makefile
 		 src/plugins/gres/Makefile
 		 src/plugins/gres/gpu/Makefile
 		 src/plugins/gres/nic/Makefile
@@ -494,6 +513,16 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/acct_gather_energy/rapl/Makefile
 		 src/plugins/acct_gather_energy/ipmi/Makefile
 		 src/plugins/acct_gather_energy/none/Makefile
+		 src/plugins/acct_gather_infiniband/Makefile
+		 src/plugins/acct_gather_infiniband/ofed/Makefile
+		 src/plugins/acct_gather_infiniband/none/Makefile
+		 src/plugins/acct_gather_filesystem/Makefile
+		 src/plugins/acct_gather_filesystem/lustre/Makefile
+		 src/plugins/acct_gather_filesystem/none/Makefile
+		 src/plugins/acct_gather_profile/Makefile
+		 src/plugins/acct_gather_profile/hdf5/Makefile
+		 src/plugins/acct_gather_profile/hdf5/sh5util/Makefile
+		 src/plugins/acct_gather_profile/none/Makefile
 		 src/plugins/jobcomp/Makefile
 		 src/plugins/jobcomp/filetxt/Makefile
 		 src/plugins/jobcomp/none/Makefile
@@ -507,6 +536,8 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/job_submit/logging/Makefile
 		 src/plugins/job_submit/lua/Makefile
 		 src/plugins/job_submit/partition/Makefile
+		 src/plugins/job_submit/pbs/Makefile
+		 src/plugins/job_submit/require_timelimit/Makefile
 		 src/plugins/launch/Makefile
 		 src/plugins/launch/aprun/Makefile
 		 src/plugins/launch/poe/Makefile
@@ -519,7 +550,6 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/priority/Makefile
 		 src/plugins/priority/basic/Makefile
 		 src/plugins/priority/multifactor/Makefile
-		 src/plugins/priority/multifactor2/Makefile
 		 src/plugins/proctrack/Makefile
 		 src/plugins/proctrack/aix/Makefile
 		 src/plugins/proctrack/cgroup/Makefile
@@ -546,6 +576,8 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/select/cray/libemulate/Makefile
 		 src/plugins/select/linear/Makefile
 		 src/plugins/select/serial/Makefile
+		 src/plugins/slurmctld/Makefile
+		 src/plugins/slurmctld/dynalloc/Makefile
 		 src/plugins/switch/Makefile
 		 src/plugins/switch/none/Makefile
 		 src/plugins/switch/nrt/Makefile

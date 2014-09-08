@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -69,7 +69,7 @@
 #define BRIEF_COMP_FIELDS "jobid,uid,state"
 #define DEFAULT_FIELDS "jobid,jobname,partition,account,alloccpus,state,exitcode"
 #define DEFAULT_COMP_FIELDS "jobid,uid,jobname,partition,nnodes,nodelist,state,end"
-#define LONG_FIELDS "jobid,jobname,partition,maxvmsize,maxvmsizenode,maxvmsizetask,avevmsize,maxrss,maxrssnode,maxrsstask,averss,maxpages,maxpagesnode,maxpagestask,avepages,mincpu,mincpunode,mincputask,avecpu,ntasks,alloccpus,elapsed,state,exitcode,avecpufreq,consumedenergy"
+#define LONG_FIELDS "jobid,jobname,partition,maxvmsize,maxvmsizenode,maxvmsizetask,avevmsize,maxrss,maxrssnode,maxrsstask,averss,maxpages,maxpagesnode,maxpagestask,avepages,mincpu,mincpunode,mincputask,avecpu,ntasks,alloccpus,elapsed,state,exitcode,avecpufreq,reqcpufreq,reqmem,consumedenergy,maxdiskread,maxdiskreadnode,maxdiskreadtask,avediskread,maxdiskwrite,maxdiskwritenode,maxdiskwritetask,avediskwrite"
 
 #define LONG_COMP_FIELDS "jobid,uid,jobname,partition,nnodes,nodelist,state,start,end,timelimit"
 
@@ -97,13 +97,16 @@ typedef enum {
 		PRINT_ASSOCID,
 		PRINT_AVECPU,
 		PRINT_ACT_CPUFREQ,
-		PRINT_CONSUMED_ENERGY,
+		PRINT_AVEDISKREAD,
+		PRINT_AVEDISKWRITE,
 		PRINT_AVEPAGES,
 		PRINT_AVERSS,
 		PRINT_AVEVSIZE,
 		PRINT_BLOCKID,
 		PRINT_CLUSTER,
 		PRINT_COMMENT,
+		PRINT_CONSUMED_ENERGY,
+		PRINT_CONSUMED_ENERGY_RAW,
 		PRINT_CPU_TIME,
 		PRINT_CPU_TIME_RAW,
 		PRINT_DERIVED_EC,
@@ -116,6 +119,12 @@ typedef enum {
 		PRINT_JOBID,
 		PRINT_JOBNAME,
 		PRINT_LAYOUT,
+		PRINT_MAXDISKREAD,
+		PRINT_MAXDISKREADNODE,
+		PRINT_MAXDISKREADTASK,
+		PRINT_MAXDISKWRITE,
+		PRINT_MAXDISKWRITENODE,
+		PRINT_MAXDISKWRITETASK,
 		PRINT_MAXPAGES,
 		PRINT_MAXPAGESNODE,
 		PRINT_MAXPAGESTASK,
@@ -135,7 +144,9 @@ typedef enum {
 		PRINT_PRIO,
 		PRINT_QOS,
 		PRINT_QOSRAW,
+		PRINT_REQ_CPUFREQ,
 		PRINT_REQ_CPUS,
+		PRINT_REQ_MEM,
 		PRINT_RESV,
 		PRINT_RESV_CPU,
 		PRINT_RESV_CPU_RAW,
@@ -156,9 +167,7 @@ typedef enum {
 typedef struct {
 	slurmdb_job_cond_t *job_cond;
 	int opt_completion;	/* --completion */
-	int opt_dump;		/* --dump */
 	int opt_dup;		/* --duplicates; +1 = explicitly set */
-	int opt_fdump;		/* --formattted_dump */
 	char *opt_field_list;	/* --fields= */
 	int opt_gid;		/* running persons gid */
 	int opt_help;		/* --help */
@@ -188,8 +197,6 @@ void print_fields(type_t type, void *object);
 /* options.c */
 int get_data(void);
 void parse_command_line(int argc, char **argv);
-void do_dump(void);
-void do_dump_completion(void);
 void do_help(void);
 void do_list(void);
 void do_list_completion(void);

@@ -11,7 +11,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -71,9 +71,9 @@
 
 
 /* Change PART_STATE_VERSION value when changing the state save format */
-#define PART_STATE_VERSION      "VER003"
-#define PART_2_2_STATE_VERSION  "VER003"	/* SLURM version 2.2 */
-#define PART_2_1_STATE_VERSION  "VER002"	/* SLURM version 2.1 */
+#define PART_STATE_VERSION      "VER004"
+#define PART_2_6_STATE_VERSION  "VER004"	/* SLURM version 2.6 */
+#define PART_2_5_STATE_VERSION  "VER003"	/* SLURM version 2.5 to 2.2 */
 
 /* Global variables */
 struct part_record default_part;	/* default configuration values */
@@ -117,13 +117,9 @@ static int _build_part_bitmap(struct part_record *part_ptr)
 
 	if (part_ptr->node_bitmap == NULL) {
 		part_ptr->node_bitmap = bit_alloc(node_record_count);
-		if (part_ptr->node_bitmap == NULL)
-			fatal("bit_alloc malloc failure");
 		old_bitmap = NULL;
 	} else {
 		old_bitmap = bit_copy(part_ptr->node_bitmap);
-		if (old_bitmap == NULL)
-			fatal("bit_copy malloc failure");
 		bit_nclear(part_ptr->node_bitmap, 0,
 			   node_record_count - 1);
 	}
@@ -225,9 +221,11 @@ struct part_record *create_part_record(void)
 	xassert (part_ptr->magic = PART_MAGIC);  /* set value */
 	part_ptr->name              = xstrdup("DEFAULT");
 	part_ptr->alternate         = xstrdup(default_part.alternate);
+	part_ptr->cr_type	    = default_part.cr_type;
 	part_ptr->flags             = default_part.flags;
 	part_ptr->max_time          = default_part.max_time;
 	part_ptr->default_time      = default_part.default_time;
+	part_ptr->max_cpus_per_node = default_part.max_cpus_per_node;
 	part_ptr->max_nodes         = default_part.max_nodes;
 	part_ptr->max_nodes_orig    = default_part.max_nodes;
 	part_ptr->min_nodes         = default_part.min_nodes;
@@ -237,7 +235,7 @@ struct part_record *create_part_record(void)
 	part_ptr->preempt_mode      = default_part.preempt_mode;
 	part_ptr->priority          = default_part.priority;
 	part_ptr->grace_time 	    = default_part.grace_time;
-	if(part_max_priority)
+	if (part_max_priority)
 		part_ptr->norm_priority = (double)default_part.priority
 			/ (double)part_max_priority;
 	part_ptr->node_bitmap       = NULL;
@@ -258,8 +256,7 @@ struct part_record *create_part_record(void)
 	else
 		part_ptr->nodes = NULL;
 
-	if (list_append(part_list, part_ptr) == NULL)
-		fatal("create_part_record: unable to allocate memory");
+	(void) list_append(part_list, part_ptr);
 
 	return part_ptr;
 }
@@ -313,8 +310,6 @@ int dump_all_part_state(void)
 	/* write partition records to buffer */
 	lock_slurmctld(part_read_lock);
 	part_iterator = list_iterator_create(part_list);
-	if (!part_iterator)
-		fatal("list_iterator_create malloc");
 	while ((part_ptr = (struct part_record *) list_next(part_iterator))) {
 		xassert (part_ptr->magic == PART_MAGIC);
 		_dump_part_state(part_ptr, buffer);
@@ -398,6 +393,7 @@ static void _dump_part_state(struct part_record *part_ptr, Buf buffer)
 	pack32(part_ptr->grace_time,	 buffer);
 	pack32(part_ptr->max_time,       buffer);
 	pack32(part_ptr->default_time,   buffer);
+	pack32(part_ptr->max_cpus_per_node, buffer);
 	pack32(part_ptr->max_nodes_orig, buffer);
 	pack32(part_ptr->min_nodes_orig, buffer);
 
@@ -407,6 +403,8 @@ static void _dump_part_state(struct part_record *part_ptr, Buf buffer)
 	pack16(part_ptr->priority,       buffer);
 
 	pack16(part_ptr->state_up,       buffer);
+	pack16(part_ptr->cr_type,        buffer);
+
 	packstr(part_ptr->allow_groups,  buffer);
 	packstr(part_ptr->allow_alloc_nodes, buffer);
 	packstr(part_ptr->alternate,     buffer);
@@ -455,10 +453,10 @@ int load_all_part_state(void)
 	char *part_name = NULL, *allow_groups = NULL, *nodes = NULL;
 	char *state_file, *data = NULL;
 	uint32_t max_time, default_time, max_nodes, min_nodes;
-	uint32_t grace_time = 0;
+	uint32_t max_cpus_per_node = INFINITE, grace_time = 0;
 	time_t time;
 	uint16_t flags;
-	uint16_t max_share, preempt_mode, priority, state_up;
+	uint16_t max_share, preempt_mode, priority, state_up, cr_type;
 	struct part_record *part_ptr;
 	uint32_t data_size = 0, name_len;
 	int data_allocated, data_read = 0, error_code = 0, part_cnt = 0;
@@ -505,9 +503,11 @@ int load_all_part_state(void)
 
 	safe_unpackstr_xmalloc( &ver_str, &name_len, buffer);
 	debug3("Version string in part_state header is %s", ver_str);
-	if(ver_str) {
+	if (ver_str) {
 		if (!strcmp(ver_str, PART_STATE_VERSION)) {
 			protocol_version = SLURM_PROTOCOL_VERSION;
+		} else if (!strcmp(ver_str, PART_2_5_STATE_VERSION)) {
+			protocol_version = SLURM_2_5_PROTOCOL_VERSION;
 		}
 	}
 
@@ -523,7 +523,42 @@ int load_all_part_state(void)
 	safe_unpack_time(&time, buffer);
 
 	while (remaining_buf(buffer) > 0) {
-		if (protocol_version >= SLURM_2_3_PROTOCOL_VERSION) {
+		if (protocol_version >= SLURM_2_6_PROTOCOL_VERSION) {
+			safe_unpackstr_xmalloc(&part_name, &name_len, buffer);
+			safe_unpack32(&grace_time, buffer);
+			safe_unpack32(&max_time, buffer);
+			safe_unpack32(&default_time, buffer);
+			safe_unpack32(&max_cpus_per_node, buffer);
+			safe_unpack32(&max_nodes, buffer);
+			safe_unpack32(&min_nodes, buffer);
+
+			safe_unpack16(&flags,        buffer);
+			safe_unpack16(&max_share,    buffer);
+			safe_unpack16(&preempt_mode, buffer);
+			safe_unpack16(&priority,     buffer);
+
+			if (priority > part_max_priority)
+				part_max_priority = priority;
+
+			safe_unpack16(&state_up, buffer);
+			safe_unpack16(&cr_type, buffer);
+
+			safe_unpackstr_xmalloc(&allow_groups,
+					       &name_len, buffer);
+			safe_unpackstr_xmalloc(&allow_alloc_nodes,
+					       &name_len, buffer);
+			safe_unpackstr_xmalloc(&alternate, &name_len, buffer);
+			safe_unpackstr_xmalloc(&nodes, &name_len, buffer);
+			if ((flags & PART_FLAG_DEFAULT_CLR) ||
+			    (flags & PART_FLAG_HIDDEN_CLR)  ||
+			    (flags & PART_FLAG_NO_ROOT_CLR) ||
+			    (flags & PART_FLAG_ROOT_ONLY_CLR) ||
+			    (flags & PART_FLAG_REQ_RESV_CLR)) {
+				error("Invalid data for partition %s: flags=%u",
+				      part_name, flags);
+				error_code = EINVAL;
+			}
+		} else if (protocol_version >= SLURM_2_4_PROTOCOL_VERSION) {
 			safe_unpackstr_xmalloc(&part_name, &name_len, buffer);
 			safe_unpack32(&grace_time, buffer);
 			safe_unpack32(&max_time, buffer);
@@ -538,6 +573,7 @@ int load_all_part_state(void)
 
 			if (priority > part_max_priority)
 				part_max_priority = priority;
+			cr_type = 0;	/* Default value */
 
 			safe_unpack16(&state_up, buffer);
 			safe_unpackstr_xmalloc(&allow_groups,
@@ -570,7 +606,8 @@ int load_all_part_state(void)
 			error("No more partition data will be processed from "
 			      "the checkpoint file");
 			xfree(allow_groups);
-			xfree(allow_groups);
+			xfree(allow_alloc_nodes);
+			xfree(alternate);
 			xfree(part_name);
 			xfree(nodes);
 			error_code = EINVAL;
@@ -597,6 +634,7 @@ int load_all_part_state(void)
 		}
 		part_ptr->max_time       = max_time;
 		part_ptr->default_time   = default_time;
+		part_ptr->max_cpus_per_node = max_cpus_per_node;
 		part_ptr->max_nodes      = max_nodes;
 		part_ptr->max_nodes_orig = max_nodes;
 		part_ptr->min_nodes      = min_nodes;
@@ -607,6 +645,7 @@ int load_all_part_state(void)
 			part_ptr->preempt_mode   = preempt_mode;
 		part_ptr->priority       = priority;
 		part_ptr->state_up       = state_up;
+		part_ptr->cr_type	 = cr_type;
 		xfree(part_ptr->allow_groups);
 		part_ptr->allow_groups   = allow_groups;
 		xfree(part_ptr->allow_alloc_nodes);
@@ -641,6 +680,30 @@ struct part_record *find_part_record(char *name)
 }
 
 /*
+ * Create a copy of a job's part_list *partition list
+ * IN part_list_src - a job's part_list
+ * RET copy of part_list_src, must be freed by caller
+ */
+extern List part_list_copy(List part_list_src)
+{
+	struct part_record *part_ptr;
+	ListIterator iter;
+	List part_list_dest = NULL;
+
+	if (!part_list_src)
+		return part_list_dest;
+
+	part_list_dest = list_create(NULL);
+	iter = list_iterator_create(part_list_src);
+	while ((part_ptr = (struct part_record *) list_next(iter))) {
+		list_append(part_list_dest, part_ptr);
+	}
+	list_iterator_destroy(iter);
+
+	return part_list_dest;
+}
+
+/*
  * get_part_list - find record for named partition(s)
  * IN name - partition name(s) in a comma separated list
  * RET List of pointers to the partitions or NULL if not found
@@ -662,8 +725,6 @@ extern List get_part_list(char *name)
 		if (part_ptr) {
 			if (job_part_list == NULL) {
 				job_part_list = list_create(NULL);
-				if (job_part_list == NULL)
-					fatal("list_create: malloc failure");
 			}
 			list_append(job_part_list, part_ptr);
 		} else {
@@ -695,6 +756,7 @@ int init_part_conf(void)
 		default_part.flags |= PART_FLAG_NO_ROOT;
 	default_part.max_time       = INFINITE;
 	default_part.default_time   = NO_VAL;
+	default_part.max_cpus_per_node = INFINITE;
 	default_part.max_nodes      = INFINITE;
 	default_part.max_nodes_orig = INFINITE;
 	default_part.min_nodes      = 1;
@@ -707,6 +769,7 @@ int init_part_conf(void)
 	default_part.total_nodes    = 0;
 	default_part.total_cpus     = 0;
 	default_part.grace_time     = 0;
+	default_part.cr_type	    = 0;
 	xfree(default_part.nodes);
 	xfree(default_part.allow_groups);
 	xfree(default_part.allow_uids);
@@ -718,9 +781,6 @@ int init_part_conf(void)
 		(void) _delete_part_record(NULL);
 	else
 		part_list = list_create(_list_delete_part);
-
-	if (part_list == NULL)
-		fatal ("memory allocation failure");
 
 	xfree(default_part_name);
 	default_part_loc = (struct part_record *) NULL;
@@ -894,7 +954,39 @@ void pack_part(struct part_record *part_ptr, Buf buffer,
 {
 	uint32_t altered;
 
-	if (protocol_version >= SLURM_2_3_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_2_6_PROTOCOL_VERSION) {
+		if (default_part_loc == part_ptr)
+			part_ptr->flags |= PART_FLAG_DEFAULT;
+		else
+			part_ptr->flags &= (~PART_FLAG_DEFAULT);
+
+		packstr(part_ptr->name, buffer);
+		pack32(part_ptr->grace_time, buffer);
+		pack32(part_ptr->max_time, buffer);
+		pack32(part_ptr->default_time, buffer);
+		pack32(part_ptr->max_nodes_orig, buffer);
+		pack32(part_ptr->min_nodes_orig, buffer);
+		altered = part_ptr->total_nodes;
+		select_g_alter_node_cnt(SELECT_APPLY_NODE_MAX_OFFSET, &altered);
+		pack32(altered,              buffer);
+		pack32(part_ptr->total_cpus, buffer);
+		pack32(part_ptr->def_mem_per_cpu, buffer);
+		pack32(part_ptr->max_cpus_per_node, buffer);
+		pack32(part_ptr->max_mem_per_cpu, buffer);
+
+		pack16(part_ptr->flags,      buffer);
+		pack16(part_ptr->max_share,  buffer);
+		pack16(part_ptr->preempt_mode, buffer);
+		pack16(part_ptr->priority,   buffer);
+		pack16(part_ptr->state_up, buffer);
+		pack16(part_ptr->cr_type, buffer);
+
+		packstr(part_ptr->allow_groups, buffer);
+		packstr(part_ptr->allow_alloc_nodes, buffer);
+		packstr(part_ptr->alternate, buffer);
+		packstr(part_ptr->nodes, buffer);
+		pack_bit_fmt(part_ptr->node_bitmap, buffer);
+	} else if (protocol_version >= SLURM_2_4_PROTOCOL_VERSION) {
 		if (default_part_loc == part_ptr)
 			part_ptr->flags |= PART_FLAG_DEFAULT;
 		else
@@ -972,6 +1064,12 @@ extern int update_part (update_part_msg_t * part_desc, bool create_flag)
 	}
 
 	last_part_update = time(NULL);
+
+	if (part_desc->max_cpus_per_node != NO_VAL) {
+		info("update_part: setting MaxCPUsPerNode to %u for partition %s",
+		     part_desc->max_cpus_per_node, part_desc->name);
+		part_ptr->max_cpus_per_node = part_desc->max_cpus_per_node;
+	}
 
 	if (part_desc->max_time != NO_VAL) {
 		info("update_part: setting max_time to %u for partition %s",
@@ -1121,7 +1219,7 @@ extern int update_part (update_part_msg_t * part_desc, bool create_flag)
 		 * the normalized priorities of all the other
 		 * partitions. If not then just set this partition.
 		 */
-		if(part_ptr->priority > part_max_priority) {
+		if (part_ptr->priority > part_max_priority) {
 			ListIterator itr = list_iterator_create(part_list);
 			struct part_record *part2 = NULL;
 
@@ -1474,8 +1572,8 @@ extern bool misc_policy_job_runnable_state(struct job_record *job_ptr)
 
 /*
  * Determine of the specified job can execute right now or is currently
- * blocked by a partition state or limit. Execute job_limits_check() to
- * re-validate job state.
+ * blocked by a partition state or limit. These job states should match the
+ * reason values returned by job_limits_check().
  */
 extern bool part_policy_job_runnable_state(struct job_record *job_ptr)
 {

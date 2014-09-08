@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -223,9 +223,15 @@ static int _get_date(char *time_str, int *pos, int *month, int *mday, int *year)
 {
 	int mon, day, yr;
 	int offset = *pos;
+	int len;
 
-	if(time_str[offset+4] && (time_str[offset+4] == '-')
-	   && time_str[offset+7] && (time_str[offset+7] == '-')) {
+	if (!time_str)
+		goto prob;
+
+	len = strlen(time_str);
+
+	if ((len >= (offset+7)) && (time_str[offset+4] == '-')
+	    && (time_str[offset+7] == '-')) {
 		/* get year */
 		if ((time_str[offset] < '0') || (time_str[offset] > '9'))
 			goto prob;
@@ -626,7 +632,7 @@ slurm_make_time_str (time_t *time, char *string, int size)
 		if (use_relative_format)
 			display_fmt = _relative_date_fmt(&time_tm);
 
-		strftime(string, size, display_fmt, &time_tm);
+		slurm_strftime(string, size, display_fmt, &time_tm);
 	}
 }
 
@@ -683,7 +689,7 @@ extern int time_str2secs(const char *string)
 			break;
 	}
 
-	if ((days != -1) && (hr == -1) && (min != 0)) {
+	if ((days != -1) && (hr == -1) && (min != -1)) {
 		/* format was "days-hr" or "days-hr:min" */
 		hr = min;
 		min = sec;

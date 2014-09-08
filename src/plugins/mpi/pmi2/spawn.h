@@ -6,7 +6,7 @@
  *  All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -78,6 +78,7 @@ typedef struct spawn_resp {
 	uint32_t seq;
 	int rc;
 	char *jobid;
+	uint16_t pmi_port;
 	uint32_t error_cnt;
 	int *error_codes;
 } spawn_resp_t;

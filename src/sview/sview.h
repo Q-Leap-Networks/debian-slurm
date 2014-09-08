@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -337,6 +337,7 @@ extern GMutex *sview_mutex;
 extern int global_row_count;
 extern gint last_event_x;
 extern gint last_event_y;
+extern int sview_max_cpus;
 extern GdkCursor* in_process_cursor;
 extern int cpus_per_node;
 extern int g_node_scaling;

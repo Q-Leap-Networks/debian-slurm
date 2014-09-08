@@ -12,7 +12,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -154,10 +154,8 @@ static void _compute_start_times(void)
 	sched_start = now;
 	last_job_alloc = now - 1;
 	alloc_bitmap = bit_alloc(node_record_count);
-	if (alloc_bitmap == NULL)
-		fatal("bit_alloc: malloc failure");
-	job_queue = build_job_queue(true);
-	while ((job_queue_rec = (job_queue_rec_t *) 
+	job_queue = build_job_queue(true, false);
+	while ((job_queue_rec = (job_queue_rec_t *)
 				list_pop_bottom(job_queue, sort_job_queue2))) {
 		job_ptr  = job_queue_rec->job_ptr;
 		part_ptr = job_queue_rec->part_ptr;

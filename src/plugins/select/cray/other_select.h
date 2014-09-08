@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -380,7 +380,7 @@ extern int other_pack_select_info(time_t last_query_time, uint16_t show_flags,
 extern int other_reconfigure(void);
 
 extern bitstr_t * other_resv_test(bitstr_t *avail_bitmap, uint32_t node_cnt,
-				  uint32_t core_cnt, bitstr_t **core_bitmap);
+				  uint32_t *core_cnt, bitstr_t **core_bitmap);
 
 extern void other_ba_init(node_info_msg_t *node_info_ptr, bool sanity_check);
 extern void other_ba_fini(void);

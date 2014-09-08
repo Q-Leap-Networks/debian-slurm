@@ -7,7 +7,7 @@
  *  Written by Danny Auble <da@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -55,6 +55,7 @@ s_p_options_t cray_conf_file_options[] = {
 	{"AlpsDir", S_P_STRING},	/* Vestigial option */
 	{"apbasil", S_P_STRING},
 	{"apkill", S_P_STRING},
+	{"AlpsEngine", S_P_STRING},
 	{"SDBdb", S_P_STRING},
 	{"SDBhost", S_P_STRING},
 	{"SDBpass", S_P_STRING},
@@ -63,18 +64,6 @@ s_p_options_t cray_conf_file_options[] = {
 	{"SyncTimeout", S_P_UINT32},
 	{NULL}
 };
-
-static char *_get_cray_conf(void)
-{
-	char *val = getenv("SLURM_CONF");
-	char *rc = NULL;
-
-	if (!val)
-		val = default_slurm_config_file;
-	rc = xstrdup(val);
-	xstrsubstitute(rc, "slurm.conf", "cray.conf");
-	return rc;
-}
 
 extern int create_config(void)
 {
@@ -89,7 +78,7 @@ extern int create_config(void)
 
 	cray_conf = xmalloc(sizeof(cray_config_t));
 
-	cray_conf_file = _get_cray_conf();
+	cray_conf_file = get_extra_conf_path("cray.conf");
 
 	if (stat(cray_conf_file, &config_stat) < 0) {
 		cray_conf->apbasil  = xstrdup(DEFAULT_APBASIL);
@@ -133,6 +122,8 @@ extern int create_config(void)
 	if (!s_p_get_string(&cray_conf->apkill, "apkill", tbl))
 		cray_conf->apkill = xstrdup(DEFAULT_APKILL);
 
+	s_p_get_string(&cray_conf->alps_engine, "AlpsEngine", tbl);
+
 	if (!s_p_get_string(&cray_conf->sdb_db, "SDBdb", tbl))
 		cray_conf->sdb_db = xstrdup(DEFAULT_CRAY_SDB_DB);
 	if (!s_p_get_string(&cray_conf->sdb_host, "SDBhost", tbl))
@@ -154,6 +145,7 @@ end_it:
 	info("Cray conf is...");
 	info("\tapbasil=\t%s", cray_conf->apbasil);
 	info("\tapkill=\t\t%s", cray_conf->apkill);
+	info("\tAlpsEngine=\t\t%s", cray_conf->alps_engine);
 	info("\tSDBdb=\t\t%s", cray_conf->sdb_db);
 	info("\tSDBhost=\t%s", cray_conf->sdb_host);
 	info("\tSDBpass=\t%s", cray_conf->sdb_pass);
@@ -171,6 +163,7 @@ extern int destroy_config(void)
 	if (cray_conf) {
 		xfree(cray_conf->apbasil);
 		xfree(cray_conf->apkill);
+		xfree(cray_conf->alps_engine);
 		xfree(cray_conf->sdb_db);
 		xfree(cray_conf->sdb_host);
 		xfree(cray_conf->sdb_pass);

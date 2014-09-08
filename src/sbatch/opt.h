@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -96,6 +96,7 @@ typedef struct sbatch_options {
 	int  time_min;		/* --min-time 	(int minutes)	*/
 	char *time_min_str;	/* --min-time (string)		*/
 	char *partition;	/* --partition=n,   -p n   	*/
+	uint32_t profile;	/* --profile=[all | none}       */
 	enum task_dist_states
 	        distribution;	/* --distribution=, -m dist	*/
         uint32_t plane_size;    /* lllp distribution -> plane_size for
@@ -119,7 +120,8 @@ typedef struct sbatch_options {
 	bool no_kill;		/* --no-kill, -k		*/
 	int requeue;		/* --requeue and --no-requeue	*/
 	uint8_t open_mode;	/* --open-mode			*/
-	int acctg_freq;		/* --acctg-freq=secs		*/
+	char *acctg_freq;	/* --acctg-freq=<type1>=<freq1>,*/
+				/* 	<type2>=<freq2>,...	*/
 	bool overcommit;	/* --overcommit -O		*/
 	uint16_t shared;	/* --share,   -s		*/
 	char *licenses;		/* --licenses, -L		*/
@@ -154,6 +156,7 @@ typedef struct sbatch_options {
 	char *ramdiskimage;     /* --ramdisk-image RamDiskImage for block */
 	/*********************/
 
+	char *array_inx;	/* -a, --array			*/
 	time_t begin;		/* --begin			*/
 	uint16_t mail_type;	/* --mail-type			*/
 	char *mail_user;	/* --mail-user			*/
@@ -174,6 +177,7 @@ typedef struct sbatch_options {
 	char **spank_job_env;	/* SPANK controlled environment for job
 				 * Prolog and Epilog		*/
 	int spank_job_env_size;	/* size of spank_job_env	*/
+	int umask;		/* job umask for PBS		*/
 } opt_t;
 
 extern opt_t opt;

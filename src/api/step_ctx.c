@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -42,6 +42,7 @@
 #endif
 
 #include <errno.h>
+#include <poll.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -63,9 +64,23 @@
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_defs.h"
 #include "src/common/xmalloc.h"
+#include "src/common/xsignal.h"
 #include "src/common/xstring.h"
-#include "src/common/slurm_cred.h"
 #include "src/api/step_ctx.h"
+
+int step_signals[] = {
+	SIGINT,  SIGQUIT, SIGCONT, SIGTERM, SIGHUP,
+	SIGALRM, SIGUSR1, SIGUSR2, SIGPIPE, 0 };
+static int destroy_step = 0;
+
+static void _signal_while_allocating(int signo)
+{
+	debug("Got signal %d", signo);
+	if (signo == SIGCONT)
+		return;
+
+	destroy_step = 1;
+}
 
 static void
 _job_fake_cred(struct slurm_step_ctx_struct *ctx)
@@ -126,7 +141,7 @@ static job_step_create_request_msg_t *_create_step_request(
 	step_req->name = xstrdup(step_params->name);
 	step_req->no_kill = step_params->no_kill;
 	step_req->overcommit = step_params->overcommit ? 1 : 0;
-	step_req->mem_per_cpu = step_params->mem_per_cpu;
+	step_req->pn_min_memory = step_params->pn_min_memory;
 	step_req->time_limit = step_params->time_limit;
 
 	return step_req;
@@ -148,8 +163,7 @@ slurm_step_ctx_create (const slurm_step_ctx_params_t *step_params)
 	short port = 0;
 	int errnum = 0;
 
-	/* First copy the user's step_params into a step request
-	 * struct */
+	/* First copy the user's step_params into a step request struct */
 	step_req = _create_step_request(step_params);
 
 	/* We will handle the messages in the step_launch.c mesage handler,
@@ -167,6 +181,90 @@ slurm_step_ctx_create (const slurm_step_ctx_params_t *step_params)
 
 	if ((slurm_job_step_create(step_req, &step_resp) < 0) ||
 	    (step_resp == NULL)) {
+		errnum = errno;
+		slurm_free_job_step_create_request_msg(step_req);
+		close(sock);
+		goto fail;
+	}
+
+	ctx = xmalloc(sizeof(struct slurm_step_ctx_struct));
+	ctx->launch_state = NULL;
+	ctx->magic	= STEP_CTX_MAGIC;
+	ctx->job_id	= step_req->job_id;
+	ctx->user_id	= step_req->user_id;
+	ctx->step_req   = step_req;
+	ctx->step_resp	= step_resp;
+	ctx->verbose_level = step_params->verbose_level;
+
+	ctx->launch_state = step_launch_state_create(ctx);
+	ctx->launch_state->slurmctld_socket_fd = sock;
+fail:
+	errno = errnum;
+	return (slurm_step_ctx_t *)ctx;
+}
+
+/*
+ * slurm_step_ctx_create - Create a job step and its context.
+ * IN step_params - job step parameters
+ * IN timeout - in milliseconds
+ * RET the step context or NULL on failure with slurm errno set
+ * NOTE: Free allocated memory using slurm_step_ctx_destroy.
+ */
+extern slurm_step_ctx_t *
+slurm_step_ctx_create_timeout (const slurm_step_ctx_params_t *step_params,
+			       int timeout)
+{
+	struct slurm_step_ctx_struct *ctx = NULL;
+	job_step_create_request_msg_t *step_req = NULL;
+	job_step_create_response_msg_t *step_resp = NULL;
+	int i, rc, time_left = timeout;
+	int sock = -1;
+	short port = 0;
+	int errnum = 0;
+
+	/* First copy the user's step_params into a step request struct */
+	step_req = _create_step_request(step_params);
+
+	/* We will handle the messages in the step_launch.c mesage handler,
+	 * but we need to open the socket right now so we can tell the
+	 * controller which port to use.
+	 */
+	if (net_stream_listen(&sock, &port) < 0) {
+		errnum = errno;
+		error("unable to initialize step context socket: %m");
+		slurm_free_job_step_create_request_msg(step_req);
+		goto fail;
+	}
+	step_req->port = port;
+	step_req->host = xshort_hostname();
+
+	rc = slurm_job_step_create(step_req, &step_resp);
+	if ((rc < 0) &&
+	    ((errno == ESLURM_NODES_BUSY) ||
+	     (errno == ESLURM_PORTS_BUSY) ||
+	     (errno == ESLURM_INTERCONNECT_BUSY))) {
+		struct pollfd fds;
+		fds.fd = sock;
+		fds.events = POLLIN;
+		xsignal_unblock(step_signals);
+		for (i = 0; step_signals[i]; i++)
+			xsignal(step_signals[i], _signal_while_allocating);
+		while ((rc = poll(&fds, 1, time_left)) <= 0) {
+			if (destroy_step)
+				break;
+			if ((errno == EINTR) || (errno == EAGAIN))
+				continue;
+			break;
+		}
+		xsignal_block(step_signals);
+		if (destroy_step) {
+			info("Cancelled pending job step");
+			errno = ESLURM_ALREADY_DONE;
+		} else
+			rc = slurm_job_step_create(step_req, &step_resp);
+	}
+
+	if ((rc < 0) || (step_resp == NULL)) {
 		errnum = errno;
 		slurm_free_job_step_create_request_msg(step_req);
 		close(sock);

@@ -6,7 +6,7 @@
  *  Written by Danny Auble <da@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -175,7 +175,8 @@ _handle_msg(slurm_msg_t *msg)
 	case SRUN_STEP_SIGNAL:
 		ss = msg->data;
 		debug("received step signal %u RPC", ss->signal);
-		runjob_signal(ss->signal);
+		if (ss->signal)
+			runjob_signal(ss->signal);
 		slurm_free_job_step_kill_msg(msg->data);
 		break;
 	default:

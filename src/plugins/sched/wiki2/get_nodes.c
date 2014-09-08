@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -198,8 +198,10 @@ static char *	_dump_all_nodes(int *node_cnt, time_t update_time)
 					hostlist_push(hl, node_ptr->name);
 				} else {
 					hl = hostlist_create(node_ptr->name);
-					if (hl == NULL)
-						fatal("malloc failure");
+					if (!hl) {
+						fatal("Invalid node_name: %s",
+						      node_ptr->name);
+					}
 				}
 				continue;
 			} else {
@@ -207,8 +209,10 @@ static char *	_dump_all_nodes(int *node_cnt, time_t update_time)
 						     update_time);
 				hostlist_destroy(hl);
 				hl = hostlist_create(node_ptr->name);
-				if (hl == NULL)
-					fatal("malloc failure");
+				if (!hl) {
+					fatal("Invalid node_name: %s",
+					      node_ptr->name);
+				}
 				uniq_node_ptr = node_ptr;
 			}
 		} else {
@@ -326,6 +330,13 @@ static char *	_dump_node(struct node_record *node_ptr, hostlist_t hl,
 
 	snprintf(tmp, sizeof(tmp), ":STATE=%s;", _get_node_state(node_ptr));
 	xstrcat(buf, tmp);
+
+	if (node_ptr->cpu_load != NO_VAL) {
+		snprintf(tmp, sizeof(tmp), "CPULOAD=%f;",
+			 (node_ptr->cpu_load / 100.0));
+		xstrcat(buf, tmp);
+	}
+
 	if (node_ptr->reason) {
 		/* Strip out any quotes, they confuse Moab */
 		char *reason, *bad_char;
@@ -360,12 +371,6 @@ static char *	_dump_node(struct node_record *node_ptr, hostlist_t hl,
 	if (i > 0)
 		xstrcat(buf, ";");
 
-	if (node_ptr->cpu_load != NO_VAL) {
-		snprintf(tmp, sizeof(tmp), "CPULOAD=%f;",
-			 (node_ptr->cpu_load / 100.0));
-		xstrcat(buf, tmp);
-	}
-
 	if (node_ptr->arch) {
 		snprintf(tmp, sizeof(tmp), "ARCH=%s;", node_ptr->arch);
 		xstrcat(buf, tmp);
@@ -396,7 +401,7 @@ static char *	_dump_node(struct node_record *node_ptr, hostlist_t hl,
 	if (update_time > 0)
 		return buf;
 
-	if (slurmctld_conf.fast_schedule) {
+	if (slurmctld_conf.fast_schedule && node_ptr->config_ptr) {
 		/* config from slurm.conf */
 		snprintf(tmp, sizeof(tmp),
 			"CMEMORY=%u;CDISK=%u;CPROC=%u;",

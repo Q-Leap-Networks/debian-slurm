@@ -1,4 +1,4 @@
-.TH "salloc" "1" "SLURM 2.5" "October 2012" "SLURM Commands"
+.TH "salloc" "1" "SLURM 2.6" "January 2013" "SLURM Commands"
 
 .SH "NAME"
 salloc \- Obtain a SLURM job allocation (a set of nodes), execute a command,
@@ -42,12 +42,56 @@ be changed after job submission using the \fBscontrol\fR
 command.
 
 .TP
-\fB\-\-acctg\-freq\fR=<\fIseconds\fR>
-Define the job accounting sampling interval.
+\fB\-\-acctg\-freq\fR
+Define the job accounting and profiling sampling intervals.
 This can be used to override the \fIJobAcctGatherFrequency\fR parameter in SLURM's
 configuration file, \fIslurm.conf\fR.
-A value of zero disables real the periodic job sampling and provides accounting
-information only on job termination (reducing SLURM interference with the job).
+The supported format is as follows:
+.RS
+.TP 12
+\fB\-\-acctg\-freq=\fR\fI<datatype>\fR\fB=\fR\fI<interval>\fR
+where \fI<datatype>\fR=\fI<interval>\fR specifies the task sampling
+interval for the jobacct_gather plugin or a
+sampling interval for a profiling type by the
+acct_gather_profile plugin. Multiple,
+comma-separated \fI<datatype>\fR=\fI<interval>\fR intervals
+may be specified. Supported datatypes are as follows:
+.RS
+.TP
+\fBtask=\fI<interval>\fR
+where \fI<interval>\fR is the task sampling interval in seconds
+for the jobacct_gather plugins and for task
+profiling by the acct_gather_profile plugin.
+.TP
+\fBenergy=\fI<interval>\fR
+where \fI<interval>\fR is the sampling interval in seconds
+for energy profiling using the acct_gather_energy plugin
+.TP
+\fBnetwork=\fI<interval>\fR
+where \fI<interval>\fR is the sampling interval in seconds
+for infiniband profiling using the acct_gather_infiniband
+plugin.
+.TP
+\fBfilesystem=\fI<interval>\fR
+where \fI<interval>\fR is the sampling interval in seconds
+for filesystem profiling using the acct_gather_filesystem
+plugin.
+.TP
+.RE
+.RE
+.br
+The default value for the task sampling interval
+is 30. The default value for all other intervals is 0.
+An interval of 0 disables sampling of the specified type.
+If the task sampling interval is 0, accounting
+information is collected only at job termination (reducing SLURM
+interference with the job).
+.br
+.br
+Smaller (non\-zero) values have a greater impact upon job performance,
+but a value of 30 seconds is not likely to be noticeable for
+applications having less than 10,000 tasks.
+.RE
 
 .TP
 \fB\-B\fR \fB\-\-extra\-node\-info\fR=<\fIsockets\fR[:\fIcores\fR[:\fIthreads\fR]]>
@@ -405,17 +449,15 @@ by the user root.
 .TP
 \fB\-\-gres\fR=<\fIlist\fR>
 Specifies a comma delimited list of generic consumable resources.
-The format of each entry on the list is "name[:count[*cpu]]".
+The format of each entry on the list is "name[:count]".
 The name is that of the consumable resource.
 The count is the number of those resources with a default value of 1.
-The specified resources will be allocated to the job on each node
-allocated unless "*cpu" is appended, in which case the resources
-will be allocated on a per cpu basis.
+The specified resources will be allocated to the job on each node.
 The available generic consumable resources is configurable by the system
 administrator.
 A list of available generic consumable resources will be printed and the
 command will exit if the option argument is "help".
-Examples of use include "\-\-gres=gpus:2*cpu,disk=40G" and "\-\-gres=help".
+Examples of use include "\-\-gres=gpu:2,mic=1" and "\-\-gres=help".
 
 .TP
 \fB\-H, \-\-hold\fR
@@ -557,7 +599,9 @@ of tasks is no larger than the number of allocated nodes.
 The tasks are distributed in blocks of a specified size.  The options
 include a number representing the size of the task block.  This is
 followed by an optional specification of the task distribution scheme
-within a block of tasks and between the blocks of tasks.  For more
+within a block of tasks and between the blocks of tasks.  The number of tasks
+distributed to each node is the same as for cyclic distribution, but the
+taskids assigned to each node depend on the plane size. For more
 details (including examples and diagrams), please see
 .br
 http://slurm.schedmd.com/mc_support.html
@@ -926,6 +970,38 @@ allowing more than one task per processor.  However no more than
 \fBMAX_TASKS_PER_NODE\fR tasks are permitted to execute per node.
 
 .TP
+\fB\-\-profile\fR=<all|none|[energy[,|task[,|lustre[,|network]]]]>
+enables detailed data collection by the acct_gather_profile plugin.
+Detailed data are typically time-series that are stored in an HDF5 file for
+the job.
+
+.RS
+.TP 10
+\fBAll\fR
+All data types are collected. (Cannot be combined with other values.)
+
+.TP
+\fBNone\fR
+No data types are collected. This is the default.
+ (Cannot be combined with other values.)
+
+.TP
+\fBEnergy\fR
+Energy data is collected.
+
+.TP
+\fBTask\fR
+Task (I/O, Memory, ...) data is collected.
+
+.TP
+\fBLustre\fR
+Lustre data is collected.
+
+.TP
+\fBNetwork\fR
+Network (InfiniBand) data is collected.
+.RE
+.TP
 \fB\-p\fR, \fB\-\-partition\fR=<\fIpartition_names\fR>
 Request a specific partition for the resource allocation.  If not specified,
 the default behavior is to allow the slurm controller to select the default
@@ -1233,6 +1309,9 @@ Same as \fB\-O, \-\-overcommit\fR
 \fBSALLOC_PARTITION\fR
 Same as \fB\-p, \-\-partition\fR
 .TP
+\fBSALLOC_PROFILE\fR
+Same as \fB\-\-profile\fR
+.TP
 \fBSALLOC_QOS\fR
 Same as \fB\-\-qos\fR
 .TP
@@ -1279,6 +1358,9 @@ CPU_ID = Board_ID x threads_per_board +
 Socket_ID x threads_per_socket +
 Core_ID x threads_per_core + Thread_ID).
 .TP
+\fBSLURM_DISTRIBUTION\fR
+Same as \fB\-m, \-\-distribution\fR
+.TP
 \fBSLURM_JOB_ID\fR (and \fBSLURM_JOBID\fR for backwards compatibility)
 The ID of the job allocation.
 .TP
@@ -1302,6 +1384,9 @@ Set to value of the \-\-mem_bind\fR option.
 \fBSLURM_SUBMIT_DIR\fR
 The directory from which \fBsalloc\fR was invoked.
 .TP
+\fBSLURM_SUBMIT_HOST\fR
+The hostname of the computer from which \fBsalloc\fR was invoked.
+.TP
 \fBSLURM_NODE_ALIASES\fR
 Sets of node name, communication address and hostname for nodes allocated to
 the job from the cloud. Each element in the set if colon separated and each
@@ -1313,6 +1398,9 @@ Same as \fB\-n, \-\-ntasks\fR
 .TP
 \fBSLURM_NTASKS_PER_NODE\fR
 Set to value of the \-\-ntasks\-per\-node\fR option, if specified.
+.TP
+\fBSLURM_PROFILE\fR
+Same as \fB\-\-profile\fR
 .TP
 \fBSLURM_TASKS_PER_NODE\fR
 Number of tasks to be initiated on each node. Values are
@@ -1364,9 +1452,11 @@ salloc \-N5 srun \-n10 myprogram
 
 .SH "COPYING"
 Copyright (C) 2006\-2007 The Regents of the University of California.
-Copyright (C) 2008\-2010 Lawrence Livermore National Security.
 Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
-CODE\-OCEC\-09\-009. All rights reserved.
+.br
+Copyright (C) 2008\-2010 Lawrence Livermore National Security.
+.br
+Copyright (C) 2010\-2013 SchedMD LLC.
 .LP
 This file is part of SLURM, a resource management program.
 For details, see <http://slurm.schedmd.com/>.

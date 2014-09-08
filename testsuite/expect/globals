@@ -25,7 +25,7 @@
 # CODE-OCEC-09-009. All rights reserved.
 #
 # This file is part of SLURM, a resource management program.
-# For details, see <http://www.schedmd.com/slurmdocs/>.
+# For details, see <http://slurm.schedmd.com/>.
 # Please also read the supplied file: DISCLAIMER.
 #
 # SLURM is free software; you can redistribute it and/or modify it under
@@ -89,6 +89,7 @@ cset sbcast      "${slurm_dir}/bin/sbcast"
 cset scancel     "${slurm_dir}/bin/scancel"
 cset scontrol    "${slurm_dir}/bin/scontrol"
 cset sdiag       "${slurm_dir}/bin/sdiag"
+cset sh5util     "${slurm_dir}/bin/sh5util"
 cset sinfo       "${slurm_dir}/bin/sinfo"
 cset smap        "${slurm_dir}/bin/smap"
 cset sprio       "${slurm_dir}/bin/sprio"
@@ -928,23 +929,23 @@ proc test_topology { } {
 #
 ################################################################
 proc test_track_wckey { } {
-        global scontrol number
+	global scontrol number
 
-        log_user 0
-        set track_wckey 0
-        spawn $scontrol show config
-        expect {
-                -re "TrackWCKey *= ($number)" {
-                        set track_wckey $expect_out(1,string)
-                        exp_continue
-                }
-                eof {
-                        wait
-                }
-        }
+	log_user 0
+	set track_wckey 0
+	spawn $scontrol show config
+	expect {
+		-re "TrackWCKey *= ($number)" {
+			set track_wckey $expect_out(1,string)
+			exp_continue
+		}
+		eof {
+			wait
+		}
+	}
 
-        log_user 1
-        return $track_wckey
+	log_user 1
+	return $track_wckey
 }
 
 ################################################################
@@ -1005,6 +1006,43 @@ proc test_account_storage { } {
 	log_user 1
 
 	return $account_storage
+}
+
+################################################################
+#
+# Proc: test_enforce_limits
+#
+# Purpose: Determine resouce limits are enforced
+# This is based upon
+# the value of AccountingStorageEnforce in the slurm.conf.
+#
+# Returns 1 if the system is enforcing limits, 0 otherwise
+#
+################################################################
+
+proc test_enforce_limits { } {
+	global alpha_numeric_comma scontrol
+
+	log_user 0
+	set enforce_limits 0
+	spawn $scontrol show config
+	expect {
+		-re "AccountingStorageEnforce *= ($alpha_numeric_comma)" {
+			if {[string first "safe" $expect_out(1,string)] != -1 } {
+				set enforce_limits 1
+			}
+			if {[string first "limits" $expect_out(1,string)] != -1 } {
+				set enforce_limits 1
+			}
+			exp_continue
+		}
+		eof {
+			wait
+		}
+	}
+	log_user 1
+
+	return $enforce_limits
 }
 
 ################################################################
@@ -1189,23 +1227,23 @@ proc test_front_end { } {
 ################################################################
 
 proc test_multiple_slurmd { } {
-        global scontrol
+	global scontrol
 
-        log_user 0
-        set multiple_slurmd 0
-        spawn $scontrol show config
-        expect {
-                "MULTIPLE_SLURMD" {
-                        set multiple_slurmd 1
-                        exp_continue
-                }
-                eof {
-                        wait
-                }
-        }
-        log_user 1
+	log_user 0
+	set multiple_slurmd 0
+	spawn $scontrol show config
+	expect {
+		"MULTIPLE_SLURMD" {
+			set multiple_slurmd 1
+			exp_continue
+		}
+		eof {
+			wait
+		}
+	}
+	log_user 1
 
-        return $multiple_slurmd
+	return $multiple_slurmd
 }
 
 
@@ -1745,7 +1783,7 @@ proc default_partition {} {
 	set name ""
 	set fd [open "|$scontrol --all --oneliner show partition"]
 	while {[gets $fd line] != -1} {
-		if {[regexp {^PartitionName=(\w+).*Default=YES} $line frag name]
+		if {[regexp {^PartitionName=([^ ]*).*Default=YES} $line frag name]
 				== 1} {
 			break
 		}
@@ -1910,9 +1948,9 @@ proc is_super_user { } {
 #
 ################################################################
 proc check_acct_associations { } {
-        global sacctmgr number alpha_numeric_under
+	global sacctmgr number alpha_numeric_under
 
-        set rc 1
+	set rc 1
 	log_user 0
 	send_user "Testing Associations\n"
      	#
@@ -1963,7 +2001,7 @@ proc check_acct_associations { } {
 	       eof {
 		      wait
 	       }
-        }
+	}
 
 	foreach cluster [array names c_min] {
 		# Here we are checking for holes in the list from above
@@ -1976,6 +2014,46 @@ proc check_acct_associations { } {
 	}
 	log_user 1
 	return $rc
+}
+
+################################################################
+#
+# Proc: get_job_acct_freq
+#
+# Purpose: gets the value of the job account gather frequency
+#
+# Returns: job account gather frequency
+#
+################################################################
+proc get_job_acct_freq { } {
+	global scontrol number
+
+	log_user 0
+	set freq_val 0
+
+	spawn $scontrol show config
+	expect {
+		-re "JobAcctGatherFrequency *= ($number)" {
+			set freq_val $expect_out(1,string)
+			if {$freq_val == 0} {
+				set freq_val 0
+			}
+		}
+		-re "JobAcctGatherFrequency *= task=($number)" {
+			set freq_val $expect_out(1,string)
+			if {$freq_val == 0} {
+				set freq_val 0
+			}
+		}
+		eof {
+			wait
+		}
+	}
+
+	log_user 1
+	return $freq_val
+
+
 }
 
 ################################################################
@@ -2028,7 +2106,7 @@ proc check_accounting_admin_level { } {
 	       eof {
 		      wait
 	       }
-        }
+	}
 
 	log_user 1
 	return $admin_level
@@ -2443,3 +2521,117 @@ proc change_subbp_state { node ionodes state } {
 	return $exit_code
 }
 
+################################################################
+#
+# Proc: get_array_config
+#
+# Purpose: Use scontrol to determine the MaxArraySize
+#
+# Returns: MaxArraySize value
+#
+################################################################
+
+proc get_array_config { } {
+     global scontrol number
+
+     	  log_user 0
+     	  set array_size 1
+	  spawn $scontrol show config
+	  expect {
+		  -re "MaxArraySize *= ($number)" {
+		    	   set array_size $expect_out(1,string)
+			   exp_continue
+		  }
+		  eof {
+		  	   wait
+		  }
+	   }
+	   log_user 1
+	   return $array_size
+}
+
+#################################################
+#
+# Proc: scale_to_megs
+#
+# Purpose: scale the value by the factor T|G|M
+#          to megabytes
+# Returns: the scaled variable
+#
+#################################################
+
+proc scale_to_megs { value factor } {
+
+	if {[string compare $factor "T"] == 0} {
+		set value [expr $value * 1024 * 1024]
+	} elseif {[string compare $factor "G"] == 0} {
+		set value [expr $value * 1024]
+	} elseif {[string compare $factor "M"] == 0} {
+		set value [expr $value * 1]
+	} else {
+		set value [expr $value / (1024 * 1024)]
+	}
+
+	return $value
+}
+
+#################################################
+#
+# Proc: scale_to_ks
+#
+# Purpose: scale the value by the factor G|M|K
+#          to kilobytes
+# Returns: the scaled variable
+#
+#################################################
+
+proc scale_to_ks { value factor } {
+
+	if {[string compare $factor "G"] == 0} {
+		set value [expr $value * 1024 * 1024]
+	} elseif {[string compare $factor "M"] == 0} {
+		set value [expr $value * 1024]
+	} elseif {[string compare $factor "K"] == 0} {
+		set value [expr $value * 1]
+	} else {
+		set value [expr $value / 1024]
+	}
+
+	return $value
+}
+
+############################################################
+#
+# Proc: check_node_mem
+#
+# Purpose: check that the nodes have memory configured
+#
+# Returns: 1 if the nodes have memory, 0 otherwise
+#
+############################################################
+
+proc check_node_mem { } {
+	global scontrol number
+
+	log_user 0
+	set mem_size 0
+
+	spawn $scontrol show node
+	expect {
+		-re "RealMemory=($number)" {
+			set mem_size $expect_out(1,string)
+			exp_continue
+		}
+		eof {
+			wait
+		}
+	}
+
+	if {$mem_size == 1} {
+		return 0
+	} else {
+		return 1
+	}
+	log_user 1
+
+}

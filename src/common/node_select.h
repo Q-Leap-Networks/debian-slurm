@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -223,7 +223,7 @@ typedef struct slurm_select_ops {
 	int		(*reconfigure)		(void);
 	bitstr_t *      (*resv_test)            (bitstr_t *avail_bitmap,
 						 uint32_t node_cnt,
-						 uint32_t core_cnt,
+						 uint32_t *core_cnt,
 						 bitstr_t **core_bitmap);
 	void            (*ba_init)              (node_info_msg_t *node_info_ptr,
 						 bool sanity_check);
@@ -675,7 +675,7 @@ extern int select_g_step_finish(struct step_record *step_ptr);
  * RET - nodes selected for use by the reservation
  */
 extern bitstr_t * select_g_resv_test(bitstr_t *avail_bitmap, uint32_t node_cnt,
-				     uint32_t core_cnt,
+				     uint32_t *core_cnt,
 				     bitstr_t **core_bitmap);
 
 /*****************************\

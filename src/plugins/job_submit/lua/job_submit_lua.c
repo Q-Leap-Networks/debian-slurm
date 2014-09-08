@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -115,7 +115,7 @@ static pthread_mutex_t lua_lock = PTHREAD_MUTEX_INITIALIZER;
 /*****************************************************************************\
  * We've provided a simple example of the type of things you can do with this
  * plugin. If you develop another plugin that may be of interest to others
- * please post it to slurm-dev@lists.llnl.gov  Thanks!
+ * please post it to slurm-dev@schedmd.com  Thanks!
 \*****************************************************************************/
 
 /* Generic stack dump function for debugging purposes */
@@ -285,7 +285,7 @@ static char *_get_default_account(uint32_t user_id)
 
 /* Get fields in an existing slurmctld job record
  * NOTE: This is an incomplete list of job record fields.
- * Add more as needed and send patches to slurm-dev@llnl.gov */
+ * Add more as needed and send patches to slurm-dev@schedmd.com */
 static int _get_job_rec_field (lua_State *L)
 {
 	const struct job_record *job_ptr = lua_touserdata(L, 1);
@@ -366,7 +366,7 @@ static int _get_job_req_field (lua_State *L)
 	} else if (!strcmp(name, "account")) {
 		lua_pushstring (L, job_desc->account);
 	} else if (!strcmp(name, "acctg_freq")) {
-		lua_pushnumber (L, job_desc->acctg_freq);
+		lua_pushstring (L, job_desc->acctg_freq);
 	} else if (!strcmp(name, "begin_time")) {
 		lua_pushnumber (L, job_desc->begin_time);
 	} else if (!strcmp(name, "comment")) {
@@ -431,6 +431,12 @@ static int _get_job_req_field (lua_State *L)
 		lua_pushnumber (L, job_desc->shared);
 	} else if (!strcmp(name, "sockets_per_node")) {
 		lua_pushnumber (L, job_desc->sockets_per_node);
+	} else if (!strcmp(name, "std_err")) {
+		lua_pushstring (L, job_desc->std_err);
+	} else if (!strcmp(name, "std_in")) {
+		lua_pushstring (L, job_desc->std_in);
+	} else if (!strcmp(name, "std_out")) {
+		lua_pushstring (L, job_desc->std_out);
 	} else if (!strcmp(name, "threads_per_core")) {
 		lua_pushnumber (L, job_desc->threads_per_core);
 	} else if (!strcmp(name, "time_limit")) {
@@ -441,8 +447,21 @@ static int _get_job_req_field (lua_State *L)
 		lua_pushnumber (L, job_desc->user_id);
 	} else if (!strcmp(name, "wait4switch")) {
 		lua_pushnumber (L, job_desc->wait4switch);
+	} else if (!strcmp(name, "work_dir")) {
+		lua_pushstring (L, job_desc->work_dir);
 	} else if (!strcmp(name, "wckey")) {
 		lua_pushstring (L, job_desc->wckey);
+	} else if (!strcmp(name, "ntasks_per_core")) {
+		lua_pushnumber (L, job_desc->ntasks_per_core);
+	} else if (!strcmp(name, "boards_per_node")) {
+		lua_pushnumber (L, job_desc->boards_per_node);
+	} else if (!strcmp(name, "ntasks_per_board")) {
+		lua_pushnumber (L, job_desc->ntasks_per_board);
+	} else if (!strcmp(name, "ntasks_per_socket")) {
+		lua_pushnumber (L, job_desc->ntasks_per_socket);
+	} else if (!strcmp(name, "sockets_per_board")) {
+		lua_pushnumber (L, job_desc->sockets_per_board);
+
 	} else {
 		lua_pushnil (L);
 	}
@@ -465,7 +484,10 @@ static int _set_job_req_field (lua_State *L)
 		if (strlen(value_str))
 			job_desc->account = xstrdup(value_str);
 	} else if (!strcmp(name, "acctg_freq")) {
-		job_desc->acctg_freq = luaL_checknumber(L, 3);
+		value_str = luaL_checkstring(L, 3);
+		xfree(job_desc->acctg_freq);
+		if (strlen(value_str))
+			job_desc->acctg_freq = xstrdup(value_str);
 	} else if (!strcmp(name, "begin_time")) {
 		job_desc->begin_time = luaL_checknumber(L, 3);
 	} else if (!strcmp(name, "comment")) {
@@ -559,6 +581,21 @@ static int _set_job_req_field (lua_State *L)
 		job_desc->shared = luaL_checknumber(L, 3);
 	} else if (!strcmp(name, "sockets_per_node")) {
 		job_desc->sockets_per_node = luaL_checknumber(L, 3);
+	} else if (!strcmp(name, "std_err")) {
+		value_str = luaL_checkstring(L, 3);
+		xfree(job_desc->std_err);
+		if (strlen(value_str))
+			job_desc->std_err = xstrdup(value_str);
+	} else if (!strcmp(name, "std_in")) {
+		value_str = luaL_checkstring(L, 3);
+		xfree(job_desc->std_in);
+		if (strlen(value_str))
+			job_desc->std_in = xstrdup(value_str);
+	} else if (!strcmp(name, "std_out")) {
+		value_str = luaL_checkstring(L, 3);
+		xfree(job_desc->std_out);
+		if (strlen(value_str))
+			job_desc->std_out = xstrdup(value_str);
 	} else if (!strcmp(name, "threads_per_core")) {
 		job_desc->threads_per_core = luaL_checknumber(L, 3);
 	} else if (!strcmp(name, "time_limit")) {
@@ -572,6 +609,11 @@ static int _set_job_req_field (lua_State *L)
 		xfree(job_desc->wckey);
 		if (strlen(value_str))
 			job_desc->wckey = xstrdup(value_str);
+	} else if (!strcmp(name, "work_dir")) {
+		value_str = luaL_checkstring(L, 3);
+		xfree(job_desc->work_dir);
+		if (strlen(value_str))
+			job_desc->work_dir = xstrdup(value_str);
 	} else {
 		error("_set_job_field: unrecognized field: %s", name);
 	}
@@ -581,7 +623,7 @@ static int _set_job_req_field (lua_State *L)
 
 /* Get fields in an existing slurmctld partition record
  * NOTE: This is an incomplete list of partition record fields.
- * Add more as needed and send patches to slurm-dev@llnl.gov */
+ * Add more as needed and send patches to slurm-dev@schedmd.com */
 static int _get_part_rec_field (lua_State *L)
 {
 	const struct part_record *part_ptr = lua_touserdata(L, 1);
@@ -712,8 +754,6 @@ static void _push_partition_list(uint32_t user_id, uint32_t submit_uid)
 
 	lua_newtable(L);
 	part_iterator = list_iterator_create(part_list);
-	if (!part_iterator)
-		fatal("list_iterator_create malloc");
 	while ((part_ptr = (struct part_record *) list_next(part_iterator))) {
 		if (!_user_can_use_part(user_id, submit_uid, part_ptr))
 			continue;

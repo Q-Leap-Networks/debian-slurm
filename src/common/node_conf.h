@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -75,7 +75,6 @@ struct config_record {
 	uint32_t weight;	/* arbitrary priority of node for
 				 * scheduling work on */
 	char *feature;		/* arbitrary list of node's features */
-	char **feature_array;	/* array of feature names */
 	char *gres;		/* arbitrary list of node's generic resources */
 	char *nodes;		/* name of nodes with this configuration */
 	bitstr_t *node_bitmap;	/* bitmap of nodes with this configuration */
@@ -154,6 +153,7 @@ struct node_record {
 	time_t down_time;		/* When first set to DOWN state */
 #endif	/* HAVE_CRAY */
 	acct_gather_energy_t *energy;
+	ext_sensors_data_t *ext_sensors; /* external sensor data */
 	dynamic_plugin_data_t *select_nodeinfo; /* opaque data structure,
 						 * use select_g_get_nodeinfo()
 						 * to access contents */
@@ -234,7 +234,7 @@ extern struct node_record *create_node_record (
  * find_node_record - find a record for node with specified name
  * input: name - name of the desired node
  * output: return pointer to node record or NULL if not found
- *         node_hash_table - table of hash indecies
+ *         node_hash_table - table of hash indexes
  */
 extern struct node_record *find_node_record (char *name);
 
@@ -281,5 +281,11 @@ extern void cr_fini_global_core_data(void);
 
 /*return the coremap index to the first core of the given node */
 extern uint32_t cr_get_coremap_offset(uint32_t node_index);
+
+/* Given the number of tasks per core and the actual number of hw threads,
+ * compute how many CPUs are "visible" and, hence, usable on the node.
+ */
+extern int adjust_cpus_nppcu(uint16_t ntasks_per_core, uint16_t threads,
+			     int cpus);
 
 #endif /* !_HAVE_NODE_CONF_H */

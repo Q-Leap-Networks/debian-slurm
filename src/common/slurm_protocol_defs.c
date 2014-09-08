@@ -11,7 +11,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -149,7 +149,7 @@ extern char *slurm_add_slash_to_quotes(char *str)
 {
 	char *dup, *copy = NULL;
 	int len = 0;
-	if(!str || !(len = strlen(str)))
+	if (!str || !(len = strlen(str)))
 		return NULL;
 
 	/* make a buffer 2 times the size just to be safe */
@@ -311,6 +311,11 @@ extern void slurm_free_job_id_msg(job_id_msg_t * msg)
 	xfree(msg);
 }
 
+extern void slurm_free_job_user_id_msg(job_user_id_msg_t * msg)
+{
+	xfree(msg);
+}
+
 extern void slurm_free_job_step_id_msg(job_step_id_msg_t * msg)
 {
 	xfree(msg);
@@ -323,7 +328,11 @@ extern void slurm_free_job_id_request_msg(job_id_request_msg_t * msg)
 
 extern void slurm_free_update_step_msg(step_update_request_msg_t * msg)
 {
-	xfree(msg);
+	if (msg) {
+		jobacctinfo_destroy(msg->jobacct);
+		xfree(msg->name);
+		xfree(msg);
+	}
 }
 
 extern void slurm_free_job_id_response_msg(job_id_response_msg_t * msg)
@@ -357,6 +366,14 @@ extern void slurm_free_node_info_request_msg(node_info_request_msg_t *msg)
 	xfree(msg);
 }
 
+extern void slurm_free_node_info_single_msg(node_info_single_msg_t *msg)
+{
+	if (msg) {
+		xfree(msg->node_name);
+		xfree(msg);
+	}
+}
+
 extern void slurm_free_part_info_request_msg(part_info_request_msg_t *msg)
 {
 	xfree(msg);
@@ -368,12 +385,15 @@ extern void slurm_free_job_desc_msg(job_desc_msg_t * msg)
 
 	if (msg) {
 		xfree(msg->account);
+		xfree(msg->acctg_freq);
 		xfree(msg->alloc_node);
 		if (msg->argv) {
 			for (i = 0; i < msg->argc; i++)
 				xfree(msg->argv[i]);
 		}
 		xfree(msg->argv);
+		FREE_NULL_BITMAP(msg->array_bitmap);
+		xfree(msg->array_inx);
 		xfree(msg->blrtsimage);
 		xfree(msg->ckpt_dir);
 		xfree(msg->comment);
@@ -418,6 +438,7 @@ extern void slurm_free_job_launch_msg(batch_job_launch_msg_t * msg)
 	int i;
 
 	if (msg) {
+		xfree(msg->acctg_freq);
 		xfree(msg->alias_list);
 		xfree(msg->nodes);
 		xfree(msg->cpu_bind);
@@ -505,6 +526,14 @@ extern void slurm_free_acct_gather_node_resp_msg(
 	}
 }
 
+extern void slurm_free_acct_gather_energy_req_msg(
+	acct_gather_energy_req_msg_t *msg)
+{
+	if (msg) {
+		xfree(msg);
+	}
+}
+
 extern void slurm_free_node_registration_status_msg(
 	slurm_node_registration_status_msg_t * msg)
 {
@@ -566,6 +595,7 @@ extern void slurm_free_resv_desc_msg(resv_desc_msg_t * msg)
 {
 	if (msg) {
 		xfree(msg->accounts);
+		xfree(msg->core_cnt);
 		xfree(msg->features);
 		xfree(msg->licenses);
 		xfree(msg->name);
@@ -681,6 +711,7 @@ extern void slurm_free_launch_tasks_request_msg(launch_tasks_request_msg_t * msg
 		}
 		xfree(msg->env);
 	}
+	xfree(msg->acctg_freq);
 	xfree(msg->alias_list);
 	xfree(msg->cwd);
 	xfree(msg->cpu_bind);
@@ -695,7 +726,7 @@ extern void slurm_free_launch_tasks_request_msg(launch_tasks_request_msg_t * msg
 		xfree(msg->spank_job_env[i]);
 	}
 	xfree(msg->spank_job_env);
-	if(msg->nnodes && msg->global_task_ids)
+	if (msg->nnodes && msg->global_task_ids)
 		for(i=0; i<msg->nnodes; i++) {
 			xfree(msg->global_task_ids[i]);
 		}
@@ -1148,7 +1179,7 @@ extern uint16_t log_string2num(char *name)
  * NOTE: Not reentrant */
 extern char *sched_param_type_string(uint16_t select_type_param)
 {
-	static char select_str[64];
+	static char select_str[128];
 
 	select_str[0] = '\0';
 	if ((select_type_param & CR_CPU) &&
@@ -1178,6 +1209,11 @@ extern char *sched_param_type_string(uint16_t select_type_param)
 		if (select_str[0])
 			strcat(select_str, ",");
 		strcat(select_str, "CR_CORE_DEFAULT_DIST_BLOCK");
+	}
+	if (select_type_param & CR_ALLOCATE_FULL_SOCKET) {
+		if (select_str[0])
+			strcat(select_str, ",");
+		strcat(select_str, "CR_ALLOCATE_FULL_SOCKET");
 	}
 
 	if (select_str[0] == '\0')
@@ -1300,6 +1336,34 @@ extern char *trigger_res_type(uint16_t res_type)
 		return "front_end";
 	else
 		return "unknown";
+}
+
+/* Convert HealthCheckNodeState numeric value to a string.
+ * Caller must xfree() the return value */
+extern char *health_check_node_state_str(uint16_t node_state)
+{
+	char *state_str = NULL;
+
+	if (node_state == HEALTH_CHECK_NODE_ANY) {
+		state_str = xstrdup("ANY");
+		return state_str;
+	}
+
+	state_str = xstrdup("");
+	if (node_state & HEALTH_CHECK_NODE_IDLE)
+		xstrcat(state_str, "IDLE");
+	if (node_state & HEALTH_CHECK_NODE_ALLOC) {
+		if (state_str[0])
+			xstrcat(state_str, ",");
+		xstrcat(state_str, "ALLOC");
+	}
+	if (node_state & HEALTH_CHECK_NODE_MIXED) {
+		if (state_str[0])
+			xstrcat(state_str, ",");
+		xstrcat(state_str, "MIXED");
+	}
+
+	return state_str;
 }
 
 extern char *trigger_type(uint32_t trig_type)
@@ -1731,6 +1795,16 @@ extern void accounting_enforce_string(uint16_t enforce, char *str, int str_len)
 			strcat(str, ",");
 		strcat(str, "limits"); //7 len
 	}
+	if (enforce & ACCOUNTING_ENFORCE_NO_JOBS) {
+		if (str[0])
+			strcat(str, ",");
+		strcat(str, "nojobs"); //7 len
+	}
+	if (enforce & ACCOUNTING_ENFORCE_NO_JOBS) {
+		if (str[0])
+			strcat(str, ",");
+		strcat(str, "nosteps"); //8 len
+	}
 	if (enforce & ACCOUNTING_ENFORCE_QOS) {
 		if (str[0])
 			strcat(str, ",");
@@ -1746,7 +1820,7 @@ extern void accounting_enforce_string(uint16_t enforce, char *str, int str_len)
 			strcat(str, ",");
 		strcat(str, "wckeys"); //7 len
 	}
-	// total len 35
+	// total len 50
 
 	if (str[0] == '\0')
 		strcat(str, "none");
@@ -2090,6 +2164,10 @@ static void _free_all_front_end_info(front_end_info_msg_t *msg)
 extern void slurm_free_front_end_info_members(front_end_info_t * front_end)
 {
 	if (front_end) {
+		xfree(front_end->allow_groups);
+		xfree(front_end->allow_users);
+		xfree(front_end->deny_groups);
+		xfree(front_end->deny_users);
 		xfree(front_end->name);
 		xfree(front_end->reason);
 	}
@@ -2279,7 +2357,7 @@ extern void slurm_free_job_step_stat(void *object)
 extern void slurm_free_job_step_pids(void *object)
 {
 	job_step_pids_t *msg = (job_step_pids_t *)object;
-	if(msg) {
+	if (msg) {
 		xfree(msg->node_name);
 		xfree(msg->pid);
 		xfree(msg);
@@ -2300,7 +2378,7 @@ extern void slurm_free_block_job_info(void *object)
 
 extern void slurm_free_block_info_members(block_info_t *block_info)
 {
-	if(block_info) {
+	if (block_info) {
 		xfree(block_info->bg_block_id);
 		xfree(block_info->blrtsimage);
 		xfree(block_info->ionode_inx);
@@ -2316,7 +2394,7 @@ extern void slurm_free_block_info_members(block_info_t *block_info)
 
 extern void slurm_free_block_info(block_info_t *block_info)
 {
-	if(block_info) {
+	if (block_info) {
 		slurm_free_block_info_members(block_info);
 		xfree(block_info);
 	}
@@ -2324,7 +2402,7 @@ extern void slurm_free_block_info(block_info_t *block_info)
 
 extern void slurm_free_block_info_msg(block_info_msg_t *block_info_msg)
 {
-	if(block_info_msg) {
+	if (block_info_msg) {
 		if (block_info_msg->block_array) {
 			int i;
 			for(i=0; i<block_info_msg->record_count; i++)
@@ -2369,7 +2447,7 @@ extern void slurm_destroy_association_shares_object(void *object)
 	association_shares_object_t *obj_ptr =
 		(association_shares_object_t *)object;
 
-	if(obj_ptr) {
+	if (obj_ptr) {
 		xfree(obj_ptr->cluster);
 		xfree(obj_ptr->name);
 		xfree(obj_ptr->parent);
@@ -2379,10 +2457,10 @@ extern void slurm_destroy_association_shares_object(void *object)
 
 extern void slurm_free_shares_request_msg(shares_request_msg_t *msg)
 {
-	if(msg) {
-		if(msg->acct_list)
+	if (msg) {
+		if (msg->acct_list)
 			list_destroy(msg->acct_list);
-		if(msg->user_list)
+		if (msg->user_list)
 			list_destroy(msg->user_list);
 		xfree(msg);
 	}
@@ -2390,8 +2468,8 @@ extern void slurm_free_shares_request_msg(shares_request_msg_t *msg)
 
 extern void slurm_free_shares_response_msg(shares_response_msg_t *msg)
 {
-	if(msg) {
-		if(msg->assoc_shares_list)
+	if (msg) {
+		if (msg->assoc_shares_list)
 			list_destroy(msg->assoc_shares_list);
 		xfree(msg);
 	}
@@ -2414,10 +2492,10 @@ extern void slurm_destroy_priority_factors_object(void *object)
 extern void slurm_free_priority_factors_request_msg(
 	priority_factors_request_msg_t *msg)
 {
-	if(msg) {
-		if(msg->job_id_list)
+	if (msg) {
+		if (msg->job_id_list)
 			list_destroy(msg->job_id_list);
-		if(msg->uid_list)
+		if (msg->uid_list)
 			list_destroy(msg->uid_list);
 		xfree(msg);
 	}
@@ -2426,8 +2504,8 @@ extern void slurm_free_priority_factors_request_msg(
 extern void slurm_free_priority_factors_response_msg(
 	priority_factors_response_msg_t *msg)
 {
-	if(msg) {
-		if(msg->priority_factors_list)
+	if (msg) {
+		if (msg->priority_factors_list)
 			list_destroy(msg->priority_factors_list);
 		xfree(msg);
 	}
@@ -2436,8 +2514,8 @@ extern void slurm_free_priority_factors_response_msg(
 
 extern void slurm_free_accounting_update_msg(accounting_update_msg_t *msg)
 {
-	if(msg) {
-		if(msg->update_list)
+	if (msg) {
+		if (msg->update_list)
 			list_destroy(msg->update_list);
 		xfree(msg);
 	}
@@ -2454,6 +2532,9 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 		break;
 	case REQUEST_NODE_INFO:
 		slurm_free_node_info_request_msg(data);
+		break;
+	case REQUEST_NODE_INFO_SINGLE:
+		slurm_free_node_info_single_msg(data);
 		break;
 	case REQUEST_PARTITION_INFO:
 		slurm_free_part_info_request_msg(data);
@@ -2549,6 +2630,9 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case REQUEST_JOB_REQUEUE:
 	case REQUEST_JOB_INFO_SINGLE:
 		slurm_free_job_id_msg(data);
+		break;
+	case REQUEST_JOB_USER_INFO:
+		slurm_free_job_user_id_msg(data);
 		break;
 	case REQUEST_SHARE_INFO:
 		slurm_free_shares_request_msg(data);

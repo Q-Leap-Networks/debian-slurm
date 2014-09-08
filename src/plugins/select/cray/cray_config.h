@@ -7,7 +7,7 @@
  *  Written by Danny Auble <da@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -65,6 +65,7 @@
 
 /**
  * cray_config_t - Parsed representation of cray.conf
+ * @alps_engine: Basil engine version number
  * @apbasil:	full path to ALPS 'apbasil' executable
  * @apkill:	full path to ALPS 'apkill' executable
  * @sdb_host:	DNS name of SDB host
@@ -77,6 +78,7 @@
  *                jobs
  */
 typedef struct {
+	char		*alps_engine;
 	char		*apbasil;
 	char		*apkill;
 

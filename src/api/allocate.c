@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -324,7 +324,7 @@ int slurm_job_will_run (job_desc_msg_t *req)
 			return SLURM_PROTOCOL_ERROR;
 		break;
 	case RESPONSE_JOB_WILL_RUN:
-		if(cluster_flags & CLUSTER_FLAG_BG)
+		if (cluster_flags & CLUSTER_FLAG_BG)
 			type = "cnodes";
 		will_run_resp = (will_run_response_msg_t *) resp_msg.data;
 		slurm_make_time_str(&will_run_resp->start_time,
@@ -562,6 +562,8 @@ char *slurm_read_hostfile(char *filename, int n)
 	int line_num = 0;
 	hostlist_t hostlist = NULL;
 	char *nodelist = NULL;
+	char *asterisk, *tmp_text, *save_ptr = NULL, *host_name;
+	int total_file_len = 0;
 
 	if (filename == NULL || strlen(filename) == 0)
 		return NULL;
@@ -581,6 +583,7 @@ char *slurm_read_hostfile(char *filename, int n)
 	while (fgets(in_line, BUFFER_SIZE, fp) != NULL) {
 		line_num++;
 		line_size = strlen(in_line);
+		total_file_len += line_size;
 		if (line_size == (BUFFER_SIZE - 1)) {
 			error ("Line %d, of hostfile %s too long",
 			       line_num, filename);
@@ -609,8 +612,22 @@ char *slurm_read_hostfile(char *filename, int n)
 			break;
 		}
 
-		hostlist_push(hostlist, in_line);
-		if (n != (int)NO_VAL && hostlist_count(hostlist) == n)
+		tmp_text = xstrdup(in_line);
+		host_name = strtok_r(tmp_text, ",", &save_ptr);
+		while (host_name) {
+			if ((asterisk = strchr(host_name, '*')) &&
+			    (i = atoi(asterisk + 1))) {
+				asterisk[0] = '\0';
+				for (j = 0; j < i; j++)
+					hostlist_push(hostlist, host_name);
+			} else {
+				hostlist_push(hostlist, host_name);
+			}
+			host_name = strtok_r(NULL, ",", &save_ptr);
+		}
+		xfree(tmp_text);
+
+		if ((n != (int)NO_VAL) && (hostlist_count(hostlist) == n))
 			break;
 	}
 	fclose(fp);
@@ -624,13 +641,14 @@ char *slurm_read_hostfile(char *filename, int n)
 		goto cleanup_hostfile;
 	}
 
-	nodelist = (char *)malloc(0xffff);
+	total_file_len += 1024;
+	nodelist = (char *)malloc(total_file_len);
 	if (!nodelist) {
 		error("Nodelist xmalloc failed");
 		goto cleanup_hostfile;
 	}
 
-	if (hostlist_ranged_string(hostlist, 0xffff, nodelist) == -1) {
+	if (hostlist_ranged_string(hostlist, total_file_len, nodelist) == -1) {
 		error("Hostlist is too long for the allocate RPC!");
 		free(nodelist);
 		nodelist = NULL;
@@ -745,7 +763,7 @@ _accept_msg_connection(int listen_fd,
 	msg = xmalloc(sizeof(slurm_msg_t));
 	slurm_msg_t_init(msg);
 
-	if((rc = slurm_receive_msg(conn_fd, msg, 0)) != 0) {
+	if ((rc = slurm_receive_msg(conn_fd, msg, 0)) != 0) {
 		slurm_free_msg(msg);
 
 		if (errno == EINTR) {

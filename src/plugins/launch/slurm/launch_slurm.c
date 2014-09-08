@@ -5,7 +5,7 @@
  *  Written by Danny Auble <da@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -288,8 +288,18 @@ static void _task_finish(task_exit_msg_t *msg)
 	char *hosts;
 	uint32_t rc = 0;
 	int normal_exit = 0;
+	static int reduce_task_exit_msg = -1;
+	static int msg_printed = 0, last_task_exit_rc;
 
 	const char *task_str = _taskstr(msg->num_tasks);
+
+	if (reduce_task_exit_msg == -1) {
+		char *ptr = getenv("SLURM_SRUN_REDUCE_TASK_EXIT_MSG");
+		if (ptr && atoi(ptr) != 0)
+			reduce_task_exit_msg = 1;
+		else
+			reduce_task_exit_msg = 0;
+	}
 
 	verbose("Received task exit notification for %d %s (status=0x%04x).",
 		msg->num_tasks, task_str, msg->return_code);
@@ -306,8 +316,13 @@ static void _task_finish(task_exit_msg_t *msg)
 			_handle_openmpi_port_error(tasks, hosts,
 						   local_srun_job->step_ctx);
 		} else {
-			error("%s: %s %s: Exited with exit code %d",
-			      hosts, task_str, tasks, rc);
+			if (reduce_task_exit_msg == 0 || 
+			    msg_printed == 0 ||
+			    msg->return_code != last_task_exit_rc) {
+				error("%s: %s %s: Exited with exit code %d",
+				      hosts, task_str, tasks, rc);
+				msg_printed = 1;
+			}
 		}
 		if (!WIFEXITED(*local_global_rc)
 		    || (rc > WEXITSTATUS(*local_global_rc)))
@@ -325,8 +340,14 @@ static void _task_finish(task_exit_msg_t *msg)
 				hosts, task_str, tasks, signal_str, core_str);
 		} else {
 			rc = msg->return_code;
-			error("%s: %s %s: %s%s",
-			      hosts, task_str, tasks, signal_str, core_str);
+			if (reduce_task_exit_msg == 0 ||
+			    msg_printed == 0 ||
+			    msg->return_code != last_task_exit_rc) {
+				error("%s: %s %s: %s%s",
+				      hosts, task_str, tasks, signal_str,
+				      core_str);
+				msg_printed = 1;
+			}
 		}
 		if (*local_global_rc == 0)
 			*local_global_rc = msg->return_code;
@@ -344,6 +365,8 @@ static void _task_finish(task_exit_msg_t *msg)
 
 	if (task_state_first_exit(task_state) && (opt.max_wait > 0))
 		_setup_max_wait_timer();
+
+	last_task_exit_rc = msg->return_code;
 }
 
 /* Load the multi_prog config file into argv, pass the  entire file contents
@@ -482,6 +505,7 @@ extern int launch_p_step_launch(
 	launch_params.remote_output_filename =fname_remote_string(job->ofname);
 	launch_params.remote_input_filename = fname_remote_string(job->ifname);
 	launch_params.remote_error_filename = fname_remote_string(job->efname);
+	launch_params.profile = opt.profile;
 	launch_params.task_prolog = opt.task_prolog;
 	launch_params.task_epilog = opt.task_epilog;
 	launch_params.cpu_bind = opt.cpu_bind;

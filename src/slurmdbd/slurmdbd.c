@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -188,7 +188,7 @@ int main(int argc, char *argv[])
 			info("slurmdbd running in background mode");
 			have_control = false;
 			backup = true;
-			run_backup();
+			run_dbd_backup();
 			if (!shutdown_time)
 				assoc_mgr_refresh_lists(db_conn, NULL);
 		} else if (slurmdbd_conf->dbd_host &&
@@ -228,7 +228,7 @@ int main(int argc, char *argv[])
 			info("slurmdbd version %s started",
 			     SLURM_VERSION_STRING);
 			if (backup)
-				run_backup();
+				run_dbd_backup();
 		}
 
 		_request_registrations(db_conn);
@@ -605,6 +605,8 @@ static int _send_slurmctld_register_req(slurmdb_cluster_rec_t *cluster_rec)
 		slurm_msg_t_init(&out_msg);
 		out_msg.msg_type = ACCOUNTING_REGISTER_CTLD;
 		out_msg.flags = SLURM_GLOBAL_AUTH_KEY;
+		out_msg.protocol_version
+			= slurmdbd_translate_rpc(cluster_rec->rpc_version);
 		slurm_send_node_msg(fd, &out_msg);
 		/* We probably need to add matching recv_msg function
 		 * for an arbitray fd or should these be fire

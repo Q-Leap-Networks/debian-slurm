@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -146,8 +146,8 @@ set_umask(slurmd_job_t *job)
 		return SLURM_ERROR;
 	}
 
-	unsetenvp(job->env, "SLURM_UMASK");
 	mask = strtol(val, (char **)NULL, 8);
+	unsetenvp(job->env, "SLURM_UMASK");
 	umask(mask);
 	return SLURM_SUCCESS;
 }

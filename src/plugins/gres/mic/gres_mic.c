@@ -9,7 +9,7 @@
  *  Written by Morris Jette <jette1@llnl.gov>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -122,7 +122,7 @@ static int nb_available_files;
  */
 extern int node_config_load(List gres_conf_list)
 {
-	int i, rc = SLURM_ERROR;
+	int i, rc = SLURM_SUCCESS;
 	ListIterator iter;
 	gres_slurmd_conf_t *gres_slurmd_conf;
 	int nb_mic = 0;	/* Number of MICs in the list */
@@ -130,12 +130,9 @@ extern int node_config_load(List gres_conf_list)
 
 	xassert(gres_conf_list);
 	iter = list_iterator_create(gres_conf_list);
-	if (iter == NULL)
-		fatal("list_iterator_create: malloc failure");
 	while ((gres_slurmd_conf = list_next(iter))) {
 		if (strcmp(gres_slurmd_conf->name, gres_name))
 			continue;
-		rc = SLURM_SUCCESS;
 		if (gres_slurmd_conf->file)
 			nb_mic++;
 	}
@@ -153,8 +150,6 @@ extern int node_config_load(List gres_conf_list)
 	}
 
 	iter = list_iterator_create(gres_conf_list);
-	if (iter == NULL)
-		fatal("list_iterator_create: malloc failure");
 	while ((gres_slurmd_conf = list_next(iter))) {
 		if ((strcmp(gres_slurmd_conf->name, gres_name) == 0) &&
 		    gres_slurmd_conf->file) {
@@ -261,7 +256,7 @@ extern void step_set_env(char ***job_env_ptr, void *gres_ptr)
 	}
 }
 
-/* Send GRES information to slurmstepd on the specified file descriptor*/
+/* Send GRES information to slurmstepd on the specified file descriptor */
 extern void send_stepd(int fd)
 {
 	int i;
@@ -274,7 +269,7 @@ extern void send_stepd(int fd)
 rwfail:	error("gres_plugin_send_stepd failed");
 }
 
-/* Receive GRES information from slurmd on the specified file descriptor*/
+/* Receive GRES information from slurmd on the specified file descriptor */
 extern void recv_stepd(int fd)
 {
 	int i;

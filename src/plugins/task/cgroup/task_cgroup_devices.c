@@ -5,7 +5,7 @@
  *  Written by Yiannis Georgiou <yiannis.georgiou@bull.fr>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -468,7 +468,7 @@ static int read_allowed_devices_file(char **allowed_devices)
 			line[strlen(line)-1] = '\0';
 			
 			/* global pattern matching and return the list of matches*/
-			if(glob(line, GLOB_NOSORT, NULL, &globbuf) != 0){
+			if (glob(line, GLOB_NOSORT, NULL, &globbuf) != 0){
 				debug3("Device %s does not exist", line);	
 			}else{
 				for(l=0; l < globbuf.gl_pathc; l++){

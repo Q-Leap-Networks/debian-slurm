@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -305,7 +305,7 @@ job_step_create_allocation(resource_allocation_response_msg_t *resp)
 			 * know it is less than the number of nodes
 			 * in the allocation
 			 */
-			if(opt.ntasks_set && (opt.ntasks < ai->nnodes))
+			if (opt.ntasks_set && (opt.ntasks < ai->nnodes))
 				opt.min_nodes = opt.ntasks;
 			else
 				opt.min_nodes = ai->nnodes;
@@ -503,7 +503,7 @@ extern void create_srun_job(srun_job_t **p_job, bool *got_alloc,
 			 * and a node went DOWN or it used a node count range
 			 * specification, was checkpointed from one size and
 			 * restarted at a different size */
-			error("SLURM_NNODES environment varariable "
+			error("SLURM_NNODES environment variable "
 			      "conflicts with allocated node count (%u!=%u).",
 			      opt.min_nodes, resp->node_cnt);
 			/* Modify options to match resource allocation.
@@ -1214,20 +1214,21 @@ static int _set_rlimit_env(void)
 	return rc;
 }
 
-/* Set SLURM_SUBMIT_DIR environment variable with current state */
+/* Set SLURM_SUBMIT_DIR and SLURM_SUBMIT_HOST environment variables within
+ * current state */
 static void _set_submit_dir_env(void)
 {
-	char buf[MAXPATHLEN + 1];
+	char buf[MAXPATHLEN + 1], host[256];
 
-	if ((getcwd(buf, MAXPATHLEN)) == NULL) {
+	if ((getcwd(buf, MAXPATHLEN)) == NULL)
 		error("getcwd failed: %m");
-		exit(error_exit);
-	}
-
-	if (setenvf(NULL, "SLURM_SUBMIT_DIR", "%s", buf) < 0) {
+	else if (setenvf(NULL, "SLURM_SUBMIT_DIR", "%s", buf) < 0)
 		error("unable to set SLURM_SUBMIT_DIR in environment");
-		return;
-	}
+
+	if ((gethostname(host, sizeof(host))))
+		error("gethostname_short failed: %m");
+	else if (setenvf(NULL, "SLURM_SUBMIT_HOST", "%s", host) < 0)
+		error("unable to set SLURM_SUBMIT_HOST in environment");
 }
 
 /* Set some environment variables with current state */

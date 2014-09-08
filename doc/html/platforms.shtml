@@ -8,7 +8,7 @@ know of no AIX installations using Slurm after 2008. See
 <a href="ibm.html">IBM AIX User and Administrator Guide</a> for more information.</li>
 <li><b>FreeBSD</b>&#151;Slurm support added in version 2.5.5.</li>
 <li><b>Linux</b>&#151;Slurm has been thoroughly tested on most popular Linux
-distributions using i386, ia64, and x86_64 architectures.</li>>
+distributions using i386, ia64, and x86_64 architectures.</li>
 <li><b>NetBSD</b>&#151;Slurm support added in version 2.4.</li>
 <li><b>OS X</b>&#151;Slurm has run OS X in the past, but the current OS X linker
 does not support Slurm plugins. (OS X dynamically linked objects can be called by
@@ -32,7 +32,7 @@ ALPS/BASIL software necessitates some changes in Slurm behavior. See
 been thoroughly tested.</li>
 <li><b>IBM Infiniband/Torrent</b>&#151;Slurm supports IBM's NRT (Network
 Resource Table) interface and
-<a href="ibm-pe.html">IBM's PE (Parallel Environment</a>).</li>
+<a href="ibm-pe.html">IBM's PE (Parallel Environment)</a>.</li>
 <li><b>Infiniband</b>&#151;Infiniband support has been thoroughly tested.</li>
 <li><b>Myrinet</b>&#151;Myrinet, MPICH-GM and MPICH-MX are supported.</li>
 <li><b>Quadrics Elan</b>&#151;Slurm support for Quadrics Elan 3 and Elan 4 switches

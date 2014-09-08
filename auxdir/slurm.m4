@@ -65,6 +65,18 @@ AC_DEFUN([X_AC_SLURM_PORTS],
   AC_DEFINE_UNQUOTED(SLURMCTLD_PORT_COUNT, [$slurmctldportcount],
                      [Define the default port count for slurmctld])
   AC_SUBST(SLURMCTLD_PORT_COUNT)
+
+  AC_MSG_CHECKING([for dynamic allocation port to be enabled])
+  AC_ARG_ENABLE([dynamic-allocation],
+    AS_HELP_STRING([--enable-dynamic-allocation, enable dynamic allocation requests from user programs ([disabled])]))
+  if test "$enable_dynamic_allocation" = "yes"; then
+    AC_MSG_RESULT([yes])
+    slurm_enable_dynamic_allocation="yes"
+  else
+    AC_MSG_RESULT([no])
+    slurm_enable_dynamic_allocation="no"
+  fi
+  AM_CONDITIONAL(SLURM_ENABLE_DYNAMIC_ALLOCATION, test "$slurm_enable_dynamic_allocation" = "yes")
 ])
 
 dnl
@@ -99,7 +111,8 @@ AC_DEFUN([X_AC_SLURM_PROGRAM_INVOCATION_NAME],
 [
   AC_MSG_CHECKING([for program_invocation_name])
 
-  AC_LINK_IFELSE([AC_LANG_PROGRAM([[extern char *program_invocation_name;]], [[char *p; p = program_invocation_name; printf("%s\n", p);]])],[got_program_invocation_name=yes],[
+  AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <stdio.h>
+extern char *program_invocation_name;]], [[char *p; p = program_invocation_name; printf("%s\n", p);]])],[got_program_invocation_name=yes],[
   ])
 
   AC_MSG_RESULT(${got_program_invocation_name=no})

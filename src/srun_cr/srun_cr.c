@@ -6,7 +6,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -544,9 +544,6 @@ _read_info_from_srun(int srun_fd)
 
 	xfree(nodelist);
 	nodelist = (char *)xmalloc(len + 1);
-	if (!nodelist) {
-		fatal("failed to malloc nodelist: %m");
-	}
 	if (read(srun_fd, nodelist, len + 1) != len + 1) {
 		fatal("failed to read nodelist: %m");
 	}

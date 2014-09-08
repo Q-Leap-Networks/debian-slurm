@@ -8,7 +8,6 @@
 # only be 1 address per symbol.  If you link to the libcommon.la in
 # a plugin you will get 2 addresses for one symbol which could lead to problems.
 
-AM_CPPFLAGS = -DGRES_CONFIG_FILE=\"$(sysconfdir)/gres.conf\"
 AUTOMAKE_OPTIONS = foreign
 
 if HAVE_UNSETENV
@@ -45,6 +44,8 @@ libcommon_la_SOURCES = 			\
 	forward.c forward.h     	\
 	strlcpy.c strlcpy.h		\
 	list.c list.h 			\
+	xtree.c xtree.h			\
+	xhash.c xhash.h			\
 	net.c net.h                     \
 	log.c log.h			\
 	cbuf.c cbuf.h			\
@@ -64,6 +65,7 @@ libcommon_la_SOURCES = 			\
 	slurm_cred.h       		\
 	slurm_cred.c			\
 	slurm_errno.c			\
+	slurm_ext_sensors.c slurm_ext_sensors.h \
 	slurm_priority.c		\
 	slurm_priority.h		\
 	slurm_protocol_api.c		\
@@ -87,9 +89,13 @@ libcommon_la_SOURCES = 			\
 	uid.c uid.h			\
 	util-net.c util-net.h		\
 	slurm_auth.c slurm_auth.h	\
+	slurm_acct_gather.c slurm_acct_gather.h \
 	slurm_accounting_storage.c slurm_accounting_storage.h \
 	slurm_jobacct_gather.c slurm_jobacct_gather.h \
 	slurm_acct_gather_energy.c slurm_acct_gather_energy.h \
+	slurm_acct_gather_profile.c slurm_acct_gather_profile.h \
+	slurm_acct_gather_infiniband.c slurm_acct_gather_infiniband.h \
+	slurm_acct_gather_filesystem.c slurm_acct_gather_filesystem.h \
 	slurm_jobcomp.c slurm_jobcomp.h	\
 	slurm_topology.c slurm_topology.h \
 	switch.c switch.h		\
@@ -119,8 +125,11 @@ libcommon_la_SOURCES = 			\
 	node_conf.h node_conf.c		\
 	gres.h gres.c
 
-EXTRA_libcommon_la_SOURCES = 	\
-	$(extra_unsetenv_src)
+EXTRA_libcommon_la_SOURCES = 		\
+	$(extra_unsetenv_src)		\
+	uthash/LICENSE			\
+	uthash/README			\
+	uthash/uthash.h
 
 libdaemonize_la_SOURCES =  		\
 	daemonize.c       	 	\

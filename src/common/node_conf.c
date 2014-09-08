@@ -13,7 +13,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -71,6 +71,7 @@
 #include "src/common/read_config.h"
 #include "src/common/slurm_accounting_storage.h"
 #include "src/common/slurm_acct_gather_energy.h"
+#include "src/common/slurm_ext_sensors.h"
 #include "src/common/slurm_topology.h"
 #include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
@@ -98,6 +99,7 @@ static int	_delete_config_record (void);
 static void	_dump_hash (void);
 #endif
 static struct node_record *_find_alias_node_record (char *name);
+static struct node_record *_find_node_record (char *name, bool test_alias);
 static int	_hash_index (char *name);
 static void	_list_delete_config (void *config_entry);
 static void	_list_delete_feature (void *feature_entry);
@@ -113,8 +115,6 @@ static void _add_config_feature(char *feature, bitstr_t *node_bitmap)
 
 	/* If feature already exists in feature_list, just update the bitmap */
 	feature_iter = list_iterator_create(feature_list);
-	if (feature_iter == NULL)
-		fatal("list_iterator_create malloc failure");
 	while ((feature_ptr = (struct features_record *)
 			list_next(feature_iter))) {
 		if (strcmp(feature, feature_ptr->name))
@@ -328,7 +328,7 @@ static int _delete_config_record (void)
  * _dump_hash - print the node_hash_table contents, used for debugging
  *	or analysis of hash technique
  * global: node_record_table_ptr - pointer to global node table
- *         node_hash_table - table of hash indecies
+ *         node_hash_table - table of hash indexes
  */
 static void _dump_hash (void)
 {
@@ -355,7 +355,7 @@ static void _dump_hash (void)
  * input: name - name to be aliased of the desired node
  * output: return pointer to node record or NULL if not found
  * global: node_record_table_ptr - pointer to global node table
- *         node_hash_table - table of hash indecies
+ *         node_hash_table - table of hash indexes
  */
 static struct node_record *_find_alias_node_record (char *name)
 {
@@ -502,8 +502,6 @@ char * bitmap2node_name_sortable (bitstr_t *bitmap, bool sort)
 
 	last  = bit_fls(bitmap);
 	hl = hostlist_create("");
-	if (hl == NULL)
-		fatal("hostlist_create: malloc error");
 	for (i = first; i <= last; i++) {
 		if (bit_test(bitmap, i) == 0)
 			continue;
@@ -554,9 +552,13 @@ static int _list_find_feature (void *feature_entry, void *key)
 /* Log the contents of a frontend record */
 static void _dump_front_end(slurm_conf_frontend_t *fe_ptr)
 {
-	info("fe name:%s addr:%s port:%u state:%u reason:%s",
+	info("fe name:%s addr:%s port:%u state:%u reason:%s "
+	     "allow_groups:%s allow_users:%s "
+	     "deny_groups:%s deny_users:%s",
 	     fe_ptr->frontends, fe_ptr->addresses,
-	     fe_ptr->port, fe_ptr->node_state, fe_ptr->reason);
+	     fe_ptr->port, fe_ptr->node_state, fe_ptr->reason,
+	     fe_ptr->allow_groups, fe_ptr->allow_users,
+	     fe_ptr->deny_groups, fe_ptr->deny_users);
 }
 #endif
 
@@ -601,12 +603,27 @@ extern int build_all_frontend_info (bool is_slurmd_context)
 		while ((fe_name = hostlist_shift(hl_name))) {
 			fe_addr = hostlist_shift(hl_addr);
 			fe_single = xmalloc(sizeof(slurm_conf_frontend_t));
-			if (list_append(front_end_list, fe_single) == NULL)
-				fatal("list_append: malloc failure");
+			list_append(front_end_list, fe_single);
 			fe_single->frontends = xstrdup(fe_name);
 			fe_single->addresses = xstrdup(fe_addr);
 			free(fe_name);
 			free(fe_addr);
+			if (fe_line->allow_groups && fe_line->allow_groups[0]) {
+				fe_single->allow_groups =
+					xstrdup(fe_line->allow_groups);
+			}
+			if (fe_line->allow_users && fe_line->allow_users[0]) {
+				fe_single->allow_users =
+					xstrdup(fe_line->allow_users);
+			}
+			if (fe_line->deny_groups && fe_line->deny_groups[0]) {
+				fe_single->deny_groups =
+					xstrdup(fe_line->deny_groups);
+			}
+			if (fe_line->deny_users && fe_line->deny_users[0]) {
+				fe_single->deny_users =
+					xstrdup(fe_line->deny_users);
+			}
 			fe_single->port = fe_line->port;
 			if (fe_line->reason && fe_line->reason[0])
 				fe_single->reason = xstrdup(fe_line->reason);
@@ -667,8 +684,6 @@ extern int build_all_nodeline_info (bool set_bitmap)
 	if (set_bitmap) {
 		ListIterator config_iterator;
 		config_iterator = list_iterator_create(config_list);
-		if (config_iterator == NULL)
-			fatal ("memory allocation failure");
 		while ((config_ptr = (struct config_record *)
 				list_next(config_iterator))) {
 			node_name2bitmap(config_ptr->nodes, true,
@@ -691,8 +706,6 @@ extern void  build_config_feature_list(struct config_record *config_ptr)
 	/* Clear these nodes from the feature_list record,
 	 * then restore as needed */
 	feature_iter = list_iterator_create(feature_list);
-	if (feature_iter == NULL)
-		fatal("list_iterator_create malloc failure");
 	bit_not(config_ptr->node_bitmap);
 	while ((feature_ptr = (struct features_record *)
 			list_next(feature_iter))) {
@@ -792,17 +805,28 @@ extern struct node_record *create_node_record (
 	node_ptr->tmp_disk = config_ptr->tmp_disk;
 	node_ptr->select_nodeinfo = select_g_select_nodeinfo_alloc();
 	node_ptr->energy = acct_gather_energy_alloc();
+	node_ptr->ext_sensors = ext_sensors_alloc();
 	xassert (node_ptr->magic = NODE_MAGIC)  /* set value */;
 	return node_ptr;
 }
 
-
 /*
  * find_node_record - find a record for node with specified name
- * input: name - name of the desired node
- * output: return pointer to node record or NULL if not found
+ * IN: name - name of the desired node
+ * RET: pointer to node record or NULL if not found
  */
 extern struct node_record *find_node_record (char *name)
+{
+	return _find_node_record(name, true);
+}
+
+/*
+ * _find_node_record - find a record for node with specified name
+ * IN: name - name of the desired node
+ * IN: test_alias - if set, also test NodeHostName value
+ * RET: pointer to node record or NULL if not found
+ */
+static struct node_record *_find_node_record (char *name, bool test_alias)
 {
 	int i;
 
@@ -841,9 +865,12 @@ extern struct node_record *find_node_record (char *name)
 		}
 	}
 
-	/* look for the alias node record if the user put this in
-	   instead of what slurm sees the node name as */
-	return _find_alias_node_record (name);
+	if (test_alias) {
+		/* look for the alias node record if the user put this in
+		 * instead of what slurm sees the node name as */
+		return _find_alias_node_record (name);
+	}
+	return NULL;
 }
 
 
@@ -873,9 +900,6 @@ extern int init_node_conf (void)
 		config_list    = list_create (_list_delete_config);
 		feature_list   = list_create (_list_delete_feature);
 		front_end_list = list_create (destroy_frontend);
-		if ((config_list == NULL) || (feature_list == NULL) ||
-		    (front_end_list == NULL))
-			fatal("list_create malloc failure");
 	}
 
 	return SLURM_SUCCESS;
@@ -925,8 +949,6 @@ extern int node_name2bitmap (char *node_names, bool best_effort,
 	hostlist_t host_list;
 
 	my_bitmap = (bitstr_t *) bit_alloc (node_record_count);
-	if (my_bitmap == NULL)
-		fatal("bit_alloc malloc failure");
 	*bitmap = my_bitmap;
 
 	if (node_names == NULL) {
@@ -944,7 +966,7 @@ extern int node_name2bitmap (char *node_names, bool best_effort,
 
 	while ( (this_node_name = hostlist_shift (host_list)) ) {
 		struct node_record *node_ptr;
-		node_ptr = find_node_record (this_node_name);
+		node_ptr = _find_node_record(this_node_name, best_effort);
 		if (node_ptr) {
 			bit_set (my_bitmap, (bitoff_t) (node_ptr -
 							node_record_table_ptr));
@@ -977,6 +999,7 @@ extern void purge_node_rec (struct node_record *node_ptr)
 	xfree(node_ptr->part_pptr);
 	xfree(node_ptr->reason);
 	acct_gather_energy_destroy(node_ptr->energy);
+	ext_sensors_destroy(node_ptr->ext_sensors);
 	select_g_select_nodeinfo_free(node_ptr->select_nodeinfo);
 }
 
@@ -1087,4 +1110,20 @@ extern uint32_t cr_get_coremap_offset(uint32_t node_index)
 {
 	xassert(cr_node_cores_offset);
 	return cr_node_cores_offset[node_index];
+}
+
+/* Given the number of tasks per core and the actual number of hw threads,
+ * compute how many CPUs are "visible" and, hence, usable on the node.
+ */
+extern int adjust_cpus_nppcu(uint16_t ntasks_per_core, uint16_t threads,
+			     int cpus)
+{
+	if ((ntasks_per_core != 0) && (ntasks_per_core != 0xffff) &&
+	    (threads != 0)) {
+		/* Adjust the number of CPUs according to the percentage of the
+		 * hwthreads/core being used. */
+		cpus = cpus * ntasks_per_core / threads;
+	}
+
+	return cpus;
 }

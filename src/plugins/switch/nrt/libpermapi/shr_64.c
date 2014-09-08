@@ -6,7 +6,7 @@
  *  Written by Danny Auble <da@schedmd.com> et. al.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -461,7 +461,7 @@ static char *_uint16_array_to_str(int array_len, const uint16_t *array)
 	char *sep = ",";  /* seperator */
 	char *str = xstrdup("");
 
-	if(array == NULL)
+	if (array == NULL)
 		return str;
 
 	for (i = 0; i < array_len; i++) {

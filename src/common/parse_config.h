@@ -11,7 +11,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -342,5 +342,17 @@ int s_p_get_boolean(bool *flag, const char *key, const s_p_hashtbl_t *hashtbl);
 void s_p_dump_values(const s_p_hashtbl_t *hashtbl,
 		     const s_p_options_t options[]);
 
+
+/*
+ * copy options onto the end of full_options
+ * IN/OUT full_options
+ * IN options
+ * IN/OUT full_options_cnt
+ *
+ * Used if the full set of options are not available from one location.
+ */
+extern void transfer_s_p_options(s_p_options_t **full_options,
+				 s_p_options_t *options,
+				 int *full_options_cnt);
 
 #endif /* !_PARSE_CONFIG_H */

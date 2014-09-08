@@ -6,7 +6,7 @@
  *  All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -314,6 +314,7 @@ spawn_resp_pack(spawn_resp_t *resp, Buf buf)
 
 	pack32(resp->seq, buf);
 	pack32((uint32_t)resp->rc, buf);
+	pack16((uint16_t)resp->pmi_port, buf);
 	packstr(resp->jobid, buf);
 	pack32(resp->error_cnt, buf);
 	for (i = 0; i < resp->error_cnt; i ++) {
@@ -332,6 +333,7 @@ spawn_resp_unpack(spawn_resp_t **resp_ptr, Buf buf)
 
 	safe_unpack32(&resp->seq, buf);
 	safe_unpack32((uint32_t *)&resp->rc, buf);
+	safe_unpack16((uint16_t *)&resp->pmi_port, buf);
 	safe_unpackstr_xmalloc(&resp->jobid, &temp32, buf);
 	safe_unpack32(&resp->error_cnt, buf);
 	if (resp->error_cnt > 0) {
@@ -465,6 +467,12 @@ _exec_srun_single(spawn_req_t *req, char **env)
 	j = 0;
 	argv[j ++] = "srun";
 	argv[j ++] = "--mpi=pmi2";
+	if (job_info.srun_opt && job_info.srun_opt->no_alloc) {
+		argv[j ++] = "--no-alloc";
+		xstrfmtcat(argv[j ++], "--nodelist=%s",
+			   job_info.srun_opt->nodelist);
+	}
+
 	xstrfmtcat(argv[j ++], "--ntasks=%d", subcmd->max_procs);
 	/* TODO: inherit options from srun_opt. */
 	for (i = 0; i < subcmd->info_cnt; i ++) {
@@ -517,17 +525,17 @@ static int
 _exec_srun_multiple(spawn_req_t *req, char **env)
 {
 	int argc, ntasks, i, j, spawn_cnt, fd;
-	char **argv = NULL, *multi_prog = NULL, *buf = NULL;
+	char **argv = NULL, *buf = NULL;
 	spawn_subcmd_t *subcmd = NULL;
+	char fbuf[128];
 
 	debug3("mpi/pmi2: in _exec_srun_multiple");
 	/* create a tmp multi_prog file */
 	/* TODO: how to delete the file? */
-	multi_prog = tempnam(NULL, NULL);
-	fd = open(multi_prog, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
+	sprintf(fbuf, "/tmp/%d.XXXXXX", getpid());
+	fd = mkstemp(fbuf);
 	if (fd < 0) {
-		error("mpi/pmi2: failed to open multi-prog file %s: %m",
-		      multi_prog);
+		error("mpi/pmi2: failed to open multi-prog file %s: %m", fbuf);
 		return SLURM_ERROR;
 	}
 	ntasks = 0;
@@ -549,8 +557,10 @@ _exec_srun_multiple(spawn_req_t *req, char **env)
 		xstrcat(buf, "\n");
 		ntasks += subcmd->max_procs;
 	}
-	safe_write(fd, buf, strlen(buf));
-	xfree(buf);
+	if (buf) {
+		safe_write(fd, buf, strlen(buf));
+		xfree(buf);
+	}
 	close(fd);
 
 	argc = 7;
@@ -560,8 +570,13 @@ _exec_srun_multiple(spawn_req_t *req, char **env)
 	argv[j ++] = "srun";
 	argv[j ++] = "--mpi=pmi2";
 	xstrfmtcat(argv[j ++], "--ntasks=%d", ntasks);
+	if (job_info.srun_opt && job_info.srun_opt->no_alloc) {
+		argv[j ++] = "--no-alloc";
+		xstrfmtcat(argv[j ++], "--nodelist=%s",
+			   job_info.srun_opt->nodelist);
+	}
 	argv[j ++] = "--multi-prog";
-	argv[j ++] = multi_prog;
+	argv[j ++] = fbuf;
 	argv[j ++] = NULL;
 
 	debug3("mpi/mpi2: to execve");

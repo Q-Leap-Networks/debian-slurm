@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -58,6 +58,7 @@
 #include <ctype.h>
 
 /* PROJECT INCLUDES */
+#include "src/common/fd.h"
 #include "src/common/macros.h"
 #include "src/common/pack.h"
 #include "src/common/parse_spec.h"
@@ -1017,6 +1018,25 @@ char *slurm_get_job_submit_plugins(void)
 	return job_submit_plugins;
 }
 
+/* slurm_get_slurmctld_plugstack
+ * get slurmctld_plugstack from slurmctld_conf object from
+ * slurmctld_conf object
+ * RET char *   - slurmctld_plugstack, MUST be xfreed by caller
+ */
+char *slurm_get_slurmctld_plugstack(void)
+{
+	char *slurmctld_plugstack = NULL;
+	slurm_ctl_conf_t *conf;
+
+	if (slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		slurmctld_plugstack = xstrdup(conf->slurmctld_plugstack);
+		slurm_conf_unlock();
+	}
+	return slurmctld_plugstack;
+}
+
 /* slurm_get_accounting_storage_type
  * returns the accounting storage type from slurmctld_conf object
  * RET char *    - accounting storage type,  MUST be xfreed by caller
@@ -1176,9 +1196,9 @@ int slurm_set_accounting_storage_loc(char *loc)
 /* slurm_get_accounting_storage_enforce
  * returns what level to enforce associations at
  */
-int slurm_get_accounting_storage_enforce(void)
+uint16_t slurm_get_accounting_storage_enforce(void)
 {
-	int enforce = 0;
+	uint16_t enforce = 0;
 	slurm_ctl_conf_t *conf;
 
 	if (slurmdbd_conf) {
@@ -1358,15 +1378,15 @@ char *slurm_get_jobacct_gather_type(void)
  * returns the job accounting poll frequency from the slurmctld_conf object
  * RET int    - job accounting frequency
  */
-uint16_t slurm_get_jobacct_gather_freq(void)
+char *slurm_get_jobacct_gather_freq(void)
 {
-	uint16_t freq = 0;
+	char *freq = NULL;
 	slurm_ctl_conf_t *conf;
 
 	if (slurmdbd_conf) {
 	} else {
 		conf = slurm_conf_lock();
-		freq = conf->job_acct_gather_freq;
+		freq = xstrdup(conf->job_acct_gather_freq);
 		slurm_conf_unlock();
 	}
 	return freq;
@@ -1391,6 +1411,64 @@ char *slurm_get_acct_gather_energy_type(void)
 	return acct_gather_energy_type;
 }
 
+/* slurm_get_profile_accounting_type
+ * get ProfileAccountingType from slurmctld_conf object
+ * RET char *   - profile_accounting type, MUST be xfreed by caller
+ */
+char *slurm_get_acct_gather_profile_type(void)
+{
+	char *acct_gather_profile_type = NULL;
+	slurm_ctl_conf_t *conf;
+
+	if (slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		acct_gather_profile_type =
+			xstrdup(conf->acct_gather_profile_type);
+		slurm_conf_unlock();
+	}
+	return acct_gather_profile_type;
+}
+
+/* slurm_get_infiniband_accounting_type
+ * get InfinibandAccountingType from slurmctld_conf object
+ * RET char *   - infiniband_accounting type, MUST be xfreed by caller
+ */
+char *slurm_get_acct_gather_infiniband_type(void)
+{
+	char *acct_gather_infiniband_type = NULL;
+	slurm_ctl_conf_t *conf;
+
+	if (slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		acct_gather_infiniband_type =
+			xstrdup(conf->acct_gather_infiniband_type);
+		slurm_conf_unlock();
+	}
+	return acct_gather_infiniband_type;
+}
+
+/* slurm_get_filesystem_accounting_type
+ * get FilesystemAccountingType from slurmctld_conf object
+ * RET char *   - filesystem_accounting type, MUST be xfreed by caller
+ */
+char *slurm_get_acct_gather_filesystem_type(void)
+{
+	char *acct_gather_filesystem_type = NULL;
+	slurm_ctl_conf_t *conf;
+
+	if (slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		acct_gather_filesystem_type =
+			xstrdup(conf->acct_gather_filesystem_type);
+		slurm_conf_unlock();
+	}
+	return acct_gather_filesystem_type;
+}
+
+
 extern uint16_t slurm_get_acct_gather_node_freq(void)
 {
 	uint16_t freq = 0;
@@ -1400,6 +1478,39 @@ extern uint16_t slurm_get_acct_gather_node_freq(void)
 	} else {
 		conf = slurm_conf_lock();
 		freq = conf->acct_gather_node_freq;
+		slurm_conf_unlock();
+	}
+	return freq;
+}
+
+/* slurm_get_ext_sensors_type
+ * get ExtSensorsType from slurmctld_conf object
+ * RET char *   - ext_sensors type, MUST be xfreed by caller
+ */
+char *slurm_get_ext_sensors_type(void)
+{
+	char *ext_sensors_type = NULL;
+	slurm_ctl_conf_t *conf;
+
+	if (slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		ext_sensors_type =
+			xstrdup(conf->ext_sensors_type);
+		slurm_conf_unlock();
+	}
+	return ext_sensors_type;
+}
+
+extern uint16_t slurm_get_ext_sensors_freq(void)
+{
+	uint16_t freq = 0;
+	slurm_ctl_conf_t *conf;
+
+	if (slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		freq = conf->ext_sensors_freq;
 		slurm_conf_unlock();
 	}
 	return freq;
@@ -1535,6 +1646,25 @@ int slurm_set_jobcomp_port(uint32_t port)
 	}
 	return 0;
 }
+
+/* slurm_get_keep_alive_time
+ * returns keep_alive_time slurmctld_conf object
+ * RET uint16_t	- keep_alive_time
+ */
+uint16_t slurm_get_keep_alive_time(void)
+{
+	uint16_t keep_alive_time = (uint16_t) NO_VAL;
+	slurm_ctl_conf_t *conf;
+
+	if (slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		keep_alive_time = conf->keep_alive_time;
+		slurm_conf_unlock();
+	}
+	return keep_alive_time;
+}
+
 
 /* slurm_get_kill_wait
  * returns kill_wait from slurmctld_conf object
@@ -2034,7 +2164,10 @@ int slurm_shutdown_msg_conn(slurm_fd_t fd)
  */
 slurm_fd_t slurm_open_msg_conn(slurm_addr_t * slurm_address)
 {
-	return _slurm_open_msg_conn(slurm_address);
+	slurm_fd_t fd = _slurm_open_msg_conn(slurm_address);
+	if (fd >= 0)
+		fd_set_close_on_exec(fd);
+	return fd;
 }
 
 /* Calls connect to make a connection-less datagram connection to the
@@ -3236,6 +3369,7 @@ _send_and_recv_msgs(slurm_fd_t fd, slurm_msg_t *req, int timeout)
 	int retry = 0;
 	List ret_list = NULL;
 	int steps = 0;
+	int width;
 
 	if (!req->forward.timeout) {
 		if (!timeout)
@@ -3251,8 +3385,11 @@ _send_and_recv_msgs(slurm_fd_t fd, slurm_msg_t *req, int timeout)
 			 * to let the child timeout */
 			if (message_timeout < 0)
 				message_timeout = slurm_get_msg_timeout() * 1000;
-			steps = (req->forward.cnt+1)/slurm_get_tree_width();
-			timeout = (message_timeout*steps);
+			steps = req->forward.cnt + 1;
+			width = slurm_get_tree_width();
+			if (width)
+				steps /= width;
+			timeout = (message_timeout * steps);
 			steps++;
 
 			timeout += (req->forward.timeout*steps);
@@ -3533,8 +3670,6 @@ List slurm_send_addr_recv_msgs(slurm_msg_t *msg, char *name, int timeout)
 		return ret_list;
 	} else {
 		itr = list_iterator_create(ret_list);
-		if (!itr)
-			fatal("list_iterator_create: malloc failure");
 		while ((ret_data_info = list_next(itr)))
 			if (!ret_data_info->node_name) {
 				ret_data_info->node_name = xstrdup(name);
@@ -3571,10 +3706,8 @@ int slurm_send_recv_rc_msg_only_one(slurm_msg_t *req, int *rc, int timeout)
 	req->ret_list = NULL;
 	req->forward_struct = NULL;
 
-	if ((fd = slurm_open_msg_conn(&req->address)) < 0) {
+	if ((fd = slurm_open_msg_conn(&req->address)) < 0)
 		return -1;
-	}
-
 	if (!_send_and_recv_msg(fd, req, &resp, timeout)) {
 		if (resp.auth_cred)
 			g_slurm_auth_destroy(resp.auth_cred);
@@ -3686,21 +3819,27 @@ extern int nodelist_find(const char *nodelist, const char *name)
 	return id;
 }
 
-extern void convert_num_unit(float num, char *buf, int buf_size, int orig_type)
+extern void convert_num_unit2(float num, char *buf, int buf_size, int orig_type,
+			      int divisor, bool exact)
 {
 	char *unit = "\0KMGTP?";
-	int i = (int)num % 512;
+	int i;
 
 	if ((int)num == 0) {
-		snprintf(buf, buf_size, "%d", (int)num);
-		return;
-	} else if (i > 0) {
-		snprintf(buf, buf_size, "%d%c", (int)num, unit[orig_type]);
-		return;
+			snprintf(buf, buf_size, "%d", (int)num);
+			return;
+	} else if (exact) {
+		i = (int)num % (divisor / 2);
+
+		if (i > 0) {
+			snprintf(buf, buf_size, "%d%c",
+				 (int)num, unit[orig_type]);
+			return;
+		}
 	}
 
-	while (num > 1024) {
-		num /= 1024;
+	while (num > divisor) {
+		num /= divisor;
 		orig_type++;
 	}
 
@@ -3715,6 +3854,11 @@ extern void convert_num_unit(float num, char *buf, int buf_size, int orig_type)
 		snprintf(buf, buf_size, "%d%c", i, unit[orig_type]);
 	else
 		snprintf(buf, buf_size, "%.2f%c", num, unit[orig_type]);
+}
+
+extern void convert_num_unit(float num, char *buf, int buf_size, int orig_type)
+{
+	convert_num_unit2(num, buf, buf_size, orig_type, 1024, true);
 }
 
 extern int revert_num_unit(const char *buf)

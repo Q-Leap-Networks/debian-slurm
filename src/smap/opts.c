@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -126,16 +126,16 @@ extern void parse_command_line(int argc, char *argv[])
 			 * pset size.  This number should be large enough.
 			 */
 			params.io_bit = bit_alloc(128);
-			if(bit_unfmt(params.io_bit, optarg) == -1) {
+			if (bit_unfmt(params.io_bit, optarg) == -1) {
 				error("'%s' invalid entry for --ionodes",
 				      optarg);
 				exit(1);
 			}
 			break;
 		case 'M':
-			if(params.clusters)
+			if (params.clusters)
 				list_destroy(params.clusters);
-			if(!(params.clusters =
+			if (!(params.clusters =
 			     slurmdb_get_info_cluster(optarg))) {
 				print_db_notok(optarg, 0);
 				exit(1);

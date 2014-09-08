@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -276,14 +276,23 @@ _query_server(partition_info_msg_t ** part_pptr,
 	if (old_node_ptr) {
 		if (clear_old)
 			old_node_ptr->last_update = 0;
-		error_code = slurm_load_node(old_node_ptr->last_update,
-					     &new_node_ptr, show_flags);
+		if (params.node_name_single) {
+			error_code = slurm_load_node_single(&new_node_ptr,
+							    params.nodes,
+							    show_flags);
+		} else {
+			error_code = slurm_load_node(old_node_ptr->last_update,
+						     &new_node_ptr, show_flags);
+		}
 		if (error_code == SLURM_SUCCESS)
 			slurm_free_node_info_msg(old_node_ptr);
 		else if (slurm_get_errno() == SLURM_NO_CHANGE_IN_DATA) {
 			error_code = SLURM_SUCCESS;
 			new_node_ptr = old_node_ptr;
 		}
+	} else if (params.node_name_single) {
+		error_code = slurm_load_node_single(&new_node_ptr, params.nodes,
+						    show_flags);
 	} else {
 		error_code = slurm_load_node((time_t) NULL, &new_node_ptr,
 					     show_flags);
@@ -428,40 +437,46 @@ static int _build_sinfo_data(List sinfo_list,
                         }
                         continue;
                 }
-		
+
 		j2 = 0;
-		while(part_ptr->node_inx[j2] >= 0) {
+		while (part_ptr->node_inx[j2] >= 0) {
 			int i2 = 0;
 			uint16_t subgrp_size = 0;
-			for(i2 = part_ptr->node_inx[j2];
-			    i2 <= part_ptr->node_inx[j2+1];
-			    i2++) {
+			for (i2 = part_ptr->node_inx[j2];
+			     i2 <= part_ptr->node_inx[j2+1];
+			     i2++) {
+				if (i2 >= node_msg->record_count) {
+					/* This can happen if info for single
+					 * node name is loaded */
+					break;
+				}
 				node_ptr = &(node_msg->node_array[i2]);
 
-				if (node_ptr->name == NULL ||
+				if ((node_ptr->name == NULL) ||
 				    (params.filtering &&
 				     _filter_out(node_ptr)))
 					continue;
 
-				if(select_g_select_nodeinfo_get(
+				if (select_g_select_nodeinfo_get(
 					   node_ptr->select_nodeinfo,
 					   SELECT_NODEDATA_SUBGRP_SIZE,
 					   0,
 					   &subgrp_size) == SLURM_SUCCESS
-				   && subgrp_size)
+				    && subgrp_size) {
 					_handle_subgrps(sinfo_list,
 							(uint16_t) j,
 							part_ptr,
 							node_ptr,
 							node_msg->
 							node_scaling);
-				else
+				} else {
 					_insert_node_ptr(sinfo_list,
 							 (uint16_t) j,
 							 part_ptr,
 							 node_ptr,
 							 node_msg->
 							 node_scaling);
+				}
 			}
 			j2 += 2;
 		}
@@ -536,7 +551,7 @@ static bool _filter_out(node_info_t *node_ptr)
 					SELECT_NODEDATA_SUBCNT,
 					NODE_STATE_ERROR,
 					&cpus);
-				if(cpus) {
+				if (cpus) {
 					match = true;
 					break;
 				}
@@ -546,7 +561,7 @@ static bool _filter_out(node_info_t *node_ptr)
 					SELECT_NODEDATA_SUBCNT,
 					NODE_STATE_ALLOCATED,
 					&cpus);
-				if(cpus) {
+				if (cpus) {
 					match = true;
 					break;
 				}
@@ -661,6 +676,7 @@ static bool _match_node_data(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr)
 	    (node_ptr->cpu_load        != sinfo_ptr->min_cpu_load))
 		return false;
 
+
 	return true;
 }
 
@@ -718,6 +734,11 @@ static bool _match_part_data(sinfo_data_t *sinfo_ptr,
 	    (part_ptr->priority != sinfo_ptr->part_info->priority))
 		return false;
 
+	if (params.match_flags.max_cpus_per_node_flag &&
+	    (part_ptr->max_cpus_per_node !=
+	     sinfo_ptr->part_info->max_cpus_per_node))
+		return false;
+
 	return true;
 }
 
@@ -756,6 +777,8 @@ static void _update_sinfo(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr,
 		sinfo_ptr->max_weight = node_ptr->weight;
 		sinfo_ptr->min_cpu_load = node_ptr->cpu_load;
 		sinfo_ptr->max_cpu_load = node_ptr->cpu_load;
+		sinfo_ptr->max_cpus_per_node = sinfo_ptr->part_info->
+					       max_cpus_per_node;
 	} else if (hostlist_find(sinfo_ptr->nodes, node_ptr->name) != -1) {
 		/* we already have this node in this record,
 		 * just return, don't duplicate */
@@ -802,9 +825,11 @@ static void _update_sinfo(sinfo_data_t *sinfo_ptr, node_info_t *node_ptr,
 			sinfo_ptr->max_cpu_load = node_ptr->cpu_load;
 	}
 
-	hostlist_push(sinfo_ptr->nodes,     node_ptr->name);
-	hostlist_push(sinfo_ptr->node_addr, node_ptr->node_addr);
-	hostlist_push(sinfo_ptr->hostnames, node_ptr->node_hostname);
+	hostlist_push(sinfo_ptr->nodes, node_ptr->name);
+	if (params.match_flags.node_addr_flag)
+		hostlist_push(sinfo_ptr->node_addr, node_ptr->node_addr);
+	if (params.match_flags.hostnames_flag)
+		hostlist_push(sinfo_ptr->hostnames, node_ptr->node_hostname);
 
 	total_cpus = node_ptr->cpus;
 	total_nodes = node_scaling;
@@ -943,21 +968,21 @@ static int _handle_subgrps(List sinfo_list, uint16_t part_num,
 		iterator = list_iterator_create(params.state_list);
 
 	for(i=0; i<state_cnt; i++) {
-		if(iterator) {
+		if (iterator) {
 			node_info_t tmp_node, *tmp_node_ptr = &tmp_node;
 			while ((node_state = list_next(iterator))) {
 				tmp_node_ptr->node_state = *node_state;
-				if((((state[i] == NODE_STATE_ALLOCATED)
+				if ((((state[i] == NODE_STATE_ALLOCATED)
 				     && IS_NODE_DRAINING(tmp_node_ptr))
 				    || (*node_state == NODE_STATE_DRAIN))
 				   || (*node_state == state[i]))
 					break;
 			}
 			list_iterator_reset(iterator);
-			if(!node_state)
+			if (!node_state)
 				continue;
 		}
-		if(select_g_select_nodeinfo_get(node_ptr->select_nodeinfo,
+		if (select_g_select_nodeinfo_get(node_ptr->select_nodeinfo,
 						SELECT_NODEDATA_SUBCNT,
 						state[i],
 						&size) == SLURM_SUCCESS
@@ -971,22 +996,22 @@ static int _handle_subgrps(List sinfo_list, uint16_t part_num,
 	}
 
 	/* now handle the idle */
-	if(iterator) {
+	if (iterator) {
 		while ((node_state = list_next(iterator))) {
 			node_info_t tmp_node, *tmp_node_ptr = &tmp_node;
 			tmp_node_ptr->node_state = *node_state;
-			if(((*node_state == NODE_STATE_DRAIN)
+			if (((*node_state == NODE_STATE_DRAIN)
 			    || IS_NODE_DRAINED(tmp_node_ptr))
 			   || (*node_state == NODE_STATE_IDLE))
 				break;
 		}
 		list_iterator_destroy(iterator);
-		if(!node_state)
+		if (!node_state)
 			return SLURM_SUCCESS;
 	}
 	node_ptr->node_state &= NODE_STATE_FLAGS;
 	node_ptr->node_state |= NODE_STATE_IDLE;
-	if((int)node_scaling > 0)
+	if ((int)node_scaling > 0)
 		_insert_node_ptr(sinfo_list, part_num, part_ptr,
 				 node_ptr, node_scaling);
 

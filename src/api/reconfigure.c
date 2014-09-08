@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -170,7 +170,7 @@ _send_message_controller (enum controller_id dest, slurm_msg_t *req)
 	resp_msg = xmalloc(sizeof(slurm_msg_t));
 	slurm_msg_t_init(resp_msg);
 
-	if((rc = slurm_receive_msg(fd, resp_msg, 0)) != 0) {
+	if ((rc = slurm_receive_msg(fd, resp_msg, 0)) != 0) {
 		slurm_shutdown_msg_conn(fd);
 		return SLURMCTLD_COMMUNICATIONS_RECEIVE_ERROR;
 	}

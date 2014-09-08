@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -633,7 +633,7 @@ slurm_cred_copy(slurm_cred_t *cred)
 slurm_cred_t *
 slurm_cred_faker(slurm_cred_arg_t *arg)
 {
-	int fd;
+	int fd, i;
 	slurm_cred_t *cred = NULL;
 
 	xassert(arg != NULL);
@@ -649,7 +649,7 @@ slurm_cred_faker(slurm_cred_arg_t *arg)
 	cred->step_hostlist  = xstrdup(arg->step_hostlist);
 #ifndef HAVE_BG
 	{
-		int i, sock_recs = 0;
+		int sock_recs = 0;
 		for (i=0; i<arg->job_nhosts; i++) {
 			sock_recs += arg->sock_core_rep_count[i];
 			if (sock_recs >= arg->job_nhosts)
@@ -678,18 +678,19 @@ slurm_cred_faker(slurm_cred_arg_t *arg)
 	cred->signature = xmalloc(cred->siglen * sizeof(char));
 
 	if ((fd = open("/dev/urandom", O_RDONLY)) >= 0) {
-		if (read(fd, cred->signature, cred->siglen) == -1)
+		if (read(fd, cred->signature, cred->siglen-1) == -1)
 			error("reading fake signature from /dev/urandom: %m");
 		if (close(fd) < 0)
 			error("close(/dev/urandom): %m");
+		for (i=0; i<cred->siglen-1; i++)
+			cred->signature[i] = 'a' + (cred->signature[i] & 0xf);
 	} else {	/* Note: some systems lack this file */
-		unsigned int i;
 		struct timeval tv;
 		gettimeofday(&tv, NULL);
 		i = (unsigned int) (tv.tv_sec + tv.tv_usec);
 		srand((unsigned int) i);
-		for (i=0; i<cred->siglen; i++)
-			cred->signature[i] = (rand() & 0xff);
+		for (i=0; i<cred->siglen-1; i++)
+			cred->signature[i] = 'a' + (rand() & 0xf);
 	}
 
 	slurm_mutex_unlock(&cred->mutex);
@@ -1073,7 +1074,7 @@ static char *_core_format(bitstr_t *core_bitmap)
  *
  * NOTE: caller must xfree the returned strings.
  */
-void format_core_allocs(slurm_cred_t *cred, char *node_name,
+void format_core_allocs(slurm_cred_t *cred, char *node_name, uint16_t cpus,
 			char **job_alloc_cores, char **step_alloc_cores,
 			uint32_t *job_mem_limit, uint32_t *step_mem_limit)
 {
@@ -1093,7 +1094,7 @@ void format_core_allocs(slurm_cred_t *cred, char *node_name,
 	hostset_t	hset = NULL;
 	int		host_index = -1;
 	uint32_t	i, j, i_first_bit=0, i_last_bit=0;
-	uint32_t	job_core_cnt=0, step_core_cnt=0;
+	uint32_t	job_cpu_cnt = 0, step_cpu_cnt = 0;
 
 	xassert(cred);
 	xassert(job_alloc_cores);
@@ -1134,38 +1135,39 @@ void format_core_allocs(slurm_cred_t *cred, char *node_name,
 		}
 	}
 
-	job_core_bitmap = bit_alloc(i_last_bit - i_first_bit);
-	if (job_core_bitmap == NULL) {
-		error("bit_alloc malloc failure");
-		hostset_destroy(hset);
-		return;
-	}
+	job_core_bitmap  = bit_alloc(i_last_bit - i_first_bit);
 	step_core_bitmap = bit_alloc(i_last_bit - i_first_bit);
-	if (step_core_bitmap == NULL) {
-		error("bit_alloc malloc failure");
-		FREE_NULL_BITMAP(job_core_bitmap);
-		hostset_destroy(hset);
-		return;
-	}
 	for (i = i_first_bit, j = 0; i < i_last_bit; i++, j++) {
 		if (bit_test(cred->job_core_bitmap, i)) {
 			bit_set(job_core_bitmap, j);
-			job_core_cnt++;
+			job_cpu_cnt++;
 		}
 		if (bit_test(cred->step_core_bitmap, i)) {
 			bit_set(step_core_bitmap, j);
-			step_core_cnt++;
+			step_cpu_cnt++;
+		}
+	}
+
+	/* Scale CPU count, same as slurmd/req.c:_check_job_credential() */
+	if (i_last_bit <= i_first_bit)
+		error("step credential has no CPUs selected");
+	else {
+		uint32_t i = cpus / (i_last_bit - i_first_bit);
+		if (i > 1) {
+			info("scaling CPU count by factor of %d", i);
+			step_cpu_cnt *= i;
+			job_cpu_cnt *= i;
 		}
 	}
 
 	if (cred->job_mem_limit & MEM_PER_CPU) {
 		*job_mem_limit = (cred->job_mem_limit & (~MEM_PER_CPU)) *
-			job_core_cnt;
+				 job_cpu_cnt;
 	} else
 		*job_mem_limit = cred->job_mem_limit;
 	if (cred->step_mem_limit & MEM_PER_CPU) {
 		*step_mem_limit = (cred->step_mem_limit & (~MEM_PER_CPU)) *
-			step_core_cnt;
+				  step_cpu_cnt;
 	} else if (cred->step_mem_limit)
 		*step_mem_limit = cred->step_mem_limit;
 	else
@@ -1694,7 +1696,7 @@ extern char * timestr (const time_t *tp, char *buf, size_t n)
 #endif
 	if (!localtime_r (tp, &tmval))
 		error ("localtime_r: %m");
-	strftime (buf, n, fmt, &tmval);
+	slurm_strftime (buf, n, fmt, &tmval);
 	return (buf);
 }
 
@@ -1824,8 +1826,6 @@ _clear_expired_job_states(slurm_cred_ctx_t ctx)
 	last_scan = now;
 
 	i = list_iterator_create(ctx->job_list);
-	if (!i)
-		fatal("list_iterator_create: malloc failure");
 	while ((j = list_next(i))) {
 #if DEBUG_TIME
 		char t1[64], t2[64], t3[64];
@@ -2015,6 +2015,8 @@ _cred_state_unpack(slurm_cred_ctx_t ctx, Buf buffer)
 
 		if (now < s->expiration)
 			list_append(ctx->state_list, s);
+		else
+			_cred_state_destroy(s);
 	}
 
 	return;
@@ -2059,7 +2061,8 @@ _job_state_unpack(slurm_cred_ctx_t ctx, Buf buffer)
 			list_append(ctx->job_list, j);
 		else {
 			debug3 ("not appending expired job %u state",
-				j->jobid);
+			        j->jobid);
+			_job_state_destroy(j);
 		}
 	}
 
@@ -2120,22 +2123,6 @@ sbcast_cred_t *create_sbcast_cred(slurm_cred_ctx_t ctx,
 	}
 
 	return sbcast_cred;
-}
-
-/* Copy an sbcast credential created using create_sbcast_cred() or
- *	unpack_sbcast_cred() */
-sbcast_cred_t *copy_sbcast_cred(sbcast_cred_t *sbcast_cred)
-{
-	sbcast_cred_t *rcred = NULL;
-
-	xassert(sbcast_cred);
-	rcred->ctime      = sbcast_cred->ctime;
-	rcred->expiration = sbcast_cred->expiration;
-	rcred->jobid      = sbcast_cred->jobid;
-	rcred->nodes      = xstrdup(sbcast_cred->nodes);
-	rcred->siglen     = sbcast_cred->siglen;
-	rcred->signature  = xstrdup(sbcast_cred->signature);
-	return rcred;
 }
 
 /* Delete an sbcast credential created using create_sbcast_cred() or
@@ -2227,8 +2214,6 @@ int extract_sbcast_cred(slurm_cred_ctx_t ctx,
 		}
 
 		sbcast_iter = list_iterator_create(sbcast_cache_list);
-		if (!sbcast_iter)
-			fatal("list_iterator_create: malloc failure");
 		while ((next_cache_rec = 
 			(struct sbcast_cache *) list_next(sbcast_iter))) {
 			if ((next_cache_rec->expire == sbcast_cred->expiration) &&

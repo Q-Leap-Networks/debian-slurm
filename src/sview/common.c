@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -63,9 +63,10 @@ static int _find_node_inx (char *name)
 
 
 	for (i = 0; i < g_node_info_ptr->record_count; i++) {
-		if (!strcmp (name, g_node_info_ptr->node_array[i].name)) {
+		if (g_node_info_ptr->node_array[i].name == NULL)
+			continue;	/* Future node or other anomaly */
+		if (!strcmp(name, g_node_info_ptr->node_array[i].name))
 			return i;
-		}
 	}
 
 	return -1;
@@ -740,9 +741,6 @@ extern int build_nodes_bitmap(char *node_names, bitstr_t **bitmap)
 		g_print("...............build_nodes_bitmap............%s\n",
 			node_names);
 	my_bitmap = (bitstr_t *) bit_alloc(g_node_info_ptr->record_count);
-	if (!my_bitmap) {
-		fatal("bit_alloc malloc failure");
-	}
 	*bitmap = my_bitmap;
 
 	if (!node_names) {

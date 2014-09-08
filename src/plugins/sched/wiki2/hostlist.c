@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -169,7 +169,7 @@ static char * _task_list(struct job_record *job_ptr)
 
 	xassert(job_resrcs_ptr);
 #ifdef HAVE_BG
-	if(job_ptr->node_cnt) {
+	if (job_ptr->node_cnt) {
 		task_cnt = job_resrcs_ptr->cpu_array_value[0];
 	} else
 		task_cnt = 1;
@@ -271,7 +271,7 @@ static char * _task_list_exp(struct job_record *job_ptr)
 
 	xassert(job_resrcs_ptr);
 #ifdef HAVE_BG
-	if(job_ptr->node_cnt) {
+	if (job_ptr->node_cnt) {
 		task_cnt = job_resrcs_ptr->cpu_array_value[0];
 	} else
 		task_cnt = 1;

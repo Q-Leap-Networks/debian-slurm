@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -83,11 +83,11 @@ extern void get_job(void)
 			if (!params.commandline) {
 				mvwprintw(text_win,
 					  main_ycord, 1,
-					  "slurm_load_job: %s",
+					  "slurm_load_jobs: %s",
 					  slurm_strerror(slurm_get_errno()));
 				main_ycord++;
 			} else {
-				printf("slurm_load_job: %s\n",
+				printf("slurm_load_jobs: %s\n",
 				       slurm_strerror(slurm_get_errno()));
 			}
 		}

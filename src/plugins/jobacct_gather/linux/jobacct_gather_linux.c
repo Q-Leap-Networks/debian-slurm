@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -47,6 +47,7 @@
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_defs.h"
 #include "src/common/slurm_acct_gather_energy.h"
+#include "src/common/slurm_acct_gather_infiniband.h"
 #include "src/slurmd/common/proctrack.h"
 
 #define _DEBUG 0
@@ -96,6 +97,8 @@ typedef struct prec {	/* process record */
 	int	vsize;	/* virtual size */
 	int	act_cpufreq;	/* actual average cpu frequency */
 	int	last_cpu;	/* last cpu */
+	double	disk_read;	/* local disk read */
+	double	disk_write;	/* local disk write */
 } prec_t;
 
 static int pagesize = 0;
@@ -110,9 +113,10 @@ static int  _is_a_lwp(uint32_t pid);
 static void _get_offspring_data(List prec_list, prec_t *ancestor, pid_t pid);
 static int  _get_process_data_line(int in, prec_t *prec);
 static int _get_sys_interface_freq_line(uint32_t cpu, char *filename,
-					char *sbuf );
+					char *sbuf);
 static uint32_t _update_weighted_freq(struct jobacctinfo *jobacct,
 				      char * sbuf);
+
 
 /*
  * _get_offspring_data() -- collect memory usage data for the offspring
@@ -154,6 +158,8 @@ _get_offspring_data(List prec_list, prec_t *ancestor, pid_t pid)
 			ancestor->pages += prec->pages;
 			ancestor->rss += prec->rss;
 			ancestor->vsize += prec->vsize;
+			ancestor->disk_read += prec->disk_read;
+			ancestor->disk_write += prec->disk_write;
 		}
 	}
 	list_iterator_destroy(itr);
@@ -173,8 +179,8 @@ static uint32_t _update_weighted_freq(struct jobacctinfo *jobacct,
 		sscanf(sbuf, "%d", &thisfreq);
 
 	jobacct->current_weighted_freq =
-			jobacct->current_weighted_freq +
-			jobacct->this_sampled_cputime * thisfreq;
+		jobacct->current_weighted_freq +
+		jobacct->this_sampled_cputime * thisfreq;
 	if (jobacct->last_total_cputime) {
 		return (jobacct->current_weighted_freq /
 			jobacct->last_total_cputime);
@@ -197,7 +203,7 @@ static char * skipdot (char *str)
 }
 
 static int _get_sys_interface_freq_line(uint32_t cpu, char *filename,
-					char * sbuf )
+					char * sbuf)
 {
 	int num_read, fd;
 	FILE *sys_fp = NULL;
@@ -213,8 +219,8 @@ static int _get_sys_interface_freq_line(uint32_t cpu, char *filename,
 		 "/sys/devices/system/cpu/cpu%d/cpufreq/%s",
 		 cpu, filename);
 	debug2("_get_sys_interface_freq_line: "
-			"filename = %s ",
-			freq_file);
+	       "filename = %s ",
+	       freq_file);
 	if ((sys_fp = fopen(freq_file, "r"))!= NULL) {
 		/* frequency scaling enabled */
 		fd = fileno(sys_fp);
@@ -229,13 +235,13 @@ static int _get_sys_interface_freq_line(uint32_t cpu, char *filename,
 		/* frequency scaling not enabled */
 		if (!cpunfo_frequency){
 			snprintf(freq_file, 14,
-					"/proc/cpuinfo");
+				 "/proc/cpuinfo");
 			debug2("_get_sys_interface_freq_line: "
-				"filename = %s ",
-				freq_file);
+			       "filename = %s ",
+			       freq_file);
 			if ((sys_fp = fopen(freq_file, "r")) != NULL) {
 				while (fgets(cpunfo_line, sizeof cpunfo_line,
-					sys_fp ) != NULL) {
+					     sys_fp) != NULL) {
 					if (strstr(cpunfo_line, "cpu MHz") ||
 					    strstr(cpunfo_line, "cpu GHz")) {
 						break;
@@ -261,8 +267,8 @@ static int _is_a_lwp(uint32_t pid) {
 	uint32_t        tgid;
 	int             rc;
 
-	if ( snprintf(proc_status_file, 256,
-		      "/proc/%d/status",pid) > 256 ) {
+	if (snprintf(proc_status_file, 256,
+		     "/proc/%d/status",pid) > 256) {
 		debug("jobacct_gather_linux: unable to build proc_status "
 		      "fpath");
 		return -1;
@@ -278,18 +284,18 @@ static int _is_a_lwp(uint32_t pid) {
 		rc = fscanf(status_fp,
 			    "Name:\t%*s\n%*[ \ta-zA-Z0-9:()]\nTgid:\t%d\n",
 			    &tgid);
-	} while ( rc < 0 && errno == EINTR );
+	} while (rc < 0 && errno == EINTR);
 	fclose(status_fp);
 
 	/* unable to read /proc/[pid]/status content */
-	if ( rc != 1 ) {
+	if (rc != 1) {
 		debug3("jobacct_gather_linux: unable to read requested "
 		       "pattern in %s",proc_status_file);
 		return -1;
 	}
 
 	/* if tgid differs from pid, this is a LWP (Thread POSIX) */
-	if ( (uint32_t) tgid != (uint32_t) pid ) {
+	if ((uint32_t) tgid != (uint32_t) pid) {
 		debug3("jobacct_gather_linux: pid=%d is a lightweight process",
 		       tgid);
 		return 1;
@@ -307,7 +313,7 @@ static int _is_a_lwp(uint32_t pid) {
  * 		!=0 - data are valid
  *
  * Based upon stat2proc() from the ps command. It can handle arbitrary
- * executable file basenames for `cmd', i.e. those with embedded whitespace or 
+ * executable file basenames for `cmd', i.e. those with embedded whitespace or
  * embedded ')'s. Such names confuse %s (see scanf(3)), so the string is split
  * and %39c is used instead. (except for embedded ')' "(%[^)]c)" would work.
  */
@@ -368,6 +374,45 @@ static int _get_process_data_line(int in, prec_t *prec) {
 	return 1;
 }
 
+/* _get_process_io_data_line() - get line of data from /proc/<pid>/io
+ *
+ * IN:	in - input file descriptor
+ * OUT:	prec - the destination for the data
+ *
+ * RETVAL:	==0 - no valid data
+ * 		!=0 - data are valid
+ *
+ * /proc/<pid>/io content format is:
+ * rchar: <# of characters read>
+ * wrchar: <# of characters written>
+ *   . . .
+ */
+static int _get_process_io_data_line(int in, prec_t *prec) {
+	char sbuf[256];
+	char f1[7], f3[7];
+	int num_read, nvals;
+	uint64_t rchar, wchar;
+
+	num_read = read(in, sbuf, (sizeof(sbuf) - 1));
+	if (num_read <= 0)
+		return 0;
+	sbuf[num_read] = '\0';
+
+	nvals = sscanf(sbuf, "%s %"PRIu64" %s %"PRIu64"",
+		       f1, &rchar, f3, &wchar);
+	if (nvals < 4)
+		return 0;
+
+	if (_is_a_lwp(prec->pid) > 0)
+		return 0;
+
+	/* Copy the values that slurm records into our data structure */
+	prec->disk_read = (double)rchar / (double)1048576;
+	prec->disk_write = (double)wchar / (double)1048576;
+
+	return 1;
+}
+
 static void _destroy_prec(void *object)
 {
 	prec_t *prec = (prec_t *)object;
@@ -375,11 +420,48 @@ static void _destroy_prec(void *object)
 	return;
 }
 
+static void _handle_stats(
+	List prec_list, char *proc_stat_file, char *proc_io_file)
+{
+	FILE *stat_fp = NULL;
+	FILE *io_fp = NULL;
+	int fd, fd2;
+	prec_t *prec = NULL;
+
+	if (!(stat_fp = fopen(proc_stat_file, "r")))
+		return;  /* Assume the process went away */
+	/*
+	 * Close the file on exec() of user tasks.
+	 *
+	 * NOTE: If we fork() slurmstepd after the
+	 * fopen() above and before the fcntl() below,
+	 * then the user task may have this extra file
+	 * open, which can cause problems for
+	 * checkpoint/restart, but this should be a very rare
+	 * problem in practice.
+	 */
+	fd = fileno(stat_fp);
+	fcntl(fd, F_SETFD, FD_CLOEXEC);
+
+	prec = xmalloc(sizeof(prec_t));
+	if (_get_process_data_line(fd, prec)) {
+		list_append(prec_list, prec);
+		if ((io_fp = fopen(proc_io_file, "r"))) {
+			fd2 = fileno(io_fp);
+			fcntl(fd2, F_SETFD, FD_CLOEXEC);
+			_get_process_io_data_line(fd2, prec);
+			fclose(io_fp);
+		}
+	} else
+		xfree(prec);
+	fclose(stat_fp);
+
+}
 /*
  * init() is called when the plugin is loaded, before any other functions
  * are called.  Put global initialization here.
  */
-extern int init ( void )
+extern int init (void)
 {
 	pagesize = getpagesize()/1024;
 
@@ -388,7 +470,7 @@ extern int init ( void )
 	return SLURM_SUCCESS;
 }
 
-extern int fini ( void )
+extern int fini (void)
 {
 	/* just to make sure it closes things up since we call it
 	 * from here */
@@ -419,14 +501,14 @@ extern void jobacct_gather_p_poll_data(
 	static	int	slash_proc_open = 0;
 
 	struct	dirent *slash_proc_entry;
-	char		*iptr = NULL, *optr = NULL;
-	FILE		*stat_fp = NULL;
+	char		*iptr = NULL, *optr = NULL, *optr2 = NULL;
 	char		proc_stat_file[256];	/* Allow ~20x extra length */
+	char		proc_io_file[256];	/* Allow ~20x extra length */
 	List prec_list = NULL;
 	pid_t *pids = NULL;
 	int npids = 0;
 	uint32_t total_job_mem = 0, total_job_vsize = 0;
-	int		i, fd;
+	int		i;
 	ListIterator itr;
 	ListIterator itr2;
 	prec_t *prec = NULL;
@@ -435,18 +517,30 @@ extern void jobacct_gather_p_poll_data(
 	long		hertz;
 	char		sbuf[72];
 	int energy_counted = 0;
+	static int first = 1;
+	static int energy_profile = ENERGY_DATA_JOULES_TASK;
 
 	if (!pgid_plugin && (cont_id == (uint64_t)NO_VAL)) {
 		debug("cont_id hasn't been set yet not running poll");
 		return;
 	}
 
-	if(processing) {
+	if (processing) {
 		debug("already running, returning");
 		return;
 	}
 	processing = 1;
 	prec_list = list_create(_destroy_prec);
+	if (first) {
+		uint32_t profile_opt;
+		acct_gather_profile_g_get(ACCT_GATHER_PROFILE_RUNNING,
+					  &profile_opt);
+		/* If we are profiling energy it will be checked at a
+		   different rate, so just grab the last one.
+		*/
+		if (profile_opt & ACCT_GATHER_PROFILE_ENERGY)
+			energy_profile = ENERGY_DATA_STRUCT;
+	}
 
 	hertz = sysconf(_SC_CLK_TCK);
 	if (hertz < 1) {
@@ -462,7 +556,7 @@ extern void jobacct_gather_p_poll_data(
 			itr = list_iterator_create(task_list);
 			if ((jobacct = list_next(itr))) {
 				acct_gather_energy_g_get_data(
-					ENERGY_DATA_JOULES_TASK,
+					energy_profile,
 					&jobacct->energy);
 				debug2("getjoules_task energy = %u",
 				       jobacct->energy.consumed_energy);
@@ -473,30 +567,11 @@ extern void jobacct_gather_p_poll_data(
 			goto finished;
 		}
 		for (i = 0; i < npids; i++) {
-			snprintf(proc_stat_file, 256,
-				 "/proc/%d/stat", pids[i]);
-			if ((stat_fp = fopen(proc_stat_file, "r"))==NULL)
-				continue;  /* Assume the process went away */
-			/*
-			 * Close the file on exec() of user tasks.
-			 *
-			 * NOTE: If we fork() slurmstepd after the
-			 * fopen() above and before the fcntl() below,
-			 * then the user task may have this extra file
-			 * open, which can cause problems for
-			 * checkpoint/restart, but this should be a very rare
-			 * problem in practice.
-			 */
-			fd = fileno(stat_fp);
-			fcntl(fd, F_SETFD, FD_CLOEXEC);
-
-			prec = xmalloc(sizeof(prec_t));
-			if (_get_process_data_line(fd, prec))
-				list_append(prec_list, prec);
-			else
-				xfree(prec);
-			fclose(stat_fp);
+			snprintf(proc_stat_file, 256, "/proc/%d/stat", pids[i]);
+			snprintf(proc_io_file, 256, "/proc/%d/io", pids[i]);
+			_handle_stats(prec_list, proc_stat_file, proc_io_file);
 		}
+		xfree(pids);
 	} else {
 		slurm_mutex_lock(&reading_mutex);
 
@@ -512,6 +587,7 @@ extern void jobacct_gather_p_poll_data(
 			slash_proc_open=1;
 		}
 		strcpy(proc_stat_file, "/proc/");
+		strcpy(proc_io_file, "/proc/");
 
 		while ((slash_proc_entry = readdir(slash_proc))) {
 
@@ -519,7 +595,8 @@ extern void jobacct_gather_p_poll_data(
 			 * strcat(statFileName, slash_proc_entry->d_name);
 			 * strcat(statFileName, "/stat");
 			 * while checking for a numeric filename (which really
-			 * should be a pid).
+			 * should be a pid). Then do the same for the
+			 * /proc/<pid>/io file name.
 			 */
 			optr = proc_stat_file + sizeof("/proc");
 			iptr = slash_proc_entry->d_name;
@@ -540,28 +617,26 @@ extern void jobacct_gather_p_poll_data(
 				*optr++ = *iptr++;
 			} while (*iptr);
 			*optr = 0;
+			optr2 = proc_io_file + sizeof("/proc");
+			iptr = slash_proc_entry->d_name;
+			i = 0;
+			do {
+				if ((*iptr < '0') ||
+				    ((*optr2++ = *iptr++) > '9')) {
+					i = -1;
+					break;
+				}
+			} while (*iptr);
+			if (i == -1)
+				continue;
+			iptr = (char*)"/io";
 
-			if ((stat_fp = fopen(proc_stat_file,"r"))==NULL)
-				continue;  /* Assume the process went away */
-			/*
-			 * Close the file on exec() of user tasks.
-			 *
-			 * NOTE: If we fork() slurmstepd after the
-			 * fopen() above and before the fcntl() below,
-			 * then the user task may have this extra file
-			 * open, which can cause problems for
-			 * checkpoint/restart, but this should be a very rare
-			 * problem in practice.
-			 */
-			fd = fileno(stat_fp);
-			fcntl(fd, F_SETFD, FD_CLOEXEC);
+			do {
+				*optr2++ = *iptr++;
+			} while (*iptr);
+			*optr2 = 0;
 
-			prec = xmalloc(sizeof(prec_t));
-			if (_get_process_data_line(fd, prec))
-				list_append(prec_list, prec);
-			else
-				xfree(prec);
-			fclose(stat_fp);
+			_handle_stats(prec_list, proc_stat_file, proc_io_file);
 		}
 		slurm_mutex_unlock(&reading_mutex);
 
@@ -596,6 +671,14 @@ extern void jobacct_gather_p_poll_data(
 				jobacct->max_pages =
 					MAX(jobacct->max_pages, prec->pages);
 				jobacct->tot_pages = prec->pages;
+				jobacct->max_disk_read = MAX(
+					jobacct->max_disk_read,
+					prec->disk_read);
+				jobacct->tot_disk_read = prec->disk_read;
+				jobacct->max_disk_write = MAX(
+					jobacct->max_disk_write,
+					prec->disk_write);
+				jobacct->tot_disk_write = prec->disk_write;
 				jobacct->min_cpu =
 					MAX(jobacct->min_cpu, cpu_calc);
 				jobacct->last_total_cputime = jobacct->tot_cpu;
@@ -612,24 +695,29 @@ extern void jobacct_gather_p_poll_data(
 					"cpuinfo_cur_freq", sbuf);
 				jobacct->act_cpufreq =
 					_update_weighted_freq(jobacct, sbuf);
-				debug2("Task average frequency = %u",
-				       jobacct->act_cpufreq);
-				debug2(" pid %d mem size %u %u time %u(%u+%u)",
+				debug2("Task average frequency = %u "
+				       "pid %d mem size %u %u time %u(%u+%u)",
+				       jobacct->act_cpufreq,
 				       jobacct->pid, jobacct->max_rss,
 				       jobacct->max_vsize, jobacct->tot_cpu,
 				       prec->usec, prec->ssec);
 				/* get energy consumption
   				 * only once is enough since we
  				 * report per node energy consumption */
-				debug2("energycounted= %d", energy_counted);
+				debug2("energycounted = %d", energy_counted);
 				if (energy_counted == 0) {
 					acct_gather_energy_g_get_data(
-						ENERGY_DATA_JOULES_TASK,
+						energy_profile,
 						&jobacct->energy);
 					debug2("getjoules_task energy = %u",
 					       jobacct->energy.consumed_energy);
 					energy_counted = 1;
 				}
+				/* We only profile on after the first poll. */
+				if (!first)
+					acct_gather_profile_g_add_sample_data(
+						ACCT_GATHER_PROFILE_TASK,
+						jobacct);
 				break;
 			}
 		}
@@ -642,6 +730,7 @@ extern void jobacct_gather_p_poll_data(
 finished:
 	list_destroy(prec_list);
 	processing = 0;
+	first = 0;
 	return;
 }
 

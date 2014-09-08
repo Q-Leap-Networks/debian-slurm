@@ -1,8 +1,387 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in Slurm 2.6.4
+========================
+ -- Fixed sh5util to print its usage.
+ -- Corrected commit f9a3c7e4e8ec.
+ -- Honor ntasks-per-node option with exclusive node allocations.
+ -- sched/backfill - Prevent invalid memory reference if bf_continue option is
+    configured and slurm is reconfigured during one of the sleep cycles or if
+    there are any changes to the partition configuration or if the normal
+    scheduler runs and starts a job that the backfill scheduler is actively
+    working on.
+ -- Update man pages information about acct-freq and JobAcctGatherFrequency
+    to reflect only the latest supported format.
+ -- Minor document update to include note about PrivateData=Usage for the
+    slurm.conf when using the DBD.
+ -- Expand information reported with DebugFlags=backfill.
+ -- Initiate jobs pending to run in a reservation as soon as the reservation
+    becomes active.
+ -- Purged expired reservation even if it has pending jobs.
+ -- Corrections to calculation of a pending job's expected start time.
+ -- Remove some vestigial logic treating job priority of 1 as a special case.
+ -- Memory freeing up to avoid minor memory leaks at close of daemons
+ -- Updated documentation to give correct units being displayed.
+ -- Report AccountingStorageBackupHost with "scontrol show config".
+ -- init scripts ignore quotes around Pid file name specifications.
+ -- Fixed typo about command case in quickstart.html.
+ -- task/cgroup - handle new cpuset files, similar to commit c4223940.
+ -- Replace the tempname() function call with mkstemp().
+ -- Fix for --cpu_bind=map_cpu/mask_cpu/map_ldom/mask_ldom plus
+    --mem_bind=map_mem/mask_mem options, broken in 2.6.2.
+ -- Restore default behavior of allocating cores to jobs on a cyclic basis
+    across the sockets unless SelectTypeParameters=CR_CORE_DEFAULT_DIST_BLOCK
+    or user specifies other distribution options.
+ -- Enforce JobRequeue configuration parameter on node failure. Previously
+    always requeued the job.
+ -- acct_gather_energy/ipmi - Add delay before retry on read error.
+ -- select/cons_res with GRES and multiple threads per core, fix possible
+    infinite loop.
+ -- proctrack/cgroup - Add cgroup create retry logic in case one step is
+    starting at the same time as another step is ending and the logic to create
+    and delete cgroups overlaps.
+ -- Improve setting of job wait "Reason" field.
+ -- Correct sbatch documentation and job_submit/pbs plugin "%j" is job ID,
+    not "%J" (which is job_id.step_id).
+ -- Improvements to sinfo performance, especially for large numbers of
+    partitions.
+ -- SlurmdDebug - Permit changes to slurmd debug level with "scontrol reconfig"
+ -- smap - Avoid invalid memory reference with hidden nodes.
+ -- Fix sacctmgr modify qos set preempt+/-=.
+ -- BLUEGENE - fix issue where node count wasn't set up correctly when srun
+    preforms the allocation, regression in 2.6.3.
+ -- Add support for dependencies of job array elements (e.g. 
+    "sbatch --depend=afterok:123_4 ...") or all elements of a job array (e.g.
+    "sbatch --depend=afterok:123 ...").
+ -- Add support for new options in sbatch qsub wrapper:
+    -W block=true	(wait for job completion)
+    Clear PBS_NODEFILE environment variable
+ -- Fixed the MaxSubmitJobsPerUser limit in QOS which limited submissions
+    a job too early.
+ -- sched/wiki, sched/wiki2 - Fix to work with change logic introduced in
+    version 2.6.3 preventing Maui/Moab from starting jobs.
+ -- Updated the QOS limits documentation and man page.
+
+* Changes in Slurm 2.6.3
+========================
+ -- Add support for some new #PBS options in sbatch scripts and qsub wrapper:
+    -l accelerator=true|false	(GPU use)
+    -l mpiprocs=#	(processors per node)
+    -l naccelerators=#	(GPU count)
+    -l select=#		(node count)
+    -l ncpus=#		(task count)
+    -v key=value	(environment variable)
+    -W depend=opts	(job dependencies, including "on" and "before" options)
+    -W umask=#		(set job's umask)
+ -- Added qalter and qrerun commands to torque package.
+ -- Corrections to qstat logic: job CPU count and partition time format.
+ -- Add job_submit/pbs plugin to translate PBS job dependency options to the
+    extend possible (no support for PBS "before" options) and set some PBS
+    environment variables.
+ -- Add spank/pbs plugin to set a bunch of PBS environment variables.
+ -- Backported sh5util from master to 2.6 as there are some important
+    bugfixes and the new item extraction feature.
+ -- select/cons_res - Correct MacCPUsPerNode partition constraint for CR_Socket.
+ -- scontrol - for setdebugflags command, avoid parsing "-flagname" as an
+    scontrol command line option.
+ -- Fix issue with step accounting if a job is requeued.
+ -- Close file descriptors on exec of prolog, epilog, etc.
+ -- Fix issue when a user has held a job and then sets the begin time
+    into the future.
+ -- Scontrol - Enable changing a job's stdout file.
+ -- Fix issues where memory or node count of a srun job is altered while the
+    srun is pending.  The step creation would use the old values and possibly
+    hang srun since the step wouldn't be able to be created in the modified
+    allocation.
+ -- Add support for new SchedulerParameters value of "bf_max_job_part", the
+    maximum depth the backfill scheduler should go in any single partition.
+ -- acct_gather/infiniband plugin - Correct packets_in/out values.
+ -- BLUEGENE - Don't ignore a conn-type request from the user.
+ -- BGQ - Force a request on a Q for a MESH to be a TORUS in a dimension that
+    can only be a TORUS (1).
+ -- Change max message length from 100MB to 1GB before generating "Insane
+    message length" error.
+ -- sched/backfill - Prevent possible memory corruption due to use of
+    bf_continue option and long running scheduling cycle (pending jobs could
+    have been cancelled and purged).
+ -- CRAY - fix AcceleratorAllocation depth correctly for basil 1.3
+ -- Created the environment variable SLURM_JOB_NUM_NODES for srun jobs and
+    updated the srun man page.
+ -- BLUEGENE/CRAY - Don't set env variables that pertain to a node when Slurm
+    isn't doing the launching.
+ -- gres/gpu and gres/mic - Do not treat the existence of an empty gres.conf
+    file as a fatal error.
+ -- Fixed for if hours are specified as 0 the time days-0:min specification
+    is not parsed correctly.
+ -- switch/nrt - Fix for memory leak.
+ -- Subtract the PMII_COMMANDLEN_SIZE in contribs/pmi2/pmi2_api.c to prevent
+    certain implementation of snprintf() to segfault.
+
+* Changes in Slurm 2.6.2
+========================
+ -- Fix issue with reconfig and GrpCPURunMins
+ -- Fix of wrong node/job state problem after reconfig
+ -- Allow users who are coordinators update their own limits in the accounts
+    they are coordinators over.
+ -- BackupController - Make sure we have a connection to the DBD first thing
+    to avoid it thinking we don't have a cluster name.
+ -- Correct value of min_nodes returned by loading job information to consider
+    the job's task count and maximum CPUs per node.
+ -- If running jobacct_gather/none fix issue on unpacking step completion.
+ -- Reservation with CoreCnt: Avoid possible invalid memory reference.
+ -- sjstat - Add man page when generating rpms.
+ -- Make sure GrpCPURunMins is added when creating a user, account or QOS with
+    sacctmgr.
+ -- Fix for invalid memory reference due to multiple free calls caused by
+    job arrays submitted to multiple partitions.
+ -- Enforce --ntasks-per-socket=1 job option when allocating by socket.
+ -- Validate permissions of key directories at slurmctld startup. Report
+    anything that is world writable.
+ -- Improve GRES support for CPU topology. Previous logic would pick CPUs then
+    reject jobs that can not match GRES to the allocated CPUs. New logic first
+    filters out CPUs that can not use the GRES, next picks CPUs for the job,
+    and finally picks the GRES that best match those CPUs.
+ -- Switch/nrt - Prevent invalid memory reference when allocating single adapter
+    per node of specific adapter type
+ -- CRAY - Make Slurm work with CLE 5.1.1
+ -- Fix segfault if submitting to multiple partitions and holding the job.
+ -- Use MAXPATHLEN instead of the hardcoded value 1024 for maximum file path
+    lengths.
+ -- If OverTimeLimit is defined do not declare failed those jobs that ended
+    in the OverTimeLimit interval.
+
+* Changes in Slurm 2.6.1
+========================
+ -- slurmdbd - Allow job derived ec and comments to be modified by non-root
+    users.
+ -- Fix issue with job name being truncated to 24 chars when sending a mail
+    message.
+ -- Fix minor issues with spec file, missing files and including files
+    erroneously on a bluegene system.
+ -- sacct - fix --name and --partition options when using
+    accounting_storage/filetxt.
+ -- squeue - Remove extra whitespace of default printout.
+ -- BGQ - added head ppcfloor as an include dir when building.
+ -- BGQ - Better debug messages in runjob_mux plugin.
+ -- PMI2 Updated the Makefile.am to build a versioned library.
+ -- CRAY - Fix srun --mem_bind=local option with launch/aprun.
+ -- PMI2 Corrected buffer size computation in the pmi2_api.c module.
+ -- GRES accounting data wrong in database: gres_alloc, gres_req, and gres_used
+    fields were empty if the job was not started immediately.
+ -- Fix sbatch and srun task count logic when --ntasks-per-node specified,
+    but no explicit task count.
+ -- Corrected the hdf5 profile user guide and the acct_gather.conf
+    documentation.
+ -- IPMI - Fix Math bug getting new wattage.
+ -- Corrected the AcctGatherProfileType documentation in slurm.conf
+ -- Corrected the sh5util program to print the header in the csv file
+    only once, set the debug messages at debug() level, make the argument
+    check case insensitive and avoid printing duplicate \n.
+ -- If cannot collect energy values send message to the controller
+    to drain the node and log error slurmd log file.
+ -- Handle complete removal of CPURunMins time at the end of the job instead
+    of at multifactor poll.
+ -- sview - Add missing debug_flag options.
+ -- PGSQL - Notes about Postgres functionality being removed in the next
+    version of Slurm.
+ -- MYSQL - fix issue when rolling up usage and events happened when a cluster
+    was down (slurmctld not running) during that time period.
+ -- sched/wiki2 - Insure that Moab gets current CPU load information.
+ -- Prevent infinite loop in parsing configuration if including file containing
+    one blank line.
+ -- Fix pack and unpack between 2.6 and 2.5.
+ -- Fix job state recovery logic in which a job's accounting frequency was
+    not set. This would result in a value of 65534 seconds being used (the
+    equivalent of NO_VAL in uint16_t), which could result in the job being
+    requeued or aborted.
+ -- Validate a job's accounting frequency at submission time rather than
+    waiting for it's initiation to possibly fail.
+ -- Fix CPURunMins if a job is requeued from a failed launch.
+ -- Fix in accounting_storage/filetxt to correct start times which sometimes
+    could end up before the job started.
+ -- Fix issue with potentially referencing past an array in parse_time()
+ -- CRAY - fix issue with accelerators on a cray when parsing BASIL 1.3 XML.
+ -- Fix issue with a 2.5 slurmstepd locking up when talking to a 2.6 slurmd.
+ -- Add argument to priority plugin's priority_p_reconfig function to note
+    when the association and QOS used_cpu_run_secs field has been reset.
+
+* Changes in Slurm 2.6.0
+========================
+ -- Fix it so bluegene and serial systems don't get warnings over new NODEDATA
+    enum.
+ -- When a job is aborted send a message for any tasks that have completed.
+ -- Correction to memory per CPU calculation on system with threads and
+    allocating cores or sockets.
+ -- Requeue batch job if it's node reboots (used to abort the job).
+ -- Enlarge maximum size of srun's hostlist file.
+ -- IPMI - Fix first poll to get correct consumed_energy for a step.
+ -- Correction to job state recovery logic that could result in assert failure.
+ -- Record partial step accounting record if allocated nodes fail abnormally.
+ -- Accounting - fix issue where PrivateData=jobs or users could potentially
+    show information to users that had no associations on the system.
+ -- Make PrivateData in slurmdbd.conf case insensitive.
+ -- sacct/sstat - Add format option ConsumedEnergyRaw to print full energy
+    values.
+
+* Changes in Slurm 2.6.0rc2
+===========================
+ -- HDF5 - Fix issue with Ubuntu where HDF5 development headers are
+    overwritten by the parallel versions thus making it so we need handle
+    both cases.
+ -- ACCT_GATHER - handle suspending correctly for polling threads.
+ -- Make SLURM_DISTRIBUTION env var hold both types of distribution if
+    specified.
+ -- Remove hardcoded /usr/local from slurm.spec.
+ -- Modify slurmctld locking to improve performance under heavy load with
+    very large numbers of batch job submissions or job cancellations.
+ -- sstat - Fix issue where if -j wasn't given allow last argument to be checked
+    for as the job/step id.
+ -- IPMI - fix adjustment on poll when using EnergyIPMICalcAdjustment.
+
+* Changes in Slurm 2.6.0rc1
+===========================
+ -- Added helper script for launching symmetric and MIC-only MPI tasks within
+    SLURM (in contribs/mic/mpirun-mic).
+ -- Change maximum delay for state save from 2 secs to 5 secs. Make timeout
+    configurable at build time by defining SAVE_MAX_WAIT.
+ -- Modify slurmctld data structure locking to interleave read and write
+    locks rather than always favor write locks over read locks.
+ -- Added sacct format option of "ALL" to print all fields.
+ -- Deprecate the SchedulerParameters value of "interval" use "bf_interval"
+    instead as documented.
+ -- Add acct_gather_profile/hdf5 to profile jobs with hdf5
+ -- Added MaxCPUsPerNode partition configuration parameter. This can be
+    especially useful to schedule systems with GPUs.
+ -- Permit "scontrol reboot_node" for nodes in MAINT reservation.
+ -- Added "PriorityFlags" value of "SMALL_RELATIVE_TO_TIME". If set, the job's
+    size component will be based upon not the job size alone, but the job's
+    size divided by it's time limit.
+ -- Added sbatch option "--ignore-pbs" to ignore "#PBS" options in the batch
+    script.
+ -- Rename slurm_step_ctx_params_t field from "mem_per_cpu" to "pn_min_memory".
+    Job step now accepts memory specification in either per-cpu or per-node
+    basis.
+ -- Add ability to specify host repitition count in the srun hostfile (e.g.
+    "host1*2" is equivalent to "host1,host1").
+
+* Changes in Slurm 2.6.0pre3
+============================
+ -- Add milliseconds to default log message header (both RFC 5424 and ISO 8601
+    time formats). Disable milliseconds logging using the configure
+    parameter "--disable-log-time-msec". Default time format changes to
+    ISO 8601 (without time zone information). Specify "--enable-rfc5424time"
+    to restore the time zone information.
+ -- Add username (%u) to the filename pattern in the batch script.
+ -- Added options for front end nodes of AllowGroups, AllowUsers, DenyGroups,
+    and DenyUsers.
+ -- Fix sched/backfill logic to initiate jobs with maximum time limit over the
+    partition limit, but the minimum time limit permits it to start.
+ -- gres/gpu - Fix for gres.conf file with multiple files on a single line
+    using a slurm expression (e.g. "File=/dev/nvidia[0-1]").
+ -- Replaced ipmi.conf with generic acct_gather.conf file for all acct_gather
+    plugins.  For those doing development to use this follow the model set
+    forth in the acct_gather_energy_ipmi plugin.
+ -- Added more options to update a step's information
+ -- Add DebugFlags=ThreadID which will print the thread id of the calling
+    thread.
+ -- CRAY - Allocate whole node (CPUs) in reservation despite what the
+    user requests.  We have found any srun/aprun afterwards will work on a
+    subset of resources.
+
+* Changes in Slurm 2.6.0pre2
+============================
+ -- Do not purge inactive interactive jobs that lack a port to ping (added
+    for MR+ operation).
+ -- Advanced reservations with hostname and core counts now supports asymetric
+    reservations (e.g. specific different core count for each node).
+ -- Added slurmctld/dynalloc plugin for MapReduce+ support.
+ -- Added "DynAllocPort" configuration parameter.
+ -- Added partition paramter of SelectTypeParameters to override system-wide
+    value.
+ -- Added cr_type to partition_info data structure.
+ -- Added allocated memory to node information available (within the existing
+    select_nodeinfo field of the node_info_t data structure). Added Allocated
+    Memory to node information displayed by sview and scontrol commands.
+ -- Make sched/backfill the default scheduling plugin rather than sched/builtin
+    (FIFO).
+ -- Added support for a job having different priorities in different partitions.
+ -- Added new SchedulerParameters configuration parameter of "bf_continue"
+    which permits the backfill scheduler to continue considering jobs for
+    backfill scheduling after yielding locks even if new jobs have been
+    submitted. This can result in lower priority jobs from being backfill
+    scheduled instead of newly arrived higher priority jobs, but will permit
+    more queued jobs to be considered for backfill scheduling.
+ -- Added support to purge reservation records from accounting.
+ -- Cray - Add support for Basil 1.3
+
+* Changes in SLURM 2.6.0pre1
+============================
+ -- Add "state" field to job step information reported by scontrol.
+ -- Notify srun to retry step creation upon completion of other job steps
+    rather than polling. This results in much faster throughput for job step
+    execution with --exclusive option.
+ -- Added "ResvEpilog" and "ResvProlog" configuration parameters to execute a
+    program at the beginning and end of each reservation.
+ -- Added "slurm_load_job_user" function. This is a variation of
+    "slurm_load_jobs", but accepts a user ID argument, potentially resulting
+    in substantial performance improvement for "squeue --user=ID"
+ -- Added "slurm_load_node_single" function. This is a variation of
+    "slurm_load_nodes", but accepts a node name argument, potentially resulting
+    in substantial performance improvement for "sinfo --nodes=NAME".
+ -- Added "HealthCheckNodeState" configuration parameter identify node states
+    on which HealthCheckProgram should be executed.
+ -- Remove sacct --dump --formatted-dump options which were deprecated in
+    2.5.
+ -- Added support for job arrays (phase 1 of effort). See "man sbatch" option
+    -a/--array for details.
+ -- Add new AccountStorageEnforce options of 'nojobs' and 'nosteps' which will
+    allow the use of accounting features like associations, qos and limits but
+    not keep track of jobs or steps in accounting.
+ -- Cray - Add new cray.conf parameter of "AlpsEngine" to specify the
+    communication protocol to be used for ALPS/BASIL.
+ -- select/cons_res plugin: Correction to CPU allocation count logic in for
+    cores without hyperthreading.
+ -- Added new SelectTypeParameter value of "CR_ALLOCATE_FULL_SOCKET".
+ -- Added PriorityFlags value of "TICKET_BASED" and merged priority/multifactor2
+    plugin into priority/multifactor plugin.
+ -- Add "KeepAliveTime" configuration parameter controlling how long sockets
+    used for srun/slurmstepd communications are kept alive after disconnect.
+ -- Added SLURM_SUBMIT_HOST to salloc, sbatch and srun job environment.
+ -- Added SLURM_ARRAY_TASK_ID to environment of job array.
+ -- Added squeue --array/-r option to optimize output for job arrays.
+ -- Added "SlurmctldPlugstack" configuration parameter for generic stack of
+    slurmctld daemon plugins.
+ -- Removed contribs/arrayrun tool. Use native support for job arrays.
+ -- Modify default installation locations for RPMs to match "make install":
+    _prefix /usr/local
+    _slurm_sysconfdir %{_prefix}/etc/slurm
+    _mandir %{_prefix}/share/man
+    _infodir %{_prefix}/share/info
+ -- Add acct_gather_energy/ipmi which works off freeipmi for energy gathering
+
 * Changes in Slurm 2.5.8
 ========================
+ -- Fix for slurmctld segfault on NULL front-end reason field.
+ -- Avoid gres step allocation errors when a job shrinks in size due to either
+    down nodes or explicit resizing. Generated slurmctld errors of this type:
+    "step_test ... gres_bit_alloc is NULL"
+ -- Fix bug that would leak memory and over-write the AllowGroups field if on
+    "scontrol reconfig" when AllowNodes is manually changed using scontrol.
+ -- Get html/man files to install in correct places with rpms.
+ -- Remove --program-prefix from spec file since it appears to be added by
+    default and appeared to break other things.
+ -- Updated the automake min version in autogen.sh to be correct.
+ -- Select/cons_res - Correct total CPU count allocated to a job with
+    --exclusive and --cpus-per-task options
+ -- switch/nrt - Don't allocate network resources unless job step has 2+ nodes.
+ -- select/cons_res - Avoid extraneous "oversubscribe" error messages.
+ -- Reorder get config logic to avoid deadlock.
+ -- Enforce QOS MaxCPUsMin limit when job submission contains no user-specified
+    time limit.
+ -- EpilogSlurmctld pthread is passed required arguments rather than a pointer
+    to the job record, which under some conditions could be purged and result
+    in an invalid memory reference.
 
 * Changes in Slurm 2.5.7
 ========================
@@ -22,7 +401,7 @@ documents those changes that are of interest to users and admins.
  -- POE - Fix logic binding tasks to CPUs.
  -- sview - Fix race condition where new information could of slipped past
     the node tab and we didn't notice.
- -- Accounting - Fix an invalid memory read when slurmctld sends data about 
+ -- Accounting - Fix an invalid memory read when slurmctld sends data about
     start job to slurmdbd.
  -- If a prolog or epilog failure occurs, drain the node rather than setting it
     down and killing all of its jobs.
@@ -209,6 +588,7 @@ documents those changes that are of interest to users and admins.
     since left the system.
  -- Fix race condition in job dependency logic which can result in invalid
     memory reference.
+
 
 * Changes in SLURM 2.5.2
 ========================

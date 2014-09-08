@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -257,10 +257,6 @@ extern void get_bg_part(void)
 		list_flush(block_list);
 	} else {
 		block_list = list_create(_block_list_del);
-		if (!block_list) {
-			fprintf(stderr, "malloc error\n");
-			return;
-		}
 	}
 	if (!params.commandline)
 		if ((new_bg_ptr->record_count - text_line_cnt)
@@ -762,7 +758,6 @@ static int _print_text_part(partition_info_t *part_ptr,
 						      sizeof(time_buf));
 				}
 
-				width = strlen(time_buf);
 				printf("%9.9s ", time_buf);
 			}
 		}

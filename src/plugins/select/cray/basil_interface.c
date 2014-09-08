@@ -361,11 +361,7 @@ extern int basil_inventory(void)
 		struct job_record *job_ptr;
 		uint32_t resv_id;
 
-		if (job_iter == NULL)
-			fatal("list_iterator_create: malloc failure");
-
 		while ((job_ptr = (struct job_record *)list_next(job_iter))) {
-
 			if (_get_select_jobinfo(job_ptr->select_jobinfo->data,
 						SELECT_JOBDATA_RESV_ID,
 						&resv_id) == SLURM_SUCCESS
@@ -715,12 +711,15 @@ extern int do_basil_reserve(struct job_record *job_ptr)
 	/* mppmem must be at least 1 for gang scheduling to work so
 	 * if you are wondering why gang scheduling isn't working you
 	 * should check your slurm.conf for DefMemPerNode */
-	uint32_t mppdepth, mppnppn, mppwidth = 0, mppmem = 0, node_min_mem = 0;
-	uint32_t resv_id;
+	uint32_t mppdepth, mppnppn = INFINITE, mppwidth = 0,
+		mppmem = 0, node_min_mem = 0;
+	uint32_t resv_id, largest_cpus = 0, min_memory = INFINITE;
 	int i, first_bit, last_bit;
 	long rc;
 	char *user, batch_id[16];
 	struct basil_accel_param* bap;
+	uint16_t nppcu = 0;
+//	uint16_t hwthreads_per_core = 1;
 
 	if (!job_ptr->job_resrcs || job_ptr->job_resrcs->nhosts == 0)
 		return SLURM_SUCCESS;
@@ -741,16 +740,8 @@ extern int do_basil_reserve(struct job_record *job_ptr)
 	if (first_bit == -1 || last_bit == -1)
 		return SLURM_SUCCESS;		/* no nodes allocated */
 
-	mppdepth = MAX(1, job_ptr->details->cpus_per_task);
-	if (job_ptr->details->ntasks_per_node) {
-		mppnppn  = job_ptr->details->ntasks_per_node;
-	} else if (job_ptr->details->num_tasks) {
-		mppnppn = (job_ptr->details->num_tasks +
-			   job_ptr->job_resrcs->nhosts - 1) /
-			  job_ptr->job_resrcs->nhosts;
-	} else {
-		mppnppn = 1;
-	}
+	/* always be 1 */
+	mppdepth = 1;
 
 	/* mppmem */
 	if (job_ptr->details->pn_min_memory & MEM_PER_CPU) {
@@ -761,9 +752,25 @@ extern int do_basil_reserve(struct job_record *job_ptr)
 		node_min_mem = job_ptr->details->pn_min_memory;
 	}
 
+	if (slurmctld_conf.select_type_param & CR_ONE_TASK_PER_CORE) {
+		if (job_ptr->details && job_ptr->details->mc_ptr &&
+		    (job_ptr->details->mc_ptr->ntasks_per_core == 0xffff)) {
+			nppcu = 1;
+			debug("No explicit ntasks-per-core has been set, "
+			      "using nppcu=1.");
+		}
+	}
+
+	if (job_ptr->details && job_ptr->details->mc_ptr &&
+	    (job_ptr->details->mc_ptr->ntasks_per_core != 0xffff)) {
+		nppcu = job_ptr->details->mc_ptr->ntasks_per_core;
+	}
+
 	for (i = first_bit; i <= last_bit; i++) {
 		struct node_record *node_ptr = node_record_table_ptr + i;
+		uint32_t node_cpus, node_mem;
 		uint32_t basil_node_id;
+		/* uint32_t node_tasks; */
 
 		if (!bit_test(job_ptr->job_resrcs->node_bitmap, i))
 			continue;
@@ -782,55 +789,54 @@ extern int do_basil_reserve(struct job_record *job_ptr)
 			return SLURM_ERROR;
 		}
 
+		if (slurmctld_conf.fast_schedule) {
+			node_cpus = node_ptr->config_ptr->cpus;
+			node_mem  = node_ptr->config_ptr->real_memory;
+		} else {
+			node_cpus = node_ptr->cpus;
+			node_mem  = node_ptr->real_memory;
+		}
+
+		/* On a reservation we can only run one job per node
+		   on a cray so allocate all the cpuss on each node
+		   reguardless of the request.
+		*/
+		mppwidth += node_cpus;
+
+		/* We want mppnppn to be the smallest number of cpus
+		   per node and allocate that on each of the nodes
+		   reguardless of the request.
+		*/
+		mppnppn = MIN(mppnppn, node_cpus);
+
 		if (node_min_mem) {
-			uint32_t node_cpus, node_mem;
-			int32_t tmp_mppmem;
-
-			if (slurmctld_conf.fast_schedule) {
-				node_cpus = node_ptr->config_ptr->cpus;
-				node_mem  = node_ptr->config_ptr->real_memory;
-			} else {
-				node_cpus = node_ptr->cpus;
-				node_mem  = node_ptr->real_memory;
-			}
-
-			/* If the job has requested memory use it (if
-			   lesser) for calculations.
+			/* Keep track of the largest cpu count and Min
+			   memory if we need to split up the memory
+			   per cpu.
 			*/
-			tmp_mppmem = MIN(node_mem, node_min_mem);
-
-			/*
-			 * ALPS 'Processing Elements per Node' value (aprun -N),
-			 * which in slurm is --ntasks-per-node and 'mppnppn' in
-			 * PBS: if --ntasks is specified, default to the number
-			 * of cores per node (also the default for 'aprun -N').
-			 * On a heterogeneous system the nodes aren't
-			 * always the same so keep track of the lowest
-			 * mppmem and use it as the level for all
-			 * nodes (mppmem is 0 when coming in).
-			 */
-			tmp_mppmem /= mppnppn ? mppnppn : node_cpus;
-
-			/* Minimum memory per processing element should be 1,
-			 * since 0 means give all the memory to the job. */
-			if (tmp_mppmem <= 0)
-				tmp_mppmem = 1;
-
-			if (mppmem)
-				mppmem = MIN(mppmem, tmp_mppmem);
-			else
-				mppmem = tmp_mppmem;
+			largest_cpus = MAX(largest_cpus, node_cpus);
+			min_memory = MIN(min_memory, node_mem);
 		}
 	}
 
-	/* mppwidth */
-	for (i = 0; i < job_ptr->job_resrcs->nhosts; i++) {
-		uint32_t node_tasks = job_ptr->job_resrcs->cpus[i] / mppdepth;
-
-		if (mppnppn && mppnppn < node_tasks)
-			node_tasks = mppnppn;
-		mppwidth += node_tasks;
+	if (node_min_mem) {
+		/*
+		 * ALPS 'Processing Elements per Node' value (aprun -N),
+		 * which in slurm is --ntasks-per-node and 'mppnppn' in
+		 * PBS: if --ntasks is specified, default to the number
+		 * of cores per node (also the default for 'aprun -N').
+		 * On a heterogeneous system the nodes aren't
+		 * always the same so keep track of the lowest
+		 * mppmem and use it as the level for all
+		 * nodes (mppmem is 0 when coming in).
+		 */
+		mppmem = min_memory / largest_cpus;
 	}
+
+	/* Minimum memory per processing element should be 1,
+	 * since 0 means give all the memory to the job. */
+	if (mppmem <= 0)
+		mppmem = 1;
 
 	snprintf(batch_id, sizeof(batch_id), "%u", job_ptr->job_id);
 	user = uid_to_string(job_ptr->user_id);
@@ -841,7 +847,7 @@ extern int do_basil_reserve(struct job_record *job_ptr)
 		bap = NULL;
 
 	rc   = basil_reserve(user, batch_id, mppwidth, mppdepth, mppnppn,
-			     mppmem, ns_head, bap);
+			     mppmem, (uint32_t)nppcu, ns_head, bap);
 	xfree(user);
 	if (rc <= 0) {
 		/* errno value will be resolved by select_g_job_begin() */

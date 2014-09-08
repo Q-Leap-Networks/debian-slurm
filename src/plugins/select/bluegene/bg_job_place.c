@@ -9,7 +9,7 @@
  *             and Danny Auble <da@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -602,6 +602,17 @@ static bg_record_t *_find_matching_block(List block_list,
 					*/
 					goto good_conn_type;
 				}
+#ifndef HAVE_BG_L_P
+				else if ((bg_record->geo[dim] == 1)
+					 && (request->conn_type[dim]
+					     == SELECT_MESH)) {
+					/* On a BGQ system a dim only
+					   1 long must be a TORUS, so
+					   ignore a requested MESH.
+					*/
+					goto good_conn_type;
+				}
+#endif
 
 				if (bg_conf->slurm_debug_flags
 				    & DEBUG_FLAG_BG_PICK) {
@@ -1619,10 +1630,7 @@ static void _build_job_resources_struct(
 	job_resrcs_ptr->cpus_used = xmalloc(sizeof(uint16_t) * node_cnt);
 /* 	job_resrcs_ptr->nhosts = node_cnt; */
 	job_resrcs_ptr->nhosts = bit_set_count(bitmap);
-
-	if (!(job_resrcs_ptr->node_bitmap = bit_copy(bitmap)))
-		fatal("bit_copy malloc failure");
-
+	job_resrcs_ptr->node_bitmap = bit_copy(bitmap);
 	job_resrcs_ptr->nodes = xstrdup(bg_record->mp_str);
 
 	job_resrcs_ptr->cpu_array_cnt = 1;

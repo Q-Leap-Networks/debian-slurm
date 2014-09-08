@@ -11,7 +11,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -58,6 +58,8 @@ extern char *default_plugstack;
 #define ACCOUNTING_ENFORCE_WCKEYS 0x0004
 #define ACCOUNTING_ENFORCE_QOS    0x0008
 #define ACCOUNTING_ENFORCE_SAFE   0x0010
+#define ACCOUNTING_ENFORCE_NO_JOBS 0x0020
+#define ACCOUNTING_ENFORCE_NO_STEPS 0x0040
 
 #define DEFAULT_ACCOUNTING_DB      "slurm_acct_db"
 #define DEFAULT_ACCOUNTING_ENFORCE  0
@@ -67,6 +69,7 @@ extern char *default_plugstack;
 #define DEFAULT_COMPLETE_WAIT       0
 #define DEFAULT_CRYPTO_TYPE        "crypto/munge"
 #define DEFAULT_EPILOG_MSG_TIME     2000
+#define DEFAULT_EXT_SENSORS_TYPE    "ext_sensors/none"
 #define DEFAULT_FAST_SCHEDULE       1
 #define DEFAULT_FIRST_JOB_ID        1
 #define DEFAULT_GET_ENV_TIMEOUT     2
@@ -75,8 +78,11 @@ extern char *default_plugstack;
 #define DEFAULT_INACTIVE_LIMIT      0
 #define DEFAULT_JOB_ACCT_GATHER_TYPE  "jobacct_gather/none"
 #define JOB_ACCT_GATHER_TYPE_NONE "jobacct_gather/none"
-#define DEFAULT_JOB_ACCT_GATHER_FREQ  30
+#define DEFAULT_JOB_ACCT_GATHER_FREQ  "30"
 #define DEFAULT_ACCT_GATHER_ENERGY_TYPE "acct_gather_energy/none"
+#define DEFAULT_ACCT_GATHER_PROFILE_TYPE "acct_gather_profile/none"
+#define DEFAULT_ACCT_GATHER_INFINIBAND_TYPE "acct_gather_infiniband/none"
+#define DEFAULT_ACCT_GATHER_FILESYSTEM_TYPE "acct_gather_filesystem/none"
 #define ACCOUNTING_STORAGE_TYPE_NONE "accounting_storage/none"
 #define DEFAULT_DISABLE_ROOT_JOBS   0
 #define DEFAULT_ENFORCE_PART_LIMITS 0
@@ -84,6 +90,7 @@ extern char *default_plugstack;
 #define DEFAULT_JOB_COMP_TYPE       "jobcomp/none"
 #define DEFAULT_JOB_COMP_LOC        "/var/log/slurm_jobcomp.log"
 #define DEFAULT_JOB_COMP_DB         "slurm_jobcomp_db"
+#define DEFAULT_KEEP_ALIVE_TIME     ((uint16_t) NO_VAL)
 #define DEFAULT_KILL_ON_BAD_EXIT    0
 #define DEFAULT_KILL_TREE           0
 #define DEFAULT_KILL_WAIT           30
@@ -99,6 +106,7 @@ extern char *default_plugstack;
 #endif
 
 #define DEFAULT_MAIL_PROG           "/bin/mail"
+#define DEFAULT_MAX_ARRAY_SIZE      1001
 #define DEFAULT_MAX_JOB_COUNT       10000
 #define DEFAULT_MAX_JOB_ID          0xffff0000
 #define DEFAULT_MAX_STEP_COUNT      40000
@@ -131,7 +139,7 @@ extern char *default_plugstack;
 #define DEFAULT_SCHEDULER_PORT      7321
 #define DEFAULT_SCHED_LOG_LEVEL     0
 #define DEFAULT_SCHED_TIME_SLICE    30
-#define DEFAULT_SCHEDTYPE           "sched/builtin"
+#define DEFAULT_SCHEDTYPE           "sched/backfill"
 #ifdef HAVE_BG	/* Blue Gene specific default configuration parameters */
 #  define DEFAULT_SELECT_TYPE       "select/bluegene"
 #elif defined HAVE_CRAY
@@ -167,6 +175,10 @@ extern char *default_plugstack;
 #define DEFAULT_MAX_TASKS_PER_NODE  128
 
 typedef struct slurm_conf_frontend {
+	char *allow_groups;		/* allowed group string */
+	char *allow_users;		/* allowed user string */
+	char *deny_groups;		/* denied group string */
+	char *deny_users;		/* denied user string */
 	char *frontends;		/* frontend node name */
 	char *addresses;		/* frontend node address */
 	uint16_t port;			/* frontend specific port */
@@ -203,6 +215,8 @@ typedef struct slurm_conf_partition {
 	char *allow_groups;	/* comma delimited list of groups,
 				 * NULL indicates all */
 	char *alternate;	/* name of alternate partition */
+	uint16_t cr_type;	/* Custom CR values for partition (supported
+				 * by select/cons_res plugin only) */
 	uint32_t def_mem_per_cpu; /* default MB memory per allocated CPU */
 	bool default_flag;	/* Set if default partition */
 	uint32_t default_time;	/* minutes or INFINITE */
@@ -211,6 +225,7 @@ typedef struct slurm_conf_partition {
 				     * default */
 	uint32_t grace_time;	/* default grace time for partition */
 	bool     hidden_flag;	/* 1 if hidden by default */
+	uint32_t max_cpus_per_node; /* maximum allocated CPUs per node */
 	uint16_t max_share;	/* number of jobs to gang schedule */
 	uint32_t max_time;	/* minutes or INFINITE */
 	uint32_t max_mem_per_cpu; /* maximum MB memory per allocated CPU */
@@ -487,6 +502,17 @@ extern void pack_config_key_pair(void *in, uint16_t rpc_version, Buf buffer);
 extern int unpack_config_key_pair(void **object, uint16_t rpc_version,
 				  Buf buffer);
 extern int sort_key_pairs(config_key_pair_t *key_a, config_key_pair_t *key_b);
+/*
+ * Return the pathname of the extra .conf file
+ * return value must be xfreed
+ */
+extern char *get_extra_conf_path(char *conf_name);
 
+/* Determine slurm_prog_name (calling process) is in list of daemons
+ *
+ * in - daemons (comma separated list of daemons i.e. slurmd,slurmstepd
+ * returns true if slurm_prog_name (set in log.c) is in list, false otherwise.
+ */
+extern bool run_in_daemon(char *daemons);
 
 #endif /* !_READ_CONFIG_H */

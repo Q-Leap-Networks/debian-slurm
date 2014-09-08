@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -82,6 +82,7 @@
 #include "src/common/slurm_protocol_interface.h"
 #include "src/common/slurm_rlimits_info.h"
 #include "src/common/slurm_resource_info.h"
+#include "src/common/slurm_acct_gather_profile.h"
 #include "src/common/uid.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
@@ -119,6 +120,7 @@
 #define OPT_SIGNAL      0x17
 #define OPT_TIME_VAL    0x18
 #define OPT_CPU_FREQ    0x19
+#define OPT_PROFILE     0x20
 
 /* generic getopt_long flags, integers and *not* valid characters */
 #define LONG_OPT_HELP        0x100
@@ -188,6 +190,7 @@
 #define LONG_OPT_LAUNCHER_OPTS   0x154
 #define LONG_OPT_CPU_FREQ        0x155
 #define LONG_OPT_LAUNCH_CMD      0x156
+#define LONG_OPT_PROFILE         0x157
 
 extern char **environ;
 
@@ -319,12 +322,12 @@ static bool _valid_node_list(char **node_list_pptr)
 	   procs to use then we need exactly this many since we are
 	   saying, lay it out this way!  Same for max and min nodes.
 	   Other than that just read in as many in the hostfile */
-	if(opt.ntasks_set)
+	if (opt.ntasks_set)
 		count = opt.ntasks;
-	else if(opt.nodes_set) {
-		if(opt.max_nodes)
+	else if (opt.nodes_set) {
+		if (opt.max_nodes)
 			count = opt.max_nodes;
-		else if(opt.min_nodes)
+		else if (opt.min_nodes)
 			count = opt.min_nodes;
 	}
 
@@ -474,7 +477,7 @@ static void _opt_default()
 
 	for (i=0; i<HIGHEST_DIMENSIONS; i++) {
 		opt.conn_type[i]    = (uint16_t) NO_VAL;
-		opt.geometry[i]	    = (uint16_t) NO_VAL;
+		opt.geometry[i]	    = 0;
 	}
 	opt.reboot          = false;
 	opt.no_rotate	    = false;
@@ -487,6 +490,7 @@ static void _opt_default()
 	opt.egid	    = (gid_t) -1;
 
 	opt.propagate	    = NULL;  /* propagate specific rlimits */
+	opt.profile	    = ACCT_GATHER_PROFILE_NOT_SET;
 
 	opt.prolog = slurm_get_srun_prolog();
 	opt.epilog = slurm_get_srun_epilog();
@@ -507,7 +511,7 @@ static void _opt_default()
 
 	opt.pty = false;
 	opt.open_mode = 0;
-	opt.acctg_freq = -1;
+	opt.acctg_freq = NULL;
 	opt.cpu_freq = NO_VAL;
 	opt.reservation = NULL;
 	opt.wckey = NULL;
@@ -538,7 +542,7 @@ struct env_vars {
 env_vars_t env_vars[] = {
 {"SLURMD_DEBUG",        OPT_INT,        &opt.slurmd_debug,  NULL             },
 {"SLURM_ACCOUNT",       OPT_STRING,     &opt.account,       NULL             },
-{"SLURM_ACCTG_FREQ",    OPT_INT,        &opt.acctg_freq,    NULL             },
+{"SLURM_ACCTG_FREQ",    OPT_STRING,     &opt.acctg_freq,    NULL             },
 {"SLURM_BLRTS_IMAGE",   OPT_STRING,     &opt.blrtsimage,    NULL             },
 {"SLURM_CHECKPOINT",    OPT_STRING,     &opt.ckpt_interval_str, NULL         },
 {"SLURM_CHECKPOINT_DIR",OPT_STRING,     &opt.ckpt_dir,      NULL             },
@@ -581,6 +585,7 @@ env_vars_t env_vars[] = {
 {"SLURM_OPEN_MODE",     OPT_OPEN_MODE,  NULL,               NULL             },
 {"SLURM_OVERCOMMIT",    OPT_OVERCOMMIT, NULL,               NULL             },
 {"SLURM_PARTITION",     OPT_STRING,     &opt.partition,     NULL             },
+{"SLURM_PROFILE",       OPT_PROFILE,    NULL,               NULL             },
 {"SLURM_PROLOG",        OPT_STRING,     &opt.prolog,        NULL             },
 {"SLURM_QOS",           OPT_STRING,     &opt.qos,           NULL             },
 {"SLURM_RAMDISK_IMAGE", OPT_STRING,     &opt.ramdiskimage,  NULL             },
@@ -761,7 +766,9 @@ _process_env_var(env_vars_t *e, const char *val)
 	case OPT_TIME_VAL:
 		opt.wait4switch = time_str2secs(val);
 		break;
-
+	case OPT_PROFILE:
+		opt.profile = acct_gather_profile_from_string((char *)val);
+		break;
 	default:
 		/* do nothing */
 		break;
@@ -885,6 +892,7 @@ static void _set_options(const int argc, char **argv)
 		{"ntasks-per-node",  required_argument, 0, LONG_OPT_NTASKSPERNODE},
 		{"ntasks-per-socket",required_argument, 0, LONG_OPT_NTASKSPERSOCKET},
 		{"open-mode",        required_argument, 0, LONG_OPT_OPEN_MODE},
+		{"profile",          required_argument, 0, LONG_OPT_PROFILE},
 		{"prolog",           required_argument, 0, LONG_OPT_PROLOG},
 		{"propagate",        optional_argument, 0, LONG_OPT_PROPAGATE},
 		{"pty",              no_argument,       0, LONG_OPT_PTY},
@@ -1501,8 +1509,8 @@ static void _set_options(const int argc, char **argv)
 			}
 			break;
 		case LONG_OPT_ACCTG_FREQ:
-			opt.acctg_freq = _get_int(optarg, "acctg-freq",
-                                false);
+			xfree(opt.acctg_freq);
+			opt.acctg_freq = xstrdup(optarg);
 			break;
 		case LONG_OPT_CPU_FREQ:
 		        if (cpu_freq_verify_param(optarg, &opt.cpu_freq))
@@ -1512,6 +1520,9 @@ static void _set_options(const int argc, char **argv)
 		case LONG_OPT_WCKEY:
 			xfree(opt.wckey);
 			opt.wckey = xstrdup(optarg);
+			break;
+		case LONG_OPT_PROFILE:
+			opt.profile = acct_gather_profile_from_string(optarg);
 			break;
 		case LONG_OPT_RESERVATION:
 			xfree(opt.reservation);
@@ -1603,7 +1614,7 @@ static void _opt_args(int argc, char **argv)
 	if (opt.distribution == SLURM_DIST_PLANE && opt.plane_size) {
 		if ((opt.ntasks/opt.plane_size) < opt.min_nodes) {
 			if (((opt.min_nodes-1)*opt.plane_size) >= opt.ntasks) {
-#if(0)
+#if (0)
 				info("Too few processes ((n/plane_size) %d < N %d) "
 				     "and ((N-1)*(plane_size) %d >= n %d)) ",
 				     opt.ntasks/opt.plane_size, opt.min_nodes,
@@ -1688,7 +1699,7 @@ static void _opt_args(int argc, char **argv)
 	xassert((command_pos + command_args) <= opt.argc);
 
 	for (i = command_pos; i < opt.argc; i++) {
-		if (!rest[i-command_pos])
+		if (!rest || !rest[i-command_pos])
 			break;
 		opt.argv[i] = xstrdup(rest[i-command_pos]);
 	}
@@ -1767,11 +1778,11 @@ static bool _opt_verify(void)
 		opt.cmd_name = base_name(opt.argv[0]);
 
 	if (!opt.nodelist) {
-		if((opt.nodelist = xstrdup(getenv("SLURM_HOSTFILE")))) {
+		if ((opt.nodelist = xstrdup(getenv("SLURM_HOSTFILE")))) {
 			/* make sure the file being read in has a / in
 			   it to make sure it is a file in the
 			   valid_node_list function */
-			if(!strstr(opt.nodelist, "/")) {
+			if (!strstr(opt.nodelist, "/")) {
 				char *add_slash = xstrdup("./");
 				xstrcat(add_slash, opt.nodelist);
 				xfree(opt.nodelist);
@@ -1789,7 +1800,7 @@ static bool _opt_verify(void)
 			}
 		}
 	} else {
-		if(strstr(opt.nodelist, "/"))
+		if (strstr(opt.nodelist, "/"))
 			opt.hostfile = xstrdup(opt.nodelist);
 		if (!_valid_node_list(&opt.nodelist))
 			exit(error_exit);
@@ -1797,14 +1808,14 @@ static bool _opt_verify(void)
 
 	/* set up the proc and node counts based on the arbitrary list
 	   of nodes */
-	if((opt.distribution == SLURM_DIST_ARBITRARY)
+	if ((opt.distribution == SLURM_DIST_ARBITRARY)
 	   && (!opt.nodes_set || !opt.ntasks_set)) {
 		hostlist_t hl = hostlist_create(opt.nodelist);
-		if(!opt.ntasks_set) {
+		if (!opt.ntasks_set) {
 			opt.ntasks_set = true;
 			opt.ntasks = hostlist_count(hl);
 		}
-		if(!opt.nodes_set) {
+		if (!opt.nodes_set) {
 			opt.nodes_set = true;
 			opt.nodes_set_opt = true;
 			hostlist_uniq(hl);
@@ -1817,11 +1828,11 @@ static bool _opt_verify(void)
 	 * nodelist but only if it isn't arbitrary since the user has
 	 * laid it out how it should be so don't mess with it print an
 	 * error later if it doesn't work the way they wanted */
-	if(opt.max_nodes && opt.nodelist
+	if (opt.max_nodes && opt.nodelist
 	   && opt.distribution != SLURM_DIST_ARBITRARY) {
 		hostlist_t hl = hostlist_create(opt.nodelist);
 		int count = hostlist_count(hl);
-		if(count > opt.max_nodes) {
+		if (count > opt.max_nodes) {
 			int i = 0;
 			error("Required nodelist includes more nodes than "
 			      "permitted by max-node count (%d > %d). "
@@ -1830,7 +1841,7 @@ static bool _opt_verify(void)
 			count -= opt.max_nodes;
 			while(i<count) {
 				char *name = hostlist_pop(hl);
-				if(name)
+				if (name)
 					free(name);
 				else
 					break;
@@ -1949,7 +1960,8 @@ static bool _opt_verify(void)
 			opt.ntasks *= opt.cores_per_socket;
 			opt.ntasks *= opt.threads_per_core;
 			opt.ntasks_set = true;
-		}
+		} else if (opt.ntasks_per_node > 0)
+			opt.ntasks *= opt.ntasks_per_node;
 
 		/* massage the numbers */
 		if (opt.nodelist) {
@@ -1960,7 +1972,7 @@ static bool _opt_verify(void)
 				error("memory allocation failure");
 				exit(error_exit);
 			}
-			if(opt.distribution == SLURM_DIST_ARBITRARY
+			if (opt.distribution == SLURM_DIST_ARBITRARY
 			   && !opt.ntasks_set) {
 				opt.ntasks = hostlist_count(hl);
 				opt.ntasks_set = true;
@@ -2213,16 +2225,16 @@ static char *print_constraints()
 {
 	char *buf = xstrdup("");
 
-	if (opt.pn_min_cpus > 0)
+	if (opt.pn_min_cpus != NO_VAL)
 		xstrfmtcat(buf, "mincpus-per-node=%d ", opt.pn_min_cpus);
 
-	if (opt.pn_min_memory > 0)
+	if (opt.pn_min_memory != NO_VAL)
 		xstrfmtcat(buf, "mem-per-node=%dM ", opt.pn_min_memory);
 
-	if (opt.mem_per_cpu > 0)
+	if (opt.mem_per_cpu != NO_VAL)
 		xstrfmtcat(buf, "mem-per-cpu=%dM ", opt.mem_per_cpu);
 
-	if (opt.pn_min_tmp_disk > 0)
+	if (opt.pn_min_tmp_disk != NO_VAL)
 		xstrfmtcat(buf, "tmp-per-node=%ld ", opt.pn_min_tmp_disk);
 
 	if (opt.contiguous == true)
@@ -2244,7 +2256,6 @@ static char *print_constraints()
 
 static void _opt_list(void)
 {
-	int i;
 	char *str;
 
 	info("defined options for program `%s'", opt.progname);
@@ -2268,13 +2279,15 @@ static void _opt_list(void)
 	     opt.jobid_set ? "(set)" : "(default)");
 	info("partition      : %s",
 	     opt.partition == NULL ? "default" : opt.partition);
+	info("profile        : `%s'",
+	     acct_gather_profile_to_string(opt.profile));
 	info("job name       : `%s'", opt.job_name);
 	info("reservation    : `%s'", opt.reservation);
 	info("wckey          : `%s'", opt.wckey);
 	info("switches       : %d", opt.req_switch);
 	info("wait-for-switches : %d", opt.wait4switch);
 	info("distribution   : %s", format_task_dist_states(opt.distribution));
-	if(opt.distribution == SLURM_DIST_PLANE)
+	if (opt.distribution == SLURM_DIST_PLANE)
 		info("plane size   : %u", opt.plane_size);
 	info("cpu_bind       : %s",
 	     opt.cpu_bind == NULL ? "default" : opt.cpu_bind);
@@ -2318,10 +2331,10 @@ static void _opt_list(void)
 	str = print_constraints();
 	info("constraints    : %s", str);
 	xfree(str);
-	for (i = 0; i < HIGHEST_DIMENSIONS; i++) {
-		if (opt.conn_type[i] == (uint16_t) NO_VAL)
-			break;
-		info("conn_type[%d]    : %u", i, opt.conn_type[i]);
+	if (opt.conn_type[0] != (uint16_t) NO_VAL) {
+		str = conn_type_string_full(opt.conn_type);
+		info("conn_type      : %s", str);
+		xfree(str);
 	}
 	str = print_geometry(opt.geometry);
 	info("geometry       : %s", str);
@@ -2410,6 +2423,7 @@ static void _usage(void)
 "            [--cpu_bind=...] [--mem_bind=...] [--network=type]\n"
 "            [--ntasks-per-node=n] [--ntasks-per-socket=n] [reservation=name]\n"
 "            [--ntasks-per-core=n] [--mem-per-cpu=MB] [--preserve-env]\n"
+"            [--profile=...]\n"
 #ifdef HAVE_BG		/* Blue gene specific options */
 #ifdef HAVE_BG_L_P
 "            [--geometry=XxYxZ] "
@@ -2484,6 +2498,9 @@ static void _help(void)
 "  -O, --overcommit            overcommit resources\n"
 "  -p, --partition=partition   partition requested\n"
 "      --prolog=program        run \"program\" before launching job step\n"
+"      --profile=value         enable acct_gather_profile for detailed data\n"
+"                              value is all or none or any combination of\n"
+"                              energy, lustre, network or task\n"
 "      --propagate[=rlimits]   propagate all [or specific list of] rlimits\n"
 #ifdef HAVE_PTY_H
 "      --pty                   run task zero in pseudo terminal\n"

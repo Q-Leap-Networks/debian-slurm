@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -120,8 +120,6 @@ extern int node_config_load(List gres_conf_list)
 
 	xassert(gres_conf_list);
 	iter = list_iterator_create(gres_conf_list);
-	if (iter == NULL)
-		fatal("list_iterator_create: malloc failure");
 	while ((gres_slurmd_conf = list_next(iter))) {
 		if (strcmp(gres_slurmd_conf->name, gres_name) == 0) {
 			rc = SLURM_SUCCESS;

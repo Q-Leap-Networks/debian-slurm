@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -587,7 +587,7 @@ static int _create_allocation(char *com, List allocated_blocks)
 			}
 		}
 	start_request:
-		if(!_full_request(request, NULL, allocated_blocks))
+		if (!_full_request(request, NULL, allocated_blocks))
 			destroy_select_ba_request(request);
 
 	}
@@ -1133,7 +1133,7 @@ static int _add_bg_record(select_ba_request_t *blockreq, List allocated_blocks)
 	memcpy(blockreq->start, best_start, sizeof(blockreq->start));
 
 
-	if(!_full_request(blockreq, mark_bitmap, allocated_blocks))
+	if (!_full_request(blockreq, mark_bitmap, allocated_blocks))
 		destroy_select_ba_request(blockreq);
 fini:
 	FREE_NULL_BITMAP(mark_bitmap);

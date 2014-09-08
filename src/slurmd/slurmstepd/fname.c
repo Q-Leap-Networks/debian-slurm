@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -49,9 +49,10 @@
 #include "src/slurmd/slurmd/slurmd.h"
 #include "src/slurmd/slurmstepd/fname.h"
 
+#include "src/common/uid.h"
+#include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
-#include "src/common/xassert.h"
 
 /*
  * Max zero-padding width 
@@ -67,6 +68,7 @@ fname_create(slurmd_job_t *job, const char *format, int taskid)
 	unsigned int wid   = 0;
 	char *name = NULL;
 	char *orig = xstrdup(format);
+	char *uname;
 	char *p, *q;
 	int id;
 
@@ -83,7 +85,7 @@ fname_create(slurmd_job_t *job, const char *format, int taskid)
 	}
 
 	q = p = orig;
-	while(*p != '\0') {
+	while (*p != '\0') {
 		if (*p == '%') {
 			if (isdigit(*(++p))) {
 				unsigned long in_width = 0;
@@ -98,6 +100,18 @@ fname_create(slurmd_job_t *job, const char *format, int taskid)
 			}
 
 			switch (*p) {
+			case 'a':  /* '%a' => array task id   */
+				xmemcat(name, q, p - 1);
+				xstrfmtcat(name, "%0*d", wid,
+					   job->array_task_id);
+				q = ++p;
+				break;
+			case 'A':  /* '%A' => array master job id */
+				xmemcat(name, q, p - 1);
+				xstrfmtcat(name, "%0*d", wid,
+					   job->array_job_id);
+				q = ++p;
+				break;
 			case 's':  /* '%s' => step id        */
 				xmemcat(name, q, p - 1);
 				xstrfmtcat(name, "%0*d", wid, job->stepid);
@@ -118,8 +132,15 @@ fname_create(slurmd_job_t *job, const char *format, int taskid)
 				xstrfmtcat(name, "%s", conf->hostname);
 				q = ++p;
 				break;
-			case 'J':
-			case 'j':
+			case 'u':  /* '%u' => user name      */
+				uname = uid_to_string(job->uid);
+				xmemcat(name, q, p - 1);
+				xstrfmtcat(name, "%s", uname);
+				xfree(uname);
+				q = ++p;
+				break;
+			case 'J':  /* '%J' => jobid.stepid */
+			case 'j':  /* '%j' => jobid        */
 				xmemcat(name, q, p - 1);
 				xstrfmtcat(name, "%0*d", wid, job->jobid);
 

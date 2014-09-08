@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -48,6 +48,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <time.h>
+#include <stdlib.h>
 
 #include "src/common/cpu_frequency.h"
 #include "src/common/fd.h"
@@ -56,6 +57,7 @@
 #include "src/slurmd/common/proctrack.h"
 #include "src/common/slurm_auth.h"
 #include "src/common/slurm_jobacct_gather.h"
+#include "src/common/slurm_acct_gather.h"
 #include "src/common/stepd_api.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
@@ -591,6 +593,7 @@ _handle_signal_process_group(int fd, slurmd_job_t *job, uid_t uid)
 {
 	int rc = SLURM_SUCCESS;
 	int signal;
+	char *ptr = NULL;
 
 	debug3("_handle_signal_process_group for job %u.%u",
 	      job->jobid, job->stepid);
@@ -628,8 +631,11 @@ _handle_signal_process_group(int fd, slurmd_job_t *job, uid_t uid)
 	/*
 	 * Print a message in the step output before killing when
 	 * SIGTERM or SIGKILL are sent
+	 * hjcao: print JOB/STEP KILLED msg on specific node id only
 	 */
-	if ((signal == SIGTERM) || (signal == SIGKILL)) {
+	ptr = getenvp(job->env, "SLURM_STEP_KILLED_MSG_NODE_ID");
+	if ((!ptr || atoi(ptr) == job->nodeid) &&
+	    ((signal == SIGTERM) || (signal == SIGKILL))) {
 		time_t now = time(NULL);
 		char entity[24], time_str[24];
 		if (job->stepid == SLURM_BATCH_SCRIPT) {
@@ -669,13 +675,11 @@ _handle_signal_task_local(int fd, slurmd_job_t *job, uid_t uid)
 	int signal;
 	int ltaskid; /* local task index */
 
-	debug("_handle_signal_task_local for job %u.%u",
-	      job->jobid, job->stepid);
-
 	safe_read(fd, &signal, sizeof(int));
 	safe_read(fd, &ltaskid, sizeof(int));
+	debug("_handle_signal_task_local for step=%u.%u uid=%d signal=%d",
+	      job->jobid, job->stepid, (int) uid, signal);
 
-	debug3("  uid = %d", uid);
 	if (uid != job->uid && !_slurm_authorized_user(uid)) {
 		debug("kill req from uid %ld for job %u.%u owned by uid %ld",
 		      (long)uid, job->jobid, job->stepid, (long)job->uid);
@@ -745,12 +749,9 @@ _handle_signal_container(int fd, slurmd_job_t *job, uid_t uid)
 	int sig;
 	static int msg_sent = 0;
 
-	debug("_handle_signal_container for job %u.%u",
-	      job->jobid, job->stepid);
-
 	safe_read(fd, &sig, sizeof(int));
-
-	debug3("  uid = %d", uid);
+	debug("_handle_signal_container for step=%u.%u uid=%d signal=%d",
+	      job->jobid, job->stepid, (int) uid, sig);
 	if (uid != job->uid && !_slurm_authorized_user(uid)) {
 		debug("kill container req from uid %ld for job %u.%u "
 		      "owned by uid %ld",
@@ -979,11 +980,10 @@ _handle_terminate(int fd, slurmd_job_t *job, uid_t uid)
 	int rc = SLURM_SUCCESS;
 	int errnum = 0;
 
-	debug("_handle_terminate for job %u.%u",
-	      job->jobid, job->stepid);
+	debug("_handle_terminate for step=%u.%u uid=%d",
+	      job->jobid, job->stepid, uid);
 	step_terminate_monitor_start(job->jobid, job->stepid);
 
-	debug3("  uid = %d", uid);
 	if (uid != job->uid && !_slurm_authorized_user(uid)) {
 		debug("terminate req from uid %ld for job %u.%u "
 		      "owned by uid %ld",
@@ -1103,9 +1103,14 @@ done:
 		xfree(gtids);
 
 		for (i = 0; i < job->node_tasks; i++) {
-			len = strlen(job->task[i]->argv[0]) + 1;
-			safe_write(fd, &len, sizeof(int));
-			safe_write(fd, job->task[i]->argv[0], len);
+			if (job->task[i] && job->task[i]->argv) {
+				len = strlen(job->task[i]->argv[0]) + 1;
+				safe_write(fd, &len, sizeof(int));
+				safe_write(fd, job->task[i]->argv[0], len);
+			} else {
+				len = 0;
+				safe_write(fd, &len, sizeof(int));
+			}
 		}
 	}
 
@@ -1153,8 +1158,8 @@ _handle_suspend(int fd, slurmd_job_t *job, uid_t uid)
 	int rc = SLURM_SUCCESS;
 	int errnum = 0;
 
-	debug("_handle_suspend for job %u.%u", job->jobid, job->stepid);
-	debug3("  uid = %d", uid);
+	debug("_handle_suspend for step=%u.%u uid=%d",
+	      job->jobid, job->stepid, (int) uid);
 	if (!_slurm_authorized_user(uid)) {
 		debug("job step suspend request from uid %ld for job %u.%u ",
 		      (long)uid, job->jobid, job->stepid);
@@ -1171,7 +1176,7 @@ _handle_suspend(int fd, slurmd_job_t *job, uid_t uid)
 		goto done;
 	}
 
-	jobacct_gather_suspend_poll();
+	acct_gather_suspend_poll();
 	if (launch_poe == -1) {
 		char *launch_type = slurm_get_launch_type();
 		if (!strcmp(launch_type, "launch/poe"))
@@ -1259,7 +1264,7 @@ _handle_resume(int fd, slurmd_job_t *job, uid_t uid)
 		goto done;
 	}
 
-	jobacct_gather_resume_poll();
+	acct_gather_resume_poll();
 	/*
 	 * Signal the container
 	 */
@@ -1418,7 +1423,8 @@ _handle_stat_jobacct(int fd, slurmd_job_t *job, uid_t uid)
 		      "owned by uid %ld",
 		      (long)uid, job->jobid, job->stepid, (long)job->uid);
 		/* Send NULL */
-		jobacctinfo_setinfo(jobacct, JOBACCT_DATA_PIPE, &fd);
+		jobacctinfo_setinfo(jobacct, JOBACCT_DATA_PIPE, &fd,
+				    SLURM_PROTOCOL_VERSION);
 		return SLURM_ERROR;
 	}
 
@@ -1427,13 +1433,14 @@ _handle_stat_jobacct(int fd, slurmd_job_t *job, uid_t uid)
 
 	for (i = 0; i < job->node_tasks; i++) {
 		temp_jobacct = jobacct_gather_stat_task(job->task[i]->pid);
-		if(temp_jobacct) {
+		if (temp_jobacct) {
 			jobacctinfo_aggregate(jobacct, temp_jobacct);
 			jobacctinfo_destroy(temp_jobacct);
 			num_tasks++;
 		}
 	}
-	jobacctinfo_setinfo(jobacct, JOBACCT_DATA_PIPE, &fd);
+	jobacctinfo_setinfo(jobacct, JOBACCT_DATA_PIPE, &fd,
+			    SLURM_PROTOCOL_VERSION);
 	safe_write(fd, &num_tasks, sizeof(int));
 	jobacctinfo_destroy(jobacct);
 	return SLURM_SUCCESS;

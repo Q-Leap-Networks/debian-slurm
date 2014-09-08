@@ -10,7 +10,7 @@
  *  Written by Danny Auble <da@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -228,11 +228,11 @@ plugin_load_and_link(const char *type_name, int n_syms,
 	so_name = xstrdup_printf("%s.so", type_name);
 #endif
 	while(so_name[i]) {
-		if(so_name[i] == '/')
+		if (so_name[i] == '/')
 			so_name[i] = '_';
 		i++;
 	}
-	if(!(dir_array = slurm_get_plugin_dir())) {
+	if (!(dir_array = slurm_get_plugin_dir())) {
 		error("plugin_load_and_link: No plugin dir given");
 		xfree(so_name);
 		return plug;
@@ -244,7 +244,7 @@ plugin_load_and_link(const char *type_name, int n_syms,
 		if (dir_array[i] == ':') {
 			dir_array[i] = '\0';
 			got_colon = 1;
-		} else if(dir_array[i] != '\0')
+		} else if (dir_array[i] != '\0')
 			continue;
 
 		file_name = xstrdup_printf("%s/%s", head, so_name);
@@ -255,7 +255,7 @@ plugin_load_and_link(const char *type_name, int n_syms,
 			xfree(file_name);
 			err = EPLUGIN_NOTFOUND;
 		} else {
-			if((err = plugin_load_from_file(&plug, file_name))
+			if ((err = plugin_load_from_file(&plug, file_name))
 			   == EPLUGIN_SUCCESS) {
 				if (plugin_get_syms(plug, n_syms,
 						    names, ptrs) >=

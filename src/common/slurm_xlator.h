@@ -34,7 +34,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -272,8 +272,9 @@
 #define env_array_overwrite_fmt slurm_env_array_overwrite_fmt
 
 /* read_config.[ch] functions */
-#define destroy_config_key_pair slurm_destroy_config_key_pair
-#define sort_key_pairs          slurm_sort_key_pairs
+#define destroy_config_key_pair	slurm_destroy_config_key_pair
+#define get_extra_conf_path	slurm_get_extra_conf_path
+#define sort_key_pairs		slurm_sort_key_pairs
 
 /* slurm_auth.[ch] functions
  * None exported today.
@@ -303,6 +304,7 @@
 #define	_xstrcatchar		slurm_xstrcatchar
 #define	_xslurm_strerrorcat	slurm_xslurm_strerrorcat
 #define	_xstrftimecat		slurm_xstrftimecat
+#define	_xiso8601timecat	slurm_xiso8601timecat
 #define	_xrfc5424timecat	slurm_xrfc5424timecat
 #define	_xstrfmtcat		slurm_xstrfmtcat
 #define	_xmemcat		slurm_xmemcat

@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -429,12 +429,12 @@ static agent_info_t *_make_agent_info(agent_arg_t *agent_arg_ptr)
 		thread_ptr[thr_count].state      = DSH_NEW;
 		thread_ptr[thr_count].addr = agent_arg_ptr->addr;
 		name = hostlist_shift(agent_arg_ptr->hostlist);
-		if(!name) {
+		if (!name) {
 			debug3("no more nodes to send to");
 			break;
 		}
 		hl = hostlist_create(name);
-		if(thread_ptr[thr_count].addr && span[thr_count]) {
+		if (thread_ptr[thr_count].addr && span[thr_count]) {
 			debug("warning: you will only be sending this to %s",
 			      name);
 			span[thr_count] = 0;
@@ -874,7 +874,7 @@ static void *_thread_per_group_rpc(void *args)
 			msg.address = *thread_ptr->addr;
 		} else {
 			//info("no address given");
-			if(slurm_conf_get_addr(thread_ptr->nodelist,
+			if (slurm_conf_get_addr(thread_ptr->nodelist,
 					       &msg.address) == SLURM_ERROR) {
 				error("_thread_per_group_rpc: "
 				      "can't find address for host %s, "
@@ -1006,7 +1006,7 @@ static void *_thread_per_group_rpc(void *args)
 			}
 			if (srun_agent)
 				thread_state = DSH_FAILED;
-			else if(ret_data_info->type == RESPONSE_FORWARD_FAILED)
+			else if (ret_data_info->type == RESPONSE_FORWARD_FAILED)
 				/* check if a forward failed */
 				thread_state = DSH_NO_RESP;
 			else {	/* some will fail that don't mean anything went
@@ -1058,7 +1058,7 @@ static int _setup_requeue(agent_arg_t *agent_arg_ptr, thd_t *thread_ptr,
 		debug("got the name %s to resend out of %d",
 		      ret_data_info->node_name, count);
 
-		if(agent_arg_ptr) {
+		if (agent_arg_ptr) {
 			hostlist_push(agent_arg_ptr->hostlist,
 				      ret_data_info->node_name);
 
@@ -1098,7 +1098,7 @@ static void _queue_agent_retry(agent_info_t * agent_info_ptr, int count)
 
 	j = 0;
 	for (i = 0; i < agent_info_ptr->thread_count; i++) {
-		if(!thread_ptr[i].ret_list) {
+		if (!thread_ptr[i].ret_list) {
 			if (thread_ptr[i].state != DSH_NO_RESP)
 				continue;
 
@@ -1110,7 +1110,7 @@ static void _queue_agent_retry(agent_info_t * agent_info_ptr, int count)
 			if ((++j) == count)
 				break;
 		} else {
-			if(_setup_requeue(agent_arg_ptr, &thread_ptr[i],
+			if (_setup_requeue(agent_arg_ptr, &thread_ptr[i],
 					  count, &j))
 				break;
 		}
@@ -1174,10 +1174,10 @@ extern int agent_retry (int min_wait, bool mail_too)
 	slurm_mutex_lock(&retry_mutex);
 	if (retry_list) {
 		static time_t last_msg_time = (time_t) 0;
-		uint32_t msg_type[5], i = 0;
+		uint32_t msg_type[5] = {0, 0, 0, 0, 0}, i = 0;
 		list_size = list_count(retry_list);
-		if ((list_size > MAX_AGENT_CNT)
-		&&  (difftime(now, last_msg_time) > 300)) {
+		if ((list_size > MAX_AGENT_CNT) &&
+		    (difftime(now, last_msg_time) > 300)) {
 			/* Note sizable backlog of work */
 			info("WARNING: agent retry_list size is %d",
 				list_size);
@@ -1459,9 +1459,9 @@ static void _mail_proc(mail_info_t *mi)
 		(void) close(1);
 		(void) close(2);
 		fd = open("/dev/null", O_RDWR); // 0
-		if(dup(fd) == -1) // 1
+		if (dup(fd) == -1) // 1
 			error("Couldn't do a dup for 1: %m");
-		if(dup(fd) == -1) // 2
+		if (dup(fd) == -1) // 2
 			error("Couldn't do a dup for 2 %m");
 		execle(slurmctld_conf.mail_prog, "mail",
 			"-s", mi->message, mi->user_name,
@@ -1530,11 +1530,10 @@ extern void mail_job_info (struct job_record *job_ptr, uint16_t mail_type)
 	else
 		mi->user_name = xstrdup(job_ptr->mail_user);
 
-	mi->message = xmalloc(256);
 	_set_job_time(job_ptr, mail_type, job_time, sizeof(job_time));
-	sprintf(mi->message, "SLURM Job_id=%u Name=%.24s %s%s",
-		job_ptr->job_id, job_ptr->name,
-		_mail_type_str(mail_type), job_time);
+	mi->message = xstrdup_printf("SLURM Job_id=%u Name=%s %s%s",
+				     job_ptr->job_id, job_ptr->name,
+				     _mail_type_str(mail_type), job_time);
 
 	debug("email msg to %s: %s", mi->user_name, mi->message);
 
@@ -1544,8 +1543,7 @@ extern void mail_job_info (struct job_record *job_ptr, uint16_t mail_type)
 		if (!mail_list)
 			fatal("list_create failed");
 	}
-	if (!list_enqueue(mail_list, (void *) mi))
-		fatal("list_enqueue failed");
+	(void) list_enqueue(mail_list, (void *) mi);
 	slurm_mutex_unlock(&mail_mutex);
 	return;
 }

@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
+ *  For details, see <http://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -363,6 +363,25 @@ extern int gres_plugin_job_state_unpack(List *gres_list, Buf buffer,
 					uint16_t protocol_version);
 
 /*
+ * Clear the cpu_bitmap for CPUs which are not usable by this job (i.e. for
+ *	CPUs which are already bound to other jobs or lack GRES)
+ * IN job_gres_list  - job's gres_list built by gres_plugin_job_state_validate()
+ * IN node_gres_list - node's gres_list built by
+ *                     gres_plugin_node_config_validate()
+ * IN use_total_gres - if set then consider all gres resources as available,
+ *		       and none are commited to running jobs
+ * IN/OUT cpu_bitmap - Identification of available CPUs (NULL if no restriction)
+ * IN cpu_start_bit  - index into cpu_bitmap for this node's first CPU
+ * IN cpu_end_bit    - index into cpu_bitmap for this node's last CPU
+ * IN node_name      - name of the node (for logging)
+ */
+extern void gres_plugin_job_core_filter(List job_gres_list, List node_gres_list,
+					bool use_total_gres,
+					bitstr_t *cpu_bitmap,
+					int cpu_start_bit, int cpu_end_bit,
+					char *node_name);
+
+/*
  * Determine how many CPUs on the node can be used by this job
  * IN job_gres_list  - job's gres_list built by gres_plugin_job_state_validate()
  * IN node_gres_list - node's gres_list built by
@@ -386,7 +405,7 @@ extern uint32_t gres_plugin_job_test(List job_gres_list, List node_gres_list,
  * Allocate resource to a job and update node and job gres information
  * IN job_gres_list - job's gres_list built by gres_plugin_job_state_validate()
  * IN node_gres_list - node's gres_list built by
- *		gres_plugin_node_config_validate()
+ *		       gres_plugin_node_config_validate()
  * IN node_cnt    - total number of nodes originally allocated to the job
  * IN node_offset - zero-origin index to the node of interest
  * IN cpu_cnt     - number of CPUs allocated to this job on this node
