@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  controller.c - main control machine daemon for slurm
- *  $Id: controller.c 11459 2007-05-08 23:06:38Z jette $
+ *  $Id: controller.c 11973 2007-08-08 23:59:56Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -391,18 +391,19 @@ int main(int argc, char *argv[])
 {
 	/* This should purge all allocated memory,   *\
 	\*   Anything left over represents a leak.   */
-	int i;
+	int i, cnt;
 
-	/* Give running agents a chance to complete and purge */
-	sleep(1);
-	agent_purge();
-	for (i=0; i<4; i++) {
-		if (get_agent_count() == 0)
-			break;
-		sleep(5);
+	/* Give running agents a chance to complete and free memory.
+	 * Wait up to 30 seconds (3 seconds * 10) */
+	for (i=0; i<10; i++) {
 		agent_purge();
+		sleep(3);
+		cnt = get_agent_count();
+		if (cnt == 0)
+			break;
 	}
-	
+	if (i >= 10)
+		error("Left %d agent threads active", cnt);
 
 	/* Purge our local data structures */
 	job_fini();
@@ -849,12 +850,19 @@ static void *_slurmctld_background(void *no_data)
 			unlock_slurmctld(job_write_lock);
 		}
 
-		if ((difftime(now, last_ping_node_time) >= ping_interval)
-		&&  (is_ping_done())) {
-			last_ping_node_time = now;
-			lock_slurmctld(node_write_lock);
-			ping_nodes();
-			unlock_slurmctld(node_write_lock);
+		if (difftime(now, last_ping_node_time) >= ping_interval) {
+			static bool msg_sent = false;
+			if (is_ping_done()) {
+				msg_sent = false;
+				last_ping_node_time = now;
+				lock_slurmctld(node_write_lock);
+				ping_nodes();
+				unlock_slurmctld(node_write_lock);
+			} else if (!msg_sent) {
+				/* log failure once per ping_nodes() call */
+				error("Node ping may be hung");
+				msg_sent = true;
+			}
 		}
 
 		if (slurmctld_conf.inactive_limit &&

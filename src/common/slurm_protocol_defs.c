@@ -3,7 +3,7 @@
  *	storage for RPC data structures. these are the functions used by 
  *	the slurm daemons directly, not for user client use.
  *
- *  $Id: slurm_protocol_defs.c 11459 2007-05-08 23:06:38Z jette $
+ *  $Id: slurm_protocol_defs.c 12088 2007-08-22 18:02:24Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -483,6 +483,18 @@ void inline slurm_free_srun_job_complete_msg(srun_job_complete_msg_t * msg)
 	xfree(msg);
 }
 
+void inline slurm_free_srun_exec_msg(srun_exec_msg_t *msg)
+{
+	int i;
+
+	if (msg) {
+		for (i = 0; i < msg->argc; i++)
+			xfree(msg->argv[i]);
+		xfree(msg->argv);
+		xfree(msg);
+	}
+}
+
 void inline slurm_free_srun_ping_msg(srun_ping_msg_t * msg)
 {
 	xfree(msg);
@@ -499,6 +511,14 @@ void inline slurm_free_srun_node_fail_msg(srun_node_fail_msg_t * msg)
 void inline slurm_free_srun_timeout_msg(srun_timeout_msg_t * msg)
 {
 	xfree(msg);
+}
+
+void inline slurm_free_srun_user_msg(srun_user_msg_t * user_msg)
+{
+	if (user_msg) {
+		xfree(user_msg->msg);
+		xfree(user_msg);
+	}
 }
 
 void inline slurm_free_checkpoint_msg(checkpoint_msg_t *msg)
@@ -849,6 +869,21 @@ void slurm_free_ctl_conf(slurm_ctl_conf_info_msg_t * config_ptr)
 	}
 }
 
+/*
+ * slurm_free_slurmd_status - free slurmd state information
+ * IN msg - pointer to slurmd state information
+ * NOTE: buffer is loaded by slurm_load_slurmd_status
+ */
+extern void slurm_free_slurmd_status(slurmd_status_t* slurmd_status_ptr)
+{
+	if (slurmd_status_ptr) {
+		xfree(slurmd_status_ptr->hostname);
+		xfree(slurmd_status_ptr->slurmd_logfile);
+		xfree(slurmd_status_ptr->step_list);
+		xfree(slurmd_status_ptr->version);
+		xfree(slurmd_status_ptr);
+	}
+}
 
 /*
  * slurm_free_job_info - free the job information response message
@@ -1169,6 +1204,7 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case REQUEST_CONTROL:
 	case REQUEST_SHUTDOWN_IMMEDIATE:
 	case RESPONSE_FORWARD_FAILED:
+	case REQUEST_DAEMON_STATUS:
 		/* No body to free */
 		break;
 
@@ -1200,7 +1236,10 @@ extern uint32_t slurm_get_return_code(slurm_msg_type_t type, void *data)
 		rc = ((return_code_msg_t *)data)->return_code;
 		break;
 	case RESPONSE_FORWARD_FAILED:
-		rc = SLURM_ERROR;
+		/* There may be other reasons for the failure, but
+		 * this may be a slurm_msg_t data type lacking the
+		 * err field found in ret_data_info_t data type */
+		rc = SLURM_COMMUNICATIONS_CONNECTION_ERROR;
 		break;
 	default:
 		error("don't know the rc for type %u returning %u", type, rc);

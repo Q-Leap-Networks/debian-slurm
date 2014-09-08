@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  proc_req.c - process incomming messages to slurmctld
  *
- *  $Id: proc_req.c 11205 2007-03-20 18:42:31Z jette $
+ *  $Id: proc_req.c 11873 2007-07-25 21:08:46Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -323,6 +323,7 @@ void _fill_ctld_conf(slurm_ctl_conf_t * conf_ptr)
 					job_credential_private_key);
 	conf_ptr->job_credential_public_certificate = xstrdup(conf->
 					job_credential_public_certificate);
+	conf_ptr->job_file_append     = conf->job_file_append;
 	conf_ptr->kill_wait           = conf->kill_wait;
 	conf_ptr->mail_prog           = xstrdup(conf->mail_prog);
 	conf_ptr->max_job_cnt         = conf->max_job_cnt;
@@ -372,6 +373,8 @@ void _fill_ctld_conf(slurm_ctl_conf_t * conf_ptr)
 	conf_ptr->node_prefix         = xstrdup(conf->node_prefix);
 	conf_ptr->tree_width          = conf->tree_width;
 	conf_ptr->use_pam             = conf->use_pam;
+	conf_ptr->unkillable_program  = xstrdup(conf->unkillable_program);
+	conf_ptr->unkillable_timeout  = conf->unkillable_timeout;
 
 	slurm_conf_unlock();
 	return;
@@ -423,9 +426,10 @@ static int _make_step_cred(struct step_record *step_rec,
         else
                 cred_arg.alloc_lps_cnt = step_rec->job_ptr->alloc_lps_cnt;
         if (cred_arg.alloc_lps_cnt > 0) {
-                cred_arg.alloc_lps = xmalloc(cred_arg.alloc_lps_cnt * sizeof(int));
+                cred_arg.alloc_lps = xmalloc(cred_arg.alloc_lps_cnt * 
+				sizeof(uint32_t));
                 memcpy(cred_arg.alloc_lps, step_rec->job_ptr->alloc_lps, 
-                       cred_arg.alloc_lps_cnt*sizeof(int));
+                       cred_arg.alloc_lps_cnt*sizeof(uint32_t));
         } else
 		cred_arg.alloc_lps = NULL;
 

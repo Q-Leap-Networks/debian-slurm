@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  slurm_protocol_socket_implementation.c - slurm communications interfaces 
  *                                           based upon sockets.
- *  $Id: slurm_protocol_socket_implementation.c 11342 2007-04-10 22:54:27Z da $
+ *  $Id: slurm_protocol_socket_implementation.c 12005 2007-08-14 17:20:11Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -87,7 +87,7 @@
  *  Maximum message size. Messages larger than this value (in bytes)
  *  will not be received.
  */
-#define MAX_MSG_SIZE     (1024*1024)
+#define MAX_MSG_SIZE     (16*1024*1024)
 
 /****************************************************************
  * MIDDLE LAYER MSG FUNCTIONS
@@ -248,7 +248,7 @@ int _slurm_send_timeout(slurm_fd fd, char *buf, size_t size,
         struct pollfd ufds;
         struct timeval tstart;
         int timeleft = timeout;
-
+	char temp[2];
         ufds.fd     = fd;
         ufds.events = POLLOUT;
 
@@ -279,6 +279,22 @@ int _slurm_send_timeout(slurm_fd fd, char *buf, size_t size,
 				goto done;
 			}
                 }
+
+		/*
+		 * Check here to make sure the socket really is there.
+		 * If not then exit out and notify the sender.  This
+ 		 * is here since a write doesn't always tell you the
+		 * socket is gone, but getting 0 back from a
+		 * nonblocking read means just that. 
+		 */
+		rc = _slurm_recv(fd, &temp, 1, flags);
+		if (rc == 0) {
+			debug2("_slurm_send_timeout: Socket no longer there.");
+			slurm_seterrno(ENOTCONN);
+			sent = SLURM_ERROR;
+			goto done;			
+		}
+
                 rc = _slurm_send(fd, &buf[sent], (size - sent), flags);
                 if (rc < 0) {
  			if (errno == EINTR)
@@ -598,7 +614,7 @@ again:	rc = poll(&ufds, 1, 5000);
 		/* poll failed */
 		if (errno == EINTR) {
 			/* NOTE: connect() is non-interruptible in Linux */
-			verbose("_slurm_connect poll failed: %m");
+			debug3("_slurm_connect poll failed: %m");
 			goto again;
 		} else
 			error("_slurm_connect poll failed: %m");
@@ -622,6 +638,9 @@ again:	rc = poll(&ufds, 1, 5000);
 done:
 	fcntl(__fd, F_SETFL, flags);
 
+	/* NOTE: Connection refused is typically reported for
+	 * non-responsived nodes plus attempts to communicate
+	 * with terminated srun commands. */
 	if (err) {
 		slurm_seterrno(err);
 		debug2("_slurm_connect failed: %m");

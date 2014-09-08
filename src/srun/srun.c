@@ -100,6 +100,7 @@
 #define	TYPE_SCRIPT	2
 
 mpi_plugin_client_info_t mpi_job_info[1];
+pid_t srun_ppid = 0;
 
 /*
  * forward declaration of static funcs
@@ -169,7 +170,7 @@ int srun(int ac, char **av)
 		error ("srun initialization failed");
 		exit (1);
 	}
-
+	srun_ppid = getppid();
 	
 	/* reinit log with new verbosity (if changed by command line)
 	 */
@@ -261,14 +262,15 @@ int srun(int ac, char **av)
 		if (opt.alloc_nodelist == NULL)
                        opt.alloc_nodelist = xstrdup(resp->node_list);
 
-		slurm_free_resource_allocation_response_msg(resp);
 		if (opt.allocate) {
 			error("job %u already has an allocation",
 			      job_id);
+			slurm_free_resource_allocation_response_msg(resp);
 			exit(1);
 		}
 
-		job = job_step_create_allocation(job_id);
+		job = job_step_create_allocation(resp);
+		slurm_free_resource_allocation_response_msg(resp);
 
 		if(!job)
 			exit(1);

@@ -233,7 +233,7 @@ target_os = @target_os@
 target_vendor = @target_vendor@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-SUBDIRS = mpich1_p4 mpich1_shmem mpichgm mvapich none lam openmpi
+SUBDIRS = mpich1_p4 mpich1_shmem mpichgm mpichmx mvapich none lam openmpi
 all: all-recursive
 
 .SUFFIXES:

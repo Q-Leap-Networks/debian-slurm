@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/mgr.c - job manager functions for slurmstepd
- *  $Id: mgr.c 11693 2007-06-13 16:22:30Z jette $
+ *  $Id: mgr.c 11856 2007-07-19 02:36:24Z morrone $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -108,6 +108,7 @@
 #include "src/slurmd/slurmstepd/req.h"
 #include "src/slurmd/slurmstepd/pam_ses.h"
 #include "src/slurmd/slurmstepd/ulimits.h"
+#include "src/slurmd/slurmstepd/step_terminate_monitor.h"
 
 #define RETRY_DELAY 15		/* retry every 15 seconds */
 #define MAX_RETRY   240		/* retry 240 times (one hour max) */
@@ -746,10 +747,12 @@ job_manager(slurmd_job_t *job)
 	 * terminated before the switch window can be released by
 	 * interconnect_postfini().
 	 */
+	step_terminate_monitor_start(job->jobid, job->stepid);
 	if (job->cont_id != 0) {
 		slurm_container_signal(job->cont_id, SIGKILL);
 		slurm_container_wait(job->cont_id);
 	}
+	step_terminate_monitor_stop();
 	if (!job->batch) {
 		if (interconnect_postfini(job->switch_job, job->jmgr_pid,
 				job->jobid, job->stepid) < 0)

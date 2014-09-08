@@ -1,4 +1,4 @@
-# $Id: configure.ac 11665 2007-06-07 19:06:21Z jette $
+# $Id: configure.ac 12088 2007-08-22 18:02:24Z jette $
 # This file is to be processed with autoconf to generate a configure script
 
 dnl Prologue
@@ -236,6 +236,10 @@ dnl All slurm Makefiles:
 AC_CONFIG_FILES([Makefile
 		 config.xml 
 		 auxdir/Makefile
+		 contribs/Makefile
+		 contribs/perlapi/Makefile
+		 contribs/perlapi/libslurm-perl/Makefile.PL
+		 contribs/torque/Makefile
 		 src/Makefile 
 		 src/api/Makefile 
 		 src/common/Makefile
@@ -265,6 +269,7 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/checkpoint/Makefile
 		 src/plugins/checkpoint/aix/Makefile
 		 src/plugins/checkpoint/none/Makefile
+		 src/plugins/checkpoint/ompi/Makefile
 		 src/plugins/jobacct/Makefile
 		 src/plugins/jobacct/linux/Makefile
 		 src/plugins/jobacct/aix/Makefile
@@ -300,6 +305,7 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/mpi/mpich1_p4/Makefile
 		 src/plugins/mpi/mpich1_shmem/Makefile
 		 src/plugins/mpi/mpichgm/Makefile
+		 src/plugins/mpi/mpichmx/Makefile
 		 src/plugins/mpi/mvapich/Makefile
 		 src/plugins/mpi/lam/Makefile
 		 src/plugins/mpi/none/Makefile
@@ -323,4 +329,3 @@ AC_CONFIG_FILES([Makefile
 )
 
 AC_OUTPUT
-

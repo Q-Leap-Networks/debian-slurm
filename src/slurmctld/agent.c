@@ -2,9 +2,9 @@
  *  agent.c - parallel background communication functions. This is where  
  *	logic could be placed for broadcast communications.
  *
- *  $Id: agent.c 10711 2007-01-08 21:22:48Z jette $
+ *  $Id: agent.c 12088 2007-08-22 18:02:24Z jette $
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>, et. al.
  *  Derived from pdsh written by Jim Garlick <garlick1@llnl.gov>
@@ -217,7 +217,7 @@ void *agent(void *args)
 	/* info("I am here and agent_cnt is %d of %d with type %d", */
 /* 	     agent_cnt, MAX_AGENT_CNT, agent_arg_ptr->msg_type); */
 	slurm_mutex_lock(&agent_cnt_mutex);
-	while (1) {
+	while (slurmctld_config.shutdown_time == 0) {
 		if (agent_cnt < MAX_AGENT_CNT) {
 			agent_cnt++;
 			break;
@@ -226,6 +226,8 @@ void *agent(void *args)
 		}
 	}
 	slurm_mutex_unlock(&agent_cnt_mutex);
+	if (slurmctld_config.shutdown_time)
+		return NULL;
 	
 	/* basic argument value tests */
 	begin_time = time(NULL);
@@ -377,8 +379,10 @@ static agent_info_t *_make_agent_info(agent_arg_t *agent_arg_ptr)
 	
 	if ((agent_arg_ptr->msg_type != REQUEST_SHUTDOWN)
 	&&  (agent_arg_ptr->msg_type != REQUEST_RECONFIGURE)
+	&&  (agent_arg_ptr->msg_type != SRUN_EXEC)
 	&&  (agent_arg_ptr->msg_type != SRUN_TIMEOUT)
 	&&  (agent_arg_ptr->msg_type != SRUN_NODE_FAIL)
+	&&  (agent_arg_ptr->msg_type != SRUN_USER_MSG)
 	&&  (agent_arg_ptr->msg_type != SRUN_JOB_COMPLETE)) {
 		agent_info_ptr->get_reply = true;
 		span = set_span(agent_arg_ptr->node_count, 0);
@@ -492,8 +496,10 @@ static void *_wdog(void *args)
 	ret_data_info_t *ret_data_info = NULL;
 
 	if ( (agent_ptr->msg_type == SRUN_JOB_COMPLETE)
+	||   (agent_ptr->msg_type == SRUN_EXEC)
 	||   (agent_ptr->msg_type == SRUN_PING)
 	||   (agent_ptr->msg_type == SRUN_TIMEOUT)
+	||   (agent_ptr->msg_type == SRUN_USER_MSG)
 	||   (agent_ptr->msg_type == RESPONSE_RESOURCE_ALLOCATION)
 	||   (agent_ptr->msg_type == SRUN_NODE_FAIL) )
 		srun_agent = true;
@@ -577,7 +583,9 @@ static void _notify_slurmctld_jobs(agent_info_t *agent_ptr)
 			*agent_ptr->msg_args_pptr;
 		job_id  = msg->job_id;
 		step_id = NO_VAL;
-	} else if (agent_ptr->msg_type == SRUN_JOB_COMPLETE) {
+	} else if ((agent_ptr->msg_type == SRUN_JOB_COMPLETE)
+	||         (agent_ptr->msg_type == SRUN_EXEC)
+	||         (agent_ptr->msg_type == SRUN_USER_MSG)) {
 		return;		/* no need to note srun response */
 	} else if (agent_ptr->msg_type == SRUN_NODE_FAIL) {
 		return;		/* no need to note srun response */
@@ -720,6 +728,26 @@ static inline int _comm_err(char *node_name)
 	return rc;
 }
 
+/* return a value for wihc WEXITSTATUS returns 1 */
+static int _wif_status(void)
+{
+	static int rc = 0;
+	int i;
+
+	if (rc)
+		return rc;
+
+	rc = 1;
+	for (i=0; i<64; i++) {
+		if (WEXITSTATUS(rc))
+			return rc;
+		rc = rc << 1;
+	}
+	error("Could not identify WEXITSTATUS");
+	rc = 1;
+	return rc;
+}
+
 /*
  * _thread_per_group_rpc - thread to issue an RPC for a group of nodes
  *                         sending message out to one and forwarding it to
@@ -753,9 +781,6 @@ static void *_thread_per_group_rpc(void *args)
 	/* Locks: Write job, write node */
 	slurmctld_lock_t job_write_lock = { 
 		NO_LOCK, WRITE_LOCK, WRITE_LOCK, NO_LOCK };
-	/* Locks: Read job */
-	slurmctld_lock_t job_read_lock = {
-		NO_LOCK, READ_LOCK, NO_LOCK, NO_LOCK };
 #endif
 	xassert(args != NULL);
 	xsignal(SIGUSR1, _sig_handler);
@@ -763,42 +788,14 @@ static void *_thread_per_group_rpc(void *args)
 	is_kill_msg = (	(msg_type == REQUEST_KILL_TIMELIMIT) ||
 			(msg_type == REQUEST_TERMINATE_JOB) );
 	srun_agent = (	(msg_type == SRUN_PING)    ||
+			(msg_type == SRUN_EXEC)    ||
 			(msg_type == SRUN_JOB_COMPLETE) ||
 			(msg_type == SRUN_TIMEOUT) ||
+			(msg_type == SRUN_USER_MSG) ||
 			(msg_type == RESPONSE_RESOURCE_ALLOCATION) ||
 			(msg_type == SRUN_NODE_FAIL) );
 
 	thread_ptr->start_time = time(NULL);
-
-#if AGENT_IS_THREAD
-	if (srun_agent) {
-		uint32_t          job_id   = 0;
-		enum job_states    state   = JOB_END;
-		struct job_record *job_ptr = NULL;
-
-		if ((msg_type == SRUN_PING)
-		|| (msg_type == SRUN_JOB_COMPLETE)) {
-			srun_ping_msg_t *msg = task_ptr->msg_args_ptr;
-			job_id  = msg->job_id;
-		} else if (msg_type == SRUN_TIMEOUT) {
-			srun_timeout_msg_t *msg = task_ptr->msg_args_ptr;
-			job_id  = msg->job_id;
-		} else if (msg_type == SRUN_NODE_FAIL) {
-			srun_node_fail_msg_t *msg = task_ptr->msg_args_ptr;
-			job_id  = msg->job_id;
-		} else if (msg_type == RESPONSE_RESOURCE_ALLOCATION) {
-			resource_allocation_response_msg_t *msg = 
-				task_ptr->msg_args_ptr;
-			job_id  = msg->job_id;
-		}
-		lock_slurmctld(job_read_lock);
-		if (job_id)
-			job_ptr = find_job_record(job_id);
-		if (job_ptr)
-			state = job_ptr->job_state;	
-		unlock_slurmctld(job_read_lock);
-	}
-#endif
 
 	slurm_mutex_lock(thread_mutex_ptr);
 	thread_ptr->state = DSH_ACTIVE;
@@ -876,8 +873,8 @@ static void *_thread_per_group_rpc(void *args)
 		}
 			
 		/* SPECIAL CASE: Kill non-startable batch job */
-		if ((msg_type == REQUEST_BATCH_JOB_LAUNCH)
-		    && rc) {
+		if ((msg_type == REQUEST_BATCH_JOB_LAUNCH) && rc &&
+		    (ret_data_info->type != RESPONSE_FORWARD_FAILED)) {
 			batch_job_launch_msg_t *launch_msg_ptr = 
 				task_ptr->msg_args_ptr;
 			uint32_t job_id = launch_msg_ptr->job_id;
@@ -886,7 +883,7 @@ static void *_thread_per_group_rpc(void *args)
 			thread_state = DSH_DONE;
 			ret_data_info->err = thread_state;
 			lock_slurmctld(job_write_lock);
-			job_complete(job_id, 0, false, 1);
+			job_complete(job_id, 0, false, _wif_status());
 			unlock_slurmctld(job_write_lock);
 			continue;
 		}
@@ -939,12 +936,12 @@ static void *_thread_per_group_rpc(void *args)
 			else if(ret_data_info->type == RESPONSE_FORWARD_FAILED)
 				/* check if a forward failed */
 				thread_state = DSH_NO_RESP;
-			else /* some will fail that don't mean anything went 
-				bad like a job term request on a job that is
-				already finished, we will just exit on those
-				cases
-			     */
+			else {	/* some will fail that don't mean anything went
+				 * bad like a job term request on a job that is
+				 * already finished, we will just exit on those
+				 * cases */
 				thread_state = DSH_DONE;
+			}
 		}	
 		ret_data_info->err = thread_state;
 	}
@@ -1303,6 +1300,10 @@ static void _purge_agent_args(agent_arg_t *agent_arg_ptr)
 		else if ((agent_arg_ptr->msg_type == REQUEST_TERMINATE_JOB)
 		||       (agent_arg_ptr->msg_type == REQUEST_KILL_TIMELIMIT))
 			slurm_free_kill_job_msg(agent_arg_ptr->msg_args);
+		else if (agent_arg_ptr->msg_type == SRUN_USER_MSG)
+			slurm_free_srun_user_msg(agent_arg_ptr->msg_args);
+		else if (agent_arg_ptr->msg_type == SRUN_EXEC)
+			slurm_free_srun_exec_msg(agent_arg_ptr->msg_args);
 		else
 			xfree(agent_arg_ptr->msg_args);
 	}

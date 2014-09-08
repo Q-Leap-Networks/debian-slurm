@@ -2,7 +2,7 @@
  *  node_scheduler.c - select and allocated nodes to jobs 
  *	Note: there is a global node table (node_record_table_ptr) 
  *
- *  $Id: node_scheduler.c 11313 2007-04-05 22:44:14Z jette $
+ *  $Id: node_scheduler.c 12092 2007-08-22 20:39:02Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -63,7 +63,10 @@
 #include "src/slurmctld/sched_plugin.h"
 #include "src/slurmctld/slurmctld.h"
 
-#define MAX_RETRIES 10
+#define FEATURE_OP_OR  0
+#define FEATURE_OP_AND 1
+#define MAX_FEATURES  32	/* max exclusive features "[fs1|fs2]"=2 */
+#define MAX_RETRIES   10
 
 struct node_set {		/* set of nodes with same configuration */
 	uint32_t cpus_per_node;	/* NOTE: This is the minimum count,
@@ -74,7 +77,7 @@ struct node_set {		/* set of nodes with same configuration */
 	uint32_t real_memory;
 	uint32_t nodes;
 	uint32_t weight;
-	int feature;
+	bitstr_t *feature_bits;
 	bitstr_t *my_bitmap;
 };
 
@@ -82,19 +85,18 @@ static int _add_node_set_info(struct node_set *node_set_ptr,
 			      bitstr_t ** node_bitmap, 
 			      int *node_cnt, int *cpu_cnt, 
 			      const int mem_cnt, int cr_enabled,
-			      int job_id);
+			      struct job_record *job);
 static int  _build_node_list(struct job_record *job_ptr, 
 			     struct node_set **node_set_pptr,
 			     int *node_set_size);
 static void _filter_nodes_in_set(struct node_set *node_set_ptr,
 				 struct job_details *detail_ptr);
+static int _job_count_bitmap(bitstr_t * bitmap, bitstr_t * jobmap,
+			     int job_cnt); 
 static int _match_feature(char *seek, char *available);
 static int _nodes_in_sets(bitstr_t *req_bitmap, 
 			  struct node_set * node_set_ptr, 
 			  int node_set_size);
-static void _node_load_bitmaps(bitstr_t * bitmap, bitstr_t ** no_load_bit, 
-			       bitstr_t ** light_load_bit, 
-			       bitstr_t ** heavy_load_bit);
 static int _pick_best_load(struct job_record *job_ptr, bitstr_t * bitmap, 
 			uint32_t min_nodes, uint32_t max_nodes, 
 			uint32_t req_nodes, bool test_only);
@@ -104,7 +106,7 @@ static int _pick_best_nodes(struct node_set *node_set_ptr,
 			    struct part_record *part_ptr,
 			    uint32_t min_nodes, uint32_t max_nodes,
 			    uint32_t req_nodes);
-static int _valid_features(char *requested, char *available);
+static bitstr_t *_valid_features(char *requested, char *available);
 
 
 /*
@@ -286,90 +288,57 @@ _pick_best_load(struct job_record *job_ptr, bitstr_t * bitmap,
 		uint32_t min_nodes, uint32_t max_nodes, 
 		uint32_t req_nodes, bool test_only)
 {
-	bitstr_t *no_load_bit, *light_load_bit, *heavy_load_bit;
-	int error_code;
-	
-	_node_load_bitmaps(bitmap, &no_load_bit, &light_load_bit, 
-			&heavy_load_bit);
+	bitstr_t *basemap;
+	int i, error_code = EINVAL, node_cnt = 0, prev_cnt = 0, set_cnt;
 
-	/* always include required nodes or selection algorithm fails,
-	 * note that we have already confirmed these nodes are available
-	 * to this job */
-	if (job_ptr->details && job_ptr->details->req_node_bitmap)
-		 bit_or(no_load_bit, job_ptr->details->req_node_bitmap);
+	basemap = bit_copy(bitmap);
+	if (basemap == NULL)
+		fatal("bit_copy malloc failure");
 
-	/* NOTE: select_g_job_test() is destructive of  bitmap */
+	set_cnt = bit_set_count(bitmap);
+	if ((set_cnt < min_nodes) ||
+	    ((req_nodes > min_nodes) && (set_cnt < req_nodes)))
+		return error_code;	/* not usable */
 
-	/* first try to use idle nodes */
-	bit_and(bitmap, no_load_bit);
-	error_code = select_g_job_test(job_ptr, bitmap, 
-				       min_nodes, max_nodes, 
-				       req_nodes, test_only);
-
-	/* now try to use idle and lightly loaded nodes */
-	if (error_code) {
-		bit_nclear(bitmap, 0, (node_record_count-1));
-		bit_or(bitmap, no_load_bit);
-		bit_or(bitmap, light_load_bit);
+	for (i=0; node_cnt<set_cnt; i++) {
+		node_cnt = _job_count_bitmap(basemap, bitmap, i);
+		if ((node_cnt == 0) || (node_cnt == prev_cnt))
+			continue;	/* nothing new to test */
+		if ((node_cnt < min_nodes) ||
+		    ((req_nodes > min_nodes) && (node_cnt < req_nodes)))
+			continue;	/* need more nodes */
 		error_code = select_g_job_test(job_ptr, bitmap, 
 					       min_nodes, max_nodes, 
 					       req_nodes, test_only);
-	} 
-
-	/* now try to use all possible nodes */
-	if (error_code) {
-		bit_nclear(bitmap, 0, (node_record_count-1));
-		bit_or(bitmap, no_load_bit);
-		bit_or(bitmap, light_load_bit);
-		bit_or(bitmap, heavy_load_bit);
-		error_code = select_g_job_test(job_ptr, bitmap, 
-					       min_nodes, max_nodes, 
-					       req_nodes, test_only);
+		if (!error_code)
+			break;
+		prev_cnt = node_cnt;
 	}
-	FREE_NULL_BITMAP(no_load_bit);
-	FREE_NULL_BITMAP(light_load_bit);
-	FREE_NULL_BITMAP(heavy_load_bit);
 
+	FREE_NULL_BITMAP(basemap);
 	return error_code;
 }
 
-/* 
- * _node_load_bitmaps - given a bitmap of nodes, create three new bitmaps
- *	indicative of the load on those nodes
- * IN bitmap             - map of nodes to test
- * OUT no_load_bitmap    - nodes from bitmap with no jobs
- * OUT light_load_bitmap - nodes from bitmap with one job
- * OUT heavy_load_bitmap - nodes from bitmap with two or more jobs
- * NOTE: caller must free the created bitmaps
+/*
+ * Set the bits in 'jobmap' that correspond to bits in the 'bitmap'
+ * that are running 'job_cnt' jobs or less, and clear the rest.
  */
-static void
-_node_load_bitmaps(bitstr_t * bitmap, bitstr_t ** no_load_bit, 
-		bitstr_t ** light_load_bit, bitstr_t ** heavy_load_bit)
+static int
+_job_count_bitmap(bitstr_t * bitmap, bitstr_t * jobmap, int job_cnt) 
 {
-	int i, load;
+	int i, count = 0;
 	bitoff_t size = bit_size(bitmap);
-	bitstr_t *bitmap0 = bit_alloc(size);
-	bitstr_t *bitmap1 = bit_alloc(size);
-	bitstr_t *bitmap2 = bit_alloc(size);
-
-	if ((bitmap0 == NULL) || (bitmap1 == NULL) || (bitmap2 == NULL))
-		fatal("bit_alloc malloc failure");
 
 	for (i = 0; i < size; i++) {
-		if (!bit_test(bitmap, i))
-			continue;
-		load = node_record_table_ptr[i].run_job_cnt;
-		if      (load == 0)
-			bit_set(bitmap0, i);
-		else if (load == 1)
-			bit_set(bitmap1, i);
-		else
-			bit_set(bitmap2, i);
+		if (bit_test(bitmap, i) &&
+		    (node_record_table_ptr[i].run_job_cnt <= job_cnt)) {
+			bit_set(jobmap, i);
+			count++;
+		} else {
+			bit_clear(jobmap, i);
+		}
 	}
-	
-	*no_load_bit    = bitmap0;
-	*light_load_bit = bitmap1;
-	*heavy_load_bit = bitmap2;
+	return count;
 }
 
 /*
@@ -392,10 +361,13 @@ _resolve_shared_status(uint16_t user_flag, uint16_t part_enum,
 	if (cons_res_flag) {
 		/*
 		 * Consumable resources will always share nodes by default,
-		 * the user has to explicitly disable sharing to
+		 * the partition or user has to explicitly disable sharing to
 		 * get exclusive nodes.
 		 */
-		shared = (user_flag == 0) ? 0 : 1;
+		if ((part_enum == SHARED_EXCLUSIVE) || (user_flag == 0))
+			shared = 0;
+		else
+			shared = 1;
 	} else {
 		/* The partition sharing option is only used if
 		 * the consumable resources plugin is NOT in use.
@@ -464,7 +436,8 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 	int max_feature, min_feature;
 	bool runable_ever  = false;	/* Job can ever run */
 	bool runable_avail = false;	/* Job can run with available nodes */
-	int cr_enabled = 0;
+	bool pick_light_load = false;
+	uint32_t cr_enabled = 0;
 	int shared = 0;
 	select_type_plugin_info_t cr_type = SELECT_TYPE_INFO_NONE; 
 
@@ -496,7 +469,8 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 			job_ptr->details->job_max_memory = 0;
 		}
 
-                debug3("Job %u in exclusive mode? %d cr_enabled %d CR type %d num_procs %d", 
+                debug3("Job %u in exclusive mode? "
+		     "%d cr_enabled %d CR type %d num_procs %d", 
 		     job_ptr->job_id, 
 		     job_ptr->details->shared ? 0 : 1,
 		     cr_enabled,
@@ -522,9 +496,10 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 	if (job_ptr->details->req_node_bitmap) {  /* specific nodes required */
 		/* we have already confirmed that all of these nodes have a
 		 * usable configuration and are in the proper partition */
-		if (min_nodes != 0)
+		if (min_nodes != 0) {
 			total_nodes = bit_set_count(
 				job_ptr->details->req_node_bitmap);
+		}
 		if (job_ptr->num_procs != 0) {
 			if (cr_enabled) {
 				uint16_t tmp16;
@@ -556,9 +531,10 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 					return error_code;
 				}
 				total_cpus = (int) tmp16;
-			} else 
+			} else { 
 				total_cpus = count_cpus(
 					job_ptr->details->req_node_bitmap);
+			}
 		}
 		if (total_nodes > max_nodes) {
 			/* exceeds node limit */
@@ -612,21 +588,28 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 		total_nodes = total_cpus = 0;	/* reinitialize */
 	}
 
-	/* identify how many feature sets we have (e.g. "[fs1|fs2|fs3|fs4]" */
-	max_feature = min_feature = node_set_ptr[0].feature;
-	for (i = 1; i < node_set_size; i++) {
-		if (node_set_ptr[i].feature > max_feature)
-			max_feature = node_set_ptr[i].feature;
-		if (node_set_ptr[i].feature < min_feature)
-			min_feature = node_set_ptr[i].feature;
+#ifndef HAVE_BG
+	if (shared)
+		pick_light_load = true;
+#endif
+		
+	/* identify the min and max feature values for exclusive OR */
+	max_feature = -1;
+	min_feature = MAX_FEATURES;
+	for (i = 0; i < node_set_size; i++) {
+		j = bit_ffs(node_set_ptr[i].feature_bits);
+		if ((j >= 0) && (j < min_feature))
+			min_feature = j;
+		j = bit_fls(node_set_ptr[i].feature_bits);
+		if ((j >= 0) && (j > max_feature))
+			max_feature = j;
 	}
-	
+		
 	for (j = min_feature; j <= max_feature; j++) {
 		for (i = 0; i < node_set_size; i++) {
-			bool pick_light_load = false;
-			if (node_set_ptr[i].feature != j)
+
+			if (!bit_test(node_set_ptr[i].feature_bits, j))
 				continue;
-			
 			if (!runable_ever) {
 				int cr_disabled = 0;
 				total_mem = 0;
@@ -637,7 +620,7 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 					&total_cpus,
 					total_mem, 
 					cr_disabled,
-					job_ptr->job_id);
+					job_ptr);
 				if (error_code != SLURM_SUCCESS) {
 					if (cr_enabled) {
 						FREE_NULL_BITMAP(
@@ -654,26 +637,8 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 			/* shared needs to be checked before cr_enabled
 			 * to make sure that CR_MEMORY works correctly. */ 
 			if (shared) {
-#ifdef HAVE_BG
-				/* If any nodes which can be used have jobs in 
-				 * COMPLETING state then do not schedule the  
-				 * job, this give time to insure Epilog 
-				 * completes before possibly scheduling another
-				 * job to the same bgblock. We also want to 
-				 * route the job to the smallest usable block*/
-				int ni;
 				bit_and(node_set_ptr[i].my_bitmap,
 					share_node_bitmap);
-				for (ni = 0; ni < node_record_count; ni++) {
-					if (node_record_table_ptr[ni].
-					    node_state & NODE_STATE_COMPLETING)
-						continue;
-				}
-#else
-				bit_and(node_set_ptr[i].my_bitmap,
-					share_node_bitmap);
-				pick_light_load = true;
-#endif
 			} else if (cr_enabled) {
 				bit_and(node_set_ptr[i].my_bitmap,
 					partially_idle_node_bitmap);
@@ -689,8 +654,8 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
                                                         &avail_nodes, 
 							&avail_cpus, 
 							avail_mem,
-                                                        cr_enabled,
-							job_ptr->job_id);
+							cr_enabled,
+							job_ptr);
                         if (error_code != SLURM_SUCCESS) {
 				if (cr_enabled) { 
 					FREE_NULL_BITMAP(
@@ -701,6 +666,8 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 				FREE_NULL_BITMAP(possible_bitmap);
 				return error_code;
 			}
+			if (pick_light_load)
+				continue; /* Keep accumulating */
 			if (avail_nodes == 0)
 				continue; /* Keep accumulating */
 			if ((job_ptr->details->req_node_bitmap) &&
@@ -717,21 +684,12 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 			/* NOTE: select_g_job_test() is destructive of
 			 * avail_bitmap, so save a backup copy */
 			backup_bitmap = bit_copy(avail_bitmap);
-			if (pick_light_load) {
-				pick_code = _pick_best_load(job_ptr, 
-							    avail_bitmap, 
-							    min_nodes, 
-							    max_nodes,
-							    req_nodes,
-							    false);
-			} else {
-				pick_code = select_g_job_test(job_ptr, 
-							      avail_bitmap, 
-							      min_nodes, 
-							      max_nodes,
-							      req_nodes,
-							      false);
-			}
+			pick_code = select_g_job_test(job_ptr, 
+						      avail_bitmap, 
+						      min_nodes, 
+						      max_nodes,
+						      req_nodes,
+						      false);
 
 			if (pick_code == SLURM_SUCCESS) {
 				FREE_NULL_BITMAP(backup_bitmap);
@@ -752,12 +710,46 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 				FREE_NULL_BITMAP(avail_bitmap);
 				avail_bitmap = backup_bitmap;
 			}
+		} /* for (i = 0; i < node_set_size; i++) */
+
+		/* try picking the lightest load from all
+		   available nodes with this feature set */
+		if (pick_light_load) {
+			backup_bitmap = bit_copy(avail_bitmap);
+			pick_code = _pick_best_load(job_ptr, 
+						    avail_bitmap, 
+						    min_nodes, 
+						    max_nodes,
+						    req_nodes,
+						    false);
+			if (pick_code == SLURM_SUCCESS) {
+				FREE_NULL_BITMAP(backup_bitmap);
+				if (bit_set_count(avail_bitmap) > max_nodes) {
+					avail_nodes = 0; 
+				} else {
+					FREE_NULL_BITMAP(total_bitmap);
+					FREE_NULL_BITMAP(possible_bitmap);
+					if (cr_enabled) {
+						FREE_NULL_BITMAP(
+						    partially_idle_node_bitmap);
+					}
+					*select_bitmap = avail_bitmap;
+					return SLURM_SUCCESS;
+				}
+			} else {
+				FREE_NULL_BITMAP(avail_bitmap);
+				avail_bitmap = backup_bitmap;
+			}
 		}
 
 		/* try to get req_nodes now for this feature */
-		if ((req_nodes   >  min_nodes) && 
-		    (avail_nodes >= min_nodes) &&
-		    (avail_nodes <  req_nodes)) {
+		if (avail_bitmap
+		&&  (req_nodes   >  min_nodes) 
+		&&  (avail_nodes >= min_nodes)
+		&&  (avail_nodes <  req_nodes)
+		&&  ((job_ptr->details->req_node_bitmap == NULL) ||
+		     bit_super_set(job_ptr->details->req_node_bitmap, 
+                                        avail_bitmap))) {
 			pick_code = select_g_job_test(job_ptr, avail_bitmap, 
 						      min_nodes, max_nodes,
 						      req_nodes, false);
@@ -777,12 +769,13 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 		/* determine if job could possibly run (if all configured 
 		 * nodes available) */
 
-		if ((!runable_ever || !runable_avail)
-		    &&  (total_nodes >= min_nodes)
-		    &&  ((slurmctld_conf.fast_schedule == 0) ||
-			 (total_cpus >= job_ptr->num_procs))
-		    &&  ((job_ptr->details->req_node_bitmap == NULL) ||
-			 (bit_super_set(job_ptr->details->req_node_bitmap, 
+		if (total_bitmap
+		&&  (!runable_ever || !runable_avail)
+		&&  (total_nodes >= min_nodes)
+		&&  ((slurmctld_conf.fast_schedule == 0) ||
+		     (total_cpus >= job_ptr->num_procs))
+		&&  ((job_ptr->details->req_node_bitmap == NULL) ||
+		     (bit_super_set(job_ptr->details->req_node_bitmap, 
 					total_bitmap)))) {
 			if (!runable_avail) {
 				FREE_NULL_BITMAP(avail_bitmap);
@@ -861,18 +854,20 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
  * IN/OUT cpu_cnt     - add count of cpus in set to this total
  * IN/OUT mem_cnt     - add count of memory in set to this total
  * IN cr_enabled      - specify if consumable resources (of processors) is enabled
+ * IN job_ptr         - the job to be updated
  */
 static int
 _add_node_set_info(struct node_set *node_set_ptr, 
 		   bitstr_t ** node_bitmap, 
 		   int *node_cnt, int *cpu_cnt, 
 		   const int mem_cnt, int cr_enabled,
-		   int job_id)
+		   struct job_record * job_ptr)
 {
         int error_code = SLURM_SUCCESS, i;
 	int this_cpu_cnt, this_mem_cnt;
 	uint32_t alloc_mem;
 	uint16_t alloc_cpus;
+	uint32_t job_id = job_ptr->job_id;
 
         xassert(node_set_ptr->my_bitmap);
 
@@ -896,7 +891,16 @@ _add_node_set_info(struct node_set *node_set_ptr,
 			}
 		}
         } else {
-                for (i = 0; i < node_record_count; i++) {
+		int ll; /* layout array index */
+		uint16_t * layout_ptr = NULL;
+		if (job_ptr->details)
+			layout_ptr = job_ptr->details->req_node_layout;
+
+                for (i = 0, ll = -1; i < node_record_count; i++) {
+			if (layout_ptr &&
+			    bit_test(job_ptr->details->req_node_bitmap, i)) {
+				ll ++;
+			}
                         if (bit_test (node_set_ptr->my_bitmap, i) == 0)
 				continue;
                         alloc_cpus = 0;
@@ -919,6 +923,8 @@ _add_node_set_info(struct node_set *node_set_ptr,
 				      node_record_table_ptr[i]. name);
 				return error_code;
 			}
+
+			/* Determine processors and memory available for use */
 			if (slurmctld_conf.fast_schedule) {
 				this_cpu_cnt = node_set_ptr->cpus_per_node - 
 					alloc_cpus;
@@ -931,10 +937,21 @@ _add_node_set_info(struct node_set *node_set_ptr,
 					alloc_mem) - mem_cnt;
 			}                       
 
-			debug3("_add_node_set_info %d %s this_cpu_cnt %d"
-			       " this_mem_cnt %d", job_id, 
-			       node_record_table_ptr[i].name, this_cpu_cnt,
-			       this_mem_cnt);
+			debug3("_add_node_set_info %u %s this_cpu_cnt %d"
+				" this_mem_cnt %d", 
+				job_id, node_record_table_ptr[i].name, 
+				this_cpu_cnt, this_mem_cnt);
+
+			if (layout_ptr &&
+			    bit_test(job_ptr->details->req_node_bitmap, i)) {
+				this_cpu_cnt = MIN(this_cpu_cnt, layout_ptr[ll]);
+				debug3("_add_node_set_info %u %s this_cpu_cnt"
+				       " limited by task layout %d: %u",
+					job_id, node_record_table_ptr[i].name,
+					ll, layout_ptr[ll]);
+			} else if (layout_ptr) {
+				this_cpu_cnt = 0;
+			}
 
 			if ((this_cpu_cnt > 0) && (this_mem_cnt > 0)) {
 				*node_cnt += 1;
@@ -1115,6 +1132,10 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 	allocate_nodes(job_ptr);
 	build_node_details(job_ptr);
 	job_ptr->job_state = JOB_RUNNING;
+	if (select_g_update_nodeinfo(job_ptr) != SLURM_SUCCESS) {
+		error("select_g_update_nodeinfo(%u): %m", job_ptr->job_id);
+		/* not critical ... by now */
+	}
 	job_ptr->start_time = job_ptr->time_last_active = time(NULL);
 	if (job_ptr->time_limit == NO_VAL)
 		job_ptr->time_limit = part_ptr->max_time;
@@ -1133,8 +1154,10 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 	else
 		FREE_NULL_BITMAP(select_bitmap);
 	if (node_set_ptr) {
-		for (i = 0; i < node_set_size; i++)
+		for (i = 0; i < node_set_size; i++) {
 			FREE_NULL_BITMAP(node_set_ptr[i].my_bitmap);
+			FREE_NULL_BITMAP(node_set_ptr[i].feature_bits);
+		}
 		xfree(node_set_ptr);
 	}
 	return error_code;
@@ -1156,10 +1179,11 @@ static int _build_node_list(struct job_record *job_ptr,
 	struct config_record *config_ptr;
 	struct part_record *part_ptr = job_ptr->part_ptr;
 	ListIterator config_iterator;
-	int tmp_feature, check_node_config, config_filter = 0;
+	int check_node_config, config_filter = 0;
 	struct job_details *detail_ptr = job_ptr->details;
 	bitstr_t *exc_node_mask = NULL;
 	multi_core_data_t *mc_ptr = detail_ptr->mc_ptr;
+	bitstr_t *tmp_feature;
 
 	node_set_inx = 0;
 	node_set_ptr = (struct node_set *) 
@@ -1178,10 +1202,6 @@ static int _build_node_list(struct job_record *job_ptr,
 
 	while ((config_ptr = (struct config_record *) 
 			list_next(config_iterator))) {
-		tmp_feature = _valid_features(job_ptr->details->features,
-					      config_ptr->feature);
-		if (tmp_feature == 0)
-			continue;
 
 		config_filter = 0;
 		if ((detail_ptr->job_min_procs    > config_ptr->cpus       )
@@ -1210,32 +1230,42 @@ static int _build_node_list(struct job_record *job_ptr,
 			check_node_config = 0;
 
 		node_set_ptr[node_set_inx].my_bitmap =
-		    bit_copy(config_ptr->node_bitmap);
+			bit_copy(config_ptr->node_bitmap);
 		if (node_set_ptr[node_set_inx].my_bitmap == NULL)
 			fatal("bit_copy malloc failure");
 		bit_and(node_set_ptr[node_set_inx].my_bitmap,
 			part_ptr->node_bitmap);
-		if (exc_node_mask)
+		if (exc_node_mask) {
 			bit_and(node_set_ptr[node_set_inx].my_bitmap,
 				exc_node_mask);
+		}
 		node_set_ptr[node_set_inx].nodes =
 			bit_set_count(node_set_ptr[node_set_inx].my_bitmap);
-		if (check_node_config && 
-		    (node_set_ptr[node_set_inx].nodes != 0))
+		if (check_node_config 
+		&&  (node_set_ptr[node_set_inx].nodes != 0)) {
 			_filter_nodes_in_set(&node_set_ptr[node_set_inx], 
 					     detail_ptr);
-
+		}
 		if (node_set_ptr[node_set_inx].nodes == 0) {
 			FREE_NULL_BITMAP(node_set_ptr[node_set_inx].my_bitmap);
 			continue;
 		}
+
+		tmp_feature = _valid_features(job_ptr->details->features,
+					      config_ptr->feature);
+		if (tmp_feature == NULL) {
+			FREE_NULL_BITMAP(node_set_ptr[node_set_inx].my_bitmap);
+			continue;
+		}
+		/* NOTE: Must bit_free(tmp_feature) to avoid memory leak */
+
 		node_set_ptr[node_set_inx].cpus_per_node =
 			config_ptr->cpus;
 		node_set_ptr[node_set_inx].real_memory =
 			config_ptr->real_memory;		
 		node_set_ptr[node_set_inx].weight =
 		    config_ptr->weight;
-		node_set_ptr[node_set_inx].feature = tmp_feature;
+		node_set_ptr[node_set_inx].feature_bits = tmp_feature;
 		debug2("found %d usable nodes from config containing %s",
 		       node_set_ptr[node_set_inx].nodes, config_ptr->nodes);
 
@@ -1247,6 +1277,7 @@ static int _build_node_list(struct job_record *job_ptr,
 	list_iterator_destroy(config_iterator);
 	/* eliminate last (incomplete) node_set record */
 	FREE_NULL_BITMAP(node_set_ptr[node_set_inx].my_bitmap);
+	FREE_NULL_BITMAP(node_set_ptr[node_set_inx].feature_bits);
 	FREE_NULL_BITMAP(exc_node_mask);
 
 	if (node_set_inx == 0) {
@@ -1371,7 +1402,7 @@ extern void build_node_details(struct job_record *job_ptr)
 	hostlist_t host_list = NULL;
 	struct node_record *node_ptr;
 	char *this_node_name;
-        int error_code = SLURM_SUCCESS, cr_enabled = 0;
+        int error_code = SLURM_SUCCESS;
 	int node_inx = 0, cpu_inx = -1;
         int cr_count = 0;
 
@@ -1402,13 +1433,9 @@ extern void build_node_details(struct job_record *job_ptr)
 	xrealloc(job_ptr->node_addr, 
 		(sizeof(slurm_addr) * job_ptr->node_cnt));	
 
-        job_ptr->alloc_lps_cnt = 0;
-        xfree(job_ptr->alloc_lps);
-        if (job_ptr->cr_enabled) {
-                cr_enabled = job_ptr->cr_enabled;
-                job_ptr->alloc_lps = xmalloc(job_ptr->node_cnt * sizeof(uint32_t));
-                job_ptr->alloc_lps_cnt = job_ptr->node_cnt;
-        }
+	job_ptr->alloc_lps_cnt = job_ptr->node_cnt;
+	xrealloc(job_ptr->alloc_lps,
+		(sizeof(uint32_t) * job_ptr->node_cnt));
 
 	while ((this_node_name = hostlist_shift(host_list))) {
 		node_ptr = find_node_record(this_node_name);
@@ -1432,15 +1459,13 @@ extern void build_node_details(struct job_record *job_ptr)
 				node_ptr, job_ptr, SELECT_AVAIL_CPUS, 
 				&usable_lps);
 			if (error_code == SLURM_SUCCESS) {
-				if (cr_enabled && job_ptr->alloc_lps) {
+				if (job_ptr->alloc_lps) {
 					job_ptr->alloc_lps[cr_count++] =
 								usable_lps;
 				}
 			} else {
-				if (cr_enabled) {
-					xfree(job_ptr->alloc_lps); 
-					job_ptr->alloc_lps_cnt = 0;
-				}
+				xfree(job_ptr->alloc_lps); 
+				job_ptr->alloc_lps_cnt = 0;
 				error("Unable to get extra jobinfo "
 				      "from JobId=%u", job_ptr->job_id);
 			}
@@ -1473,13 +1498,6 @@ extern void build_node_details(struct job_record *job_ptr)
 		      job_ptr->job_id, job_ptr->node_cnt, node_inx);
 	}
 	job_ptr->num_cpu_groups = cpu_inx + 1;
-	if ((cr_enabled) && (error_code == SLURM_SUCCESS)) {
-                /* Update cr node structure with this job's allocated resources */
-                error_code = select_g_update_nodeinfo(job_ptr);
-                if(error_code != SLURM_SUCCESS)
-                      fatal("Unable to update nodeinfo JobId=%u",
-                            job_ptr->job_id);
-        }
 }
 
 /*
@@ -1493,30 +1511,35 @@ extern void build_node_details(struct job_record *job_ptr)
  *	slurm administrator and user guides for details. returns 1 if 
  *	requirements are satisfied without mutually exclusive feature list.
  */
-static int _valid_features(char *requested, char *available)
+static bitstr_t *_valid_features(char *requested, char *available)
 {
 	char *tmp_requested, *str_ptr1;
-	int bracket, found, i, option, position, result;
+	int bracket, found, i, position, result;
 	int last_op;		/* last operation 0 for or, 1 for and */
 	int save_op = 0, save_result = 0;	/* for bracket support */
+	bitstr_t *result_bits = (bitstr_t *) NULL;
 
-	if (requested == NULL)
-		return 1;	/* no constraints */
-	if (available == NULL)
-		return 0;	/* no features */
+	if (requested == NULL) {		/* no constraints */
+		result_bits = bit_alloc(MAX_FEATURES);
+		bit_set(result_bits, 0);
+		return result_bits;
+	}
+	if (available == NULL)			/* no features */
+		return result_bits;
 
 	tmp_requested = xstrdup(requested);
-	bracket = option = position = 0;
+	bracket = position = 0;
 	str_ptr1 = tmp_requested;	/* start of feature name */
-	result = last_op = 1;	/* assume good for now */
-	for (i = 0;; i++) {
+	result = 1;			/* assume good for now */
+	last_op = FEATURE_OP_AND;
+	for (i=0; ; i++) {
 		if (tmp_requested[i] == (char) NULL) {
 			if (strlen(str_ptr1) == 0)
 				break;
 			found = _match_feature(str_ptr1, available);
-			if (last_op == 1)	/* and */
+			if (last_op == FEATURE_OP_AND)
 				result &= found;
-			else	/* or */
+			else	/* FEATURE_OP_OR */
 				result |= found;
 			break;
 		}
@@ -1530,53 +1553,67 @@ static int _valid_features(char *requested, char *available)
 			}
 			tmp_requested[i] = (char) NULL;
 			found = _match_feature(str_ptr1, available);
-			if (last_op == 1)	/* and */
+			if (last_op == FEATURE_OP_AND)
 				result &= found;
-			else	/* or */
+			else	/* FEATURE_OP_OR */
 				result |= found;
 			str_ptr1 = &tmp_requested[i + 1];
-			last_op = 1;	/* and */
+			last_op = FEATURE_OP_AND;
 
 		} else if (tmp_requested[i] == '|') {
 			tmp_requested[i] = (char) NULL;
 			found = _match_feature(str_ptr1, available);
 			if (bracket != 0) {
-				if (found)
-					option = position;
+				if (found) {
+					if (!result_bits)
+						result_bits = bit_alloc(MAX_FEATURES);
+					if (position < MAX_FEATURES)
+						bit_set(result_bits, (position-1));
+					else
+						error("_valid_features: overflow");
+				}
 				position++;
 			}
-			if (last_op == 1)	/* and */
+			if (last_op == FEATURE_OP_AND)
 				result &= found;
-			else	/* or */
+			else	/* FEATURE_OP_OR */
 				result |= found;
 			str_ptr1 = &tmp_requested[i + 1];
-			last_op = 0;	/* or */
+			last_op = FEATURE_OP_OR;
 
 		} else if (tmp_requested[i] == '[') {
 			bracket++;
 			position = 1;
 			save_op = last_op;
 			save_result = result;
-			last_op = result = 1;
+			last_op = FEATURE_OP_AND;
+			result = 1;
 			str_ptr1 = &tmp_requested[i + 1];
 
 		} else if (tmp_requested[i] == ']') {
 			tmp_requested[i] = (char) NULL;
 			found = _match_feature(str_ptr1, available);
-			if (found)
-				option = position;
+			if (found) {
+				if (!result_bits)
+					result_bits = bit_alloc(MAX_FEATURES);
+				if (position < MAX_FEATURES)
+					bit_set(result_bits, (position-1));
+				else
+					error("_valid_features: overflow");
+			}
+			position++;
 			result |= found;
-			if (save_op == 1)	/* and */
+			if (save_op == FEATURE_OP_AND)
 				result &= save_result;
-			else	/* or */
+			else	/* FEATURE_OP_OR */
 				result |= save_result;
 			if ((tmp_requested[i + 1] == '&')
 			    && (bracket == 1)) {
-				last_op = 1;
+				last_op = FEATURE_OP_AND;
 				str_ptr1 = &tmp_requested[i + 2];
 			} else if ((tmp_requested[i + 1] == '|')
 				   && (bracket == 1)) {
-				last_op = 0;
+				last_op = FEATURE_OP_OR;
 				str_ptr1 = &tmp_requested[i + 2];
 			} else if ((tmp_requested[i + 1] == (char) NULL)
 				   && (bracket == 1)) {
@@ -1590,11 +1627,18 @@ static int _valid_features(char *requested, char *available)
 			bracket = 0;
 		}
 	}
-
-	if (position)
-		result *= option;
 	xfree(tmp_requested);
-	return result;
+
+	if (result) {
+		if (!result_bits) {
+			result_bits = bit_alloc(MAX_FEATURES);
+			bit_set(result_bits, 0);
+		}
+	} else {
+		FREE_NULL_BITMAP(result_bits);
+	}
+
+	return result_bits;
 }
 
 /*

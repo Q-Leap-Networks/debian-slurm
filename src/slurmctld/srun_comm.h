@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  srun_comm.h - definitions srun communications
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette@llnl.gov> et. al.
  *  UCRL-CODE-226842.
@@ -50,10 +50,25 @@
 extern void srun_allocate (uint32_t job_id);
 
 /*
- * srun_complete - notify srun of a job's termination
+ * srun_exec - request that srun execute a specific command
+ *	and route it's output to stdout
+ * IN step_ptr - pointer to the slurmctld job step record
+ * IN argv - command and arguments to execute
+ */
+extern void srun_exec(struct step_record *step_ptr, char **argv);
+
+
+/*
+ * srun_job_complete - notify srun of a job's termination
  * IN job_ptr - pointer to the slurmctld job record
  */
-extern void srun_complete (struct job_record *job_ptr);
+extern void srun_job_complete (struct job_record *job_ptr);
+
+/*
+ * srun_step_complete - notify srun of a job step's termination
+ * IN step_ptr - pointer to the slurmctld job step record
+ */
+extern void srun_step_complete (struct step_record *step_ptr);
 
 /*
  * srun_node_fail - notify srun of a node's failure
@@ -77,5 +92,10 @@ extern void srun_response(uint32_t job_id, uint32_t step_id);
  * IN job_ptr - pointer to the slurmctld job record
  */
 extern void srun_timeout (struct job_record *job_ptr);
+
+/*
+ * srun_user_message - Send arbitrary message to an srun job (no job steps)
+ */
+extern void srun_user_message(struct job_record *job_ptr, char *msg);
 
 #endif /* !_HAVE_SRUN_COMM_H */

@@ -44,7 +44,6 @@
 #include "src/common/node_select.h"
 #include "src/common/uid.h"
 #include "src/slurmctld/locks.h"
-#include "src/slurmctld/slurmctld.h"
 
 static char *	_dump_all_jobs(int *job_cnt, int state_info);
 static char *	_dump_job(struct job_record *job_ptr, int state_info);
@@ -61,11 +60,12 @@ static uint32_t	_get_job_submit_time(struct job_record *job_ptr);
 static uint32_t	_get_job_suspend_time(struct job_record *job_ptr);
 static uint32_t	_get_job_tasks(struct job_record *job_ptr);
 static uint32_t	_get_job_time_limit(struct job_record *job_ptr);
-static char *	_full_task_list(struct job_record *job_ptr);
 
 #define SLURM_INFO_ALL		0
 #define SLURM_INFO_VOLITILE	1
 #define SLURM_INFO_STATE	2
+
+static uint32_t cr_enabled = 0, cr_test = 0;
 
 /*
  * get_jobs - get information on specific job(s) changed since some time
@@ -111,6 +111,12 @@ extern int	get_jobs(char *cmd_ptr, int *err_code, char **err_msg)
 	slurmctld_lock_t job_read_lock = {
 		NO_LOCK, READ_LOCK, NO_LOCK, READ_LOCK };
 	int job_rec_cnt = 0, buf_size = 0, state_info;
+
+	if (cr_test == 0) {
+		select_g_get_info_from_plugin(SELECT_CR_PLUGIN,
+					      &cr_enabled);
+		cr_test = 1;
+	}
 
 	arg_ptr = strstr(cmd_ptr, "ARG=");
 	if (arg_ptr == NULL) {
@@ -239,12 +245,7 @@ static char *	_dump_job(struct job_record *job_ptr, int state_info)
 		}
 	} else if (!IS_JOB_FINISHED(job_ptr)) {
 		char *hosts;
-		if (job_ptr->cr_enabled) {
-			hosts = _full_task_list(job_ptr);
-		} else {
-			hosts = bitmap2wiki_node_name(
-				job_ptr->node_bitmap);
-		}
+		hosts = slurm_job2moab_task_list(job_ptr);
 		xstrcat(buf, "TASKLIST=");
 		xstrcat(buf, hosts);
 		xstrcat(buf, ";");
@@ -331,7 +332,6 @@ static void	_get_job_comment(struct job_record *job_ptr,
 {
 	int size, sharing = 0;
 	char *field_sep = "";
-	static int cr_enabled = 0, cr_test = 0;
 
 	/* HEADER */
 	size = snprintf(buffer, buf_size, "COMMENT=\"");
@@ -345,19 +345,16 @@ static void	_get_job_comment(struct job_record *job_ptr,
 	}
 
 	/* SHARED NODES */
-	if (cr_test == 0) {
-		select_g_get_info_from_plugin(SELECT_CR_PLUGIN,
-					      &cr_enabled);
-		cr_test = 1;
-	}
 	if (cr_enabled)	{			/* consumable resources */
-		if (job_ptr->details && (job_ptr->details->shared != 0))
+		if (job_ptr->part_ptr->shared == SHARED_EXCLUSIVE)
+			sharing = 0;
+		else if (job_ptr->details && (job_ptr->details->shared != 0))
 			sharing = 1;
 	} else if (job_ptr->part_ptr) {			/* partition with */
-		if (job_ptr->part_ptr->shared == 2)	/* forced sharing */
+		if (job_ptr->part_ptr->shared == SHARED_FORCE)
 			sharing = 1;
-		if ((job_ptr->part_ptr->shared == 1)	/* optional sharing */
-		&&  (job_ptr->details)
+		else if ((job_ptr->part_ptr->shared == SHARED_YES)
+		&&  (job_ptr->details)			/* optional for partition */
 		&&  (job_ptr->details->shared))		/* with job to share */
 			sharing = 1;
 	}
@@ -537,37 +534,4 @@ static uint32_t	_get_job_suspend_time(struct job_record *job_ptr)
 	return (uint32_t) 0;
 }
 
-/* Return a job's task list. 
- * List hostname once for each allocated CPU on that node. 
- * NOTE: xfree the return value.  */
-static char * _full_task_list(struct job_record *job_ptr)
-{
-	int i, j;
-	char *buf = NULL, *host;
-	hostlist_t hl = hostlist_create(job_ptr->nodes);
-
-	if (hl == NULL) {
-		error("hostlist_create error for job %u, %s",
-			job_ptr->job_id, job_ptr->nodes);
-		return buf;
-	}
-
-	for (i=0; i<job_ptr->alloc_lps_cnt; i++) {
-		host = hostlist_shift(hl);
-		if (host == NULL) {
-			error("bad alloc_lps_cnt for job %u (%s, %d)", 
-				job_ptr->job_id, job_ptr->nodes,
-				job_ptr->alloc_lps_cnt);
-			break;
-		}
-		for (j=0; j<job_ptr->alloc_lps[i]; j++) {
-			if (buf)
-				xstrcat(buf, ":");
-			xstrcat(buf, host);
-		}
-		free(host);
-	}
-	hostlist_destroy(hl);
-	return buf;
-}
 

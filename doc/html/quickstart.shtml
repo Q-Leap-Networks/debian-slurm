@@ -19,8 +19,9 @@ work.</p>
 each compute node and a central <b>slurmctld</b> daemon running on a management node 
 (with optional fail-over twin). 
 The <b>slurmd</b> daemons provide fault-tolerant hierarchical communciations.
-The user commands include: <b>srun</b>, <b>sbcast</b>, <b>scancel</b>, 
-<b>sinfo</b>, <b>srun</b>, <b>smap</b>, <b>squeue</b>, and <b>scontrol</b>.  
+The user commands include: <b>salloc</b>, <b>sattach</b>, <b>sbatch</b>, 
+<b>sbcast</b>, <b>scancel</b>, <b>sinfo</b>, <b>srun</b>, 
+<b>smap</b>, <b>squeue</b>, and <b>scontrol</b>.  
 All of the commands can run anywhere in the cluster.</p>
 
 <div class="figure">
@@ -53,15 +54,18 @@ or several job steps may independently use a portion of the allocation.</p>
 <p>Man pages exist for all SLURM daemons, commands, and API functions. The command 
 option <span class="commandline">--help</span> also provides a brief summary of 
 options. Note that the command options are all case insensitive.</p>
-<p><span class="commandline"><b>srun</b></span> is used to submit a job for execution, 
-allocate resources, attach to an existing allocation, or initiate job steps. Jobs 
-can be submitted for immediate or later execution (e.g., batch). <span class="commandline">srun</span> 
-has a wide variety of options to specify resource requirements, including: minimum 
-and maximum node count, processor count, specific nodes to use or not use, and 
-specific node characteristics (so much memory, disk space, certain required features, 
-etc.). Besides securing a resource allocation, <span class="commandline">srun</span> 
-is used to initiate job steps. These job steps can execute sequentially or in 
-parallel on independent or shared nodes within the job's node allocation.</p>
+
+<p><span class="commandline"><b>salloc</b></span> is used to allocate resources 
+for a job in real time. Typically this is used to allocate resources and spawn a shell. 
+The shell is then used to execute srun commands to launch parallel tasks.</p>
+
+<p><span class="commandline"><b>sattach</b></span> is used to attach standard 
+input, output, and error plus signal capabilities to a currently running 
+job or job step. One can attach to and detach from jobs multiple times.</p>
+
+<p><span class="commandline"><b>sbatch</b></span> is used to submit a job script 
+for later execution. The script will typically contain one or more srun commands 
+to launch parallel tasks.</p>
 
 <p><span class="commandline"><b>sbcast</b></span> is used to transfer a file
 from local disk to local disk on the nodes allocated to a job. This can be 
@@ -84,6 +88,16 @@ options.</p>
 job steps. It has a wide variety of filtering, sorting, and formatting options. 
 By default, it reports the running jobs in priority order and then the pending 
 jobs in priority order.</p>
+
+<p><span class="commandline"><b>srun</b></span> is used to submit a job for
+execution or initiate job steps in real time.
+<span class="commandline">srun</span>
+has a wide variety of options to specify resource requirements, including: minimum
+and maximum node count, processor count, specific nodes to use or not use, and
+specific node characteristics (so much memory, disk space, certain required 
+features, etc.).
+A job can contain multiple job steps executing sequentially or in parallel on
+independent or shared nodes within the job's node allocation.</p>
 
 <p><span class="commandline"><b>smap</b></span> reports state information for 
 jobs, partitions, and nodes managed by SLURM, but graphically displays the 
@@ -115,24 +129,33 @@ adev0: srun -n4 -l /bin/hostname
 1: adev9
 2: adev10
 3: adev10
-</pre> <p>Submit the script my.script for later execution (<span class="commandline">-b</span>). 
-Explicitly use the nodes adev9 and adev10 (<span class="commandline">-w "adev[9-10]"</span>; 
-note the use of a node range expression). One processor per task will be used 
-by default. The output will appear in the file my.stdout (<span class="commandline">-o 
-my.stdout</span>). By default, one task will be initiated per processor on the 
-nodes. Note that my.script contains the command <span class="commandline">/bin/hostname</span> 
+</pre> <p>Submit the script my.script for later execution.
+Explicitly use the nodes adev9 and adev10 ("-w "adev[9-10]", note the use of a 
+node range expression). 
+We also explicitly state that the subsequent job steps will spawn four tasks 
+each, which will insure that our allocation contains at least four processors
+(one processor per task to be launched).
+The output will appear in the file my.stdout ("-o my.stdout").
+This script contains a timelimit for the job embedded within itself.
+Other options can be supplied as desired by using a prefix of "#SBATCH" followed
+by the option at the beginning of the script (before any commands to be executed
+in the script).
+Options supplied on the command line would override any options specified within
+the script.
+Note that my.script contains the command <span class="commandline">/bin/hostname</span> 
 that executed on the first node in the allocation (where the script runs) plus 
 two job steps initiated using the <span class="commandline">srun</span> command 
 and executed sequentially.</p>
 <pre>
 adev0: cat my.script
 #!/bin/sh
+#SBATCH --time=1
 /bin/hostname
 srun -l /bin/hostname
 srun -l /bin/pwd
 
-adev0: srun -w &quot;adev[9-10]&quot; -o my.stdout -b my.script
-srun: jobid 469 submitted
+adev0: sbatch -n4 -w &quot;adev[9-10]&quot; -o my.stdout my.script
+sbatch: Submitted batch job 469
 
 adev0: cat my.stdout
 adev9
@@ -148,27 +171,27 @@ adev9
 
 <p>Submit a job, get its status, and cancel it. </p>
 <pre>
-adev0: srun -b my.sleeper
+adev0: sbatch my.sleeper
 srun: jobid 473 submitted
 
 adev0: squeue
-  JobId Partition Name     User     St TimeLimit Prio Nodes
-    473 batch     my.sleep jette    R  UNLIMITED 0.99 adev9
+  JOBID PARTITION NAME     USER  ST TIME  NODES NODELIST(REASON)
+    473 batch     my.sleep jette R  00:00 1     adev9
  
 adev0: scancel 473
 
 adev0: squeue
-  JobId Partition Name     User     St TimeLimit Prio Nodes
+  JOBID PARTITION NAME     USER  ST TIME  NODES NODELIST(REASON)
 </pre>
 
 <p>Get the SLURM partition and node status.</p>
 <pre>
 adev0: sinfo
-PARTITION  NODES STATE     CPUS    MEMORY    TMP_DISK NODES
-----------------------------------------------------------------
-debug          8 IDLE         2      3448       82306 adev[0-7]
-batch          1 DOWN         2      3448       82306 adev8
-               7 IDLE         2 3448-3458       82306 adev[9-15]
+PARTITION AVAIL  TIMELIMIT NODES  STATE NODELIST
+debug     up     00:30:00      8   idle adev[0-7]
+batch     up     12:00:00      1   down adev8
+                 12:00:00      7   idle adev[9-15]
+
 </pre>
 <p class="footer"><a href="#top">top</a></p>
 
@@ -274,7 +297,6 @@ of 1 or higher for the PMI libary to print debugging information</li>
 </ul></p>
 
 <p><a href="http://www.myri.com/scs/download-mpichgm.html"><b>MPICH-GM</b></a>
-and <a href="http://www.myri.com/scs/download-mpichmx.html"><b>MPICH-MX</b></a>
 jobs can be launched directly by <b>srun</b> command.
 SLURM's <i>mpichgm</i> MPI plugin must be used to establish communications 
 between the laucnhed tasks. This can be accomplished either using the SLURM 
@@ -283,6 +305,17 @@ or srun's <i>--mpi=mpichgm</i> option.
 <pre>
 $ mpicc ...
 $ srun -n16 --mpi=mpichgm a.out
+</pre>
+
+<p><a href="http://www.myri.com/scs/download-mpichmx.html"><b>MPICH-MX</b></a>
+jobs can be launched directly by <b>srun</b> command.
+SLURM's <i>mpichmx</i> MPI plugin must be used to establish communications
+between the laucnhed tasks. This can be accomplished either using the SLURM
+configuration parameter <i>MpiDefault=mpichmx</i> in <b>slurm.conf</b>
+or srun's <i>--mpi=mpichmx</i> option.
+<pre>
+$ mpicc ...
+$ srun -n16 --mpi=mpichmx a.out
 </pre>
 
 <p><a href="http://nowlab.cse.ohio-state.edu/projects/mpi-iba"><b>MVAPICH</b></a>
@@ -295,6 +328,12 @@ or srun's <i>--mpi=mvapich</i> option.
 $ mpicc ...
 $ srun -n16 --mpi=mvapich a.out
 </pre>
+<p><b>Note for system administrators:</b> Configure
+<i>PropagateResourceLimitsExcept=MEMLOCK</i> in <b>slurm.conf</b> and 
+start the <i>slurmd</i> daemons with an unlimited locked memory limit.
+For more details, see 
+<a href="http://mvapich.cse.ohio-state.edu/support/mvapich_user_guide.html#x1-420007.2.3">MVAPICH</a> 
+documentation for "CQ or QP Creation failure".</p>
 
 <p><a href="http://nowlab.cse.ohio-state.edu/projects/mpi-iba"><b>MVAPICH2</b></a>
 jobs can be launched directly by <b>srun</b> command.
@@ -338,10 +377,10 @@ with the <i>--mpi=mpich1_shmem</i> option.</p>
 $ srun -n16 --mpi=mpich1_shmem a.out
 </pre>
 
-<p>If you are using MPICH P4 (<i>DEFAULT_DEVICE=ch_shmem</i> in 
+<p>If you are using MPICH P4 (<i>DEFAULT_DEVICE=ch_p4</i> in 
 the mpirun script) and SLURM version 1.2.11 or newer, 
 then it is recommended that you apply the patch in the SLURM 
-distribution's file <i>etc/mpich1.slurm.patch</i>. 
+distribution's file <i>contribs/mpich1.slurm.patch</i>. 
 Follow directions within the file to rebuild MPICH. 
 Applications must be relinked with the new library.
 Initiate tasks using the 
@@ -378,6 +417,6 @@ sbatch: Submitted batch job 1234
 tasks. These tasks are not managed by SLURM since they are launched 
 outside of its control.</p>
  
-<p style="text-align:center;">Last modified 15 June 2007</p>
+<p style="text-align:center;">Last modified 14 August 2007</p>
 
 <!--#include virtual="footer.txt"-->

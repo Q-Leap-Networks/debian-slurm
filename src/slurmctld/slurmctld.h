@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  slurmctld.h - definitions of functions and structures for slurmcltd use
  *
- *  $Id: slurmctld.h 11459 2007-05-08 23:06:38Z jette $
+ *  $Id: slurmctld.h 11795 2007-07-06 15:39:25Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -241,8 +241,7 @@ struct part_record {
 	uint32_t max_offset;	/* select plugin max offset */
 	uint16_t root_only;	/* 1 if allocate/submit RPC can only be 
 				   issued by user root */
-	uint16_t shared;	/* 1 if job can share a node,
-				   2 if sharing required */
+	uint16_t shared;	/* See part_shared in slurm.h */
 	uint16_t state_up;	/* 1 if state is up, 0 if down */
 	char *nodes;		/* comma delimited list names of nodes */
 	char *allow_groups;	/* comma delimited list of groups, 
@@ -276,6 +275,7 @@ struct job_details {
 	char *req_nodes;		/* required nodes */
 	char *exc_nodes;		/* excluded nodes */
 	bitstr_t *req_node_bitmap;	/* bitmap of required nodes */
+	uint16_t *req_node_layout;	/* task layout for required nodes */
 	bitstr_t *exc_node_bitmap;	/* bitmap of excluded nodes */
 	char *features;			/* required features */
 	uint16_t shared;		/* 1 if job can share nodes,
@@ -376,11 +376,11 @@ struct job_record {
                                          * linear plugins 
                                          * 0 if cr is NOT enabled, 
                                          * 1 if cr is enabled */
-        uint32_t alloc_lps_cnt;        /* number of hosts in alloc_lps
-					  or 0 if alloc_lps is not needed
-					  for the credentials */
-        uint32_t *alloc_lps;           /* number of logical processors
-					* allocated for this job */
+        uint32_t alloc_lps_cnt;		/* number of hosts in alloc_lps
+					 * or 0 if alloc_lps is not needed
+					 * for the credentials */
+        uint32_t *alloc_lps;		/* number of logical processors
+					 * allocated for this job */
 	uint16_t mail_type;		/* see MAIL_JOB_* in slurm.h */
 	char *mail_user;		/* user to get e-mail notification */
 	uint32_t requid;            	/* requester user ID */

@@ -149,6 +149,7 @@ s_p_options_t slurm_conf_options[] = {
 	{"JobCompType", S_P_STRING},
 	{"JobCredentialPrivateKey", S_P_STRING},
 	{"JobCredentialPublicCertificate", S_P_STRING},
+	{"JobFileAppend", S_P_UINT16},
 	{"KillTree", S_P_UINT16, defunct_option},
 	{"KillWait", S_P_UINT16},
 	{"MailProg", S_P_STRING},
@@ -193,6 +194,8 @@ s_p_options_t slurm_conf_options[] = {
 	{"TaskPluginParam", S_P_STRING},
 	{"TmpFS", S_P_STRING},
 	{"TreeWidth", S_P_UINT16},
+	{"UnkillableStepProgram", S_P_STRING},
+	{"UnkillableStepTimeout", S_P_UINT16},
 	{"UsePAM", S_P_BOOLEAN},
 	{"WaitTime", S_P_UINT16},
 
@@ -518,6 +521,8 @@ static int parse_partitionname(void **dest, slurm_parser_enum_t type,
 			/* Only "Shared=NO" is valid on XCPU systems */
 			else if (strcasecmp(tmp, "YES") == 0)
 				p->shared = SHARED_YES;
+			else if (strcasecmp(tmp, "EXCLUSIVE") == 0)
+				p->shared = SHARED_EXCLUSIVE;
 			else if (strcasecmp(tmp, "FORCE") == 0)
 				p->shared = SHARED_FORCE;
 #endif
@@ -1069,6 +1074,7 @@ free_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr, bool purge_node_hash)
 	xfree (ctl_conf_ptr->srun_prolog);
 	xfree (ctl_conf_ptr->srun_epilog);
 	xfree (ctl_conf_ptr->node_prefix);
+	xfree (ctl_conf_ptr->unkillable_program);
 
 	if (purge_node_hash)
 		_free_name_hashtbl();
@@ -1102,6 +1108,7 @@ init_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr)
 	xfree (ctl_conf_ptr->job_comp_type);
 	xfree (ctl_conf_ptr->job_credential_private_key);
 	xfree (ctl_conf_ptr->job_credential_public_certificate);
+	ctl_conf_ptr->job_file_append		= (uint16_t) NO_VAL;
 	ctl_conf_ptr->kill_wait			= (uint16_t) NO_VAL;
 	xfree (ctl_conf_ptr->mail_prog);
 	ctl_conf_ptr->max_job_cnt		= (uint16_t) NO_VAL;
@@ -1147,7 +1154,9 @@ init_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr)
 	xfree (ctl_conf_ptr->node_prefix);
 	ctl_conf_ptr->tree_width       		= (uint16_t) NO_VAL;
 	ctl_conf_ptr->use_pam			= 0;
-	
+	xfree (ctl_conf_ptr->unkillable_program);
+	ctl_conf_ptr->unkillable_timeout        = (uint16_t) NO_VAL;
+
 	_free_name_hashtbl();
 	_init_name_hashtbl();
 
@@ -1466,6 +1475,9 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 	if (!s_p_get_string(&conf->job_comp_type, "JobCompType", hashtbl))
 		conf->job_comp_type = xstrdup(DEFAULT_JOB_COMP_TYPE);
 
+	if (!s_p_get_uint16(&conf->job_file_append, "JobFileAppend", hashtbl))
+		conf->job_file_append = 0;
+
 	if (!s_p_get_uint16(&conf->kill_wait, "KillWait", hashtbl))
 		conf->kill_wait = DEFAULT_KILL_WAIT;
 
@@ -1674,6 +1686,12 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 	} else {
 		conf->use_pam = 0;
 	}
+
+	s_p_get_string(&conf->unkillable_program,
+		       "UnkillableStepProgram", hashtbl);
+	if (!s_p_get_uint16(&conf->unkillable_timeout,
+			    "UnkillableStepTimeout", hashtbl))
+		conf->unkillable_timeout = DEFAULT_UNKILLABLE_TIMEOUT;
 }
 
 /*

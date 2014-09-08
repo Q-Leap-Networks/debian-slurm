@@ -1,7 +1,7 @@
 /****************************************************************************\
  *  slurm_protocol_pack.c - functions to pack and unpack structures for RPCs
  *
- *  $Id: slurm_protocol_pack.c 11144 2007-03-14 19:17:47Z jette $
+ *  $Id: slurm_protocol_pack.c 12088 2007-08-22 18:02:24Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -272,6 +272,9 @@ static void _pack_job_step_kill_msg(job_step_kill_msg_t * msg, Buf buffer);
 static int  _unpack_job_step_kill_msg(job_step_kill_msg_t ** msg_ptr, 
 				      Buf buffer);
 
+static void _pack_srun_exec_msg(srun_exec_msg_t * msg, Buf buffer);
+static int  _unpack_srun_exec_msg(srun_exec_msg_t ** msg_ptr, Buf buffer);
+
 static void _pack_srun_ping_msg(srun_ping_msg_t * msg, Buf buffer);
 static int  _unpack_srun_ping_msg(srun_ping_msg_t ** msg_ptr, Buf buffer);
 
@@ -280,8 +283,11 @@ static int  _unpack_srun_node_fail_msg(srun_node_fail_msg_t ** msg_ptr,
 				       Buf buffer);
 
 static void _pack_srun_timeout_msg(srun_timeout_msg_t * msg, Buf buffer);
-static int  
-_unpack_srun_timeout_msg(srun_timeout_msg_t ** msg_ptr, Buf buffer);
+static int  _unpack_srun_timeout_msg(srun_timeout_msg_t ** msg_ptr, 
+					Buf buffer);
+
+static void _pack_srun_user_msg(srun_user_msg_t * msg, Buf buffer);
+static int  _unpack_srun_user_msg(srun_user_msg_t ** msg_ptr, Buf buffer);
 
 static void _pack_checkpoint_msg(checkpoint_msg_t *msg, Buf buffer);
 static int  _unpack_checkpoint_msg(checkpoint_msg_t **msg_ptr, Buf buffer);
@@ -316,6 +322,9 @@ static int _unpack_file_bcast(file_bcast_msg_t ** msg_ptr , Buf buffer );
 
 static void _pack_trigger_msg(trigger_info_msg_t *msg , Buf buffer );
 static int  _unpack_trigger_msg(trigger_info_msg_t ** msg_ptr , Buf buffer );
+
+static void _pack_slurmd_status(slurmd_status_t *msg, Buf buffer);
+static int  _unpack_slurmd_status(slurmd_status_t **msg_ptr, Buf buffer);
 
 /* pack_header
  * packs a slurm protocol header that proceeds every slurm message
@@ -452,6 +461,7 @@ pack_msg(slurm_msg_t const *msg, Buf buffer)
 	case REQUEST_SHUTDOWN_IMMEDIATE:
 	case REQUEST_PING:
 	case REQUEST_CONTROL:
+	case REQUEST_DAEMON_STATUS:
 		/* Message contains no body/information */
 		break;
 	case REQUEST_SHUTDOWN:
@@ -611,6 +621,9 @@ pack_msg(slurm_msg_t const *msg, Buf buffer)
 			(job_id_response_msg_t *)msg->data,
 			buffer);
 		break;
+	case SRUN_EXEC:
+		_pack_srun_exec_msg((srun_exec_msg_t *)msg->data, buffer);
+		break;
 	case SRUN_JOB_COMPLETE:
 	case SRUN_PING:
 		_pack_srun_ping_msg((srun_ping_msg_t *)msg->data, buffer);
@@ -621,6 +634,9 @@ pack_msg(slurm_msg_t const *msg, Buf buffer)
 		break;
 	case SRUN_TIMEOUT:
 		_pack_srun_timeout_msg((srun_timeout_msg_t *)msg->data, buffer);
+		break;
+	case SRUN_USER_MSG:
+		_pack_srun_user_msg((srun_user_msg_t *)msg->data, buffer);
 		break;
 	case REQUEST_CHECKPOINT:
 		_pack_checkpoint_msg((checkpoint_msg_t *)msg->data, buffer);
@@ -668,7 +684,10 @@ pack_msg(slurm_msg_t const *msg, Buf buffer)
 	case RESPONSE_TRIGGER_GET:
 	case REQUEST_TRIGGER_SET:
 	case REQUEST_TRIGGER_CLEAR:
-	_pack_trigger_msg((trigger_info_msg_t *) msg->data, buffer);
+		_pack_trigger_msg((trigger_info_msg_t *) msg->data, buffer);
+		break;
+	case RESPONSE_SLURMD_STATUS:
+		_pack_slurmd_status((slurmd_status_t *) msg->data, buffer);
 		break;
 	default:
 		debug("No pack method for msg type %u", msg->msg_type);
@@ -746,6 +765,7 @@ unpack_msg(slurm_msg_t * msg, Buf buffer)
 	case REQUEST_SHUTDOWN_IMMEDIATE:
 	case REQUEST_PING:
 	case REQUEST_CONTROL:
+	case REQUEST_DAEMON_STATUS:
 		/* Message contains no body/information */
 		break;
 	case REQUEST_SHUTDOWN:
@@ -920,6 +940,10 @@ unpack_msg(slurm_msg_t * msg, Buf buffer)
 			(job_id_response_msg_t **) & msg->data,
 			buffer);
 		break;
+	case SRUN_EXEC:
+		rc = _unpack_srun_exec_msg((srun_exec_msg_t **) & msg->data, 
+					   buffer);
+		break;
 	case SRUN_JOB_COMPLETE:
 	case SRUN_PING:
 		rc = _unpack_srun_ping_msg((srun_ping_msg_t **) & msg->data, 
@@ -932,6 +956,10 @@ unpack_msg(slurm_msg_t * msg, Buf buffer)
 	case SRUN_TIMEOUT:
 		rc = _unpack_srun_timeout_msg((srun_timeout_msg_t **)
 					      & msg->data, buffer);
+		break;
+	case SRUN_USER_MSG:
+		rc = _unpack_srun_user_msg((srun_user_msg_t **)
+						& msg->data, buffer);
 		break;
 	case REQUEST_CHECKPOINT:
 		rc = _unpack_checkpoint_msg((checkpoint_msg_t **)
@@ -987,6 +1015,10 @@ unpack_msg(slurm_msg_t * msg, Buf buffer)
 	case REQUEST_TRIGGER_CLEAR:
 		rc = _unpack_trigger_msg((trigger_info_msg_t **) 
 					  &msg->data, buffer);
+		break;
+	case RESPONSE_SLURMD_STATUS:
+		rc = _unpack_slurmd_status((slurmd_status_t **)
+					&msg->data, buffer);
 		break;
 	default:
 		debug("No unpack method for msg type %u", msg->msg_type);
@@ -3599,6 +3631,36 @@ unpack_error:
 }
 
 static void
+_pack_srun_exec_msg(srun_exec_msg_t * msg, Buf buffer)
+{
+	xassert ( msg != NULL );
+
+	pack32(msg ->job_id  , buffer ) ;
+	pack32(msg ->step_id , buffer ) ;
+	packstr_array(msg->argv, msg->argc, buffer);
+}
+
+static int  
+_unpack_srun_exec_msg(srun_exec_msg_t ** msg_ptr, Buf buffer)
+{
+	srun_exec_msg_t * msg;
+	xassert ( msg_ptr != NULL );
+
+	msg = xmalloc ( sizeof (srun_exec_msg_t) ) ;
+	*msg_ptr = msg;
+
+	safe_unpack32(&msg->job_id  , buffer ) ;
+	safe_unpack32(&msg->step_id , buffer ) ;
+	safe_unpackstr_array(&msg->argv, &msg->argc, buffer);
+	return SLURM_SUCCESS;
+
+unpack_error:
+	*msg_ptr = NULL;
+	xfree(msg);
+	return SLURM_ERROR;
+}
+
+static void
 _pack_srun_ping_msg(srun_ping_msg_t * msg, Buf buffer)
 {
 	xassert ( msg != NULL );
@@ -3712,6 +3774,33 @@ _unpack_srun_timeout_msg(srun_timeout_msg_t ** msg_ptr, Buf buffer)
 unpack_error:
 	*msg_ptr = NULL;
 	xfree(msg);
+	return SLURM_ERROR;
+}
+
+static void
+_pack_srun_user_msg(srun_user_msg_t * msg, Buf buffer)
+{
+        xassert ( msg != NULL );
+
+	pack32((uint32_t)msg->job_id,  buffer);
+	packstr(msg->msg, buffer);
+}
+
+static int
+_unpack_srun_user_msg(srun_user_msg_t ** msg_ptr, Buf buffer)
+{
+	uint16_t uint16_tmp;
+	srun_user_msg_t * msg_user;
+	xassert ( msg_ptr != NULL );
+
+	msg_user = xmalloc(sizeof (srun_user_msg_t)) ;
+	*msg_ptr = msg_user;
+
+	safe_unpack32(&msg_user->job_id, buffer);
+	safe_unpackstr_xmalloc(&msg_user->msg, &uint16_tmp, buffer);
+	return SLURM_SUCCESS;
+
+unpack_error:
 	return SLURM_ERROR;
 }
 
@@ -4155,13 +4244,77 @@ unpack_multi_core_data (multi_core_data_t **mc_ptr, Buf buffer)
 	return SLURM_ERROR;
 }
 
+static void _pack_slurmd_status(slurmd_status_t *msg, Buf buffer)
+{
+	xassert(msg);
+
+	pack_time(msg->booted, buffer);
+	pack_time(msg->last_slurmctld_msg, buffer);
+
+	pack16(msg->slurmd_debug, buffer);
+	pack16(msg->actual_cpus, buffer);
+	pack16(msg->actual_sockets, buffer);
+	pack16(msg->actual_cores, buffer);
+	pack16(msg->actual_threads, buffer);
+
+	pack32(msg->actual_real_mem, buffer);
+	pack32(msg->actual_tmp_disk, buffer);
+	pack32(msg->pid, buffer);
+
+	packstr(msg->hostname, buffer);
+	packstr(msg->slurmd_logfile, buffer);
+	packstr(msg->step_list, buffer);
+	packstr(msg->version, buffer);
+}
+
+static int _unpack_slurmd_status(slurmd_status_t **msg_ptr, Buf buffer)
+{
+	uint16_t uint16_tmp;
+	slurmd_status_t *msg;
+
+	xassert(msg_ptr);
+
+	msg = xmalloc(sizeof(slurmd_status_t));
+
+	safe_unpack_time(&msg->booted, buffer);
+	safe_unpack_time(&msg->last_slurmctld_msg, buffer);
+
+	safe_unpack16(&msg->slurmd_debug, buffer);
+	safe_unpack16(&msg->actual_cpus, buffer);
+	safe_unpack16(&msg->actual_sockets, buffer);
+	safe_unpack16(&msg->actual_cores, buffer);
+	safe_unpack16(&msg->actual_threads, buffer);
+
+	safe_unpack32(&msg->actual_real_mem, buffer);
+	safe_unpack32(&msg->actual_tmp_disk, buffer);
+	safe_unpack32(&msg->pid, buffer);
+
+	safe_unpackstr_xmalloc(&msg->hostname, &uint16_tmp, buffer);
+	safe_unpackstr_xmalloc(&msg->slurmd_logfile, &uint16_tmp, buffer);
+	safe_unpackstr_xmalloc(&msg->step_list, &uint16_tmp, buffer);
+	safe_unpackstr_xmalloc(&msg->version, &uint16_tmp, buffer);
+
+	*msg_ptr = msg;
+	return SLURM_SUCCESS;
+
+unpack_error:
+	xfree(msg->hostname);
+	xfree(msg->slurmd_logfile);
+	xfree(msg->step_list);
+	xfree(msg->version);
+	xfree(msg);
+	*msg_ptr = NULL;
+	return SLURM_ERROR;
+}
+
 /* template 
    void pack_ ( * msg , Buf buffer )
    {
    xassert ( msg != NULL );
 
    pack16( msg -> , buffer ) ;
-   pack32((uint32_t)msg -> , buffer ) ;
+   pack32( msg -> , buffer ) ;
+   pack_time( msg -> , buffer );
    packstr ( msg -> , buffer ) ;
    }
 
@@ -4176,7 +4329,8 @@ unpack_multi_core_data (multi_core_data_t **mc_ptr, Buf buffer)
    *msg_ptr = msg;
 
    safe_unpack16( & msg -> , buffer ) ;
-   safe_unpack32(& msg -> , buffer ) ;
+   safe_unpack32( & msg -> , buffer ) ;
+   safe_unpack_time ( & msg -> , buffer ) ;
    safe_unpackstr_xmalloc ( & msg -> x, & uint16_tmp , buffer ) ;
    return SLURM_SUCCESS;
 

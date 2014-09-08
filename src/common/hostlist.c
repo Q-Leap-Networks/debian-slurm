@@ -1,5 +1,5 @@
 /*****************************************************************************\
- *  $Id: hostlist.c 11402 2007-04-25 17:39:08Z da $
+ *  $Id: hostlist.c 11863 2007-07-23 18:15:00Z jette $
  *****************************************************************************
  *  $LSDId: hostlist.c,v 1.14 2003/10/14 20:11:54 grondo Exp $
  *****************************************************************************
@@ -1483,6 +1483,10 @@ static int _parse_single_range(const char *str, struct _range *range)
 	if (!orig) 
 		seterrno_ret(ENOMEM, 0);
 	
+	if ((p = strchr(str, 'x'))) {
+		goto error; /* do NOT allow boxes in here */
+	}
+
 	if ((p = strchr(str, '-'))) {
 		*p++ = '\0';
 		if (*p == '-')     /* do NOT allow negative numbers */
@@ -1495,7 +1499,7 @@ static int _parse_single_range(const char *str, struct _range *range)
 		goto error;
 	
 	range->hi = (p && *p) ? strtoul(p, &q, HOSTLIST_BASE) : range->lo;
-		
+
 	if (q == p || *q != '\0') 
 		goto error;
 	
@@ -1586,6 +1590,7 @@ static int _parse_range_list(char *str, struct _range *ranges, int len)
 			return -1;
 		if ((p = strchr(str, ',')))
 			*p++ = '\0';
+
 		if ((str[3] == 'x') && (strlen(str) == 7)) {
 			if (!_parse_box_range(str, ranges, len, &count)) 
 				return -1;  
@@ -1639,6 +1644,10 @@ _hostlist_create_bracketed(const char *hostlist, char *sep, char *r_op)
 			*p++ = '\0';
 
 			if ((q = strchr(p, ']'))) {
+				if ((q[1] != ',') && (q[1] != '\0')) {
+					errno = EINVAL; /* Invalid suffix */
+					goto error;
+				}
 				*q = '\0';
 				nr = _parse_range_list(p, ranges, MAX_RANGES);
 				if (nr < 0) 
@@ -1646,8 +1655,12 @@ _hostlist_create_bracketed(const char *hostlist, char *sep, char *r_op)
 				_push_range_list(new, prefix, ranges, nr);
 
                 
-			} else
+			} else {
+				/* The hostname itself contains a '['
+				 * (no ']' found). 
+				 * Not likely what the user wanted. */
 				hostlist_push_host(new, cur_tok);
+			}
 
 		} else
 			hostlist_push_host(new, cur_tok);

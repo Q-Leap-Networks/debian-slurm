@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/common/env.c - add an environment variable to environment vector
- *  $Id: env.c 11523 2007-05-17 19:12:22Z morrone $
+ *  $Id: env.c 11774 2007-07-02 20:13:14Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -602,6 +602,12 @@ int setup_env(env_t *env)
 		setenvf (&env->env, "SLURM_LAUNCH_NODE_IPADDR", "%s", addrbuf);
 	}
 
+	if (env->sgtids
+	   && setenvf(&env->env, "SLURM_GTIDS", "%s", env->sgtids)) {
+		error("Unable to set SLURM_GTIDS environment variable");
+		rc = SLURM_FAILURE;
+	} 
+	
 #ifdef HAVE_AIX
 	{
 		char res_env[128];

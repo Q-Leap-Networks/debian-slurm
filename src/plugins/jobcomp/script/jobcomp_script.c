@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  jobcomp_script.c - Script running slurm job completion logging plugin.
- *  $Id: jobcomp_script.c 11416 2007-04-26 17:11:20Z jette $
+ *  $Id: jobcomp_script.c 11930 2007-08-03 05:40:18Z grondo $
  *****************************************************************************
  *  Produced at Center for High Performance Computing, North Dakota State
  *  University
@@ -210,7 +210,7 @@ _check_script_permissions(char * path)
 
 	if (stat(path, &st) < 0) {
 		plugin_errno = errno;
-		return error("jobcomp/script: %s does not exist", path);
+		return error("jobcomp/script: failed to stat %s: %m", path);
 	}
 
 	if (!(st.st_mode & S_IFREG)) {
@@ -417,8 +417,7 @@ static void * _script_agent (void *args)
 		pthread_mutex_unlock(&comp_list_mutex);
 
 		if ((job = list_pop(comp_list))) {
-			if (_jobcomp_exec_child (script, job) < 0)
-				error ("jobcomp/script: %s failed");
+			_jobcomp_exec_child (script, job);
 			_jobcomp_info_destroy (job);
 		}
 

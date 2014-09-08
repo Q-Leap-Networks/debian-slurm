@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/common/stepd_api.c - slurmstepd message API
- *  $Id: stepd_api.c 10946 2007-02-07 00:52:03Z jette $
+ *  $Id: stepd_api.c 11890 2007-07-30 16:03:53Z grondo $
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -162,7 +162,7 @@ _guess_nodename()
 	char host[256];
 	char *nodename = NULL;
 
-	if (gethostname_short(host, 256) != 0)
+	if (gethostname_short(host, 256) != 0) 
 		return NULL;
 
 	nodename = slurm_conf_get_nodename(host);
@@ -483,7 +483,8 @@ stepd_available(const char *directory, const char *nodename)
 	struct stat stat_buf;
 
 	if (nodename == NULL) {
-		nodename = _guess_nodename();
+		if (!(nodename = _guess_nodename()))
+			return NULL;
 	}
 	if (directory == NULL) {
 		slurm_ctl_conf_t *cf;
