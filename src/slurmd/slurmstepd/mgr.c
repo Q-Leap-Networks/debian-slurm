@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/mgr.c - job manager functions for slurmstepd
- *  $Id: mgr.c 13229 2008-02-08 01:02:06Z jette $
+ *  $Id: mgr.c 13322 2008-02-21 19:06:27Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -139,6 +139,7 @@ step_complete_t step_complete = {
 	{},
 	-1,
 	-1,
+	true,
 	(bitstr_t *)NULL,
 	0,
         NULL
@@ -478,6 +479,8 @@ _wait_for_children_slurmstepd(slurmd_job_t *job)
 		step_complete.step_rc = MAX(step_complete.step_rc,
 					 WEXITSTATUS(job->task[i]->estatus));
 
+	step_complete.wait_children = false;
+
 	pthread_mutex_unlock(&step_complete.lock);
 }
 
@@ -495,6 +498,7 @@ _one_step_complete_msg(slurmd_job_t *job, int first, int last)
 	int rc = -1;
 	int retcode;
 	int i;
+	static bool acct_sent = false;
 
 	debug2("_one_step_complete_msg: first=%d, last=%d", first, last);
 	msg.job_id = job->jobid;
@@ -504,9 +508,12 @@ _one_step_complete_msg(slurmd_job_t *job, int first, int last)
 	msg.step_rc = step_complete.step_rc;
 	msg.jobacct = jobacct_g_alloc(NULL);
 	/************* acct stuff ********************/
-	jobacct_g_aggregate(step_complete.jobacct, job->jobacct);
-	jobacct_g_getinfo(step_complete.jobacct, JOBACCT_DATA_TOTAL, 
-			  msg.jobacct);
+	if(!acct_sent) {
+		jobacct_g_aggregate(step_complete.jobacct, job->jobacct);
+		jobacct_g_getinfo(step_complete.jobacct, JOBACCT_DATA_TOTAL, 
+				  msg.jobacct);
+		acct_sent = true;
+	}
 	/*********************************************/	
 	slurm_msg_t_init(&req);
 	req.msg_type = REQUEST_STEP_COMPLETE;

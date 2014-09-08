@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  proc_req.c - process incomming messages to slurmctld
  *
- *  $Id: proc_req.c 13237 2008-02-08 23:16:16Z jette $
+ *  $Id: proc_req.c 13341 2008-02-25 17:20:07Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1401,7 +1401,7 @@ static void _slurm_rpc_reconfigure_controller(slurm_msg_t * msg)
 	uid_t uid;
 
 	START_TIMER;
-	debug2("Processing RPC: REQUEST_RECONFIGURE");
+	info("Processing RPC: REQUEST_RECONFIGURE");
 	uid = g_slurm_auth_get_uid(msg->auth_cred);
 	if (!_is_super_user(uid)) {
 		error("Security violation, RECONFIGURE RPC from uid=%u",

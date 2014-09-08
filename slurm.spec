@@ -1,4 +1,4 @@
-# $Id: slurm.spec 13266 2008-02-13 21:54:50Z da $
+# $Id: slurm.spec 13299 2008-02-19 19:46:58Z da $
 #
 # Note that this package is not relocatable
 
@@ -60,14 +60,14 @@
 %endif
 
 Name:    slurm
-Version: 1.2.23
+Version: 1.2.24
 Release: 1
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL 
 Group: System Environment/Base
-Source: slurm-1.2.23.tar.bz2
+Source: slurm-1.2.24.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: https://computing.llnl.gov/linux/slurm/
 BuildRequires: openssl-devel >= 0.9.6 openssl >= 0.9.6
@@ -112,8 +112,9 @@ BuildRequires: readline-devel
 # http://slforums.typo3-factory.net/index.php?showtopic=11378
 %define _unpackaged_files_terminate_build      0
 
-
-%define _perlarch %(perl -e 'use Config; $T=$Config{installsitearch}; $P=$Config{installprefix}; $T =~ s/$P//; print $T;') 
+# First we remove $prefix/local and then just prefix to make 
+# sure we get the correct installdir
+%define _perlarch %(perl -e 'use Config; $T=$Config{installsitearch}; $P=$Config{installprefix}; $P1="$P/local"; $T =~ s/$P1//; $T =~ s/$P//; print $T;') 
 
 %define _perldir %{_prefix}%{_perlarch}
 
@@ -211,7 +212,7 @@ SLURM process tracking plugin for SGI job containers.
 #############################################################################
 
 %prep
-%setup -n slurm-1.2.23
+%setup -n slurm-1.2.24
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \
@@ -289,6 +290,10 @@ test -f $RPM_BUILD_ROOT/%{_perldir}/Slurm.pm &&
   echo "%{_perldir}/Slurm.pm"                 >> $LIST
 test -f $RPM_BUILD_ROOT/%{_perldir}/auto/Slurm/Slurm.so &&
   echo "%{_perldir}/auto/Slurm/Slurm.so"      >> $LIST
+test -f $RPM_BUILD_ROOT/%{_perldir}/auto/Slurm/Slurm.bs &&
+  echo "%{_perldir}/auto/Slurm/Slurm.bs"      >> $LIST
+test -f $RPM_BUILD_ROOT/%{_perldir}/auto/Slurm/autosplit.ix &&
+  echo "%{_perldir}/auto/Slurm/autosplit.ix"      >> $LIST
 
 LIST=./torque.files
 touch $LIST
