@@ -62,6 +62,7 @@ am__aclocal_m4_deps = $(top_srcdir)/auxdir/acx_pthread.m4 \
 	$(top_srcdir)/auxdir/x_ac_setproctitle.m4 \
 	$(top_srcdir)/auxdir/x_ac_sgi_job.m4 \
 	$(top_srcdir)/auxdir/x_ac_slurm_ssl.m4 \
+	$(top_srcdir)/auxdir/x_ac_sun_const.m4 \
 	$(top_srcdir)/auxdir/x_ac_xcpu.m4 $(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
 	$(ACLOCAL_M4)
@@ -72,7 +73,8 @@ am__installdirs = "$(DESTDIR)$(sbindir)"
 sbinPROGRAMS_INSTALL = $(INSTALL_PROGRAM)
 PROGRAMS = $(sbin_PROGRAMS)
 am_slurmctld_OBJECTS = acct_policy.$(OBJEXT) agent.$(OBJEXT) \
-	backup.$(OBJEXT) controller.$(OBJEXT) job_mgr.$(OBJEXT) \
+	backup.$(OBJEXT) controller.$(OBJEXT) hilbert.$(OBJEXT) \
+	hilbert_slurm.$(OBJEXT) job_mgr.$(OBJEXT) \
 	job_scheduler.$(OBJEXT) licenses.$(OBJEXT) locks.$(OBJEXT) \
 	node_mgr.$(OBJEXT) node_scheduler.$(OBJEXT) \
 	partition_mgr.$(OBJEXT) ping_nodes.$(OBJEXT) \
@@ -285,6 +287,9 @@ slurmctld_SOURCES = \
 	agent.h		\
 	backup.c	\
 	controller.c 	\
+	hilbert.c	\
+	hilbert.h	\
+	hilbert_slurm.c	\
 	job_mgr.c 	\
 	job_scheduler.c \
 	job_scheduler.h \
@@ -390,6 +395,8 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/agent.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/backup.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/controller.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/hilbert.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/hilbert_slurm.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/job_mgr.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/job_scheduler.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/licenses.Po@am__quote@

@@ -2,7 +2,7 @@
  *  bg_job_run.c - blue gene job execution (e.g. initiation and termination) 
  *  functions.
  *
- *  $Id: bg_job_run.c 15611 2008-11-05 23:28:45Z da $ 
+ *  $Id: bg_job_run.c 16146 2009-01-06 18:20:48Z da $ 
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -66,6 +66,8 @@
 
 #define MAX_POLL_RETRIES    220
 #define POLL_INTERVAL        3
+
+bool deleting_old_blocks_flag = 0;
 
 enum update_op {START_OP, TERM_OP, SYNC_OP};
 
@@ -665,9 +667,7 @@ static void _term_agent(bg_update_t *bg_update_ptr)
 	if ((rc = bridge_get_data(job_list, RM_JobListSize, &jobs)) != STATUS_OK) {
 		error("bridge_get_data(RM_JobListSize): %s", bg_err_str(rc));
 		jobs = 0;
-	} else if (jobs > 300)
-		fatal("Active job count (%d) invalid, restart MMCS", jobs);
-
+	}
 	debug2("job count %d",jobs);
 
 	for (i=0; i<jobs; i++) {		
@@ -759,11 +759,19 @@ static void _term_agent(bg_update_t *bg_update_ptr)
 		
 		slurm_mutex_unlock(&block_state_mutex);
 		
-	} else {
-		debug2("hopefully we are destroying this block %s "
+	} else if (bluegene_layout_mode == LAYOUT_DYNAMIC) {
+		debug2("Hopefully we are destroying this block %s "
 		       "since it isn't in the bg_list",
 		       bg_update_ptr->bg_block_id);
+	} else {
+		error("Could not find block %s previously assigned to job.  "
+		      "If this is happening at startup and you just changed "
+		      "your bluegene.conf this is expected.  Else you should "
+		      "probably restart your slurmctld since this shouldn't "
+		      "happen outside of that.",
+		      bg_update_ptr->bg_block_id);
 	}
+
 #ifdef HAVE_BG_FILES
 	if ((rc = bridge_free_job_list(job_list)) != STATUS_OK)
 		error("bridge_free_job_list(): %s", bg_err_str(rc));

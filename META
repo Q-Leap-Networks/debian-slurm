@@ -3,9 +3,9 @@
   Api_revision:  0
   Major:         1
   Meta:          1
-  Micro:         12
+  Micro:         13
   Minor:         3
   Name:          slurm
   Release:       1
   Release_tags:  dist
-  Version:       1.3.12
+  Version:       1.3.13

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  jobcomp_script.c - Script running slurm job completion logging plugin.
- *  $Id: jobcomp_script.c 15983 2008-12-17 00:39:14Z jette $
+ *  $Id: jobcomp_script.c 16035 2008-12-22 21:46:26Z da $
  *****************************************************************************
  *  Produced at Center for High Performance Computing, North Dakota State
  *  University
@@ -611,9 +611,7 @@ extern int fini ( void )
  * in/out job_list List of job_rec_t *
  * note List needs to be freed when called
  */
-extern List slurm_jobcomp_get_jobs(List selected_steps,
-				   List selected_parts,
-				   void *params)
+extern List slurm_jobcomp_get_jobs(acct_job_cond_t *job_cond)
 {
 
 	info("This function is not implemented.");
@@ -623,8 +621,8 @@ extern List slurm_jobcomp_get_jobs(List selected_steps,
 /* 
  * expire old info from the storage 
  */
-extern void slurm_jobcomp_archive(List selected_parts, void *params)
+extern int slurm_jobcomp_archive(acct_archive_cond_t *archive_cond)
 {
 	info("This function is not implemented.");
-	return;
+	return SLURM_SUCCESS;
 }
