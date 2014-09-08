@@ -1,15 +1,15 @@
 /*****************************************************************************\
  *  node_select.h - Define node selection plugin functions.
- *
- * $Id: node_select.h 15324 2008-10-07 00:16:53Z da $
  *****************************************************************************
- *  Copyright (C) 2004-2006 The Regents of the University of California.
+ *  Copyright (C) 2004-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -128,9 +128,11 @@ extern int select_g_update_sub_node (update_part_msg_t *part_desc_ptr);
  * IN node_pts  - current node record
  * IN cr_info   - type of data to get from the node record 
  *                (see enum select_data_info)
+ * IN job_ptr   - pointer to the job that's related to this query (may be NULL)
  * IN/OUT data  - the data to get from node record
  */
 extern int select_g_get_info_from_plugin (enum select_data_info cr_info, 
+					  struct job_record *job_ptr,
 					  void *data);
 
 /* 
@@ -238,14 +240,6 @@ extern int select_g_job_suspend(struct job_record *job_ptr);
  */
 extern int select_g_job_resume(struct job_record *job_ptr);
 
-/*
- * Get number of allocated cores per socket from a job
- * IN job_id      - identifies the job
- * IN alloc_index - allocated node index
- * IN s           - socket index
- */
-extern int select_g_get_job_cores(uint32_t job_id, int alloc_index, int s);
-
 /* allocate storage for a select job credential
  * OUT jobinfo - storage for a select job credential
  * RET         - slurm error code
@@ -282,18 +276,6 @@ extern select_jobinfo_t select_g_copy_jobinfo(select_jobinfo_t jobinfo);
  * RET         - slurm error code
  */
 extern int select_g_free_jobinfo  (select_jobinfo_t *jobinfo);
- 
-/* 
- * Get selected data from a given node for a specific job. 
- * IN node_ptr  - current node record
- * IN job_ptr   - current job record
- * IN cr_info   - type of data to get from the node record
- * IN/OUT data  - the data to get from node record
- */
-extern int select_g_get_extra_jobinfo (struct node_record *node_ptr, 
-				       struct job_record *job_ptr, 
-                                       enum select_data_info cr_info,
-                                       void *data);
 
 /* pack a select job credential into a buffer in machine independent form
  * IN jobinfo  - the select job credential to be saved
@@ -360,5 +342,8 @@ extern int select_g_free_node_info(node_select_info_msg_t **
 
 /* Note reconfiguration or change in partition configuration */
 extern int select_g_reconfigure(void);
+
+/*  Get configuration specific for this plugin */
+extern List select_g_get_config(void);
 
 #endif /*__SELECT_PLUGIN_API_H__*/

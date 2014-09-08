@@ -2,14 +2,15 @@
  *  smap.c - Report overall state the system
  *****************************************************************************
  *  Copyright (C) 2004-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -230,6 +231,9 @@ part_fini:
 		case JOBS:
 			get_job();
 			break;
+		case RESERVATIONS:
+			get_reservation();
+			break;
 		case SLURMPART:
 			get_slurm_part();
 			break;
@@ -247,7 +251,8 @@ part_fini:
 			get_bg_part();
 			break;
 #else
-		default:
+		case COMMANDS:
+		case BGPART:
 			error("Must be on a BG SYSTEM to run this command");
 			if(!params.commandline)
 				endwin();
@@ -367,6 +372,12 @@ static int _get_option()
 		params.display = JOBS;
 		return 1;
 		break;
+	case 'r':
+		text_line_cnt = 0;
+		grid_line_cnt = 0;
+		params.display = RESERVATIONS;
+		return 1;
+		break;
 #ifdef HAVE_BG
 	case 'b':
 		text_line_cnt = 0;
@@ -473,6 +484,9 @@ static void *_resize_handler(int sig)
 	switch (params.display) {
 	case JOBS:
 		get_job();
+		break;
+	case RESERVATIONS:
+		get_reservation();
 		break;
 	case SLURMPART:
 		get_slurm_part();

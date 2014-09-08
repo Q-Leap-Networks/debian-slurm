@@ -6,10 +6,11 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -106,6 +107,7 @@ static display_data_t options_data_node[] = {
 	{G_TYPE_STRING, BLOCK_PAGE, "Blocks", TRUE, NODE_PAGE},
 #endif
 	{G_TYPE_STRING, PART_PAGE, "Partition", TRUE, NODE_PAGE},
+	{G_TYPE_STRING, RESV_PAGE, "Reservation", TRUE, NODE_PAGE},
 	{G_TYPE_STRING, SUBMIT_PAGE, "Job Submit", FALSE, NODE_PAGE},
 	{G_TYPE_NONE, -1, NULL, FALSE, EDIT_NONE}
 };
@@ -467,6 +469,8 @@ extern int get_new_info_node(node_info_msg_t **info_ptr, int force)
 	static bool changed = 0;
 
 	if(!force && ((now - last) < global_sleep_time)) {
+		if(*info_ptr != node_info_ptr)
+			error_code = SLURM_SUCCESS;
 		*info_ptr = node_info_ptr;
 		if(changed) 
 			return SLURM_SUCCESS;
@@ -493,6 +497,10 @@ extern int get_new_info_node(node_info_msg_t **info_ptr, int force)
 		changed = 1;
 	}
 	node_info_ptr = new_node_ptr;
+
+	if(*info_ptr != node_info_ptr) 
+		error_code = SLURM_SUCCESS;
+	
 	*info_ptr = new_node_ptr;
 	return error_code;
 }
@@ -828,7 +836,7 @@ display_it:
 	/* set up the grid */
 	itr = list_iterator_create(info_list);
 	while ((sview_node_info_ptr = list_next(itr))) {
-		change_grid_color(grid_button_list, i, i, i);
+		change_grid_color(grid_button_list, i, i, i, true);
 		i++;
 	}
 	list_iterator_destroy(itr);
@@ -907,7 +915,7 @@ extern void specific_info_node(popup_info_t *popup_win)
 					  label,
 					  0, 1, 0, 1); 
 		gtk_widget_show(label);	
-		spec_info->display_widget = gtk_widget_ref(GTK_WIDGET(label));
+		spec_info->display_widget = gtk_widget_ref(label);
 		return;
 	}
 display_it:	
@@ -946,14 +954,7 @@ display_it:
 		goto end_it;
 	}
 
-	if(popup_win->grid_button_list) {
-		list_destroy(popup_win->grid_button_list);
-	}	       
-#ifdef HAVE_3D
-	popup_win->grid_button_list = copy_main_button_list();
-#else
-	popup_win->grid_button_list = list_create(destroy_grid_button);
-#endif	
+	setup_popup_grid_list(popup_win);
 	
 	/* just linking to another list, don't free the inside, just
 	   the list */
@@ -1023,13 +1024,8 @@ display_it:
 			continue;
 		
 		list_push(send_info_list, sview_node_info_ptr);
-#ifdef HAVE_3D
 		change_grid_color(popup_win->grid_button_list,
-				  i, i, 0);
-#else
-		get_button_list_from_main(&popup_win->grid_button_list,
-					  i, i, 0);		
-#endif
+				  i, i, 0, true);
 	}
 	list_iterator_destroy(itr);
 
@@ -1037,10 +1033,6 @@ display_it:
 		hostlist_iterator_destroy(host_itr);
 		hostlist_destroy(hostlist);
 	}
-
-
-	put_buttons_in_table(popup_win->grid_table,
-			     popup_win->grid_button_list);
 
 	_update_info_node(send_info_list, 
 			  GTK_TREE_VIEW(spec_info->display_widget));
@@ -1093,6 +1085,9 @@ extern void popup_all_node(GtkTreeModel *model, GtkTreeIter *iter, int id)
 		break;
 	case PART_PAGE:
 		snprintf(title, 100, "Partition(s) with %s %s", node, name);
+		break;
+	case RESV_PAGE:
+		snprintf(title, 100, "Reservation(s) with %s %s", node, name);
 		break;
 	case BLOCK_PAGE: 
 		snprintf(title, 100, "Blocks(s) with %s %s", node, name);

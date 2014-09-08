@@ -4,10 +4,11 @@
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -43,7 +44,7 @@ static char *opt_out_file = NULL;
 static int _test_opt_process(int val, const char *optarg, int remote);
 
 /*
- *  Provide a --renice=[prio] option to srun:
+ *  Provide a --test_suite=[opt_arg] option to srun:
  */
 struct spank_option spank_options[] =
 {
@@ -73,6 +74,12 @@ static int _test_opt_process(int val, const char *optarg, int remote)
 /*  Called from both srun and slurmd */
 int slurm_spank_init(spank_t sp, int ac, char **av)
 {
+	spank_context_t context;
+
+	context = spank_context();
+	if ((context != S_CTX_LOCAL) && (context != S_CTX_REMOTE) &&
+	    (context != S_CTX_ALLOCATOR))
+		slurm_error("spank_context error");
 	if (spank_option_register(sp, spank_options_reg) != ESPANK_SUCCESS)
 		slurm_error("spank_option_register error");
 	if (spank_remote(sp) && (ac == 1))

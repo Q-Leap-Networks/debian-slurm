@@ -2,14 +2,15 @@
  *  popups.c - put different popup displays here
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Portions Copyright (C) 2008 Vijay Ramasubramanian
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>, et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -151,6 +152,11 @@ void _search_entry(sview_search_info_t *sview_search_info)
 		xfree(lower);
 		
 		break;
+	case SEARCH_RESERVATION_NAME:
+		id = RESV_PAGE;
+		snprintf(title, 100, "Reservation %s info",
+			 sview_search_info->gchar_data);
+		break;
 	default:
 		g_print("unknown search type %d.\n",
 			sview_search_info->search_type);
@@ -258,6 +264,11 @@ static void _layout_ctl_conf(GtkTreeStore *treestore,
 	add_display_treestore_line(update, treestore, &iter, 
 				   "CheckpointType",
 				   slurm_ctl_conf_ptr->checkpoint_type);
+	snprintf(temp_str, sizeof(temp_str), "%u", 
+		 slurm_ctl_conf_ptr->complete_wait);
+	add_display_treestore_line(update, treestore, &iter, 
+				   "CompleteWait", 
+				   temp_str);
 	add_display_treestore_line(update, treestore, &iter, 
 				   "ControlAddr", 
 				   slurm_ctl_conf_ptr->control_addr);
@@ -267,11 +278,17 @@ static void _layout_ctl_conf(GtkTreeStore *treestore,
 	add_display_treestore_line(update, treestore, &iter, 
 				   "CryptoType", 
 				   slurm_ctl_conf_ptr->crypto_type);
-	snprintf(temp_str, sizeof(temp_str), "%u", 
-		 slurm_ctl_conf_ptr->def_mem_per_task);
-	add_display_treestore_line(update, treestore, &iter, 
-				   "DefMemPerTask", 
-				   temp_str);
+	if (slurm_ctl_conf_ptr->def_mem_per_task & MEM_PER_CPU) {
+		snprintf(temp_str, sizeof(temp_str), "%u", 
+			 slurm_ctl_conf_ptr->def_mem_per_task & (~MEM_PER_CPU));
+		add_display_treestore_line(update, treestore, &iter, 
+					   "DefMemPerCPU", temp_str);
+	} else {
+		snprintf(temp_str, sizeof(temp_str), "%u", 
+			 slurm_ctl_conf_ptr->def_mem_per_task);
+		add_display_treestore_line(update, treestore, &iter, 
+					   "DefMemPerNode", temp_str);
+	}
 	add_display_treestore_line(update, treestore, &iter, 
 				   "Epilog", 
 				   slurm_ctl_conf_ptr->epilog);
@@ -324,7 +341,8 @@ static void _layout_ctl_conf(GtkTreeStore *treestore,
 
 	add_display_treestore_line(update, treestore, &iter, 
 				   "JobCredentialPrivateKey", 
-				   slurm_ctl_conf_ptr->job_credential_private_key);
+				   slurm_ctl_conf_ptr->
+				   job_credential_private_key);
 	add_display_treestore_line(update, treestore, &iter, 
 				   "JobCredentialPublicCertificate", 
 				   slurm_ctl_conf_ptr->
@@ -346,11 +364,17 @@ static void _layout_ctl_conf(GtkTreeStore *treestore,
 	add_display_treestore_line(update, treestore, &iter, 
 				   "MaxJobCount", 
 				   temp_str);
-	snprintf(temp_str, sizeof(temp_str), "%u", 
-		 slurm_ctl_conf_ptr->max_mem_per_task);
-	add_display_treestore_line(update, treestore, &iter, 
-				   "MaxMemPerTask", 
-				   temp_str);
+	if (slurm_ctl_conf_ptr->max_mem_per_task & MEM_PER_CPU) {
+		snprintf(temp_str, sizeof(temp_str), "%u", 
+			 slurm_ctl_conf_ptr->max_mem_per_task & (~MEM_PER_CPU));
+		add_display_treestore_line(update, treestore, &iter, 
+					   "MaxMemPerCPU", temp_str);
+	} else {
+		snprintf(temp_str, sizeof(temp_str), "%u", 
+			 slurm_ctl_conf_ptr->max_mem_per_task);
+		add_display_treestore_line(update, treestore, &iter, 
+					   "MaxMemPerNode", temp_str);
+	}
 	snprintf(temp_str, sizeof(temp_str), "%u", 
 		 slurm_ctl_conf_ptr->msg_timeout);
 	add_display_treestore_line(update, treestore, &iter, 
@@ -364,6 +388,9 @@ static void _layout_ctl_conf(GtkTreeStore *treestore,
 	add_display_treestore_line(update, treestore, &iter, 
 				   "MpiDefault",
 				   slurm_ctl_conf_ptr->mpi_default);
+	add_display_treestore_line(update, treestore, &iter, 
+				   "MpiParams",
+				   slurm_ctl_conf_ptr->mpi_params);
 #ifdef MULTIPLE_SLURMD
 	add_display_treestore_line(update, treestore, &iter, 
 				   "MULTIPLE_SLURMD", "1");
@@ -777,7 +804,11 @@ extern void create_search_popup(GtkAction *action, gpointer user_data)
 		label = gtk_label_new("Which state?");
 	}
 #endif
-	else {
+	else if(!strcmp(name, "reservation_name")) {
+		sview_search_info.search_type = SEARCH_RESERVATION_NAME;
+		entry = create_entry();
+		label = gtk_label_new("Which reservation");
+	} else {
 		sview_search_info.search_type = 0;
 		goto end_it;
 	}
@@ -819,6 +850,7 @@ extern void create_search_popup(GtkAction *action, gpointer user_data)
 		case SEARCH_BLOCK_SIZE:
 		case SEARCH_PARTITION_NAME:
 		case SEARCH_NODE_NAME:
+		case SEARCH_RESERVATION_NAME:
 			sview_search_info.gchar_data =
 				g_strdup(gtk_entry_get_text(GTK_ENTRY(entry)));
 			break;

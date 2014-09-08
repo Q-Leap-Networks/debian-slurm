@@ -5,10 +5,11 @@
  *  Copyright (C) 2002-2008 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -364,7 +365,7 @@ static int _set_rec(int *start, int argc, char *argv[],
 					 MAX(command_len, 1))) {
 			if(!assoc)
 				continue;
-			if (get_uint(argv[i]+end, &assoc->fairshare, 
+			if (get_uint(argv[i]+end, &assoc->shares_raw, 
 				     "FairShare") == SLURM_SUCCESS)
 				a_set = 1;
 		} else if (!strncasecmp (argv[i], "GrpCPUMins", 
@@ -575,10 +576,14 @@ extern int sacctmgr_add_account(int argc, char *argv[])
 	
 	init_acct_association_rec(start_assoc);
 
-	for (i=0; i<argc; i++) 
-		limit_set = _set_rec(&i, argc, argv, name_list, cluster_list,
+	for (i=0; i<argc; i++) {
+		int command_len = strlen(argv[i]);
+		if (!strncasecmp (argv[i], "Where", MAX(command_len, 5))
+		    || !strncasecmp (argv[i], "Set", MAX(command_len, 3))) 
+			i++;		
+		limit_set += _set_rec(&i, argc, argv, name_list, cluster_list,
 				     start_acct, start_assoc);
-
+	}
 	if(exit_code) 
 		return SLURM_ERROR;
 
@@ -780,7 +785,7 @@ extern int sacctmgr_add_account(int argc, char *argv[])
 			assoc->acct = xstrdup(name);
 			assoc->cluster = xstrdup(cluster);
 			assoc->parent_acct = xstrdup(start_assoc->parent_acct);
-			assoc->fairshare = start_assoc->fairshare;
+			assoc->shares_raw = start_assoc->shares_raw;
 
 			assoc->grp_cpu_mins = start_assoc->grp_cpu_mins;
 			assoc->grp_cpus = start_assoc->grp_cpus;
@@ -949,7 +954,13 @@ extern int sacctmgr_list_account(int argc, char *argv[])
 
 	acct_cond->with_assocs = with_assoc_flag;
 
-	set = _set_cond(&i, argc, argv, acct_cond, format_list);
+	for (i=0; i<argc; i++) {
+		int command_len = strlen(argv[i]);
+		if (!strncasecmp (argv[i], "Where", MAX(command_len, 5))
+		    || !strncasecmp (argv[i], "Set", MAX(command_len, 3))) 
+			i++;		
+		set += _set_cond(&i, argc, argv, acct_cond, format_list);
+	}
 
 	if(exit_code) {
 		destroy_acct_account_cond(acct_cond);
@@ -995,6 +1006,7 @@ extern int sacctmgr_list_account(int argc, char *argv[])
 
 		field = xmalloc(sizeof(print_field_t));
 		if(!strncasecmp("Account", object, MAX(command_len, 1))
+		   || !strncasecmp("Acct", object, MAX(command_len, 4))
 		   || !strncasecmp("Name", object, MAX(command_len, 2))) {
 			field->type = PRINT_ACCOUNT;
 			field->name = xstrdup("Account");
@@ -1149,7 +1161,7 @@ extern int sacctmgr_list_account(int argc, char *argv[])
 			continue;
 		}
 		
-		if(newlen > 0) 
+		if(newlen) 
 			field->len = newlen;
 		
 		list_append(print_fields_list, field);		
@@ -1216,7 +1228,7 @@ extern int sacctmgr_list_account(int argc, char *argv[])
 					case PRINT_FAIRSHARE:
 						field->print_routine(
 							field, 
-							assoc->fairshare,
+							assoc->shares_raw,
 							(curr_inx == 
 							 field_count));
 						break;
@@ -1480,13 +1492,13 @@ extern int sacctmgr_modify_account(int argc, char *argv[])
 		int command_len = strlen(argv[i]);
 		if (!strncasecmp (argv[i], "Where", MAX(command_len, 5))) {
 			i++;
-			cond_set = _set_cond(&i, argc, argv, acct_cond, NULL);
+			cond_set += _set_cond(&i, argc, argv, acct_cond, NULL);
 		} else if (!strncasecmp (argv[i], "Set", MAX(command_len, 3))) {
 			i++;
-			rec_set = _set_rec(&i, argc, argv, NULL, NULL, 
+			rec_set += _set_rec(&i, argc, argv, NULL, NULL, 
 					   acct, assoc);
 		} else {
-			cond_set = _set_cond(&i, argc, argv, acct_cond, NULL);
+			cond_set += _set_cond(&i, argc, argv, acct_cond, NULL);
 		}
 	}
 
@@ -1610,7 +1622,15 @@ extern int sacctmgr_delete_account(int argc, char *argv[])
 	ListIterator itr = NULL;
 	int set = 0;
 	
-	if(!(set = _set_cond(&i, argc, argv, acct_cond, NULL))) {
+	for (i=0; i<argc; i++) {
+		int command_len = strlen(argv[i]);
+		if (!strncasecmp (argv[i], "Where", MAX(command_len, 5))
+		    || !strncasecmp (argv[i], "Set", MAX(command_len, 3))) 
+			i++;		
+		set += _set_cond(&i, argc, argv, acct_cond, NULL);
+	}
+
+	if(!set) {
 		exit_code=1;
 		fprintf(stderr, 
 			" No conditions given to remove, not executing.\n");

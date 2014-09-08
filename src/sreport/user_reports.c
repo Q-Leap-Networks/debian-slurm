@@ -6,10 +6,11 @@
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -225,7 +226,7 @@ static int _setup_print_fields_list(List format_list)
 			continue;
 		}
 
-		if(newlen > 0) 
+		if(newlen) 
 			field->len = newlen;
 		
 		list_append(print_fields_list, field);		
@@ -343,7 +344,7 @@ extern int user_top(int argc, char *argv[])
 		       "----------------------------------------\n");
 		printf("Top %u Users %s - %s (%d secs)\n", 
 		       top_limit, start_char, end_char, 
-		       (user_cond->assoc_cond->usage_end 
+		       (int)(user_cond->assoc_cond->usage_end 
 			- user_cond->assoc_cond->usage_start));
 		
 		switch(time_format) {

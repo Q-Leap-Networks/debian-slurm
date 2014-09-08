@@ -5,10 +5,11 @@
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -59,6 +60,7 @@
 #include "src/common/xstring.h"
 #include "src/slurmdbd/read_config.h"
 #include "src/slurmdbd/rpc_mgr.h"
+#include "src/slurmdbd/backup.h"
 
 /* Global variables */
 time_t shutdown_time = 0;		/* when shutdown request arrived */
@@ -85,7 +87,7 @@ static void  _init_config(void);
 static void  _init_pidfile(void);
 static void  _kill_old_slurmdbd(void);
 static void  _parse_commandline(int argc, char *argv[]);
-static void _rollup_handler_cancel();
+static void  _rollup_handler_cancel();
 static void *_rollup_handler(void *no_data);
 static void *_signal_handler(void *no_data);
 static void  _update_logging(void);
@@ -106,14 +108,6 @@ int main(int argc, char *argv[])
 	_parse_commandline(argc, argv);
 	_update_logging();
 
-	if (gethostname_short(node_name, sizeof(node_name)))
-		fatal("getnodename: %m");
-	if (slurmdbd_conf->dbd_host &&
-	    strcmp(slurmdbd_conf->dbd_host, node_name) &&
-	    strcmp(slurmdbd_conf->dbd_host, "localhost")) {
-		fatal("This host not configured to run SlurmDBD (%s != %s)",
-		      node_name, slurmdbd_conf->dbd_host);
-	}
 	if (slurm_auth_init(NULL) != SLURM_SUCCESS) {
 		fatal("Unable to initialize %s authentication plugin",
 			slurmdbd_conf->auth_type);
@@ -147,59 +141,106 @@ int main(int argc, char *argv[])
 	assoc_init_arg.cache_level = ASSOC_MGR_CACHE_USER;
 	if(slurmdbd_conf->track_wckey)
 		assoc_init_arg.cache_level |= ASSOC_MGR_CACHE_WCKEY;
-
+	
 	if(assoc_mgr_init(db_conn, &assoc_init_arg) == SLURM_ERROR) {
 		error("Problem getting cache of data");
 		acct_storage_g_close_connection(&db_conn);
 		goto end_it;
 	}
 
-	if(!shutdown_time) {
-		/* Create attached thread to process incoming RPCs */
-		slurm_attr_init(&thread_attr);
-		if (pthread_create(&rpc_handler_thread, &thread_attr, 
-				   rpc_mgr, NULL))
-			fatal("pthread_create error %m");
-		slurm_attr_destroy(&thread_attr);
+	if (gethostname_short(node_name, sizeof(node_name)))
+		fatal("getnodename: %m");
+
+	while(1) {
+		if (slurmdbd_conf->dbd_backup &&
+		    (!strcmp(node_name, slurmdbd_conf->dbd_backup) ||
+		     !strcmp(slurmdbd_conf->dbd_backup, "localhost"))) {
+			info("slurmdbd running in background mode");
+			have_control = false;
+			backup = true;
+			run_backup();
+			if(!shutdown_time)
+				assoc_mgr_refresh_lists(db_conn, NULL);		
+		} else if (slurmdbd_conf->dbd_host &&
+			   (!strcmp(slurmdbd_conf->dbd_host, node_name) ||
+			    !strcmp(slurmdbd_conf->dbd_host, "localhost"))) {
+			backup = false;
+			have_control = true;
+		} else {
+			fatal("This host not configured to run SlurmDBD "
+			      "(%s != %s | (backup) %s)",
+			      node_name, slurmdbd_conf->dbd_host,
+			      slurmdbd_conf->dbd_backup);
+		}
+		
+		if(!shutdown_time) {
+			/* Create attached thread to process incoming RPCs */
+			slurm_attr_init(&thread_attr);
+			if (pthread_create(&rpc_handler_thread, &thread_attr, 
+					   rpc_mgr, NULL))
+				fatal("pthread_create error %m");
+			slurm_attr_destroy(&thread_attr);
+		}
+
+		if(!shutdown_time) {
+			/* Create attached thread to do usage rollup */
+			slurm_attr_init(&thread_attr);
+			if (pthread_create(&rollup_handler_thread,
+					   &thread_attr,
+					   _rollup_handler, db_conn))
+				fatal("pthread_create error %m");
+			slurm_attr_destroy(&thread_attr);
+		}
+
+		/* Daemon is fully operational here */
+		if(!shutdown_time || primary_resumed) {
+			shutdown_time = 0;
+			info("slurmdbd version %s started", SLURM_VERSION);
+			if(backup)
+				run_backup();
+		}
+
+		/* this is only ran if not backup */
+		if(rollup_handler_thread)
+			pthread_join(rollup_handler_thread, NULL);
+		if(rpc_handler_thread)
+			pthread_join(rpc_handler_thread, NULL);
+
+		if(backup && primary_resumed) { 
+			shutdown_time = 0;
+			info("Backup has given up control");
+		}
+
+		if(shutdown_time)
+			break;
 	}
-
-	if(!shutdown_time) {
-		/* Create attached thread to do usage rollup */
-		slurm_attr_init(&thread_attr);
-		if (pthread_create(&rollup_handler_thread, &thread_attr,
-				   _rollup_handler, db_conn))
-			fatal("pthread_create error %m");
-		slurm_attr_destroy(&thread_attr);
-	}
-
-	/* Daemon is fully operational here */
-	info("slurmdbd version %s started", SLURM_VERSION);
-
 	/* Daemon termination handled here */
-	if(rollup_handler_thread)
-		pthread_join(rollup_handler_thread, NULL);
-
-	if(rpc_handler_thread)
-		pthread_join(rpc_handler_thread, NULL);
-
+	
 	if(signal_handler_thread)
 		pthread_join(signal_handler_thread, NULL);
-
+	
 end_it:
 	acct_storage_g_close_connection(&db_conn);
-
+	
 	if (slurmdbd_conf->pid_file &&
 	    (unlink(slurmdbd_conf->pid_file) < 0)) {
 		verbose("Unable to remove pidfile '%s': %m",
 			slurmdbd_conf->pid_file);
 	}
-
+	
 	assoc_mgr_fini(NULL);
 	slurm_acct_storage_fini();
 	slurm_auth_fini();
 	log_fini();
 	free_slurmdbd_conf();
 	exit(0);
+}
+
+extern void shutdown_threads()
+{
+	shutdown_time = time(NULL);
+	rpc_mgr_wake();
+	_rollup_handler_cancel();
 }
 
 /* Reset some of the processes resource limits to the hard limits */
@@ -398,7 +439,7 @@ static void *_rollup_handler(void *db_conn)
 		slurm_mutex_lock(&rollup_lock);
 		running_rollup = 1;
 		debug2("running rollup at %s", ctime(&start_time));
-		acct_storage_g_roll_usage(db_conn, 0);
+		acct_storage_g_roll_usage(db_conn, 0, 0, 1);
 		running_rollup = 0;
 		slurm_mutex_unlock(&rollup_lock);	
 
@@ -457,17 +498,12 @@ static void *_signal_handler(void *no_data)
 		case SIGINT:	/* kill -2  or <CTRL-C> */
 		case SIGTERM:	/* kill -15 */
 			info("Terminate signal (SIGINT or SIGTERM) received");
-			shutdown_time = time(NULL);
-			rpc_mgr_wake();
-			_rollup_handler_cancel();
-
+			shutdown_threads();
 			return NULL;	/* Normal termination */
 		case SIGABRT:	/* abort */
 			info("SIGABRT received");
 			abort();	/* Should terminate here */
-			shutdown_time = time(NULL);
-			rpc_mgr_wake();
-			_rollup_handler_cancel();
+			shutdown_threads();
 			return NULL;
 		default:
 			error("Invalid signal (%d) received", sig);

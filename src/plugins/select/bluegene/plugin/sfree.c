@@ -1,15 +1,16 @@
 /*****************************************************************************\
  *  sfree.c - free specified block or all blocks.
- *  $Id: sfree.c 16357 2009-01-30 18:05:07Z da $
+ *  $Id: sfree.c 17366 2009-04-28 23:04:14Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -39,7 +40,7 @@
 
 #include "sfree.h"
 
-#define MAX_POLL_RETRIES    110
+#define MAX_POLL_RETRIES    220
 #define POLL_INTERVAL        3
 #define MAX_PTHREAD_RETRIES  1
 
@@ -292,10 +293,17 @@ static int _free_block(delete_record_t *delete_record)
 				if(rc == PARTITION_NOT_FOUND) {
 					info("block %s is not found");
 					break;
+				} else if(rc == INCOMPATIBLE_STATE) {
+					debug2("bridge_destroy_partition"
+					       "(%s): %s State = %d",
+					       delete_record->bg_block_id, 
+					       _bg_err_str(rc), 
+					       delete_record->state);
+				} else {
+					error("bridge_destroy_block(%s): %s",
+					      delete_record->bg_block_id,
+					      _bg_err_str(rc));
 				}
-				error("bridge_destroy_block(%s): %s",
-				      delete_record->bg_block_id,
-				      _bg_err_str(rc));
 			}
 #else
 			bg_record->state = RM_PARTITION_FREE;	
@@ -519,14 +527,15 @@ static char *_bg_err_str(status_t inx)
 /* Kill a job and remove its record from MMCS */
 static int _remove_job(db_job_id_t job_id)
 {
-	int i, rc;
+	int rc, count = 0;
 	rm_job_t *job_rec = NULL;
 	rm_job_state_t job_state;
 
 	info("removing job %d from MMCS", job_id);
-	for (i=0; i<MAX_POLL_RETRIES; i++) {
-		if (i > 0)
+	while(1) {
+		if (count)
 			sleep(POLL_INTERVAL);
+		count++;
 
 		/* Find the job */
 		if ((rc = bridge_get_job(job_id, &job_rec)) != STATUS_OK) {
@@ -560,17 +569,30 @@ static int _remove_job(db_job_id_t job_id)
 		/* check the state and process accordingly */
 		if(job_state == RM_JOB_TERMINATED)
 			return STATUS_OK;
-		else if(job_state == RM_JOB_DYING)
+		else if(job_state == RM_JOB_DYING) {
+			if(count > MAX_POLL_RETRIES) 
+				error("Job %d isn't dying, trying for "
+				      "%d seconds", count*POLL_INTERVAL);
 			continue;
-		else if(job_state == RM_JOB_ERROR) {
+		} else if(job_state == RM_JOB_ERROR) {
 			error("job %d is in a error state.", job_id);
 			
 			//free_bg_block();
 			return STATUS_OK;
 		}
 
-		(void) bridge_signal_job(job_id, SIGKILL);
-		rc = bridge_cancel_job(job_id);
+		/* we have been told the next 2 lines do the same
+		 * thing, but I don't believe it to be true.  In most
+		 * cases when you do a signal of SIGTERM the mpirun
+		 * process gets killed with a SIGTERM.  In the case of
+		 * bridge_cancel_job it always gets killed with a
+		 * SIGKILL.  From IBM's point of view that is a bad
+		 * deally, so we are going to use signal ;).
+		 */
+
+//		 rc = bridge_cancel_job(job_id);
+		 rc = bridge_signal_job(job_id, SIGTERM);
+
 		if (rc != STATUS_OK) {
 			if (rc == JOB_NOT_FOUND) {
 				debug("job %d removed from MMCS", job_id);

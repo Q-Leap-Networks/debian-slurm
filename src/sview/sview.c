@@ -2,13 +2,14 @@
  *  sview.c - main for sview
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>, et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -78,6 +79,10 @@ display_data_t main_display_data[] = {
 	 refresh_main, create_model_part, admin_edit_part,
 	 get_info_part, specific_info_part, 
 	 set_menus_part, NULL},
+	{G_TYPE_NONE, RESV_PAGE, "Reservations", TRUE, -1, 
+	 refresh_main, create_model_resv, admin_edit_resv,
+	 get_info_resv, specific_info_resv, 
+	 set_menus_resv, NULL},
 #ifdef HAVE_BG
 	{G_TYPE_NONE, BLOCK_PAGE, "BG Blocks", TRUE, -1,
 	 refresh_main, NULL, NULL,
@@ -379,6 +384,8 @@ static GtkWidget *_get_menubar_menu(GtkWidget *window, GtkWidget *notebook)
 		"      <separator/>"
 		"        <menuitem action='node_name'/>"
 		"        <menuitem action='node_state'/>"
+		"      <separator/>"
+		"        <menuitem action='reservation_name'/>"
 		"      </menu>"
 		"      <menuitem action='refresh'/>"
 		"      <menuitem action='reconfig'/>"
@@ -459,6 +466,9 @@ static GtkWidget *_get_menubar_menu(GtkWidget *window, GtkWidget *notebook)
 		 "", "Search for a Node in a given state", 
 #endif
 		 G_CALLBACK(create_search_popup)},		
+		{"reservation_name", NULL, "Reservation Name", 
+		 "", "Search for reservation", 
+		 G_CALLBACK(create_search_popup)},
 		{"tab_pos", NULL, "_Tab Pos"},
 		{"interval", GTK_STOCK_REFRESH, "Set Refresh _Interval", 
 		 "<control>i", "Change Refresh Interval", 
@@ -537,6 +547,7 @@ static GtkWidget *_get_menubar_menu(GtkWidget *window, GtkWidget *notebook)
 	/* Finally, return the actual menu bar created by the item factory. */
 	return gtk_ui_manager_get_widget (ui_manager, "/main");
 }
+
 void *_popup_thr_main(void *arg)
 {
 	popup_thr(arg);		

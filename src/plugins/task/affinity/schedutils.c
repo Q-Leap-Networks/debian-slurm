@@ -6,7 +6,8 @@
  *  Copyright (C) 2004 Robert Love
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -122,7 +123,7 @@ char * cpuset_to_str(const cpu_set_t *mask, char *str)
 {
 	int base;
 	char *ptr = str;
-	char *ret = 0;
+	char *ret = NULL;
 
 	for (base = CPU_SETSIZE - 4; base >= 0; base -= 4) {
 		char val = 0;
@@ -138,7 +139,7 @@ char * cpuset_to_str(const cpu_set_t *mask, char *str)
 			ret = ptr;
 		*ptr++ = val_to_char(val);
 	}
-	*ptr = 0;
+	*ptr = '\0';
 	return ret ? ret : ptr - 1;
 }
 

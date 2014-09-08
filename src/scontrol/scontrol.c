@@ -3,14 +3,15 @@
  *	provides interface to read, write, update, and configurations.
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Portions Copyright (C) 2008 Vijay Ramasubramanian.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -51,7 +52,9 @@ int one_liner;		/* one record per line if =1 */
 int quiet_flag;		/* quiet=1, verbose=-1, normal=0 */
 int verbosity;		/* count of "-v" options */
 
+static void	_create_it (int argc, char *argv[]);
 static void	_delete_it (int argc, char *argv[]);
+static void     _show_it (int argc, char *argv[]);
 static int	_get_command (int *argc, char *argv[]);
 static void     _ping_slurmctld(char *control_machine, char *backup_controller);
 static void	_print_config (char *config_param);
@@ -457,19 +460,29 @@ static int
 _process_command (int argc, char *argv[]) 
 {
 	int error_code = 0;
+	char *tag = argv[0];
+	int taglen = 0;
 
 	if (argc < 1) {
 		exit_code = 1;
 		if (quiet_flag == -1)
 			fprintf(stderr, "no input");
+		return 0;
+	} else if(tag)
+		taglen = strlen(tag);
+	else {
+		if (quiet_flag == -1)
+			fprintf(stderr, "input problem");
+		return 0;
 	}
-	else if (strncasecmp (argv[0], "abort", 5) == 0) {
+
+if (strncasecmp (tag, "abort", MAX(taglen, 5)) == 0) {
 		/* require full command name */
 		if (argc > 2) {
 			exit_code = 1;
 			fprintf (stderr,
 				 "too many arguments for keyword:%s\n", 
-				 argv[0]);
+				 tag);
 		}
 		error_code = slurm_shutdown (1);
 		if (error_code) {
@@ -478,92 +491,101 @@ _process_command (int argc, char *argv[])
 				slurm_perror ("slurm_shutdown error");
 		}
 	}
-	else if (strncasecmp (argv[0], "all", 3) == 0)
+	else if (strncasecmp (tag, "all", MAX(taglen, 2)) == 0)
 		all_flag = 1;
-	else if (strncasecmp (argv[0], "completing", 3) == 0) {
+	else if (strncasecmp (tag, "completing", MAX(taglen, 2)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr, 
 				 "too many arguments for keyword:%s\n", 
-				 argv[0]);
+				 tag);
 		}
 		scontrol_print_completing();
 	}
-	else if (strncasecmp (argv[0], "exit", 1) == 0) {
+	else if (strncasecmp (tag, "create", MAX(taglen, 2)) == 0) {
+		if (argc < 2) {
+			exit_code = 1;
+			fprintf (stderr, "too few arguments for %s keyword\n",
+				 tag);
+			return 0;
+		}		
+		_create_it ((argc - 1), &argv[1]);
+	}
+	else if (strncasecmp (tag, "exit", MAX(taglen, 1)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr, 
 				 "too many arguments for keyword:%s\n", 
-				 argv[0]);
+				 tag);
 		}
 		exit_flag = 1;
 	}
-	else if (strncasecmp (argv[0], "help", 2) == 0) {
+	else if (strncasecmp (tag, "help", MAX(taglen, 2)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr, 
 				 "too many arguments for keyword:%s\n",
-				 argv[0]);
+				 tag);
 		}
 		_usage ();
 	}
-	else if (strncasecmp (argv[0], "hide", 2) == 0)
+	else if (strncasecmp (tag, "hide", MAX(taglen, 2)) == 0)
 		all_flag = 0;
-	else if (strncasecmp (argv[0], "oneliner", 1) == 0) {
+	else if (strncasecmp (tag, "oneliner", MAX(taglen, 1)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr, 
 				 "too many arguments for keyword:%s\n",
-				 argv[0]);
+				 tag);
 		}
 		one_liner = 1;
 	}
-	else if (strncasecmp (argv[0], "pidinfo", 3) == 0) {
+	else if (strncasecmp (tag, "pidinfo", MAX(taglen, 3)) == 0) {
 		if (argc > 2) {
 			exit_code = 1;
 			fprintf (stderr, 
 				 "too many arguments for keyword:%s\n", 
-				 argv[0]);
+				 tag);
 		} else if (argc < 2) {
 			exit_code = 1;
 			fprintf (stderr, 
 				 "missing argument for keyword:%s\n", 
-				 argv[0]);
+				 tag);
 		} else
 			scontrol_pid_info ((pid_t) atol (argv[1]) );
 	}
-	else if (strncasecmp (argv[0], "ping", 3) == 0) {
+	else if (strncasecmp (tag, "ping", MAX(taglen, 3)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr, 
 				 "too many arguments for keyword:%s\n",
-				 argv[0]);
+				 tag);
 		}
 		_print_ping ();
 	}
-	else if ((strncasecmp (argv[0], "\\q", 2) == 0) ||
-		 (strncasecmp (argv[0], "quiet", 4) == 0)) {
+	else if ((strncasecmp (tag, "\\q", 2) == 0) ||
+		 (strncasecmp (tag, "quiet", MAX(taglen, 4)) == 0)) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr, "too many arguments for keyword:%s\n",
-				 argv[0]);
+				 tag);
 		}
 		quiet_flag = 1;
 	}
-	else if (strncasecmp (argv[0], "quit", 4) == 0) {
+	else if (strncasecmp (tag, "quit", MAX(taglen, 4)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr, 
 				 "too many arguments for keyword:%s\n", 
-				 argv[0]);
+				 tag);
 		}
 		exit_flag = 1;
 	}
-	else if (strncasecmp (argv[0], "reconfigure", 3) == 0) {
+	else if (strncasecmp (tag, "reconfigure", MAX(taglen, 3)) == 0) {
 		if (argc > 2) {
 			exit_code = 1;
 			fprintf (stderr, "too many arguments for keyword:%s\n",
-			         argv[0]);
+			         tag);
 		}
 		error_code = slurm_reconfigure ();
 		if (error_code) {
@@ -572,43 +594,44 @@ _process_command (int argc, char *argv[])
 				slurm_perror ("slurm_reconfigure error");
 		}
 	}
-	else if (strncasecmp (argv[0], "checkpoint", 5) == 0) {
-		if (argc > 3) {
+	else if (strncasecmp (tag, "checkpoint", MAX(taglen, 2)) == 0) {
+		if (argc > 5) {
 			exit_code = 1;
 			if (quiet_flag != 1)
 				fprintf(stderr, 
 				        "too many arguments for keyword:%s\n", 
-				        argv[0]);
+				        tag);
 		}
 		else if (argc < 3) {
 			exit_code = 1;
 			if (quiet_flag != 1)
 				fprintf(stderr, 
 				        "too few arguments for keyword:%s\n", 
-				        argv[0]);
+				        tag);
 		}
 		else {
-			error_code = scontrol_checkpoint(argv[1], argv[2]);
+			error_code = scontrol_checkpoint(argv[1], argv[2], 
+							 argc - 3, &argv[3]);
 			if (error_code) {
 				exit_code = 1;
 				if (quiet_flag != 1)
-					slurm_perror ("slurm_checkpoint error");
+					slurm_perror ("scontrol_checkpoint error");
 			}
 		}
 	}
-	else if (strncasecmp (argv[0], "requeue", 3) == 0) {
+	else if (strncasecmp (tag, "requeue", MAX(taglen, 3)) == 0) {
 		if (argc > 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
 				fprintf(stderr,
 					"too many arguments for keyword:%s\n",
-					argv[0]);
+					tag);
 		} else if (argc < 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
 				fprintf(stderr,
 					"too few arguments for keyword:%s\n",
-					argv[0]);
+					tag);
 		} else {
 			error_code = scontrol_requeue(argv[1]);
 			if (error_code) {
@@ -619,21 +642,21 @@ _process_command (int argc, char *argv[])
 		}
 				
 	}
-	else if ((strncasecmp (argv[0], "suspend", 3) == 0)
-	||       (strncasecmp (argv[0], "resume", 3) == 0)) {
+	else if ((strncasecmp (tag, "suspend", MAX(taglen, 2)) == 0)
+	||       (strncasecmp (tag, "resume", MAX(taglen, 3)) == 0)) {
 		if (argc > 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
 				fprintf(stderr,
 					"too many arguments for keyword:%s\n",
-					argv[0]);
+					tag);
 		}
 		else if (argc < 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
 				fprintf(stderr,
 					"too few arguments for keyword:%s\n",
-					argv[0]);
+					tag);
 		} else {
 			error_code =scontrol_suspend(argv[0], argv[1]);
 			if (error_code) {
@@ -643,23 +666,26 @@ _process_command (int argc, char *argv[])
 			}
 		}
 	}
-	else if (strncasecmp (argv[0], "setdebug", 4) == 0) {
+	else if (strncasecmp (tag, "setdebug", MAX(taglen, 2)) == 0) {
 		if (argc > 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
-				fprintf(stderr, "too many arguments for keyword:%s\n",
-					argv[0]);
+				fprintf(stderr, 
+					"too many arguments for keyword:%s\n",
+					tag);
 		} else if (argc < 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
-				fprintf(stderr, "too few arguments for keyword:%s\n",
-					argv[0]);
+				fprintf(stderr, 
+					"too few arguments for keyword:%s\n",
+					tag);
 		} else {
 			int level = -1;
 			char *endptr;
 			char *levels[] = {
 				"quiet", "fatal", "error", "info", "verbose",
-				"debug", "debug2", "debug3", "debug4", "debug5", NULL};
+				"debug", "debug2", "debug3", "debug4", 
+				"debug5", NULL};
 			int index = 0;
 			while (levels[index]) {
 				if (strcasecmp(argv[1], levels[index]) == 0) {
@@ -669,13 +695,14 @@ _process_command (int argc, char *argv[])
 				index ++;
 			}
 			if (level == -1) {
-				level = (int)strtoul (argv[1], &endptr, 10);    /* effective levels: 0 - 9 */
+				/* effective levels: 0 - 9 */
+				level = (int)strtoul (argv[1], &endptr, 10);
 				if (*endptr != '\0' || level > 9) {
 					level = -1;
 					exit_code = 1;
 					if (quiet_flag != 1)
-						fprintf(stderr, "invalid debug level: %s\n",
-							argv[1]);
+						fprintf(stderr, "invalid debug "
+							"level: %s\n", argv[1]);
 				}
 			}
 			if (level != -1) {
@@ -688,91 +715,31 @@ _process_command (int argc, char *argv[])
 			}
 		}
 	}
-	else if (strncasecmp (argv[0], "show", 3) == 0) {
-		if (argc > 3) {
-			exit_code = 1;
-			if (quiet_flag != 1)
-				fprintf(stderr, 
-				        "too many arguments for keyword:%s\n", 
-				        argv[0]);
-		}
-		else if (argc < 2) {
-			exit_code = 1;
-			if (quiet_flag != 1)
-				fprintf(stderr, 
-				        "too few arguments for keyword:%s\n", 
-				        argv[0]);
-		}
-		else if (strncasecmp (argv[1], "config", 3) == 0) {
-			if (argc > 2)
-				_print_config (argv[2]);
-			else
-				_print_config (NULL);
-		}
-		else if (strncasecmp (argv[1], "daemons", 3) == 0) {
-			if (argc > 2) {
+	else if (strncasecmp (tag, "show", MAX(taglen, 3)) == 0) {
+		_show_it (argc, argv);
+	}
+	else if (strncasecmp (tag, "takeover", MAX(taglen, 8)) == 0) {
+		char *secondary = NULL;
+		slurm_ctl_conf_info_msg_t  *slurm_ctl_conf_ptr = NULL;
+
+		slurm_ctl_conf_ptr = slurm_conf_lock();
+		secondary = xstrdup(slurm_ctl_conf_ptr->backup_controller);
+		slurm_conf_unlock();
+
+		if ( secondary && secondary[0] != '\0' ) {
+			error_code = slurm_takeover();
+			if (error_code) {
 				exit_code = 1;
 				if (quiet_flag != 1)
-					fprintf(stderr,
-					        "too many arguments for keyword:%s\n", 
-					        argv[0]);
+					slurm_perror("slurm_takeover error");
 			}
-			_print_daemons ();
+		} else {
+			fprintf(stderr, "slurm_takeover error: no backup "
+				"controller defined\n");
 		}
-		else if (strncasecmp (argv[1], "jobs", 3) == 0) {
-			if (argc > 2)
-				scontrol_print_job (argv[2]);
-			else
-				scontrol_print_job (NULL);
-		}
-		else if (strncasecmp (argv[1], "hostnames", 5) == 0) {
-			if (argc > 2)
-				scontrol_print_hosts(argv[2]);
-			else
-				scontrol_print_hosts(getenv("SLURM_NODELIST"));
-		}
-		else if (strncasecmp (argv[1], "hostlist", 5) == 0) {
-			if (argc != 3) {
-				exit_code = 1;
-				fprintf(stderr, "invalid encode argument\n");
-				_usage();
-			} else if (scontrol_encode_hostlist(argv[2]))
-				exit_code = 1;
-		}
-		else if (strncasecmp (argv[1], "nodes", 3) == 0) {
-			if (argc > 2)
-				scontrol_print_node_list (argv[2]);
-			else
-				scontrol_print_node_list (NULL);
-		}
-		else if (strncasecmp (argv[1], "partitions", 3) == 0) {
-			if (argc > 2)
-				scontrol_print_part (argv[2]);
-			else
-				scontrol_print_part (NULL);
-		}
-		else if (strncasecmp (argv[1], "slurmd", 6) == 0) {
-			if (argc > 2)
-				_print_slurmd(argv[2]);
-			else
-				_print_slurmd(NULL);
-		}
-		else if (strncasecmp (argv[1], "steps", 3) == 0) {
-			if (argc > 2)
-				scontrol_print_step (argv[2]);
-			else
-				scontrol_print_step (NULL);
-		}
-		else {
-			exit_code = 1;
-			if (quiet_flag != 1)
-				fprintf (stderr,
-					 "invalid entity:%s for keyword:%s \n",
-					 argv[1], argv[0]);
-		}		
-
+		xfree(secondary);
 	}
-	else if (strncasecmp (argv[0], "shutdown", 8) == 0) {
+	else if (strncasecmp (tag, "shutdown", MAX(taglen, 8)) == 0) {
 		/* require full command name */
 		uint16_t options = 0;
 		if (argc == 2) {
@@ -790,7 +757,7 @@ _process_command (int argc, char *argv[])
 			exit_code = 1;
 			fprintf (stderr,
 				 "too many arguments for keyword:%s\n", 
-				 argv[0]);
+				 tag);
 		}
 		if (error_code == 0) {
 			error_code = slurm_shutdown(options);
@@ -801,59 +768,59 @@ _process_command (int argc, char *argv[])
 			}
 		}
 	}
-	else if (strncasecmp (argv[0], "update", 1) == 0) {
+	else if (strncasecmp (tag, "update", MAX(taglen, 1)) == 0) {
 		if (argc < 2) {
 			exit_code = 1;
 			fprintf (stderr, "too few arguments for %s keyword\n",
-				 argv[0]);
+				 tag);
 			return 0;
 		}		
 		_update_it ((argc - 1), &argv[1]);
 	}
-	else if (strncasecmp (argv[0], "delete", 3) == 0) {
+	else if (strncasecmp (tag, "delete", MAX(taglen, 1)) == 0) {
 		if (argc < 2) {
 			exit_code = 1;
 			fprintf (stderr, "too few arguments for %s keyword\n",
-				 argv[0]);
+				 tag);
 			return 0;
 		}
 		_delete_it ((argc - 1), &argv[1]);
 	}
-	else if (strncasecmp (argv[0], "verbose", 4) == 0) {
+	else if (strncasecmp (tag, "verbose", MAX(taglen, 4)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr,
 				 "too many arguments for %s keyword\n",
-				 argv[0]);
+				 tag);
 		}		
 		quiet_flag = -1;
 	}
-	else if (strncasecmp (argv[0], "version", 4) == 0) {
+	else if (strncasecmp (tag, "version", MAX(taglen, 4)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr,
 				 "too many arguments for %s keyword\n",
-				 argv[0]);
+				 tag);
 		}		
 		_print_version();
 	}
-	else if (strncasecmp (argv[0], "listpids", 8) == 0) {
+	else if (strncasecmp (tag, "listpids", MAX(taglen, 1)) == 0) {
 		if (argc > 3) {
 			exit_code = 1;
 			fprintf (stderr, 
 				 "too many arguments for keyword:%s\n", 
-				 argv[0]);
+				 tag);
 		} else {
 			scontrol_list_pids (argc == 1 ? NULL : argv[1],
 					    argc <= 2 ? NULL : argv[2]);
 		}
 	}
-	else if (strncasecmp (argv[0], "notify", 6) == 0) {
+	else if (strncasecmp (tag, "notify", MAX(taglen, 1)) == 0) {
 		if (argc < 3) {
 			exit_code = 1;
 			fprintf (stderr, 
 				 "too few arguments for keyword:%s\n", 
-				 argv[0]);
+				 tag);
 		} else if (scontrol_job_notify(argc-1, &argv[1])) {
 			exit_code = 1;
 			slurm_perror("job notify failure");
@@ -861,35 +828,208 @@ _process_command (int argc, char *argv[])
 	}
 	else {
 		exit_code = 1;
-		fprintf (stderr, "invalid keyword: %s\n", argv[0]);
+		fprintf (stderr, "invalid keyword: %s\n", tag);
 	}
 
 	return 0;
 }
 
+
 /* 
- * _delete_it - delete the slurm the specified slurm entity 
+ * _create_it - create a slurm configuration per the supplied arguments 
+ * IN argc - count of arguments
+ * IN argv - list of arguments
+ */
+static void
+_create_it (int argc, char *argv[]) 
+{
+	/* Scan for "res" first, anywhere in the args.  When creating
+	   a reservation there is a partition= option, which we don't
+	   want to mistake for a requestion to create a partition. */
+	int i, error_code = SLURM_SUCCESS;
+	for (i=0; i<argc; i++) {
+		char *tag = argv[i];
+		char *val = strchr(argv[i], '=');
+		int taglen;
+
+		if (val) {
+			taglen = val - argv[i];
+			val++;
+		} else {
+			taglen = strlen(tag);
+		}
+		if (!strncasecmp(tag, "ReservationName", MAX(taglen, 3))) {
+			error_code = scontrol_create_res(argc, argv);
+			break;
+		} else if (!strncasecmp(tag, "PartitionName", MAX(taglen, 3))) {
+			error_code = scontrol_create_part(argc, argv);
+			break;
+		}
+	}
+
+	if (i >= argc) {
+		exit_code = 1;
+		error("Invalid creation entity: %s\n", argv[0]);
+	} else if (error_code) 
+		exit_code = 1;
+}
+
+
+
+
+/* 
+ * _delete_it - delete the specified slurm entity 
  * IN argc - count of arguments
  * IN argv - list of arguments
  */
 static void
 _delete_it (int argc, char *argv[]) 
 {
-	delete_part_msg_t part_msg;
+	char *tag = NULL, *val = NULL;
+	int taglen = 0;
+
+	if (argc != 1) {
+		error("Only one option follows delete.  %d given.\n", argc);
+		exit_code = 1;
+		return;
+	}
+
+	tag = argv[0];
+	val = strchr(argv[0], '=');
+	if (val) {
+		taglen = val - argv[0];
+		val++;
+	} else {
+		error("Proper format is 'delete Partition=p'"
+		      " or 'delete Reservation=r'\n");
+		exit_code = 1;
+		return;
+	}
 
 	/* First identify the entity type to delete */
-	if (strncasecmp (argv[0], "PartitionName=", 14) == 0) {
-		part_msg.name = argv[0] + 14;
+	if (strncasecmp (tag, "PartitionName", MAX(taglen, 1)) == 0) {
+		delete_part_msg_t part_msg;
+		part_msg.name = val;
 		if (slurm_delete_partition(&part_msg)) {
 			char errmsg[64];
 			snprintf(errmsg, 64, "delete_partition %s", argv[0]);
 			slurm_perror(errmsg);
 		}
+	} else if (strncasecmp (tag, "ReservationName", MAX(taglen, 1)) == 0) {
+		reservation_name_msg_t   res_msg;
+		res_msg.name = val;
+		if (slurm_delete_reservation(&res_msg)) {
+			char errmsg[64];
+			snprintf(errmsg, 64, "delete_reservation %s", argv[0]);
+			slurm_perror(errmsg);
+		}
 	} else {
 		exit_code = 1;
-		fprintf(stderr, "Invalid deletion entity: %s\n", argv[1]);
+		fprintf(stderr, "Invalid deletion entity: %s\n", argv[0]);
 	}
 }
+
+
+/* 
+ * _show_it - print a description of the specified slurm entity 
+ * IN argc - count of arguments
+ * IN argv - list of arguments
+ */
+static void
+_show_it (int argc, char *argv[])
+{
+	char *tag = NULL, *val = NULL;
+	int taglen = 0;
+
+	if (argc > 3) {
+		exit_code = 1;
+		if (quiet_flag != 1)
+			fprintf(stderr, 
+			        "too many arguments for keyword:%s\n", 
+			        argv[0]);
+		return;
+	}
+	else if (argc < 2) {
+		exit_code = 1;
+		if (quiet_flag != 1)
+			fprintf(stderr, 
+			        "too few arguments for keyword:%s\n", argv[0]);
+		return;
+	}
+
+	tag = argv[1];
+	taglen = strlen(tag);
+	val = strchr(argv[1], '=');
+	if (val) {
+		taglen = val - argv[1];
+		val++;
+	} else if (argc == 3) {
+		val = argv[2];
+	} else {
+		val = NULL;
+	}
+
+	if (strncasecmp (tag, "config", MAX(taglen, 1)) == 0) {
+		_print_config (val);
+	}
+	else if (strncasecmp (tag, "daemons", MAX(taglen, 1)) == 0) {
+		if (val) {
+			exit_code = 1;
+			if (quiet_flag != 1)
+				fprintf(stderr,
+				        "too many arguments for keyword:%s\n", 
+				        argv[0]);
+		}
+		_print_daemons ();
+	}
+	else if (strncasecmp (tag, "jobs", MAX(taglen, 1)) == 0 ||
+		 strncasecmp (tag, "jobid", MAX(taglen, 1)) == 0 ) {
+		scontrol_print_job (val);
+	}
+	else if (strncasecmp (tag, "hostnames", MAX(taglen, 5)) == 0) {
+		if (val)
+			scontrol_print_hosts(val);
+		else
+			scontrol_print_hosts(getenv("SLURM_NODELIST"));
+	}
+	else if (strncasecmp (tag, "hostlist", MAX(taglen, 5)) == 0) {
+		if (!val) {
+			exit_code = 1;
+			fprintf(stderr, "invalid encode argument\n");
+			_usage();
+		} else if (scontrol_encode_hostlist(val))
+			exit_code = 1;
+	}
+	else if (strncasecmp (tag, "nodes", MAX(taglen, 1)) == 0) {
+		scontrol_print_node_list (val);
+	}
+	else if (strncasecmp (tag, "partitions", MAX(taglen, 1)) == 0 || 
+		 strncasecmp (tag, "partitionname", MAX(taglen, 1)) == 0) {
+		scontrol_print_part (val);
+	}
+	else if (strncasecmp (tag, "reservations", MAX(taglen, 1)) == 0 || 
+		 strncasecmp (tag, "reservationname", MAX(taglen, 1)) == 0) {
+		scontrol_print_res (val);
+	}
+	else if (strncasecmp (tag, "slurmd", MAX(taglen, 2)) == 0) {
+		_print_slurmd (val);
+	}
+	else if (strncasecmp (tag, "steps", MAX(taglen, 2)) == 0) {
+		scontrol_print_step (val);
+	}
+	else if (strncasecmp (tag, "topology", MAX(taglen, 1)) == 0) {
+		scontrol_print_topo (val);
+	}
+	else {
+		exit_code = 1;
+		if (quiet_flag != 1)
+			fprintf (stderr,
+				 "invalid entity:%s for keyword:%s \n",
+				 tag, argv[0]);
+	}		
+
+}
+
 
 
 /* 
@@ -901,29 +1041,54 @@ static void
 _update_it (int argc, char *argv[]) 
 {
 	int i, error_code = SLURM_SUCCESS;
+	int nodetag=0, partag=0, jobtag=0;
+	int blocktag=0, subtag=0, restag=0;
 
 	/* First identify the entity to update */
 	for (i=0; i<argc; i++) {
-		if (strncasecmp (argv[i], "NodeName=", 9) == 0) {
-			error_code = scontrol_update_node (argc, argv);
-			break;
-		} else if (strncasecmp (argv[i], "PartitionName=", 14) == 0) {
-			error_code = scontrol_update_part (argc, argv);
-			break;
-		} else if (strncasecmp (argv[i], "JobId=", 6) == 0) {
-			error_code = scontrol_update_job (argc, argv);
-			break;
-		} else if (strncasecmp (argv[i], "BlockName=", 10) == 0) {
-			error_code = _update_bluegene_block (argc, argv);
-			break;
-		} else if (strncasecmp (argv[i], "SubBPName=", 10) == 0) {
-			error_code = _update_bluegene_subbp (argc, argv);
-			break;
+		char *tag = argv[i];
+		int taglen = 0;
+		char *val = strchr(argv[i], '=');
+		if (!val)
+			continue;
+		taglen = val - argv[i];
+		val++;
+
+		if (strncasecmp (tag, "NodeName", MAX(taglen, 5)) == 0) {
+			nodetag=1;
+		} else if (strncasecmp (tag, "PartitionName", MAX(taglen, 3)) == 0) {
+			partag=1;
+		} else if (strncasecmp (tag, "JobId", MAX(taglen, 3)) == 0) {
+			jobtag=1;
+		} else if (strncasecmp (tag, "BlockName", MAX(taglen, 3)) == 0) {
+			blocktag=1;
+		} else if (strncasecmp (tag, "SubBPName", MAX(taglen, 3)) == 0) {
+			subtag=1;
+		} else if (strncasecmp (tag, "ReservationName", MAX(taglen, 3)) == 0) {
+			restag=1;
 		}
-		
 	}
-	
-	if (i >= argc) {
+
+	/* The order of tests matters here.  An update job request can include
+	   partition and reservation tags, possibly before the jobid tag, but
+	   none of the other updates have a jobid tag, so check jobtag first.
+	   Likewise, check restag next, because reservations can have a 
+	   partition tag.  The order of the rest doesn't matter because there
+	   aren't any other duplicate tags.  */
+
+	if (jobtag)
+		error_code = scontrol_update_job (argc, argv);
+	else if (restag)
+		error_code = scontrol_update_res (argc, argv);
+	else if (nodetag)
+		error_code = scontrol_update_node (argc, argv);
+	else if (partag)
+		error_code = scontrol_update_part (argc, argv);
+	else if (blocktag)
+		error_code = _update_bluegene_block (argc, argv);
+	else if (subtag)
+		error_code = _update_bluegene_subbp (argc, argv);
+	else {
 		exit_code = 1;
 		fprintf(stderr, "No valid entity in update command\n");
 		fprintf(stderr, "Input line must include \"NodeName\", ");
@@ -931,9 +1096,11 @@ _update_it (int argc, char *argv[])
 		fprintf(stderr, "\"BlockName\", \"SubBPName\" "
 			"(i.e. bgl000[0-3]),");
 #endif
-		fprintf(stderr, "\"PartitionName\", or \"JobId\"\n");
+		fprintf(stderr, "\"PartitionName\", \"Reservation\", "
+				"or \"JobId\"\n");
 	}
-	else if (error_code) {
+
+	if (error_code) {
 		exit_code = 1;
 		slurm_perror ("slurm_update error");
 	}
@@ -959,12 +1126,26 @@ _update_bluegene_block (int argc, char *argv[])
 	part_msg.hidden = (uint16_t)INFINITE;
 
 	for (i=0; i<argc; i++) {
-		if (strncasecmp(argv[i], "BlockName=", 10) == 0)
-			part_msg.name = &argv[i][10];
-		else if (strncasecmp(argv[i], "State=", 6) == 0) {
-			if (strcasecmp(&argv[i][6], "ERROR") == 0)
+		char *tag = argv[i];
+		char *val = strchr(argv[i], '=');
+		int taglen = 0, vallen = 0;
+
+		if (val) {
+			taglen = val - argv[i];
+			val++;
+			vallen = strlen(val);
+		} else {
+			exit_code = 1;
+			error("Invalid input for BlueGene block update %s", argv[i]);
+			return 0;
+		}
+
+		if (strncasecmp(tag, "BlockName", MAX(taglen, 2)) == 0) {
+			part_msg.name = val;
+		} else if (strncasecmp(tag, "State", MAX(taglen, 2)) == 0) {
+			if (strncasecmp(val, "ERROR", MAX(vallen, 1)) == 0)
 				part_msg.state_up = 0;
-			else if (strcasecmp(&argv[i][6], "FREE") == 0)
+			else if (strncasecmp(val, "FREE", MAX(vallen, 1)) == 0)
 				part_msg.state_up = 1;
 			else {
 				exit_code = 1;
@@ -975,8 +1156,13 @@ _update_bluegene_block (int argc, char *argv[])
 				return 0;
 			}
 			update_cnt++;
+		} else {
+			exit_code = 1;
+			error("Invalid input for BlueGene block update %s", argv[i]);
+			return 0;
 		}
 	}
+
 	if(!part_msg.name) {
 		error("You didn't supply a name.");
 		return 0;
@@ -1012,12 +1198,27 @@ _update_bluegene_subbp (int argc, char *argv[])
 	part_msg.root_only = (uint16_t)INFINITE;
 
 	for (i=0; i<argc; i++) {
-		if (strncasecmp(argv[i], "SubBPName=", 10) == 0)
-			part_msg.name = &argv[i][10];
-		else if (strncasecmp(argv[i], "State=", 6) == 0) {
-			if (strcasecmp(&argv[i][6], "ERROR") == 0)
+		char *tag = argv[i];
+		char *val = strchr(argv[i], '=');
+		int taglen = 0, vallen = 0;
+
+		if (val) {
+			taglen = val - argv[i];
+			val++;
+			vallen = strlen(val);
+		} else {
+			exit_code = 1;
+			error("Invalid input for BlueGene SubBPName update %s",
+			      argv[i]);
+			return 0;
+		}
+
+		if (strncasecmp(tag, "SubBPName", MAX(taglen, 2)) == 0)
+			part_msg.name = val;
+		else if (strncasecmp(tag, "State", MAX(taglen, 2)) == 0) {
+			if (strncasecmp(val, "ERROR", MAX(vallen, 1)) == 0)
 				part_msg.state_up = 0;
-			else if (strcasecmp(&argv[i][6], "FREE") == 0)
+			else if (strncasecmp(val, "FREE", MAX(vallen, 1)) == 0)
 				part_msg.state_up = 1;
 			else {
 				exit_code = 1;
@@ -1028,8 +1229,14 @@ _update_bluegene_subbp (int argc, char *argv[])
 				return 0;
 			}
 			update_cnt++;
+		} else {
+			exit_code = 1;
+			error("Invalid input for BlueGene SubBPName update %s",
+			      argv[i]);
+			return 0;
 		}
 	}
+
 	if(!part_msg.name) {
 		error("You didn't supply a name.");
 		return 0;
@@ -1068,11 +1275,12 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
                               generating a core file.                      \n\
      all                      display information about all partitions,    \n\
                               including hidden partitions.                 \n\
-     checkpoint <CH_OP><step> perform a checkpoint operation on identified \n\
-                              job step \n\
+     checkpoint <CH_OP><ID>   perform a checkpoint operation on identified \n\
+                              job or job step \n\
      completing               display jobs in completing state along with  \n\
                               their completing or down nodes               \n\
-     delete <SPECIFICATIONS>  delete the specified partition, kill its jobs\n\
+     create <SPECIFICATIONS>  create a new partition or reservation        \n\
+     delete <SPECIFICATIONS>  delete the specified partition or reservation\n\
      exit                     terminate scontrol                           \n\
      help                     print this description of use.               \n\
      hide                     do not display information about hidden      \n\
@@ -1095,20 +1303,24 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
      show <ENTITY> [<ID>]     display state of identified entity, default  \n\
                               is all records.                              \n\
      shutdown <OPTS>          shutdown slurm daemons                       \n\
+     takeover                 ask slurm backup controller to take over     \n\
+                              (the primary controller will be stopped)     \n\
      suspend <job_id>         susend specified job                         \n\
      resume <job_id>          resume previously suspended job              \n\
-     update <SPECIFICATIONS>  update job, node, partition, or bluegene     \n\
-                              block/subbp configuration                    \n\
+     update <SPECIFICATIONS>  update job, node, partition, reservation, or \n\
+                              bluegene block/subbp configuration           \n\
      verbose                  enable detailed logging.                     \n\
      version                  display tool version number.                 \n\
      !!                       Repeat the last command entered.             \n\
                                                                            \n\
   <ENTITY> may be \"config\", \"daemons\", \"job\", \"node\", \"partition\"\n\
-           \"hostlist\", \"hostnames\", \"slurmd\",                        \n\
-           (for BlueGene only: \"block\", \"subbp\" or \"step\").          \n\
+       \"reservation\", \"hostlist\", \"hostnames\", \"slurmd\",           \n\
+       \"topology\", or \"step\"                                           \n\
+       (also for BlueGene only: \"block\" or \"subbp\").                  \n\
                                                                            \n\
   <ID> may be a configuration parameter name, job id, node name, partition \n\
-       name, job step id, or hostlist or pathname to a list of host names. \n\
+       name, reservation name, job step id, or hostlist or pathname to a   \n\
+       list of host names.                                                 \n\
                                                                            \n\
   <HOSTLIST> may either be a comma separated list of host names or the     \n\
        absolute pathname of a file (with leading '/' containing host names \n\
@@ -1122,7 +1334,7 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
        otherwise all slurm daemons are shutdown                            \n\
                                                                            \n\
   Node names may be specified using simple range expressions,              \n\
-  (e.g. \"lx[10-20]\" corresponsds to lx10, lx11, lx12, ...)               \n\
+  (e.g. \"lx[10-20]\" corresponds to lx10, lx11, lx12, ...)                \n\
   The job step id is the job id followed by a period and the step id.      \n\
                                                                            \n\
   <SPECIFICATIONS> are specified in the same format as the configuration   \n\
@@ -1133,6 +1345,8 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
                                                                            \n\
   <CH_OP> identify checkpoint operations and may be \"able\", \"disable\", \n\
   \"enable\", \"create\", \"vacate\", \"restart\", or \"error\".           \n\
+  Additional options include \"ImageDir=<dir>\", \"MaxWait=<seconds>\" and \n\
+  \"StickToNodes\"   \n\
                                                                            \n\
   All commands and options are case-insensitive, although node names and   \n\
   partition names tests are case-sensitive (node names \"LX\" and \"lx\"   \n\

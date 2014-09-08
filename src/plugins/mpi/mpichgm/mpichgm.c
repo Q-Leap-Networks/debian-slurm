@@ -5,10 +5,11 @@
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Takao Hatazaki <takao.hatazaki@hp.com>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -226,7 +227,7 @@ static int _gmpi_establish_map(gmpi_state_t *st)
 		if (setsockopt(newfd, SOL_SOCKET, SO_REUSEADDR,
 			       (void *)&j, sizeof(j)))
 			error("setsockopt in GMPI master: %m");
-		bzero(&addr, sizeof(addr));
+		memset(&addr, 0, sizeof(addr));
 		addr.sin_family = AF_INET;
 		addr.sin_addr.s_addr = htonl(iaddrs[i]);
 		addr.sin_port = htons(dp->remote_port);

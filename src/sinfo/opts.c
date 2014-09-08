@@ -2,13 +2,14 @@
  *  opts.c - sinfo command line option processing functions
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>, Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -238,7 +239,7 @@ extern void parse_command_line(int argc, char *argv[])
 		} else if (params.list_reasons) {
 			params.format = params.long_output ?  
 			  "%50R %6t %N" : 
-			  "%35R %N";
+			  "%50R %N";
 
 		} else if ((env_val = getenv ("SINFO_FORMAT"))) {
 			params.format = xstrdup(env_val);
@@ -364,16 +365,18 @@ _node_state_list (void)
 	all_states = xstrdup (node_state_string_compact (0));
 	for (i = 1; i < NODE_STATE_END; i++) {
 		xstrcat (all_states, ",");
-		xstrcat (all_states, node_state_string_compact(i));
+		xstrcat (all_states, node_state_string(i));
 	}
 
-	xstrcat (all_states, ",");
-	xstrcat (all_states, 
-		node_state_string_compact(NODE_STATE_DRAIN));
-
-	xstrcat (all_states, ",");
-	xstrcat (all_states, 
-		node_state_string_compact(NODE_STATE_COMPLETING));
+	xstrcat(all_states, ",DRAIN,DRAINED,DRAINING,NO_RESPOND");
+	xstrcat(all_states, ",");
+	xstrcat(all_states, node_state_string(NODE_STATE_COMPLETING));
+	xstrcat(all_states, ",");
+	xstrcat(all_states, node_state_string(NODE_STATE_POWER_SAVE));
+	xstrcat(all_states, ",");
+	xstrcat(all_states, node_state_string(NODE_STATE_FAIL));
+	xstrcat(all_states, ",");
+	xstrcat(all_states, node_state_string(NODE_STATE_MAINT));
 
 	for (i = 0; i < strlen (all_states); i++)
 		all_states[i] = tolower (all_states[i]);
@@ -387,8 +390,8 @@ _node_state_equal (int i, const char *str)
 {
 	int len = strlen (str);
 
-	if (  (strncasecmp (node_state_string_compact(i), str, len) == 0) 
-	   || (strncasecmp (node_state_string(i),         str, len) == 0)) 
+	if ((strncasecmp(node_state_string_compact(i), str, len) == 0) ||
+	    (strncasecmp(node_state_string(i),         str, len) == 0)) 
 		return (true);
 	return (false);
 }
@@ -403,16 +406,30 @@ static int
 _node_state_id (char *str)
 {	
 	int i;
+	int len = strlen (str);
+
 	for (i = 0; i < NODE_STATE_END; i++) {
 		if (_node_state_equal (i, str))
 			return (i);
 	}
 
-	if  (_node_state_equal (NODE_STATE_DRAIN, str))
+	if (strncasecmp("DRAIN", str, len) == 0)
 		return NODE_STATE_DRAIN;
-
+	if (strncasecmp("DRAINED", str, len) == 0)
+		return NODE_STATE_DRAIN | NODE_STATE_IDLE;
+	if ((strncasecmp("DRAINING", str, len) == 0) ||
+	    (strncasecmp("DRNG", str, len) == 0))
+		return NODE_STATE_DRAIN | NODE_STATE_ALLOCATED;
 	if (_node_state_equal (NODE_STATE_COMPLETING, str))
 		return NODE_STATE_COMPLETING;
+	if (strncasecmp("NO_RESPOND", str, len) == 0)
+		return NODE_STATE_NO_RESPOND;
+	if (_node_state_equal (NODE_STATE_POWER_SAVE, str))
+		return NODE_STATE_POWER_SAVE;
+	if (_node_state_equal (NODE_STATE_FAIL, str))
+		return NODE_STATE_FAIL;
+	if (_node_state_equal (NODE_STATE_MAINT, str))
+		return NODE_STATE_MAINT;
 
 	return (-1);
 }
@@ -509,6 +526,12 @@ _parse_format( char* format )
 					field_size, 
 					right_justify, 
 					suffix );
+		} else if (field[0] == 'L') {
+			params.match_flags.default_time_flag = true;
+			format_add_default_time( params.format_list, 
+					field_size, 
+					right_justify, 
+					suffix );
 		} else if (field[0] == 'm') {
 			params.match_flags.memory_flag = true;
 			format_add_memory( params.format_list, 
@@ -547,9 +570,14 @@ _parse_format( char* format )
 		} else if (field[0] == 's') {
 			params.match_flags.job_size_flag = true;
 			format_add_size( params.format_list, 
-					field_size, 
-					right_justify, 
-					suffix );
+					 field_size, 
+					 right_justify, 
+					 suffix );
+		} else if (field[0] == 'S') {
+			format_add_alloc_nodes( params.format_list, 
+						field_size, 
+						right_justify, 
+						suffix );
 		} else if (field[0] == 't') {
 			params.match_flags.state_flag = true;
 			format_add_state_compact( params.format_list, 
@@ -687,6 +715,8 @@ void _print_options( void )
 	printf("bg_flag         = %s\n", params.bg_flag ? "true" : "false");
 	printf("cpus_flag       = %s\n", params.match_flags.cpus_flag ?
 			"true" : "false");
+	printf("default_time_flag =%s\n", params.match_flags.default_time_flag ?
+					"true" : "false");
 	printf("disk_flag       = %s\n", params.match_flags.disk_flag ?
 			"true" : "false");
 	printf("features_flag   = %s\n", params.match_flags.features_flag ?

@@ -1,13 +1,15 @@
 /*****************************************************************************\
  *  info_node.c - node information functions for scontrol.
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -183,3 +185,55 @@ scontrol_print_node_list (char *node_list)
 	return;
 }
 
+/*
+ * scontrol_print_topo - print the switch topology above the specified node
+ * IN node_name - NULL to print all topology information
+ */
+extern void	scontrol_print_topo (char *node_list)
+{
+	static topo_info_response_msg_t *topo_info_msg = NULL;
+	int i, match, match_cnt = 0;
+	hostset_t hs;
+
+	if ((topo_info_msg == NULL) &&
+	    slurm_load_topo(&topo_info_msg)) {
+		slurm_perror ("slurm_load_topo error");
+		return;
+	}
+
+	if ((node_list == NULL) || (node_list[0] == '\0')) {
+		slurm_print_topo_info_msg(stdout, topo_info_msg, one_liner);
+		return;
+	}
+
+	/* Search for matching switch name */
+	for (i=0; i<topo_info_msg->record_count; i++) {
+		if (strcmp(topo_info_msg->topo_array[i].name, node_list))
+			continue;
+		slurm_print_topo_record(stdout, &topo_info_msg->topo_array[i], 
+					one_liner);
+		return;
+	}
+
+	/* Search for matching node name */
+	for (i=0; i<topo_info_msg->record_count; i++) {
+		if ((topo_info_msg->topo_array[i].nodes == NULL) ||
+		    (topo_info_msg->topo_array[i].nodes[0] == '\0')) 
+			continue;
+		hs = hostset_create(topo_info_msg->topo_array[i].nodes);
+		if (hs == NULL)
+			fatal("hostset_create: memory allocation failure");
+		match = hostset_within(hs, node_list);
+		hostset_destroy(hs);
+		if (!match)
+			continue;
+		match_cnt++;
+		slurm_print_topo_record(stdout, &topo_info_msg->topo_array[i], 
+					one_liner);
+	}
+
+	if (match_cnt == 0) {
+		error("Topology information contains no switch or "
+		      "node named %s", node_list);
+	}
+}

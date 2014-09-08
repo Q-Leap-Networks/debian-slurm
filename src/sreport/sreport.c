@@ -5,10 +5,11 @@
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -40,6 +41,7 @@
 #include "src/sreport/assoc_reports.h"
 #include "src/sreport/cluster_reports.h"
 #include "src/sreport/job_reports.h"
+#include "src/sreport/resv_reports.h"
 #include "src/sreport/user_reports.h"
 #include "src/common/xsignal.h"
 
@@ -60,6 +62,7 @@ sreport_sort_t sort_flag = SREPORT_SORT_TIME;
 
 static void	_job_rep (int argc, char *argv[]);
 static void	_user_rep (int argc, char *argv[]);
+static void	_resv_rep (int argc, char *argv[]);
 static void	_cluster_rep (int argc, char *argv[]);
 static void	_assoc_rep (int argc, char *argv[]);
 static int	_get_command (int *argc, char *argv[]);
@@ -81,11 +84,11 @@ main (int argc, char *argv[])
 		{"all_clusters", 0, 0, 'a'},
 		{"help",     0, 0, 'h'},
 		{"immediate",0, 0, 'i'},
-		{"no_header", 0, 0, 'n'},
+		{"noheader", 0, 0, 'n'},
 		{"parsable", 0, 0, 'p'},
-		{"parsable2", 0, 0, 'P'},
+		{"parsable2",0, 0, 'P'},
 		{"quiet",    0, 0, 'q'},
-		{"sort",    0, 0, 's'},
+		{"sort",     0, 0, 's'},
 		{"usage",    0, 0, 'h'},
 		{"verbose",  0, 0, 'v'},
 		{"version",  0, 0, 'V'},
@@ -249,7 +252,7 @@ static void _job_rep (int argc, char *argv[])
 }
 
 /* 
- * _user_rep - Reports having to do with jobs 
+ * _user_rep - Reports having to do with users 
  * IN argc - count of arguments
  * IN argv - list of arguments
  */
@@ -272,7 +275,30 @@ static void _user_rep (int argc, char *argv[])
 }
 
 /* 
- * _cluster_rep - Reports having to do with jobs 
+ * _resv_rep - Reports having to do with reservations 
+ * IN argc - count of arguments
+ * IN argv - list of arguments
+ */
+static void _resv_rep (int argc, char *argv[]) 
+{
+	int error_code = SLURM_SUCCESS;
+
+	if (strncasecmp (argv[0], "Utilization", 1) == 0) {
+		error_code = resv_utilization((argc - 1), &argv[1]);
+	} else {
+		exit_code = 1;
+		fprintf(stderr, "Not valid report %s\n", argv[0]);
+		fprintf(stderr, "Valid reservation reports are, ");
+		fprintf(stderr, "\"Utilization\"\n");
+	}	
+	
+	if (error_code) {
+		exit_code = 1;
+	}
+}
+
+/* 
+ * _cluster_rep - Reports having to do with clusters 
  * IN argc - count of arguments
  * IN argv - list of arguments
  */
@@ -484,6 +510,18 @@ _process_command (int argc, char *argv[])
 				 argv[0]);
 		}
 		exit_flag = 1;
+	} else if ((strncasecmp (argv[0], "reservation",
+				 MAX(command_len, 2)) == 0)
+		   || (strncasecmp (argv[0], "resv",
+				    MAX(command_len, 2)) == 0)) {
+		if (argc < 2) {
+			exit_code = 1;
+			if (quiet_flag != 1)
+				fprintf(stderr, 
+				        "too few arguments for keyword:%s\n", 
+				        argv[0]);
+		} else 
+			_resv_rep((argc - 1), &argv[1]);
 	} else if (strncasecmp (argv[0], "sort", MAX(command_len, 1)) == 0) {
 		if (argc < 2) {
 			exit_code = 1;
@@ -590,7 +628,7 @@ sreport [<OPTION>] [<COMMAND>]                                             \n\
     Valid <OPTION> values are:                                             \n\
      -a or --all_clusters: Use all clusters instead of current             \n\
      -h or --help: equivalent to \"help\" command                          \n\
-     -n or --no_header: equivalent to \"no_header\" command                \n\
+     -n or --noheader: equivalent to \"noheader\" command                \n\
      -p or --parsable: output will be '|' delimited with a '|' at the end  \n\
      -P or --parsable2: output will be '|' delimited without a '|' at the end\n\
      -q or --quiet: equivalent to \"quiet\" command                        \n\
@@ -623,6 +661,8 @@ sreport [<OPTION>] [<COMMAND>]                                             \n\
      cluster - AccountUtilizationByUser, UserUtilizationByAccount,         \n\
                UserUtilizationByWckey, Utilization, WCKeyUtilizationByUser \n\
      job     - SizesByAccount, SizesByWckey                                \n\
+     reservation                                                           \n\
+             - Utilization                                                 \n\
      user    - TopUsage                                                    \n\
                                                                            \n\
   <OPTIONS> are different for each report type.                            \n\
@@ -674,6 +714,8 @@ sreport [<OPTION>] [<COMMAND>]                                             \n\
                                    1-49, 50-99, 100-149, > 150).           \n\
              - Jobs=<OPT>       - List of jobs/steps to include in report. \n\
                                   Default is all.                          \n\
+             - Nodes=<OPT>      - Only show jobs that ran on these nodes.  \n\
+                                  Default is all.                          \n\
              - Partitions=<OPT> - List of partitions jobs ran on to include\n\
                                   in report.  Default is all.              \n\
              - PrintJobCount    - When used with the any Sizes report      \n\
@@ -687,6 +729,12 @@ sreport [<OPTION>] [<COMMAND>]                                             \n\
                                   you want only certain users specify them \n\
                                   them with the Users= option.             \n\
                                                                            \n\
+     reservation                                                           \n\
+             - Names=<OPT>      - List of reservations to use for the report\n\
+                                  Default is all.                          \n\
+             - Nodes=<OPT>      - Only show reservations that used these   \n\
+                                  nodes.  Default is all.                  \n\
+                                                                           \n\
      user    - Accounts=<OPT>   - List of accounts to use for the report   \n\
                                   Default is all.                          \n\
              - Group            - Group all accounts together for each user.\n\
@@ -696,7 +744,6 @@ sreport [<OPTION>] [<COMMAND>]                                             \n\
                                   number of users displayed.  Default is 10.\n\
              - Users=<OPT>      - List of users jobs to include in report. \n\
                                   Default is all.                          \n\
-                                                                           \n\
                                                                            \n\
   Below are the format options for each report.                            \n\
                                                                            \n\
@@ -709,22 +756,27 @@ sreport [<OPTION>] [<COMMAND>]                                             \n\
              - Cluster, CPUCount, Login, Proper, Used, Wckey               \n\
        - Utilization                                                       \n\
              - Allocated, Cluster, CPUCount, Down, Idle, Overcommited,     \n\
-               Reported, Reserved                                          \n\
+               PlannedDown, Reported, Reserved                             \n\
                                                                            \n\
        Job                                                                 \n\
        - Sizes                                                             \n\
              - Account, Cluster                                            \n\
+                                                                           \n\
+       Reservation                                                         \n\
+       - Utilization                                                       \n\
+             - Allocated, Associations, Cluster, CPUCount, CPUTime,        \n\
+               End, Idle, Name, Nodes, Start, TotalTime                    \n\
                                                                            \n\
        User                                                                \n\
        - TopUsage                                                          \n\
              - Account, Cluster, Login, Proper, Used                       \n\
                                                                            \n\
                                                                            \n\
-                                                                           \n\
   Note, valid start/end time formats are...                                \n\
        HH:MM[:SS] [AM|PM]                                                  \n\
        MMDD[YY] or MM/DD[/YY] or MM.DD[.YY]                                \n\
        MM/DD[/YY]-HH:MM[:SS]                                               \n\
+       YYYY-MM-DD[THH[:MM[:SS]]]                                           \n\
                                                                            \n\
                                                                            \n\
   All commands and options are case-insensitive.                         \n\n");

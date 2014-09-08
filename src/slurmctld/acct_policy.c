@@ -4,10 +4,11 @@
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -57,6 +58,7 @@ static void _cancel_job(struct job_record *job_ptr)
 	job_ptr->job_state = JOB_FAILED;
 	job_ptr->exit_code = 1;
 	job_ptr->state_reason = FAIL_BANK_ACCOUNT;
+	xfree(job_ptr->state_desc);
 	job_ptr->start_time = job_ptr->end_time = now;
 	job_completion_logger(job_ptr);
 	delete_job_details(job_ptr);
@@ -155,7 +157,7 @@ extern void acct_policy_job_begin(struct job_record *job_ptr)
 		return;
 
 	slurm_mutex_lock(&assoc_mgr_association_lock);
-	assoc_ptr = job_ptr->assoc_ptr;
+	assoc_ptr = (acct_association_rec_t *)job_ptr->assoc_ptr;
 	while(assoc_ptr) {
 		assoc_ptr->used_jobs++;	
 		assoc_ptr->grp_used_cpus += job_ptr->total_procs;
@@ -179,7 +181,7 @@ extern void acct_policy_job_fini(struct job_record *job_ptr)
 		return;
 
 	slurm_mutex_lock(&assoc_mgr_association_lock);
-	assoc_ptr = job_ptr->assoc_ptr;
+	assoc_ptr = (acct_association_rec_t *)job_ptr->assoc_ptr;
 	while(assoc_ptr) {
 		if (assoc_ptr->used_jobs)
 			assoc_ptr->used_jobs--;
@@ -235,28 +237,43 @@ extern bool acct_policy_job_runnable(struct job_record *job_ptr)
 		return true;
 
 	/* clear old state reason */
-        if (job_ptr->state_reason == WAIT_ASSOC_LIMIT)
+        if ((job_ptr->state_reason == WAIT_ASSOC_JOB_LIMIT) ||
+	    (job_ptr->state_reason == WAIT_ASSOC_RESOURCE_LIMIT) ||
+	    (job_ptr->state_reason == WAIT_ASSOC_TIME_LIMIT))
                 job_ptr->state_reason = WAIT_NO_REASON;
 
 	slurm_mutex_lock(&assoc_mgr_association_lock);
 	assoc_ptr = job_ptr->assoc_ptr;
 	while(assoc_ptr) {
+		uint64_t usage_mins =
+			(uint64_t)(assoc_ptr->usage_raw / 60.0);
+		uint32_t wall_mins = assoc_ptr->grp_used_wall / 60;
 #if _DEBUG
 		info("acct_job_limits: %u of %u", 
 		     assoc_ptr->used_jobs, assoc_ptr->max_jobs);
 #endif		
-		/* NOTE: We can't enforce assoc_ptr->grp_cpu_mins at this
-		 * time because we aren't keeping track of how long
-		 * jobs have been running yet */
-
-		/* NOTE: We can't enforce assoc_ptr->grp_cpus at this
-		 * time because we don't have access to a CPU count for the job
-		 * due to how all of the job's specifications interact */
+		if ((assoc_ptr->grp_cpu_mins != (uint64_t)NO_VAL)
+		    && (assoc_ptr->grp_cpu_mins != (uint64_t)INFINITE)
+		    && (usage_mins >= assoc_ptr->grp_cpu_mins)) {
+			job_ptr->state_reason = WAIT_ASSOC_JOB_LIMIT;
+			xfree(job_ptr->state_desc);
+			debug2("job %u being held, "
+			       "assoc %u is at or exceeds "
+			       "group max cpu minutes limit %llu "
+			       "with %Lf for account %s",
+			       job_ptr->job_id, assoc_ptr->id,
+			       assoc_ptr->grp_cpu_mins, 
+			       assoc_ptr->usage_raw, assoc_ptr->acct);	
+			
+			rc = false;
+			goto end_it;
+		}
 
 		if ((assoc_ptr->grp_jobs != NO_VAL) &&
 		    (assoc_ptr->grp_jobs != INFINITE) &&
 		    (assoc_ptr->used_jobs >= assoc_ptr->grp_jobs)) {
-			job_ptr->state_reason = WAIT_ASSOC_LIMIT;
+			job_ptr->state_reason = WAIT_ASSOC_JOB_LIMIT;
+			xfree(job_ptr->state_desc);
 			debug2("job %u being held, "
 			       "assoc %u is at or exceeds "
 			       "group max jobs limit %u with %u for account %s",
@@ -282,7 +299,9 @@ extern bool acct_policy_job_runnable(struct job_record *job_ptr)
 			} else if ((assoc_ptr->grp_used_nodes + 
 				    job_ptr->details->min_nodes) > 
 				   assoc_ptr->grp_nodes) {
-				job_ptr->state_reason = WAIT_ASSOC_LIMIT;
+				job_ptr->state_reason = 
+					WAIT_ASSOC_RESOURCE_LIMIT;
+				xfree(job_ptr->state_desc);
 				debug2("job %u being held, "
 				       "assoc %u is at or exceeds "
 				       "group max node limit %u "
@@ -299,27 +318,22 @@ extern bool acct_policy_job_runnable(struct job_record *job_ptr)
 		}
 
 		/* we don't need to check submit_jobs here */
-		
-		/* FIX ME: Once we start tracking time of running jobs
-		 * we will need to update the amount of time we have
-		 * used and check against that here.  When we start
-		 * keeping track of time we will also need to come up
-		 * with a way to refresh the time. 
-		 */
-		if ((assoc_ptr->grp_wall != NO_VAL) &&
-		    (assoc_ptr->grp_wall != INFINITE)) {
-			time_limit = assoc_ptr->grp_wall;
-			if ((job_ptr->time_limit != NO_VAL) &&
-			    (job_ptr->time_limit > time_limit)) {
-				info("job %u being cancelled, "
-				     "time limit %u exceeds group "
-				     "time limit %u for account %s",
-				     job_ptr->job_id, job_ptr->time_limit, 
-				     time_limit, assoc_ptr->acct);
-				_cancel_job(job_ptr);
-				rc = false;
-				goto end_it;
-			}
+
+		if ((assoc_ptr->grp_wall != NO_VAL) 
+		    && (assoc_ptr->grp_wall != INFINITE)
+		    && (wall_mins >= assoc_ptr->grp_wall)) {
+			job_ptr->state_reason = WAIT_ASSOC_JOB_LIMIT;
+			xfree(job_ptr->state_desc);
+			debug2("job %u being held, "
+			       "assoc %u is at or exceeds "
+			       "group wall limit %u "
+			       "with %u for account %s",
+			       job_ptr->job_id, assoc_ptr->id,
+			       assoc_ptr->grp_wall, 
+			       wall_mins, assoc_ptr->acct);
+			       
+			rc = false;
+			goto end_it;
 		}
 
 		
@@ -343,7 +357,8 @@ extern bool acct_policy_job_runnable(struct job_record *job_ptr)
 		if ((assoc_ptr->max_jobs != NO_VAL) &&
 		    (assoc_ptr->max_jobs != INFINITE) &&
 		    (assoc_ptr->used_jobs >= assoc_ptr->max_jobs)) {
-			job_ptr->state_reason = WAIT_ASSOC_LIMIT;
+			job_ptr->state_reason = WAIT_ASSOC_JOB_LIMIT;
+			xfree(job_ptr->state_desc);
 			debug2("job %u being held, "
 			       "assoc %u is at or exceeds "
 			       "max jobs limit %u with %u for account %s",
@@ -403,10 +418,10 @@ end_it:
 extern void acct_policy_update_running_job_usage(struct job_record *job_ptr)
 {
 	acct_association_rec_t *assoc_ptr;
+
 	slurm_mutex_lock(&assoc_mgr_association_lock);
 	assoc_ptr = job_ptr->assoc_ptr;
 	while(assoc_ptr) {
-
 		assoc_ptr = assoc_ptr->parent_assoc_ptr;
 	}
 	slurm_mutex_unlock(&assoc_mgr_association_lock);

@@ -2,14 +2,15 @@
  *  job_functions.c - Functions related to job display mode of smap.
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -48,7 +49,7 @@ static int  _nodes_in_list(char *node_list);
 static void _print_header_job(void);
 static int  _print_text_job(job_info_t * job_ptr);
 
-extern void get_job()
+extern void get_job(void)
 {
 	int error_code = -1, i, recs;
 	static int printed_jobs = 0;
@@ -204,6 +205,11 @@ static void _print_header_job(void)
 			  main_xcord, "BG_BLOCK");
 		main_xcord += 18;
 #endif
+#ifdef HAVE_CRAY_XT
+		mvwprintw(text_win, main_ycord,
+			  main_xcord, "RESV_ID");
+		main_xcord += 18;
+#endif
 		mvwprintw(text_win, main_ycord,
 			  main_xcord, "USER");
 		main_xcord += 9;
@@ -260,18 +266,7 @@ static int _print_text_job(job_info_t * job_ptr)
 	uint32_t node_cnt = 0;
 	char *ionodes = NULL, *uname;
 	time_t now_time = time(NULL);
-	char *temp = NULL;
-	/* first set the jname to the job_ptr->name */
-	char *jname = NULL;
-
-	if(job_ptr->name) {
-		jname = xstrdup(job_ptr->name);
-		/* then grep for " since that is the delimiter for
-		   the wckey */
-		if((temp = strchr(jname, '\"')))
-			temp[0] = '\0';
-	}
-
+	
 #ifdef HAVE_BG
 	select_g_get_jobinfo(job_ptr->select_jobinfo, 
 			     SELECT_DATA_IONODES, 
@@ -310,13 +305,22 @@ static int _print_text_job(job_info_t * job_ptr)
 						  SELECT_PRINT_BG_ID));
 		main_xcord += 18;
 #endif
+#ifdef HAVE_CRAY_XT
+		mvwprintw(text_win, main_ycord,
+			  main_xcord, "%.16s", 
+			  select_g_sprint_jobinfo(job_ptr->select_jobinfo, 
+						  time_buf, 
+						  sizeof(time_buf), 
+						  SELECT_PRINT_RESV_ID));
+		main_xcord += 18;
+#endif
 		uname = uid_to_string((uid_t) job_ptr->user_id);
 		mvwprintw(text_win, main_ycord,
 			  main_xcord, "%.8s", uname);
 		xfree(uname);
 		main_xcord += 9;
 		mvwprintw(text_win, main_ycord,
-			  main_xcord, "%.9s", jname);
+			  main_xcord, "%.9s", job_ptr->name);
 		main_xcord += 10;
 		mvwprintw(text_win, main_ycord,
 			  main_xcord, "%.2s",
@@ -384,10 +388,17 @@ static int _print_text_job(job_info_t * job_ptr)
 					       sizeof(time_buf), 
 					       SELECT_PRINT_BG_ID));
 #endif
+#ifdef HAVE_CRAY_XT
+		printf("%16.16s ", 
+		       select_g_sprint_jobinfo(job_ptr->select_jobinfo, 
+					       time_buf, 
+					       sizeof(time_buf), 
+					       SELECT_PRINT_RESV_ID));
+#endif
 		uname = uid_to_string((uid_t) job_ptr->user_id);
 		printf("%8.8s ", uname);
 		xfree(uname);
-		printf("%6.6s ", jname);
+		printf("%6.6s ", job_ptr->name);
 		printf("%2.2s ",
 		       job_state_string_compact(job_ptr->job_state));
 		if(!strcasecmp(job_ptr->nodes,"waiting...")) {
@@ -410,7 +421,6 @@ static int _print_text_job(job_info_t * job_ptr)
 		printf("\n");
 		
 	}
-	xfree(jname);
 
 	return printed;
 }

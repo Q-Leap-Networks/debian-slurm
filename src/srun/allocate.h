@@ -1,14 +1,15 @@
 /*****************************************************************************\
  * src/srun/allocate.h - node allocation functions for srun
- * $Id: allocate.h 14570 2008-07-18 22:06:26Z da $
+ * $Id: allocate.h 17313 2009-04-21 20:28:06Z lipari $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -44,7 +45,6 @@
 #include "src/srun/srun_job.h"
 
 typedef struct slurmctld_communication_addr {
-	char *hostname;
 	uint16_t port;
 } slurmctld_comm_addr_t;
 
@@ -89,28 +89,21 @@ job_desc_msg_t * job_desc_msg_create_from_opts ();
 void job_desc_msg_destroy (job_desc_msg_t *j);
 
 /*
- * Check for SLURM_JOBID environment variable, and if it is a valid
+ * Check for SLURM_JOB_ID environment variable, and if it is a valid
  * jobid, return a pseudo allocation response pointer.
  *
- * Returns NULL if SLURM_JOBID is not present or is invalid.
+ * Returns NULL if SLURM_JOB_ID is not present or is invalid.
  */
 resource_allocation_response_msg_t * existing_allocation(void);
 
 /*
- * Return the jobid number stored in SLURM_JOBID env var
- *
- * Returns 0 if SLURM_JOBID is not set in current environment, or
- * is invalid.
- */
-uint32_t jobid_from_env(void);
-
-/*
  * Create a job step given the job information stored in 'j'
  * After returning, 'j' is filled in with information for job step.
+ * IN use_all_cpus - true to use every CPU allocated to the job
  *
  * Returns -1 if job step creation failure, 0 otherwise
  */
-int create_job_step(srun_job_t *j);
+int create_job_step(srun_job_t *j, bool use_all_cpus);
 
 /* set the job for debugging purpose */
 void set_allocate_job(srun_job_t *job);

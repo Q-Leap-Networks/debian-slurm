@@ -6,10 +6,11 @@
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov>, Morris Jette <jette1@llnl.gov>, et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -60,6 +61,7 @@
 #define BUF_MAGIC 0x42554545
 #define BUF_SIZE (16 * 1024)
 #define MAX_BUF_SIZE ((uint32_t) 0xffff0000)	/* avoid going over 32-bits */
+#define FLOAT_MULT 1000000
 
 struct slurm_buf {
 	uint32_t magic;
@@ -84,6 +86,9 @@ void	*xfer_buf_data(Buf my_buf);
 
 void	pack_time(time_t val, Buf buffer);
 int	unpack_time(time_t *valp, Buf buffer);
+
+void 	packdouble(double val, Buf buffer);
+int	unpackdouble(double *valp, Buf buffer);
 
 void 	pack64(uint64_t val, Buf buffer);
 int	unpack64(uint64_t *valp, Buf buffer);
@@ -126,6 +131,20 @@ int	unpackmem_array(char *valp, uint32_t size_valp, Buf buffer);
 	assert(sizeof(*valp) == sizeof(time_t));	\
 	assert(buf->magic == BUF_MAGIC);		\
         if (unpack_time(valp,buf))			\
+		goto unpack_error;			\
+} while (0)
+
+#define safe_packdouble(val,buf) do {			\
+	assert(sizeof(val) == sizeof(double));   	\
+	assert(buf->magic == BUF_MAGIC);		\
+	packdouble(val,buf);				\
+} while (0)
+
+#define safe_unpackdouble(valp,buf) do {		\
+	assert((valp) != NULL); 			\
+	assert(sizeof(*valp) == sizeof(double));        \
+	assert(buf->magic == BUF_MAGIC);		\
+        if (unpackdouble(valp,buf))			\
 		goto unpack_error;			\
 } while (0)
 

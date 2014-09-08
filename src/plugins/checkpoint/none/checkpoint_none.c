@@ -1,13 +1,15 @@
 /*****************************************************************************\
  *  checkpoint_none.c - NO-OP slurm checkpoint plugin.
  *****************************************************************************
- *  Copyright (C) 2004 The Regents of the University of California.
+ *  Copyright (C) 2004-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -82,7 +84,7 @@
  */
 const char plugin_name[]       	= "Checkpoint NONE plugin";
 const char plugin_type[]       	= "checkpoint/none";
-const uint32_t plugin_version	= 90;
+const uint32_t plugin_version	= 100;
 
 /*
  * init() is called when the plugin is loaded, before any other functions
@@ -102,14 +104,15 @@ extern int fini ( void )
  * The remainder of this file implements the standard SLURM checkpoint API.
  */
 
-extern int slurm_ckpt_op ( uint16_t op, uint16_t data,
-		struct step_record * step_ptr, time_t * event_time,
-		uint32_t *error_code, char **error_msg )
+extern int slurm_ckpt_op (uint32_t job_id, uint32_t step_id, 
+			  struct step_record *step_ptr, uint16_t op,
+			  uint16_t data, char *image_dir, time_t * event_time, 
+			  uint32_t *error_code, char **error_msg )
 {
 	return ESLURM_NOT_SUPPORTED;
 }
 
-extern int slurm_ckpt_comp ( struct step_record * step_ptr, time_t event_time,
+extern int slurm_ckpt_comp (struct step_record * step_ptr, time_t event_time,
 		uint32_t error_code, char *error_msg)
 {
 	return ESLURM_NOT_SUPPORTED;
@@ -135,9 +138,24 @@ extern int slurm_ckpt_unpack_job(check_jobinfo_t jobinfo, Buf buffer)
 	return SLURM_SUCCESS;
 }
 
-extern int slurm_ckpt_task_comp ( struct step_record * step_ptr, uint32_t task_id,
-				  time_t event_time, uint32_t error_code, char *error_msg )
+extern int slurm_ckpt_task_comp (struct step_record * step_ptr, 
+				 uint32_t task_id, time_t event_time, 
+				 uint32_t error_code, char *error_msg )
 {
 	return SLURM_SUCCESS;
 }
 
+extern int slurm_ckpt_stepd_prefork(void *slurmd_job)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int slurm_ckpt_signal_tasks(void *slurmd_job)
+{
+	return ESLURM_NOT_SUPPORTED;
+}
+
+extern int slurm_ckpt_restart_task(void *slurmd_job, char *image_dir, int gtid)
+{
+	return ESLURM_NOT_SUPPORTED;
+}

@@ -1,15 +1,16 @@
 /*****************************************************************************\
  *  step_launch.h - launch a parallel job step
  *
- *  $Id: step_launch.h 15262 2008-10-01 22:58:26Z jette $
+ *  $Id: step_launch.h 16616 2009-02-20 17:00:27Z jette $
  *****************************************************************************
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -58,7 +59,6 @@ struct step_launch_state {
 	bitstr_t *tasks_exited;  /* or never started correctly */
 	bool abort;
 	bool abort_action_taken;
-	bool no_kill;
 
 	/* message thread variables */
 	eio_handle_t *msg_handle;

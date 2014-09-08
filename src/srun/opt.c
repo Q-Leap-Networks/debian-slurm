@@ -2,13 +2,14 @@
  *  opt.c - options processing for srun
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona1@llnl.gov>, et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -61,7 +62,6 @@
 #include <stdio.h>
 #include <stdlib.h>		/* getenv     */
 #include <pwd.h>		/* getpwuid   */
-#include <ctype.h>		/* isdigit    */
 #include <sys/param.h>		/* MAXPATHLEN */
 #include <sys/stat.h>
 #include <unistd.h>
@@ -71,22 +71,24 @@
 
 #include "src/common/list.h"
 #include "src/common/log.h"
+#include "src/common/mpi.h"
+#include "src/common/optz.h"
 #include "src/common/parse_time.h"
+#include "src/common/plugstack.h"
 #include "src/common/proc_args.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_interface.h"
+#include "src/common/slurm_rlimits_info.h"
+#include "src/common/slurm_resource_info.h"
 #include "src/common/uid.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
-#include "src/common/slurm_rlimits_info.h"
-#include "src/common/plugstack.h"
-#include "src/common/optz.h"
+
 #include "src/api/pmi_server.h"
 
 #include "src/srun/multi_prog.h"
 #include "src/srun/opt.h"
 #include "src/srun/debugger.h"
-#include "src/common/mpi.h"
 
 /* generic OPT_ definitions -- mainly for use with env vars  */
 #define OPT_NONE        0x00
@@ -97,6 +99,7 @@
 #define OPT_OVERCOMMIT  0x06
 #define OPT_CORE        0x07
 #define OPT_CONN_TYPE	0x08
+#define OPT_RESV_PORTS	0x09
 #define OPT_NO_ROTATE	0x0a
 #define OPT_GEOMETRY	0x0b
 #define OPT_MPI         0x0c
@@ -125,7 +128,8 @@
 #define LONG_OPT_UID         0x10a
 #define LONG_OPT_GID         0x10b
 #define LONG_OPT_MPI         0x10c
-#define LONG_OPT_CORE	     0x10e
+#define LONG_OPT_RESV_PORTS  0x10d
+#define LONG_OPT_CORE        0x10e
 #define LONG_OPT_DEBUG_TS    0x110
 #define LONG_OPT_CONNTYPE    0x111
 #define LONG_OPT_TEST_ONLY   0x113
@@ -142,7 +146,6 @@
 #define LONG_OPT_NICE        0x11e
 #define LONG_OPT_CPU_BIND    0x11f
 #define LONG_OPT_MEM_BIND    0x120
-#define LONG_OPT_CTRL_COMM_IFHN 0x121
 #define LONG_OPT_MULTI       0x122
 #define LONG_OPT_COMMENT     0x124
 #define LONG_OPT_SOCKETSPERNODE  0x130
@@ -164,10 +167,12 @@
 #define LONG_OPT_GET_USER_ENV    0x145
 #define LONG_OPT_PTY             0x146
 #define LONG_OPT_CHECKPOINT      0x147
-#define LONG_OPT_CHECKPOINT_PATH 0x148
+#define LONG_OPT_CHECKPOINT_DIR  0x148
 #define LONG_OPT_OPEN_MODE       0x149
 #define LONG_OPT_ACCTG_FREQ      0x14a
 #define LONG_OPT_WCKEY           0x14b
+#define LONG_OPT_RESERVATION     0x14c
+#define LONG_OPT_RESTART_DIR     0x14d
 
 /*---- global variables, defined in opt.h ----*/
 int _verbose;
@@ -203,13 +208,8 @@ static bool _opt_verify(void);
 static void _process_env_var(env_vars_t *e, const char *val);
 
 static bool  _under_parallel_debugger(void);
-
 static void  _usage(void);
 static bool  _valid_node_list(char **node_list_pptr);
-static int   _verify_cpu_bind(const char *arg, char **cpu_bind,
-			      cpu_bind_type_t *flags);
-static int   _verify_mem_bind(const char *arg, char **mem_bind,
-			      mem_bind_type_t *flags);
 
 /*---[ end forward declarations of static functions ]---------------------*/
 
@@ -269,273 +269,6 @@ static bool _valid_node_list(char **node_list_pptr)
 	*node_list_pptr = xstrdup(nodelist);
 	free(nodelist);
 	return true;
-}
-
-/*
- * _isvalue
- * returns 1 is the argument appears to be a value, 0 otherwise
- */
-static int _isvalue(char *arg) {
-    	if (isdigit(*arg)) {	 /* decimal values and 0x... hex values */
-	    	return 1;
-	}
-
-	while (isxdigit(*arg)) { /* hex values not preceded by 0x */
-		arg++;
-	}
-	if (*arg == ',' || *arg == '\0') { /* end of field or string */
-	    	return 1;
-	}
-
-	return 0;	/* not a value */
-}
-
-/*
- * First clear all of the bits in "*data" which are set in "clear_mask".
- * Then set all of the bits in "*data" that are set in "set_mask".
- */
-static void clear_then_set(int *data, int clear_mask, int set_mask)
-{
-	*data &= ~clear_mask;
-	*data |= set_mask;
-}
-
-static void _print_cpu_bind_help()
-{
-	printf(
-"CPU bind options:\n"
-"    --cpu_bind=         Bind tasks to CPUs\n"
-"        q[uiet]         quietly bind before task runs (default)\n"
-"        v[erbose]       verbosely report binding before task runs\n"
-"        no[ne]          don't bind tasks to CPUs (default)\n"
-"        rank            bind by task rank\n"
-"        map_cpu:<list>  specify a CPU ID binding for each task\n"
-"                        where <list> is <cpuid1>,<cpuid2>,...<cpuidN>\n"
-"        mask_cpu:<list> specify a CPU ID binding mask for each task\n"
-"                        where <list> is <mask1>,<mask2>,...<maskN>\n"
-"        sockets         auto-generated masks bind to sockets\n"
-"        cores           auto-generated masks bind to cores\n"
-"        threads         auto-generated masks bind to threads\n"
-"        help            show this help message\n");
-}
-
-/*
- * verify cpu_bind arguments
- *
- * we support different launch policy names
- * we also allow a verbose setting to be specified
- *     --cpu_bind=threads
- *     --cpu_bind=cores
- *     --cpu_bind=sockets
- *     --cpu_bind=v
- *     --cpu_bind=rank,v
- *     --cpu_bind=rank
- *     --cpu_bind={MAP_CPU|MASK_CPU}:0,1,2,3,4
- *
- *
- * returns -1 on error, 0 otherwise
- */
-static int _verify_cpu_bind(const char *arg, char **cpu_bind, 
-			    cpu_bind_type_t *flags)
-{
-	char *buf, *p, *tok;
-	int bind_bits =
-		CPU_BIND_NONE|CPU_BIND_RANK|CPU_BIND_MAP|CPU_BIND_MASK;
-	int bind_to_bits =
-		CPU_BIND_TO_SOCKETS|CPU_BIND_TO_CORES|CPU_BIND_TO_THREADS;
-
-	if (arg == NULL) {
-	    	return 0;
-	}
-
-    	buf = xstrdup(arg);
-    	p = buf;
-	/* change all ',' delimiters not followed by a digit to ';'  */
-	/* simplifies parsing tokens while keeping map/mask together */
-	while (p[0] != '\0') {
-	    	if ((p[0] == ',') && (!_isvalue(&(p[1]))))
-			p[0] = ';';
-		p++;
-	}
-
-	p = buf;
-	while ((tok = strsep(&p, ";"))) {
-		if (strcasecmp(tok, "help") == 0) {
-			_print_cpu_bind_help();
-			return 1;
-		} else if ((strcasecmp(tok, "q") == 0) ||
-			   (strcasecmp(tok, "quiet") == 0)) {
-		        *flags &= ~CPU_BIND_VERBOSE;
-		} else if ((strcasecmp(tok, "v") == 0) ||
-			   (strcasecmp(tok, "verbose") == 0)) {
-		        *flags |= CPU_BIND_VERBOSE;
-		} else if ((strcasecmp(tok, "no") == 0) ||
-			   (strcasecmp(tok, "none") == 0)) {
-			clear_then_set((int *)flags, bind_bits, CPU_BIND_NONE);
-			xfree(*cpu_bind);
-		} else if (strcasecmp(tok, "rank") == 0) {
-			clear_then_set((int *)flags, bind_bits, CPU_BIND_RANK);
-			xfree(*cpu_bind);
-		} else if ((strncasecmp(tok, "map_cpu", 7) == 0) ||
-		           (strncasecmp(tok, "mapcpu", 6) == 0)) {
-			char *list;
-			list = strsep(&tok, ":=");
-			list = strsep(&tok, ":=");
-			clear_then_set((int *)flags, bind_bits, CPU_BIND_MAP);
-			xfree(*cpu_bind);
-			if (list && *list) {
-				*cpu_bind = xstrdup(list);
-			} else {
-				error("missing list for \"--cpu_bind=map_cpu:<list>\"");
-				xfree(buf);
-				return 1;
-			}
-		} else if ((strncasecmp(tok, "mask_cpu", 8) == 0) ||
-		           (strncasecmp(tok, "maskcpu", 7) == 0)) {
-			char *list;
-			list = strsep(&tok, ":=");
-			list = strsep(&tok, ":=");
-			clear_then_set((int *)flags, bind_bits, CPU_BIND_MASK);
-			xfree(*cpu_bind);
-			if (list && *list) {
-				*cpu_bind = xstrdup(list);
-			} else {
-				error("missing list for \"--cpu_bind=mask_cpu:<list>\"");
-				xfree(buf);
-				return 1;
-			}
-		} else if ((strcasecmp(tok, "socket") == 0) ||
-		           (strcasecmp(tok, "sockets") == 0)) {
-			clear_then_set((int *)flags, bind_to_bits,
-				       CPU_BIND_TO_SOCKETS);
-		} else if ((strcasecmp(tok, "core") == 0) ||
-		           (strcasecmp(tok, "cores") == 0)) {
-			clear_then_set((int *)flags, bind_to_bits,
-				       CPU_BIND_TO_CORES);
-		} else if ((strcasecmp(tok, "thread") == 0) ||
-		           (strcasecmp(tok, "threads") == 0)) {
-			clear_then_set((int *)flags, bind_to_bits,
-				       CPU_BIND_TO_THREADS);
-		} else {
-			error("unrecognized --cpu_bind argument \"%s\"", tok);
-			xfree(buf);
-			return 1;
-		}
-	}
-
-	xfree(buf);
-	return 0;
-}
-
-static void _print_mem_bind_help()
-{
-			printf(
-"Memory bind options:\n"
-"    --mem_bind=         Bind memory to locality domains (ldom)\n"
-"        q[uiet]         quietly bind before task runs (default)\n"
-"        v[erbose]       verbosely report binding before task runs\n"
-"        no[ne]          don't bind tasks to memory (default)\n"
-"        rank            bind by task rank\n"
-"        local           bind to memory local to processor\n"
-"        map_mem:<list>  specify a memory binding for each task\n"
-"                        where <list> is <cpuid1>,<cpuid2>,...<cpuidN>\n"
-"        mask_mem:<list> specify a memory binding mask for each tasks\n"
-"                        where <list> is <mask1>,<mask2>,...<maskN>\n"
-"        help            show this help message\n");
-}
-
-/*
- * verify mem_bind arguments
- *
- * we support different memory binding names
- * we also allow a verbose setting to be specified
- *     --mem_bind=v
- *     --mem_bind=rank,v
- *     --mem_bind=rank
- *     --mem_bind={MAP_MEM|MASK_MEM}:0,1,2,3,4
- *
- * returns -1 on error, 0 otherwise
- */
-static int _verify_mem_bind(const char *arg, char **mem_bind, 
-			    mem_bind_type_t *flags)
-{
-	char *buf, *p, *tok;
-	int bind_bits = MEM_BIND_NONE|MEM_BIND_RANK|MEM_BIND_LOCAL|
-		MEM_BIND_MAP|MEM_BIND_MASK;
-
-	if (arg == NULL) {
-	    	return 0;
-	}
-
-    	buf = xstrdup(arg);
-    	p = buf;
-	/* change all ',' delimiters not followed by a digit to ';'  */
-	/* simplifies parsing tokens while keeping map/mask together */
-	while (p[0] != '\0') {
-	    	if ((p[0] == ',') && (!_isvalue(&(p[1]))))
-			p[0] = ';';
-		p++;
-	}
-
-	p = buf;
-	while ((tok = strsep(&p, ";"))) {
-		if (strcasecmp(tok, "help") == 0) {
-			_print_mem_bind_help();
-			return 1;
-			
-		} else if ((strcasecmp(tok, "q") == 0) ||
-			   (strcasecmp(tok, "quiet") == 0)) {
-		        *flags &= ~MEM_BIND_VERBOSE;
-		} else if ((strcasecmp(tok, "v") == 0) ||
-			   (strcasecmp(tok, "verbose") == 0)) {
-		        *flags |= MEM_BIND_VERBOSE;
-		} else if ((strcasecmp(tok, "no") == 0) ||
-			   (strcasecmp(tok, "none") == 0)) {
-			clear_then_set((int *)flags, bind_bits, MEM_BIND_NONE);
-			xfree(*mem_bind);
-		} else if (strcasecmp(tok, "rank") == 0) {
-			clear_then_set((int *)flags, bind_bits, MEM_BIND_RANK);
-			xfree(*mem_bind);
-		} else if (strcasecmp(tok, "local") == 0) {
-			clear_then_set((int *)flags, bind_bits, MEM_BIND_LOCAL);
-			xfree(*mem_bind);
-		} else if ((strncasecmp(tok, "map_mem", 7) == 0) ||
-		           (strncasecmp(tok, "mapmem", 6) == 0)) {
-			char *list;
-			list = strsep(&tok, ":=");
-			list = strsep(&tok, ":=");
-			clear_then_set((int *)flags, bind_bits, MEM_BIND_MAP);
-			xfree(*mem_bind);
-			if (list && *list) {
-				*mem_bind = xstrdup(list);
-			} else {
-				error("missing list for \"--mem_bind=map_mem:<list>\"");
-				xfree(buf);
-				return 1;
-			}
-		} else if ((strncasecmp(tok, "mask_mem", 8) == 0) ||
-		           (strncasecmp(tok, "maskmem", 7) == 0)) {
-			char *list;
-			list = strsep(&tok, ":=");
-			list = strsep(&tok, ":=");
-			clear_then_set((int *)flags, bind_bits, MEM_BIND_MASK);
-			xfree(*mem_bind);
-			if (list && *list) {
-				*mem_bind = xstrdup(list);
-			} else {
-				error("missing list for \"--mem_bind=mask_mem:<list>\"");
-				xfree(buf);
-				return 1;
-			}
-		} else {
-			error("unrecognized --mem_bind argument \"%s\"", tok);
-			xfree(buf);
-			return 1;
-		}
-	}
-
-	xfree(buf);
-	return 0;
 }
 
 /*
@@ -607,13 +340,15 @@ static void _opt_default()
 	opt.time_limit_str = NULL;
 	opt.ckpt_interval = 0;
 	opt.ckpt_interval_str = NULL;
-	opt.ckpt_path = NULL;
+	opt.ckpt_dir = NULL;
+	opt.restart_dir = NULL;
 	opt.partition = NULL;
 	opt.max_threads = MAX_THREADS;
 	pmi_server_max_threads(opt.max_threads);
 
 	opt.relative = NO_VAL;
 	opt.relative_set = false;
+	opt.resv_port_cnt = NO_VAL;
 	opt.cmd_name = NULL;
 	opt.job_name = NULL;
 	opt.job_name_set_cmd = false;
@@ -649,6 +384,7 @@ static void _opt_default()
 	opt.quit_on_intr = false;
 	opt.disable_status = false;
 	opt.test_only   = false;
+	opt.preserve_env = false;
 
 	opt.quiet = 0;
 	_verbose = 0;
@@ -689,11 +425,10 @@ static void _opt_default()
 
 	opt.prolog = slurm_get_srun_prolog();
 	opt.epilog = slurm_get_srun_epilog();
+	opt.begin = (time_t)0;
 
 	opt.task_prolog     = NULL;
 	opt.task_epilog     = NULL;
-
-	opt.ctrl_comm_ifhn  = NULL;
 
 	/*
 	 * Reset some default values if running under a parallel debugger
@@ -708,6 +443,7 @@ static void _opt_default()
 	opt.pty = false;
 	opt.open_mode = 0;
 	opt.acctg_freq = -1;
+	opt.reservation = NULL;
 	opt.wckey = NULL;
 }
 
@@ -744,7 +480,7 @@ env_vars_t env_vars[] = {
 {"SLURM_IMMEDIATE",     OPT_INT,        &opt.immediate,     NULL             },
 {"SLURM_JOB_NAME",      OPT_STRING,     &opt.job_name,      
 					&opt.job_name_set_env},
-{"SLURM_JOBID",         OPT_INT,        &opt.jobid,         NULL             },
+{"SLURM_JOB_ID",        OPT_INT,        &opt.jobid,         NULL             },
 {"SLURM_KILL_BAD_EXIT", OPT_INT,        &opt.kill_bad_exit, NULL             },
 {"SLURM_LABELIO",       OPT_INT,        &opt.labelio,       NULL             },
 {"SLURM_LINUX_IMAGE",   OPT_STRING,     &opt.linuximage,    NULL             },
@@ -754,6 +490,7 @@ env_vars_t env_vars[] = {
 {"SLURM_NSOCKETS_PER_NODE",OPT_NSOCKETS,NULL,               NULL             },
 {"SLURM_NCORES_PER_SOCKET",OPT_NCORES,  NULL,               NULL             },
 {"SLURM_NTHREADS_PER_CORE",OPT_NTHREADS,NULL,               NULL             },
+{"SLURM_NTASKS_PER_NODE", OPT_INT,      &opt.ntasks_per_node, NULL           },
 {"SLURM_NO_ROTATE",     OPT_NO_ROTATE,  NULL,               NULL             },
 {"SLURM_NPROCS",        OPT_INT,        &opt.nprocs,        &opt.nprocs_set  },
 {"SLURM_OVERCOMMIT",    OPT_OVERCOMMIT, NULL,               NULL             },
@@ -761,17 +498,18 @@ env_vars_t env_vars[] = {
 {"SLURM_RAMDISK_IMAGE", OPT_STRING,     &opt.ramdiskimage,  NULL             },
 {"SLURM_IOLOAD_IMAGE",  OPT_STRING,     &opt.ramdiskimage,  NULL             },
 {"SLURM_REMOTE_CWD",    OPT_STRING,     &opt.cwd,           NULL             },
+{"SLURM_RESV_PORTS",    OPT_RESV_PORTS, NULL,               NULL             },
 {"SLURM_STDERRMODE",    OPT_STRING,     &opt.efname,        NULL             },
 {"SLURM_STDINMODE",     OPT_STRING,     &opt.ifname,        NULL             },
 {"SLURM_STDOUTMODE",    OPT_STRING,     &opt.ofname,        NULL             },
 {"SLURM_THREADS",       OPT_INT,        &opt.max_threads,   NULL             },
 {"SLURM_TIMELIMIT",     OPT_STRING,     &opt.time_limit_str,NULL             },
 {"SLURM_CHECKPOINT",    OPT_STRING,     &opt.ckpt_interval_str, NULL         },
-{"SLURM_CHECKPOINT_PATH",OPT_STRING,    &opt.ckpt_path,     NULL             },
+{"SLURM_CHECKPOINT_DIR",OPT_STRING,     &opt.ckpt_dir,      NULL             },
+{"SLURM_RESTART_DIR",   OPT_STRING,     &opt.restart_dir ,  NULL             },
 {"SLURM_WAIT",          OPT_INT,        &opt.max_wait,      NULL             },
 {"SLURM_DISABLE_STATUS",OPT_INT,        &opt.disable_status,NULL             },
 {"SLURM_MPI_TYPE",      OPT_MPI,        NULL,               NULL             },
-{"SLURM_SRUN_COMM_IFHN",OPT_STRING,     &opt.ctrl_comm_ifhn,NULL             },
 {"SLURM_SRUN_MULTI",    OPT_MULTI,      NULL,               NULL             },
 {"SLURM_UNBUFFEREDIO",  OPT_INT,        &opt.unbuffered,    NULL             },
 {"SLURM_NODELIST",      OPT_STRING,     &opt.alloc_nodelist,NULL             },
@@ -826,8 +564,10 @@ _process_env_var(env_vars_t *e, const char *val)
 	case OPT_INT:
 		if (val != NULL) {
 			*((int *) e->arg) = (int) strtol(val, &end, 10);
-			if (!(end && *end == '\0')) 
-				error("%s=%s invalid. ignoring...", e->var, val);
+			if (!(end && *end == '\0')) {
+				error("%s=%s invalid. ignoring...", 
+				      e->var, val);
+			}
 		}
 		break;
 
@@ -843,14 +583,14 @@ _process_env_var(env_vars_t *e, const char *val)
 		break;
 
 	case OPT_CPU_BIND:
-		if (_verify_cpu_bind(val, &opt.cpu_bind,
-				     &opt.cpu_bind_type))
+		if (slurm_verify_cpu_bind(val, &opt.cpu_bind,
+					  &opt.cpu_bind_type))
 			exit(1);
 		break;
 
 	case OPT_MEM_BIND:
-		if (_verify_mem_bind(val, &opt.mem_bind,
-				     &opt.mem_bind_type))
+		if (slurm_verify_mem_bind(val, &opt.mem_bind,
+					  &opt.mem_bind_type))
 			exit(1);
 		break;
 
@@ -871,6 +611,13 @@ _process_env_var(env_vars_t *e, const char *val)
 	case OPT_EXCLUSIVE:
 		opt.exclusive = true;
 		opt.shared = 0;
+		break;
+
+	case OPT_RESV_PORTS:
+		if (val)
+			opt.resv_port_cnt = strtol(val, NULL, 10);
+		else
+			opt.resv_port_cnt = 0;
 		break;
 
 	case OPT_OPEN_MODE:
@@ -954,6 +701,8 @@ static void set_options(const int argc, char **argv)
 		{"slurmd-debug",  required_argument, 0, 'd'},
 		{"chdir",         required_argument, 0, 'D'},
 		{"error",         required_argument, 0, 'e'},
+		{"preserve-env",  no_argument,       0, 'E'},
+		{"preserve-slurm-env", no_argument,  0, 'E'},
 		{"geometry",      required_argument, 0, 'g'},
 		{"hold",          no_argument,       0, 'H'},
 		{"input",         required_argument, 0, 'i'},
@@ -997,11 +746,10 @@ static void set_options(const int argc, char **argv)
 		{"mincores",         required_argument, 0, LONG_OPT_MINCORES},
 		{"minthreads",       required_argument, 0, LONG_OPT_MINTHREADS},
 		{"mem",              required_argument, 0, LONG_OPT_MEM},
-		{"job-mem",          required_argument, 0, LONG_OPT_MEM_PER_CPU},
-		{"task-mem",         required_argument, 0, LONG_OPT_MEM_PER_CPU},
 		{"mem-per-cpu",      required_argument, 0, LONG_OPT_MEM_PER_CPU},
 		{"hint",             required_argument, 0, LONG_OPT_HINT},
 		{"mpi",              required_argument, 0, LONG_OPT_MPI},
+		{"resv-ports",       optional_argument, 0, LONG_OPT_RESV_PORTS},
 		{"tmp",              required_argument, 0, LONG_OPT_TMP},
 		{"jobid",            required_argument, 0, LONG_OPT_JOBID},
 		{"msg-timeout",      required_argument, 0, LONG_OPT_TIMEO},
@@ -1024,7 +772,6 @@ static void set_options(const int argc, char **argv)
 		{"task-prolog",      required_argument, 0, LONG_OPT_TASK_PROLOG},
 		{"task-epilog",      required_argument, 0, LONG_OPT_TASK_EPILOG},
 		{"nice",             optional_argument, 0, LONG_OPT_NICE},
-		{"ctrl-comm-ifhn",   required_argument, 0, LONG_OPT_CTRL_COMM_IFHN},
 		{"multi-prog",       no_argument,       0, LONG_OPT_MULTI},
 		{"comment",          required_argument, 0, LONG_OPT_COMMENT},
 		{"sockets-per-node", required_argument, 0, LONG_OPT_SOCKETSPERNODE},
@@ -1044,14 +791,16 @@ static void set_options(const int argc, char **argv)
 		{"get-user-env",     optional_argument, 0, LONG_OPT_GET_USER_ENV},
 		{"pty",              no_argument,       0, LONG_OPT_PTY},
 		{"checkpoint",       required_argument, 0, LONG_OPT_CHECKPOINT},
-		{"checkpoint-path",  required_argument, 0, LONG_OPT_CHECKPOINT_PATH},
+		{"checkpoint-dir",   required_argument, 0, LONG_OPT_CHECKPOINT_DIR},
 		{"open-mode",        required_argument, 0, LONG_OPT_OPEN_MODE},
 		{"acctg-freq",       required_argument, 0, LONG_OPT_ACCTG_FREQ},
 		{"wckey",            required_argument, 0, LONG_OPT_WCKEY},
+		{"reservation",      required_argument, 0, LONG_OPT_RESERVATION},
+		{"restart-dir",      required_argument, 0, LONG_OPT_RESTART_DIR},
 		{NULL,               0,                 0, 0}
 	};
-	char *opt_string = "+aAbB:c:C:d:D:e:g:Hi:IjJ:kKlL:m:n:N:"
-		"o:Op:P:qQr:R:st:T:uU:vVw:W:x:XZ";
+	char *opt_string = "+aAbB:c:C:d:D:e:Eg:Hi:IjJ:kKlL:m:n:N:"
+		"o:Op:P:qQr:Rst:T:uU:vVw:W:x:XZ";
 
 	struct option *optz = spank_option_table_create (long_options);
 
@@ -1130,6 +879,9 @@ static void set_options(const int argc, char **argv)
 				opt.efname = xstrdup("/dev/null");
 			else
 				opt.efname = xstrdup(optarg);
+			break;
+		case (int)'E':
+			opt.preserve_env = true;
 			break;
 		case (int)'g':
 			if (verify_geometry(optarg, opt.geometry))
@@ -1287,13 +1039,13 @@ static void set_options(const int argc, char **argv)
                         opt.shared = 0;
                         break;
                 case LONG_OPT_CPU_BIND:
-			if (_verify_cpu_bind(optarg, &opt.cpu_bind,
-					     &opt.cpu_bind_type))
+			if (slurm_verify_cpu_bind(optarg, &opt.cpu_bind,
+						  &opt.cpu_bind_type))
 				exit(1);
 			break;
 		case LONG_OPT_MEM_BIND:
-			if (_verify_mem_bind(optarg, &opt.mem_bind,
-					     &opt.mem_bind_type))
+			if (slurm_verify_mem_bind(optarg, &opt.mem_bind,
+						  &opt.mem_bind_type))
 				exit(1);
 			break;
 		case LONG_OPT_CORE:
@@ -1339,6 +1091,12 @@ static void set_options(const int argc, char **argv)
 				      "--mpi=list for acceptable types.",
 				      optarg);
 			}
+			break;
+		case LONG_OPT_RESV_PORTS:
+			if (optarg)
+				opt.resv_port_cnt = strtol(optarg, NULL, 10);
+			else
+				opt.resv_port_cnt = 0;
 			break;
 		case LONG_OPT_TMP:
 			opt.job_min_tmp_disk = str_to_bytes(optarg);
@@ -1464,10 +1222,6 @@ static void set_options(const int argc, char **argv)
 				}
 			}
 			break;
-		case LONG_OPT_CTRL_COMM_IFHN:
-			xfree(opt.ctrl_comm_ifhn);
-			opt.ctrl_comm_ifhn = xstrdup(optarg);
-			break;
 		case LONG_OPT_MULTI:
 			opt.multi_prog = true;
 			break;
@@ -1537,7 +1291,8 @@ static void set_options(const int argc, char **argv)
 			opt.reboot = true;
 			break;
 		case LONG_OPT_GET_USER_ENV:
-			error("--get-user-env is no longer supported in srun, use sbatch");
+			error("--get-user-env is no longer supported in srun, "
+			      "use sbatch");
 			break;
 		case LONG_OPT_PTY:
 #ifdef HAVE_PTY_H
@@ -1575,9 +1330,17 @@ static void set_options(const int argc, char **argv)
 			xfree(opt.wckey);
 			opt.wckey = xstrdup(optarg);
 			break;
-		case LONG_OPT_CHECKPOINT_PATH:
-			xfree(opt.ckpt_path);
-			opt.ckpt_path = xstrdup(optarg);
+		case LONG_OPT_RESERVATION:
+			xfree(opt.reservation);
+			opt.reservation = xstrdup(optarg);
+			break;
+		case LONG_OPT_CHECKPOINT_DIR:
+			xfree(opt.ckpt_dir);
+			opt.ckpt_dir = xstrdup(optarg);
+			break;
+		case LONG_OPT_RESTART_DIR:
+			xfree(opt.restart_dir);
+			opt.restart_dir = xstrdup(optarg);
 			break;
 		default:
 			if (spank_process_option (opt_char, optarg) < 0) {
@@ -1741,8 +1504,10 @@ static bool _opt_verify(void)
 	 *   these debug messages cause the generation of more
 	 *   debug messages ad infinitum)
 	 */
-	if (opt.slurmd_debug + LOG_LEVEL_ERROR > LOG_LEVEL_DEBUG2)
+	if (opt.slurmd_debug + LOG_LEVEL_ERROR > LOG_LEVEL_DEBUG2) {
 		opt.slurmd_debug = LOG_LEVEL_DEBUG2 - LOG_LEVEL_ERROR;
+		info("Using srun's max debug increment of %d", opt.slurmd_debug);
+	}
 
 	if (opt.quiet && _verbose) {
 		error ("don't specify both --verbose (-v) and --quiet (-Q)");
@@ -1837,21 +1602,50 @@ static bool _opt_verify(void)
 
 	/* check for realistic arguments */
 	if (opt.nprocs <= 0) {
-		error("%s: invalid number of processes (-n %d)",
-		      opt.progname, opt.nprocs);
+		error("invalid number of processes (-n %d)", opt.nprocs);
 		verified = false;
 	}
 
 	if (opt.cpus_per_task < 0) {
-		error("%s: invalid number of cpus per task (-c %d)\n",
-		      opt.progname, opt.cpus_per_task);
+		error("invalid number of cpus per task (-c %d)\n",
+		      opt.cpus_per_task);
 		verified = false;
 	}
 
 	if ((opt.min_nodes <= 0) || (opt.max_nodes < 0) || 
 	    (opt.max_nodes && (opt.min_nodes > opt.max_nodes))) {
-		error("%s: invalid number of nodes (-N %d-%d)\n",
-		      opt.progname, opt.min_nodes, opt.max_nodes);
+		error("invalid number of nodes (-N %d-%d)\n",
+		      opt.min_nodes, opt.max_nodes);
+		verified = false;
+	}
+
+#ifdef HAVE_BGL
+	if (opt.blrtsimage && strchr(opt.blrtsimage, ' ')) {
+		error("invalid BlrtsImage given '%s'", opt.blrtsimage);
+		verified = false;
+	}
+#endif
+
+	if (opt.linuximage && strchr(opt.linuximage, ' ')) {
+#ifdef HAVE_BGL
+		error("invalid LinuxImage given '%s'", opt.linuximage);
+#else
+		error("invalid CnloadImage given '%s'", opt.linuximage);
+#endif
+		verified = false;
+	}
+
+	if (opt.mloaderimage && strchr(opt.mloaderimage, ' ')) {
+		error("invalid MloaderImage given '%s'", opt.mloaderimage);
+		verified = false;
+	}
+
+	if (opt.ramdiskimage && strchr(opt.ramdiskimage, ' ')) {
+#ifdef HAVE_BGL
+		error("invalid RamDiskImage given '%s'", opt.ramdiskimage);
+#else
+		error("invalid IoloadImage given '%s'", opt.ramdiskimage);
+#endif
 		verified = false;
 	}
 
@@ -1864,7 +1658,8 @@ static bool _opt_verify(void)
 		 */
 		if (!(opt.cpu_bind_type & (CPU_BIND_TO_SOCKETS |
 					   CPU_BIND_TO_CORES |
-					   CPU_BIND_TO_THREADS))) {
+					   CPU_BIND_TO_THREADS |
+					   CPU_BIND_TO_LDOMS))) {
 			opt.cpu_bind_type |= CPU_BIND_TO_CORES;
 		}
 	}
@@ -1876,7 +1671,8 @@ static bool _opt_verify(void)
 		 */
 		if (!(opt.cpu_bind_type & (CPU_BIND_TO_SOCKETS |
 					   CPU_BIND_TO_CORES |
-					   CPU_BIND_TO_THREADS))) {
+					   CPU_BIND_TO_THREADS |
+					   CPU_BIND_TO_LDOMS))) {
 			opt.cpu_bind_type |= CPU_BIND_TO_SOCKETS;
 		}
 	}
@@ -2018,8 +1814,8 @@ static bool _opt_verify(void)
 		}
 	}
 
-	if (! opt.ckpt_path)
-		opt.ckpt_path = xstrdup(opt.cwd);
+	if (! opt.ckpt_dir)
+		opt.ckpt_dir = xstrdup(opt.cwd);
 
 	if ((opt.euid != (uid_t) -1) && (opt.euid != opt.uid)) 
 		opt.uid = opt.euid;
@@ -2036,6 +1832,10 @@ static bool _opt_verify(void)
 		}
 		xfree(sched_name);
 	}
+
+	 if (slurm_verify_cpu_bind(NULL, &opt.cpu_bind,
+				   &opt.cpu_bind_type))
+		exit(1);
 
 	return verified;
 }
@@ -2112,6 +1912,7 @@ static void _opt_list()
 	info("partition      : %s",
 	     opt.partition == NULL ? "default" : opt.partition);
 	info("job name       : `%s'", opt.job_name);
+	info("reservation    : `%s'", opt.reservation);
 	info("wckey          : `%s'", opt.wckey);
 	info("distribution   : %s", format_task_dist_states(opt.distribution));
 	if(opt.distribution == SLURM_DIST_PLANE)
@@ -2134,7 +1935,9 @@ static void _opt_list()
 		info("time_limit     : %d", opt.time_limit);
 	if (opt.ckpt_interval)
 		info("checkpoint     : %d secs", opt.ckpt_interval);
-	info("checkpoint_path: %s", opt.ckpt_path);
+	info("checkpoint_dir : %s", opt.ckpt_dir);
+	if (opt.restart_dir)
+		info("restart_dir    : %s", opt.restart_dir);
 	info("wait           : %d", opt.max_wait);
 	if (opt.nice)
 		info("nice           : %d", opt.nice);
@@ -2155,6 +1958,7 @@ static void _opt_list()
 	xfree(str);
 	info("reboot         : %s", opt.reboot ? "no" : "yes");
 	info("rotate         : %s", opt.no_rotate ? "yes" : "no");
+	info("preserve_env   : %s", tf_(opt.preserve_env));
 	
 #ifdef HAVE_BGL
 	if (opt.blrtsimage)
@@ -2189,7 +1993,6 @@ static void _opt_list()
 	info("mail_user      : %s", opt.mail_user);
 	info("task_prolog    : %s", opt.task_prolog);
 	info("task_epilog    : %s", opt.task_epilog);
-	info("ctrl_comm_ifhn : %s", opt.ctrl_comm_ifhn);
 	info("multi_prog     : %s", opt.multi_prog ? "yes" : "no");
 	info("sockets-per-node  : %d - %d", opt.min_sockets_per_node,
 					    opt.max_sockets_per_node);
@@ -2201,6 +2004,8 @@ static void _opt_list()
 	info("ntasks-per-socket : %d", opt.ntasks_per_socket);
 	info("ntasks-per-core   : %d", opt.ntasks_per_core);
 	info("plane_size        : %u", opt.plane_size);
+	if (opt.resv_port_cnt != NO_VAL)
+		info("resv_port_cnt     : %d", opt.resv_port_cnt);
 	str = print_commandline(opt.argc, opt.argv);
 	info("remote command    : `%s'", str);
 	xfree(str);
@@ -2213,6 +2018,7 @@ static bool _under_parallel_debugger (void)
 	return (MPIR_being_debugged != 0);
 }
 
+
 static void _usage(void)
 {
  	printf(
@@ -2222,13 +2028,14 @@ static void _usage(void)
 "            [--share] [--label] [--unbuffered] [-m dist] [-J jobname]\n"
 "            [--jobid=id] [--verbose] [--slurmd_debug=#]\n"
 "            [--core=type] [-T threads] [-W sec] [--checkpoint=time]\n"
-"            [--checkpoint-path=dir]  [--licenses=names]\n"
+"            [--checkpoint-dir=dir]  [--licenses=names]\n"
+"            [--restart-dir=dir]\n"
 "            [--contiguous] [--mincpus=n] [--mem=MB] [--tmp=MB] [-C list]\n"
 "            [--mpi=type] [--account=name] [--dependency=type:jobid]\n"
 "            [--kill-on-bad-exit] [--propagate[=rlimits] [--comment=name]\n"
 "            [--cpu_bind=...] [--mem_bind=...] [--network=type]\n"
-"            [--ntasks-per-node=n] [--ntasks-per-socket=n]\n"
-"            [--ntasks-per-core=n] [--mem-per-cpu=MB]\n"
+"            [--ntasks-per-node=n] [--ntasks-per-socket=n] [reservation=name]\n"
+"            [--ntasks-per-core=n] [--mem-per-cpu=MB] [--preserve-env]\n"
 #ifdef HAVE_BG		/* Blue gene specific options */
 "            [--geometry=XxYxZ] [--conn-type=type] [--no-rotate] [--reboot]\n"
 #ifdef HAVE_BGL
@@ -2254,75 +2061,80 @@ static void _help(void)
 "Usage: srun [OPTIONS...] executable [args...]\n"
 "\n"
 "Parallel run options:\n"
-"  -n, --ntasks=ntasks         number of tasks to run\n"
-"  -N, --nodes=N               number of nodes on which to run (N = min[-max])\n"
+"  -b, --batch                 submit as batch job for later execution\n"
+"      --begin=time            defer job until HH:MM DD/MM/YY\n"
 "  -c, --cpus-per-task=ncpus   number of cpus required per task\n"
-"      --ntasks-per-node=n     number of tasks to invoke on each node\n"
-"  -i, --input=in              location of stdin redirection\n"
-"  -o, --output=out            location of stdout redirection\n"
-"  -e, --error=err             location of stderr redirection\n"
-"  -r, --relative=n            run job step relative to node n of allocation\n"
-"  -p, --partition=partition   partition requested\n"
-"  -H, --hold                  submit job in held state\n"
-"  -t, --time=minutes          time limit\n"
+"      --checkpoint=time       job step checkpoint interval\n"
+"      --checkpoint-dir=dir    directory to store job step checkpoint image \n"
+"                              files\n"
+"      --comment=name          arbitrary comment\n"
+"      --core=type             change default corefile format type\n"
+"                              (type=\"list\" to list of valid formats)\n"
+"  -d, --slurmd-debug=level    slurmd debug level\n"
 "  -D, --chdir=path            change remote current working directory\n"
+"  -e, --error=err             location of stderr redirection\n"
+"      --epilog=program        run \"program\" after launching job step\n"
+"  -E, --preserve-env          env vars for node and task counts override\n"
+"                              command-line flags\n"
+"      --get-user-env          used by Moab.  See srun man page.\n"
+"  -H, --hold                  submit job in held state\n"
+"  -i, --input=in              location of stdin redirection\n"
 "  -I, --immediate             exit if resources are not immediately available\n"
-"  -O, --overcommit            overcommit resources\n"
+"      --jobid=id              run under already allocated job\n"
+"  -J, --job-name=jobname      name of job\n"
 "  -k, --no-kill               do not kill job on node failure\n"
 "  -K, --kill-on-bad-exit      kill the job if any task terminates with a\n"
 "                              non-zero exit code\n"
-"  -s, --share                 share nodes with other jobs\n"
 "  -l, --label                 prepend task number to lines of stdout/err\n"
-"  -u, --unbuffered            do not line-buffer stdout/err\n"
+"  -L, --licenses=names        required license, comma separated\n"
 "  -m, --distribution=type     distribution method for processes to nodes\n"
 "                              (type = block|cyclic|arbitrary)\n"
-"  -J, --job-name=jobname      name of job\n"
-"      --jobid=id              run under already allocated job\n"
-"      --mpi=type              type of MPI being used\n"
-"  -b, --batch                 submit as batch job for later execution\n"
-"  -T, --threads=threads       set srun launch fanout\n"
-"  -W, --wait=sec              seconds to wait after first task exits\n"
-"                              before killing job\n"
-"  -q, --quit-on-interrupt     quit on single Ctrl-C\n"
-"  -X, --disable-status        Disable Ctrl-C status feature\n"
-"  -v, --verbose               verbose mode (multiple -v's increase verbosity)\n"
-"  -Q, --quiet                 quiet mode (suppress informational messages)\n"
-"  -d, --slurmd-debug=level    slurmd debug level\n"
-"      --core=type             change default corefile format type\n"
-"                              (type=\"list\" to list of valid formats)\n"
-"  -P, --dependency=type:jobid defer job until condition on jobid is satisfied\n"
-"      --nice[=value]          decrease secheduling priority by value\n"
-"  -U, --account=name          charge job to specified account\n"
-"      --comment=name          arbitrary comment\n"
-"      --propagate[=rlimits]   propagate all [or specific list of] rlimits\n"
-"      --mpi=type              specifies version of MPI to use\n"
-"      --prolog=program        run \"program\" before launching job step\n"
-"      --epilog=program        run \"program\" after launching job step\n"
-"      --task-prolog=program   run \"program\" before launching task\n"
-"      --task-epilog=program   run \"program\" after launching task\n"
-"      --begin=time            defer job until HH:MM DD/MM/YY\n"
 "      --mail-type=type        notify on state change: BEGIN, END, FAIL or ALL\n"
-"      --mail-user=user        who to send email notification for job state changes\n"
-"      --ctrl-comm-ifhn=addr   interface hostname for PMI communications from srun\n"
+"      --mail-user=user        who to send email notification for job state\n"
+"                              changes\n"
+"      --mpi=type              type of MPI being used\n"
 "      --multi-prog            if set the program name specified is the\n"
 "                              configuration specification for multiple programs\n"
-"      --get-user-env          used by Moab.  See srun man page.\n"
-"  -L, --licenses=names        required license, comma separated\n"
-"      --checkpoint=time       job step checkpoint interval\n"
-"      --checkpoint-path=dir   path to store job step checkpoint image files\n"
+"  -n, --ntasks=ntasks         number of tasks to run\n"
+"      --nice[=value]          decrease secheduling priority by value\n"
+"      --ntasks-per-node=n     number of tasks to invoke on each node\n"
+"  -N, --nodes=N               number of nodes on which to run (N = min[-max])\n"
+"  -o, --output=out            location of stdout redirection\n"
+"  -O, --overcommit            overcommit resources\n"
+"  -p, --partition=partition   partition requested\n"
+"      --prolog=program        run \"program\" before launching job step\n"
+"      --propagate[=rlimits]   propagate all [or specific list of] rlimits\n"
 #ifdef HAVE_PTY_H
 "      --pty                   run task zero in pseudo terminal\n"
 #endif
+"  -P, --dependency=type:jobid defer job until condition on jobid is satisfied\n"
+"  -q, --quit-on-interrupt     quit on single Ctrl-C\n"
+"  -Q, --quiet                 quiet mode (suppress informational messages)\n"
+"  -r, --relative=n            run job step relative to node n of allocation\n"
+"      --restart-dir=dir       directory of checkpoint image files to restart\n"
+"                              from\n"
+"  -s, --share                 share nodes with other jobs\n"
+"  -t, --time=minutes          time limit\n"
+"      --task-epilog=program   run \"program\" after launching task\n"
+"      --task-prolog=program   run \"program\" before launching task\n"
+"  -T, --threads=threads       set srun launch fanout\n"
+"  -u, --unbuffered            do not line-buffer stdout/err\n"
+"  -U, --account=name          charge job to specified account\n"
+"  -v, --verbose               verbose mode (multiple -v's increase verbosity)\n"
+"  -W, --wait=sec              seconds to wait after first task exits\n"
+"                              before killing job\n"
+"  -X, --disable-status        Disable Ctrl-C status feature\n"
 "\n"
 "Constraint options:\n"
+"  -C, --constraint=list       specify a list of constraints\n"
+"      --contiguous            demand a contiguous range of nodes\n"
 "      --mincpus=n             minimum number of cpus per node\n"
-"      --minsockets=n          minimum number of sockets per node\n"
 "      --mincores=n            minimum number of cores per cpu\n"
+"      --minsockets=n          minimum number of sockets per node\n"
 "      --minthreads=n          minimum number of threads per core\n"
 "      --mem=MB                minimum amount of real memory\n"
+"      --reservation=name      allocate resources from named reservation\n"
 "      --tmp=MB                minimum amount of temporary disk\n"
-"      --contiguous            demand a contiguous range of nodes\n"
-"  -C, --constraint=list       specify a list of constraints\n"
 "  -w, --nodelist=hosts...     request a specific list of hosts\n"
 "  -x, --exclude=hosts...      exclude a specific list of hosts\n"
 "  -Z, --no-allocate           don't allocate nodes (must supply -w)\n"
@@ -2333,74 +2145,73 @@ static void _help(void)
 "                              or don't share CPUs for job steps\n"
 "      --mem-per-cpu=MB        maximum amount of real memory per allocated\n"
 "                              CPU required by the job.\n" 
-"                              --mem >= --job-mem if --mem is specified.\n" 
+"                              --mem >= --mem-per-cpu if --mem is specified.\n" 
+"      --resv-ports            reserve communication ports\n" 
 "\n"
 "Affinity/Multi-core options: (when the task/affinity plugin is enabled)\n" 
-"  -B --extra-node-info=S[:C[:T]]            Expands to:\n"
-"      --sockets-per-node=S    number of sockets per node to allocate\n"
-"      --cores-per-socket=C    number of cores per socket to allocate\n"
-"      --threads-per-core=T    number of threads per core to allocate\n"
+"  -B  --extra-node-info=S[:C[:T]]            Expands to:\n"
+"       --sockets-per-node=S   number of sockets per node to allocate\n"
+"       --cores-per-socket=C   number of cores per socket to allocate\n"
+"       --threads-per-core=T   number of threads per core to allocate\n"
 "                              each field can be 'min[-max]' or wildcard '*'\n"
 "                              total cpus requested = (N x S x C x T)\n"
-"\n"
 "      --ntasks-per-socket=n   number of tasks to invoke on each socket\n"
 "      --ntasks-per-core=n     number of tasks to invoke on each core\n"
+"\n"
 "\n");
 	conf = slurm_conf_lock();
 	if (conf->task_plugin != NULL
 	    && strcasecmp(conf->task_plugin, "task/affinity") == 0) {
 		printf(
-"      --hint=                 Bind tasks according to application hints\n"
-"                              (see \"--hint=help\" for options)\n"
 "      --cpu_bind=             Bind tasks to CPUs\n"
 "                              (see \"--cpu_bind=help\" for options)\n"
+"      --hint=                 Bind tasks according to application hints\n"
+"                              (see \"--hint=help\" for options)\n"
 "      --mem_bind=             Bind memory to locality domains (ldom)\n"
 "                              (see \"--mem_bind=help\" for options)\n"
 			);
 	}
 	slurm_conf_unlock();
-	printf("\n");
 	spank_print_options (stdout, 6, 30);
-	printf("\n");
 
-        printf(
+	printf("\n"
 #ifdef HAVE_AIX				/* AIX/Federation specific options */
-		"AIX related options:\n"
-		"  --network=type              communication protocol to be used\n"
-		"\n"
+"AIX related options:\n"
+"  --network=type              communication protocol to be used\n"
+"\n"
 #endif
 
 #ifdef HAVE_BG				/* Blue gene specific options */
-		"Blue Gene related options:\n"
-		"  -g, --geometry=XxYxZ        geometry constraints of the job\n"
-		"  -R, --no-rotate             disable geometry rotation\n"
-		"      --reboot                reboot block before starting job\n"
-		"      --conn-type=type        constraint on type of connection, MESH or TORUS\n"
-		"                              if not set, then tries to fit TORUS else MESH\n"
+"Blue Gene related options:\n"
+"  -g, --geometry=XxYxZ        geometry constraints of the job\n"
+"  -R, --no-rotate             disable geometry rotation\n"
+"      --reboot                reboot block before starting job\n"
+"      --conn-type=type        constraint on type of connection, MESH or TORUS\n"
+"                              if not set, then tries to fit TORUS else MESH\n"
 #ifndef HAVE_BGL
-		"                              If wanting to run in HTC mode (only for 1\n"
-		"                              midplane and below).  You can use HTC_S for\n"
-		"                              SMP, HTC_D for Dual, HTC_V for\n"
-		"                              virtual node mode, and HTC_L for Linux mode.\n" 
-                "      --cnload-image=path     path to compute node image for bluegene block.  Default if not set\n"
-                "      --mloader-image=path    path to mloader image for bluegene block.  Default if not set\n"
-                "      --ioload-image=path     path to ioload image for bluegene block.  Default if not set\n"
+"                              If wanting to run in HTC mode (only for 1\n"
+"                              midplane and below).  You can use HTC_S for\n"
+"                              SMP, HTC_D for Dual, HTC_V for\n"
+"                              virtual node mode, and HTC_L for Linux mode.\n" 
+"      --cnload-image=path     path to compute node image for bluegene block.  Default if not set\n"
+"      --mloader-image=path    path to mloader image for bluegene block.  Default if not set\n"
+"      --ioload-image=path     path to ioload image for bluegene block.  Default if not set\n"
 #else
-                "      --blrts-image=path      path to blrts image for bluegene block.  Default if not set\n"
-                "      --linux-image=path      path to linux image for bluegene block.  Default if not set\n"
-                "      --mloader-image=path    path to mloader image for bluegene block.  Default if not set\n"
-                "      --ramdisk-image=path    path to ramdisk image for bluegene block.  Default if not set\n"
+"      --blrts-image=path      path to blrts image for bluegene block.  Default if not set\n"
+"      --linux-image=path      path to linux image for bluegene block.  Default if not set\n"
+"      --mloader-image=path    path to mloader image for bluegene block.  Default if not set\n"
+"      --ramdisk-image=path    path to ramdisk image for bluegene block.  Default if not set\n"
 #endif
 #endif
-		"\n"
-		"Help options:\n"
-		"      --help                  show this help message\n"
-		"      --usage                 display brief usage message\n"
-		"      --print-request         Display job's layout without scheduling it\n"
-		"\n"
-		"Other options:\n"
-		"  -V, --version               output version information and exit\n"
-		"\n"
+"\n"
+"Help options:\n"
+"      --help                  show this help message\n"
+"      --usage                 display brief usage message\n"
+"      --print-request         Display job's layout without scheduling it\n"
+"\n"
+"Other options:\n"
+"  -V, --version               output version information and exit\n"
+"\n"
 		);
 
 }

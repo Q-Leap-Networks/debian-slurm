@@ -5,10 +5,11 @@
  *  Copyright (C) 2002-2008 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -349,7 +350,13 @@ extern int sacctmgr_list_association(int argc, char *argv[])
 		PRINT_USER
 	};
 
-	_set_cond(&i, argc, argv, assoc_cond, format_list);
+	for (i=0; i<argc; i++) {
+		int command_len = strlen(argv[i]);
+		if (!strncasecmp (argv[i], "Where", MAX(command_len, 5))
+		    || !strncasecmp (argv[i], "Set", MAX(command_len, 3))) 
+			i++;		
+		_set_cond(&i, argc, argv, assoc_cond, format_list);
+	}
 
 	if(exit_code) {
 		destroy_acct_association_cond(assoc_cond);
@@ -357,7 +364,8 @@ extern int sacctmgr_list_association(int argc, char *argv[])
 		return SLURM_ERROR;
 	} else if(!list_count(format_list)) 
 		slurm_addto_char_list(format_list,
-				      "C,A,U,Part,F,GrpJ,GrpN,GrpS,"
+				      "C,A,U,Part,F,"
+				      "GrpCPUMins,GrpJ,GrpN,GrpS,GrpWall,"
 				      "MaxJ,MaxN,MaxS,MaxW,QOS");
 
 	print_fields_list = list_create(destroy_print_field);
@@ -382,7 +390,7 @@ extern int sacctmgr_list_association(int argc, char *argv[])
 			field->type = PRINT_ACCOUNT;
 			field->name = xstrdup("Account");
 			if(tree_display)
-				field->len = 20;
+				field->len = -20;
 			else
 				field->len = 10;
 			field->print_routine = print_fields_str;
@@ -546,7 +554,7 @@ extern int sacctmgr_list_association(int argc, char *argv[])
 			continue;
 		}
 
-		if(newlen > 0) 
+		if(newlen) 
 			field->len = newlen;
 		
 		list_append(print_fields_list, field);		
@@ -608,8 +616,7 @@ extern int sacctmgr_list_association(int argc, char *argv[])
 					}
 					print_acct = get_tree_acct_name(
 						local_acct,
-						parent_acct,
-						assoc->cluster, tree_list);
+						parent_acct, tree_list);
 					xfree(local_acct);
 				} else {
 					print_acct = assoc->acct;
@@ -628,7 +635,7 @@ extern int sacctmgr_list_association(int argc, char *argv[])
 			case PRINT_FAIRSHARE:
 				field->print_routine(
 					field,
-					assoc->fairshare,
+					assoc->shares_raw,
 					(curr_inx == field_count));
 				break;
 			case PRINT_GRPCM:

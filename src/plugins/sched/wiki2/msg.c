@@ -2,12 +2,14 @@
  *  msg.c - Message/communcation manager for Wiki plugin
  *****************************************************************************
  *  Copyright (C) 2006-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -35,10 +37,11 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#include "./crypto.h"
-#include "./msg.h"
-#include "src/common/uid.h"
-#include "src/slurmctld/locks.h"
+#include "slurm/slurm.h"
+#include <src/common/uid.h>
+#include <src/slurmctld/locks.h>
+#include <src/plugins/sched/wiki2/crypto.h>
+#include <src/plugins/sched/wiki2/msg.h>
 #include <sys/poll.h>
 
 #define _DEBUG 0
@@ -529,7 +532,11 @@ static char *	_recv_msg(slurm_fd new_fd)
 		return NULL;
 	}
 
-	debug2("wiki msg recv:%s", buf);
+	if (slurm_get_debug_flags() && DEBUG_FLAG_WIKI)
+		info("wiki msg recv:%s", buf);
+	else
+		debug2("wiki msg recv:%s", buf);
+
 	return buf;
 }
 
@@ -543,7 +550,10 @@ static size_t	_send_msg(slurm_fd new_fd, char *buf, size_t size)
 	char header[10];
 	size_t data_sent;
 
-	debug2("wiki msg send:%s", buf);
+	if (slurm_get_debug_flags() && DEBUG_FLAG_WIKI)
+		info("wiki msg send:%s", buf);
+	else
+		debug2("wiki msg send:%s", buf);
 
 	(void) sprintf(header, "%08lu\n", (unsigned long) size);
 	if (_write_bytes((int) new_fd, header, 9) != 9) {

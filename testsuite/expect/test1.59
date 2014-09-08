@@ -15,7 +15,8 @@
 # UCRL-CODE-217948.
 # 
 # This file is part of SLURM, a resource management program.
-# For details, see <http://www.llnl.gov/linux/slurm/>.
+# For details, see <https://computing.llnl.gov/linux/slurm/>.
+# Please also read the included file: DISCLAIMER.
 #  
 # SLURM is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
@@ -62,8 +63,8 @@ expect {
 	}
 	-re "TotalNodes=($number)" {
 		set node_count $expect_out(1,string)
-		if { $node_count < 2 } {
-			send_user "WARNING: system must have at least 2 \
+		if { $node_count < 3 } {
+			send_user "WARNING: system must have at least 3 \
 				   nodes to run this test on.  This system \
 				   only has $node_count.\n"
 			exit $exit_code
@@ -86,7 +87,7 @@ set node4 0
 set timeout $max_job_delay
 spawn $salloc -N$num_nodes -v bash
 expect {
-	-re "salloc: Granted job allocation ($number):" {
+	-re "salloc: Granted job allocation ($number)" {
 		set job_id $expect_out(1,string)
 		exp_continue
 	}
@@ -101,6 +102,10 @@ expect {
 	eof {
 		wait
 	}
+}
+if {$job_id == 0} {
+	send_user "\nFAILURE: salloc failure\n"
+	exit 1
 }
 
 for {set i 0} {$i<4} {incr i} {
@@ -192,7 +197,7 @@ for {set i 0} {$i<4} {incr i} {
 		-re $prompt {
 			#send_user "srun completed\n"
 		}
-		-re "slurm job ($number)" {
+		-re "Granted job allocation ($number)" {
 			set job_id $expect_out(1,string)
 			exp_continue
 		}

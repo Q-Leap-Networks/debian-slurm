@@ -16,10 +16,11 @@
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
 # Additions by Joseph Donaghy <donaghy1@llnl.gov>
-# LLNL-CODE-402394.
+# CODE-OCEC-09-009. All rights reserved.
 # 
 # This file is part of SLURM, a resource management program.
-# For details, see <http://www.llnl.gov/linux/slurm/>.
+# For details, see <https://computing.llnl.gov/linux/slurm/>.
+ # Please also read the supplied file: DISCLAIMER.
 #  
 # SLURM is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
@@ -56,6 +57,7 @@ if [file exists globals.local] {
 #
 cset slurm_dir   "/usr"
 cset build_dir   "../../"
+cset src_dir     "../../"
 cset sacctmgr    "${slurm_dir}/bin/sacctmgr"
 cset sacct       "${slurm_dir}/bin/sacct"
 cset salloc      "${slurm_dir}/bin/salloc"
@@ -66,9 +68,11 @@ cset scancel     "${slurm_dir}/bin/scancel"
 cset scontrol    "${slurm_dir}/bin/scontrol"
 cset sinfo       "${slurm_dir}/bin/sinfo"
 cset smap        "${slurm_dir}/bin/smap"
+cset sprio       "${slurm_dir}/bin/sprio"
 cset squeue      "${slurm_dir}/bin/squeue"
 cset srun        "${slurm_dir}/bin/srun"
 cset sreport     "${slurm_dir}/bin/sreport"
+cset sshare      "${slurm_dir}/bin/sshare"
 cset sstat       "${slurm_dir}/bin/sstat"
 cset strigger    "${slurm_dir}/bin/strigger"
 
@@ -195,6 +199,10 @@ cset super_user_set 0
 proc cancel_job { job_id } {
 	global scancel bin_sleep
 
+	if {$job_id == 0} {
+		return 1
+	}
+
 	send_user "cancelling $job_id\n"
 	exec $scancel -q $job_id
 	exec $bin_sleep 1
@@ -249,6 +257,102 @@ proc slow_kill { pid } {
 	catch {exec $bin_kill -KILL $pid}
 
 	return 0
+}
+
+################################################################
+#
+# Proc: get_my_nuid
+#
+# Purpose:  gets the name uid from the running user
+#
+# Returns: A non-zero return code indicates a failure.
+#
+#
+################################################################
+
+proc get_my_nuid {  } {
+	global bin_id alpha alpha_numeric
+
+	set uid -1
+
+	log_user 0
+	spawn $bin_id -nu
+	expect {
+		-re "($alpha_numeric|$alpha)" {
+			set nuid $expect_out(1,string)
+			exp_continue
+		}
+		eof {
+			wait
+		}
+	}
+	log_user 1
+	
+	return $nuid
+}
+
+################################################################
+#
+# Proc: get_my_uid
+#
+# Purpose:  gets the uid from the running user
+#
+# Returns: A non-zero return code indicates a failure.
+#
+#
+################################################################
+
+proc get_my_uid {  } {
+	global bin_id number
+
+	set uid -1
+
+	log_user 0
+	spawn $bin_id -u
+	expect {
+		-re "($number)" {
+			set uid $expect_out(1,string)
+			exp_continue
+		}
+		eof {
+			wait
+		}
+	}
+	log_user 1
+	
+	return $uid
+}
+
+################################################################
+#
+# Proc: get_my_gid
+#
+# Purpose:  gets the gid from the running user
+#
+# Returns: A non-zero return code indicates a failure.
+#
+#
+################################################################
+
+proc get_my_gid {  } {
+	global bin_id number
+
+	set gid -1
+
+	log_user 0
+	spawn $bin_id -g
+	expect {
+		-re "($number)" {
+			set gid $expect_out(1,string)
+			exp_continue
+		}
+		eof {
+			wait
+		}
+	}
+	log_user 1
+	
+	return $gid
 }
 
 
@@ -360,9 +464,9 @@ proc wait_for_file { file_name } {
 	global bin_sleep max_file_delay
 
 	for {set my_delay 0} {$my_delay <= $max_file_delay} {incr my_delay} {
-		if {[file exists $file_name] && [file exists $file_name]} {
+		if {[file exists $file_name]} {
 #			Add small delay for I/O buffering
-			exec $bin_sleep 2
+			exec $bin_sleep 1
 			return 0
 		}
 		exec $bin_sleep 1
@@ -520,8 +624,8 @@ proc test_assoc_enforced { } {
 	set assoc_enforced 0
 	spawn $scontrol show config
 	expect {
-		-re "AccountingStorageEnforce *= ($number)" {
-			set assoc_enforced $expect_out(1,string)
+		-re "AccountingStorageEnforce *= associations" {
+			set assoc_enforced 1
 			exp_continue
 		}
 		eof {
@@ -531,6 +635,62 @@ proc test_assoc_enforced { } {
 
 	log_user 1
 	return $assoc_enforced
+}
+
+################################################################
+#
+# Proc: slurmd_user_root
+#
+# Return 1 if the SlurmdUser is root, 0 otherwise
+#
+################################################################
+proc slurmd_user_root { } {
+	global scontrol
+
+	log_user 0
+	set rc 0
+	spawn $scontrol show config
+	expect {
+		-re "SlurmdUser *= root" {
+			set rc 1
+			exp_continue
+		}
+		eof {
+			wait
+		}
+	}
+	log_user 1
+
+	return $rc
+}
+
+################################################################
+#
+# Proc: test_topology
+#
+# Purpose: Determine if system is topology aware
+#
+# Returns level of association enforcement, 0 if none
+#
+################################################################
+proc test_topology { } {
+	global scontrol
+
+	log_user 0
+	set have_topology 1
+	spawn $scontrol show config
+	expect {
+		-re "TopologyPlugin *= *topology/none" {
+			set have_topology 0
+			exp_continue
+		}
+		eof {
+			wait
+		}
+	}
+
+	log_user 1
+	return $have_topology
 }
 
 ################################################################
@@ -621,6 +781,36 @@ proc test_account_storage { } {
 	log_user 1
 	
 	return $account_storage
+}
+
+################################################################
+#
+# Proc: priority_type
+#
+# Purpose: Use scontrol to determine the priority plugin
+#
+# Returns: Name of priority type
+#
+################################################################
+
+proc priority_type {} {
+	global scontrol
+
+	set name ""
+	set fd [open "|$scontrol show config"]
+	while {[gets $fd line] != -1} {
+		if {[regexp {^PriorityType *= priority/(\w+)} $line frag name]
+				== 1} {
+			break
+		}
+	}
+	catch {close $fd}
+
+	if {[string length $name] == 0} {
+		send_user "ERROR: could not identify the switch type\n"
+	}
+
+	return $name
 }
 
 ################################################################
@@ -1002,12 +1192,11 @@ proc switch_type {} {
 	catch {close $fd}
 
 	if {[string length $name] == 0} {
-		send_user "ERROR: could not identify the switch type"
+		send_user "ERROR: could not identify the switch type\n"
 	}
 
 	return $name
 }
-
 
 ################################################################
 #
@@ -1229,7 +1418,7 @@ proc get_cluster_name { } {
 	#
 	log_user 0
 	set cluster_name ""
-	set scon_pid [spawn $scontrol show config]
+	set scon_pid [spawn -noecho $scontrol show config]
 	expect {
 		-re "ClusterName *= ($alpha_numeric_under)" {
 			set cluster_name $expect_out(1,string)
@@ -1247,4 +1436,217 @@ proc get_cluster_name { } {
 
 	log_user 1
 	return $cluster_name
+}
+
+################################################################
+#
+# Proc: get_bluegene_layout
+#
+# Purpose: Determine what layout mode the blugene system is running
+#
+# Returns name of layout mode if found, 0 otherwise
+#
+################################################################
+
+proc get_bluegene_layout { } {
+	global scontrol alpha_numeric_under
+
+	log_user 0
+	set layout 0
+	set scon_pid [spawn -noecho $scontrol show config]
+	expect {
+		-re "LayoutMode *= ($alpha_numeric_under)" {
+			set layout $expect_out(1,string)
+			exp_continue
+		}
+		timeout {
+			send_user "\nFAILURE: scontrol not responding\n"
+			slow_kill $scon_pid
+			set exit_code 1
+		}
+		eof {
+			wait
+		}
+	}
+	log_user 1
+	
+	return $layout
+}
+
+################################################################
+#
+# Proc: get_bluegene_psets
+#
+# Purpose: Determine how many psets a midplane has in a bluegene system
+#
+# Returns num of psets, 0 if not set
+#
+################################################################
+
+proc get_bluegene_psets { } {
+	global scontrol number
+
+	log_user 0
+	set psets 0
+	set scon_pid [spawn -noecho $scontrol show config]
+	expect {
+		-re "Numpsets *= ($number)" {
+			set psets $expect_out(1,string)
+			exp_continue
+		}
+		timeout {
+			send_user "\nFAILURE: scontrol not responding\n"
+			slow_kill $scon_pid
+			set exit_code 1
+		}
+		eof {
+			wait
+		}
+	}
+	log_user 1
+	
+	return $psets
+}
+
+################################################################
+#
+# Proc: get_bluegene_type
+#
+# Purpose: Determine what kind of bluegene system we are running
+#
+# Returns 'L' for bluegene/L,
+# 	  'P' for bluegene/P,
+#	  'Q' for bluegene/Q,
+# 	  0 if not set
+#
+################################################################
+
+proc get_bluegene_type { } {
+	global scontrol alpha
+
+	log_user 0
+	set type 0
+	set scon_pid [spawn -noecho $scontrol show config]
+	expect {
+		-re "Bluegene/($alpha) configuration" {
+			set type $expect_out(1,string)
+			exp_continue
+		}
+		timeout {
+			send_user "\nFAILURE: scontrol not responding\n"
+			slow_kill $scon_pid
+			set exit_code 1
+		}
+		eof {
+			wait
+		}
+	}
+	log_user 1
+	
+	return $type
+}
+
+################################################################
+#
+# Proc: get_bluegene_procs_per_cnode
+#
+# Purpose: Determine how many cpus are on a cnode
+#
+# Returns count of cpus on a cnode or 0 if not set
+#
+################################################################
+
+proc get_bluegene_procs_per_cnode { } {
+	global scontrol number
+
+	log_user 0
+	set cpu_cnt 0
+	set scon_pid [spawn -noecho $scontrol show config]
+	expect {
+		-re "NodeCPUCnt *= ($number)" {
+			set cpu_cnt $expect_out(1,string)
+			exp_continue
+		}
+		timeout {
+			send_user "\nFAILURE: scontrol not responding\n"
+			slow_kill $scon_pid
+			set exit_code 1
+		}
+		eof {
+			wait
+		}
+	}
+	log_user 1
+	
+	return $cpu_cnt
+}
+
+################################################################
+#
+# Proc: get_bluegene_cnodes_per_np
+#
+# Purpose: Determine how many cnodes are in a midplane
+#
+# Returns count of nodes on a midplane or 0 if not set
+#
+################################################################
+
+proc get_bluegene_cnodes_per_mp { } {
+	global scontrol number
+
+	log_user 0
+	set node_cnt 0
+	set scon_pid [spawn -noecho $scontrol show config]
+	expect {
+		-re "BasePartitionNodeCnt *= ($number)" {
+			set node_cnt $expect_out(1,string)
+			exp_continue
+		}
+		timeout {
+			send_user "\nFAILURE: scontrol not responding\n"
+			slow_kill $scon_pid
+			set exit_code 1
+		}
+		eof {
+			wait
+		}
+	}
+	log_user 1
+	
+	return $node_cnt
+}
+
+################################################################
+#
+# Proc: get_node_cnt
+#
+# Purpose: Determine how many nodes are on the system
+#
+# Returns count of nodes on system or 0 if unknown
+#
+################################################################
+
+proc get_node_cnt { } {
+	global scontrol
+
+	log_user 0
+	set node_cnt 0
+	set scon_pid [spawn -noecho $scontrol show nodes]
+	expect {
+		-re "NodeName=" {
+			incr node_cnt
+			exp_continue
+		}
+		timeout {
+			send_user "\nFAILURE: scontrol not responding\n"
+			slow_kill $scon_pid
+			set exit_code 1
+		}
+		eof {
+			wait
+		}
+	}
+	log_user 1
+	
+	return $node_cnt
 }

@@ -1,14 +1,15 @@
 /*****************************************************************************\
  * src/slurmd/slurmstepd/ulimits.c - set user limits for job
- * $Id: ulimits.c 15505 2008-10-27 17:39:44Z jette $
+ * $Id: ulimits.c 16616 2009-02-20 17:00:27Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -83,8 +84,8 @@ int set_user_limits(slurmd_job_t *job)
 		_set_limit( job->env, rli );
 
 	/* Set soft and hard memory and data size limit for this process, 
-	 * try to handle job and task limit (all spawned processes) in slurmd */
-	task_mem_bytes  = job->task_mem;	/* MB */
+	 * handle job limit (for all spawned processes) in slurmd */
+	task_mem_bytes  = job->job_mem;	/* MB */
 	task_mem_bytes *= (1024 * 1024);
 #ifdef RLIMIT_AS
 	if ((task_mem_bytes) && (getrlimit(RLIMIT_AS, &r) == 0) &&
@@ -92,9 +93,9 @@ int set_user_limits(slurmd_job_t *job)
 		r.rlim_max =  r.rlim_cur = task_mem_bytes;
 		if (setrlimit(RLIMIT_AS, &r)) {
 			/* Indicates that limit has already been exceeded */
-			fatal("setrlimit(RLIMIT_AS, %u MB): %m", job->task_mem);
+			fatal("setrlimit(RLIMIT_AS, %u MB): %m", job->job_mem);
 		} else
-			info("Set task_mem(%u MB)", job->task_mem);
+			info("Set task_mem(%u MB)", job->job_mem);
 #if 0
 		getrlimit(RLIMIT_AS, &r);
 		info("task memory limits: %u %u", r.rlim_cur, r.rlim_max);
@@ -107,9 +108,9 @@ int set_user_limits(slurmd_job_t *job)
 		r.rlim_max =  r.rlim_cur = task_mem_bytes;
 		if (setrlimit(RLIMIT_DATA, &r)) {
 			/* Indicates that limit has already been exceeded */
-			fatal("setrlimit(RLIMIT_DATA, %u MB): %m", job->task_mem);
+			fatal("setrlimit(RLIMIT_DATA, %u MB): %m", job->job_mem);
 		} else
-			info("Set task_data(%u MB)", job->task_mem);
+			info("Set task_data(%u MB)", job->job_mem);
 #if 0
 		getrlimit(RLIMIT_DATA, &r);
 		info("task DATA limits: %u %u", r.rlim_cur, r.rlim_max);

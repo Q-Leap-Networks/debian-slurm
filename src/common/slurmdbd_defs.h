@@ -4,10 +4,11 @@
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -84,7 +85,7 @@
  *	communicating with it (e.g. it will not accept messages with a
  *	version higher than SLURMDBD_VERSION).
  */
-#define SLURMDBD_VERSION	04
+#define SLURMDBD_VERSION	05 
 #define SLURMDBD_VERSION_MIN	02
 
 /* SLURM DBD message types */
@@ -117,7 +118,9 @@ typedef enum {
 	DBD_GOT_USERS,  	/* Response to DBD_GET_USERS		*/
 	DBD_JOB_COMPLETE,	/* Record job completion 		*/
 	DBD_JOB_START,		/* Record job starting			*/
-	DBD_JOB_START_RC,	/* return db_index from job insertion 	*/
+	DBD_ID_RC,	        /* return db_index from job
+				 * insertion, or any other id from
+				 * other commands.              	*/
 	DBD_JOB_SUSPEND,	/* Record job suspension		*/
 	DBD_MODIFY_ACCOUNTS,    /* Modify existing account              */
 	DBD_MODIFY_ASSOCS,      /* Modify existing association          */
@@ -135,7 +138,9 @@ typedef enum {
 	DBD_ROLL_USAGE,         /* Roll up usage                        */
 	DBD_STEP_COMPLETE,	/* Record step completion		*/
 	DBD_STEP_START,		/* Record step starting			*/
-	DBD_UPDATE_SHARES_USED,	/* Record current share usage		*/
+	DBD_UPDATE_SHARES_USED,	/* Doesn't do anything but
+				 * needs to be here for
+				 * history sake		*/
 	DBD_GET_JOBS_COND, 	/* Get job information with a condition */
 	DBD_GET_TXN,		/* Get transaction information		*/
 	DBD_GOT_TXN,		/* Got transaction information		*/
@@ -154,6 +159,13 @@ typedef enum {
 	DBD_ARCHIVE_DUMP,    	/* issue a request to dump jobs to
 				 * archive */
 	DBD_ARCHIVE_LOAD,    	/* load an archive file    	        */
+	DBD_ADD_RESV,    	/* add a reservation                    */
+	DBD_REMOVE_RESV,    	/* remove a reservation                 */
+	DBD_MODIFY_RESV,    	/* modify a reservation                 */
+	DBD_GET_RESVS,    	/* Get reservation information  	*/
+	DBD_GOT_RESVS,		/* Response to DBD_GET_RESV		*/
+	DBD_GET_CONFIG,  	/* Get configuration information	*/
+	DBD_GOT_CONFIG,		/* Response to DBD_GET_CONFIG		*/
 } slurmdbd_msg_type_t;
 
 /*****************************************************************************\
@@ -172,9 +184,16 @@ typedef struct {
 
 typedef struct dbd_cluster_procs_msg {
 	char *cluster_name;	/* name of cluster */
+	char *cluster_nodes;	/* name of cluster */
 	uint32_t proc_count;	/* total processor count */
 	time_t event_time;	/* time of transition */
 } dbd_cluster_procs_msg_t;
+
+typedef struct {
+	void *rec; /* this could be anything based on the type types
+		     * are defined in slurm_accounting_storage.h
+		     * *_rec_t */
+} dbd_rec_msg_t;
 
 typedef struct {
 	void *cond; /* this could be anything based on the type types
@@ -183,13 +202,15 @@ typedef struct {
 } dbd_cond_msg_t;
 
 typedef struct {
+	uint16_t archive_data;
+	time_t end;
 	time_t start;
 } dbd_roll_usage_msg_t;
 
 typedef struct {
+	time_t end;
 	void *rec;
 	time_t start;
-	time_t end;
 } dbd_usage_msg_t;
 
 typedef struct dbd_get_jobs_msg {
@@ -234,6 +255,7 @@ typedef struct dbd_job_start_msg {
 	char *   account;       /* Account name for those not running
 				 * with associations */
 	uint32_t alloc_cpus;	/* count of allocated processors */
+	uint32_t alloc_nodes;   /* how many nodes used in job */ 
 	uint32_t assoc_id;	/* accounting association id */
 	char *   cluster;       /* cluster job is being ran on */
 	char *   block_id;      /* Bluegene block id */
@@ -244,18 +266,24 @@ typedef struct dbd_job_start_msg {
 	uint16_t job_state;	/* job state */
 	char *   name;		/* job name */
 	char *   nodes;		/* hosts allocated to the job */
+	char *   node_inx;      /* ranged bitmap string of hosts
+				 * allocated to the job */
 	char *   partition;	/* partition job is running on */
 	uint32_t priority;	/* job priority */
 	uint32_t req_cpus;	/* count of req processors */
+	uint32_t resv_id;	/* reservation id */
 	time_t   start_time;	/* job start time */
 	time_t   submit_time;	/* job submit time */
+	uint32_t timelimit;	/* job timelimit */
 	uint32_t uid;	        /* user ID if associations are being used */
+	char *   wckey;		/* wckey name */
 } dbd_job_start_msg_t;
 
-typedef struct dbd_job_start_rc_msg {
-	uint32_t db_index;	/* db_index */
+/* returns a uint32_t along with a return code */
+typedef struct dbd_id_rc_msg {
+	uint32_t id;
 	uint32_t return_code;
-} dbd_job_start_rc_msg_t;
+} dbd_id_rc_msg_t;
 
 typedef struct dbd_job_suspend_msg {
 	uint32_t assoc_id;	/* accounting association id needed
@@ -288,6 +316,8 @@ typedef struct dbd_node_state_msg {
 	char *hostlist;		/* name of hosts */
 	uint16_t new_state;	/* new state of host, see DBD_NODE_STATE_* */
 	char *reason;		/* explanation for the node's state */
+	uint16_t state;         /* current state of node.  Used to get
+				   flags on the state (i.e. maintenance) */
 } dbd_node_state_msg_t;
 
 typedef struct dbd_rc_msg {
@@ -314,6 +344,7 @@ typedef struct dbd_step_comp_msg {
 				  * in db */
 	uint32_t step_id;	/* step ID */
 	uint32_t total_procs;	/* count of allocated processors */
+	uint32_t total_tasks;	/* count of tasks for step */
 } dbd_step_comp_msg_t;
 
 typedef struct dbd_step_start_msg {
@@ -322,11 +353,16 @@ typedef struct dbd_step_start_msg {
 	uint32_t job_id;	/* job ID */
 	char *   name;		/* step name */
 	char *   nodes;		/* hosts allocated to the step */
+	char *   node_inx;	/* bitmap index of hosts allocated to
+				 * the step */
+	uint32_t node_cnt;      /* how many nodes used in step */ 
 	time_t   start_time;	/* step start time */
 	time_t   job_submit_time;/* job submit time needed to find job record
 				  * in db */
 	uint32_t step_id;	/* step ID */
+	uint16_t task_dist;     /* layout method of step */
 	uint32_t total_procs;	/* count of allocated processors */
+	uint32_t total_tasks;	/* count of tasks for step */
 } dbd_step_start_msg_t;
 
 /* flag to let us know if we are running on cache or from the actual
@@ -389,6 +425,9 @@ void inline slurmdbd_free_acct_coord_msg(uint16_t rpc_version,
 					 dbd_acct_coord_msg_t *msg);
 void inline slurmdbd_free_cluster_procs_msg(uint16_t rpc_version, 
 					    dbd_cluster_procs_msg_t *msg);
+void inline slurmdbd_free_rec_msg(uint16_t rpc_version, 
+				  slurmdbd_msg_type_t type,
+				  dbd_rec_msg_t *msg);
 void inline slurmdbd_free_cond_msg(uint16_t rpc_version, 
 				   slurmdbd_msg_type_t type,
 				   dbd_cond_msg_t *msg);
@@ -402,8 +441,8 @@ void inline slurmdbd_free_job_complete_msg(uint16_t rpc_version,
 					   dbd_job_comp_msg_t *msg);
 void inline slurmdbd_free_job_start_msg(uint16_t rpc_version, 
 					dbd_job_start_msg_t *msg);
-void inline slurmdbd_free_job_start_rc_msg(uint16_t rpc_version, 
-					   dbd_job_start_rc_msg_t *msg);
+void inline slurmdbd_free_id_rc_msg(uint16_t rpc_version, 
+					   dbd_id_rc_msg_t *msg);
 void inline slurmdbd_free_job_suspend_msg(uint16_t rpc_version, 
 					  dbd_job_suspend_msg_t *msg);
 void inline slurmdbd_free_list_msg(uint16_t rpc_version, 
@@ -436,6 +475,9 @@ void inline slurmdbd_pack_acct_coord_msg(uint16_t rpc_version,
 void inline slurmdbd_pack_cluster_procs_msg(uint16_t rpc_version, 
 					    dbd_cluster_procs_msg_t *msg,
 					    Buf buffer);
+void inline slurmdbd_pack_rec_msg(uint16_t rpc_version, 
+				  slurmdbd_msg_type_t type,
+				  dbd_rec_msg_t *msg, Buf buffer);
 void inline slurmdbd_pack_cond_msg(uint16_t rpc_version, 
 				   slurmdbd_msg_type_t type,
 				   dbd_cond_msg_t *msg, Buf buffer);
@@ -452,9 +494,9 @@ void inline slurmdbd_pack_job_complete_msg(uint16_t rpc_version,
 void inline slurmdbd_pack_job_start_msg(uint16_t rpc_version, 
 					dbd_job_start_msg_t *msg,
 					Buf buffer);
-void inline slurmdbd_pack_job_start_rc_msg(uint16_t rpc_version, 
-					   dbd_job_start_rc_msg_t *msg,
-					   Buf buffer);
+void inline slurmdbd_pack_id_rc_msg(uint16_t rpc_version, 
+				    dbd_id_rc_msg_t *msg,
+				    Buf buffer);
 void inline slurmdbd_pack_job_suspend_msg(uint16_t rpc_version, 
 					  dbd_job_suspend_msg_t *msg,
 					  Buf buffer);
@@ -493,6 +535,9 @@ int inline slurmdbd_unpack_acct_coord_msg(uint16_t rpc_version,
 int inline slurmdbd_unpack_cluster_procs_msg(uint16_t rpc_version, 
 					     dbd_cluster_procs_msg_t **msg,
 					     Buf buffer);
+int inline slurmdbd_unpack_rec_msg(uint16_t rpc_version, 
+				   slurmdbd_msg_type_t type,
+				   dbd_rec_msg_t **msg, Buf buffer);
 int inline slurmdbd_unpack_cond_msg(uint16_t rpc_version, 
 				    slurmdbd_msg_type_t type,
 				    dbd_cond_msg_t **msg, Buf buffer);
@@ -509,9 +554,9 @@ int inline slurmdbd_unpack_job_complete_msg(uint16_t rpc_version,
 int inline slurmdbd_unpack_job_start_msg(uint16_t rpc_version, 
 					 dbd_job_start_msg_t **msg,
 					 Buf buffer);
-int inline slurmdbd_unpack_job_start_rc_msg(uint16_t rpc_version, 
-					    dbd_job_start_rc_msg_t **msg,
-					    Buf buffer);
+int inline slurmdbd_unpack_id_rc_msg(uint16_t rpc_version, 
+				     dbd_id_rc_msg_t **msg,
+				     Buf buffer);
 int inline slurmdbd_unpack_job_suspend_msg(uint16_t rpc_version, 
 					   dbd_job_suspend_msg_t **msg,
 					   Buf buffer);

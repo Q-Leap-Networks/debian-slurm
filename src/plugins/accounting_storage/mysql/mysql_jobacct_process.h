@@ -9,7 +9,8 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -53,16 +54,39 @@
 #include "src/database/mysql_common.h"
 #include "src/common/slurm_accounting_storage.h"
 
-#ifdef HAVE_MYSQL
-
 //extern int acct_db_init;
-
+extern char *acct_coord_table;
+extern char *acct_table;
+extern char *assoc_day_table;
+extern char *assoc_hour_table;
+extern char *assoc_month_table;
 extern char *assoc_table;
+extern char *cluster_day_table;
+extern char *cluster_hour_table;
+extern char *cluster_month_table;
+extern char *cluster_table;
+extern char *event_table;
 extern char *job_table;
+extern char *last_ran_table;
+extern char *qos_table;
+extern char *resv_table;
 extern char *step_table;
+extern char *txn_table;
+extern char *user_table;
 extern char *suspend_table;
+extern char *wckey_day_table;
+extern char *wckey_hour_table;
+extern char *wckey_month_table;
+extern char *wckey_table;
 
-extern int setup_job_cond_limits(acct_job_cond_t *job_cond, char **extra);
+extern List setup_cluster_list_with_inx(mysql_conn_t *mysql_conn,
+					acct_job_cond_t *job_cond,
+					void **curr_cluster);
+extern int good_nodes_from_inx(List local_cluster_list, 
+			       void **object, char *node_inx,
+			       int submit);
+extern int setup_job_cond_limits(mysql_conn_t *mysql_conn,
+				 acct_job_cond_t *job_cond, char **extra);
 
 extern List mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn, uid_t uid,
 					   acct_job_cond_t *job_cond);
@@ -72,7 +96,4 @@ extern int mysql_jobacct_process_archive(mysql_conn_t *mysql_conn,
 
 extern int mysql_jobacct_process_archive_load(mysql_conn_t *mysql_conn,
 					      acct_archive_rec_t *arch_rec);
-
-#endif
-
 #endif

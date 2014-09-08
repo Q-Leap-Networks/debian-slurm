@@ -3,13 +3,14 @@
  *             launch a user-specified command.
  *****************************************************************************
  *  Copyright (C) 2006-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -41,12 +42,14 @@
 
 #include <slurm/slurm.h>
 
+#include "src/common/basil_resv_conf.h"
 #include "src/common/env.h"
 #include "src/common/read_config.h"
 #include "src/common/slurm_rlimits_info.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
+#include "src/common/plugstack.h"
 
 #include "src/salloc/salloc.h"
 #include "src/salloc/opt.h"
@@ -57,6 +60,10 @@
 #include "src/common/node_select.h"
 #include "src/plugins/select/bluegene/plugin/bg_boot_time.h"
 #include "src/plugins/select/bluegene/wrap_rm_api.h"
+#endif
+
+#ifdef HAVE_CRAY_XT
+#include "src/common/node_select.h"
 #endif
 
 #define MAX_RETRIES 3
@@ -72,9 +79,9 @@ static bool allocation_interrupted = false;
 static uint32_t pending_job_id = 0;
 static time_t last_timeout = 0;
 
-static int fill_job_desc_from_opts(job_desc_msg_t *desc);
-static void ring_terminal_bell(void);
-static int fork_command(char **command);
+static int  _fill_job_desc_from_opts(job_desc_msg_t *desc);
+static void _ring_terminal_bell(void);
+static int  _fork_command(char **command);
 static void _pending_callback(uint32_t job_id);
 static void _ignore_signal(int signo);
 static void _exit_on_signal(int signo);
@@ -87,14 +94,15 @@ static void _ping_handler(srun_ping_msg_t *msg);
 static void _node_fail_handler(srun_node_fail_msg_t *msg);
 
 #ifdef HAVE_BG
-
 #define POLL_SLEEP 3			/* retry interval in seconds  */
-
 static int _wait_bluegene_block_ready(
-	resource_allocation_response_msg_t *alloc);
+			resource_allocation_response_msg_t *alloc);
 static int _blocks_dealloc();
 #endif
 
+#ifdef HAVE_CRAY_XT
+static int  _claim_reservation(resource_allocation_response_msg_t *alloc);
+#endif
 
 int main(int argc, char *argv[])
 {
@@ -114,6 +122,16 @@ int main(int argc, char *argv[])
 	slurm_allocation_callbacks_t callbacks;
 
 	log_init(xbasename(argv[0]), logopt, 0, NULL);
+
+	if (spank_init_allocator() < 0)
+		fatal("Failed to initialize plugin stack");
+
+	/* Be sure to call spank_fini when salloc exits
+	 */
+	if (atexit((void (*) (void)) spank_fini) < 0)
+		error("Failed to register atexit handler for plugins: %m");
+
+
 	if (initialize_and_process_args(argc, argv) < 0) {
 		fatal("salloc parameter parsing");
 	}
@@ -124,6 +142,9 @@ int main(int argc, char *argv[])
 		logopt.prefix_level = 1;
 		log_alter(logopt, 0, NULL);
 	}
+
+	if (spank_init_post_opt() < 0)
+		fatal("Plugin stack post-option processing failed");
 
 	if (opt.cwd && chdir(opt.cwd)) {
 		error("chdir(%s): %m", opt.cwd);
@@ -149,7 +170,7 @@ int main(int argc, char *argv[])
 	 * Request a job allocation
 	 */
 	slurm_init_job_desc_msg(&desc);
-	if (fill_job_desc_from_opts(&desc) == -1) {
+	if (_fill_job_desc_from_opts(&desc) == -1) {
 		exit(1);
 	}
 	if (opt.gid != (gid_t) -1) {
@@ -176,7 +197,7 @@ int main(int argc, char *argv[])
 	xsignal(SIGTERM, _signal_while_allocating);
 	xsignal(SIGUSR1, _signal_while_allocating);
 	xsignal(SIGUSR2, _signal_while_allocating);
-
+	
 	before = time(NULL);
 	while ((alloc = slurm_allocate_resources_blocking(&desc, opt.max_wait,
 					_pending_callback)) == NULL) {
@@ -201,20 +222,29 @@ int main(int argc, char *argv[])
 		}
 		slurm_allocation_msg_thr_destroy(msg_thr);
 		exit(1);
-	}
-
-	/*
-	 * Allocation granted!
-	 */
-	info("Granted job allocation %d", alloc->job_id);
+	} else if(!allocation_interrupted) {
+		/*
+		 * Allocation granted!
+		 */
+		info("Granted job allocation %d", alloc->job_id);
 #ifdef HAVE_BG
-	if (!_wait_bluegene_block_ready(alloc)) {
-		if(!allocation_interrupted)
-			error("Something is wrong with the boot of the block.");
-		goto relinquish;
+		if (!_wait_bluegene_block_ready(alloc)) {
+			if(!allocation_interrupted)
+				error("Something is wrong with the "
+				      "boot of the block.");
+			goto relinquish;
+		}
+#endif
+#ifdef HAVE_CRAY_XT
+		if (!_claim_reservation(alloc)) {
+			if(!allocation_interrupted)
+				error("Something is wrong with the ALPS "
+				      "resource reservation.");
+			goto relinquish;
+		}
+#endif
 	}
 
-#endif
 	after = time(NULL);
 
 	xsignal(SIGHUP, _exit_on_signal);
@@ -228,7 +258,7 @@ int main(int argc, char *argv[])
 	if (opt.bell == BELL_ALWAYS
 	    || (opt.bell == BELL_AFTER_DELAY
 		&& ((after - before) > DEFAULT_BELL_DELAY))) {
-		ring_terminal_bell();
+		_ring_terminal_bell();
 	}
 	if (opt.no_shell)
 		exit(0);
@@ -272,7 +302,7 @@ int main(int argc, char *argv[])
 		return 1;
 	} else {
 		allocation_state = GRANTED;
-		command_pid = pid = fork_command(command_argv);
+		command_pid = pid = _fork_command(command_argv);
 	}
 	pthread_mutex_unlock(&allocation_state_lock);
 
@@ -323,23 +353,34 @@ relinquish:
 		} else if (WIFSIGNALED(status)) {
 			verbose("Command \"%s\" was terminated by signal %d",
 				command_argv[0], WTERMSIG(status));
+			/* if we get these signals we return a normal
+			   exit since this was most likely sent from the
+			   user */
+			switch(WTERMSIG(status)) {
+			case SIGHUP:
+			case SIGINT:
+			case SIGQUIT:
+			case SIGKILL:
+				rc = 0;
+				break;
+			default:
+				break;
+			}
 		}
 	}
-
 	return rc;
 }
 
 
 /* Returns 0 on success, -1 on failure */
-static int fill_job_desc_from_opts(job_desc_msg_t *desc)
+static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 {
 	desc->contiguous = opt.contiguous ? 1 : 0;
 	desc->features = opt.constraints;
 	desc->immediate = opt.immediate ? 1 : 0;
 	desc->name = xstrdup(opt.job_name);
-
-	if(opt.wckey)
- 		xstrfmtcat(desc->name, "\"%s", opt.wckey);
+	desc->reservation = xstrdup(opt.reservation);
+	desc->wckey  = xstrdup(opt.wckey);
 
 	desc->req_nodes = opt.nodelist;
 	desc->exc_nodes = opt.exc_nodes;
@@ -351,9 +392,21 @@ static int fill_job_desc_from_opts(job_desc_msg_t *desc)
 	desc->group_id = opt.gid;
 	if (opt.dependency)
 		desc->dependency = xstrdup(opt.dependency);
+
+	if (opt.cpu_bind)
+		desc->cpu_bind       = opt.cpu_bind;
+	if (opt.cpu_bind_type)
+		desc->cpu_bind_type  = opt.cpu_bind_type;
+	if (opt.mem_bind)
+		desc->mem_bind       = opt.mem_bind;
+	if (opt.mem_bind_type)
+		desc->mem_bind_type  = opt.mem_bind_type;
+	if (opt.plane_size != NO_VAL)
+		desc->plane_size     = opt.plane_size;
 	desc->task_dist  = opt.distribution;
 	if (opt.plane_size != NO_VAL)
 		desc->plane_size = opt.plane_size;
+
 	if (opt.licenses)
 		desc->licenses = xstrdup(opt.licenses);
 	desc->network = opt.network;
@@ -448,7 +501,7 @@ static int fill_job_desc_from_opts(job_desc_msg_t *desc)
 	return 0;
 }
 
-static void ring_terminal_bell(void)
+static void _ring_terminal_bell(void)
 {
         if (isatty(STDOUT_FILENO)) {
                 fprintf(stdout, "\a");
@@ -457,7 +510,7 @@ static void ring_terminal_bell(void)
 }
 
 /* returns the pid of the forked command, or <0 on error */
-static pid_t fork_command(char **command)
+static pid_t _fork_command(char **command)
 {
 	pid_t pid;
 
@@ -696,6 +749,24 @@ static int _blocks_dealloc()
 		}
 	}
 	bg_info_ptr = new_bg_ptr;
+	return rc;
+}
+#endif	/* HAVE_BG */
+
+#ifdef HAVE_CRAY_XT
+/* returns 1 if job and nodes are ready for job to begin, 0 otherwise */
+static int _claim_reservation(resource_allocation_response_msg_t *alloc)
+{
+	int rc = 0;
+	char *resv_id = NULL;
+
+	select_g_get_jobinfo(alloc->select_jobinfo, SELECT_DATA_RESV_ID,
+			     &resv_id);
+	if (resv_id == NULL)
+		return rc;
+	if (basil_resv_conf(resv_id, alloc->job_id) == SLURM_SUCCESS)
+		rc = 1;
+	xfree(resv_id);
 	return rc;
 }
 #endif

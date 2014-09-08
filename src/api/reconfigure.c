@@ -1,15 +1,16 @@
 /*****************************************************************************\
  *  reconfigure.c - request that slurmctld shutdown or re-read the 
  *	            configuration files
- *  $Id: reconfigure.c 14872 2008-08-25 16:25:28Z jette $
+ *  $Id: reconfigure.c 17450 2009-05-12 16:22:58Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -131,6 +132,23 @@ slurm_shutdown (uint16_t options)
 	 */
 	(void) _send_message_controller(SECONDARY_CONTROLLER, &req_msg);
 	return _send_message_controller(PRIMARY_CONTROLLER,   &req_msg);
+}
+
+/*
+ * slurm_takeover - issue RPC to have Slurm backup controller take over the 
+ *                  primary controller. REQUEST_CONTROL is sent by the backup 
+ *                  to the primary controller to take control
+ * RET 0 or a slurm error code
+ */
+int
+slurm_takeover ( void )
+{
+	slurm_msg_t req_msg;
+
+	slurm_msg_t_init(&req_msg);
+	req_msg.msg_type     = REQUEST_TAKEOVER;
+		
+	return _send_message_controller(SECONDARY_CONTROLLER, &req_msg);
 }
 
 int

@@ -4,10 +4,11 @@
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette@llnl.gov> et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -75,6 +76,15 @@ extern void srun_job_complete (struct job_record *job_ptr);
  * IN step_ptr - pointer to the slurmctld job step record
  */
 extern void srun_step_complete (struct step_record *step_ptr);
+
+/*
+ * srun_step_missing - notify srun that a job step is missing from
+ *		       a node we expect to find it on
+ * IN step_ptr  - pointer to the slurmctld job step record
+ * IN node_list - name of nodes we did not find the step on
+ */
+extern void srun_step_missing (struct step_record *step_ptr,
+			       char *node_list);
 
 /*
  * srun_node_fail - notify srun of a node's failure

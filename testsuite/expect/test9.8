@@ -13,10 +13,11 @@
 # Copyright (C) 2002-2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# LLNL-CODE-402394.
+# CODE-OCEC-09-009. All rights reserved.
 # 
 # This file is part of SLURM, a resource management program.
-# For details, see <http://www.llnl.gov/linux/slurm/>.
+# For details, see <https://computing.llnl.gov/linux/slurm/>.
+# Please also read the included file: DISCLAIMER.
 #  
 # SLURM is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
@@ -38,7 +39,7 @@ set test_id      "9.8"
 set exit_code    0
 set file_in      "test$test_id.input"
 set job_cnt      10
-set delay        5
+set delay        10
 set job_name     "test$test_id"
 set sleep_time   300
 set task_cnt     60
@@ -60,7 +61,7 @@ if {[test_front_end] != 0} {
 #   This is especially important on very slow systems (e.g. AIX).
 #
 make_bash_script $file_in "
-$bin_sleep $delay
+$bin_sleep 5
 for ((inx=0; inx < $task_cnt; inx++)) ; do
         $srun -N1 -n1 $bin_sleep $sleep_time &
 done
@@ -71,7 +72,7 @@ $srun -N1 -n1 $bin_sleep $sleep_time
 # Initiate $job_cnt batch jobs
 #
 set start_cnt 0
-set timeout $delay
+set timeout 30
 for {set inx 0} {$inx < $job_cnt} {incr inx} {
 	set sbatch_pid [spawn $sbatch --job-name=$job_name --output=/dev/null --error=/dev/null -t5 $file_in]
 	expect {
@@ -84,22 +85,20 @@ for {set inx 0} {$inx < $job_cnt} {incr inx} {
 			exp_continue
 		}
 		timeout {
-			send_user "\nFAILURE: srun not responding\n"
+			send_user "\nFAILURE: sbatch not responding\n"
 			slow_kill $sbatch_pid
-			exit 1
+			set exit_code 1
 		}
 		eof {
 			wait
 		}
 	}
 }
-if {$start_cnt < 1} {
-	send_user "\nFAILURE: no jobs submitted\n"
-	exit 1
-}
 if {$start_cnt < $job_cnt} {
-	send_user "\nFAILURE: not all jobs submitted\n"
+	send_user "\nFAILURE: $job_cnt of $start_cnt jobs submitted\n"
 	set exit_code 1
+} else {
+	send_user "\nAll $start_cnt jobs submitted\n"
 }
 
 #
@@ -185,8 +184,9 @@ expect {
 # If message are lost, slurmctld re-sends job kill RPC 120 seconds later
 # In any case, make sure that all jobs get completed
 #
-exec $bin_sleep 10
+exec $bin_sleep     10
 set completing_jobs 0
+set running_jobs    0
 spawn $squeue --noheader --user $user_name
 expect {
 	-re "test9.8.*$user_name *CG" {
@@ -194,11 +194,29 @@ expect {
 		exp_continue
 	}
 	-re "test9.8.*$user_name" {
-		send_user "\nFAILURE: jobs not all gone\n"
-		set exit_code 1
+		incr running_jobs
+		exp_continue
 	}
 	eof {
 		wait
+	}
+}
+#
+# The following logic handles the scancel request failing
+# due to a very busy system (reports FAILURE above)
+#
+# Increasing the MessageTimeout configuration parameter
+# should fix this problem. 
+#
+if {$running_jobs != 0} {
+	send_user "\nFAILURE: jobs not all cancelled\n"
+	set exit_code 1
+
+	spawn $scancel --quiet --user $user_name
+	expect {
+		eof {
+			wait
+		}
 	}
 }
 if {$completing_jobs != 0} {
@@ -208,7 +226,7 @@ if {$completing_jobs != 0} {
 	set completing_jobs 0
 	spawn $squeue --noheader --user $user_name
 	expect {
-		-re "$user_name *CG" {
+		-re "$job_name *$user_name *CG" {
 			incr completing_jobs
 			exp_continue
 		}
@@ -228,7 +246,7 @@ if {$completing_jobs != 0} {
 		exec $bin_sleep $max_wait
 		spawn $squeue --noheader --user $user_name
 		expect {
-			-re "$user_name *CG" {
+			-re "$job_name *$user_name *CG" {
 				incr completing_jobs
 				exp_continue
 			}

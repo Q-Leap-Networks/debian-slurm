@@ -4,10 +4,11 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -40,7 +41,7 @@ typedef struct env_options {
 	bool nprocs_set;	/* true if nprocs explicitly set */
 	bool cpus_set;		/* true if cpus_per_task explicitly set */
 	task_dist_states_t distribution; /* --distribution=, -m dist	*/
-	int plane_size;         /* plane_size for SLURM_DIST_PLANE */
+	uint16_t plane_size;         /* plane_size for SLURM_DIST_PLANE */
 	cpu_bind_type_t
 		cpu_bind_type;	/* --cpu_bind=			*/
 	char *cpu_bind;		/* binding map for map/mask_cpu	*/
@@ -55,7 +56,6 @@ typedef struct env_options {
 	char *nodelist;		/* nodelist in string form */
 	char **env;             /* job environment */
 	uint16_t comm_port;	/* srun's communication port */
-	char *comm_hostname;	/* srun's hostname */
 	slurm_addr *cli;	/* launch node address */
 	slurm_addr *self;
 	int jobid;		/* assigned job id */
@@ -73,7 +73,9 @@ typedef struct env_options {
 	uint16_t pty_port;	/* used to communicate window size changes */
 	uint8_t ws_col;		/* window size, columns */
 	uint8_t ws_row;		/* window size, row count */
-	char *ckpt_path;	/* --ckpt-path=                 */
+	char *ckpt_dir;		/* --ckpt-dir=                 */
+	uint16_t restart_cnt;	/* count of job restarts	*/
+	uint16_t batch_flag;	/* 1 if batch: queued job with script */
 } env_t;
 
 
@@ -136,20 +138,21 @@ extern void env_array_for_batch_job(char ***dest,
 				    const char* node_name);
 
 /*
- * Set in "dest the environment variables relevant to a SLURM job step,
+ * Set in "dest" the environment variables relevant to a SLURM job step,
  * overwriting any environment variables of the same name.  If the address
  * pointed to by "dest" is NULL, memory will automatically be xmalloc'ed.
  * The array is terminated by a NULL pointer, and thus is suitable for
- * use by execle() and other env_array_* functions.
+ * use by execle() and other env_array_* functions.  If preserve_env is
+ * true, the variables SLURM_NNODES and SLURM_NPROCS remain unchanged.
  *
  * Sets variables:
  *	SLURM_STEP_ID
  *	SLURM_STEP_NUM_NODES
  *	SLURM_STEP_NUM_TASKS
  *	SLURM_STEP_TASKS_PER_NODE
- *	SLURM_STEP_LAUNCHER_HOSTNAME
  *	SLURM_STEP_LAUNCHER_PORT
  *	SLURM_STEP_LAUNCHER_IPADDR
+ *	SLURM_STEP_RESV_PORTS
  *
  * Sets OBSOLETE variables:
  *	SLURM_STEPID
@@ -165,8 +168,8 @@ extern void env_array_for_batch_job(char ***dest,
 void
 env_array_for_step(char ***dest,
 		   const job_step_create_response_msg_t *step,
-		   const char *launcher_hostname,
-		   uint16_t launcher_port);
+		   uint16_t launcher_port,
+		   bool preserve_env);
 
 /*
  * Return an empty environment variable array (contains a single
@@ -264,8 +267,8 @@ char **env_array_user_default(const char *username, int timeout, int mode);
 /*
  * The cpus-per-node representation in SLURM (and perhaps tasks-per-node
  * in the future) is stored in a compressed format comprised of two
- * equal-length arrays of uint32_t, and an integer holding the array length.
- * In one array an element represents a count (number of cpus, number of tasks,
+ * equal-length arrays, and an integer holding the array length. In one 
+ * array an element represents a count (number of cpus, number of tasks,
  * etc.), and the corresponding element in the other array contains the
  * number of times the count is repeated sequentially in the uncompressed
  * something-per-node array.
@@ -274,7 +277,7 @@ char **env_array_user_default(const char *username, int timeout, int mode);
  * array.  Free with xfree().
  */
 char *uint32_compressed_to_str(uint32_t array_len,
-			       const uint32_t *array,
+			       const uint16_t *array,
 			       const uint32_t *array_reps);
 
 #endif

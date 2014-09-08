@@ -4,12 +4,13 @@
  *  $Id: accounting_storage_mysql.c 13061 2008-01-22 21:23:56Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -87,17 +88,12 @@ const char plugin_name[] = "Accounting storage MYSQL plugin";
 const char plugin_type[] = "accounting_storage/mysql";
 const uint32_t plugin_version = 100;
 
-#ifdef HAVE_MYSQL
-
 static mysql_db_info_t *mysql_db_info = NULL;
 static char *mysql_db_name = NULL;
 static time_t global_last_rollup = 0;
 static pthread_mutex_t rollup_lock = PTHREAD_MUTEX_INITIALIZER;
 
-#define DEFAULT_ACCT_DB "slurm_acct_db"
 #define DELETE_SEC_BACK 86400
-
-
 
 char *acct_coord_table = "acct_coord_table";
 char *acct_table = "acct_table";
@@ -113,6 +109,7 @@ char *event_table = "cluster_event_table";
 char *job_table = "job_table";
 char *last_ran_table = "last_ran_table";
 char *qos_table = "qos_table";
+char *resv_table = "resv_table";
 char *step_table = "step_table";
 char *txn_table = "txn_table";
 char *user_table = "user_table";
@@ -252,9 +249,10 @@ static uint32_t _get_wckeyid(mysql_conn_t *mysql_conn, char **name,
 		/* since we are unable to rely on uids here (someone could
 		   not have there uid in the system yet) we must
 		   first get the user name from the associd */
-		if(!(user = _get_user_from_associd(mysql_conn, associd)))
+		if(!(user = _get_user_from_associd(mysql_conn, associd))) {
+			error("No user for associd %u", associd);
 			goto no_wckeyid;
-
+		}
 		/* get the default key */
 		if(!*name) {
 			acct_user_rec_t user_rec;
@@ -262,10 +260,13 @@ static uint32_t _get_wckeyid(mysql_conn_t *mysql_conn, char **name,
 			user_rec.uid = NO_VAL;
 			user_rec.name = user;
 			if(assoc_mgr_fill_in_user(mysql_conn, &user_rec,
-						  1) != SLURM_SUCCESS) {
-				error("No user by name of %s", user);
+						  1, NULL) != SLURM_SUCCESS) {
+				error("No user by name of %s assoc %u",
+				      user, associd);
+				xfree(user);
 				goto no_wckeyid;
 			}
+			
 			if(user_rec.default_wckey)
 				*name = xstrdup_printf("*%s", 
 						       user_rec.default_wckey);
@@ -279,7 +280,8 @@ static uint32_t _get_wckeyid(mysql_conn_t *mysql_conn, char **name,
 		wckey_rec.user = user;
 		wckey_rec.cluster = cluster;
 		if(assoc_mgr_fill_in_wckey(mysql_conn, &wckey_rec,
-					   1, NULL) != SLURM_SUCCESS) {
+					   ACCOUNTING_ENFORCE_WCKEYS,
+					   NULL) != SLURM_SUCCESS) {
 			List wckey_list = NULL;
 			acct_wckey_rec_t *wckey_ptr = NULL;
 						
@@ -290,7 +292,7 @@ static uint32_t _get_wckeyid(mysql_conn_t *mysql_conn, char **name,
 			wckey_ptr->user = xstrdup(user);
 			wckey_ptr->cluster = xstrdup(cluster);
 			list_append(wckey_list, wckey_ptr);
-			/* info("adding wckey '%s' '%s' '%s'",  */
+/* 			info("adding wckey '%s' '%s' '%s'", */
 /* 				     wckey_ptr->name, wckey_ptr->user, */
 /* 				     wckey_ptr->cluster); */
 			/* we have already checked to make
@@ -304,7 +306,8 @@ static uint32_t _get_wckeyid(mysql_conn_t *mysql_conn, char **name,
 				acct_storage_p_commit(mysql_conn, 1);
 			/* If that worked lets get it */
 			assoc_mgr_fill_in_wckey(mysql_conn, &wckey_rec,
-						1, NULL);
+						ACCOUNTING_ENFORCE_WCKEYS,
+						NULL);
 				
 			list_destroy(wckey_list);
 		}
@@ -478,14 +481,15 @@ static int _setup_association_limits(acct_association_rec_t *assoc,
 	if(!assoc)
 		return SLURM_ERROR;
 	
-	if((int)assoc->fairshare >= 0) {
+	if((int)assoc->shares_raw >= 0) {
 		xstrcat(*cols, ", fairshare");
-		xstrfmtcat(*vals, ", %u", assoc->fairshare);
-		xstrfmtcat(*extra, ", fairshare=%u", assoc->fairshare);
-	} else if (((int)assoc->fairshare == INFINITE) || get_fs) {
+		xstrfmtcat(*vals, ", %u", assoc->shares_raw);
+		xstrfmtcat(*extra, ", fairshare=%u", assoc->shares_raw);
+	} else if (((int)assoc->shares_raw == INFINITE) || get_fs) {
 		xstrcat(*cols, ", fairshare");
 		xstrcat(*vals, ", 1");
-		xstrcat(*extra, ", fairshare=1");		
+		xstrcat(*extra, ", fairshare=1");
+		assoc->shares_raw = 1;
 	} 
 
 	if((int)assoc->grp_cpu_mins >= 0) {
@@ -854,10 +858,77 @@ static int _setup_qos_limits(acct_qos_rec_t *qos,
 			   qos->job_flags);
 	}
 
+	if((int)qos->usage_factor >= 0) {
+		xstrcat(*cols, ", usage_factor");
+		xstrfmtcat(*vals, ", %f", qos->usage_factor);
+		xstrfmtcat(*extra, ", usage_factor=%f", qos->usage_factor);
+	} else if((int)qos->usage_factor == INFINITE) {
+		xstrcat(*cols, ", usage_factor");
+		xstrcat(*vals, ", 1");
+		xstrcat(*extra, ", usage_factor=1");
+	}
+
 	return SLURM_SUCCESS;
 
 }
 
+static int _setup_resv_limits(acct_reservation_rec_t *resv,
+			      char **cols, char **vals,
+			      char **extra)
+{	
+	/* strip off the action item from the flags */
+
+	if(resv->assocs) {
+		xstrcat(*cols, ", assoclist");
+		xstrfmtcat(*vals, ", \"%s\"", resv->assocs);
+		xstrfmtcat(*extra, ", assoclist=\"%s\"", resv->assocs);
+	}
+
+	if(resv->cpus != (uint32_t)NO_VAL) {
+		xstrcat(*cols, ", cpus");
+		xstrfmtcat(*vals, ", %u", resv->cpus);
+		xstrfmtcat(*extra, ", cpus=%u", resv->cpus);		
+	}
+	
+	if(resv->flags != (uint16_t)NO_VAL) {
+		xstrcat(*cols, ", flags");
+		xstrfmtcat(*vals, ", %u", resv->flags);
+		xstrfmtcat(*extra, ", flags=%u", resv->flags);		
+	}
+
+	if(resv->name) {
+		xstrcat(*cols, ", name");
+		xstrfmtcat(*vals, ", \"%s\"", resv->name);
+		xstrfmtcat(*extra, ", name=\"%s\"", resv->name);
+	}
+	
+	if(resv->nodes) {
+		xstrcat(*cols, ", nodelist");
+		xstrfmtcat(*vals, ", \"%s\"", resv->nodes);
+		xstrfmtcat(*extra, ", nodelist=\"%s\"", resv->nodes);
+	}
+	
+	if(resv->node_inx) {
+		xstrcat(*cols, ", node_inx");
+		xstrfmtcat(*vals, ", \"%s\"", resv->node_inx);
+		xstrfmtcat(*extra, ", node_inx=\"%s\"", resv->node_inx);
+	}
+	
+	if(resv->time_end) {
+		xstrcat(*cols, ", end");
+		xstrfmtcat(*vals, ", %u", resv->time_end);
+		xstrfmtcat(*extra, ", end=%u", resv->time_end);		
+	}
+
+	if(resv->time_start) {
+		xstrcat(*cols, ", start");
+		xstrfmtcat(*vals, ", %u", resv->time_start);
+		xstrfmtcat(*extra, ", start=%u", resv->time_start);		
+	}
+
+	
+	return SLURM_SUCCESS;
+}
 /* when doing a select on this all the select should have a prefix of
  * t1. */
 static int _setup_association_cond_limits(acct_association_cond_t *assoc_cond,
@@ -1294,38 +1365,159 @@ static int _setup_wckey_cond_limits(acct_wckey_cond_t *wckey_cond,
 	return set;
 }
 
-static uint32_t _get_parent_id(
-       mysql_conn_t *mysql_conn, char *parent, char *cluster)
+static int _setup_resv_cond_limits(acct_reservation_cond_t *resv_cond,
+				   char **extra)
 {
-       uint32_t parent_id = 0;
-       MYSQL_RES *result = NULL;
-       MYSQL_ROW row;
-       char *query = NULL;
-       
-       xassert(parent); 
-       xassert(cluster);
+	int set = 0;
+	ListIterator itr = NULL;
+	char *object = NULL;
+	char *prefix = "t1";
+	time_t now = time(NULL);
 
-       query = xstrdup_printf("select id from %s where user='' "
-                              "and deleted = 0 and acct=\"%s\" "
-                              "and cluster=\"%s\";", 
-                              assoc_table, parent, cluster);
-       debug4("%d(%d) query\n%s", mysql_conn->conn, __LINE__, query);
-       
-       if(!(result = mysql_db_query_ret(mysql_conn->db_conn, query, 1))) {
-               xfree(query);
-               return 0;
-       }
-       xfree(query);
+	if(!resv_cond)
+		return 0;
 
-       if((row = mysql_fetch_row(result))) {
-               if(row[0])
-                       parent_id = atoi(row[0]);       
-       } else 
-               error("no association for parent %s on cluster %s",
-                     parent, cluster);
-       mysql_free_result(result);
+	if(resv_cond->cluster_list && list_count(resv_cond->cluster_list)) {
+		set = 0;
+		if(*extra)
+			xstrcat(*extra, " && (");
+		else
+			xstrcat(*extra, " where (");
+		itr = list_iterator_create(resv_cond->cluster_list);
+		while((object = list_next(itr))) {
+			if(set) 
+				xstrcat(*extra, " || ");
+			xstrfmtcat(*extra, "%s.cluster=\"%s\"", prefix, object);
+			set = 1;
+		}
+		list_iterator_destroy(itr);
+		xstrcat(*extra, ")");
+	}
 
-       return parent_id;
+	if(resv_cond->id_list && list_count(resv_cond->id_list)) {
+		set = 0;
+		if(*extra)
+			xstrcat(*extra, " && (");
+		else
+			xstrcat(*extra, " where (");
+		itr = list_iterator_create(resv_cond->id_list);
+		while((object = list_next(itr))) {
+			if(set) 
+				xstrcat(*extra, " || ");
+			xstrfmtcat(*extra, "%s.id=%s", prefix, object);
+			set = 1;
+		}
+		list_iterator_destroy(itr);
+		xstrcat(*extra, ")");
+	}
+	
+	if(resv_cond->name_list && list_count(resv_cond->name_list)) {
+		set = 0;
+		if(*extra)
+			xstrcat(*extra, " && (");
+		else
+			xstrcat(*extra, " where (");
+		itr = list_iterator_create(resv_cond->name_list);
+		while((object = list_next(itr))) {
+			if(set) 
+				xstrcat(*extra, " || ");
+			xstrfmtcat(*extra, "%s.name=\"%s\"", prefix, object);
+			set = 1;
+		}
+		list_iterator_destroy(itr);
+		xstrcat(*extra, ")");
+	}
+
+	if(resv_cond->time_start) {
+		if(!resv_cond->time_end)
+			resv_cond->time_end = now;
+
+		if(*extra)
+			xstrcat(*extra, " && (");
+		else
+			xstrcat(*extra, " where (");
+		xstrfmtcat(*extra, 
+			   "(t1.start < %d "
+			   "&& (t1.end >= %d || t1.end = 0)))",
+			   resv_cond->time_end, resv_cond->time_start);
+	} else if(resv_cond->time_end) {
+		if(*extra)
+			xstrcat(*extra, " && (");
+		else
+			xstrcat(*extra, " where (");
+		xstrfmtcat(*extra, 
+			   "(t1.start < %d))", resv_cond->time_end);
+	}
+
+
+	return set;
+}
+
+static uint32_t _get_parent_id(
+	mysql_conn_t *mysql_conn, char *parent, char *cluster)
+{
+	uint32_t parent_id = 0;
+	MYSQL_RES *result = NULL;
+	MYSQL_ROW row;
+	char *query = NULL;
+	
+	xassert(parent); 
+	xassert(cluster);
+
+	query = xstrdup_printf("select id from %s where user='' "
+			       "and deleted = 0 and acct=\"%s\" "
+			       "and cluster=\"%s\";", 
+			       assoc_table, parent, cluster);
+	debug4("%d(%d) query\n%s", mysql_conn->conn, __LINE__, query);
+	
+	if(!(result = mysql_db_query_ret(mysql_conn->db_conn, query, 1))) {
+		xfree(query);
+		return 0;
+	}
+	xfree(query);
+
+	if((row = mysql_fetch_row(result))) {
+		if(row[0])
+			parent_id = atoi(row[0]);	
+	} else 
+		error("no association for parent %s on cluster %s",
+		      parent, cluster);
+	mysql_free_result(result);
+
+	return parent_id;
+}
+
+static int _set_assoc_lft_rgt(
+	mysql_conn_t *mysql_conn, acct_association_rec_t *assoc)
+{
+	MYSQL_RES *result = NULL;
+	MYSQL_ROW row;
+	char *query = NULL;
+	int rc = SLURM_ERROR;
+
+	xassert(assoc->id);
+
+	query = xstrdup_printf("select lft, rgt from %s where id=%u;", 
+			       assoc_table, assoc->id);
+	debug4("%d(%d) query\n%s", mysql_conn->conn, __LINE__, query);
+	
+	if(!(result = mysql_db_query_ret(mysql_conn->db_conn, query, 1))) {
+		xfree(query);
+		return 0;
+	}
+	xfree(query);
+
+	if((row = mysql_fetch_row(result))) {
+		if(row[0])
+			assoc->lft = atoi(row[0]);	
+		if(row[1])
+			assoc->rgt = atoi(row[1]);	
+		rc = SLURM_SUCCESS;
+	} else 
+		error("no association (%u)", assoc->id);
+	mysql_free_result(result);
+
+	return rc;
 }
 
 /* This function will take the object given and free it later so it
@@ -1818,7 +2010,7 @@ static int _modify_unset_users(mysql_conn_t *mysql_conn,
 				continue;
 			}
 			/* We do want to send all user accounts though */
-			mod_assoc->fairshare = NO_VAL;
+			mod_assoc->shares_raw = NO_VAL;
 			if(row[ASSOC_PART][0]) { 
 				// see if there is a partition name
 				object = xstrdup_printf(
@@ -2398,10 +2590,9 @@ static int _get_db_index(MYSQL *db_conn,
    user or not.
 */
 static int _get_usage_for_list(mysql_conn_t *mysql_conn,
-			    slurmdbd_msg_type_t type, List object_list, 
-			    time_t start, time_t end)
+			       slurmdbd_msg_type_t type, List object_list, 
+			       time_t start, time_t end)
 {
-#ifdef HAVE_MYSQL
 	int rc = SLURM_SUCCESS;
 	int i=0;
 	MYSQL_RES *result = NULL;
@@ -2513,7 +2704,7 @@ static int _get_usage_for_list(mysql_conn_t *mysql_conn,
 		query = xstrdup_printf(
 			"select %s from %s "
 			"where (period_start < %d && period_start >= %d) "
-			"&& %s order by id, period_start;",
+			"&& (%s) order by id, period_start;",
 			tmp, my_usage_table, end, start, id_str);
 		break;
 	default:
@@ -2607,9 +2798,6 @@ static int _get_usage_for_list(mysql_conn_t *mysql_conn,
 
 
 	return rc;
-#else
-	return SLURM_ERROR;
-#endif
 }
 
 static mysql_db_info_t *_mysql_acct_create_db_info()
@@ -2617,10 +2805,12 @@ static mysql_db_info_t *_mysql_acct_create_db_info()
 	mysql_db_info_t *db_info = xmalloc(sizeof(mysql_db_info_t));
 	db_info->port = slurm_get_accounting_storage_port();
 	if(!db_info->port) {
-		db_info->port = 3306;
+		db_info->port = DEFAULT_MYSQL_PORT;
 		slurm_set_accounting_storage_port(db_info->port);
 	}
 	db_info->host = slurm_get_accounting_storage_host();	
+	db_info->backup = slurm_get_accounting_storage_backup_host();
+	
 	db_info->user = slurm_get_accounting_storage_user();	
 	db_info->pass = slurm_get_accounting_storage_pass();	
 	return db_info;
@@ -2695,8 +2885,9 @@ static int _mysql_acct_check_tables(MYSQL *db_conn)
 		{ "deleted", "tinyint default 0" },
 		{ "name", "tinytext not null" },
 		{ "control_host", "tinytext not null default ''" },
-		{ "control_port", "mediumint not null default 0" },
-		{ "rpc_version", "mediumint not null default 0" },
+		{ "control_port", "int unsigned not null default 0" },
+		{ "rpc_version", "smallint unsigned not null default 0" },
+		{ "classification", "smallint unsigned default 0" },
 		{ NULL, NULL}		
 	};
 
@@ -2709,6 +2900,7 @@ static int _mysql_acct_check_tables(MYSQL *db_conn)
 		{ "cpu_count", "int default 0" },
 		{ "alloc_cpu_secs", "bigint default 0" },
 		{ "down_cpu_secs", "bigint default 0" },
+		{ "pdown_cpu_secs", "bigint default 0" },
 		{ "idle_cpu_secs", "bigint default 0" },
 		{ "resv_cpu_secs", "bigint default 0" },
 		{ "over_cpu_secs", "bigint default 0" },
@@ -2719,19 +2911,21 @@ static int _mysql_acct_check_tables(MYSQL *db_conn)
 		{ "node_name", "tinytext default '' not null" },
 		{ "cluster", "tinytext not null" },
 		{ "cpu_count", "int not null" },
+		{ "state", "smallint default 0 not null" },
 		{ "period_start", "int unsigned not null" },
 		{ "period_end", "int unsigned default 0 not null" },
 		{ "reason", "tinytext not null" },
+		{ "cluster_nodes", "text not null default ''" },
 		{ NULL, NULL}		
 	};
 
 	storage_field_t job_table_fields[] = {
 		{ "id", "int not null auto_increment" },
 		{ "deleted", "tinyint default 0" },
-		{ "jobid", "mediumint unsigned not null" },
-		{ "associd", "mediumint unsigned not null" },
+		{ "jobid", "int unsigned not null" },
+		{ "associd", "int unsigned not null" },
 		{ "wckey", "tinytext not null default ''" },
-		{ "wckeyid", "mediumint unsigned not null" },
+		{ "wckeyid", "int unsigned not null" },
 		{ "uid", "smallint unsigned not null" },
 		{ "gid", "smallint unsigned not null" },
 		{ "cluster", "tinytext not null" },
@@ -2743,16 +2937,20 @@ static int _mysql_acct_check_tables(MYSQL *db_conn)
 		{ "start", "int unsigned default 0 not null" },
 		{ "end", "int unsigned default 0 not null" },
 		{ "suspended", "int unsigned default 0 not null" },
+		{ "timelimit", "int unsigned default 0 not null" },
 		{ "name", "tinytext not null" }, 
 		{ "track_steps", "tinyint not null" },
 		{ "state", "smallint not null" }, 
 		{ "comp_code", "int default 0 not null" },
 		{ "priority", "int not null" },
-		{ "req_cpus", "mediumint unsigned not null" }, 
-		{ "alloc_cpus", "mediumint unsigned not null" }, 
+		{ "req_cpus", "int unsigned not null" }, 
+		{ "alloc_cpus", "int unsigned not null" }, 
+		{ "alloc_nodes", "int unsigned not null" }, 
 		{ "nodelist", "text" },
+		{ "node_inx", "text" },
 		{ "kill_requid", "smallint default -1 not null" },
 		{ "qos", "smallint default 0" },
+		{ "resvid", "int unsigned not null" },
 		{ NULL, NULL}
 	};
 
@@ -2786,6 +2984,22 @@ static int _mysql_acct_check_tables(MYSQL *db_conn)
 		{ "preemptees", "text not null default ''" },
 		{ "preemptors", "text not null default ''" },
 		{ "priority", "int default 0" },
+		{ "usage_factor", "float default 1.0 not null" },
+		{ NULL, NULL}		
+	};
+
+	storage_field_t resv_table_fields[] = {
+		{ "id", "int unsigned default 0 not null" },
+		{ "name", "text not null" },
+		{ "cluster", "text not null" },
+		{ "deleted", "tinyint default 0" },
+		{ "cpus", "int unsigned not null" },
+		{ "assoclist", "text not null default ''" },
+		{ "nodelist", "text not null default ''" },
+		{ "node_inx", "text not null default ''" },
+		{ "start", "int unsigned default 0 not null"},
+		{ "end", "int unsigned default 0 not null" },
+		{ "flags", "smallint default 0 not null" },
 		{ NULL, NULL}		
 	};
 
@@ -2798,36 +3012,40 @@ static int _mysql_acct_check_tables(MYSQL *db_conn)
 		{ "suspended", "int unsigned default 0 not null" },
 		{ "name", "text not null" },
 		{ "nodelist", "text not null" },
+		{ "node_inx", "text" },
 		{ "state", "smallint not null" },
 		{ "kill_requid", "smallint default -1 not null" },
 		{ "comp_code", "int default 0 not null" },
-		{ "cpus", "mediumint unsigned not null" },
+		{ "nodes", "int unsigned not null" },
+		{ "cpus", "int unsigned not null" },
+		{ "tasks", "int unsigned not null" },
+		{ "task_dist", "smallint default 0" },
 		{ "user_sec", "int unsigned default 0 not null" },
 		{ "user_usec", "int unsigned default 0 not null" },
 		{ "sys_sec", "int unsigned default 0 not null" },
 		{ "sys_usec", "int unsigned default 0 not null" },
 		{ "max_vsize", "int unsigned default 0 not null" },
 		{ "max_vsize_task", "smallint unsigned default 0 not null" },
-		{ "max_vsize_node", "mediumint unsigned default 0 not null" },
+		{ "max_vsize_node", "int unsigned default 0 not null" },
 		{ "ave_vsize", "float default 0.0 not null" },
 		{ "max_rss", "int unsigned default 0 not null" },
 		{ "max_rss_task", "smallint unsigned default 0 not null" },
-		{ "max_rss_node", "mediumint unsigned default 0 not null" },
+		{ "max_rss_node", "int unsigned default 0 not null" },
 		{ "ave_rss", "float default 0.0 not null" },
-		{ "max_pages", "mediumint unsigned default 0 not null" },
+		{ "max_pages", "int unsigned default 0 not null" },
 		{ "max_pages_task", "smallint unsigned default 0 not null" },
-		{ "max_pages_node", "mediumint unsigned default 0 not null" },
+		{ "max_pages_node", "int unsigned default 0 not null" },
 		{ "ave_pages", "float default 0.0 not null" },
-		{ "min_cpu", "mediumint unsigned default 0 not null" },
+		{ "min_cpu", "int unsigned default 0 not null" },
 		{ "min_cpu_task", "smallint unsigned default 0 not null" },
-		{ "min_cpu_node", "mediumint unsigned default 0 not null" },
+		{ "min_cpu_node", "int unsigned default 0 not null" },
 		{ "ave_cpu", "float default 0.0 not null" },
 		{ NULL, NULL}
 	};
 
 	storage_field_t suspend_table_fields[] = {
 		{ "id", "int not null" },
-		{ "associd", "mediumint not null" },
+		{ "associd", "int not null" },
 		{ "start", "int unsigned default 0 not null" },
 		{ "end", "int unsigned default 0 not null" },
 		{ NULL, NULL}		
@@ -2872,6 +3090,8 @@ static int _mysql_acct_check_tables(MYSQL *db_conn)
 		{ "id", "int not null" },
 		{ "period_start", "int unsigned not null" },
 		{ "alloc_cpu_secs", "bigint default 0" },
+		{ "resv_cpu_secs", "bigint default 0" },
+		{ "over_cpu_secs", "bigint default 0" },
 		{ NULL, NULL}		
 	};
 
@@ -3076,6 +3296,12 @@ static int _mysql_acct_check_tables(MYSQL *db_conn)
 				 ", primary key (id, stepid))") == SLURM_ERROR)
 		return SLURM_ERROR;
 
+	if(mysql_db_create_table(db_conn, resv_table,
+				 resv_table_fields, 
+				 ", primary key (id, start, cluster(20)))")
+	   == SLURM_ERROR)
+		return SLURM_ERROR;
+
 	if(mysql_db_create_table(db_conn, suspend_table,
 				 suspend_table_fields, 
 				 ")") == SLURM_ERROR)
@@ -3140,7 +3366,6 @@ static int _mysql_acct_check_tables(MYSQL *db_conn)
 
 	return rc;
 }
-#endif
 
 /*
  * init() is called when the plugin is loaded, before any other functions
@@ -3150,14 +3375,8 @@ extern int init ( void )
 {
 	static int first = 1;
 	int rc = SLURM_SUCCESS;
-#ifdef HAVE_MYSQL
 	MYSQL *db_conn = NULL;
 	char *location = NULL;
-#else
-	fatal("No MySQL database was found on the machine. "
-	      "Please check the config.log from the run of configure "
-	      "and run again.");
-#endif
 
 	/* since this can be loaded from many different places
 	   only tell us once. */
@@ -3174,25 +3393,24 @@ extern int init ( void )
 		xfree(cluster_name);
 	}
 
-#ifdef HAVE_MYSQL
 	mysql_db_info = _mysql_acct_create_db_info();
 
 	location = slurm_get_accounting_storage_loc();
 	if(!location)
-		mysql_db_name = xstrdup(DEFAULT_ACCT_DB);
+		mysql_db_name = xstrdup(DEFAULT_ACCOUNTING_DB);
 	else {
 		int i = 0;
 		while(location[i]) {
 			if(location[i] == '.' || location[i] == '/') {
 				debug("%s doesn't look like a database "
 				      "name using %s",
-				      location, DEFAULT_ACCT_DB);
+				      location, DEFAULT_ACCOUNTING_DB);
 				break;
 			}
 			i++;
 		}
 		if(location[i]) {
-			mysql_db_name = xstrdup(DEFAULT_ACCT_DB);
+			mysql_db_name = xstrdup(DEFAULT_ACCOUNTING_DB);
 			xfree(location);
 		} else
 			mysql_db_name = location;
@@ -3208,8 +3426,6 @@ extern int init ( void )
 	rc = _mysql_acct_check_tables(db_conn);
 
 	mysql_close_db_connection(&db_conn);
-	
-#endif		
 
 	if(rc == SLURM_SUCCESS)
 		verbose("%s loaded", plugin_name);
@@ -3221,21 +3437,16 @@ extern int init ( void )
 
 extern int fini ( void )
 {
-#ifdef HAVE_MYSQL
 	destroy_mysql_db_info(mysql_db_info);		
 	xfree(mysql_db_name);
 	xfree(default_qos_str);
 	mysql_cleanup();
 	return SLURM_SUCCESS;
-#else
-	return SLURM_ERROR;
-#endif
 }
 
 extern void *acct_storage_p_get_connection(bool make_agent, int conn_num,
 					   bool rollback)
 {
-#ifdef HAVE_MYSQL
 	mysql_conn_t *mysql_conn = xmalloc(sizeof(mysql_conn_t));
 	
 	if(!mysql_db_info)
@@ -3255,15 +3466,10 @@ extern void *acct_storage_p_get_connection(bool make_agent, int conn_num,
 		errno = SLURM_SUCCESS;
 	}
 	return (void *)mysql_conn;
-#else
-	return NULL;
-#endif
 }
 
 extern int acct_storage_p_close_connection(mysql_conn_t **mysql_conn)
 {
-#ifdef HAVE_MYSQL
-
 	if(!mysql_conn || !(*mysql_conn))
 		return SLURM_SUCCESS;
 
@@ -3273,14 +3479,10 @@ extern int acct_storage_p_close_connection(mysql_conn_t **mysql_conn)
 	xfree((*mysql_conn));
 
 	return SLURM_SUCCESS;
-#else
-	return SLURM_ERROR;
-#endif
 }
 
 extern int acct_storage_p_commit(mysql_conn_t *mysql_conn, bool commit)
 {
-#ifdef HAVE_MYSQL
 	if(_check_connection(mysql_conn) != SLURM_SUCCESS)
 		return SLURM_ERROR;
 
@@ -3380,22 +3582,22 @@ extern int acct_storage_p_commit(mysql_conn_t *mysql_conn, bool commit)
 			case ACCT_REMOVE_USER:
 			case ACCT_ADD_COORD:
 			case ACCT_REMOVE_COORD:
-				rc = assoc_mgr_update_local_users(object);
+				rc = assoc_mgr_update_users(object);
 				break;
 			case ACCT_ADD_ASSOC:
 			case ACCT_MODIFY_ASSOC:
 			case ACCT_REMOVE_ASSOC:
-				rc = assoc_mgr_update_local_assocs(object);
+				rc = assoc_mgr_update_assocs(object);
 				break;
 			case ACCT_ADD_QOS:
 			case ACCT_MODIFY_QOS:
 			case ACCT_REMOVE_QOS:
-				rc = assoc_mgr_update_local_qos(object);
+				rc = assoc_mgr_update_qos(object);
 				break;
 			case ACCT_ADD_WCKEY:
 			case ACCT_MODIFY_WCKEY:
 			case ACCT_REMOVE_WCKEY:
-				rc = assoc_mgr_update_local_wckeys(object);
+				rc = assoc_mgr_update_wckeys(object);
 				break;
 			case ACCT_UPDATE_NOTSET:
 			default:
@@ -3411,15 +3613,11 @@ extern int acct_storage_p_commit(mysql_conn_t *mysql_conn, bool commit)
 	list_flush(mysql_conn->update_list);
 
 	return SLURM_SUCCESS;
-#else
-	return SLURM_ERROR;
-#endif
 }
 
 extern int acct_storage_p_add_users(mysql_conn_t *mysql_conn, uint32_t uid,
 				    List user_list)
 {
-#ifdef HAVE_MYSQL
 	ListIterator itr = NULL;
 	int rc = SLURM_SUCCESS;
 	acct_user_rec_t *object = NULL;
@@ -3551,15 +3749,11 @@ extern int acct_storage_p_add_users(mysql_conn_t *mysql_conn, uint32_t uid,
 	list_destroy(wckey_list);
 
 	return rc;
-#else
-	return SLURM_ERROR;
-#endif
 }
 
 extern int acct_storage_p_add_coord(mysql_conn_t *mysql_conn, uint32_t uid, 
 				    List acct_list, acct_user_cond_t *user_cond)
 {
-#ifdef HAVE_MYSQL
 	char *query = NULL, *user = NULL, *acct = NULL;
 	char *user_name = NULL, *txn_query = NULL;
 	ListIterator itr, itr2;
@@ -3643,15 +3837,11 @@ extern int acct_storage_p_add_coord(mysql_conn_t *mysql_conn, uint32_t uid,
 	}
 	
 	return SLURM_SUCCESS;
-#else
-	return SLURM_ERROR;
-#endif
 }
 
 extern int acct_storage_p_add_accts(mysql_conn_t *mysql_conn, uint32_t uid, 
 				    List acct_list)
 {
-#ifdef HAVE_MYSQL
 	ListIterator itr = NULL;
 	int rc = SLURM_SUCCESS;
 	acct_account_rec_t *object = NULL;
@@ -3762,15 +3952,11 @@ extern int acct_storage_p_add_accts(mysql_conn_t *mysql_conn, uint32_t uid,
 	list_destroy(assoc_list);
 
 	return rc;
-#else
-	return SLURM_ERROR;
-#endif
 }
 
 extern int acct_storage_p_add_clusters(mysql_conn_t *mysql_conn, uint32_t uid, 
 				       List cluster_list)
 {
-#ifdef HAVE_MYSQL
 	ListIterator itr = NULL;
 	int rc = SLURM_SUCCESS;
 	acct_cluster_rec_t *object = NULL;
@@ -3806,12 +3992,13 @@ extern int acct_storage_p_add_clusters(mysql_conn_t *mysql_conn, uint32_t uid,
 						  &vals, &extra,
 						  QOS_LEVEL_SET, 1);
 		xstrfmtcat(query, 
-			   "insert into %s (creation_time, mod_time, name) "
-			   "values (%d, %d, \"%s\") "
+			   "insert into %s (creation_time, mod_time, "
+			   "name, classification) "
+			   "values (%d, %d, \"%s\", %u) "
 			   "on duplicate key update deleted=0, mod_time=%d, "
 			   "control_host='', control_port=0;",
 			   cluster_table, 
-			   now, now, object->name,
+			   now, now, object->name, object->classification,
 			   now);
 		debug3("%d(%d) query\n%s",
 		       mysql_conn->conn, __LINE__, query);
@@ -3917,16 +4104,12 @@ extern int acct_storage_p_add_clusters(mysql_conn_t *mysql_conn, uint32_t uid,
 	}
 
 	return rc;
-#else
-	return SLURM_ERROR;
-#endif
 }
 
 extern int acct_storage_p_add_associations(mysql_conn_t *mysql_conn,
 					   uint32_t uid, 
 					   List association_list)
 {
-#ifdef HAVE_MYSQL
 	ListIterator itr = NULL;
 	int rc = SLURM_SUCCESS;
 	int i=0;
@@ -4198,8 +4381,10 @@ extern int acct_storage_p_add_associations(mysql_conn_t *mysql_conn,
 				   == SLURM_ERROR)
 					continue;
 				moved_parent = 1;
+			} else {
+				object->lft = atoi(row[MASSOC_LFT]);
+				object->rgt = atoi(row[MASSOC_RGT]);
 			}
-
 
 			affect_rows = 2;
 			xstrfmtcat(query,
@@ -4233,7 +4418,29 @@ extern int acct_storage_p_add_associations(mysql_conn_t *mysql_conn,
 		}
 
 		object->id = assoc_id;
-		
+
+		/* get the parent id only if we haven't moved the
+		 * parent since we get the total list if that has
+		 * happened */
+		if(!moved_parent &&
+		   (!last_parent || !last_cluster
+		    || strcmp(parent, last_parent)
+		    || strcmp(object->cluster, last_cluster))) {
+			uint32_t tmp32 = 0;
+			if((tmp32 = _get_parent_id(mysql_conn, 
+						   parent,
+						   object->cluster))) {
+				my_par_id = tmp32;
+
+				last_parent = parent;
+				last_cluster = object->cluster;
+			}
+		}
+		object->parent_id = my_par_id;
+
+		if(!moved_parent && !object->lft)
+			_set_assoc_lft_rgt(mysql_conn, object);
+
 
                /* get the parent id only if we haven't moved the
                 * parent since we get the total list if that has
@@ -4337,7 +4544,7 @@ end_it:
 			 * since you can't query on mod time here and I don't
 			 * want to rewrite code to make it happen
 			 */
-			//bzero(&assoc_cond, sizeof(acct_association_cond_t));
+			//memset(&assoc_cond, 0, sizeof(acct_association_cond_t));
 			
 			if(!(assoc_list = 
 			     acct_storage_p_get_associations(mysql_conn,
@@ -4370,15 +4577,11 @@ end_it:
 	}
 					
 	return rc;
-#else
-	return SLURM_ERROR;
-#endif
 }
 
 extern int acct_storage_p_add_qos(mysql_conn_t *mysql_conn, uint32_t uid, 
 				  List qos_list)
 {
-#ifdef HAVE_MYSQL
 	ListIterator itr = NULL;
 	int rc = SLURM_SUCCESS;
 	acct_qos_rec_t *object = NULL;
@@ -4479,15 +4682,11 @@ extern int acct_storage_p_add_qos(mysql_conn_t *mysql_conn, uint32_t uid,
 	}
 
 	return rc;
-#else
-	return SLURM_ERROR;
-#endif
 }
 
 extern int acct_storage_p_add_wckeys(mysql_conn_t *mysql_conn, uint32_t uid, 
 				     List wckey_list)
 {
-#ifdef HAVE_MYSQL
 	ListIterator itr = NULL;
 	int rc = SLURM_SUCCESS;
 	acct_wckey_rec_t *object = NULL;
@@ -4591,16 +4790,59 @@ extern int acct_storage_p_add_wckeys(mysql_conn_t *mysql_conn, uint32_t uid,
 	}
 
 	return rc;
-#else
-	return SLURM_ERROR;
-#endif
+}
+
+extern int acct_storage_p_add_reservation(mysql_conn_t *mysql_conn,
+					  acct_reservation_rec_t *resv)
+{
+	int rc = SLURM_SUCCESS;
+	char *cols = NULL, *vals = NULL, *extra = NULL, 
+		*query = NULL;//, *tmp_extra = NULL;
+
+	if(!resv) {
+		error("No reservation was given to edit");
+		return SLURM_ERROR;
+	}
+
+	if(!resv->id) {
+		error("We need an id to edit a reservation.");
+		return SLURM_ERROR;
+	}
+	if(!resv->time_start) {
+		error("We need a start time to edit a reservation.");
+		return SLURM_ERROR;
+	}
+	if(!resv->cluster) {
+		error("We need a cluster name to edit a reservation.");
+		return SLURM_ERROR;
+	}
+
+	_setup_resv_limits(resv, &cols, &vals, &extra);
+	
+	xstrfmtcat(query,
+		   "insert into %s (id, cluster%s) values (%u, '%s'%s) "
+		   "on duplicate key update deleted=0%s;",
+		   resv_table, cols, resv->id, resv->cluster,
+		   vals, extra);
+	debug3("%d(%d) query\n%s",
+	       mysql_conn->conn, __LINE__, query);
+	
+	if((rc = mysql_db_query(mysql_conn->db_conn, query)
+	    == SLURM_SUCCESS))
+		rc = mysql_clear_results(mysql_conn->db_conn);
+	
+	xfree(query);
+	xfree(cols);
+	xfree(vals);
+	xfree(extra);
+	
+	return rc;
 }
 
 extern List acct_storage_p_modify_users(mysql_conn_t *mysql_conn, uint32_t uid, 
 					acct_user_cond_t *user_cond,
 					acct_user_rec_t *user)
 {
-#ifdef HAVE_MYSQL
 	ListIterator itr = NULL;
 	List ret_list = NULL;
 	int rc = SLURM_SUCCESS;
@@ -4737,9 +4979,6 @@ extern List acct_storage_p_modify_users(mysql_conn_t *mysql_conn, uint32_t uid,
 	}
 				
 	return ret_list;
-#else
-	return NULL;
-#endif
 }
 
 extern List acct_storage_p_modify_accounts(
@@ -4747,7 +4986,6 @@ extern List acct_storage_p_modify_accounts(
 	acct_account_cond_t *acct_cond,
 	acct_account_rec_t *acct)
 {
-#ifdef HAVE_MYSQL
 	ListIterator itr = NULL;
 	List ret_list = NULL;
 	int rc = SLURM_SUCCESS;
@@ -4875,9 +5113,6 @@ extern List acct_storage_p_modify_accounts(
 	xfree(vals);
 
 	return ret_list;
-#else
-	return NULL;
-#endif
 }
 
 extern List acct_storage_p_modify_clusters(mysql_conn_t *mysql_conn, 
@@ -4885,7 +5120,6 @@ extern List acct_storage_p_modify_clusters(mysql_conn_t *mysql_conn,
 					   acct_cluster_cond_t *cluster_cond,
 					   acct_cluster_rec_t *cluster)
 {
-#ifdef HAVE_MYSQL
 	ListIterator itr = NULL;
 	List ret_list = NULL;
 	int rc = SLURM_SUCCESS;
@@ -4897,6 +5131,7 @@ extern List acct_storage_p_modify_clusters(mysql_conn_t *mysql_conn,
 	int set = 0;
 	MYSQL_RES *result = NULL;
 	MYSQL_ROW row;
+	bool clust_reg = false;
 
 	/* If you need to alter the default values of the cluster use
 	 * modify_associations since this is used only for registering
@@ -4927,20 +5162,33 @@ extern List acct_storage_p_modify_clusters(mysql_conn_t *mysql_conn,
 		xstrcat(extra, ")");
 	}
 
+	if(cluster_cond->classification) {
+		xstrfmtcat(extra, " && (classification & %u)",
+			   cluster_cond->classification);
+	}
+
 	set = 0;
 	if(cluster->control_host) {
 		xstrfmtcat(vals, ", control_host='%s'", cluster->control_host);
 		set++;
+		clust_reg = true;
 	}
 
 	if(cluster->control_port) {
 		xstrfmtcat(vals, ", control_port=%u", cluster->control_port);
 		set++;
+		clust_reg = true;
 	}
 
 	if(cluster->rpc_version) {
 		xstrfmtcat(vals, ", rpc_version=%u", cluster->rpc_version);
 		set++;
+		clust_reg = true;
+	}
+
+	if(cluster->classification) {
+		xstrfmtcat(vals, ", classification=%u", 
+			   cluster->classification);
 	}
 
 	if(!vals) {
@@ -4948,7 +5196,7 @@ extern List acct_storage_p_modify_clusters(mysql_conn_t *mysql_conn,
 		errno = SLURM_NO_CHANGE_IN_DATA;
 		error("Nothing to change");
 		return NULL;
-	} else if(set != 3) {
+	} else if(clust_reg && (set != 3)) {
 		xfree(vals);
 		xfree(extra);
 		errno = EFAULT;
@@ -4982,7 +5230,7 @@ extern List acct_storage_p_modify_clusters(mysql_conn_t *mysql_conn,
 		object = xstrdup(row[0]);
 
 		/* check to see if this is the first time to register */
-		if(row[1][0] == '0')
+		if(clust_reg && (row[1][0] == '0'))
 			set = 0;
 
 		list_append(ret_list, object);
@@ -5040,9 +5288,17 @@ extern List acct_storage_p_modify_clusters(mysql_conn_t *mysql_conn,
 			error("can not open socket back to slurmctld");
 		} else {
 			slurm_msg_t out_msg;
+			accounting_update_msg_t update;
+			/* We have to put this update message here so
+			   we can tell the sender to send the correct
+			   RPC version.
+			*/
+			memset(&update, 0, sizeof(accounting_update_msg_t));
+			update.rpc_version = cluster->rpc_version;
 			slurm_msg_t_init(&out_msg);
 			out_msg.msg_type = ACCOUNTING_FIRST_REG;
 			out_msg.flags = SLURM_GLOBAL_AUTH_KEY;
+			out_msg.data = &update;
 			slurm_send_node_msg(fd, &out_msg);
 			/* We probably need to add matching recv_msg function
 			 * for an arbitray fd or should these be fire
@@ -5059,9 +5315,6 @@ end_it:
 	xfree(send_char);
 
 	return ret_list;
-#else
-	return NULL;
-#endif
 }
 
 extern List acct_storage_p_modify_associations(
@@ -5069,7 +5322,6 @@ extern List acct_storage_p_modify_associations(
 	acct_association_cond_t *assoc_cond,
 	acct_association_rec_t *assoc)
 {
-#ifdef HAVE_MYSQL
 	ListIterator itr = NULL;
 	List ret_list = NULL;
 	int rc = SLURM_SUCCESS;
@@ -5137,7 +5389,7 @@ extern List acct_storage_p_modify_associations(
 		   >= ACCT_ADMIN_OPERATOR) 
 			is_admin = 1;	
 		else {
-			if(assoc_mgr_fill_in_user(mysql_conn, &user, 1)
+			if(assoc_mgr_fill_in_user(mysql_conn, &user, 1, NULL)
 			   != SLURM_SUCCESS) {
 				error("couldn't get information for this user");
 				errno = SLURM_ERROR;
@@ -5334,7 +5586,7 @@ extern List acct_storage_p_modify_associations(
 		init_acct_association_rec(mod_assoc);
 		mod_assoc->id = atoi(row[MASSOC_ID]);
 
-		mod_assoc->fairshare = assoc->fairshare;
+		mod_assoc->shares_raw = assoc->shares_raw;
 
 		mod_assoc->grp_cpus = assoc->grp_cpus;
 		mod_assoc->grp_cpu_mins = assoc->grp_cpu_mins;
@@ -5349,6 +5601,9 @@ extern List acct_storage_p_modify_associations(
 		mod_assoc->max_nodes_pj = assoc->max_nodes_pj;
 		mod_assoc->max_submit_jobs = assoc->max_submit_jobs;
 		mod_assoc->max_wall_pj = assoc->max_wall_pj;
+
+		/* no need to get the parent id since if we moved
+		 * parent id's we will get it when we send the total list */
 
 		if(!row[MASSOC_USER][0])
 			mod_assoc->parent_acct = xstrdup(assoc->parent_acct);
@@ -5484,7 +5739,7 @@ extern List acct_storage_p_modify_associations(
 		 * want to rewrite code to make it happen
 		 */
 
-		//bzero(&local_assoc_cond, sizeof(acct_association_cond_t));
+		//memset(&local_assoc_cond, 0, sizeof(acct_association_cond_t));
 		
 		if(!(local_assoc_list = 
 		     acct_storage_p_get_associations(mysql_conn,
@@ -5514,16 +5769,12 @@ end_it:
 	xfree(vals);
 
 	return ret_list;
-#else
-	return NULL;
-#endif
 }
 
 extern List acct_storage_p_modify_qos(mysql_conn_t *mysql_conn, uint32_t uid, 
 					acct_qos_cond_t *qos_cond,
 					acct_qos_rec_t *qos)
 {
-#ifdef HAVE_MYSQL
 	ListIterator itr = NULL;
 	List ret_list = NULL;
 	int rc = SLURM_SUCCESS;
@@ -5843,9 +6094,6 @@ extern List acct_storage_p_modify_qos(mysql_conn_t *mysql_conn, uint32_t uid,
 	}
 				
 	return ret_list;
-#else
-	return NULL;
-#endif
 }
 
 extern List acct_storage_p_modify_wckeys(mysql_conn_t *mysql_conn,
@@ -5856,10 +6104,211 @@ extern List acct_storage_p_modify_wckeys(mysql_conn_t *mysql_conn,
 	return NULL;
 }
 
+extern int acct_storage_p_modify_reservation(mysql_conn_t *mysql_conn,
+					     acct_reservation_rec_t *resv)
+{
+	MYSQL_RES *result = NULL;
+	MYSQL_ROW row;
+	int rc = SLURM_SUCCESS;
+	char *cols = NULL, *vals = NULL, *extra = NULL, 
+		*query = NULL;//, *tmp_extra = NULL;
+	time_t start = 0, now = time(NULL);
+	int i;
+	int set = 0;
+	char *resv_req_inx[] = {
+		"assoclist",
+		"start",
+		"end",
+		"cpus",
+		"name",
+		"nodelist",
+		"node_inx",
+		"flags"
+	};
+	enum {
+		RESV_ASSOCS,
+		RESV_START,
+		RESV_END,
+		RESV_CPU,
+		RESV_NAME,
+		RESV_NODES,
+		RESV_NODE_INX,
+		RESV_FLAGS,
+		RESV_COUNT
+	};
+
+	if(!resv) {
+		error("No reservation was given to edit");
+		return SLURM_ERROR;
+	}
+
+	if(!resv->id) {
+		error("We need an id to edit a reservation.");
+		return SLURM_ERROR;
+	}
+	if(!resv->time_start) {
+		error("We need a start time to edit a reservation.");
+		return SLURM_ERROR;
+	}
+	if(!resv->cluster) {
+		error("We need a cluster name to edit a reservation.");
+		return SLURM_ERROR;
+	}
+		
+	if(!resv->time_start_prev) {
+		error("We need a time to check for last "
+		      "start of reservation.");
+		return SLURM_ERROR;
+	}
+	
+	for(i=0; i<RESV_COUNT; i++) {
+		if(i) 
+			xstrcat(cols, ", ");
+		xstrcat(cols, resv_req_inx[i]);
+	}
+	
+	/* check for both the last start and the start because most
+	   likely the start time hasn't changed, but something else
+	   may have since the last time we did an update to the
+	   reservation. */
+	query = xstrdup_printf("select %s from %s where id=%u "
+			       "and (start=%d || start=%d) and cluster='%s' "
+			       "and deleted=0 order by start desc "
+			       "limit 1 FOR UPDATE;",
+			       cols, resv_table, resv->id, 
+			       resv->time_start, resv->time_start_prev,
+			       resv->cluster);
+try_again:
+	debug4("%d(%d) query\n%s",
+	       mysql_conn->conn, __LINE__, query);
+	if(!(result = mysql_db_query_ret(
+		     mysql_conn->db_conn, query, 0))) {
+		rc = SLURM_ERROR;
+		goto end_it;
+	}
+	if(!(row = mysql_fetch_row(result))) {
+		rc = SLURM_ERROR;
+		mysql_free_result(result);
+		error("There is no reservation by id %u, "
+		      "start %d, and cluster '%s'", resv->id,
+		      resv->time_start_prev, resv->cluster);
+		if(!set && resv->time_end) {
+			/* This should never really happen,
+			   but just incase the controller and the
+			   database get out of sync we check
+			   to see if there is a reservation
+			   not deleted that hasn't ended yet. */
+			xfree(query);
+			query = xstrdup_printf(
+				"select %s from %s where id=%u "
+				"and start <= %d and cluster='%s' "
+				"and deleted=0 order by start desc "
+				"limit 1;",
+				cols, resv_table, resv->id, 
+				resv->time_end, resv->cluster);
+			set = 1;
+			goto try_again;
+		}
+		goto end_it;
+	} 
+	
+	start = atoi(row[RESV_START]);
+	
+	xfree(query);
+	xfree(cols);
+	
+	set = 0;
+	
+	/* check differences here */
+		
+	if(!resv->name 
+	   && row[RESV_NAME] && row[RESV_NAME][0])
+		// if this changes we just update the
+		// record, no need to create a new one since
+		// this doesn't really effect the
+		// reservation accounting wise
+		resv->name = xstrdup(row[RESV_NAME]);
+
+	if(resv->assocs)
+		set = 1;
+	else if(row[RESV_ASSOCS] && row[RESV_ASSOCS][0])
+		resv->assocs = xstrdup(row[RESV_ASSOCS]);
+
+	if(resv->cpus != (uint32_t)NO_VAL) 
+		set = 1;
+	else 
+		resv->cpus = atoi(row[RESV_CPU]);
+		
+	if(resv->flags != (uint16_t)NO_VAL) 
+		set = 1;
+	else
+		resv->flags = atoi(row[RESV_FLAGS]);
+		
+	if(resv->nodes) 
+		set = 1;
+	else if(row[RESV_NODES] && row[RESV_NODES][0]) {
+		resv->nodes = xstrdup(row[RESV_NODES]);
+		resv->node_inx = xstrdup(row[RESV_NODE_INX]);
+	}
+		
+	if(!resv->time_end)
+		resv->time_end = atoi(row[RESV_END]);
+
+	mysql_free_result(result);
+
+	_setup_resv_limits(resv, &cols, &vals, &extra);
+	/* use start below instead of resv->time_start_prev
+	 * just incase we have a different one from being out
+	 * of sync
+	 */
+	if((start > now) || !set) {
+		/* we haven't started the reservation yet, or
+		   we are changing the associations or end
+		   time which we can just update it */
+		query = xstrdup_printf("update %s set deleted=0%s "
+				       "where deleted=0 and id=%u "
+				       "and start=%d and cluster='%s';",
+				       resv_table, extra, resv->id,
+				       start,
+				       resv->cluster);
+	} else {
+		/* time_start is already done above and we
+		 * changed something that is in need on a new
+		 * entry. */
+		query = xstrdup_printf("update %s set end=%d "
+				       "where deleted=0 && id=%u "
+				       "&& start=%d and cluster='%s';",
+				       resv_table, resv->time_start-1,
+				       resv->id, start,
+				       resv->cluster);
+		xstrfmtcat(query,
+			   "insert into %s (id, cluster%s) "
+			   "values (%u, '%s'%s) "
+			   "on duplicate key update deleted=0%s;",
+			   resv_table, cols, resv->id, resv->cluster,
+			   vals, extra);
+	}
+
+	debug3("%d(%d) query\n%s",
+	       mysql_conn->conn, __LINE__, query);
+	
+	if((rc = mysql_db_query(mysql_conn->db_conn, query)
+	    == SLURM_SUCCESS))
+		rc = mysql_clear_results(mysql_conn->db_conn);
+	
+end_it:
+	
+	xfree(query);
+	xfree(cols);
+	xfree(vals);
+	xfree(extra);
+	
+	return rc;
+}
+
 extern List acct_storage_p_remove_users(mysql_conn_t *mysql_conn, uint32_t uid, 
 					acct_user_cond_t *user_cond)
 {
-#ifdef HAVE_MYSQL
 	ListIterator itr = NULL;
 	List ret_list = NULL;
 	List coord_list = NULL;
@@ -6029,17 +6478,12 @@ extern List acct_storage_p_remove_users(mysql_conn_t *mysql_conn, uint32_t uid,
 	}		
 
 	return ret_list;
-
-#else
-	return NULL;
-#endif
 }
 
 extern List acct_storage_p_remove_coord(mysql_conn_t *mysql_conn, uint32_t uid, 
 					List acct_list,
 					acct_user_cond_t *user_cond)
 {
-#ifdef HAVE_MYSQL
 	char *query = NULL, *object = NULL, *extra = NULL, *last_user = NULL;
 	char *user_name = NULL;
 	time_t now = time(NULL);
@@ -6080,7 +6524,7 @@ extern List acct_storage_p_remove_coord(mysql_conn_t *mysql_conn, uint32_t uid,
 		   >= ACCT_ADMIN_OPERATOR) 
 			is_admin = 1;	
 		else {
-			if(assoc_mgr_fill_in_user(mysql_conn, &user, 1)
+			if(assoc_mgr_fill_in_user(mysql_conn, &user, 1, NULL)
 			   != SLURM_SUCCESS) {
 				error("couldn't get information for this user");
 				errno = SLURM_ERROR;
@@ -6225,15 +6669,11 @@ extern List acct_storage_p_remove_coord(mysql_conn_t *mysql_conn, uint32_t uid,
 	list_destroy(user_list);
 
 	return ret_list;
-#else
-	return NULL;
-#endif
 }
 
 extern List acct_storage_p_remove_accts(mysql_conn_t *mysql_conn, uint32_t uid, 
 					acct_account_cond_t *acct_cond)
 {
-#ifdef HAVE_MYSQL
 	ListIterator itr = NULL;
 	List ret_list = NULL;
 	List coord_list = NULL;
@@ -6357,16 +6797,12 @@ extern List acct_storage_p_remove_accts(mysql_conn_t *mysql_conn, uint32_t uid,
 	}
 
 	return ret_list;
-#else
-	return NULL;
-#endif
 }
 
 extern List acct_storage_p_remove_clusters(mysql_conn_t *mysql_conn,
 					   uint32_t uid, 
 					   acct_cluster_cond_t *cluster_cond)
 {
-#ifdef HAVE_MYSQL
 	ListIterator itr = NULL;
 	List ret_list = NULL;
 	List tmp_list = NULL;
@@ -6492,16 +6928,12 @@ extern List acct_storage_p_remove_clusters(mysql_conn_t *mysql_conn,
 	}
 
 	return ret_list;
-#else
-	return NULL;
-#endif
 }
 
 extern List acct_storage_p_remove_associations(
 	mysql_conn_t *mysql_conn, uint32_t uid, 
 	acct_association_cond_t *assoc_cond)
 {
-#ifdef HAVE_MYSQL
 	ListIterator itr = NULL;
 	List ret_list = NULL;
 	int rc = SLURM_SUCCESS;
@@ -6563,7 +6995,7 @@ extern List acct_storage_p_remove_associations(
 		   >= ACCT_ADMIN_OPERATOR) 
 			is_admin = 1;	
 		else {
-			if(assoc_mgr_fill_in_user(mysql_conn, &user, 1)
+			if(assoc_mgr_fill_in_user(mysql_conn, &user, 1, NULL)
 			   != SLURM_SUCCESS) {
 				error("couldn't get information for this user");
 				errno = SLURM_ERROR;
@@ -6738,15 +7170,11 @@ end_it:
 	mysql_free_result(result);
 
 	return NULL;
-#else
-	return NULL;
-#endif
 }
 
 extern List acct_storage_p_remove_qos(mysql_conn_t *mysql_conn, uint32_t uid, 
 				      acct_qos_cond_t *qos_cond)
 {
-#ifdef HAVE_MYSQL
 	ListIterator itr = NULL;
 	List ret_list = NULL;
 	int rc = SLURM_SUCCESS;
@@ -6870,16 +7298,12 @@ extern List acct_storage_p_remove_qos(mysql_conn_t *mysql_conn, uint32_t uid,
 	}
 
 	return ret_list;
-#else
-	return NULL;
-#endif
 }
 
 extern List acct_storage_p_remove_wckeys(mysql_conn_t *mysql_conn,
 					 uint32_t uid, 
 					 acct_wckey_cond_t *wckey_cond)
 {
-#ifdef HAVE_MYSQL
 	List ret_list = NULL;
 	int rc = SLURM_SUCCESS;
 	char *extra = NULL, *query = NULL,
@@ -6954,15 +7378,58 @@ empty:
 	}
 
 	return ret_list;
-#else
-	return NULL;
-#endif
+}
+
+extern int acct_storage_p_remove_reservation(mysql_conn_t *mysql_conn,
+					     acct_reservation_rec_t *resv)
+{
+	int rc = SLURM_SUCCESS;
+	char *query = NULL;//, *tmp_extra = NULL;
+
+	if(!resv) {
+		error("No reservation was given to edit");
+		return SLURM_ERROR;
+	}
+
+	if(!resv->id || !resv->time_start || !resv->cluster) {
+		error("We need an id, start time, and cluster "
+		      "name to edit a reservation.");
+		return SLURM_ERROR;
+	}
+
+
+	/* first delete the resv that hasn't happened yet. */
+	query = xstrdup_printf("delete from %s where start > %d "
+			       "and id=%u and start=%d "
+			       "and cluster='%s';", 
+			       resv_table, resv->time_start_prev,
+			       resv->id, 
+			       resv->time_start, resv->cluster);
+	/* then update the remaining ones with a deleted flag and end
+	 * time of the time_start_prev which is set to when the
+	 * command was issued */
+	xstrfmtcat(query,
+		   "update %s set end=%d, deleted=1 where deleted=0 and "
+		   "id=%u and start=%d and cluster='%s;'",
+		   resv_table, resv->time_start_prev,
+		   resv->id, resv->time_start,
+		   resv->cluster);
+	
+	debug3("%d(%d) query\n%s",
+	       mysql_conn->conn, __LINE__, query);
+	
+	if((rc = mysql_db_query(mysql_conn->db_conn, query)
+	    == SLURM_SUCCESS))
+		rc = mysql_clear_results(mysql_conn->db_conn);
+	
+	xfree(query);
+	
+	return rc;
 }
 
 extern List acct_storage_p_get_users(mysql_conn_t *mysql_conn, uid_t uid, 
 				     acct_user_cond_t *user_cond)
 {
-#ifdef HAVE_MYSQL
 	char *query = NULL;	
 	char *extra = NULL;	
 	char *tmp = NULL;	
@@ -7016,7 +7483,8 @@ extern List acct_storage_p_get_users(mysql_conn_t *mysql_conn, uid_t uid,
 			   >= ACCT_ADMIN_OPERATOR) 
 				is_admin = 1;	
 			else {
-				assoc_mgr_fill_in_user(mysql_conn, &user, 1);
+				assoc_mgr_fill_in_user(mysql_conn, &user, 1,
+						       NULL);
 			}
 		}
 	}
@@ -7227,15 +7695,11 @@ get_wckeys:
 	}
 
 	return user_list;
-#else
-	return NULL;
-#endif
 }
 
 extern List acct_storage_p_get_accts(mysql_conn_t *mysql_conn, uid_t uid,
 				     acct_account_cond_t *acct_cond)
 {
-#ifdef HAVE_MYSQL
 	char *query = NULL;	
 	char *extra = NULL;	
 	char *tmp = NULL;	
@@ -7288,7 +7752,8 @@ extern List acct_storage_p_get_accts(mysql_conn_t *mysql_conn, uid_t uid,
 			   >= ACCT_ADMIN_OPERATOR) 
 				is_admin = 1;	
 			else {
-				assoc_mgr_fill_in_user(mysql_conn, &user, 1);
+				assoc_mgr_fill_in_user(mysql_conn, &user, 1,
+						       NULL);
 			}
 
 			if(!is_admin && (!user.coord_accts 
@@ -7471,15 +7936,11 @@ empty:
 	}
 
 	return acct_list;
-#else
-	return NULL;
-#endif
 }
 
 extern List acct_storage_p_get_clusters(mysql_conn_t *mysql_conn, uid_t uid, 
 					acct_cluster_cond_t *cluster_cond)
 {
-#ifdef HAVE_MYSQL
 	char *query = NULL;	
 	char *extra = NULL;	
 	char *tmp = NULL;	
@@ -7499,12 +7960,14 @@ extern List acct_storage_p_get_clusters(mysql_conn_t *mysql_conn, uid_t uid,
 	/* if this changes you will need to edit the corresponding enum */
 	char *cluster_req_inx[] = {
 		"name",
+		"classification",
 		"control_host",
 		"control_port",
 		"rpc_version",
 	};
 	enum {
 		CLUSTER_REQ_NAME,
+		CLUSTER_REQ_CLASS,
 		CLUSTER_REQ_CH,
 		CLUSTER_REQ_CP,
 		CLUSTER_REQ_VERSION,
@@ -7575,6 +8038,9 @@ empty:
 	assoc_cond.cluster_list = list_create(NULL);
 
 	while((row = mysql_fetch_row(result))) {
+		MYSQL_RES *result2 = NULL;
+		MYSQL_ROW row2;
+
 		cluster = xmalloc(sizeof(acct_cluster_rec_t));
 		list_append(cluster_list, cluster);
 
@@ -7591,9 +8057,28 @@ empty:
 				cluster_cond->usage_end);
 		}
 
+		cluster->classification = atoi(row[CLUSTER_REQ_CLASS]);
 		cluster->control_host = xstrdup(row[CLUSTER_REQ_CH]);
 		cluster->control_port = atoi(row[CLUSTER_REQ_CP]);
 		cluster->rpc_version = atoi(row[CLUSTER_REQ_VERSION]);
+		query = xstrdup_printf(
+			"select cpu_count, cluster_nodes from "
+			"%s where cluster=\"%s\" "
+			"and period_end=0 and node_name='' limit 1",
+			event_table, cluster->name);
+		debug4("%d(%d) query\n%s", mysql_conn->conn, __LINE__, query);
+		if(!(result2 = mysql_db_query_ret(
+			     mysql_conn->db_conn, query, 0))) {
+			xfree(query);
+			continue;
+		}
+		xfree(query);
+		if((row2 = mysql_fetch_row(result2))) {
+			cluster->cpu_count = atoi(row2[0]);
+			if(row2[1] && row2[1][0])
+				cluster->nodes = xstrdup(row2[1]);
+		}
+		mysql_free_result(result2);	
 	}
 	mysql_free_result(result);
 
@@ -7642,16 +8127,12 @@ empty:
 	list_destroy(assoc_list);
 
 	return cluster_list;
-#else
-	return NULL;
-#endif
 }
 
 extern List acct_storage_p_get_associations(mysql_conn_t *mysql_conn,
 					    uid_t uid, 
 					    acct_association_cond_t *assoc_cond)
 {
-#ifdef HAVE_MYSQL
 	//DEF_TIMERS;
 	char *query = NULL;	
 	char *extra = NULL;	
@@ -7779,7 +8260,8 @@ extern List acct_storage_p_get_associations(mysql_conn_t *mysql_conn,
 			   >= ACCT_ADMIN_OPERATOR) 
 				is_admin = 1;	
 			else {
-				assoc_mgr_fill_in_user(mysql_conn, &user, 1);
+				assoc_mgr_fill_in_user(mysql_conn, &user, 1,
+						       NULL);
 			}
 		}
 	}
@@ -7917,9 +8399,9 @@ empty:
 		if(row[ASSOC_REQ_PART][0])
 			assoc->partition = xstrdup(row[ASSOC_REQ_PART]);
 		if(row[ASSOC_REQ_FS])
-			assoc->fairshare = atoi(row[ASSOC_REQ_FS]);
+			assoc->shares_raw = atoi(row[ASSOC_REQ_FS]);
 		else
-			assoc->fairshare = 1;
+			assoc->shares_raw = 1;
 
 		if(!without_parent_info && parent_acct &&
 		   (!last_acct || !last_cluster 
@@ -8140,15 +8622,16 @@ empty:
 	xfree(parent_qos);
 	//END_TIMER2("get_associations");
 	return assoc_list;
-#else
+}
+
+extern List acct_storage_p_get_config(void *db_conn)
+{
 	return NULL;
-#endif
 }
 
 extern List acct_storage_p_get_qos(mysql_conn_t *mysql_conn, uid_t uid,
 				   acct_qos_cond_t *qos_cond)
 {
-#ifdef HAVE_MYSQL
 	char *query = NULL;	
 	char *extra = NULL;	
 	char *tmp = NULL;	
@@ -8181,6 +8664,7 @@ extern List acct_storage_p_get_qos(mysql_conn_t *mysql_conn, uid_t uid,
 		"preemptees",
 		"preemptors",
 		"priority",
+		"usage_factor",
 	};
 	enum {
 		QOS_REQ_NAME,
@@ -8202,6 +8686,7 @@ extern List acct_storage_p_get_qos(mysql_conn_t *mysql_conn, uid_t uid,
 		QOS_REQ_PREE,
 		QOS_REQ_PREO,
 		QOS_REQ_PRIO,
+		QOS_REQ_UF,
 		QOS_REQ_COUNT
 	};
 
@@ -8367,19 +8852,18 @@ empty:
 
 		if(row[QOS_REQ_PRIO])
 			qos->priority = atoi(row[QOS_REQ_PRIO]);
+
+		if(row[QOS_REQ_UF])
+			qos->usage_factor = atof(row[QOS_REQ_UF]);
 	}
 	mysql_free_result(result);
 
 	return qos_list;
-#else
-	return NULL;
-#endif
 }
 
 extern List acct_storage_p_get_wckeys(mysql_conn_t *mysql_conn, uid_t uid,
 				      acct_wckey_cond_t *wckey_cond)
 {
-#ifdef HAVE_MYSQL
 	//DEF_TIMERS;
 	char *query = NULL;	
 	char *extra = NULL;	
@@ -8441,7 +8925,8 @@ extern List acct_storage_p_get_wckeys(mysql_conn_t *mysql_conn, uid_t uid,
 			   >= ACCT_ADMIN_OPERATOR) 
 				is_admin = 1;	
 			else {
-				assoc_mgr_fill_in_user(mysql_conn, &user, 1);
+				assoc_mgr_fill_in_user(mysql_conn, &user,
+						       1, NULL);
 			}
 		}
 	}
@@ -8505,15 +8990,228 @@ empty:
 
 	//END_TIMER2("get_wckeys");
 	return wckey_list;
-#else
-	return NULL;
-#endif
+}
+
+extern List acct_storage_p_get_reservations(mysql_conn_t *mysql_conn, uid_t uid,
+					    acct_reservation_cond_t *resv_cond)
+{
+	//DEF_TIMERS;
+	char *query = NULL;	
+	char *extra = NULL;	
+	char *tmp = NULL;	
+	List resv_list = NULL;
+	int set = 0;
+	int i=0, is_admin=1;
+	MYSQL_RES *result = NULL;
+	MYSQL_ROW row;
+	uint16_t private_data = 0;
+	acct_job_cond_t job_cond;
+	void *curr_cluster = NULL;
+	List local_cluster_list = NULL;
+
+	/* needed if we don't have an resv_cond */
+	uint16_t with_usage = 0;
+
+	/* if this changes you will need to edit the corresponding enum */
+	char *resv_req_inx[] = {
+		"id",
+		"name",
+		"cluster",
+		"cpus",
+		"assoclist",
+		"nodelist",
+		"node_inx",
+		"start",
+		"end",
+		"flags",
+	};
+
+	enum {
+		RESV_REQ_ID,
+		RESV_REQ_NAME,
+		RESV_REQ_CLUSTER,
+		RESV_REQ_CPUS,
+		RESV_REQ_ASSOCS,
+		RESV_REQ_NODES,
+		RESV_REQ_NODE_INX,
+		RESV_REQ_START,
+		RESV_REQ_END,
+		RESV_REQ_FLAGS,
+		RESV_REQ_COUNT
+	};
+
+	if(!resv_cond) {
+		xstrcat(extra, " where deleted=0");
+		goto empty;
+	}
+
+	if(_check_connection(mysql_conn) != SLURM_SUCCESS)
+		return NULL;
+
+	private_data = slurm_get_private_data();
+	if (private_data & PRIVATE_DATA_RESERVATIONS) {
+		/* This only works when running though the slurmdbd.
+		 * THERE IS NO AUTHENTICATION WHEN RUNNNING OUT OF THE
+		 * SLURMDBD!
+		 */
+		if(slurmdbd_conf) {
+			is_admin = 0;
+			/* we have to check the authentication here in the
+			 * plugin since we don't know what accounts are being
+			 * referenced until after the query.  Here we will
+			 * set if they are an operator or greater and then
+			 * check it below after the query.
+			 */
+			if((uid == slurmdbd_conf->slurm_user_id || uid == 0)
+			   || assoc_mgr_get_admin_level(mysql_conn, uid) 
+			   >= ACCT_ADMIN_OPERATOR) 
+				is_admin = 1;	
+			else {
+				error("Only admins can look at "
+				      "reservation usage");
+				return NULL;
+			}
+		}
+	}
+
+	memset(&job_cond, 0, sizeof(acct_job_cond_t));
+	if(resv_cond->nodes) {
+		job_cond.usage_start = resv_cond->time_start;
+		job_cond.usage_end = resv_cond->time_end;
+		job_cond.used_nodes = resv_cond->nodes;
+		job_cond.cluster_list = resv_cond->cluster_list;
+		local_cluster_list = setup_cluster_list_with_inx(
+			mysql_conn, &job_cond, (void **)&curr_cluster);
+	} else if(with_usage) {
+		job_cond.usage_start = resv_cond->time_start;
+		job_cond.usage_end = resv_cond->time_end;
+	}
+
+	set = _setup_resv_cond_limits(resv_cond, &extra);
+
+	with_usage = resv_cond->with_usage;
+
+empty:
+	xfree(tmp);
+	xstrfmtcat(tmp, "t1.%s", resv_req_inx[i]);
+	for(i=1; i<RESV_REQ_COUNT; i++) {
+		xstrfmtcat(tmp, ", t1.%s", resv_req_inx[i]);
+	}
+	
+	//START_TIMER;
+	query = xstrdup_printf("select distinct %s from %s as t1%s "
+			       "order by cluster, name;", 
+			       tmp, resv_table, extra);
+	xfree(tmp);
+	xfree(extra);
+	debug3("%d(%d) query\n%s", mysql_conn->conn, __LINE__, query);
+	if(!(result = mysql_db_query_ret(mysql_conn->db_conn, query, 0))) {
+		xfree(query);
+		if(local_cluster_list)
+			list_destroy(local_cluster_list);
+		return NULL;
+	}
+	xfree(query);
+	
+	resv_list = list_create(destroy_acct_reservation_rec);
+	
+	while((row = mysql_fetch_row(result))) {
+		acct_reservation_rec_t *resv =
+			xmalloc(sizeof(acct_reservation_rec_t));
+		int start = atoi(row[RESV_REQ_START]);
+		list_append(resv_list, resv);
+
+		if(!good_nodes_from_inx(local_cluster_list, &curr_cluster,
+					row[RESV_REQ_NODE_INX], start))
+			continue;
+		
+		resv->id = atoi(row[RESV_REQ_ID]);
+		if(with_usage) {
+			if(!job_cond.resvid_list) 
+				job_cond.resvid_list = list_create(NULL);
+			list_append(job_cond.resvid_list, row[RESV_REQ_ID]);
+		}
+		resv->name = xstrdup(row[RESV_REQ_NAME]);
+		resv->cluster = xstrdup(row[RESV_REQ_CLUSTER]);
+		resv->cpus = atoi(row[RESV_REQ_CPUS]);
+		resv->assocs = xstrdup(row[RESV_REQ_ASSOCS]);
+		resv->nodes = xstrdup(row[RESV_REQ_NODES]);
+		resv->time_start = start;
+		resv->time_end = atoi(row[RESV_REQ_END]);
+		resv->flags = atoi(row[RESV_REQ_FLAGS]);
+	}
+
+	if(local_cluster_list)
+		list_destroy(local_cluster_list);
+
+	if(with_usage && resv_list && list_count(resv_list)) {
+		List job_list = mysql_jobacct_process_get_jobs(
+			mysql_conn, uid, &job_cond);	
+		ListIterator itr = NULL, itr2 = NULL;
+		jobacct_job_rec_t *job = NULL;
+		acct_reservation_rec_t *resv = NULL;
+
+		if(!job_list || !list_count(job_list))
+			goto no_jobs;
+		
+		itr = list_iterator_create(job_list);
+		itr2 = list_iterator_create(resv_list);
+		while((job = list_next(itr))) {
+			int start = job->start;
+			int end = job->end;
+			int set = 0;
+			while((resv = list_next(itr2))) {
+				int elapsed = 0;
+				/* since a reservation could have
+				   changed while a job was running we
+				   have to make sure we get the time
+				   in the correct record.
+				*/
+				if(resv->id != job->resvid) 
+					continue;
+				set = 1;
+
+				if(start < resv->time_start)
+					start = resv->time_start;
+				if(!end || end > resv->time_end) 
+					end = resv->time_end;
+				
+				if((elapsed = (end - start)) < 1)
+					continue;
+
+				if(job->alloc_cpus)
+					resv->alloc_secs +=
+						elapsed * job->alloc_cpus;
+			}
+			list_iterator_reset(itr2);
+			if(!set) {
+				error("we got a job %u with no reservation "
+				      "associatied with it?", job->jobid);
+			}
+		}		
+		
+		list_iterator_destroy(itr2);
+		list_iterator_destroy(itr);
+	no_jobs:
+		if(job_list)
+			list_destroy(job_list);
+	}	
+
+	if(job_cond.resvid_list) {
+		list_destroy(job_cond.resvid_list);
+		job_cond.resvid_list = NULL;
+	}
+
+	/* free result after we use the list with resv id's in it. */
+	mysql_free_result(result);
+
+	//END_TIMER2("get_resvs");
+	return resv_list;
 }
 
 extern List acct_storage_p_get_txn(mysql_conn_t *mysql_conn, uid_t uid,
 				   acct_txn_cond_t *txn_cond)
 {
-#ifdef HAVE_MYSQL
 	char *query = NULL;	
 	char *assoc_extra = NULL;	
 	char *name_extra = NULL;	
@@ -8893,16 +9591,12 @@ empty:
 	mysql_free_result(result);
 
 	return txn_list;
-#else
-	return NULL;
-#endif
 }
 
 extern int acct_storage_p_get_usage(mysql_conn_t *mysql_conn, uid_t uid,
 				    void *in, slurmdbd_msg_type_t type,
 				    time_t start, time_t end)
 {
-#ifdef HAVE_MYSQL
 	int rc = SLURM_SUCCESS;
 	int i=0, is_admin=1;
 	MYSQL_RES *result = NULL;
@@ -8994,7 +9688,8 @@ extern int acct_storage_p_get_usage(mysql_conn_t *mysql_conn, uid_t uid,
 			   >= ACCT_ADMIN_OPERATOR) 
 				is_admin = 1;	
 			else {
-				assoc_mgr_fill_in_user(mysql_conn, &user, 1);
+				assoc_mgr_fill_in_user(mysql_conn, &user, 1,
+						       NULL);
 			}
 			
 			if(!is_admin) {
@@ -9096,18 +9791,15 @@ is_user:
 	mysql_free_result(result);
 	
 	return rc;
-#else
-	return SLURM_ERROR;
-#endif
 }
 
 extern int acct_storage_p_roll_usage(mysql_conn_t *mysql_conn, 
-				     time_t sent_start)
+				     time_t sent_start, time_t sent_end,
+				     uint16_t archive_data)
 {
-#ifdef HAVE_MYSQL
 	int rc = SLURM_SUCCESS;
 	int i = 0;
-	time_t my_time = time(NULL);
+	time_t my_time = sent_end;
 	struct tm start_tm;
 	struct tm end_tm;
 	MYSQL_RES *result = NULL;
@@ -9198,6 +9890,9 @@ extern int acct_storage_p_roll_usage(mysql_conn_t *mysql_conn,
 		}
 	}
 	
+	if(!my_time)
+		my_time = time(NULL);
+
 	/* test month gap */
 /* 	last_hour = 1212299999; */
 /* 	last_day = 1212217200; */
@@ -9253,8 +9948,10 @@ extern int acct_storage_p_roll_usage(mysql_conn_t *mysql_conn,
 		   != SLURM_SUCCESS)
 			return rc;
 		END_TIMER2("hourly_rollup");
-		query = xstrdup_printf("update %s set hourly_rollup=%d",
-				       last_ran_table, end_time);
+		/* If we have a sent_end do not update the last_run_table */
+		if(!sent_end)
+			query = xstrdup_printf("update %s set hourly_rollup=%d",
+					       last_ran_table, end_time);
 	} else {
 		debug2("no need to run this hour %d <= %d", 
 		       end_time, start_time);
@@ -9279,13 +9976,14 @@ extern int acct_storage_p_roll_usage(mysql_conn_t *mysql_conn,
 
 	if(end_time-start_time > 0) {
 		START_TIMER;
-		if((rc = mysql_daily_rollup(mysql_conn, start_time, end_time)) 
+		if((rc = mysql_daily_rollup(mysql_conn, start_time, end_time,
+					    archive_data)) 
 		   != SLURM_SUCCESS)
 			return rc;
 		END_TIMER2("daily_rollup");
-		if(query) 
+		if(query && !sent_end) 
 			xstrfmtcat(query, ", daily_rollup=%d", end_time);
-		else 
+		else if(!sent_end)
 			query = xstrdup_printf("update %s set daily_rollup=%d",
 					       last_ran_table, end_time);
 	} else {
@@ -9320,13 +10018,14 @@ extern int acct_storage_p_roll_usage(mysql_conn_t *mysql_conn,
 	if(end_time-start_time > 0) {
 		START_TIMER;
 		if((rc = mysql_monthly_rollup(
-			    mysql_conn, start_time, end_time)) != SLURM_SUCCESS)
+			    mysql_conn, start_time, end_time, archive_data))
+		   != SLURM_SUCCESS)
 			return rc;
 		END_TIMER2("monthly_rollup");
 
-		if(query) 
+		if(query && !sent_end) 
 			xstrfmtcat(query, ", monthly_rollup=%d", end_time);
-		else 
+		else if(!sent_end)
 			query = xstrdup_printf(
 				"update %s set monthly_rollup=%d",
 				last_ran_table, end_time);
@@ -9341,9 +10040,6 @@ extern int acct_storage_p_roll_usage(mysql_conn_t *mysql_conn,
 		xfree(query);
 	}
 	return rc;
-#else
-	return SLURM_ERROR;
-#endif
 }
 
 extern int clusteracct_storage_p_node_down(mysql_conn_t *mysql_conn, 
@@ -9351,7 +10047,6 @@ extern int clusteracct_storage_p_node_down(mysql_conn_t *mysql_conn,
 					   struct node_record *node_ptr,
 					   time_t event_time, char *reason)
 {
-#ifdef HAVE_MYSQL
 	uint16_t cpus;
 	int rc = SLURM_SUCCESS;
 	char *query = NULL;
@@ -9391,26 +10086,24 @@ extern int clusteracct_storage_p_node_down(mysql_conn_t *mysql_conn,
 	 */
 	xstrfmtcat(query,
 		   "insert into %s "
-		   "(node_name, cluster, cpu_count, period_start, reason) "
-		   "values (\"%s\", \"%s\", %u, %d, \"%s\") on duplicate key "
+		   "(node_name, state, cluster, cpu_count, "
+		   "period_start, reason) "
+		   "values (\"%s\", %u, \"%s\", %u, %d, \"%s\") "
+		   "on duplicate key "
 		   "update period_end=0;",
-		   event_table, node_ptr->name, cluster, 
+		   event_table, node_ptr->name,  node_ptr->node_state, cluster, 
 		   cpus, event_time, my_reason);
 	debug4("%d(%d) query\n%s", mysql_conn->conn, __LINE__, query);
 	rc = mysql_db_query(mysql_conn->db_conn, query);
 	xfree(query);
 
 	return rc;
-#else
-	return SLURM_ERROR;
-#endif
 }
 extern int clusteracct_storage_p_node_up(mysql_conn_t *mysql_conn, 
 					 char *cluster,
 					 struct node_record *node_ptr,
 					 time_t event_time)
 {
-#ifdef HAVE_MYSQL
 	char* query;
 	int rc = SLURM_SUCCESS;
 
@@ -9425,9 +10118,6 @@ extern int clusteracct_storage_p_node_up(mysql_conn_t *mysql_conn,
 	rc = mysql_db_query(mysql_conn->db_conn, query);
 	xfree(query);
 	return rc;
-#else
-	return SLURM_ERROR;
-#endif
 }
 
 /* This is only called when not running from the slurmdbd so we can
@@ -9437,7 +10127,6 @@ extern int clusteracct_storage_p_register_ctld(mysql_conn_t *mysql_conn,
 					       char *cluster,
 					       uint16_t port)
 {
-#ifdef HAVE_MYSQL
 	char *query = NULL;
 	char *address = NULL;
 	char hostname[255];
@@ -9463,9 +10152,11 @@ extern int clusteracct_storage_p_register_ctld(mysql_conn_t *mysql_conn,
 
 	query = xstrdup_printf(
 		"update %s set deleted=0, mod_time=%d, "
-		"control_host='%s', control_port=%u, rpc_version=%d "
+		"control_host='%s', control_port=%u, rpc_version=%d, "
 		"where name='%s';",
-		cluster_table, now, address, port, SLURMDBD_VERSION, cluster);
+		cluster_table, now, address, port,
+		SLURMDBD_VERSION,
+		cluster);
 	xstrfmtcat(query, 	
 		   "insert into %s "
 		   "(timestamp, action, name, actor, info) "
@@ -9477,18 +10168,14 @@ extern int clusteracct_storage_p_register_ctld(mysql_conn_t *mysql_conn,
 	debug3("%d(%d) query\n%s", mysql_conn->conn, __LINE__, query);
 	
 	return mysql_db_query(mysql_conn->db_conn, query);
-	
-#else
-	return SLURM_ERROR;
-#endif
 }
 
 extern int clusteracct_storage_p_cluster_procs(mysql_conn_t *mysql_conn, 
 					       char *cluster,
+					       char *cluster_nodes,
 					       uint32_t procs,
 					       time_t event_time)
 {
-#ifdef HAVE_MYSQL
 	char* query;
 	int rc = SLURM_SUCCESS;
 	int first = 0;
@@ -9500,7 +10187,7 @@ extern int clusteracct_storage_p_cluster_procs(mysql_conn_t *mysql_conn,
 
 	/* Record the processor count */
 	query = xstrdup_printf(
-		"select cpu_count from %s where cluster=\"%s\" "
+		"select cpu_count, cluster_nodes from %s where cluster=\"%s\" "
 		"and period_end=0 and node_name='' limit 1",
 		event_table, cluster);
 	if(!(result = mysql_db_query_ret(
@@ -9535,9 +10222,30 @@ extern int clusteracct_storage_p_cluster_procs(mysql_conn_t *mysql_conn,
 	if(atoi(row[0]) == procs) {
 		debug3("we have the same procs as before no need to "
 		       "update the database.");
-		goto end_it;
-	}
-	debug("%s has changed from %s cpus to %u", cluster, row[0], procs);   
+		if(cluster_nodes) {
+			if(!row[1][0]) {
+				debug("Adding cluster nodes '%s' to "
+				      "last instance of cluster '%s'.",
+				      cluster_nodes, cluster);
+				query = xstrdup_printf(
+					"update %s set cluster_nodes=\"%s\" "
+					"where cluster=\"%s\" "
+					"and period_end=0 and node_name=''",
+					event_table, cluster_nodes, cluster);
+				rc = mysql_db_query(mysql_conn->db_conn, query);
+				xfree(query);
+				goto end_it;
+			} else if(!strcmp(cluster_nodes, row[1])) {
+				debug3("we have the same nodes in the cluster "
+				       "as before no need to "
+				       "update the database.");
+				goto end_it;
+			}
+		} else 
+			goto end_it;
+	} else
+		debug("%s has changed from %s cpus to %u",
+		      cluster, row[0], procs);   
 
 	/* reset all the entries for this cluster since the procs
 	   changed some of the downed nodes may have gone away.
@@ -9553,9 +10261,10 @@ extern int clusteracct_storage_p_cluster_procs(mysql_conn_t *mysql_conn,
 		goto end_it;
 add_it:
 	query = xstrdup_printf(
-		"insert into %s (cluster, cpu_count, period_start, reason) "
-		"values (\"%s\", %u, %d, 'Cluster processor count')",
-		event_table, cluster, procs, event_time);
+		"insert into %s (cluster, cluster_nodes, cpu_count, "
+		"period_start, reason) "
+		"values (\"%s\", \"%s\", %u, %d, 'Cluster processor count')",
+		event_table, cluster, cluster_nodes, procs, event_time);
 	rc = mysql_db_query(mysql_conn->db_conn, query);
 	xfree(query);
 end_it:
@@ -9564,9 +10273,6 @@ end_it:
 		rc = ACCOUNTING_FIRST_REG;
 
 	return rc;
-#else
-	return SLURM_ERROR;
-#endif
 }
 
 extern int clusteracct_storage_p_get_usage(
@@ -9574,7 +10280,6 @@ extern int clusteracct_storage_p_get_usage(
 	acct_cluster_rec_t *cluster_rec, slurmdbd_msg_type_t type,
 	time_t start, time_t end)
 {
-#ifdef HAVE_MYSQL
 	int rc = SLURM_SUCCESS;
 	int i=0;
 	MYSQL_RES *result = NULL;
@@ -9585,6 +10290,7 @@ extern int clusteracct_storage_p_get_usage(
 	char *cluster_req_inx[] = {
 		"alloc_cpu_secs",
 		"down_cpu_secs",
+		"pdown_cpu_secs",
 		"idle_cpu_secs",
 		"resv_cpu_secs",
 		"over_cpu_secs",
@@ -9595,6 +10301,7 @@ extern int clusteracct_storage_p_get_usage(
 	enum {
 		CLUSTER_ACPU,
 		CLUSTER_DCPU,
+		CLUSTER_PDCPU,
 		CLUSTER_ICPU,
 		CLUSTER_RCPU,
 		CLUSTER_OCPU,
@@ -9643,6 +10350,7 @@ extern int clusteracct_storage_p_get_usage(
 			xmalloc(sizeof(cluster_accounting_rec_t));
 		accounting_rec->alloc_secs = atoll(row[CLUSTER_ACPU]);
 		accounting_rec->down_secs = atoll(row[CLUSTER_DCPU]);
+		accounting_rec->pdown_secs = atoll(row[CLUSTER_PDCPU]);
 		accounting_rec->idle_secs = atoll(row[CLUSTER_ICPU]);
 		accounting_rec->over_secs = atoll(row[CLUSTER_OCPU]);
 		accounting_rec->resv_secs = atoll(row[CLUSTER_RCPU]);
@@ -9653,9 +10361,6 @@ extern int clusteracct_storage_p_get_usage(
 	mysql_free_result(result);
 
 	return rc;
-#else
-	return SLURM_ERROR;
-#endif
 }
 
 /* 
@@ -9665,18 +10370,16 @@ extern int jobacct_storage_p_job_start(mysql_conn_t *mysql_conn,
 				       char *cluster_name,
 				       struct job_record *job_ptr)
 {
-#ifdef HAVE_MYSQL
 	int	rc=SLURM_SUCCESS;
-	char	*jname = NULL, *nodes = NULL;
-	long	priority;
+	char	*nodes = NULL, *jname = NULL, *node_inx = NULL;
 	int track_steps = 0;
 	char *block_id = NULL;
 	char *query = NULL;
-	char *wckey = NULL;
 	int reinit = 0;
 	time_t check_time = job_ptr->start_time;
 	uint32_t wckeyid = 0;
 	int no_cluster = 0;
+	int node_cnt = 0;
 
 	if (!job_ptr->details || !job_ptr->details->submit_time) {
 		error("jobacct_storage_p_job_start: "
@@ -9688,11 +10391,69 @@ extern int jobacct_storage_p_job_start(mysql_conn_t *mysql_conn,
 		return SLURM_ERROR;
 	
 	debug2("mysql_jobacct_job_start() called");
-	if(!check_time)
-		check_time = job_ptr->details->submit_time;
- 
+
+	/* See what we are hearing about here if no start time. If
+	 * this job latest time is before the last roll up we will
+	 * need to reset it to look at this job. */
+	if(!check_time) {
+		check_time = job_ptr->details->begin_time;
+ 		
+		if(!check_time)
+			check_time = job_ptr->details->submit_time;
+	}
+
 	slurm_mutex_lock(&rollup_lock);
 	if(check_time < global_last_rollup) {
+		MYSQL_RES *result = NULL;
+		MYSQL_ROW row;
+
+		/* check to see if we are hearing about this time for the
+		 * first time.
+		 */
+		query = xstrdup_printf("select id from %s where jobid=%u and "
+				       "submit=%d and eligible=%d "
+				       "and start=%d;",
+				       job_table, job_ptr->job_id,
+				       job_ptr->details->submit_time, 
+				       job_ptr->details->begin_time, 
+				       job_ptr->start_time);
+		debug3("%d(%d) query\n%s", mysql_conn->conn, __LINE__, query);
+		if(!(result =
+		     mysql_db_query_ret(mysql_conn->db_conn, query, 0))) {
+			xfree(query);
+			slurm_mutex_unlock(&rollup_lock);
+			return SLURM_ERROR;
+		}
+		xfree(query);
+		if((row = mysql_fetch_row(result))) {
+			mysql_free_result(result);
+			debug4("revieved an update for a "
+			       "job (%u) already known about",
+			       job_ptr->job_id);
+			slurm_mutex_unlock(&rollup_lock);
+			goto no_rollup_change;
+		}
+		mysql_free_result(result);
+
+		if(job_ptr->start_time)
+			debug("Need to reroll usage from %sJob %u "
+			      "from %s started then and we are just "
+			      "now hearing about it.",
+			      ctime(&check_time),
+			      job_ptr->job_id, cluster_name);
+		else if(job_ptr->details->begin_time) 
+			debug("Need to reroll usage from %sJob %u "
+			      "from %s became eligible then and we are just "
+			      "now hearing about it.",
+			      ctime(&check_time), 
+			      job_ptr->job_id, cluster_name);
+		else
+			debug("Need to reroll usage from %sJob %u "
+			      "from %s was submitted then and we are just "
+			      "now hearing about it.",
+			      ctime(&check_time),
+			      job_ptr->job_id, cluster_name);
+			
 		global_last_rollup = check_time;
 		slurm_mutex_unlock(&rollup_lock);
 		
@@ -9705,7 +10466,9 @@ extern int jobacct_storage_p_job_start(mysql_conn_t *mysql_conn,
 		xfree(query);
 	} else
 		slurm_mutex_unlock(&rollup_lock);
-	
+
+no_rollup_change:
+
 	if(!cluster_name && job_ptr->assoc_id) {
 		no_cluster = 1;
 		cluster_name = _get_cluster_from_associd(mysql_conn,
@@ -9713,41 +10476,14 @@ extern int jobacct_storage_p_job_start(mysql_conn_t *mysql_conn,
 	}
 
 
-	priority = (job_ptr->priority == NO_VAL) ?
-		-1L : (long) job_ptr->priority;
-
-	if (job_ptr->name && job_ptr->name[0]) {
-		char *temp = NULL;
-		/* first set the jname to the job_ptr->name */
-		jname = xstrdup(job_ptr->name);
-		/* then grep for " since that is the delimiter for
-		   the wckey */
-		if((temp = strchr(jname, '\"'))) {
-			if(strrchr(jname, '\"') != temp) {
-				error("job %u has quotes in it's name '%s', "
-				      "no way to get correct wckey", 
-				      job_ptr->job_id, jname);
-				xfree(jname);
-				jname = _fix_double_quotes(job_ptr->name);
-			} else {
-				/* if we have a wckey set the " to NULL to
-				 * end the jname */
-				temp[0] = '\0';
-				/* increment and copy the remainder */
-				temp++;
-				wckey = xstrdup(temp);
-			}
-		}
-	}
-
-	if(!jname || !jname[0]) {
-		/* free jname if something is allocated here */
-		xfree(jname);
-		jname = xstrdup("allocation");
+	if (job_ptr->name && job_ptr->name[0]) 
+		jname = job_ptr->name;
+	else {
+		jname = "allocation";
 		track_steps = 1;
 	}
 	
-	if (job_ptr->nodes && job_ptr->nodes[0])
+	if (job_ptr->nodes && job_ptr->nodes[0]) 
 		nodes = job_ptr->nodes;
 	else
 		nodes = "None assigned";
@@ -9757,18 +10493,32 @@ extern int jobacct_storage_p_job_start(mysql_conn_t *mysql_conn,
 
 	if(slurmdbd_conf) {
 		block_id = xstrdup(job_ptr->comment);
+		node_cnt = job_ptr->node_cnt;
+		node_inx = job_ptr->network;
 	} else {
+		char temp_bit[BUF_SIZE];
+
+		if(job_ptr->node_bitmap) 
+			node_inx = bit_fmt(temp_bit, sizeof(temp_bit), 
+					   job_ptr->node_bitmap);
+#ifdef HAVE_BG
 		select_g_get_jobinfo(job_ptr->select_jobinfo, 
 				     SELECT_DATA_BLOCK_ID, 
 				     &block_id);
+		select_g_get_jobinfo(job_ptr->select_jobinfo, 
+				     SELECT_DATA_NODE_CNT, 
+				     &node_cnt);
+#else
+		node_cnt = job_ptr->node_cnt;
+#endif 		
 	}
 
 	job_ptr->requid = -1; /* force to -1 for sacct to know this
 			       * hasn't been set yet */
 	
 	/* if there is a start_time get the wckeyid */
-	if(job_ptr->start_time) 
-		wckeyid = _get_wckeyid(mysql_conn, &wckey,
+	if(job_ptr->start_time && job_ptr->assoc_id) 
+		wckeyid = _get_wckeyid(mysql_conn, &job_ptr->wckey,
 				       job_ptr->user_id, cluster_name,
 				       job_ptr->assoc_id);
 	
@@ -9785,7 +10535,8 @@ extern int jobacct_storage_p_job_start(mysql_conn_t *mysql_conn,
 				job_ptr->details->submit_time;
 		query = xstrdup_printf(
 			"insert into %s "
-			"(jobid, associd, wckeyid, uid, gid, nodelist, ",
+			"(jobid, associd, wckeyid, uid, "
+			"gid, nodelist, resvid, timelimit, ",
 			job_table);
 
 		if(cluster_name) 
@@ -9796,15 +10547,19 @@ extern int jobacct_storage_p_job_start(mysql_conn_t *mysql_conn,
 			xstrcat(query, "partition, ");
 		if(block_id) 
 			xstrcat(query, "blockid, ");
-		if(wckey) 
+		if(job_ptr->wckey) 
 			xstrcat(query, "wckey, ");
+		if(node_inx) 
+			xstrcat(query, "node_inx, ");
 		
 		xstrfmtcat(query, 
 			   "eligible, submit, start, name, track_steps, "
-			   "state, priority, req_cpus, alloc_cpus) "
-			   "values (%u, %u, %u, %u, %u, \"%s\", ",
+			   "state, priority, req_cpus, "
+			   "alloc_cpus, alloc_nodes) "
+			   "values (%u, %u, %u, %u, %u, \"%s\", %u, %u, ",
 			   job_ptr->job_id, job_ptr->assoc_id, wckeyid,
-			   job_ptr->user_id, job_ptr->group_id, nodes);
+			   job_ptr->user_id, job_ptr->group_id, nodes, 
+			   job_ptr->resv_id, job_ptr->time_limit);
 		
 		if(cluster_name) 
 			xstrfmtcat(query, "\"%s\", ", cluster_name);
@@ -9814,23 +10569,26 @@ extern int jobacct_storage_p_job_start(mysql_conn_t *mysql_conn,
 			xstrfmtcat(query, "\"%s\", ", job_ptr->partition);
 		if(block_id) 
 			xstrfmtcat(query, "\"%s\", ", block_id);
-		if(wckey) 
-			xstrfmtcat(query, "\"%s\", ", wckey);
+		if(job_ptr->wckey) 
+			xstrfmtcat(query, "\"%s\", ", job_ptr->wckey);
+		if(node_inx) 
+			xstrfmtcat(query, "\"%s\", ", node_inx);
 
 		xstrfmtcat(query, 
-			   "%d, %d, %d, \"%s\", %u, %u, %u, %u, %u) "
+			   "%d, %d, %d, \"%s\", %u, %u, %u, %u, %u, %u) "
 			   "on duplicate key update "
 			   "id=LAST_INSERT_ID(id), state=%u, "
-			   "associd=%u, wckeyid=%u",
+			   "associd=%u, wckeyid=%u, resvid=%u, timelimit=%u",
 			   (int)job_ptr->details->begin_time,
 			   (int)job_ptr->details->submit_time,
 			   (int)job_ptr->start_time,
 			   jname, track_steps,
 			   job_ptr->job_state & (~JOB_COMPLETING),
-			   priority, job_ptr->num_procs,
-			   job_ptr->total_procs, 
+			   job_ptr->priority, job_ptr->num_procs,
+			   job_ptr->total_procs, node_cnt,
 			   job_ptr->job_state & (~JOB_COMPLETING),
-			   job_ptr->assoc_id, wckeyid);
+			   job_ptr->assoc_id, wckeyid, job_ptr->resv_id,
+			   job_ptr->time_limit);
 
 		if(job_ptr->account) 
 			xstrfmtcat(query, ", account=\"%s\"", job_ptr->account);
@@ -9839,8 +10597,10 @@ extern int jobacct_storage_p_job_start(mysql_conn_t *mysql_conn,
 				   job_ptr->partition);
 		if(block_id)
 			xstrfmtcat(query, ", blockid=\"%s\"", block_id);
-		if(wckey) 
-			xstrfmtcat(query, ", wckey=\"%s\"", wckey);
+		if(job_ptr->wckey) 
+			xstrfmtcat(query, ", wckey=\"%s\"", job_ptr->wckey);
+		if(node_inx) 
+			xstrfmtcat(query, ", node_inx=\"%s\"", node_inx);
 		
 		debug3("%d(%d) query\n%s", mysql_conn->conn, __LINE__, query);
 	try_again:
@@ -9870,31 +10630,30 @@ extern int jobacct_storage_p_job_start(mysql_conn_t *mysql_conn,
 				   job_ptr->partition);
 		if(block_id)
 			xstrfmtcat(query, "blockid=\"%s\", ", block_id);
-
-		if(wckey) 
-			xstrfmtcat(query, "wckey=\"%s\", ", wckey);
+		if(job_ptr->wckey) 
+			xstrfmtcat(query, "wckey=\"%s\", ", job_ptr->wckey);
+		if(node_inx) 
+			xstrfmtcat(query, "node_inx=\"%s\", ", node_inx);
 
 		xstrfmtcat(query, "start=%d, name=\"%s\", state=%u, "
-			   "alloc_cpus=%u, associd=%u, wckeyid=%u where id=%d",
+			   "alloc_cpus=%u, alloc_nodes=%u, "
+			   "associd=%u, wckeyid=%u, resvid=%u, timelimit=%u "
+			   "where id=%d",
 			   (int)job_ptr->start_time,
 			   jname, job_ptr->job_state & (~JOB_COMPLETING),
-			   job_ptr->total_procs, job_ptr->assoc_id, wckeyid,
+			   job_ptr->total_procs, node_cnt, 
+			   job_ptr->assoc_id, wckeyid,
+			   job_ptr->resv_id, job_ptr->time_limit, 
 			   job_ptr->db_index);
 		debug3("%d(%d) query\n%s", mysql_conn->conn, __LINE__, query);
 		rc = mysql_db_query(mysql_conn->db_conn, query);
 	}
 
 	xfree(block_id);
-	xfree(jname);
-	xfree(wckey);
-
 	xfree(query);
 	if(no_cluster)
 		xfree(cluster_name);
 	return rc;
-#else
-	return SLURM_ERROR;
-#endif
 }
 
 /* 
@@ -9903,7 +10662,6 @@ extern int jobacct_storage_p_job_start(mysql_conn_t *mysql_conn,
 extern int jobacct_storage_p_job_complete(mysql_conn_t *mysql_conn, 
 					  struct job_record *job_ptr)
 {
-#ifdef HAVE_MYSQL
 	char *query = NULL, *nodes = NULL;
 	int rc=SLURM_SUCCESS;
 	time_t start_time = job_ptr->start_time;
@@ -9979,9 +10737,6 @@ extern int jobacct_storage_p_job_complete(mysql_conn_t *mysql_conn,
 	xfree(query);
 	
 	return rc;
-#else
-	return SLURM_ERROR;
-#endif
 }
 
 /* 
@@ -9990,15 +10745,14 @@ extern int jobacct_storage_p_job_complete(mysql_conn_t *mysql_conn,
 extern int jobacct_storage_p_step_start(mysql_conn_t *mysql_conn, 
 					struct step_record *step_ptr)
 {
-#ifdef HAVE_MYSQL
-	int cpus = 0;
+	int cpus = 0, tasks = 0, nodes = 0, task_dist = 0;
 	int rc=SLURM_SUCCESS;
 	char node_list[BUFFER_SIZE];
+	char *node_inx = NULL;
 #ifdef HAVE_BG
 	char *ionodes = NULL;
 #endif
 	char *query = NULL;
-	char *sname = NULL;
 
 	if (!step_ptr->job_ptr->db_index 
 	    && (!step_ptr->job_ptr->details
@@ -10011,12 +10765,21 @@ extern int jobacct_storage_p_step_start(mysql_conn_t *mysql_conn,
 	if(_check_connection(mysql_conn) != SLURM_SUCCESS)
 		return SLURM_ERROR;
 	if(slurmdbd_conf) {
-		cpus = step_ptr->job_ptr->total_procs;
+		tasks = step_ptr->job_ptr->details->num_tasks;
+		cpus = step_ptr->cpu_count;
 		snprintf(node_list, BUFFER_SIZE, "%s",
 			 step_ptr->job_ptr->nodes);
+		nodes = step_ptr->step_layout->node_cnt;
+		task_dist = step_ptr->step_layout->task_dist;
+		node_inx = step_ptr->network;
 	} else {
+		char temp_bit[BUF_SIZE];
+
+		if(step_ptr->step_node_bitmap) 
+			node_inx = bit_fmt(temp_bit, sizeof(temp_bit), 
+					   step_ptr->step_node_bitmap);
 #ifdef HAVE_BG
-		cpus = step_ptr->job_ptr->num_procs;
+		tasks = cpus = step_ptr->job_ptr->num_procs;
 		select_g_get_jobinfo(step_ptr->job_ptr->select_jobinfo, 
 				     SELECT_DATA_IONODES, 
 				     &ionodes);
@@ -10027,20 +10790,26 @@ extern int jobacct_storage_p_step_start(mysql_conn_t *mysql_conn,
 		} else
 			snprintf(node_list, BUFFER_SIZE, "%s",
 				 step_ptr->job_ptr->nodes);
-		
+		select_g_get_jobinfo(step_ptr->job_ptr->select_jobinfo, 
+				     SELECT_DATA_NODE_CNT, 
+				     &nodes);
 #else
 		if(!step_ptr->step_layout || !step_ptr->step_layout->task_cnt) {
-			cpus = step_ptr->job_ptr->total_procs;
+			tasks = cpus = step_ptr->job_ptr->total_procs;
 			snprintf(node_list, BUFFER_SIZE, "%s",
 				 step_ptr->job_ptr->nodes);
+			nodes = step_ptr->job_ptr->node_cnt;
 		} else {
-			cpus = step_ptr->step_layout->task_cnt;
+			cpus = step_ptr->cpu_count; 
+			tasks = step_ptr->step_layout->task_cnt;
+			nodes = step_ptr->step_layout->node_cnt;
+			task_dist = step_ptr->step_layout->task_dist;
 			snprintf(node_list, BUFFER_SIZE, "%s", 
 				 step_ptr->step_layout->node_list);
 		}
 #endif
 	}
-	
+
 	step_ptr->job_ptr->requid = -1; /* force to -1 for sacct to know this
 					 * hasn't been set yet  */
 
@@ -10063,38 +10832,25 @@ extern int jobacct_storage_p_step_start(mysql_conn_t *mysql_conn,
 		}
 	}
 
-	if (step_ptr->name && step_ptr->name[0]) {
-		char *temp = NULL;
-		/* first set the jname to the job_ptr->name */
-		sname = xstrdup(step_ptr->name);
-		/* then grep for " since that is the delimiter for
-		   the wckey */
-		if((temp = strchr(sname, '\"'))) {
-			/* if we have a wckey set the " to NULL to
-			 * end the jname */
-			temp[0] = '\0';
-		}
-	}
-
 	/* we want to print a -1 for the requid so leave it a
 	   %d */
 	query = xstrdup_printf(
 		"insert into %s (id, stepid, start, name, state, "
-		"cpus, nodelist) "
-		"values (%d, %d, %d, \"%s\", %d, %d, \"%s\") "
-		"on duplicate key update cpus=%d, end=0, state=%d",
+		"cpus, nodes, node_inx, tasks, nodelist, task_dist) "
+		"values (%d, %d, %d, \"%s\", %d, %d, %d, %d, "
+		"\"%s\", \"%s\", %d) "
+		"on duplicate key update cpus=%d, nodes=%d, "
+		"tasks=%d, end=0, state=%d, node_inx=\"%s\", task_dist=%d",
 		step_table, step_ptr->job_ptr->db_index,
 		step_ptr->step_id, 
-		(int)step_ptr->start_time, sname,
-		JOB_RUNNING, cpus, node_list, cpus, JOB_RUNNING);
+		(int)step_ptr->start_time, step_ptr->name,
+		JOB_RUNNING, cpus, nodes, tasks, node_list, node_inx, task_dist,
+		cpus, nodes, tasks, JOB_RUNNING, node_inx, task_dist);
 	debug3("%d(%d) query\n%s", mysql_conn->conn, __LINE__, query);
 	rc = mysql_db_query(mysql_conn->db_conn, query);
 	xfree(query);
-	xfree(sname);
+
 	return rc;
-#else
-	return SLURM_ERROR;
-#endif
 }
 
 /* 
@@ -10103,11 +10859,10 @@ extern int jobacct_storage_p_step_start(mysql_conn_t *mysql_conn,
 extern int jobacct_storage_p_step_complete(mysql_conn_t *mysql_conn, 
 					   struct step_record *step_ptr)
 {
-#ifdef HAVE_MYSQL
 	time_t now;
 	int elapsed;
 	int comp_status;
-	int cpus = 0;
+	int cpus = 0, tasks = 0;
 	struct jobacctinfo *jobacct = (struct jobacctinfo *)step_ptr->jobacct;
 	struct jobacctinfo dummy_jobacct;
 	float ave_vsize = 0, ave_rss = 0, ave_pages = 0;
@@ -10126,7 +10881,7 @@ extern int jobacct_storage_p_step_complete(mysql_conn_t *mysql_conn,
 
 	if (jobacct == NULL) {
 		/* JobAcctGather=jobacct_gather/none, no data to process */
-		bzero(&dummy_jobacct, sizeof(dummy_jobacct));
+		memset(&dummy_jobacct, 0, sizeof(dummy_jobacct));
 		jobacct = &dummy_jobacct;
 	}
 
@@ -10135,18 +10890,20 @@ extern int jobacct_storage_p_step_complete(mysql_conn_t *mysql_conn,
 
 	if(slurmdbd_conf) {
 		now = step_ptr->job_ptr->end_time;
-		cpus = step_ptr->job_ptr->total_procs;
-
+		tasks = step_ptr->job_ptr->details->num_tasks;
+		cpus = step_ptr->cpu_count;
 	} else {
 		now = time(NULL);
 #ifdef HAVE_BG
-		cpus = step_ptr->job_ptr->num_procs;
+		tasks = cpus = step_ptr->job_ptr->num_procs;
 		
 #else
 		if(!step_ptr->step_layout || !step_ptr->step_layout->task_cnt)
-			cpus = step_ptr->job_ptr->total_procs;
-		else 
-			cpus = step_ptr->step_layout->task_cnt;
+			tasks = cpus = step_ptr->job_ptr->total_procs;
+		else {
+			cpus = step_ptr->cpu_count; 
+			tasks = step_ptr->step_layout->task_cnt;
+		}
 #endif
 	}
 	
@@ -10248,9 +11005,6 @@ extern int jobacct_storage_p_step_complete(mysql_conn_t *mysql_conn,
 	xfree(query);
 	 
 	return rc;
-#else
-	return SLURM_ERROR;
-#endif
 }
 
 /* 
@@ -10259,7 +11013,6 @@ extern int jobacct_storage_p_step_complete(mysql_conn_t *mysql_conn,
 extern int jobacct_storage_p_suspend(mysql_conn_t *mysql_conn, 
 				     struct job_record *job_ptr)
 {
-#ifdef HAVE_MYSQL
 	char *query = NULL;
 	int rc = SLURM_SUCCESS;
 	bool suspended = false;
@@ -10320,9 +11073,6 @@ extern int jobacct_storage_p_suspend(mysql_conn_t *mysql_conn,
 	}
 	
 	return rc;
-#else
-	return SLURM_ERROR;
-#endif
 }
 
 /* 
@@ -10335,11 +11085,11 @@ extern List jobacct_storage_p_get_jobs_cond(mysql_conn_t *mysql_conn,
 					    acct_job_cond_t *job_cond)
 {
 	List job_list = NULL;
-#ifdef HAVE_MYSQL
+
 	if(_check_connection(mysql_conn) != SLURM_SUCCESS)
 		return NULL;
 	job_list = mysql_jobacct_process_get_jobs(mysql_conn, uid, job_cond);	
-#endif
+
 	return job_list;
 }
 
@@ -10349,13 +11099,10 @@ extern List jobacct_storage_p_get_jobs_cond(mysql_conn_t *mysql_conn,
 extern int jobacct_storage_p_archive(mysql_conn_t *mysql_conn, 
 				     acct_archive_cond_t *arch_cond)
 {
-#ifdef HAVE_MYSQL
 	if(_check_connection(mysql_conn) != SLURM_SUCCESS)
 		return SLURM_ERROR;
 	
 	return mysql_jobacct_process_archive(mysql_conn, arch_cond);
-#endif
-	return SLURM_ERROR;
 }
 
 /* 
@@ -10364,20 +11111,16 @@ extern int jobacct_storage_p_archive(mysql_conn_t *mysql_conn,
 extern int jobacct_storage_p_archive_load(mysql_conn_t *mysql_conn, 
 					  acct_archive_rec_t *arch_rec)
 {
-#ifdef HAVE_MYSQL
 	if(_check_connection(mysql_conn) != SLURM_SUCCESS)
 		return SLURM_ERROR;
 
 	return mysql_jobacct_process_archive_load(mysql_conn, arch_rec);
-#endif
-	return SLURM_ERROR;
 }
 
 extern int acct_storage_p_update_shares_used(mysql_conn_t *mysql_conn, 
 					     List shares_used)
 {
-	/* This definitely needs to be fleshed out.
-	 * Go through the list of shares_used_object_t objects and store them */
+	/* No plans to have the database hold the used shares */
 	return SLURM_SUCCESS;
 }
 
@@ -10385,7 +11128,6 @@ extern int acct_storage_p_flush_jobs_on_cluster(
 	mysql_conn_t *mysql_conn, char *cluster, time_t event_time)
 {
 	int rc = SLURM_SUCCESS;
-#ifdef HAVE_MYSQL
 	/* put end times for a clean start */
 	MYSQL_RES *result = NULL;
 	MYSQL_ROW row;
@@ -10462,7 +11204,6 @@ extern int acct_storage_p_flush_jobs_on_cluster(
 		rc = mysql_db_query(mysql_conn->db_conn, query);
 		xfree(query);
 	}
-#endif
 
 	return rc;
 }

@@ -4,10 +4,11 @@
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -82,11 +83,15 @@
 #define POS_LOC 0
 #define DEFAULT_ENTRY_LENGTH 500
 
+#define MAKE_BLACK -2
+#define MAKE_WHITE -1
+
 enum { JOB_PAGE, 
        STEP_PAGE, 
-       PART_PAGE, 
+       PART_PAGE,
        NODE_PAGE, 
        BLOCK_PAGE, 
+       RESV_PAGE,
        SUBMIT_PAGE,
        ADMIN_PAGE,
        INFO_PAGE,
@@ -115,6 +120,18 @@ enum { EDIT_NONE,
        EDIT_TEXTBOX	
 };
 
+#ifdef HAVE_BG
+/* ERROR_STATE must be last since that will affect the state of the rest of the
+   midplane.
+*/
+enum {
+	SVIEW_BG_IDLE_STATE,
+	SVIEW_BG_ALLOC_STATE,
+	SVIEW_BG_ERROR_STATE
+};
+#endif
+
+
 typedef enum { SEARCH_JOB_ID = 1,
 	       SEARCH_JOB_USER,
 	       SEARCH_JOB_STATE,
@@ -125,7 +142,8 @@ typedef enum { SEARCH_JOB_ID = 1,
 	       SEARCH_PARTITION_NAME,
 	       SEARCH_PARTITION_STATE,
 	       SEARCH_NODE_NAME,
-	       SEARCH_NODE_STATE
+	       SEARCH_NODE_STATE,
+	       SEARCH_RESERVATION_NAME,
 } sview_search_type_t;
 
 
@@ -196,7 +214,9 @@ struct popup_info {
 	int toggled;
 	int force_refresh;
 	int *running;
+	int *node_inx;
 	int show_grid;
+	int full_grid;
 	bool not_found;
 	GtkWidget *popup;
 	GtkWidget *event_box;
@@ -205,6 +225,9 @@ struct popup_info {
 	List grid_button_list;
 	specific_info_t *spec_info;
 	display_data_t *display_data;
+	GtkTreeModel *model;
+	GtkTreeIter iter;
+	int node_inx_id;
 };
 
 typedef struct {
@@ -217,6 +240,7 @@ typedef struct {
 	int state;
 	int table_x;
 	int table_y;
+	bool used;
 } grid_button_t;
 
 typedef struct {
@@ -266,11 +290,12 @@ extern void destroy_grid_button(void *arg);
 extern grid_button_t *create_grid_button_from_another(
 	grid_button_t *grid_button, char *name, int color_inx);
 /* do not free the char * from this function it is static */
-extern char *change_grid_color(List button_list, int start_inx, int end_inx,
-			       int color_inx);
+extern char *change_grid_color(List button_list, int start, int end,
+			       int color_inx, bool change_unused);
+extern void set_grid_used(List button_list, int start, int end, bool used);
 extern void get_button_list_from_main(List *button_list, int start, int end,
 				      int color_inx);
-extern List copy_main_button_list();
+extern List copy_main_button_list(int initial_color);
 #ifdef HAVE_BG
 extern void add_extra_bluegene_buttons(List *button_list, int inx, 
 				       int *color_inx);
@@ -281,6 +306,7 @@ extern int get_system_stats(GtkTable *table);
 extern int setup_grid_table(GtkTable *table, List button_list, List node_list);
 extern void sview_init_grid();
 extern void sview_reset_grid();
+extern void setup_popup_grid_list(popup_info_t *popup_win);
 
 // part_info.c
 extern void refresh_part(GtkAction *action, gpointer user_data);
@@ -352,6 +378,22 @@ extern void set_menus_node(void *arg, GtkTreePath *path,
 			   GtkMenu *menu, int type);
 extern void popup_all_node(GtkTreeModel *model, GtkTreeIter *iter, int id);
 extern void admin_node(GtkTreeModel *model, GtkTreeIter *iter, char *type);
+
+// resv_info.c
+extern void refresh_resv(GtkAction *action, gpointer user_data);
+extern GtkListStore *create_model_resv(int type);
+extern void admin_edit_resv(GtkCellRendererText *cell,
+			    const char *path_string,
+			    const char *new_text,
+			    gpointer data);
+extern int get_new_info_resv(reserve_info_msg_t **info_ptr, int force);
+extern void get_info_resv(GtkTable *table, display_data_t *display_data);
+extern void specific_info_resv(popup_info_t *popup_win);
+extern void set_menus_resv(void *arg, GtkTreePath *path, 
+			   GtkMenu *menu, int type);
+extern void popup_all_resv(GtkTreeModel *model, GtkTreeIter *iter, int id);
+extern void admin_resv(GtkTreeModel *model, GtkTreeIter *iter, char *type);
+
 
 // submit_info.c
 extern void get_info_submit(GtkTable *table, display_data_t *display_data);

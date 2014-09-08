@@ -5,10 +5,11 @@
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *   
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -221,6 +222,19 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 		xstrcat(out, "\n   ");
 	
 	/****** Line 4 ******/
+	if (part_ptr->allow_alloc_nodes == NULL)
+		snprintf(tmp_line, sizeof(tmp_line), "AllocNodes=%s","ALL");
+	else
+		snprintf(tmp_line, sizeof(tmp_line), "AllocNodes=%s",
+			 part_ptr->allow_alloc_nodes);
+	xstrcat(out, tmp_line);
+	if (one_liner)
+		xstrcat(out, " ");
+	else
+		xstrcat(out, "\n   ");
+	
+
+	/****** Line 5 ******/
 #ifdef HAVE_BG
 	snprintf(tmp_line, sizeof(tmp_line), "BasePartitions=%s BPIndices=", 
 		part_ptr->nodes);
@@ -237,6 +251,19 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 			part_ptr->node_inx[j+1]);
 		xstrcat(out, tmp_line);
 	}
+
+	if (part_ptr->default_time == INFINITE)
+		sprintf(tmp_line, " DefaultTime=UNLIMITED ");
+	else if (part_ptr->default_time == NO_VAL)
+		sprintf(tmp_line, " DefaultTime=NONE ");	  
+	else {
+		char time_line[32];
+		secs2time_str(part_ptr->default_time * 60, time_line, 
+			sizeof(time_line));
+		sprintf(tmp_line, " DefaultTime=%s ", time_line);
+	}
+	xstrcat(out, tmp_line);
+
 	if (one_liner)
 		xstrcat(out, "\n");
 	else

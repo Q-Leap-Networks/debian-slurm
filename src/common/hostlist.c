@@ -1,15 +1,16 @@
 /*****************************************************************************\
- *  $Id: hostlist.c 16088 2008-12-29 21:56:17Z jette $
+ *  $Id: hostlist.c 17248 2009-04-14 20:14:06Z da $
  *****************************************************************************
  *  $LSDId: hostlist.c,v 1.14 2003/10/14 20:11:54 grondo Exp $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -2550,7 +2551,7 @@ _get_boxes(char *buf, int max_len)
 static void
 _clear_grid(void)
 {
-	bzero(axis, sizeof(axis));
+	memset(axis, 0, sizeof(axis));
 
 	axis_min_x = HOSTLIST_BASE;
 	axis_min_y = HOSTLIST_BASE;

@@ -5,10 +5,11 @@
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -151,7 +152,7 @@ extern int sacctmgr_list_wckey(int argc, char *argv[])
 	int rc = SLURM_SUCCESS;
 	acct_wckey_cond_t *wckey_cond = xmalloc(sizeof(acct_wckey_cond_t));
 	List wckey_list = NULL;
-	int i=0, set=0;
+	int i=0;
 	ListIterator itr = NULL;
 	ListIterator itr2 = NULL;
 	acct_wckey_rec_t *wckey = NULL;
@@ -170,7 +171,13 @@ extern int sacctmgr_list_wckey(int argc, char *argv[])
 		PRINT_USER
 	};
 
-	set = _set_cond(&i, argc, argv, wckey_cond, format_list);
+	for (i=0; i<argc; i++) {
+		int command_len = strlen(argv[i]);
+		if (!strncasecmp (argv[i], "Where", MAX(command_len, 5))
+		    || !strncasecmp (argv[i], "Set", MAX(command_len, 3))) 
+			i++;		
+		_set_cond(&i, argc, argv, wckey_cond, format_list);
+	}
 
 	if(exit_code) {
 		destroy_acct_wckey_cond(wckey_cond);
@@ -228,7 +235,7 @@ extern int sacctmgr_list_wckey(int argc, char *argv[])
 			continue;
 		}
 
-		if(newlen > 0) 
+		if(newlen) 
 			field->len = newlen;
 		
 		list_append(print_fields_list, field);		

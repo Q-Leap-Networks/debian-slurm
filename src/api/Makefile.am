@@ -76,7 +76,9 @@ slurmapi_src =           \
 	node_info.c      \
 	node_select_info.c node_select_info.h \
 	partition_info.c \
+	reservation_info.c \
 	signal.c         \
+	slurm_hostlist.c \
 	slurm_pmi.c slurm_pmi.h	\
 	step_ctx.c step_ctx.h \
 	step_io.c step_io.h \
@@ -84,6 +86,7 @@ slurmapi_src =           \
 	pmi_server.c pmi_server.h \
 	submit.c         \
 	suspend.c        \
+	topo_info.c      \
 	triggers.c       \
 	reconfigure.c    \
 	update_config.c

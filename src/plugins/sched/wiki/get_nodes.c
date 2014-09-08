@@ -5,10 +5,11 @@
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -132,9 +133,13 @@ static char *	_dump_all_nodes(int *node_cnt, time_t update_time)
 	int i, cnt = 0;
 	struct node_record *node_ptr = node_record_table_ptr;
 	char *tmp_buf, *buf = NULL;
+	uint16_t base_state;
 
 	for (i=0; i<node_record_count; i++, node_ptr++) {
 		if (node_ptr->name == NULL)
+			continue;
+		base_state = node_ptr->node_state & NODE_STATE_BASE;
+		if (base_state == NODE_STATE_FUTURE)
 			continue;
 		tmp_buf = _dump_node(node_ptr, update_time);
 		if (cnt > 0)

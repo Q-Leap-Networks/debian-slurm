@@ -1,10 +1,12 @@
 /*****************************************************************************\
- *  Copyright (C) 2006 Hewlett-Packard Development Company, L.P.
+ *  Copyright (C) 2006-2009 Hewlett-Packard Development Company, L.P.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Written by Susanne M. Balle, <susanne.balle@hp.com>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -32,83 +34,218 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#include <limits.h>       /* INT_MAX */
-#include "src/plugins/task/affinity/dist_tasks.h"
+#include "affinity.h"
+#include "dist_tasks.h"
+#include "src/common/bitstring.h"
+#include "src/common/log.h"
+#include "src/common/slurm_cred.h"
+#include "src/common/slurm_protocol_api.h"
+#include "src/common/slurm_resource_info.h"
+#include "src/common/xmalloc.h"
+#include "src/slurmd/slurmd/slurmd.h"
 
-static slurm_lllp_ctx_t *lllp_ctx = NULL;	/* binding context */
-static struct node_gids *lllp_tasks = NULL;	/* Keep track of the task count
-						 * for logical processors
-						 * socket/core/thread. */
-static uint32_t lllp_reserved_size = 0;		/* lllp reserved array size */
-static uint32_t *lllp_reserved = NULL;   	/* count of Reserved lllps 
-						 * (socket, core, threads) */
+#ifdef HAVE_NUMA
+#include <numa.h>
+#endif
 
+static char *_alloc_mask(launch_tasks_request_msg_t *req,
+			 int *whole_node_cnt, int *whole_socket_cnt, 
+			 int *whole_core_cnt, int *whole_thread_cnt,		 				 int *part_socket_cnt, int *part_core_cnt);
+static bitstr_t *_get_avail_map(launch_tasks_request_msg_t *req,
+				uint16_t *hw_sockets, uint16_t *hw_cores,
+				uint16_t *hw_threads);
+static int _get_local_node_info(slurm_cred_arg_t *arg, uint32_t job_node_id,
+				uint16_t *sockets, uint16_t *cores);
 
-static void _task_layout_display_masks(launch_tasks_request_msg_t *req,
-				       const uint32_t *gtid,
-				       const uint32_t maxtasks,
-				       bitstr_t **masks);
-static int _init_lllp(void);
-static int _cleanup_lllp(void);
-static void _print_tasks_per_lllp(void);
 static int _task_layout_lllp_block(launch_tasks_request_msg_t *req,
-				   const uint32_t *gtid,
-				   const uint32_t maxtasks,
-				   bitstr_t ***masks_p);
+				   uint32_t node_id, bitstr_t ***masks_p);
 static int _task_layout_lllp_cyclic(launch_tasks_request_msg_t *req,
-				    const uint32_t *gtid,
-				    const uint32_t maxtasks,
-				    bitstr_t ***masks_p);
-static int _task_layout_lllp_plane(launch_tasks_request_msg_t *req,
-				   const uint32_t *gtid,
-				   const uint32_t maxtasks,
-				   bitstr_t ***masks_p);
-static void _lllp_enlarge_masks(launch_tasks_request_msg_t *req,
-				const uint32_t maxtasks,
-				bitstr_t **masks);
-static void _lllp_use_available(launch_tasks_request_msg_t *req,
-				const uint32_t maxtasks,
-				bitstr_t **masks);
-static bitstr_t *_lllp_map_abstract_mask (bitstr_t *bitmask);
+				    uint32_t node_id, bitstr_t ***masks_p);
+static int _task_layout_lllp_multi(launch_tasks_request_msg_t *req, 
+				    uint32_t node_id, bitstr_t ***masks_p);
+
 static void _lllp_map_abstract_masks(const uint32_t maxtasks,
 				     bitstr_t **masks);
 static void _lllp_generate_cpu_bind(launch_tasks_request_msg_t *req,
 				    const uint32_t maxtasks,
 				    bitstr_t **masks);
-static void _lllp_free_masks(launch_tasks_request_msg_t *req,
-			     const uint32_t maxtasks,
-			     bitstr_t **masks);
-static void _single_mask(const uint16_t nsockets, 
-			 const uint16_t ncores, 
-			 const uint16_t nthreads, 
-			 const uint16_t socket_id,
-			 const uint16_t core_id, 
-			 const uint16_t thread_id,
-			 const bool bind_to_exact_socket,
-			 const bool bind_to_exact_core,
-			 const bool bind_to_exact_thread,
-			 bitstr_t ** single_mask);
-static void _get_resources_this_node(uint16_t *cpus,
-				     uint16_t *sockets,
-				     uint16_t *cores,
-				     uint16_t *threads,
-				     uint16_t *alloc_cores,
-				     uint32_t jobid);
-static void _cr_update_reservation(int reserve, uint32_t *reserved, 
-				   bitstr_t *mask);
 
-/* Convenience macros: 
- *     SCT_TO_LLLP   sockets cores threads to abstract block LLLP index
- */
-#define SCT_TO_LLLP(s,c,t,ncores,nthreads)			\
-	(s)*((ncores)*(nthreads)) + (c)*(nthreads) + (t)
 /*     BLOCK_MAP     physical machine LLLP index to abstract block LLLP index
  *     BLOCK_MAP_INV physical abstract block LLLP index to machine LLLP index
  */
 #define BLOCK_MAP(index)	_block_map(index, conf->block_map)
 #define BLOCK_MAP_INV(index)	_block_map(index, conf->block_map_inv)
 
-static uint16_t _block_map(uint16_t index, uint16_t *map);
+
+/* _block_map
+ *
+ * safely returns a mapped index using a provided block map
+ *
+ * IN - index to map
+ * IN - map to use
+ */
+static uint16_t _block_map(uint16_t index, uint16_t *map)
+{
+	if (map == NULL) {
+	    	return index;
+	}
+	/* make sure bit falls in map */
+	if (index >= conf->block_map_size) {
+		debug3("wrapping index %u into block_map_size of %u",
+		       index, conf->block_map_size);
+		index = index % conf->block_map_size;
+	}
+	index = map[index];
+	return(index);
+}
+
+static void _task_layout_display_masks(launch_tasks_request_msg_t *req, 
+					const uint32_t *gtid,
+					const uint32_t maxtasks,
+					bitstr_t **masks)
+{
+	int i;
+	char *str = NULL;
+	for(i = 0; i < maxtasks; i++) {
+		str = (char *)bit_fmt_hexmask(masks[i]);
+		debug3("_task_layout_display_masks jobid [%u:%d] %s",
+		       req->job_id, gtid[i], str);
+		xfree(str);
+	}
+}
+
+static void _lllp_free_masks(const uint32_t maxtasks, bitstr_t **masks)
+{
+    	int i;
+	bitstr_t *bitmask;
+	for (i = 0; i < maxtasks; i++) { 
+		bitmask = masks[i];
+	    	if (bitmask) {
+			bit_free(bitmask);
+		}
+	}
+	xfree(masks);
+}
+
+#ifdef HAVE_NUMA
+/* _match_mask_to_ldom
+ *
+ * expand each mask to encompass the whole locality domain
+ * within which it currently exists
+ * NOTE: this assumes that the masks are already in logical
+ * (and not abstract) CPU order.
+ */
+static void _match_masks_to_ldom(const uint32_t maxtasks, bitstr_t **masks)
+{
+	uint32_t i, b, size;
+
+	if (!masks || !masks[0])
+		return;
+	size = bit_size(masks[0]);
+	for(i = 0; i < maxtasks; i++) {
+		for (b = 0; b < size; b++) {
+			if (bit_test(masks[i], b)) {
+				/* get the NUMA node for this CPU, and then
+				 * set all CPUs in the mask that exist in
+				 * the same CPU */
+				int c;
+				uint16_t nnid = slurm_get_numa_node(b);
+				for (c = 0; c < size; c++) {
+					if (slurm_get_numa_node(c) == nnid)
+						bit_set(masks[i], c);
+				}
+			}
+		}
+	}
+}
+#endif
+
+/* 
+ * batch_bind - Set the batch request message so as to bind the shell to the 
+ *	proper resources
+ */
+void batch_bind(batch_job_launch_msg_t *req)
+{
+	bitstr_t *req_map, *hw_map;
+	slurm_cred_arg_t arg;
+	uint16_t sockets=0, cores=0, num_procs;
+	int hw_size, start, p, t, task_cnt=0;
+	char *str;
+
+	if (slurm_cred_get_args(req->cred, &arg) != SLURM_SUCCESS) {
+		error("task/affinity: job lacks a credential");
+		return;
+	}
+	start = _get_local_node_info(&arg, 0, &sockets, &cores);
+	if (start != 0) {
+		error("task/affinity: missing node 0 in job credential");
+		slurm_cred_free_args(&arg);
+		return;
+	}
+
+	hw_size    = conf->sockets * conf->cores * conf->threads;
+	num_procs  = MIN((sockets * cores),
+			 (conf->sockets * conf->cores));
+	req_map = (bitstr_t *) bit_alloc(num_procs);
+	hw_map  = (bitstr_t *) bit_alloc(hw_size);
+	if (!req_map || !hw_map) {
+		error("task/affinity: malloc error");
+		bit_free(req_map);
+		bit_free(hw_map);
+		slurm_cred_free_args(&arg);
+	}
+
+	/* Transfer core_bitmap data to local req_map.
+	 * The MOD function handles the case where fewer processes
+	 * physically exist than are configured (slurmd is out of 
+	 * sync with the slurmctld daemon). */
+	for (p = 0; p < (sockets * cores); p++) {
+		if (bit_test(arg.core_bitmap, p))
+			bit_set(req_map, (p % num_procs));
+	}
+	str = (char *)bit_fmt_hexmask(req_map);
+	debug3("task/affinity: job %u CPU mask from slurmctld: %s",
+		req->job_id, str);
+	xfree(str);
+
+	for (p = 0; p < num_procs; p++) {
+		if (bit_test(req_map, p) == 0)
+			continue;
+		/* core_bitmap does not include threads, so we
+		 * add them here but limit them to what the job
+		 * requested */
+		for (t = 0; t < conf->threads; t++) {
+			uint16_t bit = p * conf->threads + t;
+			bit_set(hw_map, bit);
+			task_cnt++;
+		}
+	}
+	if (task_cnt) {
+		req->cpu_bind_type = CPU_BIND_MASK;
+		if (conf->task_plugin_param & CPU_BIND_VERBOSE)
+			req->cpu_bind_type |= CPU_BIND_VERBOSE;
+		req->cpu_bind = (char *)bit_fmt_hexmask(hw_map);
+		info("task/affinity: job %u CPU input mask for node: %s",
+		     req->job_id, req->cpu_bind);
+		/* translate abstract masks to actual hardware layout */
+		_lllp_map_abstract_masks(1, &hw_map);
+#ifdef HAVE_NUMA
+		if (req->cpu_bind_type & CPU_BIND_TO_LDOMS) {
+			_match_masks_to_ldom(1, &hw_map);
+		}
+#endif
+		xfree(req->cpu_bind);
+		req->cpu_bind = (char *)bit_fmt_hexmask(hw_map);
+		info("task/affinity: job %u CPU final HW mask for node: %s",
+		     req->job_id, req->cpu_bind);
+	} else {
+		error("task/affinity: job %u allocated no CPUs", 
+		      req->job_id);
+	}
+	bit_free(hw_map);
+	bit_free(req_map);
+	slurm_cred_free_args(&arg);
+}
 
 /* 
  * lllp_distribution
@@ -118,9 +255,10 @@ static uint16_t _block_map(uint16_t index, uint16_t *map);
  * When automatic binding is enabled:
  *      - no binding flags set >= CPU_BIND_NONE, and
  *      - a auto binding level selected CPU_BIND_TO_{SOCKETS,CORES,THREADS}
+ * Otherwise limit job step to the allocated CPUs
  *
  * generate the appropriate cpu_bind type and string which results in
- * the sepcified lllp distribution.
+ * the specified lllp distribution.
  *
  * IN/OUT- job launch request (cpu_bind_type and cpu_bind updated)
  * IN- global task id array
@@ -131,569 +269,530 @@ void lllp_distribution(launch_tasks_request_msg_t *req, uint32_t node_id)
 	bitstr_t **masks = NULL;
 	char buf_type[100];
 	int maxtasks = req->tasks_to_launch[(int)node_id];
+	int whole_nodes, whole_sockets, whole_cores, whole_threads;
+	int part_sockets, part_cores;
         const uint32_t *gtid = req->global_task_ids[(int)node_id];
-	
-	slurm_sprint_cpu_bind_type(buf_type, req->cpu_bind_type);
-	if(req->cpu_bind_type >= CPU_BIND_NONE) {
+	static uint16_t bind_entity = CPU_BIND_TO_THREADS | CPU_BIND_TO_CORES |
+				      CPU_BIND_TO_SOCKETS | CPU_BIND_TO_LDOMS;
+	static uint16_t bind_mode = CPU_BIND_NONE   | CPU_BIND_MASK   |
+				    CPU_BIND_RANK   | CPU_BIND_MAP    |
+				    CPU_BIND_LDMASK | CPU_BIND_LDRANK | 
+				    CPU_BIND_LDMAP;
+
+	if (req->cpu_bind_type & bind_mode) {
+		/* Explicit step binding specified by user */
+		char *avail_mask = _alloc_mask(req,
+					       &whole_nodes,  &whole_sockets, 
+					       &whole_cores,  &whole_threads,
+					       &part_sockets, &part_cores);
+		if ((whole_nodes == 0) && avail_mask) {
+			/* Step does NOT have access to whole node, 
+			 * bind to full mask of available processors */
+			xfree(req->cpu_bind);
+			req->cpu_bind = avail_mask;
+			req->cpu_bind_type &= (~bind_mode);
+			req->cpu_bind_type |= CPU_BIND_MASK;
+		} else {
+			/* Step does have access to whole node, 
+			 * bind to whatever step wants */
+			xfree(avail_mask);
+		}
+		slurm_sprint_cpu_bind_type(buf_type, req->cpu_bind_type);
 		info("lllp_distribution jobid [%u] manual binding: %s",
 		     req->job_id, buf_type);
 		return;
 	}
-	if (!((req->cpu_bind_type & CPU_BIND_TO_THREADS) ||
-	      (req->cpu_bind_type & CPU_BIND_TO_CORES) ||
-	      (req->cpu_bind_type & CPU_BIND_TO_SOCKETS))) {
+
+	if (!(req->cpu_bind_type & bind_entity)) {
+		/* No bind unit (sockets, cores) specified by user,
+		 * pick something reasonable */
+		int max_tasks = req->tasks_to_launch[(int)node_id];
+		char *avail_mask = _alloc_mask(req,
+					       &whole_nodes,  &whole_sockets, 
+					       &whole_cores,  &whole_threads,
+					       &part_sockets, &part_cores);
+		debug("binding tasks:%d to "
+		      "nodes:%d sockets:%d:%d cores:%d:%d threads:%d",
+		      max_tasks, whole_nodes, whole_sockets ,part_sockets,
+		      whole_cores, part_cores, whole_threads);
+		if ((max_tasks == whole_sockets) && (part_sockets == 0)) {
+			req->cpu_bind_type |= CPU_BIND_TO_SOCKETS;
+			goto make_auto;
+		}
+		if ((max_tasks == whole_cores) && (part_cores == 0)) {
+			req->cpu_bind_type |= CPU_BIND_TO_CORES;
+			goto make_auto;
+		}
+		if (max_tasks == whole_threads) {
+			req->cpu_bind_type |= CPU_BIND_TO_THREADS;
+			goto make_auto;
+		}
+		if (avail_mask) {
+			xfree(req->cpu_bind);
+			req->cpu_bind = avail_mask;
+			req->cpu_bind_type |= CPU_BIND_MASK;
+		}
+		slurm_sprint_cpu_bind_type(buf_type, req->cpu_bind_type);
 		info("lllp_distribution jobid [%u] auto binding off: %s",
 		     req->job_id, buf_type);
 		return;
-	}
 
-	/* We are still thinking about this. Does this make sense?
-	if (req->task_dist == SLURM_DIST_ARBITRARY) {
-		req->cpu_bind_type >= CPU_BIND_NONE;
-		info("lllp_distribution jobid [%u] -m hostfile - auto binding off ",
-		     req->job_id);
-		return;
+  make_auto:	xfree(avail_mask);
+		slurm_sprint_cpu_bind_type(buf_type, req->cpu_bind_type);
+		info("lllp_distribution jobid [%u] implicit auto binding: "
+		     "%s, dist %d", req->job_id, buf_type, req->task_dist);
+	} else {
+		/* Explicit bind unit (sockets, cores) specified by user */
+		slurm_sprint_cpu_bind_type(buf_type, req->cpu_bind_type);
+		info("lllp_distribution jobid [%u] binding: %s, dist %d",
+		     req->job_id, buf_type, req->task_dist);
 	}
-	*/
-
-	info("lllp_distribution jobid [%u] auto binding: %s, dist %d",
-	     req->job_id, buf_type, req->task_dist);
 
 	switch (req->task_dist) {
 	case SLURM_DIST_BLOCK_BLOCK:
 	case SLURM_DIST_CYCLIC_BLOCK:
-		rc = _task_layout_lllp_block(req, gtid, maxtasks, &masks);
+	case SLURM_DIST_PLANE:
+		/* tasks are distributed in blocks within a plane */
+		rc = _task_layout_lllp_block(req, node_id, &masks);
 		break;
 	case SLURM_DIST_CYCLIC:
 	case SLURM_DIST_BLOCK:
 	case SLURM_DIST_CYCLIC_CYCLIC:
 	case SLURM_DIST_BLOCK_CYCLIC:
-		rc = _task_layout_lllp_cyclic(req, gtid, maxtasks, &masks); 
-		break;
-	case SLURM_DIST_PLANE:
-		rc = _task_layout_lllp_plane(req, gtid, maxtasks, &masks); 
+		rc = _task_layout_lllp_cyclic(req, node_id, &masks); 
 		break;
 	default:
-		rc = _task_layout_lllp_cyclic(req, gtid, maxtasks, &masks); 
+		if (req->cpus_per_task > 1)
+			rc = _task_layout_lllp_multi(req, node_id, &masks);
+		else
+			rc = _task_layout_lllp_cyclic(req, node_id, &masks);
 		req->task_dist = SLURM_DIST_BLOCK_CYCLIC;
 		break;
 	}
 
+	/* FIXME: I'm worried about core_bitmap with CPU_BIND_TO_SOCKETS &
+	 * max_cores - does select/cons_res plugin allocate whole
+	 * socket??? Maybe not. Check srun man page.
+	 */
+
 	if (rc == SLURM_SUCCESS) {
 		_task_layout_display_masks(req, gtid, maxtasks, masks); 
-		if (req->cpus_per_task > 1) {
-			_lllp_enlarge_masks(req, maxtasks, masks);
-		}
+	    	/* translate abstract masks to actual hardware layout */
+		_lllp_map_abstract_masks(maxtasks, masks);
 		_task_layout_display_masks(req, gtid, maxtasks, masks); 
-	    	_lllp_use_available(req, maxtasks, masks);
-		_task_layout_display_masks(req, gtid, maxtasks, masks); 
-	    	_lllp_map_abstract_masks(maxtasks, masks);
-		_task_layout_display_masks(req, gtid, maxtasks, masks); 
-	    	_lllp_generate_cpu_bind(req, maxtasks, masks);
-	}
-	_lllp_free_masks(req, maxtasks, masks);
-}
-
-static
-void _task_layout_display_masks(launch_tasks_request_msg_t *req, 
-				const uint32_t *gtid,
-				const uint32_t maxtasks,
-				bitstr_t **masks)
-{
-	int i;
-	for(i=0; i<maxtasks;i++) {
-		char *str = bit_fmt_hexmask(masks[i]);
-		debug3("_task_layout_display_masks jobid [%u:%d] %s",
-		       req->job_id, gtid[i], str);
-		xfree(str);
-	}
-}
-
-/*
- * _compute_min_overlap
- *
- * Given a mask and a set of current reservations, return the
- * minimum overlap between the mask and the reservations and the
- * rotation required to obtain it
- *
- * IN-  bitmask - bitmask to rotate
- * IN-  resv - current reservations
- * IN-  rotmask_size - size of mask to use during rotation
- * IN-  rotval - starting rotation value
- * IN-  rot_incr - rotation increment
- * OUT- p_min_overlap- minimum overlap
- * OUT- p_min_rotval- rotation to obtain minimum overlap
- */
-static void
-_compute_min_overlap(bitstr_t *bitmask, uint32_t *resv,
-			int rotmask_size, int rotval, int rot_incr, 
-			int *p_min_overlap, int *p_min_rotval)
-{
-	int min_overlap = INT_MAX;
-	int min_rotval  = 0;
-	int rot_cnt;
-	int j;
-	if (rot_incr <= 0) {
-		rot_incr = 1;
-	}
-	rot_cnt = rotmask_size / rot_incr;
-	debug3("  rotval:%d rot_incr:%d rot_cnt:%d",
-					rotval, rot_incr, rot_cnt);
-	for (j = 0; j < rot_cnt; j++) {
-		int overlap;		       
-		bitstr_t *newmask = bit_rotate_copy(bitmask, rotval,
-						    rotmask_size);
-		bitstr_t *physmask = _lllp_map_abstract_mask(newmask);
-		overlap = int_and_set_count((int *)resv,
-					    lllp_reserved_size,
-					    physmask);
-		bit_free(newmask);
-		bit_free(physmask);
-		debug3("  rotation #%d %d => overlap:%d", j, rotval, overlap);
-		if (overlap < min_overlap) {
-			min_overlap = overlap;
-			min_rotval  = rotval;
+#ifdef HAVE_NUMA
+		if (req->cpu_bind_type & CPU_BIND_TO_LDOMS) {
+			_match_masks_to_ldom(maxtasks, masks);
+			_task_layout_display_masks(req, gtid, maxtasks, masks);
 		}
-		if (overlap == 0) {	/* no overlap, stop rotating */
-			debug3("  --- found zero overlap, stopping search");
-			break;
-		}
-		rotval += rot_incr;
-	}
-	debug3("  min_overlap:%d min_rotval:%d",
-					min_overlap, min_rotval);
-	*p_min_overlap = min_overlap;
-	*p_min_rotval  = min_rotval;
-}
-
-/*
- * _lllp_enlarge_masks
- *
- * Given an array of masks, update the masks to honor the number
- * of cpus requested per task in req->cpus_per_task.  Note: not
- * concerned with mask overlap between tasks as _lllp_use_available
- * will take care of that.
- *
- * IN- job launch request
- * IN- maximum number of tasks
- * IN/OUT- array of masks
- */
-static void _lllp_enlarge_masks (launch_tasks_request_msg_t *req,
-				const uint32_t maxtasks,
-				bitstr_t **masks)
-{
-	int i, j, k, l;
-	int cpus_per_task = req->cpus_per_task;
-
-	debug3("_lllp_enlarge_masks");
-
-	/* enlarge each mask */
-	for (i = 0; i < maxtasks; i++) {
-		bitstr_t *bitmask = masks[i];
-		bitstr_t *addmask;
-		int bitmask_size = bit_size(bitmask);
-		int num_added = 0;
-
-		/* get current number of set bits in bitmask */
-		int num_set = bit_set_count(bitmask);
-		if (num_set >= cpus_per_task) {
-			continue;
-		}
-
-		/* add bits by selecting disjoint cores first, then threads */
-		for (j = conf->threads; j > 0; j--) {
-			/* rotate current bitmask to find new candidate bits */
-		        for (k = 1; k < bitmask_size / j; k++) {
-				addmask = bit_rotate_copy(bitmask, k*j,
-								bitmask_size);
-
-			    	/* check candidate bits to add into to bitmask */
-				for (l = 0; l < bitmask_size; l++) {
-					if (bit_test(addmask,l) &&
-					    !bit_test(bitmask,l)) {
-						bit_set(bitmask,l);
-						num_set++;
-						num_added++;
-					}
-					if (num_set >= cpus_per_task) {
-						break;
-					}
-				}
-
-				/* done with candidate mask */
-				bit_free(addmask);
-				if (num_set >= cpus_per_task) {
-					break;
-				}
-			}
-			if (num_set >= cpus_per_task) {
-				break;
-			}
-		}
-		debug3("  mask %d => added %d bits", i, num_added);
-	}
-}
-
-/*
- * _lllp_use_available
- *
- * Given an array of masks, update the masks to make best use of
- * available resources based on the current state of reservations
- * recorded in conf->lllp_reserved.
- *
- * IN- job launch request
- * IN- maximum number of tasks
- * IN/OUT- array of masks
- */
-static void _lllp_use_available (launch_tasks_request_msg_t *req,
-				const uint32_t maxtasks,
-				bitstr_t **masks)
-{
-	int resv_incr, i;
-	uint32_t *resv;
-	int rotval, prev_rotval;
-
-	/* select the unit of reservation rotation increment based on CR type */
-	if ((conf->cr_type == CR_SOCKET) 
-	    || (conf->cr_type == CR_SOCKET_MEMORY)) {
-		resv_incr = conf->cores * conf->threads; /* socket contents */
-	} else if ((conf->cr_type == CR_CORE) 
-		   || (conf->cr_type == CR_CORE_MEMORY)) {
-		resv_incr = conf->threads;		 /* core contents */
+#endif
+	    	 /* convert masks into cpu_bind mask string */
+		 _lllp_generate_cpu_bind(req, maxtasks, masks);
 	} else {
-		resv_incr = conf->threads;		 /* core contents */
-	}
-	if (resv_incr < 1) {		/* make sure increment is non-zero */ 
-		debug3("_lllp_use_available changed resv_incr %d to 1", resv_incr);
-		resv_incr = 1;
-	}
-
-	debug3("_lllp_use_available resv_incr = %d", resv_incr);
-
-	/* get a copy of the current reservations */
-	resv = xmalloc(lllp_reserved_size * sizeof(uint32_t));
-        memcpy(resv, lllp_reserved, lllp_reserved_size * sizeof(uint32_t));
-
-	/* check each mask against current reservations */
-	rotval      = 0;
-	prev_rotval = 0;
-	for (i = 0; i < maxtasks; i++) {
-		bitstr_t *bitmask = masks[i];
-		bitstr_t *physmask = NULL;
-		int min_overlap, min_rotval;
-
-		/* create masks that are at least as large as the reservation */
-		int bitmask_size = bit_size(bitmask);
-		int rotmask_size = MAX(bitmask_size, lllp_reserved_size);
-
-		/* get maximum number of contiguous bits in bitmask */
-		int contig_bits = bit_nset_max_count(bitmask);
-
-		/* make sure the reservation increment is larger than the number
-		 * of contiguous bits in the mask to maintain any properties
-		 * present in the mask (e.g. use both cores on one socket)
-		 */
-		int this_resv_incr = resv_incr;
-		while (this_resv_incr < contig_bits) {
-			this_resv_incr += resv_incr;
+		char *avail_mask = _alloc_mask(req,
+					       &whole_nodes,  &whole_sockets,
+					       &whole_cores,  &whole_threads,
+					       &part_sockets, &part_cores);
+		if (avail_mask) {
+			xfree(req->cpu_bind);
+			req->cpu_bind = avail_mask;
+			req->cpu_bind_type &= (~bind_mode);
+			req->cpu_bind_type |= CPU_BIND_MASK;
 		}
+		slurm_sprint_cpu_bind_type(buf_type, req->cpu_bind_type);
+		error("lllp_distribution jobid [%u] overriding binding: %s",
+		      req->job_id, buf_type);
+		error("Verify socket/core/thread counts in configuration");
+	}
+	_lllp_free_masks(maxtasks, masks);
+}
 
-		/* rotate mask to find the minimum reservation overlap starting
-		 * with the previous rotation value
-		 */
-		rotval  = prev_rotval;
-		debug3("mask %d compute_min_overlap contig:%d", i, contig_bits);
-		_compute_min_overlap(bitmask, resv,
-					rotmask_size, rotval, this_resv_incr,
-					&min_overlap, &min_rotval);
 
-		/* if we didn't find a zero overlap, recheck at a thread
-		 * granularity
-		 */
-		if (min_overlap != 0) {
-		        int prev_resv_incr = this_resv_incr;
-			this_resv_incr = 1;
-			if (this_resv_incr != prev_resv_incr) {
-				int this_min_overlap, this_min_rotval;
-				_compute_min_overlap(bitmask, resv,
-					rotmask_size, rotval, this_resv_incr,
-					&this_min_overlap, &this_min_rotval);
-				if (this_min_overlap < min_overlap) {
-					min_overlap = this_min_overlap;
-					min_rotval  = this_min_rotval;
-				}
+/*
+ * _get_local_node_info - get job allocation details for this node
+ * IN: req         - launch request structure
+ * IN: job_node_id - index of the local node in the job allocation
+ * IN/OUT: sockets - pointer to socket count variable
+ * IN/OUT: cores   - pointer to cores_per_socket count variable
+ * OUT:  returns the core_bitmap index of the first core for this node
+ */
+static int _get_local_node_info(slurm_cred_arg_t *arg, uint32_t job_node_id,
+				uint16_t *sockets, uint16_t *cores)
+{
+	int bit_start = 0, bit_finish = 0;
+	int i, index = -1, cur_node_id = -1;
+
+	do {
+		index++;
+		for (i = 0; i < arg->sock_core_rep_count[index] &&
+			    cur_node_id < job_node_id; i++) {
+			bit_start = bit_finish;
+			bit_finish += arg->sockets_per_node[index] *
+					arg->cores_per_socket[index];
+			cur_node_id++;
+		}
+		
+	} while (cur_node_id < job_node_id);
+
+	*sockets = arg->sockets_per_node[index];
+	*cores   = arg->cores_per_socket[index];
+	return bit_start;
+}
+
+/* enforce max_sockets, max_cores */
+static void _enforce_limits(launch_tasks_request_msg_t *req, bitstr_t *mask,
+			    uint16_t hw_sockets, uint16_t hw_cores,
+			    uint16_t hw_threads)
+{
+	uint16_t i, j, size, count = 0;
+	int prev = -1;
+
+	size = bit_size(mask);
+	/* enforce max_sockets */
+	for (i = 0; i < size; i++) {
+		if (bit_test(mask, i) == 0)
+			continue;
+		/* j = first bit in socket; i = last bit in socket */
+		j = i/(hw_cores * hw_threads) * (hw_cores * hw_threads);
+		i = j+(hw_cores * hw_threads)-1;
+		if (++count > req->max_sockets) {
+			bit_nclear(mask, j, i);
+			count--;
+		}
+	}
+
+	/* enforce max_cores */
+	for (i = 0; i < size; i++) {
+		if (bit_test(mask, i) == 0)
+			continue;
+		/* j = first bit in socket */
+		j = i/(hw_cores * hw_threads) * (hw_cores * hw_threads);
+		if (j != prev) {
+			/* we're in a new socket, so reset the count */
+			count = 0;
+			prev = j;
+		}
+		/* j = first bit in core; i = last bit in core */
+		j = i/hw_threads * hw_threads;
+		i = j+hw_threads-1;
+		if (++count > req->max_cores) {
+			bit_nclear(mask, j, i);
+			count--;
+		}
+	}
+}
+
+/* Determine which CPUs a job step can use. 
+ * OUT whole_<entity>_count - returns count of whole <entities> in this 
+ *                            allocation for this node
+ * OUT part__<entity>_count - returns count of partial <entities> in this 
+ *                            allocation for this node
+ * RET - a string representation of the available mask or NULL on error
+ * NOTE: Caller must xfree() the return value. */
+static char *_alloc_mask(launch_tasks_request_msg_t *req,
+			 int *whole_node_cnt,  int *whole_socket_cnt, 
+			 int *whole_core_cnt,  int *whole_thread_cnt,
+			 int *part_socket_cnt, int *part_core_cnt)
+{
+	uint16_t sockets, cores, threads;
+	int c, s, t, i, mask;
+	int c_miss, s_miss, t_miss, c_hit, t_hit;
+	bitstr_t *alloc_bitmap;
+	char *str_mask;
+
+	*whole_node_cnt   = 0;
+	*whole_socket_cnt = 0;
+	*whole_core_cnt   = 0;
+	*whole_thread_cnt = 0;
+	*part_socket_cnt  = 0;
+	*part_core_cnt    = 0;
+
+	alloc_bitmap = _get_avail_map(req, &sockets, &cores, &threads);
+	if (!alloc_bitmap)
+		return NULL;
+
+	i = mask = 0;
+	for (s=0, s_miss=false; s<sockets; s++) {
+		for (c=0, c_hit=c_miss=false; c<cores; c++) {
+			for (t=0, t_hit=t_miss=false; t<threads; t++) {
+				if (bit_test(alloc_bitmap, i)) {
+					mask |= (1 << i);
+					(*whole_thread_cnt)++;
+					t_hit = true;
+					c_hit = true;
+				} else
+					t_miss = true;
+				i++;
+			}
+			if (!t_miss)
+				(*whole_core_cnt)++;
+			else {
+				if (t_hit)
+					(*part_core_cnt)++;
+				c_miss = true;
 			}
 		}
-
-		rotval = min_rotval;	/* readjust for the minimum overlap */
-		if (rotval != 0) {
-			bitstr_t *newmask = bit_rotate_copy(bitmask, rotval,
-							    rotmask_size);
-			bit_free(masks[i]);
-			masks[i] = newmask;
+		if (!c_miss)
+			(*whole_socket_cnt)++;
+		else {
+			if (c_hit)
+				(*part_socket_cnt)++;
+			s_miss = true;
 		}
-
-		debug3("  mask %d => rotval %d", i, rotval);
-		/* accepted current mask, add to copy of the reservations */
-		physmask = _lllp_map_abstract_mask(masks[i]);
-		_cr_update_reservation(1, resv, physmask);
-		bit_free(physmask);
-		prev_rotval = rotval;
 	}
-	xfree(resv);
+	if (!s_miss)
+		(*whole_node_cnt)++;
+	bit_free(alloc_bitmap);
+
+	str_mask = xmalloc(16);
+	snprintf(str_mask, 16, "%x", mask);
+	return str_mask;
 }
 
 /*
- * _lllp_map_abstract_mask
- *
- * Map one abstract block mask to a physical machine mask
- *
- * IN - mask to map
- * OUT - mapped mask (storage allocated in this routine)
+ * Given a job step request, return an equivalent local bitmap for this node
+ * IN req          - The job step launch request
+ * OUT hw_sockets  - number of actual sockets on this node
+ * OUT hw_cores    - number of actual cores per socket on this node
+ * OUT hw_threads  - number of actual threads per core on this node
+ * RET: bitmap of processors available to this job step on this node
+ *      OR NULL on error
  */
-static bitstr_t *_lllp_map_abstract_mask (bitstr_t *bitmask)
+static bitstr_t *_get_avail_map(launch_tasks_request_msg_t *req,
+				uint16_t *hw_sockets, uint16_t *hw_cores,
+				uint16_t *hw_threads)
 {
-    	int i, bit;
-	int num_bits = bit_size(bitmask);
-	bitstr_t *newmask = bit_alloc(num_bits);
+	bitstr_t *req_map, *hw_map;
+	slurm_cred_arg_t arg;
+	uint16_t p, t, num_procs, num_threads, sockets, cores, hw_size;
+	uint32_t job_node_id;
+	int start;
+	char *str;
 
-	/* remap to physical machine */
-	for (i = 0; i < num_bits; i++) {
-		if (bit_test(bitmask,i)) {
-			bit = BLOCK_MAP(i);
-			bit_set(newmask, bit);
+	*hw_sockets = conf->sockets;
+	*hw_cores   = conf->cores;
+	*hw_threads = conf->threads;
+	hw_size    = (*hw_sockets) * (*hw_cores) * (*hw_threads);
+
+	if (slurm_cred_get_args(req->cred, &arg) != SLURM_SUCCESS) {
+		error("task/affinity: job lacks a credential");
+		return NULL;
+	}
+
+	/* we need this node's ID in relation to the whole
+	 * job allocation, not just this jobstep */
+	job_node_id = nodelist_find(arg.job_hostlist, conf->node_name);
+	start = _get_local_node_info(&arg, job_node_id, &sockets, &cores);
+	if (start < 0) {
+		error("task/affinity: missing node %u in job credential",
+		      job_node_id);
+		slurm_cred_free_args(&arg);
+		return NULL;
+	}
+	debug3("task/affinity: slurmctld s %u c %u; hw s %u c %u t %u",
+		sockets, cores, *hw_sockets, *hw_cores, *hw_threads);
+
+	num_procs   = MIN((sockets * cores),
+			  ((*hw_sockets)*(*hw_cores)));
+	req_map = (bitstr_t *) bit_alloc(num_procs);
+	hw_map  = (bitstr_t *) bit_alloc(hw_size);
+	if (!req_map || !hw_map) {
+		error("task/affinity: malloc error");
+		bit_free(req_map);
+		bit_free(hw_map);
+		slurm_cred_free_args(&arg);
+		return NULL;
+	}
+	/* Transfer core_bitmap data to local req_map.
+	 * The MOD function handles the case where fewer processes
+	 * physically exist than are configured (slurmd is out of 
+	 * sync with the slurmctld daemon). */
+	for (p = 0; p < (sockets * cores); p++) {
+		if (bit_test(arg.core_bitmap, start+p))
+			bit_set(req_map, (p % num_procs));
+	}
+
+	str = (char *)bit_fmt_hexmask(req_map);
+	debug3("task/affinity: job %u.%u CPU mask from slurmctld: %s",
+		req->job_id, req->job_step_id, str);
+	xfree(str);
+
+	if (req->max_threads == 0) {
+		error("task/affinity: job %u.%u has max_threads=0",
+		      req->job_id, req->job_step_id);
+		req->max_threads = 1;
+	}
+	if (req->max_cores == 0) {
+		error("task/affinity: job %u.%u has max_coress=0",
+		      req->job_id, req->job_step_id);
+		req->max_cores = 1;
+	}
+	if (req->max_sockets == 0) {
+		error("task/affinity: job %u.%u has max_sockets=0",
+		      req->job_id, req->job_step_id);
+		req->max_sockets = 1;
+	}
+	num_threads = MIN(req->max_threads, (*hw_threads));
+	for (p = 0; p < num_procs; p++) {
+		if (bit_test(req_map, p) == 0)
+			continue;
+		/* core_bitmap does not include threads, so we
+		 * add them here but limit them to what the job
+		 * requested */
+		for (t = 0; t < num_threads; t++) {
+			uint16_t bit = p * (*hw_threads) + t;
+			bit_set(hw_map, bit);
 		}
 	}
-	return newmask;
-}
 
-/*
- * _lllp_map_abstract_masks
- *
- * Map an array of abstract block masks to physical machine masks
- *
- * IN- maximum number of tasks
- * IN/OUT- array of masks
- */
-static void _lllp_map_abstract_masks(const uint32_t maxtasks,
-				     bitstr_t **masks)
-{
-    	int i;
-	debug3("_lllp_map_abstract_masks");
+	/* enforce max_sockets and max_cores limits */
+	_enforce_limits(req, hw_map, *hw_sockets, *hw_cores, *hw_threads);
 	
-	for (i = 0; i < maxtasks; i++) { 
-		bitstr_t *bitmask = masks[i];
-	    	if (bitmask) {
-			bitstr_t *newmask = _lllp_map_abstract_mask(bitmask);
-			bit_free(bitmask);
-			masks[i] = newmask;
+	str = (char *)bit_fmt_hexmask(hw_map);
+	debug3("task/affinity: job %u.%u CPU final mask for local node: %s",
+		req->job_id, req->job_step_id, str);
+	xfree(str);
+
+	bit_free(req_map);
+	slurm_cred_free_args(&arg);
+	return hw_map;
+}
+
+/* helper function for _expand_masks() */
+static void _blot_mask(bitstr_t *mask, uint16_t blot)
+{
+	uint16_t i, size = 0;
+	int prev = -1;
+
+	if (!mask)
+		return;
+	size = bit_size(mask);
+	for (i = 0; i < size; i++) {
+		if (bit_test(mask, i)) {
+			/* fill in this blot */
+			uint16_t start = (i / blot) * blot;
+			if (start != prev) {
+				bit_nset(mask, start, start+blot-1);
+				prev = start;
+			}
 		}
+	}
+}
+
+/* foreach mask, expand the mask around the set bits to include the
+ * complete resource to which the set bits are to be bound */
+static void _expand_masks(uint16_t cpu_bind_type, const uint32_t maxtasks,
+			  bitstr_t **masks, uint16_t hw_sockets,
+			  uint16_t hw_cores, uint16_t hw_threads)
+{
+	uint32_t i;
+
+	if (cpu_bind_type & CPU_BIND_TO_THREADS)
+		return;
+	if (cpu_bind_type & CPU_BIND_TO_CORES) {
+		if (hw_threads < 2)
+			return;
+		for (i = 0; i < maxtasks; i++) {
+			_blot_mask(masks[i], hw_threads);
+		}
+		return;
+	}
+	if (cpu_bind_type & CPU_BIND_TO_SOCKETS) {
+		if (hw_threads*hw_cores < 2)
+			return;
+		for (i = 0; i < maxtasks; i++) {
+			_blot_mask(masks[i], hw_threads*hw_cores);
+		}
+		return;
 	}
 }
 
 /* 
- * _lllp_generate_cpu_bind
+ * _task_layout_lllp_multi
  *
- * Generate the cpu_bind type and string given an array of bitstr_t masks
+ * A variant of _task_layout_lllp_cyclic for use with allocations having 
+ * more than one CPU per task, put the tasks as close as possible (fill 
+ * core rather than going next socket for the extra task)
  *
- * IN/OUT- job launch request (cpu_bind_type and cpu_bind updated)
- * IN- maximum number of tasks
- * IN- array of masks
  */
-static void _lllp_generate_cpu_bind(launch_tasks_request_msg_t *req,
-				    const uint32_t maxtasks,
-				    bitstr_t **masks)
+static int _task_layout_lllp_multi(launch_tasks_request_msg_t *req, 
+				    uint32_t node_id, bitstr_t ***masks_p)
 {
-    	int i, num_bits=0, masks_len;
-	bitstr_t *bitmask;
-	bitoff_t charsize;
-	char *masks_str = NULL;
-	char buf_type[100];
+	int last_taskcount = -1, taskcount = 0;
+	uint16_t c, i, s, t, hw_sockets = 0, hw_cores = 0, hw_threads = 0;
+	uint16_t num_threads, num_cores, num_sockets;
+	int size, max_tasks = req->tasks_to_launch[(int)node_id];
+	int max_cpus = max_tasks * req->cpus_per_task;
+	bitstr_t *avail_map;
+	bitstr_t **masks = NULL;
+	
+	info ("_task_layout_lllp_multi ");
 
-	for (i = 0; i < maxtasks; i++) { 
-		bitmask = masks[i];
-	    	if (bitmask) {
-			num_bits = bit_size(bitmask);
-			break;
+	avail_map = _get_avail_map(req, &hw_sockets, &hw_cores, &hw_threads);
+	if (!avail_map)
+		return SLURM_ERROR;
+	
+	*masks_p = xmalloc(max_tasks * sizeof(bitstr_t*));
+	masks = *masks_p;
+	
+	size = bit_set_count(avail_map);
+	if (size < max_tasks) {
+		error("task/affinity: only %d bits in avail_map for %d tasks!",
+		      size, max_tasks);
+		bit_free(avail_map);
+		return SLURM_ERROR;
+	}
+	if (size < max_cpus) {
+		/* Possible result of overcommit */
+		i = size / max_tasks;
+		info("task/affinity: reset cpus_per_task from %d to %d",
+		     req->cpus_per_task, i);
+		req->cpus_per_task = i;
+	}
+	
+	size = bit_size(avail_map);
+	num_sockets = MIN(req->max_sockets, hw_sockets);
+	num_cores   = MIN(req->max_cores, hw_cores);
+	num_threads = MIN(req->max_threads, hw_threads);
+	i = 0;
+	while (taskcount < max_tasks) {
+		if (taskcount == last_taskcount)
+			fatal("_task_layout_lllp_multi failure");
+		last_taskcount = taskcount; 
+		for (s = 0; s < hw_sockets; s++) {
+			for (c = 0; c < hw_cores; c++) {
+				for (t = 0; t < num_threads; t++) {
+					uint16_t bit = s*(hw_cores*hw_threads) +
+							c*(hw_threads) + t;
+					if (bit_test(avail_map, bit) == 0)
+						continue;
+					if (masks[taskcount] == NULL)
+						masks[taskcount] =
+						    (bitstr_t *)bit_alloc(size);
+					bit_set(masks[taskcount], bit);
+					if (++i < req->cpus_per_task)
+						continue;
+					i = 0;
+					if (++taskcount >= max_tasks)
+						break;
+				}
+				if (taskcount >= max_tasks)
+					break;
+			}
+			if (taskcount >= max_tasks)
+				break;
 		}
 	}
-	charsize = (num_bits + 3) / 4;		/* ASCII hex digits */
-	charsize += 3;				/* "0x" and trailing "," */
-	masks_len = maxtasks * charsize + 1;	/* number of masks + null */
+	bit_free(avail_map);
+	
+	/* last step: expand the masks to bind each task
+	 * to the requested resource */
+	_expand_masks(req->cpu_bind_type, max_tasks, masks,
+			hw_sockets, hw_cores, hw_threads);
 
-	debug3("_lllp_generate_cpu_bind %d %d %d", maxtasks, charsize, masks_len);
-
-	masks_str = xmalloc(masks_len);
-	masks_len = 0;
-	for (i = 0; i < maxtasks; i++) {
-	    	char *str;
-		int curlen;
-		bitmask = masks[i];
-	    	if (bitmask == NULL) {
-			continue;
-		}
-		str = bit_fmt_hexmask(bitmask);
-		curlen = strlen(str) + 1;
-
-		if (masks_len > 0) masks_str[masks_len-1]=',';
-		strncpy(&masks_str[masks_len], str, curlen);
-		masks_len += curlen;
-		xassert(masks_str[masks_len] == '\0');
-		xfree(str);
-	}
-
-	if (req->cpu_bind) {
-	    	xfree(req->cpu_bind);
-	}
-	if (masks_str[0] != '\0') {
-		req->cpu_bind = masks_str;
-		req->cpu_bind_type |= CPU_BIND_MASK; 
-	} else {
-		req->cpu_bind = NULL;
-		req->cpu_bind_type &= ~CPU_BIND_VERBOSE;
-	}
-
-	/* clear mask generation bits */
-	req->cpu_bind_type &= ~CPU_BIND_TO_THREADS;
-	req->cpu_bind_type &= ~CPU_BIND_TO_CORES;
-	req->cpu_bind_type &= ~CPU_BIND_TO_SOCKETS;
-
-	slurm_sprint_cpu_bind_type(buf_type, req->cpu_bind_type);
-	info("_lllp_generate_cpu_bind jobid [%u]: %s, %s",
-	     req->job_id, buf_type, masks_str);
-}
-
-
-static void _lllp_free_masks (launch_tasks_request_msg_t *req,
-			      const uint32_t maxtasks,
-			      bitstr_t **masks)
-{
-    	int i;
-	bitstr_t *bitmask;
-	for (i = 0; i < maxtasks; i++) { 
-		bitmask = masks[i];
-	    	if (bitmask) {
-			bit_free(bitmask);
-		}
-	}
-}
-
-/* 
- * _task_layout_lllp_init performs common initialization required by:
- *	_task_layout_lllp_cyclic
- *	_task_layout_lllp_block
- *	_task_layout_lllp_plane
- */
-static int _task_layout_lllp_init(launch_tasks_request_msg_t *req, 
-				  const uint32_t maxtasks,
-				  bitstr_t ***masks_p,
-				  bool *bind_to_exact_socket,
-				  bool *bind_to_exact_core,
-				  bool *bind_to_exact_thread,
-				  uint16_t *usable_cpus,
-				  uint16_t *usable_sockets, 
-				  uint16_t *usable_cores,
-				  uint16_t *usable_threads,
-				  uint16_t *hw_sockets, 
-				  uint16_t *hw_cores,
-				  uint16_t *hw_threads,
-				  uint16_t *avail_cpus)
-{
-	int min_sockets = 1, min_cores = 1;
-	uint16_t alloc_cores[conf->sockets];
-
-	if (req->cpu_bind_type & CPU_BIND_TO_THREADS) {
-		/* Default: in here in case we decide to change the
-		 * default */
-		info ("task_layout cpu_bind_type CPU_BIND_TO_THREADS ");
-	} else if (req->cpu_bind_type & CPU_BIND_TO_CORES) {
-		*bind_to_exact_thread = false;
-		info ("task_layout cpu_bind_type CPU_BIND_TO_CORES ");
-	} else if (req->cpu_bind_type & CPU_BIND_TO_SOCKETS) {
-		*bind_to_exact_thread = false;
-		*bind_to_exact_core   = false;
-		info ("task_layout cpu_bind_type CPU_BIND_TO_SOCKETS");
-	}
-
-	_get_resources_this_node(usable_cpus, usable_sockets, usable_cores,
-				 usable_threads, alloc_cores, req->job_id);
-
-	*hw_sockets = *usable_sockets;
-	*hw_cores   = *usable_cores;
-	*hw_threads = *usable_threads;
-
-	*avail_cpus = slurm_get_avail_procs(req->max_sockets, 
-					    req->max_cores, 
-					    req->max_threads, 
-					    min_sockets,
-					    min_cores,
-					    req->cpus_per_task,
-					    req->ntasks_per_node,
-					    req->ntasks_per_socket,
-					    req->ntasks_per_core,
-					    usable_cpus, usable_sockets,
-					    usable_cores, usable_threads,
-					    alloc_cores, conf->cr_type,
-					    req->job_id, conf->hostname);
-	/* Allocate masks array */
-	*masks_p = xmalloc(maxtasks * sizeof(bitstr_t*));
 	return SLURM_SUCCESS;
 }
 
-/* _get_resources_this_node determines counts for already allocated
- * resources (currently sockets and lps) for this node.  
- *
- * Only used when cons_res (Consumable Resources) is enabled with
- * CR_Socket, CR_Cores, or CR_CPU.
- *
- * OUT- Number of allocated sockets on this node
- * OUT- Number of allocated logical processors on this node 
- * 
- */
-static void _get_resources_this_node(uint16_t *cpus,
-				     uint16_t *sockets,
-				     uint16_t *cores,
-				     uint16_t *threads,
-				     uint16_t *alloc_cores,
-	                             uint32_t jobid)
-{
-	int bit_index = 0;
-	int i, j, k;
-
-	/* FIX for heterogeneous socket/core/thread count per system
-	 * in future releases */
-	*cpus    = conf->cpus;
-	*sockets = conf->sockets;
-	*cores   = conf->cores;
-	*threads = conf->threads;
-
-	for(i = 0; i < *sockets; i++)
-		alloc_cores[i] = 0;
-
-	for(i = 0; i < *sockets; i++) {
-		for(j = 0; j < *cores; j++) {
-			for(k = 0; k < *threads; k++) {
-				info("jobid %u lllp_reserved[%d]=%d", jobid, 
-				     bit_index, lllp_reserved[bit_index]);
-				if(lllp_reserved[bit_index] > 0) {
-					if (k == 0) {
-						alloc_cores[i]++;
-					}
-				}
-				bit_index++;
-			}
-		}
-	}
-		
-	xassert(bit_index == (*sockets * *cores * *threads));
-
-#if(0)
-	for (i = 0; i < *sockets; i++)
-		info("_get_resources jobid:%u hostname:%s socket id:%d cores:%u", 
-		     jobid, conf->hostname, i, alloc_cores[i]);
-#endif
-}
-	
 /* 
  * _task_layout_lllp_cyclic
  *
@@ -717,70 +816,81 @@ static void _get_resources_this_node(uint16_t *cpus,
  *
  */
 static int _task_layout_lllp_cyclic(launch_tasks_request_msg_t *req, 
-				    const uint32_t *gtid,
-				    const uint32_t maxtasks,
-				    bitstr_t ***masks_p)
+				    uint32_t node_id, bitstr_t ***masks_p)
 {
-	int retval, i, last_taskcount = -1, taskcount = 0, taskid = 0;
-	uint16_t socket_index = 0, core_index = 0, thread_index = 0;
-	uint16_t hw_sockets = 0, hw_cores = 0, hw_threads = 0;
-	uint16_t usable_cpus = 0, avail_cpus = 0;
-	uint16_t usable_sockets = 0, usable_cores = 0, usable_threads = 0;
-	
+	int last_taskcount = -1, taskcount = 0;
+	uint16_t c, i, s, t, hw_sockets = 0, hw_cores = 0, hw_threads = 0;
+	uint16_t num_threads, num_cores, num_sockets;
+	int size, max_tasks = req->tasks_to_launch[(int)node_id];
+	int max_cpus = max_tasks * req->cpus_per_task;
+	bitstr_t *avail_map;
 	bitstr_t **masks = NULL;
-	bool bind_to_exact_socket = true;
-	bool bind_to_exact_core   = true;
-	bool bind_to_exact_thread = true;
 	
 	info ("_task_layout_lllp_cyclic ");
 
-	retval = _task_layout_lllp_init(req, maxtasks, masks_p,
-					&bind_to_exact_socket, 
-					&bind_to_exact_core, 
-					&bind_to_exact_thread,
-					&usable_cpus, 
-					&usable_sockets, 
-					&usable_cores, 
-					&usable_threads,
-					&hw_sockets, 
-					&hw_cores, 
-					&hw_threads, 
-					&avail_cpus);
-	if (retval != SLURM_SUCCESS)
-		return retval;
+	avail_map = _get_avail_map(req, &hw_sockets, &hw_cores, &hw_threads);
+	if (!avail_map)
+		return SLURM_ERROR;
+	
+	*masks_p = xmalloc(max_tasks * sizeof(bitstr_t*));
 	masks = *masks_p;
+	
+	size = bit_set_count(avail_map);
+	if (size < max_tasks) {
+		error("task/affinity: only %d bits in avail_map for %d tasks!",
+		      size, max_tasks);
+		bit_free(avail_map);
+		return SLURM_ERROR;
+	}
+	if (size < max_cpus) {
+		/* Possible result of overcommit */
+		i = size / max_tasks;
+		info("task/affinity: reset cpus_per_task from %d to %d",
+		     req->cpus_per_task, i);
+		req->cpus_per_task = i;
+	}
 
-	for (i=0; taskcount<maxtasks; i++) {
-		if (taskcount == last_taskcount) {
-			error("_task_layout_lllp_cyclic failure");
-			return SLURM_ERROR;
-		}
+	size = bit_size(avail_map);
+	num_sockets = MIN(req->max_sockets, hw_sockets);
+	num_cores   = MIN(req->max_cores, hw_cores);
+	num_threads = MIN(req->max_threads, hw_threads);
+	i = 0;
+	while (taskcount < max_tasks) {
+		if (taskcount == last_taskcount)
+			fatal("_task_layout_lllp_cyclic failure");
 		last_taskcount = taskcount; 
-		for (thread_index=0; thread_index<usable_threads; thread_index++) {
-			for (core_index=0; core_index<usable_cores; core_index++) {
-				for (socket_index=0; socket_index<usable_sockets; 
-						     socket_index++) {
-					bitstr_t *bitmask = NULL;
-					taskid = gtid[taskcount];
-					_single_mask(hw_sockets, 
-						     hw_cores, 
-						     hw_threads,
-						     socket_index, 
-						     core_index, 
-						     thread_index, 
-						     bind_to_exact_socket, 
-						     bind_to_exact_core,
-						     bind_to_exact_thread, 
-						     &bitmask);
-					xassert(masks[taskcount] == NULL);
-					masks[taskcount] = bitmask;
-					if (++taskcount >= maxtasks)
-						goto fini;
+		for (t = 0; t < num_threads; t++) {
+			for (c = 0; c < hw_cores; c++) {
+				for (s = 0; s < hw_sockets; s++) {
+					uint16_t bit = s*(hw_cores*hw_threads) +
+							c*(hw_threads) + t;
+					if (bit_test(avail_map, bit) == 0)
+						continue;
+					if (masks[taskcount] == NULL)
+						masks[taskcount] =
+						    (bitstr_t *)bit_alloc(size);
+					bit_set(masks[taskcount], bit);
+					if (++i < req->cpus_per_task)
+						continue;
+					i = 0;
+					if (++taskcount >= max_tasks)
+						break;
 				}
+				if (taskcount >= max_tasks)
+					break;
 			}
+			if (taskcount >= max_tasks)
+				break;
 		}
 	}
- fini:	return SLURM_SUCCESS;
+	bit_free(avail_map);
+	
+	/* last step: expand the masks to bind each task
+	 * to the requested resource */
+	_expand_masks(req->cpu_bind_type, max_tasks, masks,
+			hw_sockets, hw_cores, hw_threads);
+
+	return SLURM_SUCCESS;
 }
 
 /* 
@@ -806,845 +916,249 @@ static int _task_layout_lllp_cyclic(launch_tasks_request_msg_t *req,
  *
  */
 static int _task_layout_lllp_block(launch_tasks_request_msg_t *req, 
-				   const uint32_t *gtid,
-				   const uint32_t maxtasks,
-				   bitstr_t ***masks_p)
+				   uint32_t node_id, bitstr_t ***masks_p)
 {
-	int retval, j, k, l, m, last_taskcount = -1, taskcount = 0, taskid = 0;
-	int over_subscribe  = 0, space_remaining = 0;
-	uint16_t core_index = 0, thread_index = 0;
+	int c, i, j, t, size, last_taskcount = -1, taskcount = 0;
 	uint16_t hw_sockets = 0, hw_cores = 0, hw_threads = 0;
-	uint16_t usable_cpus = 0, avail_cpus = 0;
-	uint16_t usable_sockets = 0, usable_cores = 0, usable_threads = 0;
-
+	uint16_t num_sockets, num_cores, num_threads;
+	int max_tasks = req->tasks_to_launch[(int)node_id];
+	int max_cpus = max_tasks * req->cpus_per_task;
+	int *task_array;
+	bitstr_t *avail_map;
 	bitstr_t **masks = NULL;
-	bool bind_to_exact_socket = true;
-	bool bind_to_exact_core   = true;
-	bool bind_to_exact_thread = true;
 
 	info("_task_layout_lllp_block ");
 
-	retval = _task_layout_lllp_init(req, maxtasks, masks_p,
-					&bind_to_exact_socket, 
-					&bind_to_exact_core, 
-					&bind_to_exact_thread,
-					&usable_cpus, 
-					&usable_sockets, 
-					&usable_cores, 
-					&usable_threads,
-					&hw_sockets, 
-					&hw_cores, 
-					&hw_threads, 
-					&avail_cpus);
-	if (retval != SLURM_SUCCESS) {
-		return retval;
+	avail_map = _get_avail_map(req, &hw_sockets, &hw_cores, &hw_threads);
+	if (!avail_map) {
+		return SLURM_ERROR;
 	}
+
+	size = bit_set_count(avail_map);
+	if (size < max_tasks) {
+		error("task/affinity: only %d bits in avail_map for %d tasks!",
+		      size, max_tasks);
+		bit_free(avail_map);
+		return SLURM_ERROR;
+	}
+	if (size < max_cpus) {
+		/* Possible result of overcommit */
+		i = size / max_tasks;
+		info("task/affinity: reset cpus_per_task from %d to %d",
+		     req->cpus_per_task, i);
+		req->cpus_per_task = i;
+	}
+	size = bit_size(avail_map);
+
+	*masks_p = xmalloc(max_tasks * sizeof(bitstr_t*));
 	masks = *masks_p;
 
-	if (_init_lllp() != SLURM_SUCCESS) {
-		error("In lllp_block: _init_lllp() != SLURM_SUCCESS");
+	task_array = xmalloc(size * sizeof(int));
+	if (!task_array) {
+		error("In lllp_block: task_array memory error");
+		bit_free(avail_map);
 		return SLURM_ERROR;
 	}
 	
-	while(taskcount < maxtasks) {
+	/* block distribution with oversubsciption */
+	num_sockets = MIN(req->max_sockets, hw_sockets);
+	num_cores   = MIN(req->max_cores, hw_cores);
+	num_threads = MIN(req->max_threads, hw_threads);
+	c = 0;
+	while(taskcount < max_tasks) {
 		if (taskcount == last_taskcount) {
-			error("_task_layout_lllp_block failure");
-			return SLURM_ERROR;
+			fatal("_task_layout_lllp_block infinite loop");
 		}
 		last_taskcount = taskcount;
-		for (j=0; j<usable_sockets; j++) {
-			for(core_index=0; core_index < usable_cores; core_index++) {
-				if((core_index < usable_cores) || (over_subscribe)) {
-					for(thread_index=0; thread_index<usable_threads; thread_index++) {
-						if((thread_index < usable_threads) || (over_subscribe)) {
-							lllp_tasks->sockets[j].cores[core_index]
-								.threads[thread_index].tasks++;
-							taskcount++;
-							if((thread_index+1) < usable_threads)
-								space_remaining = 1;
-							if(maxtasks <= taskcount) break;
-						}
-						if(maxtasks <= taskcount) break;
-						if (!space_remaining) {
-							over_subscribe = 1;
-						} else {
-							space_remaining = 0;
-						}
-					}
-				}
-				if(maxtasks <= taskcount) break;
-				if((core_index+1) < usable_cores)
-					space_remaining = 1;
-				if (!space_remaining) {
-					over_subscribe = 1;
-				} else {
-					space_remaining = 0;
-				}
-			}
-			if(maxtasks <= taskcount) break;
-			if (!space_remaining) {
-				over_subscribe = 1;
-			} else {
-				space_remaining = 0;
-			}
+		/* the abstract map is already laid out in block order,
+		 * so just iterate over it
+		 */
+		for (i = 0; i < size; i++) {
+			/* skip unrequested threads */
+			if (i%hw_threads >= num_threads)
+				continue;
+			/* skip unavailable resources */
+			if (bit_test(avail_map, i) == 0)
+				continue;
+			/* if multiple CPUs per task, only
+			 * count the task on the first CPU */
+			if (c == 0)
+				task_array[i] += 1;
+			if (++c < req->cpus_per_task)
+				continue;
+			c = 0;
+			if (++taskcount >= max_tasks)
+				break;
 		}
 	}
-	
-	/* Distribute the tasks and create masks for the task
-	 * affinity plug-in */
-	taskid = 0;
+	/* Distribute the tasks and create per-task masks that only
+	 * contain the first CPU. Note that unused resources
+	 * (task_array[i] == 0) will get skipped */
 	taskcount = 0;
-	for (j=0; j<usable_sockets; j++) {
-		for (k=0; k<usable_cores; k++) {
-			for (m=0; m<usable_threads; m++) {
-				for (l=0; l<lllp_tasks->sockets[j]
-					     .cores[k].threads[m].tasks; l++) {
-					bitstr_t *bitmask = NULL;
-					taskid = gtid[taskcount];
-					_single_mask(hw_sockets, 
-						     hw_cores, 
-						     hw_threads,
-						     j, k, m, 
-						     bind_to_exact_socket, 
-						     bind_to_exact_core, 
-						     bind_to_exact_thread,
-						     &bitmask);
-					xassert(masks[taskcount] == NULL);
-					xassert(taskcount < maxtasks);
-					masks[taskcount] = bitmask;
-					taskcount++;
+	for (i = 0; i < size; i++) {
+		for (t = 0; t < task_array[i]; t++) {
+			if (masks[taskcount] == NULL)
+				masks[taskcount] = (bitstr_t *)bit_alloc(size);
+			bit_set(masks[taskcount++], i);
+		}
+	}
+	/* now set additional CPUs for cpus_per_task > 1 */
+	for (t=0; t<max_tasks && req->cpus_per_task>1; t++) {
+		if (!masks[t])
+			continue;
+		for (i = 0; i < size; i++) {
+			if (bit_test(masks[t], i) == 0)
+				continue;
+			for (j=i+1,c=1; j<size && c<req->cpus_per_task;j++) {
+				if (bit_test(avail_map, j) == 0)
+					continue;
+				bit_set(masks[t], j);
+				c++;
+			}
+			if (c < req->cpus_per_task) {
+				/* we haven't found all of the CPUs for this
+				 * task, so we'll wrap the search to cover the
+				 * whole node */
+				for (j=0; j<i && c<req->cpus_per_task; j++) {
+					if (bit_test(avail_map, j) == 0)
+						continue;
+					bit_set(masks[t], j);
+					c++;
 				}
 			}
 		}
 	}
-	
-	_print_tasks_per_lllp ();
-	_cleanup_lllp();
+
+	xfree(task_array);
+	bit_free(avail_map);
+
+	/* last step: expand the masks to bind each task
+	 * to the requested resource */
+	_expand_masks(req->cpu_bind_type, max_tasks, masks,
+			hw_sockets, hw_cores, hw_threads);
 
 	return SLURM_SUCCESS;
+}
+
+/*
+ * _lllp_map_abstract_mask
+ *
+ * Map one abstract block mask to a physical machine mask
+ *
+ * IN - mask to map
+ * OUT - mapped mask (storage allocated in this routine)
+ */
+static bitstr_t *_lllp_map_abstract_mask(bitstr_t *bitmask)
+{
+    	int i, bit;
+	int num_bits = bit_size(bitmask);
+	bitstr_t *newmask = NULL;
+	newmask = (bitstr_t *) bit_alloc(num_bits);
+
+	/* remap to physical machine */
+	for (i = 0; i < num_bits; i++) {
+		if (bit_test(bitmask,i)) {
+			bit = BLOCK_MAP(i);
+			bit_set(newmask, bit);
+		}
+	}
+	return newmask;
+}
+
+/*
+ * _lllp_map_abstract_masks
+ *
+ * Map an array of abstract block masks to physical machine masks
+ *
+ * IN- maximum number of tasks
+ * IN/OUT- array of masks
+ */
+static void _lllp_map_abstract_masks(const uint32_t maxtasks, bitstr_t **masks)
+{
+    	int i;
+	debug3("_lllp_map_abstract_masks");
+	
+	for (i = 0; i < maxtasks; i++) { 
+		bitstr_t *bitmask = masks[i];
+	    	if (bitmask) {
+			bitstr_t *newmask = _lllp_map_abstract_mask(bitmask);
+			bit_free(bitmask);
+			masks[i] = newmask;
+		}
+	}
 }
 
 /* 
- * _task_layout_lllp_plane
+ * _lllp_generate_cpu_bind
  *
- * task_layout_lllp_plane will create a block cyclic distribution at
- * the lowest level of logical processor which is either socket, core or
- * thread depending on the system architecture. The Block algorithm is
- * different from the Block distribution performed at the node level
- * in that this algorithm does not load-balance the tasks across the
- * resources but uses the block size (i.e. plane size) specified by
- * the user.
+ * Generate the cpu_bind type and string given an array of bitstr_t masks
  *
- *  Distribution at the lllp: 
- *  -m hostfile|plane|block|cyclic:block|cyclic 
- * 
- * The first distribution "hostfile|plane|block|cyclic" is computed
- * in srun. The second distribution "plane|block|cyclic" is computed
- * locally by each slurmd.
- *  
- * The input to the lllp distribution algorithms is the gids
- * (tasksids) generated for the local node.
- *  
- * The output is a mapping of the gids onto logical processors
- * (thread/core/socket)  with is expressed in cpu_bind masks.
- *
+ * IN/OUT- job launch request (cpu_bind_type and cpu_bind updated)
+ * IN- maximum number of tasks
+ * IN- array of masks
  */
-static int _task_layout_lllp_plane(launch_tasks_request_msg_t *req, 
-				   const uint32_t *gtid,
-				   const uint32_t maxtasks,
-				   bitstr_t ***masks_p)
+static void _lllp_generate_cpu_bind(launch_tasks_request_msg_t *req,
+				    const uint32_t maxtasks, bitstr_t **masks)
 {
-	int retval, j, k, l, m, taskid = 0, last_taskcount = -1, next = 0;
-	uint16_t core_index = 0, thread_index = 0;
-	uint16_t hw_sockets = 0, hw_cores = 0, hw_threads = 0;
-	uint16_t usable_cpus = 0, avail_cpus = 0;
-	uint16_t usable_sockets = 0, usable_cores = 0, usable_threads = 0;
-	uint16_t plane_size = req->plane_size;
-	int max_plane_size = 0;
+    	int i, num_bits=0, masks_len;
+	bitstr_t *bitmask;
+	bitoff_t charsize;
+	char *masks_str = NULL;
+	char buf_type[100];
 
-	bitstr_t **masks = NULL; 
-	bool bind_to_exact_socket = true;
-	bool bind_to_exact_core   = true;
-	bool bind_to_exact_thread = true;
-
-	info("_task_layout_lllp_plane %d ", req->plane_size);
-
-	retval = _task_layout_lllp_init(req, maxtasks, masks_p,
-					&bind_to_exact_socket, 
-					&bind_to_exact_core, 
-					&bind_to_exact_thread,
-					&usable_cpus, 
-					&usable_sockets, 
-					&usable_cores, 
-					&usable_threads,
-					&hw_sockets, 
-					&hw_cores, 
-					&hw_threads, 
-					&avail_cpus);
-	if (retval != SLURM_SUCCESS) {
-		return retval;
-	}
-	masks = *masks_p;
-
-	max_plane_size = (plane_size > usable_cores) ? plane_size : usable_cores;
-	next = 0;
-
-	for (j=0; next<maxtasks; j++) {
-		if (next == last_taskcount) {
-			error("_task_layout_lllp_plan failure");
-			return SLURM_ERROR;
-		}
-		last_taskcount = next;
-		for (k=0; k<usable_sockets; k++) {
-			max_plane_size = (plane_size > usable_cores) ? plane_size : usable_cores;
-			for (m=0; m<max_plane_size; m++) {
-				if(next>=maxtasks)
-					break;
-				core_index = m%usable_cores;				
-				if(m<usable_cores) {
-					for(l=0; l<usable_threads;l++) {
-						if(next>=maxtasks)
-							break;
-						thread_index = l%usable_threads;
-						
-						if(thread_index<usable_threads) {
-							bitstr_t *bitmask = NULL;
-							taskid = gtid[next];
-							_single_mask(hw_sockets,
-								     hw_cores, 
-								     hw_threads,
-								     k, 
-								     core_index, 
-								     thread_index, 
-								     bind_to_exact_socket, 
-								     bind_to_exact_core,
-								     bind_to_exact_thread, 
-								     &bitmask);
-							xassert(masks[next] == NULL);
-							xassert(next < maxtasks);
-							masks[next] = bitmask;
-							next++;
-						}
-					}
-				}
-			}
+	for (i = 0; i < maxtasks; i++) { 
+		bitmask = masks[i];
+	    	if (bitmask) {
+			num_bits = bit_size(bitmask);
+			break;
 		}
 	}
-	
-	return SLURM_SUCCESS;
-}
+	charsize = (num_bits + 3) / 4;		/* ASCII hex digits */
+	charsize += 3;				/* "0x" and trailing "," */
+	masks_len = maxtasks * charsize + 1;	/* number of masks + null */
 
-/*
- * slurm job state information
- * tracks jobids for which all future credentials have been revoked
- *  
- */
-typedef struct {
-	uint32_t jobid;
-	uint32_t jobstepid;
-	uint32_t numtasks;
-	cpu_bind_type_t cpu_bind_type;
-	char *cpu_bind;
-} lllp_job_state_t;
+	debug3("_lllp_generate_cpu_bind %d %d %d", maxtasks, charsize,
+		masks_len);
 
-static lllp_job_state_t *
-_lllp_job_state_create(uint32_t job_id, uint32_t job_step_id,
-		       cpu_bind_type_t cpu_bind_type, char *cpu_bind,
-		       uint32_t numtasks)
-{
-	lllp_job_state_t *j;
-	debug3("creating job [%u.%u] lllp state", job_id, job_step_id);
-
-	j = xmalloc(sizeof(lllp_job_state_t));
-
-	j->jobid	 = job_id;
-	j->jobstepid	 = job_step_id;
-	j->numtasks	 = numtasks;
-	j->cpu_bind_type = cpu_bind_type;
-	j->cpu_bind	 = NULL;
-	if (cpu_bind) {
-		j->cpu_bind = xmalloc(strlen(cpu_bind) + 1);
-		strcpy(j->cpu_bind, cpu_bind);
-	}
-	return j;
-}
-
-static void
-_lllp_job_state_destroy(lllp_job_state_t *j)
-{
-	debug3("destroying job [%u.%u] lllp state", j->jobid, j->jobstepid);
-        if (j) {
-		if (j->cpu_bind)
-			xfree(j->cpu_bind);
-	    	xfree(j);
-	}
-}
-
-#if 0
-/* Note: now inline in cr_release_lllp to support multiple job steps */
-static lllp_job_state_t *
-_find_lllp_job_state(uint32_t jobid)
-{
-        ListIterator  i = NULL;
-        lllp_job_state_t  *j = NULL;
-
-        i = list_iterator_create(lllp_ctx->job_list);
-        while ((j = list_next(i)) && (j->jobid != jobid)) {;}
-        list_iterator_destroy(i);
-        return j;
-}
-
-static void
-_remove_lllp_job_state(uint32_t jobid)
-{
-        ListIterator  i = NULL;
-        lllp_job_state_t  *j = NULL;
-
-        i = list_iterator_create(lllp_ctx->job_list);
-        while ((j = list_next(i)) && (j->jobid != jobid)) {;}
-	if (j) {
-	    	list_delete_item(i);
-	}
-        list_iterator_destroy(i);
-}
-#endif
-
-void
-_append_lllp_job_state(lllp_job_state_t *j)
-{
-        list_append(lllp_ctx->job_list, j);
-}
-
-void
-lllp_ctx_destroy(void)
-{
-	xfree(lllp_reserved);
-
-    	if (lllp_ctx == NULL)
-		return;
-
-        xassert(lllp_ctx->magic == LLLP_CTX_MAGIC);
-
-        slurm_mutex_lock(&lllp_ctx->mutex);
-	list_destroy(lllp_ctx->job_list);
-
-        xassert(lllp_ctx->magic = ~LLLP_CTX_MAGIC);
-
-        slurm_mutex_unlock(&lllp_ctx->mutex);
-        slurm_mutex_destroy(&lllp_ctx->mutex);
-
-    	xfree(lllp_ctx);
-}
-
-void
-lllp_ctx_alloc(void)
-{
-	uint32_t num_lllp;
-
-	debug3("alloc LLLP");
-
-	xfree(lllp_reserved);
-	num_lllp = conf->sockets * conf->cores * conf->threads;
-	if (conf->cpus > num_lllp) {
-	    	num_lllp = conf->cpus;
-	}
-	lllp_reserved_size = num_lllp;
-	lllp_reserved = xmalloc(num_lllp * sizeof(uint32_t));
-
-	if (lllp_ctx) {
-		lllp_ctx_destroy();
-	}
-
-        lllp_ctx = xmalloc(sizeof(*lllp_ctx));
-
-        slurm_mutex_init(&lllp_ctx->mutex);
-        slurm_mutex_lock(&lllp_ctx->mutex);
-        
-        lllp_ctx->job_list = NULL;
-	lllp_ctx->job_list = list_create((ListDelF) _lllp_job_state_destroy);
-
-        xassert(lllp_ctx->magic = LLLP_CTX_MAGIC);
-        
-        slurm_mutex_unlock(&lllp_ctx->mutex);
-}
-
-static int _init_lllp(void)
-{
-	int j = 0, k = 0;
-	int usable_sockets, usable_threads, usable_cores;
-
-	debug3("init LLLP");
-
-  	/* FIX for heterogeneous socket/core/thread count per system
-	 * in future releases */
-	usable_sockets = conf->sockets;
-	usable_threads = conf->threads;
-	usable_cores   = conf->cores;
-
-        lllp_tasks = xmalloc(sizeof(struct node_gids));
-	lllp_tasks->sockets =  xmalloc(sizeof(struct socket_gids) * usable_sockets);
-	for (j=0; j<usable_sockets; j++) {
-		lllp_tasks->sockets[j].cores =  xmalloc(sizeof(struct core_gids) * usable_cores);
-		for (k=0; k<usable_cores; k++) {
-			lllp_tasks->sockets[j].cores[k].threads = 
-					xmalloc(sizeof(struct thread_gids) * usable_threads);
+	masks_str = xmalloc(masks_len);
+	masks_len = 0;
+	for (i = 0; i < maxtasks; i++) {
+	    	char *str;
+		int curlen;
+		bitmask = masks[i];
+	    	if (bitmask == NULL) {
+			continue;
 		}
+		str = (char *)bit_fmt_hexmask(bitmask);
+		curlen = strlen(str) + 1;
+
+		if (masks_len > 0)
+			masks_str[masks_len-1]=',';
+		strncpy(&masks_str[masks_len], str, curlen);
+		masks_len += curlen;
+		xassert(masks_str[masks_len] == '\0');
+		xfree(str);
 	}
-	return SLURM_SUCCESS;
-}
 
-int _cleanup_lllp(void)
-{
-	int i=0, j=0;
-  	/* FIX for heterogeneous socket/core/thread count per system in future releases */
-	int usable_sockets = conf->sockets;
-	int usable_cores   = conf->cores;
-
-	for (i=0; i<usable_sockets; i++) { 
-		for (j=0; j<usable_cores; j++) {
-			xfree(lllp_tasks->sockets[i].cores[j].threads);
-		}
-		xfree(lllp_tasks->sockets[i].cores);
+	if (req->cpu_bind) {
+	    	xfree(req->cpu_bind);
 	}
-	xfree(lllp_tasks->sockets);
-	xfree(lllp_tasks);
-	return SLURM_SUCCESS;
-}
-
-void _print_tasks_per_lllp (void)
-{
-	int j=0, k=0, l=0;
-  	/* FIX for heterogeneous socket/core/thread count per system
-	 * in future releases */
-	int usable_sockets = conf->sockets;
-	int usable_cores   = conf->cores;  
-	int usable_threads = conf->threads;
-  
-	info("_print_tasks_per_lllp ");
-  
-	for(j=0; j < usable_sockets; j++) {
-		for(k=0; k < usable_cores; k++) {
-			for(l=0; l < usable_threads; l++) {
-				info("socket %d core %d thread %d tasks %d ", j, k, l, 
-				     lllp_tasks->sockets[j].cores[k].threads[l].tasks);
-			}
-		}
-	}
-}
-
-/* _block_map
- *
- * safely returns a mapped index using a provided block map
- *
- * IN - index to map
- * IN - map to use
- */
-static uint16_t _block_map(uint16_t index, uint16_t *map)
-{
-	if (map == NULL) {
-	    	return index;
-	}
-	/* make sure bit falls in map */
-	if (index >= conf->block_map_size) {
-		debug3("wrapping index %u into block_map_size of %u",
-		       index, conf->block_map_size);
-		index = index % conf->block_map_size;
-	}
-	index = map[index];
-	return(index);
-}
-
-
-/*
- * _single_mask
- *
- * This function allocates and returns a abstract (unmapped) bitmask given the
- * machine architecture, the index for the task, and the desired binding type
- */
-static void _single_mask(const uint16_t nsockets, 
-			 const uint16_t ncores, 
-			 const uint16_t nthreads, 
-			 const uint16_t socket_id,
-			 const uint16_t core_id, 
-			 const uint16_t thread_id,
-			 const bool bind_to_exact_socket,
-			 const bool bind_to_exact_core,
-			 const bool bind_to_exact_thread,
-			 bitstr_t **single_mask ) 
-{
-	int socket, core, thread;
-	int nsockets_left, ncores_left, nthreads_left;
-	bitoff_t bit;
-	bitoff_t num_bits = nsockets * ncores * nthreads;
-	bitstr_t * bitmask = bit_alloc(num_bits);
-
-	if (bind_to_exact_socket) {
-		nsockets_left = 1;
-		socket = socket_id;
+	if (masks_str[0] != '\0') {
+		req->cpu_bind = masks_str;
+		req->cpu_bind_type |= CPU_BIND_MASK; 
 	} else {
-		nsockets_left = nsockets;
-		socket = 0;
-	}	
-	while (nsockets_left-- > 0) {
-		if (bind_to_exact_core) {
-			ncores_left = 1;
-			core = core_id;
-		} else {
-			ncores_left = ncores;
-			core = 0;
-		}
-		while (ncores_left-- > 0) {
-			if (bind_to_exact_thread) { 
-				nthreads_left = 1; 
-				thread = thread_id;
-			} else { 
-				nthreads_left = nthreads; 
-				thread = 0; 
-			}
-			while (nthreads_left-- > 0) {
-				bit = SCT_TO_LLLP(socket, core, thread,
-						  ncores, nthreads);
-				if (bit < num_bits)
-					bit_set(bitmask, bit);
-				else
-					info("Invalid job cpu_bind mask");
-				thread++;
-			}
-			core++;
-		}
-		socket++;
+		req->cpu_bind = NULL;
+		req->cpu_bind_type &= ~CPU_BIND_VERBOSE;
 	}
-	
-	*single_mask = bitmask;
 
-#if(0)
-	char *str = bit_fmt_hexmask(bitmask);
-	info("_single_mask(Real: %d.%d.%d\t Use:%d.%d.%d\t = %s )",
-	     nsockets, ncores, nthreads,
-	     socket_id, core_id, thread_id, *str);
-	xfree(str);
-#endif
+	/* clear mask generation bits */
+	req->cpu_bind_type &= ~CPU_BIND_TO_THREADS;
+	req->cpu_bind_type &= ~CPU_BIND_TO_CORES;
+	req->cpu_bind_type &= ~CPU_BIND_TO_SOCKETS;
+	req->cpu_bind_type &= ~CPU_BIND_TO_LDOMS;
+
+	slurm_sprint_cpu_bind_type(buf_type, req->cpu_bind_type);
+	info("_lllp_generate_cpu_bind jobid [%u]: %s, %s",
+	     req->job_id, buf_type, masks_str);
 }
-
-
-/*
- * cr_reserve_unit
- *
- * Given a bitstr_t, expand any set bits to cover the:
- * - entire socket if cr_type == CR_SOCKET or CR_SOCKET_MEMORY to 
- *   create a reservation for the entire socket.
- *     or
- * - entire core if cr_type == CR_CORE or CR_CORE_MEMORY to 
- *   create a reservation for the entire core.
- */
-static void _cr_reserve_unit(bitstr_t *bitmask, int cr_type)
-{
-	uint32_t nsockets = conf->sockets;
-	uint32_t ncores   = conf->cores;
-	uint32_t nthreads = conf->threads;
-	bitoff_t bit;
-	int socket, core, thread;
-	int nsockets_left, ncores_left, nthreads_left;
-	int num_bits;
-	bool reserve_this_socket = false;
-	bool reserve_this_core   = false;
-
-	if (!bitmask) {
-	    	return;
-	}
-	if ((cr_type != CR_SOCKET) &&
-	    (cr_type != CR_SOCKET_MEMORY) &&
-	    (cr_type != CR_CORE) &&
-	    (cr_type != CR_CORE_MEMORY)) {
-		return;
-	}
-
-	num_bits = bit_size(bitmask);
-	nsockets_left = nsockets;
-	socket = 0;
-	while (nsockets_left-- > 0) {
-		reserve_this_socket = false;
-		ncores_left = ncores;
-		core = 0;
-		while (ncores_left-- > 0) { /* check socket for set bits */
-			reserve_this_core = false;
-			nthreads_left = nthreads; 
-			thread = 0; 
-			while (nthreads_left-- > 0) {
-				bit = SCT_TO_LLLP(socket, core, thread,
-						  ncores, nthreads);
-				/* map abstract to machine */
-				bit = BLOCK_MAP(bit);
-				if (bit < num_bits) {
-					if (bit_test(bitmask,bit)) {
-						reserve_this_socket = true;
-						reserve_this_core   = true;
-						nthreads_left = 0;
-					}
-				} else
-					info("Invalid job cpu_bind mask");
-				thread++;
-			}
-			/* mark entire core */
-			if (((cr_type == CR_CORE) ||
-			     (cr_type == CR_CORE_MEMORY)) &&
-			    reserve_this_core) {
-				nthreads_left = nthreads; 
-				thread = 0; 
-				while (nthreads_left-- > 0) {
-					bit = SCT_TO_LLLP(socket, core, thread,
-							  ncores, nthreads);
-					/* map abstract to machine */
-					bit = BLOCK_MAP(bit);
-					if (bit < num_bits)
-						bit_set(bitmask, bit);
-					else
-						info("Invalid job cpu_bind mask");
-					thread++;
-				}
-			}
-			core++;
-		}
-		/* mark entire socket */
-		if (((cr_type == CR_SOCKET) ||
-		     (cr_type == CR_SOCKET_MEMORY)) &&
-		    reserve_this_socket) {
-			ncores_left = ncores;
-			core = 0;
-			while (ncores_left-- > 0) {
-				nthreads_left = nthreads; 
-				thread = 0; 
-				while (nthreads_left-- > 0) {
-					bit = SCT_TO_LLLP(socket, core, thread,
-							  ncores, nthreads);
-					/* map abstract to machine */
-					bit = BLOCK_MAP(bit);
-					if (bit < num_bits)
-						bit_set(bitmask, bit);
-					else
-						info("Invalid job cpu_bind mask");
-					thread++;
-				}
-				core++;
-			}
-		}
-		socket++;
-	}
-	
-}
-
-
-static int _get_bitmap_from_cpu_bind(bitstr_t *bitmap_test,
-				     cpu_bind_type_t cpu_bind_type, 
-				     char *cpu_bind, uint32_t numtasks)
-{
-	char opt_dist[10];
-	char *dist_str = NULL;
-	char *dist_str_next = NULL;
-	int bitmap_size = bit_size(bitmap_test);
-	int rc = SLURM_SUCCESS;
-	unsigned int i;
-	dist_str = cpu_bind;
-	
-	if (cpu_bind_type & CPU_BIND_RANK) {
-		for (i=0; i<numtasks; i++) {
-			if (i < bitmap_size)
-				bit_set(bitmap_test, i);
-			else {
-				info("Invalid job cpu_bind mask");
-				return SLURM_ERROR;
-			}
-		}
-		return rc;
-	}
-
-	i = 0;
-	while (dist_str != NULL) {
-		if (i >= numtasks) {	/* no more tasks need masks */
-		    	break;
-		}
-		if (*dist_str == ',') {	/* get next mask from cpu_bind */
-			dist_str++;
-		}
-		dist_str_next = strchr(dist_str, ',');
-
-		if (dist_str_next != NULL) {
-			strncpy(opt_dist, dist_str, dist_str_next-dist_str);
-			opt_dist[dist_str_next-dist_str] = '\0';
-		} else {
-			strcpy(opt_dist, dist_str);
-		}
-
-		/* add opt_dist to bitmap_test */
-		if (cpu_bind_type & CPU_BIND_MASK) {
-			bit_unfmt_hexmask(bitmap_test, opt_dist);
-		} else if (cpu_bind_type & CPU_BIND_MAP) {
-			unsigned int mycpu = 0;
-			if (strncmp(opt_dist, "0x", 2) == 0) {
-				mycpu = strtoul(&(opt_dist[2]), NULL, 16);
-			} else {
-				mycpu = strtoul(opt_dist, NULL, 10);
-			}
-			if (mycpu < bitmap_size)
-				bit_set(bitmap_test, mycpu);
-			else {
-				info("Invalid job cpu_bind mask");
-				rc = SLURM_ERROR;
-				/* continue and try to map remaining tasks */
-			}
-		}
-
-		dist_str = dist_str_next;
-		dist_str_next = NULL;
-	    	i++;
-	}
-	return rc;
-}
-
-
-static void _cr_update_reservation(int reserve, uint32_t *reserved, 
-				   bitstr_t *mask)
-{
-	int i;
-	int num_bits = bit_size(mask);
-
-	for(i=0; i < num_bits; i++) {
-		if (bit_test(mask,i)) {
-			if (reserve) {
-				/* reserve LLLP */
-				reserved[i]++;
-			} else {
-				/* release LLLP only if non-zero */
-				if (reserved[i] > 0) {
-					reserved[i]--;
-				}
-			}
-		}
-	}
-}
-
-static void _cr_update_lllp(int reserve, uint32_t job_id, uint32_t job_step_id,
-			    cpu_bind_type_t cpu_bind_type, char *cpu_bind,
-			    uint32_t numtasks)
-{
-	int buf_len = 1024;
-	char buffer[buf_len], buftmp[128], buf_action[20];	/* for info */
-
-	if (lllp_reserved == NULL) {
-	    	/* fixme: lllp_reserved not allocated */
-	    	return;
-	}
-
-	if ((cpu_bind_type & CPU_BIND_RANK) ||
-	    (cpu_bind_type & CPU_BIND_MASK) ||
-	    (cpu_bind_type & CPU_BIND_MAP)) {
-		int i = 0;
-		bitoff_t num_bits = 
-			conf->sockets * conf->cores * conf->threads;
-		bitstr_t * bitmap_test = bit_alloc(num_bits);
-		_get_bitmap_from_cpu_bind(bitmap_test,
-					  cpu_bind_type, cpu_bind, numtasks);
-
-		_cr_reserve_unit(bitmap_test, conf->cr_type);
-
-		_cr_update_reservation(reserve, lllp_reserved, bitmap_test);
-
-		bit_free(bitmap_test);	/* not currently stored with job_id */
-
-		/*** display the updated lllp_reserved counts ***/
-		buffer[0] = '\0';
-		for (i=num_bits-1; i >=0; i--) {
-			sprintf(buftmp, "%d", lllp_reserved[i]);
-			if (strlen(buftmp) + strlen(buffer) + 1 < buf_len) {
-			        if (i < (num_bits-1)) strcat(buffer,",");
-				strcat(buffer,buftmp);
-			} else {/* out of space...indicate incomplete string */
-				buffer[strlen(buffer)-1] = '*';
-				buffer[strlen(buffer)] = '\0';
-				break;
-			}
-		}
-		if (reserve) {
-			strcpy(buf_action, "reserve");
-		} else {
-			strcpy(buf_action, "release");
-		}
-		info("LLLP update %s [%u.%u]: %s (CPU IDs: %d...0)",
-			buf_action, job_id, job_step_id, buffer, num_bits-1);
-	}
-}
-
-
-void cr_reserve_lllp(uint32_t job_id,
-			launch_tasks_request_msg_t *req, uint32_t node_id)
-{
-	lllp_job_state_t *j;
-	cpu_bind_type_t cpu_bind_type = req->cpu_bind_type;
-	char *cpu_bind = req->cpu_bind;
-	uint32_t numtasks = 0;
-	char buf_type[100];
-
-	debug3("reserve LLLP job [%u.%u]\n", job_id, req->job_step_id);
-
-	if (req->tasks_to_launch) {
-		numtasks = req->tasks_to_launch[(int)node_id];
-	}
-
-	slurm_sprint_cpu_bind_type(buf_type, cpu_bind_type);
-	debug3("reserve lllp job [%u.%u]: %d tasks; %s[%d], %s",
-	       job_id, req->job_step_id, numtasks,
-	       buf_type, cpu_bind_type, cpu_bind);
-	if (cpu_bind_type == 0)
-		return;
-
-
-    	/* store job_id, cpu_bind_type, cpu_bind */
-	slurm_mutex_lock(&lllp_ctx->mutex);
-
-	j = _lllp_job_state_create(job_id, req->job_step_id,
-					cpu_bind_type, cpu_bind, numtasks);
-
-	if (j) {
-		_append_lllp_job_state(j);
-		_cr_update_lllp(1, job_id, req->job_step_id,
-				cpu_bind_type, cpu_bind, numtasks);
-	}
-	slurm_mutex_unlock(&lllp_ctx->mutex);
-}
-
-void cr_release_lllp(uint32_t job_id)
-{
-	ListIterator  i = NULL;
-	lllp_job_state_t *j;
-	cpu_bind_type_t cpu_bind_type = 0;
-	char *cpu_bind = NULL;
-	uint32_t numtasks = 0;
-	char buf_type[100];
-
-	debug3("release LLLP job [%u.*]", job_id);
-
-    	/* retrieve cpu_bind_type, cpu_bind from job_id */
-	slurm_mutex_lock(&lllp_ctx->mutex);
-	i = list_iterator_create(lllp_ctx->job_list);
-	while ((j = list_next(i))) {
-		if (j->jobid == job_id) {
-			cpu_bind_type = j->cpu_bind_type;
-			cpu_bind      = j->cpu_bind;
-			numtasks      = j->numtasks;
-			slurm_sprint_cpu_bind_type(buf_type, cpu_bind_type);
-			debug3("release search lllp job %u: %d tasks; %s[%d], %s",
-			       j->jobid, numtasks,
-			       buf_type, cpu_bind_type, cpu_bind);
-
-			_cr_update_lllp(0, job_id, j->jobstepid,
-					cpu_bind_type, cpu_bind, numtasks);
-
-			/* done with saved state, remove entry */
-			list_delete_item(i);
-		}
-	}
-	list_iterator_destroy(i);
-	slurm_mutex_unlock(&lllp_ctx->mutex);
-}
-
 

@@ -5,10 +5,11 @@
  *  Copyright (C) 2002-2008 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -324,6 +325,14 @@ static int _set_rec(int *start, int argc, char *argv[],
 			if (get_uint(argv[i]+end, &qos->priority,
 			    "Priority") == SLURM_SUCCESS)
 				set = 1;
+		} else if (!strncasecmp (argv[i], "UsageFactor", 
+					 MAX(command_len, 3))) {
+			if(!qos)
+				continue;
+			
+			if (get_double(argv[i]+end, &qos->usage_factor,
+			    "UsageFactor") == SLURM_SUCCESS)
+				set = 1;
 		} else {
 			printf(" Unknown option: %s\n"
 			       " Use keyword 'where' to modify condition\n",
@@ -352,8 +361,14 @@ extern int sacctmgr_add_qos(int argc, char *argv[])
 
 	init_acct_qos_rec(start_qos);
 
-	for (i=0; i<argc; i++) 
-		limit_set = _set_rec(&i, argc, argv, name_list, start_qos);
+	for (i=0; i<argc; i++) {
+		int command_len = strlen(argv[i]);
+		if (!strncasecmp (argv[i], "Where", MAX(command_len, 5))
+		    || !strncasecmp (argv[i], "Set", MAX(command_len, 3))) 
+			i++;		
+
+		limit_set += _set_rec(&i, argc, argv, name_list, start_qos);
+	}
 
 	if(exit_code) {
 		list_destroy(name_list);
@@ -411,6 +426,8 @@ extern int sacctmgr_add_qos(int argc, char *argv[])
 				qos->job_flags = start_qos->job_flags;
 
 			qos->priority = start_qos->priority;
+
+			qos->usage_factor = start_qos->usage_factor;
 
 			xstrfmtcat(qos_str, "  %s\n", name);
 			list_append(qos_list, qos);
@@ -501,9 +518,16 @@ extern int sacctmgr_list_qos(int argc, char *argv[])
 		PRINT_MAXN,
 		PRINT_MAXS,
 		PRINT_MAXW,
+		PRINT_UF,
 	};
 
-	_set_cond(&i, argc, argv, qos_cond, format_list);
+	for (i=0; i<argc; i++) {
+		int command_len = strlen(argv[i]);
+		if (!strncasecmp (argv[i], "Where", MAX(command_len, 5))
+		    || !strncasecmp (argv[i], "Set", MAX(command_len, 3))) 
+			i++;		
+		_set_cond(&i, argc, argv, qos_cond, format_list);
+	}
 
 	if(exit_code) {
 		destroy_acct_qos_cond(qos_cond);
@@ -614,7 +638,7 @@ extern int sacctmgr_list_qos(int argc, char *argv[])
 			field->print_routine = print_fields_time;
 		} else if(!strncasecmp("Name", object, MAX(command_len, 1))) {
 			field->type = PRINT_NAME;
-			field->name = xstrdup("NAME");
+			field->name = xstrdup("Name");
 			field->len = 10;
 			field->print_routine = print_fields_str;
 		} else if(!strncasecmp("Priority", object,
@@ -623,6 +647,12 @@ extern int sacctmgr_list_qos(int argc, char *argv[])
 			field->name = xstrdup("Priority");
 			field->len = 10;
 			field->print_routine = print_fields_int;
+		} else if(!strncasecmp("UsageFactor", object,
+				       MAX(command_len, 1))) {
+			field->type = PRINT_UF;
+			field->name = xstrdup("UsageFactor");
+			field->len = 11;
+			field->print_routine = print_fields_double;
 		} else {
 			exit_code=1;
 			fprintf(stderr, "Unknown field '%s'\n", object);
@@ -630,7 +660,7 @@ extern int sacctmgr_list_qos(int argc, char *argv[])
 			continue;
 		}
 
-		if(newlen > 0) 
+		if(newlen) 
 			field->len = newlen;
 		
 		list_append(print_fields_list, field);		
@@ -750,6 +780,11 @@ extern int sacctmgr_list_qos(int argc, char *argv[])
 					field, qos->priority,
 					(curr_inx == field_count));
 				break;
+			case PRINT_UF:
+				field->print_routine(
+					field, qos->usage_factor,
+					(curr_inx == field_count));
+				break;
 			default:
 				field->print_routine(
 					field, NULL,
@@ -784,13 +819,13 @@ extern int sacctmgr_modify_qos(int argc, char *argv[])
 		int command_len = strlen(argv[i]);
 		if (!strncasecmp (argv[i], "Where", MAX(command_len, 5))) {
 			i++;
-			cond_set = _set_cond(&i, argc, argv, qos_cond, NULL);
+			cond_set += _set_cond(&i, argc, argv, qos_cond, NULL);
 			      
 		} else if (!strncasecmp (argv[i], "Set", MAX(command_len, 3))) {
 			i++;
-			rec_set = _set_rec(&i, argc, argv, NULL, qos);
+			rec_set += _set_rec(&i, argc, argv, NULL, qos);
 		} else {
-			cond_set = _set_cond(&i, argc, argv, qos_cond, NULL);
+			cond_set += _set_cond(&i, argc, argv, qos_cond, NULL);
 		}
 	}
 
@@ -863,7 +898,15 @@ extern int sacctmgr_delete_qos(int argc, char *argv[])
 	List ret_list = NULL;
 	int set = 0;
 	
-	if(!(set = _set_cond(&i, argc, argv, qos_cond, NULL))) {
+	for (i=0; i<argc; i++) {
+		int command_len = strlen(argv[i]);
+		if (!strncasecmp (argv[i], "Where", MAX(command_len, 5))
+		    || !strncasecmp (argv[i], "Set", MAX(command_len, 3))) 
+			i++;		
+		set += _set_cond(&i, argc, argv, qos_cond, NULL);
+	}
+
+	if(!set) {
 		exit_code=1;
 		fprintf(stderr, 
 			" No conditions given to remove, not executing.\n");

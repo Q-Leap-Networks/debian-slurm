@@ -2,14 +2,15 @@
  *  bg_job_run.c - blue gene job execution (e.g. initiation and termination) 
  *  functions.
  *
- *  $Id: bg_job_run.c 17202 2009-04-09 16:56:23Z da $ 
+ *  $Id: bg_job_run.c 17529 2009-05-18 18:43:42Z da $ 
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -160,7 +161,6 @@ static int _remove_job(db_job_id_t job_id)
 		if(job_state == RM_JOB_TERMINATED)
 			return STATUS_OK;
 		else if(job_state == RM_JOB_DYING) {
-			/* start sending sigkills for the last 5 tries */
 			if(count > MAX_POLL_RETRIES) 
 				error("Job %d isn't dying, trying for "
 				      "%d seconds", count*POLL_INTERVAL);
@@ -215,14 +215,14 @@ static int _reset_block(bg_record_t *bg_record)
 		/* remove user from list */		
 		
 		if(bg_record->target_name) {
-			if(strcmp(bg_record->target_name, bg_slurm_user_name)) {
+			if(strcmp(bg_record->target_name, bg_conf->slurm_user_name)) {
 				xfree(bg_record->target_name);
 				bg_record->target_name = 
-					xstrdup(bg_slurm_user_name);
+					xstrdup(bg_conf->slurm_user_name);
 			}
 			update_block_user(bg_record, 1);
 		} else {
-			bg_record->target_name = xstrdup(bg_slurm_user_name);
+			bg_record->target_name = xstrdup(bg_conf->slurm_user_name);
 		}	
 		
 			
@@ -230,7 +230,7 @@ static int _reset_block(bg_record_t *bg_record)
 		bg_record->boot_count = 0;
 		
 		last_bg_update = time(NULL);
-		if(remove_from_bg_list(bg_job_block_list, bg_record) 
+		if(remove_from_bg_list(bg_lists->job_running, bg_record) 
 		   == SLURM_SUCCESS) {
 			num_unused_cpus += bg_record->cpu_cnt;
 		}
@@ -262,7 +262,8 @@ static void _sync_agent(bg_update_t *bg_update_ptr)
 {
 	bg_record_t * bg_record = NULL;
 	
-	bg_record = find_bg_record_in_list(bg_list, bg_update_ptr->bg_block_id);
+	bg_record = find_bg_record_in_list(bg_lists->main,
+					   bg_update_ptr->bg_block_id);
 	if(!bg_record) {
 		error("No block %s", bg_update_ptr->bg_block_id);
 		return;
@@ -272,12 +273,12 @@ static void _sync_agent(bg_update_t *bg_update_ptr)
 	bg_record->job_running = bg_update_ptr->job_ptr->job_id;
 	bg_record->job_ptr = bg_update_ptr->job_ptr;
 
-	if(!block_ptr_exist_in_list(bg_job_block_list, bg_record)) {
-		list_push(bg_job_block_list, bg_record);
+	if(!block_ptr_exist_in_list(bg_lists->job_running, bg_record)) {
+		list_push(bg_lists->job_running, bg_record);
 		num_unused_cpus -= bg_record->cpu_cnt;
 	}
-	if(!block_ptr_exist_in_list(bg_booted_block_list, bg_record)) 
-		list_push(bg_booted_block_list, bg_record);
+	if(!block_ptr_exist_in_list(bg_lists->booted, bg_record)) 
+		list_push(bg_lists->booted, bg_record);
 	slurm_mutex_unlock(&block_state_mutex);
 
 	if(bg_record->state == RM_PARTITION_READY) {
@@ -325,10 +326,11 @@ static void _start_agent(bg_update_t *bg_update_ptr)
 
 	slurm_mutex_lock(&job_start_mutex);
 		
-	bg_record = find_bg_record_in_list(bg_list, bg_update_ptr->bg_block_id);
+	bg_record = find_bg_record_in_list(bg_lists->main, 
+					   bg_update_ptr->bg_block_id);
 
 	if(!bg_record) {
-		error("block %s not found in bg_list",
+		error("block %s not found in bg_lists->main",
 		      bg_update_ptr->bg_block_id);
 		/* wait for the slurmd to begin 
 		   the batch script, slurm_fail_job() 
@@ -370,7 +372,7 @@ static void _start_agent(bg_update_t *bg_update_ptr)
 	
 	delete_list = list_create(NULL);
 	slurm_mutex_lock(&block_state_mutex);
-	itr = list_iterator_create(bg_list);
+	itr = list_iterator_create(bg_lists->main);
 	while ((found_record = list_next(itr))) {
 		if ((!found_record) || (bg_record == found_record))
 			continue;
@@ -400,16 +402,13 @@ static void _start_agent(bg_update_t *bg_update_ptr)
 		       found_record->bg_block_id, 
 		       bg_record->bg_block_id);
 		list_push(delete_list, found_record);
-		if(bluegene_layout_mode == LAYOUT_DYNAMIC) {
+		if(bg_conf->layout_mode == LAYOUT_DYNAMIC) 
 			list_remove(itr);
-		}
-		num_block_to_free++;
 	}		
 	list_iterator_destroy(itr);
 
 	if(requeue_job) {
-		num_block_to_free = 0;
-		num_block_freed = 0;
+		num_block_to_free = num_block_freed = 0;
 		list_destroy(delete_list);
 
 		_reset_block(bg_record);
@@ -446,8 +445,7 @@ static void _start_agent(bg_update_t *bg_update_ptr)
 	}
 	/* Zero out the values here because we are done with them and
 	   they will be ready for the next job */
-	num_block_to_free = 0;
-	num_block_freed = 0;
+	num_block_to_free = num_block_freed = 0;
 	
 	slurm_mutex_lock(&block_state_mutex);
 	if(bg_record->job_running <= NO_JOB_RUNNING) {
@@ -637,7 +635,7 @@ static void _start_agent(bg_update_t *bg_update_ptr)
 	} else if (bg_record->state == RM_PARTITION_CONFIGURING) {
 		bg_record->boot_state = 1;		
 	}
-	
+
 	if(bg_record->job_running <= NO_JOB_RUNNING) {
 		slurm_mutex_unlock(&job_start_mutex);
 		debug("job %u finished during the start of the boot "
@@ -672,7 +670,7 @@ static void _start_agent(bg_update_t *bg_update_ptr)
 		   incase the fail job isn't ran */
 		(void) slurm_fail_job(bg_record->job_running);
 		slurm_mutex_lock(&block_state_mutex);
-		if (remove_from_bg_list(bg_job_block_list, bg_record)
+		if (remove_from_bg_list(bg_lists->job_running, bg_record)
 		    == SLURM_SUCCESS) {
 			num_unused_cpus += bg_record->cpu_cnt;
 		}
@@ -710,7 +708,8 @@ static void _term_agent(bg_update_t *bg_update_ptr)
 	}
 	
 			
-	if ((rc = bridge_get_data(job_list, RM_JobListSize, &jobs)) != STATUS_OK) {
+	if ((rc = bridge_get_data(job_list, RM_JobListSize, &jobs)) 
+	    != STATUS_OK) {
 		error("bridge_get_data(RM_JobListSize): %s", bg_err_str(rc));
 		jobs = 0;
 	}
@@ -778,7 +777,8 @@ static void _term_agent(bg_update_t *bg_update_ptr)
 #endif
 	
 	/* remove the block's users */
-	bg_record = find_bg_record_in_list(bg_list, bg_update_ptr->bg_block_id);
+	bg_record = find_bg_record_in_list(bg_lists->main,
+					   bg_update_ptr->bg_block_id);
 	if(bg_record) {
 		debug("got the record %s user is %s",
 		      bg_record->bg_block_id,
@@ -804,9 +804,9 @@ static void _term_agent(bg_update_t *bg_update_ptr)
 		
 		slurm_mutex_unlock(&block_state_mutex);
 		
-	} else if (bluegene_layout_mode == LAYOUT_DYNAMIC) {
+	} else if (bg_conf->layout_mode == LAYOUT_DYNAMIC) {
 		debug2("Hopefully we are destroying this block %s "
-		       "since it isn't in the bg_list",
+		       "since it isn't in the bg_lists->main",
 		       bg_update_ptr->bg_block_id);
 	} else {
 		error("Could not find block %s previously assigned to job.  "
@@ -894,8 +894,9 @@ static void _block_op(bg_update_t *bg_update_ptr)
 		slurm_mutex_unlock(&agent_cnt_mutex);
 		return;
 	}
-	agent_cnt++;
+
 	slurm_mutex_unlock(&agent_cnt_mutex);
+	agent_cnt++;
 	/* spawn an agent */
 	slurm_attr_init(&attr_agent);
 	if (pthread_attr_setdetachstate(&attr_agent, 
@@ -925,8 +926,8 @@ static List _get_all_blocks(void)
 	if (!ret_list)
 		fatal("malloc error");
 
-	if(bg_list) {
-		itr = list_iterator_create(bg_list);
+	if(bg_lists->main) {
+		itr = list_iterator_create(bg_lists->main);
 		while ((block_ptr = (bg_record_t *) list_next(itr))) {
 			if ((block_ptr->user_name == NULL)
 			    ||  (block_ptr->user_name[0] == '\0')
@@ -941,7 +942,7 @@ static List _get_all_blocks(void)
 		}
 		list_iterator_destroy(itr);
 	} else {
-		error("_get_all_blocks: no bg_list");
+		error("_get_all_blocks: no bg_lists->main");
 	}
 
 	return ret_list;
@@ -1040,7 +1041,8 @@ extern int start_job(struct job_record *job_ptr)
 			     &(bg_update_ptr->reboot));
 #ifdef HAVE_BGL
 	if(!bg_update_ptr->blrtsimage) {
-		bg_update_ptr->blrtsimage = xstrdup(default_blrtsimage);
+		bg_update_ptr->blrtsimage =
+			xstrdup(bg_conf->default_blrtsimage);
 		select_g_set_jobinfo(job_ptr->select_jobinfo,
 				     SELECT_DATA_BLRTS_IMAGE, 
 				     bg_update_ptr->blrtsimage);
@@ -1055,7 +1057,8 @@ extern int start_job(struct job_record *job_ptr)
 			     SELECT_DATA_LINUX_IMAGE, 
 			     &(bg_update_ptr->linuximage));
 	if(!bg_update_ptr->linuximage) {
-		bg_update_ptr->linuximage = xstrdup(default_linuximage);
+		bg_update_ptr->linuximage =
+			xstrdup(bg_conf->default_linuximage);
 		select_g_set_jobinfo(job_ptr->select_jobinfo,
 				     SELECT_DATA_LINUX_IMAGE, 
 				     bg_update_ptr->linuximage);
@@ -1064,7 +1067,8 @@ extern int start_job(struct job_record *job_ptr)
 			     SELECT_DATA_MLOADER_IMAGE, 
 			     &(bg_update_ptr->mloaderimage));
 	if(!bg_update_ptr->mloaderimage) {
-		bg_update_ptr->mloaderimage = xstrdup(default_mloaderimage);
+		bg_update_ptr->mloaderimage = 
+			xstrdup(bg_conf->default_mloaderimage);
 		select_g_set_jobinfo(job_ptr->select_jobinfo,
 				     SELECT_DATA_MLOADER_IMAGE, 
 				     bg_update_ptr->mloaderimage);
@@ -1073,24 +1077,27 @@ extern int start_job(struct job_record *job_ptr)
 			     SELECT_DATA_RAMDISK_IMAGE, 
 			     &(bg_update_ptr->ramdiskimage));
 	if(!bg_update_ptr->ramdiskimage) {
-		bg_update_ptr->ramdiskimage = xstrdup(default_ramdiskimage);
+		bg_update_ptr->ramdiskimage =
+			xstrdup(bg_conf->default_ramdiskimage);
 		select_g_set_jobinfo(job_ptr->select_jobinfo,
 				     SELECT_DATA_RAMDISK_IMAGE, 
 				     bg_update_ptr->ramdiskimage);
 	}
 	bg_record = 
-		find_bg_record_in_list(bg_list, bg_update_ptr->bg_block_id);
+		find_bg_record_in_list(bg_lists->main, 
+				       bg_update_ptr->bg_block_id);
 	if (bg_record) {
 		slurm_mutex_lock(&block_state_mutex);
 		job_ptr->num_procs = bg_record->cpu_cnt;
+		job_ptr->total_procs = job_ptr->num_procs;
 		bg_record->job_running = bg_update_ptr->job_ptr->job_id;
 		bg_record->job_ptr = bg_update_ptr->job_ptr;
-		if(!block_ptr_exist_in_list(bg_job_block_list, bg_record)) {
-			list_push(bg_job_block_list, bg_record);
+		if(!block_ptr_exist_in_list(bg_lists->job_running, bg_record)) {
+			list_push(bg_lists->job_running, bg_record);
 			num_unused_cpus -= bg_record->cpu_cnt;
 		}
-		if(!block_ptr_exist_in_list(bg_booted_block_list, bg_record))
-			list_push(bg_booted_block_list, bg_record);
+		if(!block_ptr_exist_in_list(bg_lists->booted, bg_record))
+			list_push(bg_lists->booted, bg_record);
 		slurm_mutex_unlock(&block_state_mutex);
 	} else {
 		error("bg_record %s doesn't exist, requested for job (%d)", 
@@ -1258,11 +1265,11 @@ extern int boot_block(bg_record_t *bg_record)
 	int rc;	
 		
 	if ((rc = bridge_set_block_owner(bg_record->bg_block_id, 
-					 bg_slurm_user_name)) 
+					 bg_conf->slurm_user_name)) 
 	    != STATUS_OK) {
 		error("bridge_set_block_owner(%s,%s): %s", 
 		      bg_record->bg_block_id, 
-		      bg_slurm_user_name,
+		      bg_conf->slurm_user_name,
 		      bg_err_str(rc));
 		return SLURM_ERROR;
 	}	
@@ -1291,8 +1298,8 @@ extern int boot_block(bg_record_t *bg_record)
 	}
 	
 	slurm_mutex_lock(&block_state_mutex);
-	if(!block_ptr_exist_in_list(bg_booted_block_list, bg_record))
-		list_push(bg_booted_block_list, bg_record);
+	if(!block_ptr_exist_in_list(bg_lists->booted, bg_record))
+		list_push(bg_lists->booted, bg_record);
 	slurm_mutex_unlock(&block_state_mutex);
 	
 	rc = 0;
@@ -1317,8 +1324,8 @@ extern int boot_block(bg_record_t *bg_record)
 	slurm_mutex_unlock(&block_state_mutex);
 #else
 	slurm_mutex_lock(&block_state_mutex);
-	if(!block_ptr_exist_in_list(bg_booted_block_list, bg_record))
-		list_push(bg_booted_block_list, bg_record);
+	if(!block_ptr_exist_in_list(bg_lists->booted, bg_record))
+		list_push(bg_lists->booted, bg_record);
 	bg_record->state = RM_PARTITION_READY;
 	last_bg_update = time(NULL);
 	slurm_mutex_unlock(&block_state_mutex);				

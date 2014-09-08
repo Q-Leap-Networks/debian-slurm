@@ -7,10 +7,11 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jim Garlick <garlick@llnl.gov>, 
  *             Morris Jette <jette1@llnl.gov>, et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -137,7 +138,8 @@ Buf init_buf(int size)
 		error("init_buf: buffer size too large");
 		return NULL;
 	}
-
+	if(size <= 0)
+		size = BUF_SIZE;
 	my_buf = xmalloc(sizeof(struct slurm_buf));
 	my_buf->magic = BUF_MAGIC;
 	my_buf->size = size;
@@ -192,6 +194,55 @@ int unpack_time(time_t * valp, Buf buffer)
 	return SLURM_SUCCESS;
 }
 
+
+/*
+ * Given a double, multiple by FLOAT_MULT and then
+ * typecast to a uint64_t in host byte order, convert to network byte order
+ * store in buffer, and adjust buffer counters.
+ */
+void 	packdouble(double val, Buf buffer)
+{
+	double nl1 =  (val * FLOAT_MULT) + .5; /* the .5 is here to
+						  round off.  We have
+						  found on systems
+						  going out more than
+						  15 decimals will
+						  mess things up so
+						  this is here to
+						  correct it. */
+	uint64_t nl =  HTON_uint64(nl1);
+	
+	if (remaining_buf(buffer) < sizeof(nl)) {
+		if (buffer->size > (MAX_BUF_SIZE - BUF_SIZE)) {
+			error("pack64: buffer size too large");
+			return;
+		}
+		buffer->size += BUF_SIZE;
+		xrealloc(buffer->head, buffer->size);
+	}
+
+	memcpy(&buffer->head[buffer->processed], &nl, sizeof(nl));
+	buffer->processed += sizeof(nl);
+
+}
+
+/*
+ * Given a buffer containing a network byte order 64-bit integer,
+ * typecast as double, and  divide by FLOAT_MULT 
+ * store a host double at 'valp', and adjust buffer counters.
+ */
+int	unpackdouble(double *valp, Buf buffer)
+{
+	uint64_t nl;
+	if (remaining_buf(buffer) < sizeof(nl))
+		return SLURM_ERROR;
+	
+	memcpy(&nl, &buffer->head[buffer->processed], sizeof(nl));
+
+	*valp = (double)NTOH_uint64(nl) / (double)FLOAT_MULT;
+	buffer->processed += sizeof(nl);
+	return SLURM_SUCCESS;
+}
 
 /*
  * Given a 64-bit integer in host byte order, convert to network byte order

@@ -1,15 +1,17 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/slurmstepd.c - SLURM job-step manager.
- *  $Id: slurmstepd.c 17040 2009-03-26 15:03:18Z jette $
+ *  $Id: slurmstepd.c 17056 2009-03-26 23:35:52Z dbremer $
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov> 
  *  and Christopher Morrone <morrone2@llnl.gov>.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -98,12 +100,13 @@ main (int argc, char *argv[])
 		_dump_user_env();
 		exit(0);
 	}
-
 	xsignal_block(slurmstepd_blocked_signals);
 	conf = xmalloc(sizeof(*conf));
 	conf->argv = &argv;
 	conf->argc = &argc;
 	init_setproctitle(argc, argv);
+
+	/* Receive job parameters from the slurmd */
 	_init_from_slurmd(STDIN_FILENO, argv, &cli, &self, &msg,
 			  &ngids, &gids);
 
@@ -112,12 +115,17 @@ main (int argc, char *argv[])
 	 * on STDERR_FILENO for us. */
 	dup2(STDERR_FILENO, STDIN_FILENO);
 
+	/* Create the slurmd_job_t, mostly from info in a 
+	   launch_tasks_request_msg_t or a batch_job_launch_msg_t */
 	job = _step_setup(cli, self, msg);
 	job->ngids = ngids;
 	job->gids = gids;
 
+	/* fork handlers cause mutexes on some global data structures 
+	   to be re-initialized after the fork. */
 	list_install_fork_handlers();
 	slurm_conf_install_fork_handlers();
+
 	/* sets job->msg_handle and job->msgid */
 	if (msg_thr_create(job) == SLURM_ERROR) {
 		_send_fail_to_slurmd(STDOUT_FILENO);
@@ -132,7 +140,9 @@ main (int argc, char *argv[])
 	 * on STDERR_FILENO for us. */
 	dup2(STDERR_FILENO, STDOUT_FILENO);
 
-	rc = job_manager(job); /* blocks until step is complete */
+	/* This does most of the stdio setup, then launches all the tasks,
+	   and blocks until the step is complete */
+	rc = job_manager(job); 
 
 	/* signal the message thread to shutdown, and wait for it */
 	eio_signal_shutdown(job->msg_handle);

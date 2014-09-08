@@ -3,10 +3,11 @@
  *****************************************************************************
  *  Copyright (C) 2008 Hewlett-Packard Development Company, L.P.
  *  Written by Chris Holmes
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -35,6 +36,7 @@
 \*****************************************************************************/
 
 #include "./gang.h"
+#include "src/common/slurm_priority.h"
 
 const char		plugin_name[]	= "Gang Scheduler plugin";
 const char		plugin_type[]	= "sched/gang";
@@ -111,10 +113,7 @@ slurm_sched_plugin_initial_priority( uint32_t last_prio,
 {
 	/* ignored for timeslicing, but will be used to support priority */
 
-	if (last_prio >= 2)
-		return (last_prio - 1);
-	else
-		return 1;
+	return priority_g_set(last_prio, job_ptr);
 }
 
 /**************************************************************************/

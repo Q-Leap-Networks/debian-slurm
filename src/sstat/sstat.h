@@ -7,10 +7,11 @@
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -61,10 +62,11 @@
 #include "src/common/slurm_jobacct_gather.h"
 #include "src/common/slurm_accounting_storage.h"
 #include "src/common/slurm_jobcomp.h"
+#include "src/common/print_fields.h"
 
 #define ERROR 2
 
-#define STAT_FIELDS "jobid,vsize,rss,pages,cputime,ntasks,state"
+#define STAT_FIELDS "jobid,maxvmsize,maxvmsizenode,maxvmsizetask,avevmsize,maxrss,maxrssnode,maxrsstask,averss,maxpages,maxpagesnode,maxpagestask,avepages,mincpu,mincpunode,mincputask,avecpu,ntasks"
 
 #define BUFFER_SIZE 4096
 #define STATE_COUNT 10
@@ -77,12 +79,29 @@
 
 /* On output, use fields 12-37 from JOB_STEP */
 
-typedef enum {	HEADLINE,
-		UNDERSCORE,
-		JOB,
-		JOBSTEP,
-		JOBCOMP
-} type_t;
+typedef enum {
+		PRINT_AVECPU,
+		PRINT_AVEPAGES,
+		PRINT_AVERSS,
+		PRINT_AVEVSIZE,
+		PRINT_JOBID,
+		PRINT_MAXPAGES,
+		PRINT_MAXPAGESNODE,
+		PRINT_MAXPAGESTASK,
+		PRINT_MAXRSS,
+		PRINT_MAXRSSNODE,
+		PRINT_MAXRSSTASK,
+		PRINT_MAXVSIZE,
+		PRINT_MAXVSIZENODE,
+		PRINT_MAXVSIZETASK,
+		PRINT_MINCPU,
+		PRINT_MINCPUNODE,
+		PRINT_MINCPUTASK,
+		PRINT_NTASKS,
+		PRINT_SYSTEMCPU,
+		PRINT_TOTALCPU,
+} sstat_print_types_t;
+
 
 typedef struct {
 	int opt_all_steps;	/* --allsteps */
@@ -93,13 +112,11 @@ typedef struct {
 	int opt_verbose;	/* --verbose */
 } sstat_parameters_t;
 
-typedef struct fields {
-	char *name;		/* Specified in --fields= */
-	void (*print_routine) ();	/* Who gets to print it? */
-} fields_t;
-
-extern fields_t fields[];
+extern List print_fields_list;
+extern ListIterator print_fields_itr;
+extern print_field_t fields[];
 extern sstat_parameters_t params;
+extern int field_count;
 
 extern List jobs;
 
@@ -107,19 +124,11 @@ extern int printfields[MAX_PRINTFIELDS],	/* Indexed into fields[] */
 	nprintfields;
 
 /* process.c */
-void find_hostname(uint32_t pos, char *hosts, char *host);
+char *find_hostname(uint32_t pos, char *hosts);
 void aggregate_sacct(sacct_t *dest, sacct_t *from);
 
 /* print.c */
-void print_cputime(type_t type, void *object);
-void print_fields(type_t type, void *object);
-void print_jobid(type_t type, void *object);
-void print_ntasks(type_t type, void *object);
-void print_pages(type_t type, void *object);
-void print_rss(type_t type, void *object);
-void print_state(type_t type, void *object);
-void print_vsize(type_t type, void *object);
-
+void print_fields(jobacct_step_rec_t *step);
 
 /* options.c */
 void parse_command_line(int argc, char **argv);

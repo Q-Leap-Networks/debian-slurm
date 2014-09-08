@@ -5,10 +5,11 @@
  *  Copyright (C) 2007 The Regents of the University of California.
  *  Written by Don Albert <Don.Albert@Bull.com> and 
  *             Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -99,21 +100,25 @@ int	slurm_build_cpuset(char *base, char *path, uid_t uid, gid_t gid)
 	fd = open(file_path, O_RDONLY);
 	if (fd < 0) {
 		error("open(%s): %m", file_path);
-	} else {
-		rc = read(fd, mstr, sizeof(mstr));
-		close(fd);
-		if (rc < 1)
-			error("read(%s): %m", file_path);
-		snprintf(file_path, sizeof(file_path), "%s/mems", path);
-		fd = open(file_path, O_CREAT | O_WRONLY, 0700);
-		if (fd < 0) {
-			error("open(%s): %m", file_path);
-			return -1;
-		}
-		rc = write(fd, mstr, rc);
-		close(fd);
-		if (rc < 1)
-			error("write(%s): %m", file_path);
+		return -1;
+	}
+	rc = read(fd, mstr, sizeof(mstr));
+	close(fd);
+	if (rc < 1) {
+		error("read(%s): %m", file_path);
+		return -1;
+	}
+	snprintf(file_path, sizeof(file_path), "%s/mems", path);
+	fd = open(file_path, O_CREAT | O_WRONLY, 0700);
+	if (fd < 0) {
+		error("open(%s): %m", file_path);
+		return -1;
+	}
+	rc = write(fd, mstr, rc);
+	close(fd);
+	if (rc < 1) {
+		error("write(%s): %m", file_path);
+		return -1;
 	}
 
 	/* Delete cpuset once its tasks complete.
@@ -126,6 +131,10 @@ int	slurm_build_cpuset(char *base, char *path, uid_t uid, gid_t gid)
 	}
 	rc = write(fd, "1", 2);
 	close(fd);
+	if (rc < 1) {
+		error("write(%s): %m", file_path);
+		return -1;
+	}
 
 	/* Only now can we add tasks.
 	 * We can't add self, so add tasks after exec. */
@@ -134,7 +143,7 @@ int	slurm_build_cpuset(char *base, char *path, uid_t uid, gid_t gid)
 }
 
 int	slurm_set_cpuset(char *base, char *path, pid_t pid, size_t size, 
-		const cpu_set_t *mask)
+			 const cpu_set_t *mask)
 {
 	int fd, rc;
 	char file_path[PATH_MAX];
@@ -169,8 +178,10 @@ int	slurm_set_cpuset(char *base, char *path, pid_t pid, size_t size,
 	} else {
 		rc = read(fd, mstr, sizeof(mstr));
 		close(fd);
-		if (rc < 1)
+		if (rc < 1) {
 			error("read(%s): %m", file_path);
+			return -1;
+		}
 		snprintf(file_path, sizeof(file_path), "%s/mems", path);
 		fd = open(file_path, O_CREAT | O_WRONLY, 0700);
 		if (fd < 0) {
@@ -179,8 +190,10 @@ int	slurm_set_cpuset(char *base, char *path, pid_t pid, size_t size,
 		}
 		rc = write(fd, mstr, rc);
 		close(fd);
-		if (rc < 1)
+		if (rc < 1) {
 			error("write(%s): %m", file_path);
+			return -1;
+		}
 	}
 
 	/* Delete cpuset once its tasks complete.
@@ -267,8 +280,8 @@ int	slurm_set_memset(char *path, nodemask_t *new_mask)
 	int fd, i, max_node;
 	ssize_t rc;
 
-	snprintf(file_path, sizeof(file_path), "%s/mems", CPUSET_DIR);
-	fd = open(file_path, O_CREAT | O_RDONLY, 0700);
+	snprintf(file_path, sizeof(file_path), "%s/mems", path);
+	fd = open(file_path, O_CREAT | O_RDWR, 0700);
 	if (fd < 0) {
 		error("open(%s): %m", file_path);
 		return -1;

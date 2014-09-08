@@ -1,14 +1,15 @@
 /****************************************************************************\
  *  step_io.c - process stdin, stdout, and stderr for parallel jobs.
- *  $Id: step_io.c 13672 2008-03-19 23:10:58Z jette $
+ *  $Id: step_io.c 17056 2009-03-26 23:35:52Z dbremer $
  *****************************************************************************
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona@llnl.gov>, et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -57,6 +58,7 @@
 #include "src/common/eio.h"
 #include "src/common/io_hdr.h"
 #include "src/common/net.h"
+#include "src/common/write_labelled_message.h"
 
 #include "src/api/step_io.h"
 
@@ -490,139 +492,6 @@ create_file_write_eio_obj(int fd, uint32_t taskid, uint32_t nodeid,
 	return eio;
 }
 
-static int _write_label(int fd, int taskid, int label_width)
-{
-	int n;
-	int left = label_width + 2;
-	char buf[16];
-	void *ptr = buf;
-
-	snprintf(buf, 16, "%0*d: ", label_width, taskid);
-	while (left > 0) {
-	again:
-		if ((n = write(fd, ptr, left)) < 0) {
-			if (errno == EINTR)
-				goto again;
-			if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
-				debug3("  got EAGAIN in _write_label");
-				goto again;
-			}
-			error("In _write_label: %m");
-			return SLURM_ERROR;
-		}
-		left -= n;
-		ptr += n;
-	}
-
-	return SLURM_SUCCESS;
-}
-
-static int _write_newline(int fd)
-{
-	int n;
-
-	debug2("Called _write_newline");
-again:
-	if ((n = write(fd, "\n", 1)) < 0) {
-		if (errno == EINTR
-		    || errno == EAGAIN
-		    || errno == EWOULDBLOCK) {
-			goto again;
-		}
-		error("In _write_newline: %m");
-		return SLURM_ERROR;
-	}
-	return SLURM_SUCCESS;
-}
-
-/*
- * Blocks until write is complete, regardless of the file
- * descriptor being in non-blocking mode.
- */
-static int _write_line(int fd, void *buf, int len)
-{
-	int n;
-	int left = len;
-	void *ptr = buf;
-
-	debug2("Called _write_line");
-	while (left > 0) {
-	again:
-		if ((n = write(fd, ptr, left)) < 0) {
-			if (errno == EINTR)
-				goto again;
-			if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
-				debug3("  got EAGAIN in _write_line");
-				goto again;
-			}
-			return -1;
-		}
-		left -= n;
-		ptr += n;
-	}
-	
-	return len;
-}
-
-
-/*
- * Write as many lines from the message as possible.  Return
- * the number of bytes from the message that have been written,
- * or -1 on error.
- *
- * Prepend a label of the task number if label parameter was
- * specified.
- *
- * If the message ends in a partial line (line does not end
- * in a '\n'), then add a newline to the output file, but only
- * in label mode.
- */
-static int _write_msg(int fd, void *buf, int len, int taskid,
-		      bool label, int label_width)
-{
-	void *start;
-	void *end;
-	int remaining = len;
-	int written = 0;
-	int line_len;
-	int rc = -1;
-
-	while (remaining > 0) {
-		start = buf + written;
-		end = memchr(start, '\n', remaining);
-		if (label)
-			if (_write_label(fd, taskid, label_width)
-			    != SLURM_SUCCESS)
-				goto done;
-		if (end == NULL) { /* no newline found */
-			rc = _write_line(fd, start, remaining);
-			if (rc <= 0) {
-				goto done;
-			} else {
-				remaining -= rc;
-				written += rc;
-			}
-			if (label)
-				if (_write_newline(fd) != SLURM_SUCCESS)
-					goto done;
-		} else {
-			line_len = (int)(end - start) + 1;
-			rc = _write_line(fd, start, line_len);
-			if (rc <= 0) {
-				goto done;
-			} else {
-				remaining -= rc;
-				written += rc;
-			}
-		}
-
-	}
-done:
-	if (written > 0)
-		return written;
-	else
-		return rc;
-}
 
 static bool _file_writable(eio_obj_t *obj)
 {
@@ -667,11 +536,11 @@ static int _file_write(eio_obj_t *obj, List objs)
 	} else if (!info->eof) {
 		ptr = info->out_msg->data + (info->out_msg->length
 					     - info->out_remaining);
-		if ((n = _write_msg(obj->fd, ptr,
-				    info->out_remaining,
-				    info->out_msg->header.gtaskid,
-				    info->cio->label,
-				    info->cio->label_width)) < 0) {
+		if ((n = write_labelled_message(obj->fd, ptr,
+					        info->out_remaining,
+					        info->out_msg->header.gtaskid,
+					        info->cio->label,
+					        info->cio->label_width)) < 0) {
 			list_enqueue(info->cio->free_outgoing, info->out_msg);
 			info->eof = true;
 			return SLURM_ERROR;

@@ -108,12 +108,6 @@ to indicate the reason for failure.</p>
 the plugin should return SLURM_ERROR and set the errno to an appropriate value
 to indicate the reason for failure.</p>
 
-<p class="commandline">bool switch_p_no_frag(void);</p>
-<p style="margin-left:.2in"><b>Description</b>: Report if resource fragmentation is important. 
-If so, delay scheduling a new job while another is in the process of terminating.</p>
-<p style="margin-left:.2in"><b>Arguments</b>:<span class="commandline"> None</span></p>
-<p style="margin-left:.2in"><b>Returns</b>: TRUE if job scheduling should be delayed while 
-any other job is in the process of terminating.</p>
 <p class="footer"><a href="#top">top</a></p>
 
 <h3>Node's Switch State Monitoring Functions</h3>
@@ -314,7 +308,7 @@ to indicate the reason for failure.</p>
 
 <p class="commandline">bool switch_p_part_comp (void);</p>
 <p style="margin-left:.2in"><b>Description</b>: Indicate if the switch plugin should 
-process partitial job step completions (i.e. switch_g_job_step_part_comp). Support
+process partial job step completions (i.e. switch_g_job_step_part_comp). Support
 of partition completions is compute intensive, so it should be avoided unless switch 
 resources are in short supply (e.g. switch/federation).</p>
 <p style="margin-left:.2in"><b>Returns</b>: True if partition step completions are 
@@ -380,7 +374,7 @@ to indicate the reason for failure.</p>
 <p class="footer"><a href="#top">top</a></p>
 
 <h3>Job Management Functions</h3>
-<blockquote><pre>
+<pre>
 =========================================================================
 Process 1 (root)        Process 2 (root, user)  |  Process 3 (user task) 
                                                 |                        
@@ -392,7 +386,7 @@ waitpid                 setuid, chdir, etc.     |
                         switch_p_job_fini*      |                        
 switch_p_job_postfini                           |                        
 =========================================================================
-</pre></blockquote>
+</pre>
 
 <p class="commandline">int switch_p_job_preinit (switch_jobinfo_t jobinfo switch_job);</p>
 <p style="margin-left:.2in"><b>Description</b>: Preinit is run as root in the first slurmd process, 
@@ -478,7 +472,7 @@ jobinfo switch_job, char *nodelist);</p>
 <p style="margin-left:.2in"><b>Description</b>: Note that the identified 
 job step is active at restart time. This function can be used to 
 restore global switch state information based upon job steps known to be 
-active at restart time. Use of this function is prefered over switch state 
+active at restart time. Use of this function is preferred over switch state 
 saved and restored by the switch plugin. Direct use of job step switch 
 information eliminates the possibility of inconsistent state information 
 between the switch and job steps.
@@ -519,6 +513,6 @@ plugin that transmitted it. It is at the discretion of the plugin author whether
 to maintain data format compatibility across different versions of the plugin.</p>
 <p class="footer"><a href="#top">top</a></p>
 
-<p style="text-align:center;">Last modified 3 July 2006</p>
+<p style="text-align:center;">Last modified 5 September 2008</p>
 
 <!--#include virtual="footer.txt"-->

@@ -1,15 +1,16 @@
 /****************************************************************************\
  *  opts.c - srun command line option parsing
  *
- *  $Id: opts.c 16350 2009-01-29 18:16:08Z jette $
+ *  $Id: opts.c 16616 2009-02-20 17:00:27Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>, Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -635,6 +636,11 @@ extern int parse_format( char* format )
 				                          field_size, 
 				                          right_justify, 
 				                          suffix );
+			else if (field[0] == 'v')
+				job_format_add_reservation( params.format_list, 
+				                        field_size, 
+				                        right_justify, 
+				                        suffix );
 			else if (field[0] == 'w')
 				job_format_add_wckey( params.format_list, 
 						      field_size, 

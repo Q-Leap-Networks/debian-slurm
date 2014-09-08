@@ -4,10 +4,11 @@
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -63,6 +64,8 @@ static int   _add_users(slurmdbd_conn_t *slurmdbd_conn,
 			Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _add_wckeys(slurmdbd_conn_t *slurmdbd_conn,
 			 Buf in_buffer, Buf *out_buffer, uint32_t *uid);
+static int   _add_reservation(slurmdbd_conn_t *slurmdbd_conn,
+			      Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _archive_dump(slurmdbd_conn_t *slurmdbd_conn,
 			   Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _archive_load(slurmdbd_conn_t *slurmdbd_conn,
@@ -75,6 +78,8 @@ static int   _get_assocs(slurmdbd_conn_t *slurmdbd_conn,
 			 Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _get_clusters(slurmdbd_conn_t *slurmdbd_conn,
 			   Buf in_buffer, Buf *out_buffer, uint32_t *uid);
+static int   _get_config(slurmdbd_conn_t *slurmdbd_conn,
+			 Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _get_jobs(slurmdbd_conn_t *slurmdbd_conn,
 		       Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _get_jobs_cond(slurmdbd_conn_t *slurmdbd_conn,
@@ -89,6 +94,8 @@ static int   _get_users(slurmdbd_conn_t *slurmdbd_conn,
 			Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _get_wckeys(slurmdbd_conn_t *slurmdbd_conn,
 			 Buf in_buffer, Buf *out_buffer, uint32_t *uid);
+static int   _get_reservations(slurmdbd_conn_t *slurmdbd_conn,
+			       Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _flush_jobs(slurmdbd_conn_t *slurmdbd_conn,
 			 Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _init_conn(slurmdbd_conn_t *slurmdbd_conn, 
@@ -113,6 +120,8 @@ static int   _modify_users(slurmdbd_conn_t *slurmdbd_conn,
 			   Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _modify_wckeys(slurmdbd_conn_t *slurmdbd_conn,
 			    Buf in_buffer, Buf *out_buffer, uint32_t *uid);
+static int   _modify_reservation(slurmdbd_conn_t *slurmdbd_conn,
+				 Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _node_state(slurmdbd_conn_t *slurmdbd_conn,
 			 Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static char *_node_state_string(uint16_t node_state);
@@ -133,14 +142,14 @@ static int   _remove_users(slurmdbd_conn_t *slurmdbd_conn,
 			   Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _remove_wckeys(slurmdbd_conn_t *slurmdbd_conn,
 			    Buf in_buffer, Buf *out_buffer, uint32_t *uid);
+static int   _remove_reservation(slurmdbd_conn_t *slurmdbd_conn,
+				 Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _roll_usage(slurmdbd_conn_t *slurmdbd_conn,
 			 Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _step_complete(slurmdbd_conn_t *slurmdbd_conn,
 			    Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 static int   _step_start(slurmdbd_conn_t *slurmdbd_conn,
 			 Buf in_buffer, Buf *out_buffer, uint32_t *uid);
-static int   _update_shares_used(slurmdbd_conn_t *slurmdbd_conn,
-				 Buf in_buffer, Buf *out_buffer, uint32_t *uid);
 
 /* Process an incoming RPC
  * slurmdbd_conn IN/OUT - in will that the newsockfd set before
@@ -200,6 +209,10 @@ proc_req(slurmdbd_conn_t *slurmdbd_conn,
 			rc = _add_wckeys(slurmdbd_conn, 
 					 in_buffer, out_buffer, uid);
 			break;
+		case DBD_ADD_RESV:
+			rc = _add_reservation(slurmdbd_conn,
+					      in_buffer, out_buffer, uid);
+			break;
 		case DBD_ARCHIVE_DUMP:
 			rc = _archive_dump(slurmdbd_conn, 
 					   in_buffer, out_buffer, uid);
@@ -229,6 +242,10 @@ proc_req(slurmdbd_conn_t *slurmdbd_conn,
 			rc = _get_clusters(slurmdbd_conn,
 					   in_buffer, out_buffer, uid);
 			break;
+		case DBD_GET_CONFIG:
+			rc = _get_config(slurmdbd_conn,
+					 in_buffer, out_buffer, uid);
+			break;
 		case DBD_GET_JOBS:
 			rc = _get_jobs(slurmdbd_conn,
 				       in_buffer, out_buffer, uid);
@@ -248,6 +265,10 @@ proc_req(slurmdbd_conn_t *slurmdbd_conn,
 		case DBD_GET_WCKEYS:
 			rc = _get_wckeys(slurmdbd_conn, 
 					 in_buffer, out_buffer, uid);
+			break;
+		case DBD_GET_RESVS:
+			rc = _get_reservations(slurmdbd_conn, 
+					       in_buffer, out_buffer, uid);
 			break;
 		case DBD_GET_USERS:
 			rc = _get_users(slurmdbd_conn,
@@ -307,7 +328,11 @@ proc_req(slurmdbd_conn_t *slurmdbd_conn,
 			break;
 		case DBD_MODIFY_WCKEYS:
 			rc = _modify_wckeys(slurmdbd_conn, 
-					 in_buffer, out_buffer, uid);
+					    in_buffer, out_buffer, uid);
+			break;
+		case DBD_MODIFY_RESV:
+			rc = _modify_reservation(slurmdbd_conn,
+						 in_buffer, out_buffer, uid);
 			break;
 		case DBD_NODE_STATE:
 			rc = _node_state(slurmdbd_conn,
@@ -345,6 +370,10 @@ proc_req(slurmdbd_conn_t *slurmdbd_conn,
 			rc = _remove_wckeys(slurmdbd_conn, 
 					    in_buffer, out_buffer, uid);
 			break;
+		case DBD_REMOVE_RESV:
+			rc = _remove_reservation(slurmdbd_conn,
+						 in_buffer, out_buffer, uid);
+			break;
 		case DBD_ROLL_USAGE:
 			rc = _roll_usage(slurmdbd_conn, 
 					 in_buffer, out_buffer, uid);
@@ -356,10 +385,6 @@ proc_req(slurmdbd_conn_t *slurmdbd_conn,
 		case DBD_STEP_START:
 			rc = _step_start(slurmdbd_conn,
 					 in_buffer, out_buffer, uid);
-			break;
-		case DBD_UPDATE_SHARES_USED:
-			rc = _update_shares_used(slurmdbd_conn,
-						 in_buffer, out_buffer, uid);
 			break;
 		default:
 			comment = "Invalid RPC";
@@ -384,6 +409,23 @@ unpack_error:
 	return SLURM_ERROR;
 }
 
+/* replace \" with \` return is the same as what is given */
+static char * _replace_double_quotes(char *option)
+{
+	int i=0;
+
+	if(!option)
+		return NULL;
+
+	while(option[i]) {
+		if(option[i] == '\"')
+			option[i] = '`';
+		i++;
+	}
+	return option;
+}
+
+
 static int _add_accounts(slurmdbd_conn_t *slurmdbd_conn,
 			 Buf in_buffer, Buf *out_buffer, uint32_t *uid)
 {
@@ -399,7 +441,8 @@ static int _add_accounts(slurmdbd_conn_t *slurmdbd_conn,
 
 		memset(&user, 0, sizeof(acct_user_rec_t));
 		user.uid = *uid;
-		if(assoc_mgr_fill_in_user(slurmdbd_conn->db_conn, &user, 1)
+		if(assoc_mgr_fill_in_user(
+			   slurmdbd_conn->db_conn, &user, 1, NULL)
 		   != SLURM_SUCCESS) {
 			comment = "Your user has not been added to the accounting system yet.";
 			error("%s", comment);
@@ -466,7 +509,8 @@ static int _add_account_coords(slurmdbd_conn_t *slurmdbd_conn,
 
 		memset(&user, 0, sizeof(acct_user_rec_t));
 		user.uid = *uid;
-		if(assoc_mgr_fill_in_user(slurmdbd_conn->db_conn, &user, 1) 
+		if(assoc_mgr_fill_in_user(
+			   slurmdbd_conn->db_conn, &user, 1, NULL) 
 		   != SLURM_SUCCESS) {
 			comment = "Your user has not been added to the accounting system yet.";
 			error("%s", comment);
@@ -542,7 +586,8 @@ static int _add_assocs(slurmdbd_conn_t *slurmdbd_conn,
 
 		memset(&user, 0, sizeof(acct_user_rec_t));
 		user.uid = *uid;
-		if(assoc_mgr_fill_in_user(slurmdbd_conn->db_conn, &user, 1)
+		if(assoc_mgr_fill_in_user(
+			   slurmdbd_conn->db_conn, &user, 1, NULL)
 		   != SLURM_SUCCESS) {
 			comment = "Your user has not been added to the accounting system yet.";
 			error("%s", comment);
@@ -683,7 +728,8 @@ static int _add_users(slurmdbd_conn_t *slurmdbd_conn,
 
 		memset(&user, 0, sizeof(acct_user_rec_t));
 		user.uid = *uid;
-		if(assoc_mgr_fill_in_user(slurmdbd_conn->db_conn, &user, 1) 
+		if(assoc_mgr_fill_in_user(
+			   slurmdbd_conn->db_conn, &user, 1, NULL) 
 		   != SLURM_SUCCESS) {
 			comment = "Your user has not been added to the accounting system yet.";
 			error("%s", comment);
@@ -760,6 +806,39 @@ end_it:
 	return rc;
 }
 
+static int _add_reservation(slurmdbd_conn_t *slurmdbd_conn,
+			     Buf in_buffer, Buf *out_buffer, uint32_t *uid)
+{
+	int rc = SLURM_SUCCESS;
+	dbd_rec_msg_t *rec_msg = NULL;
+	char *comment = NULL;
+
+	if ((*uid != slurmdbd_conf->slurm_user_id && *uid != 0)) {
+		comment = "DBD_ADD_RESV message from invalid uid";
+		error("DBD_ADD_RESV message from invalid uid %u", *uid);
+		rc = ESLURM_ACCESS_DENIED;
+		goto end_it;
+	}
+	if (slurmdbd_unpack_rec_msg(slurmdbd_conn->rpc_version, DBD_ADD_RESV,
+				    &rec_msg, in_buffer) != SLURM_SUCCESS) {
+		comment = "Failed to unpack DBD_ADD_RESV message";
+		error("%s", comment);
+		rc = SLURM_ERROR;
+		goto end_it;
+	}
+	debug2("DBD_ADD_RESV: called");
+
+	rc = acct_storage_g_add_reservation(slurmdbd_conn->db_conn,
+					     rec_msg->rec);
+
+end_it:
+	slurmdbd_free_rec_msg(slurmdbd_conn->rpc_version,
+			      DBD_ADD_RESV, rec_msg);
+	*out_buffer = make_dbd_rc_msg(slurmdbd_conn->rpc_version, 
+				      rc, comment, DBD_ADD_RESV);
+	return rc;
+}
+
 static int _archive_dump(slurmdbd_conn_t *slurmdbd_conn,
 			 Buf in_buffer, Buf *out_buffer, uint32_t *uid)
 {
@@ -790,6 +869,8 @@ static int _archive_dump(slurmdbd_conn_t *slurmdbd_conn,
 	/* set up some defaults */
 	if(!arch_cond->archive_dir)
 		arch_cond->archive_dir = xstrdup(slurmdbd_conf->archive_dir);
+	if(arch_cond->archive_events == (uint16_t)NO_VAL)
+		arch_cond->archive_events = slurmdbd_conf->archive_events;
 	if(arch_cond->archive_jobs == (uint16_t)NO_VAL)
 		arch_cond->archive_jobs = slurmdbd_conf->archive_jobs;
 	if(!arch_cond->archive_script)
@@ -797,10 +878,16 @@ static int _archive_dump(slurmdbd_conn_t *slurmdbd_conn,
 			xstrdup(slurmdbd_conf->archive_script);
 	if(arch_cond->archive_steps == (uint16_t)NO_VAL)
 		arch_cond->archive_steps = slurmdbd_conf->archive_steps;
-	if(arch_cond->job_purge == (uint16_t)NO_VAL)
-		arch_cond->job_purge = slurmdbd_conf->job_purge;
-	if(arch_cond->step_purge == (uint16_t)NO_VAL)
-		arch_cond->step_purge = slurmdbd_conf->step_purge;
+	if(arch_cond->archive_suspend == (uint16_t)NO_VAL)
+		arch_cond->archive_suspend = slurmdbd_conf->archive_suspend;
+	if(arch_cond->purge_event == (uint16_t)NO_VAL)
+		arch_cond->purge_event = slurmdbd_conf->purge_event;
+	if(arch_cond->purge_job == (uint16_t)NO_VAL)
+		arch_cond->purge_job = slurmdbd_conf->purge_job;
+	if(arch_cond->purge_step == (uint16_t)NO_VAL)
+		arch_cond->purge_step = slurmdbd_conf->purge_step;
+	if(arch_cond->purge_suspend == (uint16_t)NO_VAL)
+		arch_cond->purge_suspend = slurmdbd_conf->purge_suspend;
 
 	rc = jobacct_storage_g_archive(slurmdbd_conn->db_conn, arch_cond);
 	if(rc != SLURM_SUCCESS) {
@@ -844,10 +931,12 @@ static int _archive_load(slurmdbd_conn_t *slurmdbd_conn,
 	}
 	
 	rc = jobacct_storage_g_archive_load(slurmdbd_conn->db_conn, arch_rec);
+
 	if(rc == ENOENT) 
 		comment = "No archive file given to recover.";
 	else if(rc != SLURM_SUCCESS)
 		comment = "Error with request.";
+	
 end_it:
 	destroy_acct_archive_rec(arch_rec);
 	*out_buffer = make_dbd_rc_msg(slurmdbd_conn->rpc_version, 
@@ -883,6 +972,7 @@ static int _cluster_procs(slurmdbd_conn_t *slurmdbd_conn,
 	rc = clusteracct_storage_g_cluster_procs(
 		slurmdbd_conn->db_conn,
 		cluster_procs_msg->cluster_name,
+		cluster_procs_msg->cluster_nodes,
 		cluster_procs_msg->proc_count,
 		cluster_procs_msg->event_time);
 end_it:
@@ -1001,6 +1091,25 @@ static int _get_clusters(slurmdbd_conn_t *slurmdbd_conn,
 	if(list_msg.my_list)
 		list_destroy(list_msg.my_list);
 	
+	return SLURM_SUCCESS;
+}
+
+static int _get_config(slurmdbd_conn_t *slurmdbd_conn, 
+			 Buf in_buffer, Buf *out_buffer, uint32_t *uid)
+{
+	dbd_list_msg_t list_msg = { NULL };
+
+	debug2("DBD_GET_CONFIG: called");
+	/* No message body to unpack */
+
+	list_msg.my_list = dump_config();
+	*out_buffer = init_buf(1024);
+	pack16((uint16_t) DBD_GOT_CONFIG, *out_buffer);
+	slurmdbd_pack_list_msg(slurmdbd_conn->rpc_version, 
+			       DBD_GOT_CONFIG, &list_msg, *out_buffer);
+	if(list_msg.my_list)
+		list_destroy(list_msg.my_list);
+
 	return SLURM_SUCCESS;
 }
 
@@ -1342,6 +1451,44 @@ static int _get_wckeys(slurmdbd_conn_t *slurmdbd_conn,
 	return SLURM_SUCCESS;
 }
 
+static int _get_reservations(slurmdbd_conn_t *slurmdbd_conn, 
+			     Buf in_buffer, Buf *out_buffer, uint32_t *uid)
+{
+	dbd_cond_msg_t *get_msg = NULL;
+	dbd_list_msg_t list_msg;
+	char *comment = NULL;
+
+	debug2("DBD_GET_RESVS: called");
+
+	if (slurmdbd_unpack_cond_msg(slurmdbd_conn->rpc_version, 
+				     DBD_GET_RESVS, &get_msg, in_buffer) !=
+	    SLURM_SUCCESS) {
+		comment = "Failed to unpack DBD_GET_RESVS message";
+		error("%s", comment);
+		*out_buffer = make_dbd_rc_msg(slurmdbd_conn->rpc_version, 
+					      SLURM_ERROR, comment,
+					      DBD_GET_RESVS);
+		return SLURM_ERROR;
+	}
+	
+	list_msg.my_list = acct_storage_g_get_reservations(
+		slurmdbd_conn->db_conn, *uid, get_msg->cond);
+	slurmdbd_free_cond_msg(slurmdbd_conn->rpc_version, 
+			       DBD_GET_RESVS, get_msg);
+
+	if(errno == ESLURM_ACCESS_DENIED && !list_msg.my_list)
+		list_msg.my_list = list_create(NULL);
+
+	*out_buffer = init_buf(1024);
+	pack16((uint16_t) DBD_GOT_RESVS, *out_buffer);
+	slurmdbd_pack_list_msg(slurmdbd_conn->rpc_version, 
+			       DBD_GOT_RESVS, &list_msg, *out_buffer);
+	if(list_msg.my_list)
+		list_destroy(list_msg.my_list);
+	
+	return SLURM_SUCCESS;
+}
+
 static int _flush_jobs(slurmdbd_conn_t *slurmdbd_conn,
 		       Buf in_buffer, Buf *out_buffer, uint32_t *uid)
 {
@@ -1497,6 +1644,9 @@ static int  _job_complete(slurmdbd_conn_t *slurmdbd_conn,
 
 	if(rc && errno == 740) /* meaning data is already there */
 		rc = SLURM_SUCCESS;
+
+	/* just incase this gets set we need to clear it */
+	xfree(job.wckey);
 end_it:
 	slurmdbd_free_job_complete_msg(slurmdbd_conn->rpc_version, 
 				       job_comp_msg);
@@ -1509,7 +1659,7 @@ static int  _job_start(slurmdbd_conn_t *slurmdbd_conn,
 		       Buf in_buffer, Buf *out_buffer, uint32_t *uid)
 {
 	dbd_job_start_msg_t *job_start_msg = NULL;
-	dbd_job_start_rc_msg_t job_start_rc_msg;
+	dbd_id_rc_msg_t id_rc_msg;
 	struct job_record job;
 	struct job_details details;
 	char *comment = NULL;
@@ -1534,10 +1684,11 @@ static int  _job_start(slurmdbd_conn_t *slurmdbd_conn,
 	}
 	memset(&job, 0, sizeof(struct job_record));
 	memset(&details, 0, sizeof(struct job_details));
-	memset(&job_start_rc_msg, 0, sizeof(dbd_job_start_rc_msg_t));
+	memset(&id_rc_msg, 0, sizeof(dbd_id_rc_msg_t));
 
 	job.total_procs = job_start_msg->alloc_cpus;
-	job.account = job_start_msg->account;
+	job.node_cnt = job_start_msg->alloc_nodes;
+	job.account = _replace_double_quotes(job_start_msg->account);
 	job.assoc_id = job_start_msg->assoc_id;
 	job.comment = job_start_msg->block_id;
 	job.db_index = job_start_msg->db_index;
@@ -1546,12 +1697,16 @@ static int  _job_start(slurmdbd_conn_t *slurmdbd_conn,
 	job.group_id = job_start_msg->gid;
 	job.job_id = job_start_msg->job_id;
 	job.job_state = job_start_msg->job_state;
-	job.name = job_start_msg->name;
+	job.name = _replace_double_quotes(job_start_msg->name);
 	job.nodes = job_start_msg->nodes;
+	job.network = job_start_msg->node_inx;
 	job.partition = job_start_msg->partition;
 	job.num_procs = job_start_msg->req_cpus;
+	job.resv_id = job_start_msg->resv_id;
 	job.priority = job_start_msg->priority;
 	job.start_time = job_start_msg->start_time;
+	job.time_limit = job_start_msg->timelimit;
+	job.wckey = _replace_double_quotes(job_start_msg->wckey);
 	details.submit_time = job_start_msg->submit_time;
 
 	job.details = &details;
@@ -1564,16 +1719,20 @@ static int  _job_start(slurmdbd_conn_t *slurmdbd_conn,
 		debug2("DBD_JOB_START: ELIGIBLE CALL ID:%u NAME:%s", 
 		       job_start_msg->job_id, job_start_msg->name);
 	}
-	job_start_rc_msg.return_code = jobacct_storage_g_job_start(
+	id_rc_msg.return_code = jobacct_storage_g_job_start(
 		slurmdbd_conn->db_conn, job_start_msg->cluster, &job);
-	job_start_rc_msg.db_index = job.db_index;
+	id_rc_msg.id = job.db_index;
+
+	/* just incase job.wckey was set because we didn't send one */
+	if(!job_start_msg->wckey)
+		xfree(job.wckey);
 
 	slurmdbd_free_job_start_msg(slurmdbd_conn->rpc_version, 
 				    job_start_msg);
 	*out_buffer = init_buf(1024);
-	pack16((uint16_t) DBD_JOB_START_RC, *out_buffer);
-	slurmdbd_pack_job_start_rc_msg(slurmdbd_conn->rpc_version, 
-				       &job_start_rc_msg, *out_buffer);
+	pack16((uint16_t) DBD_ID_RC, *out_buffer);
+	slurmdbd_pack_id_rc_msg(slurmdbd_conn->rpc_version, 
+				       &id_rc_msg, *out_buffer);
 	return SLURM_SUCCESS;
 }
 
@@ -1620,6 +1779,9 @@ static int  _job_suspend(slurmdbd_conn_t *slurmdbd_conn,
 
 	if(rc && errno == 740) /* meaning data is already there */
 		rc = SLURM_SUCCESS;
+
+	/* just incase this gets set we need to clear it */
+	xfree(job.wckey);
 end_it:
 	slurmdbd_free_job_suspend_msg(slurmdbd_conn->rpc_version, 
 				      job_suspend_msg);
@@ -2078,6 +2240,39 @@ static int   _modify_wckeys(slurmdbd_conn_t *slurmdbd_conn,
 	return rc;
 }
 
+static int _modify_reservation(slurmdbd_conn_t *slurmdbd_conn,
+			     Buf in_buffer, Buf *out_buffer, uint32_t *uid)
+{
+	int rc = SLURM_SUCCESS;
+	dbd_rec_msg_t *rec_msg = NULL;
+	char *comment = NULL;
+
+	if ((*uid != slurmdbd_conf->slurm_user_id && *uid != 0)) {
+		comment = "DBD_MODIFY_RESV message from invalid uid";
+		error("DBD_MODIFY_RESV message from invalid uid %u", *uid);
+		rc = ESLURM_ACCESS_DENIED;
+		goto end_it;
+	}
+	if (slurmdbd_unpack_rec_msg(slurmdbd_conn->rpc_version, DBD_MODIFY_RESV,
+				    &rec_msg, in_buffer) != SLURM_SUCCESS) {
+		comment = "Failed to unpack DBD_MODIFY_RESV message";
+		error("%s", comment);
+		rc = SLURM_ERROR;
+		goto end_it;
+	}
+	debug2("DBD_MODIFY_RESV: called");
+
+	rc = acct_storage_g_modify_reservation(slurmdbd_conn->db_conn,
+					       rec_msg->rec);
+
+end_it:
+	slurmdbd_free_rec_msg(slurmdbd_conn->rpc_version,
+			      DBD_MODIFY_RESV, rec_msg);
+	*out_buffer = make_dbd_rc_msg(slurmdbd_conn->rpc_version, 
+				      rc, comment, DBD_MODIFY_RESV);
+	return rc;
+}
+
 static int _node_state(slurmdbd_conn_t *slurmdbd_conn,
 		       Buf in_buffer, Buf *out_buffer, uint32_t *uid)
 {
@@ -2086,7 +2281,6 @@ static int _node_state(slurmdbd_conn_t *slurmdbd_conn,
 	int rc = SLURM_SUCCESS;
 	char *comment = NULL;
 
-	memset(&node_ptr, 0, sizeof(struct node_record));
 
 	if (*uid != slurmdbd_conf->slurm_user_id) {
 		comment = "DBD_NODE_STATE message from invalid uid";
@@ -2103,38 +2297,37 @@ static int _node_state(slurmdbd_conn_t *slurmdbd_conn,
 		goto end_it;
 	}
 
-	if(node_state_msg->new_state == DBD_NODE_STATE_UP)
+	memset(&node_ptr, 0, sizeof(struct node_record));
+	node_ptr.name = node_state_msg->hostlist;
+	node_ptr.cpus = node_state_msg->cpu_count;
+	node_ptr.node_state = node_state_msg->state;
+
+	slurmctld_conf.fast_schedule = 0;
+
+	if(node_state_msg->new_state == DBD_NODE_STATE_UP) {
 		debug3("DBD_NODE_STATE: NODE:%s STATE:%s REASON:%s TIME:%u", 
 		       node_state_msg->hostlist,
 		       _node_state_string(node_state_msg->new_state),
 		       node_state_msg->reason, 
 		       node_state_msg->event_time);
-	else
+		rc = clusteracct_storage_g_node_up(
+			slurmdbd_conn->db_conn,
+			node_state_msg->cluster_name,
+			&node_ptr,
+			node_state_msg->event_time);
+	} else {
 		debug2("DBD_NODE_STATE: NODE:%s STATE:%s REASON:%s TIME:%u", 
 		       node_state_msg->hostlist,
 		       _node_state_string(node_state_msg->new_state),
 		       node_state_msg->reason, 
 		       node_state_msg->event_time);
-	node_ptr.name = node_state_msg->hostlist;
-	node_ptr.cpus = node_state_msg->cpu_count;
-
-	slurmctld_conf.fast_schedule = 0;
-
-	if(node_state_msg->new_state == DBD_NODE_STATE_DOWN)
 		rc = clusteracct_storage_g_node_down(
 			slurmdbd_conn->db_conn,
 			node_state_msg->cluster_name,
 			&node_ptr,
 			node_state_msg->event_time,
 			node_state_msg->reason);
-	else
-		rc = clusteracct_storage_g_node_up(slurmdbd_conn->db_conn,
-						   node_state_msg->cluster_name,
-						   &node_ptr,
-						   node_state_msg->event_time);
-	
-	if(rc && errno == 740) /* meaning data is already there */
-		rc = SLURM_SUCCESS;
+	}
 
 end_it:
 	slurmdbd_free_node_state_msg(slurmdbd_conn->rpc_version, 
@@ -2707,6 +2900,39 @@ static int   _remove_wckeys(slurmdbd_conn_t *slurmdbd_conn,
 	return rc;
 }
 
+static int _remove_reservation(slurmdbd_conn_t *slurmdbd_conn,
+			     Buf in_buffer, Buf *out_buffer, uint32_t *uid)
+{
+	int rc = SLURM_SUCCESS;
+	dbd_rec_msg_t *rec_msg = NULL;
+	char *comment = NULL;
+
+	if ((*uid != slurmdbd_conf->slurm_user_id && *uid != 0)) {
+		comment = "DBD_REMOVE_RESV message from invalid uid";
+		error("DBD_REMOVE_RESV message from invalid uid %u", *uid);
+		rc = ESLURM_ACCESS_DENIED;
+		goto end_it;
+	}
+	if (slurmdbd_unpack_rec_msg(slurmdbd_conn->rpc_version, DBD_REMOVE_RESV,
+				    &rec_msg, in_buffer) != SLURM_SUCCESS) {
+		comment = "Failed to unpack DBD_REMOVE_RESV message";
+		error("%s", comment);
+		rc = SLURM_ERROR;
+		goto end_it;
+	}
+	debug2("DBD_REMOVE_RESV: called");
+
+	rc = acct_storage_g_remove_reservation(slurmdbd_conn->db_conn,
+					     rec_msg->rec);
+
+end_it:
+	slurmdbd_free_rec_msg(slurmdbd_conn->rpc_version,
+			      DBD_REMOVE_RESV, rec_msg);
+	*out_buffer = make_dbd_rc_msg(slurmdbd_conn->rpc_version, 
+				      rc, comment, DBD_REMOVE_RESV);
+	return rc;
+}
+
 static int   _roll_usage(slurmdbd_conn_t *slurmdbd_conn,
 			 Buf in_buffer, Buf *out_buffer, uint32_t *uid)
 {
@@ -2734,7 +2960,9 @@ static int   _roll_usage(slurmdbd_conn_t *slurmdbd_conn,
 		goto end_it;
 	}
 
-	rc = acct_storage_g_roll_usage(slurmdbd_conn->db_conn, get_msg->start);
+	rc = acct_storage_g_roll_usage(slurmdbd_conn->db_conn,
+				       get_msg->start, get_msg->end,
+				       get_msg->archive_data);
 
 end_it:
 	slurmdbd_free_roll_usage_msg(slurmdbd_conn->rpc_version, 
@@ -2787,7 +3015,8 @@ static int  _step_complete(slurmdbd_conn_t *slurmdbd_conn,
 	job.start_time = step_comp_msg->start_time;
 	details.submit_time = step_comp_msg->job_submit_time;
 	step.step_id = step_comp_msg->step_id;
-	job.total_procs = step_comp_msg->total_procs;
+	step.cpu_count = step_comp_msg->total_procs;
+	details.num_tasks = step_comp_msg->total_tasks;
 
 	job.details = &details;
 	step.job_ptr = &job;
@@ -2796,7 +3025,8 @@ static int  _step_complete(slurmdbd_conn_t *slurmdbd_conn,
 
 	if(rc && errno == 740) /* meaning data is already there */
 		rc = SLURM_SUCCESS;
-
+	/* just incase this gets set we need to clear it */
+	xfree(job.wckey);
 end_it:
 	slurmdbd_free_step_complete_msg(slurmdbd_conn->rpc_version, 
 					step_comp_msg);
@@ -2812,6 +3042,7 @@ static int  _step_start(slurmdbd_conn_t *slurmdbd_conn,
 	struct step_record step;
 	struct job_record job;
 	struct job_details details;
+	slurm_step_layout_t layout;
 	int rc = SLURM_SUCCESS;
 	char *comment = NULL;
 
@@ -2837,24 +3068,34 @@ static int  _step_start(slurmdbd_conn_t *slurmdbd_conn,
 	memset(&step, 0, sizeof(struct step_record));
 	memset(&job, 0, sizeof(struct job_record));
 	memset(&details, 0, sizeof(struct job_details));
+	memset(&layout, 0, sizeof(slurm_step_layout_t));
 
 	job.assoc_id = step_start_msg->assoc_id;
 	job.db_index = step_start_msg->db_index;
 	job.job_id = step_start_msg->job_id;
 	step.name = step_start_msg->name;
 	job.nodes = step_start_msg->nodes;
+	step.network = step_start_msg->node_inx;
 	step.start_time = step_start_msg->start_time;
 	details.submit_time = step_start_msg->job_submit_time;
 	step.step_id = step_start_msg->step_id;
-	job.total_procs = step_start_msg->total_procs;
+	step.cpu_count = step_start_msg->total_procs;
+	details.num_tasks = step_start_msg->total_tasks;
+
+	layout.node_cnt = step_start_msg->node_cnt;
+	layout.task_dist = step_start_msg->task_dist;
 
 	job.details = &details;
 	step.job_ptr = &job;
+	step.step_layout = &layout;
 
 	rc = jobacct_storage_g_step_start(slurmdbd_conn->db_conn, &step);
 
 	if(rc && errno == 740) /* meaning data is already there */
 		rc = SLURM_SUCCESS;
+
+	/* just incase this gets set we need to clear it */
+	xfree(job.wckey);
 end_it:
 	slurmdbd_free_step_start_msg(slurmdbd_conn->rpc_version, 
 				     step_start_msg);
@@ -2863,49 +3104,3 @@ end_it:
 	return rc;
 }
 
-static int  _update_shares_used(slurmdbd_conn_t *slurmdbd_conn,
-				Buf in_buffer, Buf *out_buffer, uint32_t *uid)
-{
-	int rc = SLURM_SUCCESS;
-	dbd_list_msg_t *used_shares_msg = NULL;
-	char *comment = NULL;
-
-	if (*uid != slurmdbd_conf->slurm_user_id) {
-		comment = "DBD_UPDATE_SHARES_USED message from invalid uid";
-		error("%s %u", comment, *uid);
-		rc = ESLURM_ACCESS_DENIED;
-		goto end_it;
-	}
-	debug2("DBD_UPDATE_SHARES_USED");
-	if (slurmdbd_unpack_list_msg(slurmdbd_conn->rpc_version, 
-				     DBD_UPDATE_SHARES_USED, &used_shares_msg, 
-				     in_buffer) != SLURM_SUCCESS) {
-		comment = "Failed to unpack DBD_UPDATE_SHARES_USED message";
-		error("%s", comment);
-		rc = SLURM_ERROR;
-		goto end_it;
-	} else {
-#if 0
-		/* This was only added to verify the logic. 
-		 * It is not useful for production use */
-		ListIterator itr = NULL;
-		shares_used_object_t *usage;
-		itr = list_iterator_create(used_shares_msg->my_list);
-		while((usage = list_next(itr))) {
-			debug2("assoc_id:%u shares_used:%u", 
-			       usage->assoc_id, usage->shares_used);
-		}
-		list_iterator_destroy(itr);
-#endif
-	}
-
-	rc = acct_storage_g_update_shares_used(slurmdbd_conn->db_conn, 
-					       used_shares_msg->my_list);
-
-end_it:
-	slurmdbd_free_list_msg(slurmdbd_conn->rpc_version, 
-			       used_shares_msg);
-	*out_buffer = make_dbd_rc_msg(slurmdbd_conn->rpc_version, 
-				      rc, comment, DBD_UPDATE_SHARES_USED);
-	return rc;
-}

@@ -12,10 +12,11 @@
 # Copyright (C) 2008 Lawrence Livermore National Security.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# LLNL-CODE-402394.
+# CODE-OCEC-09-009. All rights reserved.
 # 
 # This file is part of SLURM, a resource management program.
-# For details, see <http://www.llnl.gov/linux/slurm/>.
+# For details, see <https://computing.llnl.gov/linux/slurm/>.
+# Please also read the included file: DISCLAIMER.
 #  
 # SLURM is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
@@ -36,6 +37,7 @@ source ./globals
 set test_id     "1.92"
 set exit_code   0
 set file_bash   "test$test_id.bash"
+set job_id      0
 
 print_header $test_id
 
@@ -52,8 +54,13 @@ exit 0
 #
 # Create an allocation
 #
+set timeout $max_job_delay
 set salloc_pid [spawn $salloc -N2 -n4 --verbose -t2 $bin_bash]
 expect {
+	-re "salloc: Granted job allocation ($number)" {
+		set job_id $expect_out(1,string)
+		exp_continue
+	}
 	-re "More processors requested than permitted" {
 		send_user "\nWARNING: can't test srun task distribution\n"
 		exit 0
@@ -70,6 +77,10 @@ expect {
 		slow_kill $salloc_pid
 		exit 1
 	}
+}
+if {$job_id == 0} {
+	send_user "\nFAILURE: salloc failure\n"
+	exit 1
 }
 
 #############################################################################

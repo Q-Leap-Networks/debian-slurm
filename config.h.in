@@ -1,5 +1,8 @@
 /* config.h.in.  Generated from configure.ac by autoheader.  */
 
+/* Define the apbasil command location */
+#undef APBASIL_LOC
+
 /* Define the BG_BRIDGE_SO value */
 #undef BG_BRIDGE_SO
 
@@ -8,6 +11,12 @@
 
 /* Define the BG_SERIAL value */
 #undef BG_SERIAL
+
+/* Define BLCR installation home */
+#undef BLCR_HOME
+
+/* Define location of cpuset directory */
+#undef CPUSET_DIR
 
 /* Define to 1 if licensed under terms of the GNU General Public License. */
 #undef GPL_LICENSED
@@ -29,6 +38,12 @@
 
 /* Define to 1 if have Blue Gene files */
 #undef HAVE_BG_FILES
+
+/* Define if Cray system */
+#undef HAVE_CRAY
+
+/* Define if Cray XT system */
+#undef HAVE_CRAY_XT
 
 /* Define to 1 if you have the <curses.h> header file. */
 #undef HAVE_CURSES_H
@@ -276,7 +291,7 @@
    member named physmem. */
 #undef HAVE__SYSTEM_CONFIGURATION
 
-/* Define to 1 for --get-user-env to load user environment without login. */
+/* Define to 1 for --get-user-env to load user environment without .login */
 #undef LOAD_ENV_NO_LOGIN
 
 /* Define to 1 for memory leak debugging. */
@@ -390,6 +405,9 @@
 
 /* Define slurm_ prefix function aliases for plugins */
 #undef USE_ALIAS
+
+/* define if using ISO 8601 time format */
+#undef USE_ISO_8601
 
 /* Version number of package */
 #undef VERSION

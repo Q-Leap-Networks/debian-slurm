@@ -6,10 +6,11 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -53,9 +54,9 @@ void _help_fields_msg(void)
 	for (i = 0; fields[i].name; i++) {
 		if (i & 3)
 			printf("  ");
-		else
+		else if(i)
 			printf("\n");
-		printf("%-10s", fields[i].name);
+		printf("%-12s", fields[i].name);
 	}
 	printf("\n");
 	return;
@@ -63,40 +64,45 @@ void _help_fields_msg(void)
 
 void _help_msg(void)
 {
-	printf("\n"
-	       "By default, sstat displays status data for job/step stated\n"
-	       "Options:\n"
-	       "-a, --allsteps\n"
-	       "-C, --cluster\n"
-	       "    Job is running on this cluster.\n"
-	       "-F <field-list>, --fields=<field-list>\n"
-	       "    Display the specified data (use \"--help-fields\" for a\n"
-	       "    list of available fields). If no field option is specified,\n"
-	       "    we use \"--fields=jobid,vsize,rss,pages,cputime,ntasks,state\".\n"
-	       "-h, --help\n"
-	       "    Print a general help message.\n"
-	       "--help-fields\n"
-	       "    Print a list of fields that can be specified with the\n"
-	       "    \"--fields\" option\n"
-	       "-j <job(.step)>, --jobs=<job(.step)>\n"
-	       "    Display information about this job or comma-separated\n"
-	       "    list of jobs. The default is all jobs. Adding .step will\n"
-	       "    display the specfic job step of that job.\n"
-	       "--noheader\n"
-	       "    Print (or don't print) a header. The default is to print a\n"
-	       "    header; the option has no effect if --dump is specified\n"
-	       "--usage\n"
-	       "    Pointer to this message.\n"
-	       "-v, --verbose\n"
-	       "    Primarily for debugging purposes, report the state of various\n"
-	       "    variables during processing.\n");
+	printf("\
+sstat [<OPTION>] -j <job(.stepid)>                                          \n\
+    Valid <OPTION> values are:                                              \n\
+      -a, --allsteps:                                                       \n\
+                   Print all steps for the given job(s) when no step is     \n\
+                   specified.                                               \n\
+      -e, --helpformat:                                                     \n\
+	           Print a list of fields that can be specified with the    \n\
+	           '--format' option                                        \n\
+     -h, --help:   Print this description of use.                           \n\
+     -j, --jobs:                                                            \n\
+	           Format is <job(.step)>. Stat this job step               \n\
+                   or comma-separated list of job steps. This option is     \n\
+                   required.  The step portion will default to step 0 if not\n\
+                   specified, unless the --allsteps flag is set where not   \n\
+                   specifing a step will result in all running steps to be  \n\
+                   displayed.                                               \n\
+     -n, --noheader:                                                        \n\
+	           No header will be added to the beginning of output.      \n\
+                   The default is to print a header.                        \n\
+     -o, --format:                                                          \n\
+	           Comma seperated list of fields. (use \"--helpformat\"    \n\
+                   for a list of available fields).                         \n\
+     -p, --parsable: output will be '|' delimited with a '|' at the end     \n\
+     -P, --parsable2: output will be '|' delimited without a '|' at the end \n\
+     --usage:      Display brief usage message.                             \n\
+     -v, --verbose:                                                         \n\
+	           Primarily for debugging purposes, report the state of    \n\
+                   various variables during processing.                     \n\
+     -V, --version: Print version.                                          \n\
+\n");
 
 	return;
 }
 
 void _usage(void)
 {
-	printf("\nUsage: sstat [options]\n\tUse --help for help\n");
+	printf("Usage: sstat [options] -j <job(.stepid)>\n"
+	       "\tUse --help for help\n");
 }
 
 
@@ -267,12 +273,14 @@ void parse_command_line(int argc, char **argv)
 
 	static struct option long_options[] = {
 		{"allsteps", 0, 0, 'a'},
-		{"cluster", 1, 0, 'C'},
-		{"fields", 1, 0, 'F'},
-		{"help", 0, &params.opt_help, 1},
-		{"help-fields", 0, &params.opt_help, 2},
+		{"helpformat", 0, 0, 'e'},
+		{"help", 0, 0, 'h'},
 		{"jobs", 1, 0, 'j'},
-		{"noheader", 0, &params.opt_noheader, 1},
+		{"noheader", 0, 0, 'n'},
+		{"fields", 1, 0, 'o'},
+		{"format", 1, 0, 'o'},
+		{"parsable", 0, 0, 'p'},
+		{"parsable2", 0, 0, 'P'},
 		{"usage", 0, &params.opt_help, 3},
 		{"verbose", 0, 0, 'v'},
 		{"version", 0, 0, 'V'},
@@ -285,7 +293,7 @@ void parse_command_line(int argc, char **argv)
 	opterr = 1;		/* Let getopt report problems to the user */
 
 	while (1) {		/* now cycle through the command line */
-		c = getopt_long(argc, argv, "aF:hj:Vv",
+		c = getopt_long(argc, argv, "aehj:no:pPvV",
 				long_options, &optionIndex);
 		if (c == -1)
 			break;
@@ -293,11 +301,8 @@ void parse_command_line(int argc, char **argv)
 		case 'a':
 			params.opt_all_steps = 1;
 			break;
-		case 'F':
-			if(params.opt_field_list)
-				xfree(params.opt_field_list);
-			
-			xstrfmtcat(params.opt_field_list, "%s,", optarg);
+		case 'e':
+			params.opt_help = 2;
 			break;
 		case 'h':
 			params.opt_help = 1;
@@ -315,6 +320,20 @@ void parse_command_line(int argc, char **argv)
 					destroy_jobacct_selected_step);
 			_addto_job_list(params.opt_job_list, optarg);
 			break;
+		case 'n':
+			print_fields_have_header = 0;
+			break;
+		case 'o':
+			xstrfmtcat(params.opt_field_list, "%s,", optarg);
+			break;
+		case 'p':
+			print_fields_parsable_print = 
+				PRINT_FIELDS_PARSABLE_ENDING;
+			break;
+		case 'P':
+			print_fields_parsable_print = 
+				PRINT_FIELDS_PARSABLE_NO_ENDING;
+			break;
 		case 'v':
 			/* Handle -vvv thusly...
 			 * 0 - report only normal messages and errors
@@ -326,19 +345,9 @@ void parse_command_line(int argc, char **argv)
 			break;
 
 		case 'V':
-		{
-			char	obuf[20]; /* should be long enough */
-			char	*rev="$Revision: 7267 $";
-			char	*s;
-
-			s=strstr(rev, " ")+1;
-			for (i=0; s[i]!=' '; i++)
-				obuf[i]=s[i];
-			obuf[i] = 0;
-			printf("%s: %s\n", argv[0], obuf);
+			printf("%s %s\n", PACKAGE, SLURM_VERSION);
 			exit(0);
-		}
-
+			break;
 		case ':':
 		case '?':	/* getopt() has explained it */
 			exit(1); 
@@ -369,32 +378,23 @@ void parse_command_line(int argc, char **argv)
 		xstrfmtcat(params.opt_field_list, "%s,", STAT_FIELDS);
 
 	if (params.opt_verbose) {
-		fprintf(stderr, "Options selected:\n"
-			"\topt_field_list=%s\n"
-			"\topt_noheader=%d\n"
-			"\topt_help=%d\n"
-			"\topt_verbose=%d\n",
-			params.opt_field_list,
-			params.opt_noheader,
-			params.opt_help,
-			params.opt_verbose);
 		logopt.stderr_level += params.opt_verbose;
+		logopt.prefix_level = 1;
 		log_alter(logopt, 0, NULL);
-
 	}
 
 	/* specific jobs requested? */
 	if (params.opt_verbose && params.opt_job_list
 	    && list_count(params.opt_job_list)) { 
-		fprintf(stderr, "Jobs requested:\n");
+		debug("Jobs requested:\n");
 		itr = list_iterator_create(params.opt_job_list);
 		while((selected_step = list_next(itr))) {
 			if(selected_step->stepid != NO_VAL) 
-				fprintf(stderr, "\t: %d.%d\n",
+				debug("\t: %d.%d\n",
 					selected_step->jobid,
 					selected_step->stepid);
 			else	
-				fprintf(stderr, "\t: %d\n", 
+				debug("\t: %d\n", 
 					selected_step->jobid);
 		}
 		list_iterator_destroy(itr);
@@ -411,24 +411,21 @@ void parse_command_line(int argc, char **argv)
 			if (!strcasecmp(fields[i].name, start))
 				goto foundfield;
 		}
-		fprintf(stderr,
-			"Invalid field requested: \"%s\"\n",
-			start);
+		error("Invalid field requested: \"%s\"", start);
 		exit(1);
 	foundfield:
-		printfields[nprintfields++] = i;
+		list_append(print_fields_list, &fields[i]);
 		start = end + 1;
 	}
+	field_count = list_count(print_fields_list);
 
-	if (params.opt_verbose) {
-		fprintf(stderr, "%d field%s selected:\n",
-			nprintfields,
-			(nprintfields==1? "" : "s"));
-		for (i = 0; i < nprintfields; i++)
-			fprintf(stderr,
-				"\t%s\n",
-				fields[printfields[i]].name);
-	} 
+	if (optind < argc) {
+		debug2("Error: Unknown arguments:");
+		for (i=optind; i<argc; i++)
+			debug2(" %s", argv[i]);
+		debug2("\n");
+		exit(1);
+	}
 
 	return;
 }

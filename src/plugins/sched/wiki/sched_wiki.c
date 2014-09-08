@@ -4,10 +4,11 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -42,6 +43,7 @@
 #include "src/common/log.h"
 #include "src/slurmctld/slurmctld.h"
 #include "./msg.h"
+#include "src/common/slurm_priority.h"
 
 const char		plugin_name[]	= "Wiki (Maui) Scheduler plugin";
 const char		plugin_type[]	= "sched/wiki";
@@ -117,12 +119,9 @@ slurm_sched_plugin_initial_priority( uint32_t last_prio,
 		return 0;
 	}
 
-	if (init_prio_mode == PRIO_DECREMENT) {
-		if (last_prio >= 2)
-			return (last_prio - 1);
-		else
-			return 1;
-	}
+	if (init_prio_mode == PRIO_DECREMENT) 
+		return priority_g_set(last_prio, job_ptr);
+
 	return 0;
 }
 

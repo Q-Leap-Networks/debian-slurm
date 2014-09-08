@@ -2,13 +2,14 @@
  *  opt.c - options processing for salloc
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona1@llnl.gov>, et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -61,13 +62,15 @@
 #include "src/common/list.h"
 #include "src/common/log.h"
 #include "src/common/parse_time.h"
+#include "src/common/plugstack.h"
 #include "src/common/proc_args.h"
+#include "src/common/read_config.h" /* contains getnodename() */
 #include "src/common/slurm_protocol_api.h"
+#include "src/common/slurm_resource_info.h"
+#include "src/common/slurm_rlimits_info.h"
 #include "src/common/uid.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
-#include "src/common/slurm_rlimits_info.h"
-#include "src/common/read_config.h" /* contains getnodename() */
 
 #include "src/salloc/salloc.h"
 #include "src/salloc/opt.h"
@@ -77,21 +80,25 @@
 #define OPT_INT         0x01
 #define OPT_STRING      0x02
 #define OPT_DEBUG       0x03
-#define OPT_NODES       0x05
-#define OPT_BOOL        0x06
-#define OPT_CORE        0x07
-#define OPT_CONN_TYPE	0x08
-#define OPT_NO_ROTATE	0x0a
-#define OPT_GEOMETRY	0x0b
-#define OPT_BELL        0x0f
-#define OPT_NO_BELL     0x10
-#define OPT_JOBID       0x11
-#define OPT_EXCLUSIVE   0x12
-#define OPT_OVERCOMMIT  0x13
-#define OPT_ACCTG_FREQ  0x14
+#define OPT_NODES       0x04
+#define OPT_BOOL        0x05
+#define OPT_CORE        0x06
+#define OPT_CONN_TYPE	0x07
+#define OPT_NO_ROTATE	0x08
+#define OPT_GEOMETRY	0x09
+#define OPT_BELL        0x0a
+#define OPT_NO_BELL     0x0b
+#define OPT_JOBID       0x0c
+#define OPT_EXCLUSIVE   0x0d
+#define OPT_OVERCOMMIT  0x0e
+#define OPT_ACCTG_FREQ  0x0f
+#define OPT_CPU_BIND    0x10
+#define OPT_MEM_BIND    0x11
 #define OPT_WCKEY       0x15
 
 /* generic getopt_long flags, integers and *not* valid characters */
+#define LONG_OPT_CPU_BIND    0x101
+#define LONG_OPT_MEM_BIND    0x102
 #define LONG_OPT_JOBID       0x105
 #define LONG_OPT_TMP         0x106
 #define LONG_OPT_MEM         0x107
@@ -130,6 +137,7 @@
 #define LONG_OPT_HINT            0x13b
 #define LONG_OPT_ACCTG_FREQ      0x13c
 #define LONG_OPT_WCKEY           0x13d
+#define LONG_OPT_RESERVATION     0x13e
 
 /*---- global variables, defined in opt.h ----*/
 opt_t opt;
@@ -238,7 +246,10 @@ static void _opt_default()
 	opt.ntasks_per_node      = NO_VAL; /* ntask max limits */
 	opt.ntasks_per_socket    = NO_VAL;
 	opt.ntasks_per_core      = NO_VAL;
-	opt.cpu_bind_type = 0;		/* local dummy variable for now */
+	opt.cpu_bind_type = 0;
+	opt.cpu_bind = NULL;
+	opt.mem_bind_type = 0;
+	opt.mem_bind = NULL;
 	opt.time_limit = NO_VAL;
 	opt.time_limit_str = NULL;
 	opt.partition = NULL;
@@ -293,7 +304,8 @@ static void _opt_default()
 	opt.no_shell	    = false;
 	opt.get_user_env_time = -1;
 	opt.get_user_env_mode = -1;
-	opt.wckey = NULL;
+	opt.reservation     = NULL;
+	opt.wckey           = NULL;
 }
 
 /*---[ env var processing ]-----------------------------------------------*/
@@ -316,21 +328,23 @@ struct env_vars {
 
 env_vars_t env_vars[] = {
   {"SALLOC_ACCOUNT",       OPT_STRING,     &opt.account,       NULL           },
+  {"SALLOC_ACCTG_FREQ",    OPT_INT,        &opt.acctg_freq,    NULL           },
+  {"SALLOC_BELL",          OPT_BELL,       NULL,               NULL           },
   {"SALLOC_CONN_TYPE",     OPT_CONN_TYPE,  NULL,               NULL           },
+  {"SALLOC_CPU_BIND",      OPT_CPU_BIND,   NULL,               NULL           },
   {"SALLOC_DEBUG",         OPT_DEBUG,      NULL,               NULL           },
+  {"SALLOC_EXCLUSIVE",     OPT_EXCLUSIVE,  NULL,               NULL           },
   {"SALLOC_GEOMETRY",      OPT_GEOMETRY,   NULL,               NULL           },
   {"SALLOC_IMMEDIATE",     OPT_BOOL,       &opt.immediate,     NULL           },
   {"SALLOC_JOBID",         OPT_JOBID,      NULL,               NULL           },
+  {"SALLOC_MEM_BIND",      OPT_MEM_BIND,   NULL,               NULL           },
+  {"SALLOC_NETWORK",       OPT_STRING    , &opt.network,       NULL           },
+  {"SALLOC_NO_BELL",       OPT_NO_BELL,    NULL,               NULL           },
   {"SALLOC_NO_ROTATE",     OPT_NO_ROTATE,  NULL,               NULL           },
+  {"SALLOC_OVERCOMMIT",    OPT_OVERCOMMIT, NULL,               NULL           },
   {"SALLOC_PARTITION",     OPT_STRING,     &opt.partition,     NULL           },
   {"SALLOC_TIMELIMIT",     OPT_STRING,     &opt.time_limit_str,NULL           },
   {"SALLOC_WAIT",          OPT_INT,        &opt.max_wait,      NULL           },
-  {"SALLOC_BELL",          OPT_BELL,       NULL,               NULL           },
-  {"SALLOC_NO_BELL",       OPT_NO_BELL,    NULL,               NULL           },
-  {"SALLOC_EXCLUSIVE",     OPT_EXCLUSIVE,  NULL,               NULL           },
-  {"SALLOC_OVERCOMMIT",    OPT_OVERCOMMIT, NULL,               NULL           },
-  {"SALLOC_ACCTG_FREQ",    OPT_INT,        &opt.acctg_freq,    NULL           },
-  {"SALLOC_NETWORK",       OPT_STRING,     &opt.network,       NULL           },
   {"SALLOC_WCKEY",         OPT_STRING,     &opt.wckey,         NULL           },
   {NULL, 0, NULL, NULL}
 };
@@ -443,6 +457,16 @@ _process_env_var(env_vars_t *e, const char *val)
 	case OPT_OVERCOMMIT:
 		opt.overcommit = true;
 		break;
+	case OPT_CPU_BIND:
+		if (slurm_verify_cpu_bind(val, &opt.cpu_bind,
+					  &opt.cpu_bind_type))
+			exit(1);
+		break;
+	case OPT_MEM_BIND:
+		if (slurm_verify_mem_bind(val, &opt.mem_bind,
+					  &opt.mem_bind_type))
+			exit(1);
+		break;
 	case OPT_WCKEY:
 		xfree(opt.wckey);
 		opt.wckey = xstrdup(optarg);
@@ -502,7 +526,7 @@ void set_options(const int argc, char **argv)
 		{"overcommit",    no_argument,       0, 'O'},
 		{"partition",     required_argument, 0, 'p'},
 		{"dependency",    required_argument, 0, 'P'},
-		{"quiet",         no_argument,       0, 'q'},
+		{"quiet",         no_argument,       0, 'Q'},
 		{"no-rotate",     no_argument,       0, 'R'},
 		{"share",         no_argument,       0, 's'},
 		{"time",          required_argument, 0, 't'},
@@ -520,8 +544,6 @@ void set_options(const int argc, char **argv)
 		{"mincores",      required_argument, 0, LONG_OPT_MINCORES},
 		{"minthreads",    required_argument, 0, LONG_OPT_MINTHREADS},
 		{"mem",           required_argument, 0, LONG_OPT_MEM},
-		{"job-mem",       required_argument, 0, LONG_OPT_MEM_PER_CPU},
-		{"task-mem",      required_argument, 0, LONG_OPT_MEM_PER_CPU},
 		{"mem-per-cpu",   required_argument, 0, LONG_OPT_MEM_PER_CPU},
 		{"hint",          required_argument, 0, LONG_OPT_HINT},
 		{"sockets-per-node", required_argument, 0, LONG_OPT_SOCKETSPERNODE},
@@ -554,15 +576,23 @@ void set_options(const int argc, char **argv)
 		{"no-shell",      no_argument,       0, LONG_OPT_NOSHELL},
 		{"get-user-env",  optional_argument, 0, LONG_OPT_GET_USER_ENV},
 		{"network",       required_argument, 0, LONG_OPT_NETWORK},
+		{"cpu_bind",      required_argument, 0, LONG_OPT_CPU_BIND},
+		{"mem_bind",      required_argument, 0, LONG_OPT_MEM_BIND},
 		{"wckey",         required_argument, 0, LONG_OPT_WCKEY},
+		{"reservation",   required_argument, 0, LONG_OPT_RESERVATION},
 		{NULL,            0,                 0, 0}
 	};
-	char *opt_string = "+a:B:c:C:d:D:F:g:hHIJ:kK:L:m:n:N:Op:P:qR:st:uU:vVw:W:x:";
+	char *opt_string = "+B:c:C:d:D:F:g:hHIJ:kK::L:m:n:N:Op:P:QRst:uU:vVw:W:x:";
+
+	struct option *optz = spank_option_table_create(long_options);
+
+	if (!optz)
+		fatal("Unable to create options table");
 
 	opt.progname = xbasename(argv[0]);
 	optind = 0;		
 	while((opt_char = getopt_long(argc, argv, opt_string,
-				      long_options, &option_index)) != -1) {
+				      optz, &option_index)) != -1) {
 		switch (opt_char) {
 			
 		case '?':
@@ -680,7 +710,7 @@ void set_options(const int argc, char **argv)
 			xfree(opt.dependency);
 			opt.dependency = xstrdup(optarg);
 			break;
-		case 'q':
+		case 'Q':
 			opt.quiet++;
 			break;
 		case 'R':
@@ -931,15 +961,32 @@ void set_options(const int argc, char **argv)
 			xfree(opt.network);
 			opt.network = xstrdup(optarg);
 			break;
+		case LONG_OPT_CPU_BIND:
+			if (slurm_verify_cpu_bind(optarg, &opt.cpu_bind,
+						  &opt.cpu_bind_type))
+				exit(1);
+			break;
+		case LONG_OPT_MEM_BIND:
+			if (slurm_verify_mem_bind(optarg, &opt.mem_bind,
+						  &opt.mem_bind_type))
+				exit(1);
+			break;
 		case LONG_OPT_WCKEY:
 			xfree(opt.wckey);
 			opt.wckey = xstrdup(optarg);
 			break;
+		case LONG_OPT_RESERVATION:
+			xfree(opt.reservation);
+			opt.reservation = xstrdup(optarg);
+			break;
 		default:
-			fatal("Unrecognized command line parameter %c",
-			      opt_char);
+			if (spank_process_option(opt_char, optarg) < 0)
+			    fatal("Unrecognized command line parameter %c",
+				    opt_char);
 		}
 	}
+
+	spank_option_table_destroy(optz);
 }
 
 static void _proc_get_user_env(char *optarg)
@@ -1035,7 +1082,7 @@ static bool _opt_verify(void)
 	bool verified = true;
 
 	if (opt.quiet && opt.verbose) {
-		error ("don't specify both --verbose (-v) and --quiet (-q)");
+		error ("don't specify both --verbose (-v) and --quiet (-Q)");
 		verified = false;
 	}
 
@@ -1056,21 +1103,51 @@ static bool _opt_verify(void)
 
 	/* check for realistic arguments */
 	if (opt.nprocs <= 0) {
-		error("%s: invalid number of processes (-n %d)",
-		      opt.progname, opt.nprocs);
+		error("invalid number of processes (-n %d)",
+		      opt.nprocs);
 		verified = false;
 	}
 
 	if (opt.cpus_per_task <= 0) {
-		error("%s: invalid number of cpus per task (-c %d)\n",
-		      opt.progname, opt.cpus_per_task);
+		error("invalid number of cpus per task (-c %d)\n",
+		      opt.cpus_per_task);
 		verified = false;
 	}
 
 	if ((opt.min_nodes < 0) || (opt.max_nodes < 0) || 
 	    (opt.max_nodes && (opt.min_nodes > opt.max_nodes))) {
-		error("%s: invalid number of nodes (-N %d-%d)\n",
-		      opt.progname, opt.min_nodes, opt.max_nodes);
+		error("invalid number of nodes (-N %d-%d)\n",
+		      opt.min_nodes, opt.max_nodes);
+		verified = false;
+	}
+
+#ifdef HAVE_BGL
+	if (opt.blrtsimage && strchr(opt.blrtsimage, ' ')) {
+		error("invalid BlrtsImage given '%s'", opt.blrtsimage);
+		verified = false;
+	}
+#endif
+
+	if (opt.linuximage && strchr(opt.linuximage, ' ')) {
+#ifdef HAVE_BGL
+		error("invalid LinuxImage given '%s'", opt.linuximage);
+#else
+		error("invalid CnloadImage given '%s'", opt.linuximage);
+#endif
+		verified = false;
+	}
+
+	if (opt.mloaderimage && strchr(opt.mloaderimage, ' ')) {
+		error("invalid MloaderImage given '%s'", opt.mloaderimage);
+		verified = false;
+	}
+
+	if (opt.ramdiskimage && strchr(opt.ramdiskimage, ' ')) {
+#ifdef HAVE_BGL
+		error("invalid RamDiskImage given '%s'", opt.ramdiskimage);
+#else
+		error("invalid IoloadImage given '%s'", opt.ramdiskimage);
+#endif
 		verified = false;
 	}
 
@@ -1196,6 +1273,35 @@ static bool _opt_verify(void)
 	if (opt.network == NULL)
 		opt.network = "us,sn_all,bulk_xfer";
 #endif
+
+	if (slurm_verify_cpu_bind(NULL, &opt.cpu_bind,
+				  &opt.cpu_bind_type))
+		exit(1);
+	if (opt.cpu_bind_type && (getenv("SLURM_CPU_BIND") == NULL)) {
+		char tmp[64];
+		slurm_sprint_cpu_bind_type(tmp, opt.cpu_bind_type);
+		if (opt.cpu_bind) {
+			setenvf(NULL, "SLURM_CPU_BIND", "%s:%s", 
+				tmp, opt.cpu_bind);
+		} else {
+			setenvf(NULL, "SLURM_CPU_BIND", "%s", tmp);
+		}
+	}
+	if (opt.mem_bind_type && (getenv("SLURM_MEM_BIND") == NULL)) {
+		char tmp[64];
+		slurm_sprint_mem_bind_type(tmp, opt.mem_bind_type);
+		if (opt.mem_bind) {
+			setenvf(NULL, "SLURM_MEM_BIND", "%s:%s", 
+				tmp, opt.mem_bind);
+		} else {
+			setenvf(NULL, "SLURM_MEM_BIND", "%s", tmp);
+		}
+	}
+	if ((opt.ntasks_per_node != NO_VAL) && 
+	    (getenv("SLURM_NTASKS_PER_NODE") == NULL)) {
+		setenvf(NULL, "SLURM_NTASKS_PER_NODE", "%d", 
+			opt.ntasks_per_node);
+	}
 
 	return verified;
 }
@@ -1324,6 +1430,7 @@ static void _opt_list()
 	info("partition      : %s",
 		opt.partition == NULL ? "default" : opt.partition);
 	info("job name       : `%s'", opt.job_name);
+	info("reservation    : `%s'", opt.reservation);
 	info("wckey          : `%s'", opt.wckey);
 	if (opt.jobid != NO_VAL)
 		info("jobid          : %u", opt.jobid);
@@ -1390,6 +1497,10 @@ static void _opt_list()
 	info("ntasks-per-socket : %d", opt.ntasks_per_socket);
 	info("ntasks-per-core   : %d", opt.ntasks_per_core);
 	info("plane_size        : %u", opt.plane_size);
+	info("cpu_bind          : %s", 
+	     opt.cpu_bind == NULL ? "default" : opt.cpu_bind);
+	info("mem_bind          : %s",
+	     opt.mem_bind == NULL ? "default" : opt.mem_bind);
 	str = print_commandline(command_argc, command_argv);
 	info("user command   : `%s'", str);
 	xfree(str);
@@ -1421,6 +1532,7 @@ static void _usage(void)
 "              [--bell] [--no-bell] [--kill-command[=signal]]\n"
 "              [--nodefile=file] [--nodelist=hosts] [--exclude=hosts]\n"
 "              [--network=type] [--mem-per-cpu=MB]\n"
+"              [--cpu_bind=...] [--mem_bind=...] [--reservation=name]\n"
 "              [executable [args...]]\n");
 }
 
@@ -1432,51 +1544,53 @@ static void _help(void)
 "Usage: salloc [OPTIONS...] [executable [args...]]\n"
 "\n"
 "Parallel run options:\n"
-"  -N, --nodes=N               number of nodes on which to run (N = min[-max])\n"
-"  -n, --tasks=N               number of processors required\n"
+"      --begin=time            defer job until HH:MM DD/MM/YY\n"
+"      --bell                  ring the terminal bell when the job is allocated\n"
 "  -c, --cpus-per-task=ncpus   number of cpus required per task\n"
-"      --ntasks-per-node=n     number of tasks to invoke on each node\n"
-"  -p, --partition=partition   partition requested\n"
-"  -H, --hold                  submit job in held state\n"
-"  -t, --time=minutes          time limit\n"
+"      --comment=name          arbitrary comment\n"
 "  -D, --chdir=path            change working directory\n"
+"      --get-user-env          used by Moab.  See srun man page.\n"
+"      --gid=group_id          group ID to run job as (user root only)\n"
+"  -H, --hold                  submit job in held state\n"
 "  -I, --immediate             exit if resources are not immediately available\n"
+"      --jobid=id              specify jobid to use\n"
+"  -J, --job-name=jobname      name of job\n"
 "  -k, --no-kill               do not kill job on node failure\n"
 "  -K, --kill-command[=signal] signal to send terminating job\n"
-"  -O, --overcommit            overcommit resources\n"
-"  -s, --share                 share nodes with other jobs\n"
+"  -L, --licenses=names        required license, comma separated\n"
 "  -m, --distribution=type     distribution method for processes to nodes\n"
 "                              (type = block|cyclic|arbitrary)\n"
-"  -J, --job-name=jobname      name of job\n"
-"      --jobid=id              specify jobid to use\n"
+"      --mail-type=type        notify on state change: BEGIN, END, FAIL or ALL\n"
+"      --mail-user=user        who to send email notification for job state\n"
+"                              changes\n"
+"  -n, --tasks=N               number of processors required\n"
+"      --nice[=value]          decrease secheduling priority by value\n"
+"      --no-bell               do NOT ring the terminal bell\n"
+"      --ntasks-per-node=n     number of tasks to invoke on each node\n"
+"  -N, --nodes=N               number of nodes on which to run (N = min[-max])\n"
+"  -O, --overcommit            overcommit resources\n"
+"  -Q, --quiet                 quiet mode (suppress informational messages)\n"
+"  -p, --partition=partition   partition requested\n"
+"  -P, --dependency=type:jobid defer job until condition on jobid is satisfied\n"
+"  -s, --share                 share nodes with other jobs\n"
+"  -t, --time=minutes          time limit\n"
+"  -U, --account=name          charge job to specified account\n"
+"      --uid=user_id           user ID to run job as (user root only)\n"
+"  -v, --verbose               verbose mode (multiple -v's increase verbosity)\n"
 "  -W, --wait=sec              seconds to wait for allocation if not\n"
 "                              immediately available\n"
-"  -v, --verbose               verbose mode (multiple -v's increase verbosity)\n"
-"  -q, --quiet                 quiet mode (suppress informational messages)\n"
-"  -P, --dependency=type:jobid defer job until condition on jobid is satisfied\n"
-"      --nice[=value]          decrease secheduling priority by value\n"
-"  -U, --account=name          charge job to specified account\n"
-"      --begin=time            defer job until HH:MM DD/MM/YY\n"
-"      --comment=name          arbitrary comment\n"
-"  -L, --licenses=names        required license, comma separated\n"
-"      --mail-type=type        notify on state change: BEGIN, END, FAIL or ALL\n"
-"      --mail-user=user        who to send email notification for job state changes\n"
-"      --bell                  ring the terminal bell when the job is allocated\n"
-"      --no-bell               do NOT ring the terminal bell\n"
-"      --gid=group_id          group ID to run job as (user root only)\n"
-"      --uid=user_id           user ID to run job as (user root only)\n"
-"      --get-user-env          used by Moab.  See srun man page.\n"
 "\n"
 "Constraint options:\n"
+"      --contiguous            demand a contiguous range of nodes\n"
+"  -C, --constraint=list       specify a list of constraints\n"
+"  -F, --nodefile=filename     request a specific list of hosts\n"
+"      --mem=MB                minimum amount of real memory\n"
 "      --mincpus=n             minimum number of cpus per node\n"
 "      --minsockets=n          minimum number of sockets per node\n"
 "      --mincores=n            minimum number of cores per cpu\n"
 "      --minthreads=n          minimum number of threads per core\n"
-"      --mem=MB                minimum amount of real memory\n"
+"      --reservation=name      allocate resources from named reservation\n"
 "      --tmp=MB                minimum amount of temporary disk\n"
-"      --contiguous            demand a contiguous range of nodes\n"
-"  -C, --constraint=list       specify a list of constraints\n"
-"  -F, --nodefile=filename     request a specific list of hosts\n"
 "  -w, --nodelist=hosts...     request a specific list of hosts\n"
 "  -x, --exclude=hosts...      exclude a specific list of hosts\n"
 "\n"
@@ -1485,26 +1599,32 @@ static void _help(void)
 "                              cpu consumable resource is enabled\n"
 "      --mem-per-cpu=MB        maximum amount of real memory per allocated\n"
 "                              cpu required by the job.\n" 
-"                              --mem >= --job-mem if --mem is specified.\n" 
+"                              --mem >= --mem-per-cpu if --mem is specified.\n" 
 "\n"
 "Affinity/Multi-core options: (when the task/affinity plugin is enabled)\n" 
-"  -B --extra-node-info=S[:C[:T]]            Expands to:\n"
-"      --sockets-per-node=S    number of sockets per node to allocate\n"
-"      --cores-per-socket=C    number of cores per socket to allocate\n"
-"      --threads-per-core=T    number of threads per core to allocate\n"
+"  -B  --extra-node-info=S[:C[:T]]            Expands to:\n"
+"       --sockets-per-node=S   number of sockets per node to allocate\n"
+"       --cores-per-socket=C   number of cores per socket to allocate\n"
+"       --threads-per-core=T   number of threads per core to allocate\n"
 "                              each field can be 'min[-max]' or wildcard '*'\n"
 "                              total cpus requested = (N x S x C x T)\n"
 "\n"
-"      --ntasks-per-socket=n   number of tasks to invoke on each socket\n"
-"      --ntasks-per-core=n     number of tasks to invoke on each core\n");
+"      --ntasks-per-core=n     number of tasks to invoke on each core\n"
+"      --ntasks-per-socket=n   number of tasks to invoke on each socket\n");
 	conf = slurm_conf_lock();
 	if (conf->task_plugin != NULL
 	    && strcasecmp(conf->task_plugin, "task/affinity") == 0) {
 		printf(
+"      --cpu_bind=             Bind tasks to CPUs\n"
+"                              (see \"--cpu_bind=help\" for options)\n"
 "      --hint=                 Bind tasks according to application hints\n"
-"                              (see \"--hint=help\" for options)\n");
+"                              (see \"--hint=help\" for options)\n"
+"      --mem_bind=             Bind memory to locality domains (ldom)\n"
+"                              (see \"--mem_bind=help\" for options)\n");
 	}
 	slurm_conf_unlock();
+
+	spank_print_options(stdout, 6, 30);
 
         printf("\n"
 #ifdef HAVE_AIX				/* AIX/Federation specific options */
@@ -1529,10 +1649,14 @@ static void _help(void)
 "      --mloader-image=path    path to mloader image for bluegene block.  Default if not set\n"
 "      --ioload-image=path     path to ioload image for bluegene block.  Default if not set\n"
 #else
-"      --blrts-image=path      path to blrts image for bluegene block.  Default if not set\n"
-"      --linux-image=path      path to linux image for bluegene block.  Default if not set\n"
-"      --mloader-image=path    path to mloader image for bluegene block.  Default if not set\n"
-"      --ramdisk-image=path    path to ramdisk image for bluegene block.  Default if not set\n"
+"      --blrts-image=path      path to blrts image for bluegene block.\n"
+"                              Default if not set\n"
+"      --linux-image=path      path to linux image for bluegene block.  Default\n"
+"                              if not set\n"
+"      --mloader-image=path    path to mloader image for bluegene block.\n"
+"                              Default if not set\n"
+"      --ramdisk-image=path    path to ramdisk image for bluegene block.\n"
+"                              Default if not set\n"
 #endif
 #endif
 "\n"

@@ -2,13 +2,14 @@
  *  slurm_protocol_defs.h - definitions used for RPCs
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov>.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -95,6 +96,7 @@ typedef enum {
 	REQUEST_CONTROL,
 	REQUEST_SET_DEBUG_LEVEL,
 	REQUEST_HEALTH_CHECK,
+	REQUEST_TAKEOVER,
 	
 	REQUEST_BUILD_INFO = 2001,
 	RESPONSE_BUILD_INFO,
@@ -117,11 +119,24 @@ typedef enum {
 	REQUEST_TRIGGER_CLEAR,
 	RESPONSE_TRIGGER_GET,
 	REQUEST_JOB_INFO_SINGLE,
+	REQUEST_SHARE_INFO,
+	RESPONSE_SHARE_INFO,
+	REQUEST_RESERVATION_INFO,
+	RESPONSE_RESERVATION_INFO,
+	REQUEST_PRIORITY_FACTORS,
+	RESPONSE_PRIORITY_FACTORS,
+	REQUEST_TOPO_INFO,
+	RESPONSE_TOPO_INFO,
 
 	REQUEST_UPDATE_JOB = 3001,
 	REQUEST_UPDATE_NODE,
-	REQUEST_UPDATE_PARTITION,
+	REQUEST_CREATE_PARTITION,
 	REQUEST_DELETE_PARTITION,
+	REQUEST_UPDATE_PARTITION,
+	REQUEST_CREATE_RESERVATION,
+	RESPONSE_CREATE_RESERVATION,
+	REQUEST_DELETE_RESERVATION,
+	REQUEST_UPDATE_RESERVATION,
 
 	REQUEST_RESOURCE_ALLOCATION = 4001,
 	RESPONSE_RESOURCE_ALLOCATION,
@@ -195,6 +210,7 @@ typedef enum {
 	SRUN_JOB_COMPLETE,
 	SRUN_USER_MSG,
 	SRUN_EXEC,
+	SRUN_STEP_MISSING,
 
 	PMI_KVS_PUT_REQ = 7201,
 	PMI_KVS_PUT_RESP,
@@ -294,6 +310,56 @@ typedef struct ret_data_info {
  * Slurm Protocol Data Structures
 \*****************************************************************************/
 
+typedef struct association_shares_object {
+	uint32_t assoc_id;	/* association ID */
+
+	char *cluster;          /* cluster name */
+	char *name;             /* name */
+	char *parent;           /* parent name */
+
+	double shares_norm;     /* normalized shares */
+	uint32_t shares_raw;	/* number of shares allocated */
+
+	double usage_efctv;	/* effective, normalized usage */
+	double usage_norm;	/* normalized usage */
+	uint64_t usage_raw;	/* measure of resource usage */
+
+	uint16_t user;          /* 1 if user association 0 if account
+				 * association */
+} association_shares_object_t;
+
+typedef struct shares_request_msg {
+	List acct_list;
+	List user_list;
+} shares_request_msg_t;
+
+typedef struct shares_response_msg {
+	List assoc_shares_list; /* list of association_shares_object_t *'s */
+	uint64_t tot_shares;
+} shares_response_msg_t;
+
+typedef struct priority_factors_object {
+	uint32_t job_id;
+	uint32_t user_id;
+
+	double	 priority_age;
+	double	 priority_fs;
+	double	 priority_js;
+	double	 priority_part;
+	double	 priority_qos;
+
+	uint16_t nice;
+} priority_factors_object_t;
+
+typedef struct priority_factors_request_msg {
+	List	 job_id_list;
+	List	 uid_list;
+} priority_factors_request_msg_t;
+
+typedef struct priority_factors_response_msg {
+	List	 priority_factors_list;	/* priority_factors_object_t list */
+} priority_factors_response_msg_t;
+
 typedef struct job_step_kill_msg {
 	uint32_t job_id;
 	uint32_t job_step_id;
@@ -342,6 +408,10 @@ typedef struct part_info_request_msg {
 	uint16_t show_flags;
 } part_info_request_msg_t;
 
+typedef struct resv_info_request_msg {
+        time_t last_update;
+} resv_info_request_msg_t;
+
 typedef struct complete_job_allocation {
 	uint32_t job_id;
 	uint32_t job_rc;
@@ -380,8 +450,8 @@ typedef struct kill_tasks_msg {
 typedef struct checkpoint_tasks_msg {
 	uint32_t job_id;
 	uint32_t job_step_id;
-	uint32_t signal;
 	time_t timestamp;
+	char *image_dir;
 } checkpoint_tasks_msg_t;
 
 typedef struct epilog_complete_msg {
@@ -404,37 +474,40 @@ typedef struct set_debug_level_msg {
 } set_debug_level_msg_t;
 
 typedef struct job_step_specs {
-	uint32_t job_id;	/* job ID */
-	uint32_t user_id;	/* user the job runs as */
-	uint32_t node_count;	/* count of required nodes */
+	uint16_t ckpt_interval;	/* checkpoint creation interval (minutes) */
+	char *ckpt_dir; 	/* path to store checkpoint image files */
 	uint32_t cpu_count;	/* count of required processors */
+	uint16_t exclusive;	/* 1 if CPUs not shared with other steps */
+	char *host;		/* host to contact initiating srun */
+	uint16_t immediate;	/* 1 if allocate to run or fail immediately,
+				 * 0 if to be queued awaiting resources */
+	uint32_t job_id;	/* job ID */
+	uint32_t mem_per_task;	/* MB memory required per task, 0=no limit */
+	char *name;		/* name of the job step, default "" */
+	char *network;		/* network use spec */
+	uint32_t node_count;	/* count of required nodes */
+	uint8_t no_kill;	/* 1 if no kill on node failure */
+	char *node_list;	/* list of required nodes */
 	uint32_t num_tasks;	/* number of tasks required */
-	uint16_t relative;	/* first node to use of job's allocation */
-	uint16_t task_dist;	/* see enum task_dist_state */
+	uint8_t overcommit;     /* flag, 1 to allow overcommit of processors,
+				   0 to disallow overcommit. default is 0 */
 	uint16_t plane_size;	/* plane size when task_dist =
 				   SLURM_DIST_PLANE */
 	uint16_t port;		/* port to contact initiating srun */
-	uint16_t ckpt_interval;	/* checkpoint creation interval (minutes) */
-	uint16_t exclusive;	/* 1 if CPUs not shared with other steps */
-	uint16_t immediate;	/* 1 if allocate to run or fail immediately,
-				 * 0 if to be queued awaiting resources */
-	uint16_t mem_per_task;	/* MB memory required per task, 0=no limit */
-	char *host;		/* host to contact initiating srun */
-	char *node_list;	/* list of required nodes */
-	char *network;		/* network use spec */
-	char *name;		/* name of the job step, default "" */
-	char *ckpt_path;	/* path to store checkpoint image files */
-	uint8_t overcommit;     /* flag, 1 to allow overcommit of processors,
-				   0 to disallow overcommit. default is 0 */
+	uint16_t relative;	/* first node to use of job's allocation */
+	uint16_t resv_port_cnt;	/* reserve ports for MPI if set */
+	uint16_t task_dist;	/* see enum task_dist_state */
+	uint32_t user_id;	/* user the job runs as */
 } job_step_create_request_msg_t;
 
 typedef struct job_step_create_response_msg {
-	uint32_t job_step_id;	/* assigned job step id */
+	uint32_t job_step_id;		/* assigned job step id */
+	char *resv_ports;		/* reserved ports */
 	slurm_step_layout_t *step_layout; /* information about how the 
-                                             step is laid out */
-	slurm_cred_t cred;      /* slurm job credential */
+                                           * step is laid out */
+	slurm_cred_t cred;    	  /* slurm job credential */
 	switch_jobinfo_t switch_job;	/* switch context, opaque 
-                                           data structure */
+                                         * data structure */
 } job_step_create_response_msg_t;
 
 typedef struct launch_tasks_request_msg {
@@ -444,8 +517,9 @@ typedef struct launch_tasks_request_msg {
 	uint32_t  nprocs;	/* number of processes in this job step   */
 	uint32_t  uid;
 	uint32_t  gid;
-	uint32_t  job_mem;	/* MB of memory reserved by job, 0 if no limit */
-	uint32_t  task_mem;	/* MB of memory reserved per task, 0 if no limit */
+	uint32_t  job_mem;	/* MB of memory reserved by job per node OR
+				 * real memory per CPU | MEM_PER_CPU,
+				 * default=0 (no limit) */
 	uint16_t  *tasks_to_launch;
 	uint32_t  envc;
 	uint32_t  argc;
@@ -455,9 +529,6 @@ typedef struct launch_tasks_request_msg {
 	uint16_t  max_cores;
 	uint16_t  max_threads;
 	uint16_t  cpus_per_task;
-	uint16_t  ntasks_per_node;
-	uint16_t  ntasks_per_socket;
-	uint16_t  ntasks_per_core;
 	char    **env;
 	char    **argv;
 	char     *cwd;
@@ -470,8 +541,6 @@ typedef struct launch_tasks_request_msg {
 
         /* Distribution at the lowest level of logical processor (lllp) */
 	uint16_t task_dist;  /* --distribution=, -m dist	*/
-	uint16_t plane_size; /* lllp distribution -> plane_size for
-			      * when -m plane=<# of lllp per plane> */      
 	uint16_t  task_flags;
 	uint32_t **global_task_ids;
 	slurm_addr orig_addr;	  /* where message really came from for io */ 
@@ -488,6 +557,7 @@ typedef struct launch_tasks_request_msg {
 	char     *efname; /* stderr filename pattern */
 	char     *ifname; /* stdin filename pattern */
 	uint8_t   buffered_stdio; /* 1 for line-buffered, 0 for unbuffered */
+	uint8_t   labelio;  /* prefix output lines with the task number */
 	uint16_t  num_io_port;
 	uint16_t  *io_port;  /* array of available client IO listen ports */
 	/**********  END  "normal" IO only options **********/
@@ -501,7 +571,8 @@ typedef struct launch_tasks_request_msg {
 	switch_jobinfo_t switch_job;	/* switch credential for the job */
 	job_options_t options;  /* Arbitrary job options */
 	char *complete_nodelist;
-	char *ckpt_path;	/* checkpoint path */
+	char *ckpt_dir;		/* checkpoint path */
+	char *restart_dir;	/* restart from checkpoint if set */
 } launch_tasks_request_msg_t;
 
 typedef struct task_user_managed_io_msg {
@@ -571,15 +642,20 @@ typedef struct batch_job_launch_msg {
 	uint32_t uid;
 	uint32_t gid;
 	uint32_t nprocs;	/* number of tasks in this job         */
-	uint16_t num_cpu_groups;/* elements in below cpu arrays */
-	uint32_t *cpus_per_node;/* cpus per node */
+	uint32_t num_cpu_groups;/* elements in below cpu arrays */
+	uint16_t cpu_bind_type;	/* Internal for slurmd/task_affinity   */
+	char     *cpu_bind;	/* Internal for slurmd/task_affinity   */
+	uint16_t *cpus_per_node;/* cpus per node */
 	uint32_t *cpu_count_reps;/* how many nodes have same cpu count */
+	uint16_t cpus_per_task;	/* number of CPUs requested per task */
 	char *nodes;		/* list of nodes allocated to job_step */
 	char *script;		/* the actual job script, default NONE */
 	char *err;		/* pathname of stderr */
 	char *in;		/* pathname of stdin */
 	char *out;		/* pathname of stdout */
 	char *work_dir;		/* full pathname of working directory */
+	char *ckpt_dir;		/* location to store checkpoint image */
+	char *restart_dir;	/* retart execution from image in this dir */
 	uint32_t argc;
 	char **argv;
 	uint32_t envc;		/* element count in environment */
@@ -589,8 +665,9 @@ typedef struct batch_job_launch_msg {
 	slurm_cred_t cred;
 	uint8_t open_mode;	/* stdout/err append or truncate */
 	uint8_t overcommit;	/* if resources being over subscribed */
-	uint16_t acctg_freq;	/* accounting polling interval */
-	uint32_t job_mem;	/* memory limit for job */
+	uint16_t acctg_freq;	/* accounting polling interval	*/
+	uint32_t job_mem;	/* memory limit for job		*/
+	uint16_t restart_cnt;	/* batch job restart count	*/
 } batch_job_launch_msg_t;
 
 typedef struct job_id_request_msg {
@@ -614,6 +691,8 @@ typedef struct checkpoint_msg {
 	uint16_t data;		/* operation specific data */
 	uint32_t job_id;	/* slurm job_id */
 	uint32_t step_id;	/* slurm step_id */
+	char *image_dir;	/* locate to store the context images. 
+				 * NULL for default */
 } checkpoint_msg_t;
 
 typedef struct checkpoint_comp_msg {
@@ -716,7 +795,7 @@ typedef struct slurm_node_registration_status_msg {
 	uint32_t tmp_disk;
 	uint32_t job_count;	/* number of associate job_id's */
 	uint32_t *job_id;	/* IDs of running job (if any) */
-	uint16_t *step_id;	/* IDs of running job steps (if any) */
+	uint32_t *step_id;	/* IDs of running job steps (if any) */
 	uint32_t status;	/* node status code, same as return codes */
 	uint16_t startup;	/* slurmd just restarted */
 	switch_node_info_t switch_nodeinfo;	/* set only if startup != 0 */
@@ -754,6 +833,7 @@ extern void slurm_msg_t_init (slurm_msg_t *msg);
 extern void slurm_msg_t_copy(slurm_msg_t *dest, slurm_msg_t *src);
 
 extern void slurm_destroy_char(void *object);
+extern void slurm_destroy_uint32_ptr(void *object);
 extern int slurm_addto_char_list(List char_list, char *names);
 extern int slurm_sort_char_list_asc(char *name_a, char *name_b);
 extern int slurm_sort_char_list_desc(char *name_a, char *name_b);
@@ -768,7 +848,16 @@ void inline slurm_free_job_step_info_request_msg(
 		job_step_info_request_msg_t *msg);
 void inline slurm_free_node_info_request_msg(node_info_request_msg_t *msg);
 void inline slurm_free_part_info_request_msg(part_info_request_msg_t *msg);
+void inline slurm_free_resv_info_request_msg(resv_info_request_msg_t *msg);
 void inline slurm_free_set_debug_level_msg(set_debug_level_msg_t *msg);
+void inline slurm_destroy_association_shares_object(void *object);
+void inline slurm_free_shares_request_msg(shares_request_msg_t *msg);
+void inline slurm_free_shares_response_msg(shares_response_msg_t *msg);
+void inline slurm_destroy_priority_factors_object(void *object);
+void inline slurm_free_priority_factors_request_msg(
+	priority_factors_request_msg_t *msg);
+void inline slurm_free_priority_factors_response_msg(
+	priority_factors_response_msg_t *msg);
 
 #define	slurm_free_timelimit_msg(msg) \
 	slurm_free_kill_job_msg(msg)
@@ -795,6 +884,9 @@ void inline slurm_free_job_launch_msg(batch_job_launch_msg_t * msg);
 void inline slurm_free_update_node_msg(update_node_msg_t * msg);
 void inline slurm_free_update_part_msg(update_part_msg_t * msg);
 void inline slurm_free_delete_part_msg(delete_part_msg_t * msg);
+void inline slurm_free_resv_desc_msg(resv_desc_msg_t * msg);
+void inline slurm_free_resv_name_msg(reservation_name_msg_t * msg);
+void inline slurm_free_resv_info_request_msg(resv_info_request_msg_t * msg);
 void inline
 slurm_free_job_step_create_request_msg(job_step_create_request_msg_t * msg);
 void inline
@@ -824,6 +916,7 @@ void inline slurm_free_srun_job_complete_msg(srun_job_complete_msg_t * msg);
 void inline slurm_free_srun_exec_msg(srun_exec_msg_t *msg);
 void inline slurm_free_srun_ping_msg(srun_ping_msg_t * msg);
 void inline slurm_free_srun_node_fail_msg(srun_node_fail_msg_t * msg);
+void inline slurm_free_srun_step_missing_msg(srun_step_missing_msg_t * msg);
 void inline slurm_free_srun_timeout_msg(srun_timeout_msg_t * msg);
 void inline slurm_free_srun_user_msg(srun_user_msg_t * msg);
 void inline slurm_free_checkpoint_msg(checkpoint_msg_t *msg);
@@ -864,6 +957,11 @@ extern char *job_state_string_compact(enum job_states inx);
 extern char *node_state_string(enum node_states inx);
 extern char *node_state_string_compact(enum node_states inx);
 extern void  private_data_string(uint16_t private_data, char *str, int str_len);
+extern void  accounting_enforce_string(uint16_t enforce,
+				       char *str, int str_len);
+
+/* user needs to xfree after */
+extern char *reservation_flags_string(uint16_t flags);
 
 #define safe_read(fd, buf, size) do {					\
 		int remaining = size;					\

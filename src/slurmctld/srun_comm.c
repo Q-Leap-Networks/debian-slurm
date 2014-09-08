@@ -2,12 +2,14 @@
  *  srun_comm.c - srun communications
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -78,10 +80,12 @@ extern void srun_allocate (uint32_t job_id)
 	struct job_record *job_ptr = find_job_record (job_id);
 
 	xassert(job_ptr);
-	if (job_ptr && job_ptr->alloc_resp_port && job_ptr->alloc_node
-	&&  job_ptr->resp_host) {
+	if (job_ptr && job_ptr->alloc_resp_port && job_ptr->alloc_node &&
+	    job_ptr->resp_host && job_ptr->select_job && 
+	    job_ptr->select_job->cpu_array_cnt) {
 		slurm_addr * addr;
 		resource_allocation_response_msg_t *msg_arg;
+		select_job_res_t select_ptr = job_ptr->select_job;
 
 		addr = xmalloc(sizeof(struct sockaddr_in));
 		slurm_set_addr(addr, job_ptr->alloc_resp_port, 
@@ -89,15 +93,17 @@ extern void srun_allocate (uint32_t job_id)
 		msg_arg = xmalloc(sizeof(resource_allocation_response_msg_t));
 		msg_arg->job_id 	= job_ptr->job_id;
 		msg_arg->node_list	= xstrdup(job_ptr->nodes);
-		msg_arg->num_cpu_groups	= job_ptr->num_cpu_groups;
-		msg_arg->cpus_per_node  = xmalloc(sizeof(uint32_t) *
-				job_ptr->num_cpu_groups);
-		memcpy(msg_arg->cpus_per_node, job_ptr->cpus_per_node,
-				(sizeof(uint32_t) * job_ptr->num_cpu_groups));
+		msg_arg->num_cpu_groups	= select_ptr->cpu_array_cnt;
+		msg_arg->cpus_per_node  = xmalloc(sizeof(uint16_t) *
+					  select_ptr->cpu_array_cnt);
+		memcpy(msg_arg->cpus_per_node, 
+		       select_ptr->cpu_array_value,
+		       (sizeof(uint16_t) * select_ptr->cpu_array_cnt));
 		msg_arg->cpu_count_reps  = xmalloc(sizeof(uint32_t) *
-				job_ptr->num_cpu_groups);
-		memcpy(msg_arg->cpu_count_reps, job_ptr->cpu_count_reps,
-				(sizeof(uint32_t) * job_ptr->num_cpu_groups));
+					   select_ptr->cpu_array_cnt);
+		memcpy(msg_arg->cpu_count_reps, 
+		       select_ptr->cpu_array_reps,
+		       (sizeof(uint32_t) * select_ptr->cpu_array_cnt));
 		msg_arg->node_cnt	= job_ptr->node_cnt;
 		msg_arg->select_jobinfo = select_g_copy_jobinfo(
 				job_ptr->select_jobinfo);
@@ -342,6 +348,31 @@ extern void srun_step_complete (struct step_record *step_ptr)
 		msg_arg->job_id   = step_ptr->job_ptr->job_id;
 		msg_arg->step_id  = step_ptr->step_id;
 		_srun_agent_launch(addr, step_ptr->host, SRUN_JOB_COMPLETE,
+				   msg_arg);
+	}
+}
+
+/*
+ * srun_step_missing - notify srun that a job step is missing from
+ *		       a node we expect to find it on
+ * IN step_ptr  - pointer to the slurmctld job step record
+ * IN node_list - name of nodes we did not find the step on
+ */
+extern void srun_step_missing (struct step_record *step_ptr,
+			       char *node_list)
+{
+	slurm_addr * addr;
+	srun_step_missing_msg_t *msg_arg;
+
+	xassert(step_ptr);
+	if (step_ptr->port && step_ptr->host && step_ptr->host[0]) {
+		addr = xmalloc(sizeof(struct sockaddr_in));
+		slurm_set_addr(addr, step_ptr->port, step_ptr->host);
+		msg_arg = xmalloc(sizeof(srun_step_missing_msg_t));
+		msg_arg->job_id   = step_ptr->job_ptr->job_id;
+		msg_arg->step_id  = step_ptr->step_id;
+		msg_arg->nodelist = xstrdup(node_list);
+		_srun_agent_launch(addr, step_ptr->host, SRUN_STEP_MISSING,
 				   msg_arg);
 	}
 }

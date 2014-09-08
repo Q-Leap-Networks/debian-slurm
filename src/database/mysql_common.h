@@ -7,7 +7,8 @@
  *  Written by Danny Auble <da@llnl.gov>
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -55,10 +56,6 @@
 #include <slurm/slurm_errno.h>
 #include "src/common/list.h"
 #include "src/common/xstring.h"
-
-#ifndef HAVE_MYSQL
-typedef void mysql_conn_t;
-#else
 #include <mysql.h>
 #include <mysqld_error.h>
 
@@ -70,6 +67,7 @@ typedef struct {
 } mysql_conn_t;
 
 typedef struct {
+	char *backup;	
 	uint32_t port;	
 	char *host;	
 	char *user;	
@@ -89,6 +87,7 @@ extern int mysql_get_db_connection(MYSQL **mysql_db, char *db_name,
 				   mysql_db_info_t *db_info);
 extern int mysql_close_db_connection(MYSQL **mysql_db);
 extern int mysql_cleanup();
+extern int mysql_clear_results(MYSQL *mysql_db);
 extern int mysql_db_query(MYSQL *mysql_db, char *query);
 extern int mysql_db_ping(MYSQL *mysql_db);
 extern int mysql_db_commit(MYSQL *mysql_db);
@@ -102,7 +101,5 @@ extern int mysql_insert_ret_id(MYSQL *mysql_db, char *query);
 extern int mysql_db_create_table(MYSQL *mysql_db, char *table_name,
 				 storage_field_t *fields, char *ending);
 
-
-#endif
 
 #endif

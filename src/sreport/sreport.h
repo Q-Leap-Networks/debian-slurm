@@ -5,10 +5,11 @@
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -152,6 +153,8 @@ extern int sort_cluster_dec(sreport_cluster_rec_t *cluster_a,
 			    sreport_cluster_rec_t *cluster_b);
 extern int sort_assoc_dec(sreport_assoc_rec_t *assoc_a,
 			  sreport_assoc_rec_t *assoc_b);
+extern int sort_reservations_dec(acct_reservation_rec_t *resv_a, 
+				 acct_reservation_rec_t *resv_b);
 
 extern int get_uint(char *in_value, uint32_t *out_value, char *type);
 

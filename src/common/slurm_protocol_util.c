@@ -4,10 +4,11 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov> et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -44,6 +45,7 @@
 #include "src/common/slurm_protocol_util.h"
 #include "src/common/log.h"
 #include "src/common/xmalloc.h"
+#include "src/slurmdbd/read_config.h"
 
 /* 
  * check_header_version checks to see that the specified header was sent 
@@ -53,7 +55,11 @@
  */
 int check_header_version(header_t * header)
 {
-	if (header->version != SLURM_PROTOCOL_VERSION)
+	if(slurmdbd_conf) {
+		if (header->version != SLURM_PROTOCOL_VERSION
+		    && header->version != SLURM_1_3_PROTOCOL_VERSION)
+			slurm_seterrno_ret(SLURM_PROTOCOL_VERSION_ERROR);
+	} else if (header->version != SLURM_PROTOCOL_VERSION)
 		slurm_seterrno_ret(SLURM_PROTOCOL_VERSION_ERROR);
 
 	return SLURM_PROTOCOL_SUCCESS;
@@ -70,7 +76,20 @@ void init_header(header_t *header, slurm_msg_t *msg,
 		 uint16_t flags)
 {
 	memset(header, 0, sizeof(header));
-	header->version = SLURM_PROTOCOL_VERSION;
+	/* Since the slurmdbd could talk to a host of different
+	   versions of slurm this needs to be kept current when the
+	   protocol version changes. */
+	if(msg->msg_type == ACCOUNTING_UPDATE_MSG
+	   || msg->msg_type == ACCOUNTING_FIRST_REG) {
+		uint32_t rpc_version =
+			((accounting_update_msg_t *)msg->data)->rpc_version;
+		if(rpc_version < 5)
+			header->version = SLURM_1_3_PROTOCOL_VERSION;
+		else if(rpc_version >= 5)
+			header->version = SLURM_PROTOCOL_VERSION;
+	} else 
+		header->version = SLURM_PROTOCOL_VERSION;
+	
 	header->flags = flags;
 	header->msg_type = msg->msg_type;
 	header->body_length = 0;	/* over-written later */

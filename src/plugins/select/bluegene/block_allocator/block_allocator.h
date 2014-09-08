@@ -7,7 +7,8 @@
  *  Written by Dan Phung <phung4@llnl.gov>, Danny Auble <da@llnl.gov>
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -272,6 +273,7 @@ extern int DIM_SIZE[BA_SYSTEM_DIMENSIONS]; /* how many midplanes in
 extern s_p_options_t bg_conf_file_options[]; /* used to parse the
 					      * bluegene.conf file. */
 extern uint16_t ba_deny_pass;
+extern ba_system_t *ba_system_ptr;
 
 /* Translate a state enum to a readable string */
 extern char *bg_block_state_string(rm_partition_state_t state);
@@ -314,13 +316,9 @@ extern void destroy_ba_node(void *ptr);
  * IN/OUT - geometry: requested/returned geometry of block
  * IN - linuximage: LinuxImage for this block if not default
  * IN - mloaderimage: MLoaderImage for this block if not default
- * IN - nodecards: Number of nodecards in each block in request only
- *      used of small block allocations.
  * OUT - passthroughs: if there were passthroughs used in the
  *       generation of the block.
  * IN - procs: Number of real processors requested
- * IN - quarters: Number of midplane quarters in each block in request only
- *      used of small block allocations.
  * IN - RamDiskimage: RamDiskImage for this block if not default
  * IN - rotate: if true, allows rotation of block during fit
  * OUT - save_name: hostlist of midplanes used in block

@@ -4,10 +4,11 @@
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -55,7 +56,7 @@ extern void pack_slurmd_conf_lite(slurmd_conf_t *conf, Buf buffer)
 	pack32(conf->daemonize, buffer);
 	pack32((uint32_t)conf->slurm_user_id, buffer);
 	pack16(conf->use_pam, buffer);
-	pack16(conf->use_cpusets, buffer);
+	pack16(conf->task_plugin_param, buffer);
 }
 
 extern int unpack_slurmd_conf_lite_no_alloc(slurmd_conf_t *conf, Buf buffer)
@@ -80,7 +81,7 @@ extern int unpack_slurmd_conf_lite_no_alloc(slurmd_conf_t *conf, Buf buffer)
 	safe_unpack32(&uint32_tmp, buffer);
 	conf->slurm_user_id = (uid_t)uint32_tmp;
 	safe_unpack16(&conf->use_pam, buffer);
-	safe_unpack16(&conf->use_cpusets, buffer);
+	safe_unpack16(&conf->task_plugin_param, buffer);
 	return SLURM_SUCCESS;
 
 unpack_error:

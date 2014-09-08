@@ -4,10 +4,11 @@
  *****************************************************************************
  *  Copyright (C) 2006 Hewlett-Packard Development Company, L.P.
  *  Written by Susanne M. Balle, <susanne.balle@hp.com>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -66,7 +67,15 @@ int slurm_get_avail_procs(const uint16_t mxsockets,
 			  const select_type_plugin_info_t cr_type,
 			  uint32_t job_id, char *name);
 
+void slurm_print_cpu_bind_help(void);
+void slurm_print_mem_bind_help(void);
+
 void slurm_sprint_cpu_bind_type(char *str, cpu_bind_type_t cpu_bind_type);
 void slurm_sprint_mem_bind_type(char *str, mem_bind_type_t mem_bind_type);
+
+int slurm_verify_cpu_bind(const char *arg, char **cpu_bind, 
+			  cpu_bind_type_t *flags);
+int slurm_verify_mem_bind(const char *arg, char **mem_bind, 
+			  mem_bind_type_t *flags);
 
 #endif /* !_RES_INFO_H */

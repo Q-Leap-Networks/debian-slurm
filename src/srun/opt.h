@@ -1,14 +1,16 @@
 /*****************************************************************************\
  *  opt.h - definitions for srun option processing
- *  $Id: opt.h 15808 2008-12-02 23:38:47Z da $
+ *  $Id: opt.h 16867 2009-03-12 16:35:42Z jette $
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona1@llnl.gov>, et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -111,8 +113,9 @@ typedef struct srun_options {
 	char *time_limit_str;	/* --time,   -t (string)	*/
 	int  ckpt_interval;	/* --checkpoint (int minutes)	*/
 	char *ckpt_interval_str;/* --checkpoint (string)	*/
-	char *ckpt_path;	/* --checkpoint-path (string)   */
+	char *ckpt_dir;  	/* --checkpoint-dir (string)   */
 	bool exclusive;		/* --exclusive			*/
+	int  resv_port_cnt;	/* --resv_ports			*/
 	char *partition;	/* --partition=n,   -p n   	*/
 	enum task_dist_states
 	        distribution;	/* --distribution=, -m dist	*/
@@ -165,6 +168,7 @@ typedef struct srun_options {
 	char *task_epilog;	/* --task-epilog=		*/
 	char *task_prolog;	/* --task-prolog=		*/
 	char *licenses;		/* --licenses, -L		*/
+	bool preserve_env;	/* --preserve-env		*/
 
 	/* constraint options */
 	int32_t job_min_cpus;	/* --mincpus=n			*/
@@ -203,13 +207,14 @@ typedef struct srun_options {
 	time_t begin;		/* --begin			*/
 	uint16_t mail_type;	/* --mail-type			*/
 	char *mail_user;	/* --mail-user			*/
-	char *ctrl_comm_ifhn;	/* --ctrl-comm-ifhn		*/
 	uint8_t open_mode;	/* --open-mode=append|truncate	*/
 	int acctg_freq;		/* --acctg-freq=secs		*/
 	bool pty;		/* --pty			*/
+	char *restart_dir;	/* --restart                    */
 	int argc;		/* length of argv array		*/
 	char **argv;		/* left over on command line	*/
 	char *wckey;            /* --wckey workload characterization key */
+	char *reservation;      /* --reservation		*/
 } opt_t;
 
 extern opt_t opt;

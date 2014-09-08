@@ -1,15 +1,17 @@
 /*****************************************************************************\
  *  job_step_info.c - get/print the job step state information of slurm
- *  $Id: job_step_info.c 13672 2008-03-19 23:10:58Z jette $
+ *  $Id: job_step_info.c 16867 2009-03-12 16:35:42Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>, 
  *             Joey Ekstrom <ekstrom1@llnl.gov>,  et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -128,10 +130,9 @@ slurm_sprint_job_step_info ( job_step_info_t * job_step_ptr,
 
 	/****** Line 2 ******/
 	snprintf(tmp_line, sizeof(tmp_line),
-		"Partition=%s Nodes=%s Name=%s Network=%s Checkpoint=%u", 
+		"Partition=%s Nodes=%s Name=%s Network=%s", 
 		job_step_ptr->partition, job_step_ptr->nodes,
-		job_step_ptr->name, job_step_ptr->network,
-		job_step_ptr->ckpt_interval);
+		job_step_ptr->name, job_step_ptr->network);
 	xstrcat(out, tmp_line);
 	if (one_liner)
 		xstrcat(out, " ");
@@ -140,8 +141,9 @@ slurm_sprint_job_step_info ( job_step_info_t * job_step_ptr,
 
 	/****** Line 3 ******/
 	snprintf(tmp_line, sizeof(tmp_line),
-		"CheckpointPath=%s\n\n", 
-		 job_step_ptr->ckpt_path);
+		"ResvPorts=%s Checkpoint=%u CheckpointDir=%s\n\n", 
+		 job_step_ptr->resv_ports,
+		 job_step_ptr->ckpt_interval, job_step_ptr->ckpt_dir);
 	xstrcat(out, tmp_line);
 
 	return out;

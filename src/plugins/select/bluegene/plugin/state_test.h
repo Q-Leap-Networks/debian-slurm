@@ -1,13 +1,14 @@
 /*****************************************************************************\
  *  state_test.h - header for Blue Gene node and switch state test. 
- *  $Id: state_test.h 17102 2009-03-31 23:23:01Z da $
+ *  $Id: state_test.h 17121 2009-04-02 18:55:59Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Dan Phung <phung4@llnl.gov> et. al.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free

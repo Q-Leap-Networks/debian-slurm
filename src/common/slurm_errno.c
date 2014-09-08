@@ -1,13 +1,15 @@
 /*****************************************************************************\
  *  slurm_errno.c - error codes and functions for slurm
  ******************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jim Garlick <garlick@llnl.gov>, et. al.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -220,9 +222,28 @@ static slurm_errtab_t slurm_errtab[] = {
 	  "The node configuration changes that were made require restart "
 	  "of the slurmctld daemon to take effect"},
 	{ ESLURM_ACCOUNTING_POLICY,
-	  "Job violates accounting policy (job submit limit, the user's size and/or time limits)"},
+	  "Job violates accounting policy (job submit limit, the user's "
+	  "size and/or time limits)"},
 	{ ESLURM_INVALID_TIME_LIMIT,
 	  "Requested time limit exceeds partition limit"	},
+	{ ESLURM_RESERVATION_ACCESS,
+	  "Access denied to requested reservation"		},
+	{ ESLURM_RESERVATION_INVALID,
+	  "Requested reservation is invalid"			},
+	{ ESLURM_INVALID_TIME_VALUE,
+	  "Invalid time specified"				},
+	{ ESLURM_RESERVATION_BUSY, 
+	  "Requested reservation is in use"			},
+	{ ESLURM_RESERVATION_NOT_USABLE, 
+	  "Requested reservation not usable now"		},
+	{ ESLURM_RESERVATION_OVERLAP, 
+	  "Requested reservation overlaps with another reservation"	},
+	{ ESLURM_PORTS_BUSY,
+	  "Requires ports are in use"				},
+	{ ESLURM_PORTS_INVALID,
+	  "Requires more ports than can be reserved"		},
+	{ ESLURM_PROLOG_RUNNING,
+	  "SlurmctldProlog is still running"			},
 
 	/* slurmd error codes */
 

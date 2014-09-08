@@ -4,10 +4,11 @@
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -49,39 +50,35 @@ int _do_stat(uint32_t jobid, uint32_t stepid);
  * Globals
  */
 sstat_parameters_t params;
-fields_t fields[] = {{"cputime", print_cputime}, 
-		     {"jobid", print_jobid}, 
-		     {"ntasks", print_ntasks}, 
-		     {"pages", print_pages}, 
-		     {"rss", print_rss},
-		     {"state", print_state}, 
-		     {"vsize", print_vsize}, 
-		     {NULL, NULL}};
+print_field_t fields[] = {
+	{10, "AveCPU", print_fields_str, PRINT_AVECPU}, 
+	{10, "AvePages", print_fields_str, PRINT_AVEPAGES}, 
+	{10, "AveRSS", print_fields_str, PRINT_AVERSS}, 
+	{10, "AveVMSize", print_fields_str, PRINT_AVEVSIZE}, 
+	{10, "JobID", print_fields_str, PRINT_JOBID}, 
+	{8, "MaxPages", print_fields_str, PRINT_MAXPAGES}, 
+	{12, "MaxPagesNode", print_fields_str, PRINT_MAXPAGESNODE}, 
+	{14, "MaxPagesTask", print_fields_int, PRINT_MAXPAGESTASK}, 
+	{10, "MaxRSS", print_fields_str, PRINT_MAXRSS},
+	{10, "MaxRSSNode", print_fields_str, PRINT_MAXRSSNODE},
+	{10, "MaxRSSTask", print_fields_int, PRINT_MAXRSSTASK},
+	{10, "MaxVMSize", print_fields_str, PRINT_MAXVSIZE}, 
+	{14, "MaxVMSizeNode", print_fields_str, PRINT_MAXVSIZENODE}, 
+	{14, "MaxVMSizeTask", print_fields_int, PRINT_MAXVSIZETASK}, 
+	{10, "MinCPU", print_fields_str, PRINT_MINCPU}, 
+	{10, "MinCPUNode", print_fields_str, PRINT_MINCPUNODE}, 
+	{10, "MinCPUTask", print_fields_int, PRINT_MINCPUTASK}, 
+	{8, "NTasks", print_fields_int, PRINT_NTASKS},
+	{10, "SystemCPU", print_fields_str, PRINT_SYSTEMCPU}, 
+	{10, "TotalCPU", print_fields_str, PRINT_TOTALCPU}, 
+	{0, NULL, NULL, 0}};
 
 List jobs = NULL;
+jobacct_job_rec_t job;
 jobacct_step_rec_t step;
-
-int printfields[MAX_PRINTFIELDS],	/* Indexed into fields[] */
-	nprintfields = 0;
-
-void _print_header(void)
-{
-	int	i,j;
-	for (i=0; i<nprintfields; i++) {
-		if (i)
-			printf(" ");
-		j=printfields[i];
-		(fields[j].print_routine)(HEADLINE, 0);
-	}
-	printf("\n");
-	for (i=0; i<nprintfields; i++) {
-		if (i)
-			printf(" ");
-		j=printfields[i];
-		(fields[j].print_routine)(UNDERSCORE, 0);
-	}
-	printf("\n");
-}
+List print_fields_list = NULL;
+ListIterator print_fields_itr = NULL;
+int field_count = 0;
 
 int _sstat_query(slurm_step_layout_t *step_layout, uint32_t job_id,
 		 uint32_t step_id)
@@ -99,12 +96,17 @@ int _sstat_query(slurm_step_layout_t *step_layout, uint32_t job_id,
 	debug("getting the stat of job %d on %d nodes", 
 	      job_id, step_layout->node_cnt);
 
+	memset(&job, 0, sizeof(jobacct_job_rec_t));
+	job.jobid = job_id;
+
+	memset(&step, 0, sizeof(jobacct_step_rec_t));
+	
 	memset(&temp_sacct, 0, sizeof(sacct_t));
 	temp_sacct.min_cpu = (float)NO_VAL;
 	memset(&step.sacct, 0, sizeof(sacct_t));
 	step.sacct.min_cpu = (float)NO_VAL;
 
-	step.jobid = job_id;
+	step.job_ptr = &job;
 	step.stepid = step_id;
 	step.nodes = step_layout->node_list;
 	step.stepname = NULL;
@@ -166,14 +168,9 @@ cleanup:
 		step.sacct.ave_rss /= tot_tasks;
 		step.sacct.ave_vsize /= tot_tasks;
 		step.sacct.ave_pages /= tot_tasks;
+		step.ntasks = tot_tasks;
 	}
 	jobacct_gather_g_destroy(r.jobacct);	
-	return SLURM_SUCCESS;
-}
-
-int _process_results()
-{
-	print_fields(JOBSTEP, &step);
 	return SLURM_SUCCESS;
 }
 
@@ -219,7 +216,7 @@ int _do_stat(uint32_t jobid, uint32_t stepid)
 
 	_sstat_query(step_layout, jobid, stepid);
 	
-	_process_results();
+	print_fields(&step);
 	
 	slurm_step_layout_destroy(step_layout);	
 	
@@ -232,14 +229,16 @@ int main(int argc, char **argv)
 	uint32_t stepid = 0;
 	jobacct_selected_step_t *selected_step = NULL;
 	
+	print_fields_list = list_create(NULL);
+	print_fields_itr = list_iterator_create(print_fields_list);
+
 	parse_command_line(argc, argv);
 	if(!params.opt_job_list || !list_count(params.opt_job_list)) {
 		error("You didn't give me any jobs to stat.");
 		return 1;
 	}
 
-	if (!params.opt_noheader) 	/* give them something to look */
-		_print_header();/* at while we think...        */
+	print_fields_header(print_fields_list);
 	itr = list_iterator_create(params.opt_job_list);
 	while((selected_step = list_next(itr))) {
 		if(selected_step->stepid != NO_VAL)
@@ -265,8 +264,15 @@ int main(int argc, char **argv)
 		_do_stat(selected_step->jobid, stepid);
 	}
 	list_iterator_destroy(itr);
-		
-	list_destroy(params.opt_job_list);
+
+	xfree(params.opt_field_list);
+	if(params.opt_job_list)	
+		list_destroy(params.opt_job_list);
+
+	if(print_fields_itr)
+		list_iterator_destroy(print_fields_itr);
+	if(print_fields_list)
+		list_destroy(print_fields_list);
 
 	return 0;
 }

@@ -1,5 +1,5 @@
 ##*****************************************************************************
-## $Id: x_ac_aix.m4 11741 2007-06-20 18:42:19Z da $
+## $Id: x_ac_aix.m4 17515 2009-05-15 19:50:47Z da $
 ##*****************************************************************************
 #  AUTHOR:
 #    Morris Jette <jette@llnl.gov>
@@ -48,9 +48,9 @@ AC_DEFUN([X_AC_AIX],
          [ PROCTRACKDIR="$withval" ]
       )
       if test -f "$PROCTRACKDIR/lib/proctrackext.exp"; then
-         CPPFLAGS="-I$PROCTRACKDIR/include $CPPFLAGS"
          PROCTRACKDIR="$PROCTRACKDIR/lib"
          AC_SUBST(PROCTRACKDIR)
+         CPPFLAGS="-I$PROCTRACKDIR/include $CPPFLAGS"
          AC_CHECK_HEADERS(proctrack.h)
          ac_have_aix_proctrack="yes"
       elif test -f "$prefix/lib/proctrackext.exp"; then

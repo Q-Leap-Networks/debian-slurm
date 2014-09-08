@@ -1,14 +1,15 @@
 /*****************************************************************************\
  * src/slurmd/slurmstepd/slurmstepd.h - slurmstepd general header file
- * $Id: slurmstepd.h 13672 2008-03-19 23:10:58Z jette $
+ * $Id: slurmstepd.h 16867 2009-03-12 16:35:42Z jette $
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -62,5 +63,7 @@ typedef struct {
 } step_complete_t;
 
 extern step_complete_t step_complete;
+
+extern slurmd_conf_t *conf;
 
 #endif /* !_SLURMSTEPD_H */

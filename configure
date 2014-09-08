@@ -933,9 +933,13 @@ HAVE_GTK_FALSE
 HAVEMYSQLCONFIG
 MYSQL_LIBS
 MYSQL_CFLAGS
+WITH_MYSQL_TRUE
+WITH_MYSQL_FALSE
 HAVEPGCONFIG
 PGSQL_LIBS
 PGSQL_CFLAGS
+WITH_PGSQL_TRUE
+WITH_PGSQL_FALSE
 DEBUG_MODULES_TRUE
 DEBUG_MODULES_FALSE
 SLURMCTLD_PORT
@@ -969,6 +973,12 @@ AUTHD_CFLAGS
 WITH_AUTHD_TRUE
 WITH_AUTHD_FALSE
 UTIL_LIBS
+BLCR_HOME
+BLCR_LIBS
+BLCR_CPPFLAGS
+BLCR_LDFLAGS
+WITH_BLCR_TRUE
+WITH_BLCR_FALSE
 LTLIBOBJS'
 ac_subst_files=''
       ac_precious_vars='build_alias
@@ -1580,14 +1590,16 @@ Optional Features:
   --disable-libtool-lock  avoid locking (might break parallel builds)
   --enable-pam            enable PAM (Pluggable Authentication Modules)
                           support
+  --disable-iso8601       disable ISO 8601 time format support
+  --enable-load-env-no-login
+                          enable --get-user-env option to load user
+                          environment without .login
+  --enable-cray-xt        enable Cray XT system support
   --enable-sun-const      enable Sun Constellation system support
   --enable-debug          enable debugging code for development
   --enable-memory-leak-debug
                           enable memory leak debugging code for development
   --enable-front-end      enable slurmd operation on a front-end
-  --enable-load-env-no-login
-                          enable --get-user-env option to load user
-                          environment without login
   --enable-multiple-slurmd
                           enable multiple-slurmd support
 
@@ -1602,6 +1614,9 @@ Optional Packages:
   --with-pic              try to use only PIC/non-PIC objects [default=use
                           both]
   --with-tags[=TAGS]      include additional configurations [automatic]
+  --with-cpusetdir=PATH   specify path to cpuset directory default is
+                          /dev/cpuset
+  --with-apbasil=PATH     Specify path to apbasil command
   --with-xcpu=PATH        specify path to XCPU directory
   --with-pkg-config=PATH  Specify path to pkg-config binary
   --with-mysql_config=PATH
@@ -1613,6 +1628,7 @@ Optional Packages:
   --without-readline      compile without readline support
   --with-ssl=PATH         Specify path to OpenSSL installation
   --with-munge=PATH       Specify path to munge installation
+  --with-blcr=PATH        Specify path to BLCR installation
 
 Some influential environment variables:
   CC          C compiler command
@@ -5001,9 +5017,9 @@ if test "${with_proctrack+set}" = set; then
 fi
 
       if test -f "$PROCTRACKDIR/lib/proctrackext.exp"; then
-         CPPFLAGS="-I$PROCTRACKDIR/include $CPPFLAGS"
          PROCTRACKDIR="$PROCTRACKDIR/lib"
 
+         CPPFLAGS="-I$PROCTRACKDIR/include $CPPFLAGS"
 
 for ac_header in proctrack.h
 do
@@ -7524,7 +7540,7 @@ ia64-*-hpux*)
   ;;
 *-*-irix6*)
   # Find out which ABI we are using.
-  echo '#line 7527 "configure"' > conftest.$ac_ext
+  echo '#line 7543 "configure"' > conftest.$ac_ext
   if { (eval echo "$as_me:$LINENO: \"$ac_compile\"") >&5
   (eval $ac_compile) 2>&5
   ac_status=$?
@@ -9630,11 +9646,11 @@ else
    -e 's:.*FLAGS}\{0,1\} :&$lt_compiler_flag :; t' \
    -e 's: [^ ]*conftest\.: $lt_compiler_flag&:; t' \
    -e 's:$: $lt_compiler_flag:'`
-   (eval echo "\"\$as_me:9633: $lt_compile\"" >&5)
+   (eval echo "\"\$as_me:9649: $lt_compile\"" >&5)
    (eval "$lt_compile" 2>conftest.err)
    ac_status=$?
    cat conftest.err >&5
-   echo "$as_me:9637: \$? = $ac_status" >&5
+   echo "$as_me:9653: \$? = $ac_status" >&5
    if (exit $ac_status) && test -s "$ac_outfile"; then
      # The compiler can only warn and ignore the option if not recognized
      # So say no if there are warnings other than the usual output.
@@ -9920,11 +9936,11 @@ else
    -e 's:.*FLAGS}\{0,1\} :&$lt_compiler_flag :; t' \
    -e 's: [^ ]*conftest\.: $lt_compiler_flag&:; t' \
    -e 's:$: $lt_compiler_flag:'`
-   (eval echo "\"\$as_me:9923: $lt_compile\"" >&5)
+   (eval echo "\"\$as_me:9939: $lt_compile\"" >&5)
    (eval "$lt_compile" 2>conftest.err)
    ac_status=$?
    cat conftest.err >&5
-   echo "$as_me:9927: \$? = $ac_status" >&5
+   echo "$as_me:9943: \$? = $ac_status" >&5
    if (exit $ac_status) && test -s "$ac_outfile"; then
      # The compiler can only warn and ignore the option if not recognized
      # So say no if there are warnings other than the usual output.
@@ -10024,11 +10040,11 @@ else
    -e 's:.*FLAGS}\{0,1\} :&$lt_compiler_flag :; t' \
    -e 's: [^ ]*conftest\.: $lt_compiler_flag&:; t' \
    -e 's:$: $lt_compiler_flag:'`
-   (eval echo "\"\$as_me:10027: $lt_compile\"" >&5)
+   (eval echo "\"\$as_me:10043: $lt_compile\"" >&5)
    (eval "$lt_compile" 2>out/conftest.err)
    ac_status=$?
    cat out/conftest.err >&5
-   echo "$as_me:10031: \$? = $ac_status" >&5
+   echo "$as_me:10047: \$? = $ac_status" >&5
    if (exit $ac_status) && test -s out/conftest2.$ac_objext
    then
      # The compiler can only warn and ignore the option if not recognized
@@ -12401,7 +12417,7 @@ else
   lt_dlunknown=0; lt_dlno_uscore=1; lt_dlneed_uscore=2
   lt_status=$lt_dlunknown
   cat > conftest.$ac_ext <<EOF
-#line 12404 "configure"
+#line 12420 "configure"
 #include "confdefs.h"
 
 #if HAVE_DLFCN_H
@@ -12501,7 +12517,7 @@ else
   lt_dlunknown=0; lt_dlno_uscore=1; lt_dlneed_uscore=2
   lt_status=$lt_dlunknown
   cat > conftest.$ac_ext <<EOF
-#line 12504 "configure"
+#line 12520 "configure"
 #include "confdefs.h"
 
 #if HAVE_DLFCN_H
@@ -14902,11 +14918,11 @@ else
    -e 's:.*FLAGS}\{0,1\} :&$lt_compiler_flag :; t' \
    -e 's: [^ ]*conftest\.: $lt_compiler_flag&:; t' \
    -e 's:$: $lt_compiler_flag:'`
-   (eval echo "\"\$as_me:14905: $lt_compile\"" >&5)
+   (eval echo "\"\$as_me:14921: $lt_compile\"" >&5)
    (eval "$lt_compile" 2>conftest.err)
    ac_status=$?
    cat conftest.err >&5
-   echo "$as_me:14909: \$? = $ac_status" >&5
+   echo "$as_me:14925: \$? = $ac_status" >&5
    if (exit $ac_status) && test -s "$ac_outfile"; then
      # The compiler can only warn and ignore the option if not recognized
      # So say no if there are warnings other than the usual output.
@@ -15006,11 +15022,11 @@ else
    -e 's:.*FLAGS}\{0,1\} :&$lt_compiler_flag :; t' \
    -e 's: [^ ]*conftest\.: $lt_compiler_flag&:; t' \
    -e 's:$: $lt_compiler_flag:'`
-   (eval echo "\"\$as_me:15009: $lt_compile\"" >&5)
+   (eval echo "\"\$as_me:15025: $lt_compile\"" >&5)
    (eval "$lt_compile" 2>out/conftest.err)
    ac_status=$?
    cat out/conftest.err >&5
-   echo "$as_me:15013: \$? = $ac_status" >&5
+   echo "$as_me:15029: \$? = $ac_status" >&5
    if (exit $ac_status) && test -s out/conftest2.$ac_objext
    then
      # The compiler can only warn and ignore the option if not recognized
@@ -16604,11 +16620,11 @@ else
    -e 's:.*FLAGS}\{0,1\} :&$lt_compiler_flag :; t' \
    -e 's: [^ ]*conftest\.: $lt_compiler_flag&:; t' \
    -e 's:$: $lt_compiler_flag:'`
-   (eval echo "\"\$as_me:16607: $lt_compile\"" >&5)
+   (eval echo "\"\$as_me:16623: $lt_compile\"" >&5)
    (eval "$lt_compile" 2>conftest.err)
    ac_status=$?
    cat conftest.err >&5
-   echo "$as_me:16611: \$? = $ac_status" >&5
+   echo "$as_me:16627: \$? = $ac_status" >&5
    if (exit $ac_status) && test -s "$ac_outfile"; then
      # The compiler can only warn and ignore the option if not recognized
      # So say no if there are warnings other than the usual output.
@@ -16708,11 +16724,11 @@ else
    -e 's:.*FLAGS}\{0,1\} :&$lt_compiler_flag :; t' \
    -e 's: [^ ]*conftest\.: $lt_compiler_flag&:; t' \
    -e 's:$: $lt_compiler_flag:'`
-   (eval echo "\"\$as_me:16711: $lt_compile\"" >&5)
+   (eval echo "\"\$as_me:16727: $lt_compile\"" >&5)
    (eval "$lt_compile" 2>out/conftest.err)
    ac_status=$?
    cat out/conftest.err >&5
-   echo "$as_me:16715: \$? = $ac_status" >&5
+   echo "$as_me:16731: \$? = $ac_status" >&5
    if (exit $ac_status) && test -s out/conftest2.$ac_objext
    then
      # The compiler can only warn and ignore the option if not recognized
@@ -18928,11 +18944,11 @@ else
    -e 's:.*FLAGS}\{0,1\} :&$lt_compiler_flag :; t' \
    -e 's: [^ ]*conftest\.: $lt_compiler_flag&:; t' \
    -e 's:$: $lt_compiler_flag:'`
-   (eval echo "\"\$as_me:18931: $lt_compile\"" >&5)
+   (eval echo "\"\$as_me:18947: $lt_compile\"" >&5)
    (eval "$lt_compile" 2>conftest.err)
    ac_status=$?
    cat conftest.err >&5
-   echo "$as_me:18935: \$? = $ac_status" >&5
+   echo "$as_me:18951: \$? = $ac_status" >&5
    if (exit $ac_status) && test -s "$ac_outfile"; then
      # The compiler can only warn and ignore the option if not recognized
      # So say no if there are warnings other than the usual output.
@@ -19218,11 +19234,11 @@ else
    -e 's:.*FLAGS}\{0,1\} :&$lt_compiler_flag :; t' \
    -e 's: [^ ]*conftest\.: $lt_compiler_flag&:; t' \
    -e 's:$: $lt_compiler_flag:'`
-   (eval echo "\"\$as_me:19221: $lt_compile\"" >&5)
+   (eval echo "\"\$as_me:19237: $lt_compile\"" >&5)
    (eval "$lt_compile" 2>conftest.err)
    ac_status=$?
    cat conftest.err >&5
-   echo "$as_me:19225: \$? = $ac_status" >&5
+   echo "$as_me:19241: \$? = $ac_status" >&5
    if (exit $ac_status) && test -s "$ac_outfile"; then
      # The compiler can only warn and ignore the option if not recognized
      # So say no if there are warnings other than the usual output.
@@ -19322,11 +19338,11 @@ else
    -e 's:.*FLAGS}\{0,1\} :&$lt_compiler_flag :; t' \
    -e 's: [^ ]*conftest\.: $lt_compiler_flag&:; t' \
    -e 's:$: $lt_compiler_flag:'`
-   (eval echo "\"\$as_me:19325: $lt_compile\"" >&5)
+   (eval echo "\"\$as_me:19341: $lt_compile\"" >&5)
    (eval "$lt_compile" 2>out/conftest.err)
    ac_status=$?
    cat out/conftest.err >&5
-   echo "$as_me:19329: \$? = $ac_status" >&5
+   echo "$as_me:19345: \$? = $ac_status" >&5
    if (exit $ac_status) && test -s out/conftest2.$ac_objext
    then
      # The compiler can only warn and ignore the option if not recognized
@@ -23173,16 +23189,26 @@ echo "$as_me: WARNING: Unable to locate PLPA processor affinity functions" >&2;}
   fi
 
 #
-# Test for cpusets
+# Test for cpuset directory
 #
-  if test -d "/dev/cpuset" ; then
-     have_sched_setaffinity=yes
-  fi
+  cpuset_default_dir="/dev/cpuset"
 
-#
-# Test for other affinity functions as appropriate
-# TBD
-#
+# Check whether --with-cpusetdir was given.
+if test "${with_cpusetdir+set}" = set; then
+  withval=$with_cpusetdir; try_path=$withval
+fi
+
+  for cpuset_dir in $try_path "" $cpuset_default_dir; do
+    if test -d "$cpuset_dir" ; then
+
+cat >>confdefs.h <<_ACEOF
+#define CPUSET_DIR "$cpuset_dir"
+_ACEOF
+
+      have_sched_setaffinity=yes
+      break
+    fi
+  done
 
 #
 # Set HAVE_SCHED_SETAFFINITY if any task affinity supported
@@ -23377,6 +23403,76 @@ else
 fi
 
 
+
+
+
+  { echo "$as_me:$LINENO: checking whether to enable ISO 8601 time format support" >&5
+echo $ECHO_N "checking whether to enable ISO 8601 time format support... $ECHO_C" >&6; }
+  # Check whether --enable-iso8601 was given.
+if test "${enable_iso8601+set}" = set; then
+  enableval=$enable_iso8601;  case "$enableval" in
+        yes) x_ac_iso8601=yes ;;
+         no) x_ac_iso8601=no ;;
+          *) { echo "$as_me:$LINENO: result: doh!" >&5
+echo "${ECHO_T}doh!" >&6; }
+             { { echo "$as_me:$LINENO: error: bad value \"$enableval\" for --enable-iso8601" >&5
+echo "$as_me: error: bad value \"$enableval\" for --enable-iso8601" >&2;}
+   { (exit 1); exit 1; }; } ;;
+      esac
+
+else
+  x_ac_iso8601=yes
+
+fi
+
+
+  if test "$x_ac_iso8601" = yes; then
+    { echo "$as_me:$LINENO: result: yes" >&5
+echo "${ECHO_T}yes" >&6; }
+
+cat >>confdefs.h <<\_ACEOF
+#define USE_ISO_8601
+_ACEOF
+
+  else
+    { echo "$as_me:$LINENO: result: no" >&5
+echo "${ECHO_T}no" >&6; }
+  fi
+
+
+
+  { echo "$as_me:$LINENO: checking whether sbatch --get-user-env option should load .login" >&5
+echo $ECHO_N "checking whether sbatch --get-user-env option should load .login... $ECHO_C" >&6; }
+  # Check whether --enable-load-env-no-login was given.
+if test "${enable_load_env_no_login+set}" = set; then
+  enableval=$enable_load_env_no_login;  case "$enableval" in
+        yes) x_ac_load_env_no_login=yes ;;
+         no) x_ac_load_env_no_login=no ;;
+          *) { echo "$as_me:$LINENO: result: doh!" >&5
+echo "${ECHO_T}doh!" >&6; }
+             { { echo "$as_me:$LINENO: error: bad value \"$enableval\" for --enable-load-env-no-login" >&5
+echo "$as_me: error: bad value \"$enableval\" for --enable-load-env-no-login" >&2;}
+   { (exit 1); exit 1; }; } ;;
+      esac
+
+else
+  x_ac_load_env_no_login=no
+
+fi
+
+
+  if test "$x_ac_load_env_no_login" = yes; then
+    { echo "$as_me:$LINENO: result: yes" >&5
+echo "${ECHO_T}yes" >&6; }
+
+cat >>confdefs.h <<\_ACEOF
+#define LOAD_ENV_NO_LOGIN 1
+_ACEOF
+
+  else
+    { echo "$as_me:$LINENO: result: no" >&5
+echo "${ECHO_T}no" >&6; }
+  fi
 
 
 
@@ -25053,6 +25149,75 @@ CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
 LIBS="$PTHREAD_LIBS $LIBS"
 
 
+  { echo "$as_me:$LINENO: checking for Cray XT" >&5
+echo $ECHO_N "checking for Cray XT... $ECHO_C" >&6; }
+  # Check whether --enable-cray-xt was given.
+if test "${enable_cray_xt+set}" = set; then
+  enableval=$enable_cray_xt;  case "$enableval" in
+        yes) x_ac_cray_xt=yes ;;
+         no) x_ac_cray_xt=no ;;
+          *) { echo "$as_me:$LINENO: result: doh!" >&5
+echo "${ECHO_T}doh!" >&6; }
+             { { echo "$as_me:$LINENO: error: bad value \"$enableval\" for --enable-cray-xt" >&5
+echo "$as_me: error: bad value \"$enableval\" for --enable-cray-xt" >&2;}
+   { (exit 1); exit 1; }; } ;;
+      esac
+
+else
+  x_ac_cray_xt=no
+
+fi
+
+
+  if test "$x_ac_cray_xt" = yes; then
+    { echo "$as_me:$LINENO: result: yes" >&5
+echo "${ECHO_T}yes" >&6; }
+
+cat >>confdefs.h <<\_ACEOF
+#define HAVE_3D 1
+_ACEOF
+
+
+cat >>confdefs.h <<\_ACEOF
+#define HAVE_CRAY 1
+_ACEOF
+
+
+cat >>confdefs.h <<\_ACEOF
+#define HAVE_CRAY_XT 1
+_ACEOF
+
+
+cat >>confdefs.h <<\_ACEOF
+#define HAVE_FRONT_END 1
+_ACEOF
+
+  else
+    { echo "$as_me:$LINENO: result: no" >&5
+echo "${ECHO_T}no" >&6; }
+  fi
+
+
+# Check whether --with-apbasil was given.
+if test "${with_apbasil+set}" = set; then
+  withval=$with_apbasil;  try_apbasil=$withval
+fi
+
+  apbasil_default_locs="/usr/apbasil"
+  for apbasil_loc in $try_apbasil "" $apbasil_default_locs; do
+    if test -z "$have_apbasil" -a -x "$apbasil_loc" ; then
+      have_apbasil=$apbasil_loc
+    fi
+  done
+  if test ! -z "$have_apbasil" ; then
+
+cat >>confdefs.h <<_ACEOF
+#define APBASIL_LOC "$have_apbasil"
+_ACEOF
+
+  fi
+
+
   { echo "$as_me:$LINENO: checking for Sun Constellation system" >&5
 echo $ECHO_N "checking for Sun Constellation system... $ECHO_C" >&6; }
   # Check whether --enable-sun-const was given.
@@ -25443,7 +25608,6 @@ fi
     if test -d "/usr/lib64/pkgconfig"; then
 	    PKG_CONFIG_PATH="/usr/lib64/pkgconfig/"
     fi
-
 
 ### Check for pkg-config program
 
@@ -25930,6 +26094,13 @@ echo "$as_me: WARNING: *** MySQL test program execution failed." >&2;}
 			fi
 		fi
       	fi
+	 if test x"$ac_have_mysql" == x"yes"; then
+  WITH_MYSQL_TRUE=
+  WITH_MYSQL_FALSE='#'
+else
+  WITH_MYSQL_TRUE='#'
+  WITH_MYSQL_FALSE=
+fi
 
 
 	#Check for PostgreSQL
@@ -26111,6 +26282,15 @@ _ACEOF
 echo "$as_me: WARNING: *** PostgreSQL test program execution failed." >&2;}
 		fi
       	fi
+	 if test x"$ac_have_pgsql" == x"yes"; then
+  WITH_PGSQL_TRUE=
+  WITH_PGSQL_FALSE='#'
+else
+  WITH_PGSQL_TRUE='#'
+  WITH_PGSQL_FALSE=
+fi
+
+
 
 
 
@@ -26926,7 +27106,7 @@ fi
 
 rm -f core conftest.err conftest.$ac_objext conftest_ipa8_conftest.oo \
       conftest$ac_exeext conftest.$ac_ext
-    LIBS="$savedLIBS"
+    LIBS="$saved_LIBS"
   fi
 
 
@@ -27298,36 +27478,6 @@ fi
 
 
 
-{ echo "$as_me:$LINENO: checking if user env vars should be based upon login" >&5
-echo $ECHO_N "checking if user env vars should be based upon login... $ECHO_C" >&6; }
-# Check whether --enable-load-env-no-login was given.
-if test "${enable_load_env_no_login+set}" = set; then
-  enableval=$enable_load_env_no_login;  case "$enableval" in
-     yes) x_ac_load_env_no_login=yes ;;
-      no) x_ac_load_env_no_login=no ;;
-       *) { echo "$as_me:$LINENO: result: doh!" >&5
-echo "${ECHO_T}doh!" >&6; }
-          { { echo "$as_me:$LINENO: error: bad value \"$enableval\" for --enable-load-env-no-login" >&5
-echo "$as_me: error: bad value \"$enableval\" for --enable-load-env-no-login" >&2;}
-   { (exit 1); exit 1; }; } ;;
-   esac
-
-
-fi
-
-if test "$x_ac_load_env_no_login" = yes; then
-
-cat >>confdefs.h <<\_ACEOF
-#define LOAD_ENV_NO_LOGIN 1
-_ACEOF
-
-  { echo "$as_me:$LINENO: result: yes" >&5
-echo "${ECHO_T}yes" >&6; }
-else
-  { echo "$as_me:$LINENO: result: no" >&5
-echo "${ECHO_T}no" >&6; }
-fi
-
 { echo "$as_me:$LINENO: checking whether to enable multiple-slurmd support" >&5
 echo $ECHO_N "checking whether to enable multiple-slurmd support... $ECHO_C" >&6; }
 # Check whether --enable-multiple-slurmd was given.
@@ -27523,7 +27673,126 @@ _ACEOF
 
 
 
-ac_config_files="$ac_config_files Makefile config.xml auxdir/Makefile contribs/Makefile contribs/perlapi/Makefile contribs/perlapi/libslurm-perl/Makefile.PL contribs/torque/Makefile contribs/phpext/Makefile contribs/phpext/slurm_php/config.m4 contribs/python/Makefile contribs/python/hostlist/Makefile contribs/python/hostlist/test/Makefile contribs/slurmdb-direct/Makefile src/Makefile src/api/Makefile src/common/Makefile src/database/Makefile src/sacct/Makefile src/sacctmgr/Makefile src/sreport/Makefile src/sstat/Makefile src/salloc/Makefile src/sbatch/Makefile src/sattach/Makefile src/srun/Makefile src/slurmd/Makefile src/slurmd/slurmd/Makefile src/slurmd/slurmstepd/Makefile src/slurmdbd/Makefile src/slurmctld/Makefile src/sbcast/Makefile src/scontrol/Makefile src/scancel/Makefile src/squeue/Makefile src/sinfo/Makefile src/smap/Makefile src/strigger/Makefile src/sview/Makefile src/plugins/Makefile src/plugins/accounting_storage/Makefile src/plugins/accounting_storage/filetxt/Makefile src/plugins/accounting_storage/mysql/Makefile src/plugins/accounting_storage/pgsql/Makefile src/plugins/accounting_storage/none/Makefile src/plugins/accounting_storage/slurmdbd/Makefile src/plugins/auth/Makefile src/plugins/auth/authd/Makefile src/plugins/auth/munge/Makefile src/plugins/auth/none/Makefile src/plugins/checkpoint/Makefile src/plugins/checkpoint/aix/Makefile src/plugins/checkpoint/none/Makefile src/plugins/checkpoint/ompi/Makefile src/plugins/checkpoint/xlch/Makefile src/plugins/crypto/Makefile src/plugins/crypto/munge/Makefile src/plugins/crypto/openssl/Makefile src/plugins/jobacct_gather/Makefile src/plugins/jobacct_gather/linux/Makefile src/plugins/jobacct_gather/aix/Makefile src/plugins/jobacct_gather/none/Makefile src/plugins/jobcomp/Makefile src/plugins/jobcomp/filetxt/Makefile src/plugins/jobcomp/none/Makefile src/plugins/jobcomp/script/Makefile src/plugins/jobcomp/mysql/Makefile src/plugins/jobcomp/pgsql/Makefile src/plugins/proctrack/Makefile src/plugins/proctrack/aix/Makefile src/plugins/proctrack/pgid/Makefile src/plugins/proctrack/linuxproc/Makefile src/plugins/proctrack/rms/Makefile src/plugins/proctrack/sgi_job/Makefile src/plugins/sched/Makefile src/plugins/sched/backfill/Makefile src/plugins/sched/builtin/Makefile src/plugins/sched/gang/Makefile src/plugins/sched/hold/Makefile src/plugins/sched/wiki/Makefile src/plugins/sched/wiki2/Makefile src/plugins/select/Makefile src/plugins/select/bluegene/Makefile src/plugins/select/bluegene/block_allocator/Makefile src/plugins/select/bluegene/plugin/Makefile src/plugins/select/linear/Makefile src/plugins/select/cons_res/Makefile src/plugins/switch/Makefile src/plugins/switch/elan/Makefile src/plugins/switch/none/Makefile src/plugins/switch/federation/Makefile src/plugins/mpi/Makefile src/plugins/mpi/mpich1_p4/Makefile src/plugins/mpi/mpich1_shmem/Makefile src/plugins/mpi/mpichgm/Makefile src/plugins/mpi/mpichmx/Makefile src/plugins/mpi/mvapich/Makefile src/plugins/mpi/lam/Makefile src/plugins/mpi/none/Makefile src/plugins/mpi/openmpi/Makefile src/plugins/task/Makefile src/plugins/task/affinity/Makefile src/plugins/task/none/Makefile doc/Makefile doc/man/Makefile doc/html/Makefile doc/html/configurator.html testsuite/Makefile testsuite/expect/Makefile testsuite/slurm_unit/Makefile testsuite/slurm_unit/api/Makefile testsuite/slurm_unit/api/manual/Makefile testsuite/slurm_unit/common/Makefile testsuite/slurm_unit/slurmctld/Makefile testsuite/slurm_unit/slurmd/Makefile testsuite/slurm_unit/slurmdbd/Makefile"
+
+  _x_ac_blcr_dirs="/usr /usr/local /opt/freeware /opt/blcr"
+  _x_ac_blcr_libs="lib64 lib"
+
+
+# Check whether --with-blcr was given.
+if test "${with_blcr+set}" = set; then
+  withval=$with_blcr; _x_ac_blcr_dirs="$withval $_x_ac_blcr_dirs"
+fi
+
+
+  { echo "$as_me:$LINENO: checking for blcr installation" >&5
+echo $ECHO_N "checking for blcr installation... $ECHO_C" >&6; }
+if test "${x_ac_cv_blcr_dir+set}" = set; then
+  echo $ECHO_N "(cached) $ECHO_C" >&6
+else
+
+      for d in $_x_ac_blcr_dirs; do
+        test -d "$d" || continue
+        test -d "$d/include" || continue
+        test -f "$d/include/libcr.h" || continue
+	for bit in $_x_ac_blcr_libs; do
+          test -d "$d/$bit" || continue
+
+ 	  _x_ac_blcr_libs_save="$LIBS"
+          LIBS="-L$d/$bit -lcr $LIBS"
+          cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char cr_init ();
+int
+main ()
+{
+return cr_init ();
+  ;
+  return 0;
+}
+_ACEOF
+rm -f conftest.$ac_objext conftest$ac_exeext
+if { (ac_try="$ac_link"
+case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_link") 2>conftest.er1
+  ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } && {
+	 test -z "$ac_c_werror_flag" ||
+	 test ! -s conftest.err
+       } && test -s conftest$ac_exeext &&
+       $as_test_x conftest$ac_exeext; then
+  x_ac_cv_blcr_dir=$d
+else
+  echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+
+fi
+
+rm -f core conftest.err conftest.$ac_objext conftest_ipa8_conftest.oo \
+      conftest$ac_exeext conftest.$ac_ext
+          LIBS="$_x_ac_blcr_libs_save"
+          test -n "$x_ac_cv_blcr_dir" && break
+	done
+        test -n "$x_ac_cv_blcr_dir" && break
+      done
+
+fi
+{ echo "$as_me:$LINENO: result: $x_ac_cv_blcr_dir" >&5
+echo "${ECHO_T}$x_ac_cv_blcr_dir" >&6; }
+
+  if test -z "$x_ac_cv_blcr_dir"; then
+    { echo "$as_me:$LINENO: WARNING: unable to locate blcr installation" >&5
+echo "$as_me: WARNING: unable to locate blcr installation" >&2;}
+  else
+    BLCR_HOME="$x_ac_cv_blcr_dir"
+    BLCR_LIBS="-lcr"
+    BLCR_CPPFLAGS="-I$x_ac_cv_blcr_dir/include"
+    BLCR_LDFLAGS="-L$x_ac_cv_blcr_dir/$bit"
+  fi
+
+
+cat >>confdefs.h <<_ACEOF
+#define BLCR_HOME "$x_ac_cv_blcr_dir"
+_ACEOF
+
+
+
+
+
+
+
+   if test -n "$x_ac_cv_blcr_dir"; then
+  WITH_BLCR_TRUE=
+  WITH_BLCR_FALSE='#'
+else
+  WITH_BLCR_TRUE='#'
+  WITH_BLCR_FALSE=
+fi
+
+
+
+
+
+ac_config_files="$ac_config_files Makefile config.xml auxdir/Makefile contribs/Makefile contribs/perlapi/Makefile contribs/perlapi/libslurm-perl/Makefile.PL contribs/torque/Makefile contribs/phpext/Makefile contribs/phpext/slurm_php/config.m4 contribs/python/Makefile contribs/python/hostlist/Makefile contribs/python/hostlist/test/Makefile contribs/slurmdb-direct/Makefile src/Makefile src/api/Makefile src/common/Makefile src/database/Makefile src/sacct/Makefile src/sacctmgr/Makefile src/sreport/Makefile src/sstat/Makefile src/sshare/Makefile src/salloc/Makefile src/sbatch/Makefile src/sattach/Makefile src/sprio/Makefile src/srun/Makefile src/srun_cr/Makefile src/slurmd/Makefile src/slurmd/slurmd/Makefile src/slurmd/slurmstepd/Makefile src/slurmdbd/Makefile src/slurmctld/Makefile src/sbcast/Makefile src/scontrol/Makefile src/scancel/Makefile src/squeue/Makefile src/sinfo/Makefile src/smap/Makefile src/strigger/Makefile src/sview/Makefile src/plugins/Makefile src/plugins/accounting_storage/Makefile src/plugins/accounting_storage/filetxt/Makefile src/plugins/accounting_storage/mysql/Makefile src/plugins/accounting_storage/pgsql/Makefile src/plugins/accounting_storage/none/Makefile src/plugins/accounting_storage/slurmdbd/Makefile src/plugins/auth/Makefile src/plugins/auth/authd/Makefile src/plugins/auth/munge/Makefile src/plugins/auth/none/Makefile src/plugins/checkpoint/Makefile src/plugins/checkpoint/aix/Makefile src/plugins/checkpoint/none/Makefile src/plugins/checkpoint/ompi/Makefile src/plugins/checkpoint/xlch/Makefile src/plugins/checkpoint/blcr/Makefile src/plugins/checkpoint/blcr/cr_checkpoint.sh src/plugins/checkpoint/blcr/cr_restart.sh src/plugins/crypto/Makefile src/plugins/crypto/munge/Makefile src/plugins/crypto/openssl/Makefile src/plugins/jobacct_gather/Makefile src/plugins/jobacct_gather/linux/Makefile src/plugins/jobacct_gather/aix/Makefile src/plugins/jobacct_gather/none/Makefile src/plugins/jobcomp/Makefile src/plugins/jobcomp/filetxt/Makefile src/plugins/jobcomp/none/Makefile src/plugins/jobcomp/script/Makefile src/plugins/jobcomp/mysql/Makefile src/plugins/jobcomp/pgsql/Makefile src/plugins/priority/Makefile src/plugins/priority/basic/Makefile src/plugins/priority/multifactor/Makefile src/plugins/proctrack/Makefile src/plugins/proctrack/aix/Makefile src/plugins/proctrack/pgid/Makefile src/plugins/proctrack/linuxproc/Makefile src/plugins/proctrack/rms/Makefile src/plugins/proctrack/sgi_job/Makefile src/plugins/sched/Makefile src/plugins/sched/backfill/Makefile src/plugins/sched/builtin/Makefile src/plugins/sched/gang/Makefile src/plugins/sched/hold/Makefile src/plugins/sched/wiki/Makefile src/plugins/sched/wiki2/Makefile src/plugins/select/Makefile src/plugins/select/bluegene/Makefile src/plugins/select/bluegene/block_allocator/Makefile src/plugins/select/bluegene/plugin/Makefile src/plugins/select/cons_res/Makefile src/plugins/select/linear/Makefile src/plugins/switch/Makefile src/plugins/switch/elan/Makefile src/plugins/switch/none/Makefile src/plugins/switch/federation/Makefile src/plugins/mpi/Makefile src/plugins/mpi/mpich1_p4/Makefile src/plugins/mpi/mpich1_shmem/Makefile src/plugins/mpi/mpichgm/Makefile src/plugins/mpi/mpichmx/Makefile src/plugins/mpi/mvapich/Makefile src/plugins/mpi/lam/Makefile src/plugins/mpi/none/Makefile src/plugins/mpi/openmpi/Makefile src/plugins/task/Makefile src/plugins/task/affinity/Makefile src/plugins/task/none/Makefile src/plugins/topology/Makefile src/plugins/topology/3d_torus/Makefile src/plugins/topology/none/Makefile src/plugins/topology/tree/Makefile doc/Makefile doc/man/Makefile doc/html/Makefile doc/html/configurator.html testsuite/Makefile testsuite/expect/Makefile testsuite/slurm_unit/Makefile testsuite/slurm_unit/api/Makefile testsuite/slurm_unit/api/manual/Makefile testsuite/slurm_unit/common/Makefile testsuite/slurm_unit/slurmctld/Makefile testsuite/slurm_unit/slurmd/Makefile testsuite/slurm_unit/slurmdbd/Makefile"
 
 
 cat >confcache <<\_ACEOF
@@ -27727,6 +27996,20 @@ echo "$as_me: error: conditional \"HAVE_GTK\" was never defined.
 Usually this means the macro was only invoked conditionally." >&2;}
    { (exit 1); exit 1; }; }
 fi
+if test -z "${WITH_MYSQL_TRUE}" && test -z "${WITH_MYSQL_FALSE}"; then
+  { { echo "$as_me:$LINENO: error: conditional \"WITH_MYSQL\" was never defined.
+Usually this means the macro was only invoked conditionally." >&5
+echo "$as_me: error: conditional \"WITH_MYSQL\" was never defined.
+Usually this means the macro was only invoked conditionally." >&2;}
+   { (exit 1); exit 1; }; }
+fi
+if test -z "${WITH_PGSQL_TRUE}" && test -z "${WITH_PGSQL_FALSE}"; then
+  { { echo "$as_me:$LINENO: error: conditional \"WITH_PGSQL\" was never defined.
+Usually this means the macro was only invoked conditionally." >&5
+echo "$as_me: error: conditional \"WITH_PGSQL\" was never defined.
+Usually this means the macro was only invoked conditionally." >&2;}
+   { (exit 1); exit 1; }; }
+fi
 if test -z "${DEBUG_MODULES_TRUE}" && test -z "${DEBUG_MODULES_FALSE}"; then
   { { echo "$as_me:$LINENO: error: conditional \"DEBUG_MODULES\" was never defined.
 Usually this means the macro was only invoked conditionally." >&5
@@ -27773,6 +28056,13 @@ if test -z "${WITH_AUTHD_TRUE}" && test -z "${WITH_AUTHD_FALSE}"; then
   { { echo "$as_me:$LINENO: error: conditional \"WITH_AUTHD\" was never defined.
 Usually this means the macro was only invoked conditionally." >&5
 echo "$as_me: error: conditional \"WITH_AUTHD\" was never defined.
+Usually this means the macro was only invoked conditionally." >&2;}
+   { (exit 1); exit 1; }; }
+fi
+if test -z "${WITH_BLCR_TRUE}" && test -z "${WITH_BLCR_FALSE}"; then
+  { { echo "$as_me:$LINENO: error: conditional \"WITH_BLCR\" was never defined.
+Usually this means the macro was only invoked conditionally." >&5
+echo "$as_me: error: conditional \"WITH_BLCR\" was never defined.
 Usually this means the macro was only invoked conditionally." >&2;}
    { (exit 1); exit 1; }; }
 fi
@@ -28267,10 +28557,13 @@ do
     "src/sacctmgr/Makefile") CONFIG_FILES="$CONFIG_FILES src/sacctmgr/Makefile" ;;
     "src/sreport/Makefile") CONFIG_FILES="$CONFIG_FILES src/sreport/Makefile" ;;
     "src/sstat/Makefile") CONFIG_FILES="$CONFIG_FILES src/sstat/Makefile" ;;
+    "src/sshare/Makefile") CONFIG_FILES="$CONFIG_FILES src/sshare/Makefile" ;;
     "src/salloc/Makefile") CONFIG_FILES="$CONFIG_FILES src/salloc/Makefile" ;;
     "src/sbatch/Makefile") CONFIG_FILES="$CONFIG_FILES src/sbatch/Makefile" ;;
     "src/sattach/Makefile") CONFIG_FILES="$CONFIG_FILES src/sattach/Makefile" ;;
+    "src/sprio/Makefile") CONFIG_FILES="$CONFIG_FILES src/sprio/Makefile" ;;
     "src/srun/Makefile") CONFIG_FILES="$CONFIG_FILES src/srun/Makefile" ;;
+    "src/srun_cr/Makefile") CONFIG_FILES="$CONFIG_FILES src/srun_cr/Makefile" ;;
     "src/slurmd/Makefile") CONFIG_FILES="$CONFIG_FILES src/slurmd/Makefile" ;;
     "src/slurmd/slurmd/Makefile") CONFIG_FILES="$CONFIG_FILES src/slurmd/slurmd/Makefile" ;;
     "src/slurmd/slurmstepd/Makefile") CONFIG_FILES="$CONFIG_FILES src/slurmd/slurmstepd/Makefile" ;;
@@ -28300,6 +28593,9 @@ do
     "src/plugins/checkpoint/none/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/checkpoint/none/Makefile" ;;
     "src/plugins/checkpoint/ompi/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/checkpoint/ompi/Makefile" ;;
     "src/plugins/checkpoint/xlch/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/checkpoint/xlch/Makefile" ;;
+    "src/plugins/checkpoint/blcr/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/checkpoint/blcr/Makefile" ;;
+    "src/plugins/checkpoint/blcr/cr_checkpoint.sh") CONFIG_FILES="$CONFIG_FILES src/plugins/checkpoint/blcr/cr_checkpoint.sh" ;;
+    "src/plugins/checkpoint/blcr/cr_restart.sh") CONFIG_FILES="$CONFIG_FILES src/plugins/checkpoint/blcr/cr_restart.sh" ;;
     "src/plugins/crypto/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/crypto/Makefile" ;;
     "src/plugins/crypto/munge/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/crypto/munge/Makefile" ;;
     "src/plugins/crypto/openssl/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/crypto/openssl/Makefile" ;;
@@ -28313,6 +28609,9 @@ do
     "src/plugins/jobcomp/script/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/jobcomp/script/Makefile" ;;
     "src/plugins/jobcomp/mysql/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/jobcomp/mysql/Makefile" ;;
     "src/plugins/jobcomp/pgsql/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/jobcomp/pgsql/Makefile" ;;
+    "src/plugins/priority/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/priority/Makefile" ;;
+    "src/plugins/priority/basic/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/priority/basic/Makefile" ;;
+    "src/plugins/priority/multifactor/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/priority/multifactor/Makefile" ;;
     "src/plugins/proctrack/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/proctrack/Makefile" ;;
     "src/plugins/proctrack/aix/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/proctrack/aix/Makefile" ;;
     "src/plugins/proctrack/pgid/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/proctrack/pgid/Makefile" ;;
@@ -28330,8 +28629,8 @@ do
     "src/plugins/select/bluegene/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/select/bluegene/Makefile" ;;
     "src/plugins/select/bluegene/block_allocator/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/select/bluegene/block_allocator/Makefile" ;;
     "src/plugins/select/bluegene/plugin/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/select/bluegene/plugin/Makefile" ;;
-    "src/plugins/select/linear/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/select/linear/Makefile" ;;
     "src/plugins/select/cons_res/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/select/cons_res/Makefile" ;;
+    "src/plugins/select/linear/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/select/linear/Makefile" ;;
     "src/plugins/switch/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/switch/Makefile" ;;
     "src/plugins/switch/elan/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/switch/elan/Makefile" ;;
     "src/plugins/switch/none/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/switch/none/Makefile" ;;
@@ -28348,6 +28647,10 @@ do
     "src/plugins/task/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/task/Makefile" ;;
     "src/plugins/task/affinity/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/task/affinity/Makefile" ;;
     "src/plugins/task/none/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/task/none/Makefile" ;;
+    "src/plugins/topology/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/topology/Makefile" ;;
+    "src/plugins/topology/3d_torus/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/topology/3d_torus/Makefile" ;;
+    "src/plugins/topology/none/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/topology/none/Makefile" ;;
+    "src/plugins/topology/tree/Makefile") CONFIG_FILES="$CONFIG_FILES src/plugins/topology/tree/Makefile" ;;
     "doc/Makefile") CONFIG_FILES="$CONFIG_FILES doc/Makefile" ;;
     "doc/man/Makefile") CONFIG_FILES="$CONFIG_FILES doc/man/Makefile" ;;
     "doc/html/Makefile") CONFIG_FILES="$CONFIG_FILES doc/html/Makefile" ;;
@@ -28630,9 +28933,13 @@ HAVE_GTK_FALSE!$HAVE_GTK_FALSE$ac_delim
 HAVEMYSQLCONFIG!$HAVEMYSQLCONFIG$ac_delim
 MYSQL_LIBS!$MYSQL_LIBS$ac_delim
 MYSQL_CFLAGS!$MYSQL_CFLAGS$ac_delim
+WITH_MYSQL_TRUE!$WITH_MYSQL_TRUE$ac_delim
+WITH_MYSQL_FALSE!$WITH_MYSQL_FALSE$ac_delim
 HAVEPGCONFIG!$HAVEPGCONFIG$ac_delim
 PGSQL_LIBS!$PGSQL_LIBS$ac_delim
 PGSQL_CFLAGS!$PGSQL_CFLAGS$ac_delim
+WITH_PGSQL_TRUE!$WITH_PGSQL_TRUE$ac_delim
+WITH_PGSQL_FALSE!$WITH_PGSQL_FALSE$ac_delim
 DEBUG_MODULES_TRUE!$DEBUG_MODULES_TRUE$ac_delim
 DEBUG_MODULES_FALSE!$DEBUG_MODULES_FALSE$ac_delim
 SLURMCTLD_PORT!$SLURMCTLD_PORT$ac_delim
@@ -28654,10 +28961,6 @@ SSL_LDFLAGS!$SSL_LDFLAGS$ac_delim
 SSL_LIBS!$SSL_LIBS$ac_delim
 SSL_CPPFLAGS!$SSL_CPPFLAGS$ac_delim
 HAVE_OPENSSL_TRUE!$HAVE_OPENSSL_TRUE$ac_delim
-HAVE_OPENSSL_FALSE!$HAVE_OPENSSL_FALSE$ac_delim
-HAVE_OPENSSL!$HAVE_OPENSSL$ac_delim
-MUNGE_LIBS!$MUNGE_LIBS$ac_delim
-MUNGE_CPPFLAGS!$MUNGE_CPPFLAGS$ac_delim
 _ACEOF
 
   if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 97; then
@@ -28699,6 +29002,10 @@ _ACEOF
 ac_delim='%!_!# '
 for ac_last_try in false false false false false :; do
   cat >conf$$subs.sed <<_ACEOF
+HAVE_OPENSSL_FALSE!$HAVE_OPENSSL_FALSE$ac_delim
+HAVE_OPENSSL!$HAVE_OPENSSL$ac_delim
+MUNGE_LIBS!$MUNGE_LIBS$ac_delim
+MUNGE_CPPFLAGS!$MUNGE_CPPFLAGS$ac_delim
 MUNGE_LDFLAGS!$MUNGE_LDFLAGS$ac_delim
 WITH_MUNGE_TRUE!$WITH_MUNGE_TRUE$ac_delim
 WITH_MUNGE_FALSE!$WITH_MUNGE_FALSE$ac_delim
@@ -28707,10 +29014,16 @@ AUTHD_CFLAGS!$AUTHD_CFLAGS$ac_delim
 WITH_AUTHD_TRUE!$WITH_AUTHD_TRUE$ac_delim
 WITH_AUTHD_FALSE!$WITH_AUTHD_FALSE$ac_delim
 UTIL_LIBS!$UTIL_LIBS$ac_delim
+BLCR_HOME!$BLCR_HOME$ac_delim
+BLCR_LIBS!$BLCR_LIBS$ac_delim
+BLCR_CPPFLAGS!$BLCR_CPPFLAGS$ac_delim
+BLCR_LDFLAGS!$BLCR_LDFLAGS$ac_delim
+WITH_BLCR_TRUE!$WITH_BLCR_TRUE$ac_delim
+WITH_BLCR_FALSE!$WITH_BLCR_FALSE$ac_delim
 LTLIBOBJS!$LTLIBOBJS$ac_delim
 _ACEOF
 
-  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 9; then
+  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 19; then
     break
   elif $ac_last_try; then
     { { echo "$as_me:$LINENO: error: could not make $CONFIG_STATUS" >&5

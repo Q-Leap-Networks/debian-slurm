@@ -6,10 +6,11 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *   
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -86,6 +87,7 @@ enum {
 #ifndef HAVE_BG
 	SORTID_NODELIST, 
 #endif
+	SORTID_NODE_INX,
 	SORTID_NODES, 
 	SORTID_ONLY_LINE, 
 	SORTID_PRIORITY,
@@ -154,6 +156,8 @@ static display_data_t display_data_part[] = {
 	 create_model_part, admin_edit_part},
 	{G_TYPE_INT, SORTID_ONLY_LINE, NULL, FALSE, EDIT_NONE, refresh_part,
 	 create_model_part, admin_edit_part},
+	{G_TYPE_POINTER, SORTID_NODE_INX,  NULL, FALSE, EDIT_NONE, 
+	 refresh_part, create_model_part, admin_edit_part},
 	{G_TYPE_INT, SORTID_UPDATED, NULL, FALSE, EDIT_NONE, refresh_part,
 	 create_model_part, admin_edit_part},
 
@@ -190,22 +194,9 @@ static display_data_t options_data_part[] = {
 	{G_TYPE_STRING, NODE_PAGE, "Nodes", TRUE, PART_PAGE},
 #endif
 	{G_TYPE_STRING, SUBMIT_PAGE, "Job Submit", FALSE, PART_PAGE},
+	{G_TYPE_STRING, RESV_PAGE, "Reservations", TRUE, PART_PAGE},
 	{G_TYPE_NONE, -1, NULL, FALSE, EDIT_NONE}
 };
-
-#ifdef HAVE_BG
-static void _update_nodes_for_bg(int node_scaling,
-				 node_info_msg_t *node_msg,
-				 bg_info_record_t *bg_info_record);
-/* ERROR_STATE must be last since that will affect the state of the rest of the
-   midplane.
-*/
-enum {
-	SVIEW_BG_IDLE_STATE,
-	SVIEW_BG_ALLOC_STATE,
-	SVIEW_BG_ERROR_STATE
-};
-#endif
 
 static display_data_t *local_display_data = NULL;
 
@@ -220,45 +211,6 @@ static void _append_part_sub_record(sview_part_sub_t *sview_part_sub,
 				    int line);
 static node_info_t *_find_node(char *node_name, node_info_msg_t *node_msg);
 
-#ifdef HAVE_BG
-
-static void _update_nodes_for_bg(int node_scaling,
-				 node_info_msg_t *node_msg,
-				 bg_info_record_t *bg_info_record)
-{
-	node_info_t *node_ptr = NULL;
-	hostlist_t hl;
-	char *node_name = NULL;
-
-	/* we are using less than one node */
-	if(bg_info_record->conn_type == SELECT_SMALL) 
-		node_scaling = bg_info_record->node_cnt;
-       		   
-	hl = hostlist_create(bg_info_record->nodes);
-	while (1) {
-		if (node_name)
-			free(node_name);
-		node_name = hostlist_shift(hl);
-		if (!node_name)
-			break;
-		node_ptr = _find_node(node_name, node_msg);
-		if (!node_ptr)
-			continue;
-		/* cores is overloaded to be the cnodes in an error
-		 * state and used_cpus is overloaded to be the nodes in
-		 * use.  No block should be sent in here if it isn't
-		 * in use (that doesn't mean in a free state, it means
-		 * the user isn't slurm or the block is in an error state.  
-		 */
-		if(bg_info_record->state == RM_PARTITION_ERROR) 
-			node_ptr->cores += node_scaling;
-		else
-			node_ptr->used_cpus += node_scaling;
-	}
-	hostlist_destroy(hl);
-	
-}
-#endif
 
 static int 
 _build_min_max_16_string(char *buffer, int buf_size, 
@@ -1050,6 +1002,9 @@ static void _update_part_record(sview_part_info_t *sview_part_info,
 
 	gtk_tree_store_set(treestore, iter, SORTID_NODELIST, 
 			   part_ptr->nodes, -1);
+
+	gtk_tree_store_set(treestore, iter, 
+			   SORTID_NODE_INX, part_ptr->node_inx, -1);
 	
 	gtk_tree_store_set(treestore, iter, SORTID_ONLY_LINE, 0, -1);
 	/* clear out info for the main listing */
@@ -1416,6 +1371,27 @@ static sview_part_info_t *_create_sview_part_info(partition_info_t* part_ptr)
 	return sview_part_info;
 }
 
+static int _sview_part_sort_aval_dec(sview_part_info_t* rec_a,
+				     sview_part_info_t* rec_b)
+{
+	int size_a = rec_a->part_ptr->total_nodes;
+	int size_b = rec_b->part_ptr->total_nodes;
+
+	if (size_a > size_b)
+		return -1;
+	else if (size_a < size_b)
+		return 1;
+
+	if(rec_a->part_ptr->nodes && rec_b->part_ptr->nodes) {
+		size_a = strcmp(rec_a->part_ptr->nodes, rec_b->part_ptr->nodes);
+		if (size_a > 0)
+			return -1;
+		else if (size_a < 0)
+			return 1;
+	}
+	return 0;
+}
+
 static List _create_part_info_list(partition_info_msg_t *part_info_ptr,
 				   node_info_msg_t *node_info_ptr,
 				   node_select_info_msg_t *node_select_ptr,
@@ -1432,9 +1408,8 @@ static List _create_part_info_list(partition_info_msg_t *part_info_ptr,
 	hostlist_t hl;
 #ifdef HAVE_BG
 	int j;
-	bg_info_record_t *bg_info_record = NULL;
 	int node_scaling = part_info_ptr->partition_array[0].node_scaling;
-	char *slurm_user = NULL;
+	int block_error = 0;
 #endif
 	if(!changed && info_list) {
 		return info_list;
@@ -1449,39 +1424,6 @@ static List _create_part_info_list(partition_info_msg_t *part_info_ptr,
 		return NULL;
 	}
 
-#ifdef HAVE_BG
-	slurm_user = xstrdup(slurmctld_conf.slurm_user_name);
-
-	for (i=0; i<node_info_ptr->record_count; i++) {
-		node_ptr = &(node_info_ptr->node_array[i]);
-		/* in each node_ptr we overload the threads var
-		 * with the number of cnodes in the used_cpus var
-		 * will be used to tell how many cnodes are
-		 * allocated and the cores will represent the cnodes
-		 * in an error state. So we can get an idle count by
-		 * subtracting those 2 numbers from the total possible
-		 * cnodes (which are the idle cnodes).
-		 */
-		node_ptr->threads = node_scaling;
-		node_ptr->cores = 0;
-		node_ptr->used_cpus = 0;
-	}
-
-	for (i=0; i<node_select_ptr->record_count; i++) {
-		bg_info_record = &(node_select_ptr->bg_info_array[i]);
-		
-		/* this block is idle we won't mark it */
-		if (bg_info_record->state != RM_PARTITION_ERROR
-		    && !strcmp(slurm_user, bg_info_record->owner_name))
-			continue;
-		_update_nodes_for_bg(node_scaling, node_info_ptr,
-				     bg_info_record);
-	}
-	xfree(slurm_user);
-
-#endif
-
-
 	for (i=0; i<part_info_ptr->record_count; i++) {
 		part_ptr = &(part_info_ptr->partition_array[i]);
 		if (!part_ptr->nodes || (part_ptr->nodes[0] == '\0'))
@@ -1493,6 +1435,14 @@ static List _create_part_info_list(partition_info_msg_t *part_info_ptr,
 			node_ptr = _find_node(node_name, node_info_ptr);
 			free(node_name);
 #ifdef HAVE_BG
+			if((node_ptr->node_state & NODE_STATE_DRAIN) 
+			   && (node_ptr->node_state & NODE_STATE_FAIL)) {
+				node_ptr->node_state &= ~NODE_STATE_DRAIN;
+				node_ptr->node_state &= ~NODE_STATE_FAIL;
+				block_error = 1;
+			} else
+				block_error = 0;
+			node_ptr->threads = node_scaling;
 			for(j=0; j<3; j++) {
 				int norm = 0;
 				switch(j) {
@@ -1545,8 +1495,11 @@ static List _create_part_info_list(partition_info_msg_t *part_info_ptr,
 						continue;
 					node_ptr->node_state &=
 						NODE_STATE_FLAGS;
-					node_ptr->node_state |= 
+					node_ptr->node_state |=
 						NODE_STATE_DRAIN;
+					if(block_error)
+						node_ptr->node_state
+							|= NODE_STATE_FAIL;
 					node_ptr->threads = node_ptr->cores;
 					break;
 				default:
@@ -1592,6 +1545,10 @@ static List _create_part_info_list(partition_info_msg_t *part_info_ptr,
 		hostlist_destroy(hl);
 		list_append(info_list, sview_part_info);
 	}
+
+	list_sort(info_list,
+		  (ListCmpF)_sview_part_sort_aval_dec);
+
 	return info_list;
 }
 
@@ -1633,17 +1590,11 @@ need_refresh:
 		if(!strcmp(part_ptr->name, name)) {
 			j=0;
 			while(part_ptr->node_inx[j] >= 0) {
-				if(!first_time)
-					change_grid_color(
-						popup_win->grid_button_list,
-						part_ptr->node_inx[j],
-						part_ptr->node_inx[j+1], i);
-				else
-					get_button_list_from_main(
-						&popup_win->grid_button_list,
-						part_ptr->node_inx[j],
-						part_ptr->node_inx[j+1],
-						i);
+				change_grid_color(
+					popup_win->grid_button_list,
+					part_ptr->node_inx[j],
+					part_ptr->node_inx[j+1], i,
+					true);
 				j += 2;
 			}
 			_layout_part_record(treeview, sview_part_info, update);
@@ -1674,9 +1625,6 @@ need_refresh:
 			
 			goto need_refresh;
 		}
-		put_buttons_in_table(popup_win->grid_table,
-				     popup_win->grid_button_list);
-
 	}
 	gtk_widget_show(spec_info->display_widget);
 		
@@ -1705,6 +1653,8 @@ extern int get_new_info_part(partition_info_msg_t **part_ptr, int force)
 	static bool changed = 0;
 		
 	if(!force && ((now - last) < global_sleep_time)) {
+		if(*part_ptr != part_info_ptr)
+			error_code = SLURM_SUCCESS;
 		*part_ptr = part_info_ptr;
 		if(changed) 
 			return SLURM_SUCCESS;
@@ -1729,6 +1679,10 @@ extern int get_new_info_part(partition_info_msg_t **part_ptr, int force)
 	}
 	
 	part_info_ptr = new_part_ptr;
+
+	if(*part_ptr != part_info_ptr) 
+		error_code = SLURM_SUCCESS;
+
 	*part_ptr = new_part_ptr;
 	return error_code;
 }
@@ -2045,7 +1999,7 @@ display_it:
 				change_grid_color(grid_button_list,
 						  part_ptr->node_inx[j],
 						  part_ptr->node_inx[j+1],
-						  i);
+						  i, true);
 			j += 2;
 		}
 		i++;
@@ -2096,9 +2050,7 @@ extern void specific_info_part(popup_info_t *popup_win)
 	sview_part_info_t *sview_part_info_ptr = NULL;
 	partition_info_t *part_ptr = NULL;
 	ListIterator itr = NULL;
-	char *host = NULL, *host2 = NULL;
-	hostlist_t hostlist = NULL;
-	int found = 0;
+	hostset_t hostset = NULL;
 	
 	if(!spec_info->display_widget)
 		setup_popup_info(popup_win, display_data_part, SORTID_CNT);
@@ -2203,15 +2155,7 @@ display_it:
 				 SORTID_CNT);
 	}
 	
-	if(popup_win->grid_button_list) {
-		list_destroy(popup_win->grid_button_list);
-	}	       
-	
-#ifdef HAVE_3D
-	popup_win->grid_button_list = copy_main_button_list();
-#else
-	popup_win->grid_button_list = list_create(destroy_grid_button);
-#endif	
+	setup_popup_grid_list(popup_win);
 
 	spec_info->view = INFO_VIEW;
 	if(spec_info->type == INFO_PAGE) {
@@ -2224,34 +2168,24 @@ display_it:
 	send_info_list = list_create(NULL);	
 	
 	itr = list_iterator_create(info_list);
+	i = -1;
 	while ((sview_part_info_ptr = list_next(itr))) {
 		i++;
-		part_ptr = sview_part_info_ptr->part_ptr;	
+		part_ptr = sview_part_info_ptr->part_ptr;
 		switch(spec_info->type) {
+		case RESV_PAGE:
 		case NODE_PAGE:
 			if(!part_ptr->nodes)
 				continue;
 
-			hostlist = hostlist_create(
-				spec_info->search_info->gchar_data);
-			host = hostlist_shift(hostlist);
-			hostlist_destroy(hostlist);
-			if(!host) 
+			if(!(hostset = hostset_create(
+				     spec_info->search_info->gchar_data)))
 				continue;
-			
-			hostlist = hostlist_create(part_ptr->nodes);
-			found = 0;
-			while((host2 = hostlist_shift(hostlist))) { 
-				if(!strcmp(host, host2)) {
-					free(host2);
-					found = 1;
-					break; 
-				}
-				free(host2);
+			if(!hostset_intersects(hostset, part_ptr->nodes)) {
+				hostset_destroy(hostset);
+				continue;
 			}
-			hostlist_destroy(hostlist);
-			if(!found)
-				continue;
+			hostset_destroy(hostset);				
 			break;
 		case PART_PAGE:
 		case BLOCK_PAGE:
@@ -2268,23 +2202,14 @@ display_it:
 		list_push(send_info_list, sview_part_info_ptr);
 		j=0;
 		while(part_ptr->node_inx[j] >= 0) {
-#ifdef HAVE_3D
 			change_grid_color(
 				popup_win->grid_button_list,
 				part_ptr->node_inx[j],
-				part_ptr->node_inx[j+1], i);
-#else
-			get_button_list_from_main(
-				&popup_win->grid_button_list,
-				part_ptr->node_inx[j],
-				part_ptr->node_inx[j+1], i);
-#endif
+				part_ptr->node_inx[j+1], i, false);
 			j += 2;
 		}
 	}
 	list_iterator_destroy(itr);
-	put_buttons_in_table(popup_win->grid_table,
-			     popup_win->grid_button_list);
 	 
 	_update_info_part(send_info_list, 
 			  GTK_TREE_VIEW(spec_info->display_widget));
@@ -2332,6 +2257,9 @@ extern void popup_all_part(GtkTreeModel *model, GtkTreeIter *iter, int id)
 	switch(id) {
 	case JOB_PAGE:
 		snprintf(title, 100, "Job(s) in partition %s", name);
+		break;
+	case RESV_PAGE:
+		snprintf(title, 100, "Reservation(s) in partition %s", name);
 		break;
 	case NODE_PAGE:
 		gtk_tree_model_get(model, iter, SORTID_ONLY_LINE,
@@ -2394,6 +2322,13 @@ extern void popup_all_part(GtkTreeModel *model, GtkTreeIter *iter, int id)
 		return;
 	}
 
+	/* Pass the model and the structs from the iter so we can always get
+	   the current node_inx.
+	*/
+	popup_win->model = model;
+	popup_win->iter = *iter;
+	popup_win->node_inx_id = SORTID_NODE_INX;
+
 	switch(id) {
 	case JOB_PAGE:
 	case BLOCK_PAGE: 
@@ -2401,6 +2336,7 @@ extern void popup_all_part(GtkTreeModel *model, GtkTreeIter *iter, int id)
 		popup_win->spec_info->search_info->gchar_data = name;
 		//specific_info_job(popup_win);
 		break;
+	case RESV_PAGE:
 	case NODE_PAGE:
 		g_free(name);
 		gtk_tree_model_get(model, iter, SORTID_NODELIST, &name, -1);

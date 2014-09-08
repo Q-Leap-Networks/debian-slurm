@@ -1,14 +1,16 @@
 /*****************************************************************************\
- * src/slurmd/slurmstepd/slurmstepd_job.c - slurmd_job_t routines
- * $Id: slurmstepd_job.c 15043 2008-09-09 23:45:19Z jette $
+ *  src/slurmd/slurmstepd/slurmstepd_job.c - slurmd_job_t routines
+ *  $Id: slurmstepd_job.c 16867 2009-03-12 16:35:42Z jette $
  *****************************************************************************
- *  Copyright (C) 2002 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -44,24 +46,25 @@
 #  include <string.h>
 #endif
 
+#include <grp.h>
 #include <signal.h>
 #include <sys/types.h>
-#include <grp.h>
 
-#include "src/common/xmalloc.h"
-#include "src/common/xassert.h"
-#include "src/common/xstring.h"
+#include "src/common/eio.h"
 #include "src/common/fd.h"
 #include "src/common/log.h"
-#include "src/common/eio.h"
+#include "src/common/node_select.h"
 #include "src/common/slurm_jobacct_gather.h"
 #include "src/common/slurm_protocol_api.h"
+#include "src/common/xassert.h"
+#include "src/common/xmalloc.h"
+#include "src/common/xstring.h"
 
 #include "src/slurmd/slurmd/slurmd.h"
-#include "src/slurmd/slurmstepd/slurmstepd_job.h"
 #include "src/slurmd/slurmstepd/io.h"
 #include "src/slurmd/slurmstepd/fname.h"
 #include "src/slurmd/slurmstepd/multi_prog.h"
+#include "src/slurmd/slurmstepd/slurmstepd_job.h"
 
 static char ** _array_copy(int n, char **src);
 static void _array_free(char ***array);
@@ -196,25 +199,20 @@ job_create(launch_tasks_request_msg_t *msg)
 	job->stepid	= msg->job_step_id;
 
 	job->job_mem	= msg->job_mem;
-	job->task_mem	= msg->task_mem;
 	if (job->job_mem)
 		jobacct_common_set_mem_limit(job->jobid, job->job_mem);
-	else if (job->task_mem && job->ntasks) {
-		jobacct_common_set_mem_limit(job->jobid, 
-					     (job->task_mem * job->ntasks));
-	}
 	
 	job->uid	= (uid_t) msg->uid;
 	job->gid	= (gid_t) msg->gid;
 	job->cwd	= xstrdup(msg->cwd);
 	job->task_dist	= msg->task_dist;
-	job->plane_size	= msg->plane_size;
 	
 	job->cpu_bind_type = msg->cpu_bind_type;
 	job->cpu_bind = xstrdup(msg->cpu_bind);
 	job->mem_bind_type = msg->mem_bind_type;
 	job->mem_bind = xstrdup(msg->mem_bind);
-	job->ckpt_path = xstrdup(msg->ckpt_path);
+	job->ckpt_dir = xstrdup(msg->ckpt_dir);
+	job->restart_dir = xstrdup(msg->restart_dir);
 	job->cpus_per_task = msg->cpus_per_task;
 
 	job->env     = _array_copy(msg->envc, msg->env);
@@ -237,13 +235,11 @@ job_create(launch_tasks_request_msg_t *msg)
 	job->envtp->nodeid = -1;
 
 	job->envtp->distribution = 0;
-	job->envtp->plane_size = 0;
-
 	job->envtp->cpu_bind_type = 0;
 	job->envtp->cpu_bind = NULL;
 	job->envtp->mem_bind_type = 0;
 	job->envtp->mem_bind = NULL;
-	job->envtp->ckpt_path = NULL;
+	job->envtp->ckpt_dir = NULL;
 	
 	memcpy(&resp_addr, &msg->orig_addr, sizeof(slurm_addr));
 	slurm_set_addr(&resp_addr,
@@ -260,6 +256,7 @@ job_create(launch_tasks_request_msg_t *msg)
 	srun = srun_info_create(msg->cred, &resp_addr, &io_addr);
 
 	job->buffered_stdio = msg->buffered_stdio;
+	job->labelio = msg->labelio;
 
 	job->task_prolog = xstrdup(msg->task_prolog);
 	job->task_epilog = xstrdup(msg->task_epilog);
@@ -350,6 +347,9 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 	job->gid     = (gid_t) msg->gid;
 	job->cwd     = xstrdup(msg->work_dir);
 
+	job->ckpt_dir = xstrdup(msg->ckpt_dir);
+	job->restart_dir = xstrdup(msg->restart_dir);
+
 	job->env     = _array_copy(msg->envc, msg->environment);
 	job->eio     = eio_handle_create();
 	job->sruns   = list_create((ListDelF) _srun_info_destructor);
@@ -361,13 +361,13 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 	job->envtp->nodeid = -1;
 
 	job->envtp->distribution = 0;
-	job->envtp->plane_size = 0;
-
-	job->envtp->cpu_bind_type = 0;
-	job->envtp->cpu_bind = NULL;
+	job->cpu_bind_type = msg->cpu_bind_type;
+	job->cpu_bind = xstrdup(msg->cpu_bind);
 	job->envtp->mem_bind_type = 0;
 	job->envtp->mem_bind = NULL;
-	job->envtp->ckpt_path = NULL;
+	job->envtp->ckpt_dir = NULL;
+	job->envtp->restart_cnt = msg->restart_cnt;
+
 	job->cpus_per_task = msg->cpus_per_node[0];
 
 	srun = srun_info_create(NULL, NULL, NULL);
@@ -401,6 +401,11 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 					_batchfilename(job, msg->err));
 	job->task[0]->argc = job->argc;
 	job->task[0]->argv = job->argv;
+
+#ifdef HAVE_CRAY_XT
+	select_g_get_jobinfo(msg->select_jobinfo, SELECT_DATA_RESV_ID,
+			     &job->resv_id);
+#endif
 
 	return job;
 }

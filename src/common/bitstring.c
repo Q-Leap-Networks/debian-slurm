@@ -7,10 +7,11 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jim Garlick <garlick@llnl.gov>, Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -654,12 +655,21 @@ int
 bit_set_count(bitstr_t *b)
 {
 	int count = 0;
-	bitoff_t bit;
+	bitoff_t bit, bit_cnt;
+	int word_size = sizeof(bitstr_t) * 8;
 
 	_assert_bitstr_valid(b);
 
-	for (bit = 0; bit < _bitstr_bits(b); bit += sizeof(bitstr_t)*8)
+	bit_cnt = _bitstr_bits(b);
+	for (bit = 0; bit < bit_cnt; bit += word_size) {
+		if ((bit + word_size - 1) >= bit_cnt)
+			break;
 		count += hweight(b[_bit_word(bit)]);
+	}
+	for ( ; bit < bit_cnt; bit++) {
+		if (bit_test(b, bit))
+			count++;
+	}
 
 	return count;
 }
@@ -671,14 +681,23 @@ extern int
 bit_overlap(bitstr_t *b1, bitstr_t *b2)
 {
 	int count = 0;
-	bitoff_t bit;
-	
+	bitoff_t bit, bit_cnt;
+	int word_size = sizeof(bitstr_t) * 8;
+
 	_assert_bitstr_valid(b1);
 	_assert_bitstr_valid(b2);
 	assert(_bitstr_bits(b1) == _bitstr_bits(b2));
 
-	for (bit = 0; bit < _bitstr_bits(b1); bit += sizeof(bitstr_t)*8) 
+	bit_cnt = _bitstr_bits(b1);
+	for (bit = 0; bit < bit_cnt; bit += word_size) {
+		if ((bit + word_size - 1) >= bit_cnt)
+			break;
 		count += hweight(b1[_bit_word(bit)] & b2[_bit_word(bit)]);
+	}
+	for ( ; bit < bit_cnt; bit++) {
+		if (bit_test(b1, bit) && bit_test(b2, bit))
+			count++;
+	}
 
 	return count;
 }
@@ -824,6 +843,7 @@ bitstr_t *
 bit_pick_cnt(bitstr_t *b, bitoff_t nbits) {
 	bitoff_t bit = 0, new_bits, count = 0;
 	bitstr_t *new;
+	int word_size = sizeof(bitstr_t) * 8;
 
 	_assert_bitstr_valid(b);
 
@@ -838,15 +858,16 @@ bit_pick_cnt(bitstr_t *b, bitoff_t nbits) {
 		int word = _bit_word(bit);
 
 		if (b[word] == 0) {
-			bit += sizeof(bitstr_t)*8;
+			bit += word_size;
 			continue;
 		}
 
 		new_bits = hweight(b[word]);
-		if ((count + new_bits) <= nbits) {
+		if (((count + new_bits) <= nbits) && 
+		    ((bit + word_size - 1) < _bitstr_bits(b))) {
 			new[word] = b[word];
 			count += new_bits;
-			bit += sizeof(bitstr_t)*8;
+			bit += word_size;
 			continue;
 		}
 		while ((bit < _bitstr_bits(b)) && (count < nbits)) {
@@ -930,6 +951,8 @@ bit_unfmt(bitstr_t *b, char *str)
 	int *intvec, *p, rc = 0; 
 
 	_assert_bitstr_valid(b);
+	if (str[0] == '\0')	/* no bits set */
+		return rc;
 	intvec = bitfmt2int(str);
 	if (intvec == NULL) 
 		return -1;

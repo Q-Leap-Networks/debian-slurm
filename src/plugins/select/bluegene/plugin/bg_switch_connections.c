@@ -2,14 +2,15 @@
  *  bg_switch_connections.c - Blue Gene switch management functions, 
  *  establish switch connections
  *
- *  $Id: bg_switch_connections.c 17104 2009-04-01 17:20:31Z da $
+ *  $Id: bg_switch_connections.c 17483 2009-05-13 18:31:42Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Dan Phung <phung4@llnl.gov> and Danny Auble <da@llnl.gov>
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -221,7 +222,7 @@ static int _add_switch_conns(rm_switch_t* curr_switch,
 				break;	
 			}
 			conn[i].part_state = RM_PARTITION_READY;
-			debug2("adding %d -> %d", source, ba_conn->port_tar);
+			debug3("adding %d -> %d", source, ba_conn->port_tar);
 			list_push(conn_list, &conn[i]);
 		}
 	}
@@ -236,7 +237,7 @@ static int _add_switch_conns(rm_switch_t* curr_switch,
 			return SLURM_ERROR;
 		} 
 	} else {
-		debug("we got a switch with no connections");
+		debug2("we got a switch with no connections");
 		list_destroy(conn_list);
                 return SLURM_ERROR;
 	}
@@ -287,12 +288,12 @@ static int _used_switches(ba_node_t* ba_node)
 	int i = 0, j = 0, switch_count = 0;
 	int source = 0;
 	
-	debug4("checking node %c%c%c",
+	debug5("checking node %c%c%c",
 	       alpha_num[ba_node->coord[X]], 
 	       alpha_num[ba_node->coord[Y]], 
 	       alpha_num[ba_node->coord[Z]]);
 	for(i=0; i<BA_SYSTEM_DIMENSIONS; i++) {
-		debug4("dim %d", i);
+		debug5("dim %d", i);
 		ba_switch = &ba_node->axis_switch[i];
 		for(j=0; j<num_connections; j++) {
 			/* set the source port(-) to check */
@@ -314,7 +315,7 @@ static int _used_switches(ba_node_t* ba_node)
 			ba_conn = &ba_switch->int_wire[source];
 			if(ba_conn->used && ba_conn->port_tar != source) {
 				switch_count++;
-				debug4("used");
+				debug5("used");
 				break;
 			}
 		}
@@ -338,7 +339,7 @@ extern int configure_small_block(bg_record_t *bg_record)
 	rm_nodecard_t *ncard;
 	rm_nodecard_list_t *ncard_list = NULL;
 	int num, i;
-	int use_nc[bluegene_bp_nodecard_cnt];
+	int use_nc[bg_conf->bp_nodecard_cnt];
 	double nc_pos = 0;
 #endif
 	xassert(bg_record->ionode_bitmap);
@@ -348,7 +349,7 @@ extern int configure_small_block(bg_record_t *bg_record)
 		return SLURM_ERROR;
 	}
 /* 	info("configuring small block on ionodes %s out of %d ncs",  */
-/* 	     bg_record->ionodes, bluegene_bp_nodecard_cnt); */
+/* 	     bg_record->ionodes, bg_conf->bp_nodecard_cnt); */
 #ifdef HAVE_BG_FILES	
 	/* set that we are doing a small block */
 	if ((rc = bridge_set_data(bg_record->bg_block, RM_PartitionSmall, 
@@ -358,7 +359,7 @@ extern int configure_small_block(bg_record_t *bg_record)
 		      bg_err_str(rc));
 	}
 
-	num_ncards = bg_record->node_cnt/bluegene_nodecard_node_cnt;
+	num_ncards = bg_record->node_cnt/bg_conf->nodecard_node_cnt;
 	if(num_ncards < 1) {
 		num_ncards = 1;
 		sub_nodecard = 1;
@@ -367,11 +368,11 @@ extern int configure_small_block(bg_record_t *bg_record)
 
 	/* find out how many nodecards to get for each ionode */
 		
-	for(i = 0; i<bluegene_numpsets; i++) {
+	for(i = 0; i<bg_conf->numpsets; i++) {
 		if(bit_test(bg_record->ionode_bitmap, i)) {
-			if(bluegene_nc_ratio > 1) {
+			if(bg_conf->nc_ratio > 1) {
 				int j=0;
-				for(j=0; j<bluegene_nc_ratio; j++)
+				for(j=0; j<bg_conf->nc_ratio; j++)
 					use_nc[(int)nc_pos+j] = 1;
 			} else {
 				use_nc[(int)nc_pos] = 1;
@@ -379,7 +380,7 @@ extern int configure_small_block(bg_record_t *bg_record)
 					ionode_card = 1;
 			}
 		}
-		nc_pos += bluegene_nc_ratio;
+		nc_pos += bg_conf->nc_ratio;
 	}
 
 	if ((rc = bridge_set_data(bg_record->bg_block,
@@ -687,8 +688,8 @@ extern int configure_block_switches(bg_record_t * bg_record)
 		goto cleanup;
 	}
 #endif	
-	debug3("BP count %d", bg_record->bp_count);
-	debug3("switch count %d", bg_record->switch_count);
+	debug4("BP count %d", bg_record->bp_count);
+	debug4("switch count %d", bg_record->switch_count);
 
 	list_iterator_reset(itr);
 	while ((ba_node = list_next(itr))) {
@@ -700,13 +701,13 @@ extern int configure_block_switches(bg_record_t * bg_record)
 		}
 #endif
 		if(!ba_node->used) {
-			debug3("%c%c%c is a passthrough, "
+			debug4("%c%c%c is a passthrough, "
 			       "not including in request",
 			       alpha_num[ba_node->coord[X]], 
 			       alpha_num[ba_node->coord[Y]], 
 			       alpha_num[ba_node->coord[Z]]);
 		} else {
-			debug2("using node %c%c%c",
+			debug3("using node %c%c%c",
 			       alpha_num[ba_node->coord[X]], 
 			       alpha_num[ba_node->coord[Y]], 
 			       alpha_num[ba_node->coord[Z]]);
@@ -757,7 +758,7 @@ extern int configure_block_switches(bg_record_t * bg_record)
 			if(_add_switch_conns(coord_switch[i],
 					     &ba_node->axis_switch[i])
 			   == SLURM_SUCCESS) {
-				debug2("adding switch dim %d", i);
+				debug3("adding switch dim %d", i);
 				if (first_switch){
 					if ((rc = bridge_set_data(
 						     bg_record->bg_block,

@@ -7,9 +7,11 @@ generated_html = \
 	authplugins.html \
 	big_sys.html \
 	bluegene.html \
+	checkpoint_blcr.html \
 	checkpoint_plugins.html \
 	cons_res.html \
 	cons_res_share.html \
+	cray.html \
 	crypto_plugins.html \
 	dist_plane.html \
 	documentation.html \
@@ -18,6 +20,8 @@ generated_html = \
 	gang_scheduling.html \
 	help.html \
 	ibm.html \
+	priority_multifactor.html \
+	priority_plugins.html \
 	jobacct_gatherplugins.html \
 	accounting_storageplugins.html \
 	jobcompplugins.html \
@@ -25,6 +29,7 @@ generated_html = \
 	maui.html \
 	mc_support.html \
 	moab.html \
+	mpi_guide.html \
 	mpiplugins.html \
 	news.html \
 	overview.html \
@@ -33,25 +38,34 @@ generated_html = \
 	power_save.html \
 	preempt.html \
 	proctrack_plugins.html \
+	priority_multifactor.html \
+	priority_plugins.html \
 	programmer_guide.html \
 	publications.html \
 	quickstart_admin.html \
 	quickstart.html \
+	reservations.html \
+	resource_limits.html \
 	schedplugins.html \
 	selectplugins.html \
 	slurm.html \
+	sun_const.html \
 	switchplugins.html \
 	taskplugins.html \
 	team.html \
 	testimonials.html \
+	topology.html \
+	topology_plugin.html \
 	troubleshoot.html
 
 html_DATA = \
 	${generated_html} \
+	AllocationPies.gif \
 	arch.gif \
 	configurator.html \
 	coding_style.pdf \
 	entities.gif \
+	ExampleUsage.gif \
 	lci.7.tutorial.pdf \
 	lll.gif \
 	mc_support.gif \
@@ -66,7 +80,10 @@ html_DATA = \
 	slurm_design.pdf \
 	slurmstyles.css \
 	sponsors.gif \
-	linuxstyles.css
+	topo_ex1.gif \
+	topo_ex2.gif \
+	linuxstyles.css \
+	UsagePies.gif
 
 MOSTLYCLEANFILES = ${generated_html}
 

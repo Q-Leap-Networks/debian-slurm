@@ -46,14 +46,18 @@ am__aclocal_m4_deps = $(top_srcdir)/auxdir/acx_pthread.m4 \
 	$(top_srcdir)/auxdir/x_ac__system_configuration.m4 \
 	$(top_srcdir)/auxdir/x_ac_affinity.m4 \
 	$(top_srcdir)/auxdir/x_ac_aix.m4 \
+	$(top_srcdir)/auxdir/x_ac_blcr.m4 \
 	$(top_srcdir)/auxdir/x_ac_bluegene.m4 \
 	$(top_srcdir)/auxdir/x_ac_cflags.m4 \
+	$(top_srcdir)/auxdir/x_ac_cray.m4 \
 	$(top_srcdir)/auxdir/x_ac_databases.m4 \
 	$(top_srcdir)/auxdir/x_ac_debug.m4 \
 	$(top_srcdir)/auxdir/x_ac_elan.m4 \
+	$(top_srcdir)/auxdir/x_ac_env.m4 \
 	$(top_srcdir)/auxdir/x_ac_federation.m4 \
 	$(top_srcdir)/auxdir/x_ac_gpl_licensed.m4 \
 	$(top_srcdir)/auxdir/x_ac_gtk.m4 \
+	$(top_srcdir)/auxdir/x_ac_iso.m4 \
 	$(top_srcdir)/auxdir/x_ac_munge.m4 \
 	$(top_srcdir)/auxdir/x_ac_ncurses.m4 \
 	$(top_srcdir)/auxdir/x_ac_pam.m4 \
@@ -97,8 +101,9 @@ libslurmhelper_la_DEPENDENCIES = $(am__DEPENDENCIES_1)
 am__objects_1 = allocate.lo allocate_msg.lo cancel.lo checkpoint.lo \
 	complete.lo config_info.lo init_msg.lo job_info.lo \
 	job_step_info.lo node_info.lo node_select_info.lo \
-	partition_info.lo signal.lo slurm_pmi.lo step_ctx.lo \
-	step_io.lo step_launch.lo pmi_server.lo submit.lo suspend.lo \
+	partition_info.lo reservation_info.lo signal.lo \
+	slurm_hostlist.lo slurm_pmi.lo step_ctx.lo step_io.lo \
+	step_launch.lo pmi_server.lo submit.lo suspend.lo topo_info.lo \
 	triggers.lo reconfigure.lo update_config.lo
 am_libslurmhelper_la_OBJECTS = $(am__objects_1)
 libslurmhelper_la_OBJECTS = $(am_libslurmhelper_la_OBJECTS)
@@ -137,6 +142,10 @@ AUTOHEADER = @AUTOHEADER@
 AUTOMAKE = @AUTOMAKE@
 AWK = @AWK@
 BG_INCLUDES = @BG_INCLUDES@
+BLCR_CPPFLAGS = @BLCR_CPPFLAGS@
+BLCR_HOME = @BLCR_HOME@
+BLCR_LDFLAGS = @BLCR_LDFLAGS@
+BLCR_LIBS = @BLCR_LIBS@
 BLUEGENE_LOADED = @BLUEGENE_LOADED@
 CC = @CC@
 CCDEPMODE = @CCDEPMODE@
@@ -368,7 +377,9 @@ slurmapi_src = \
 	node_info.c      \
 	node_select_info.c node_select_info.h \
 	partition_info.c \
+	reservation_info.c \
 	signal.c         \
+	slurm_hostlist.c \
 	slurm_pmi.c slurm_pmi.h	\
 	step_ctx.c step_ctx.h \
 	step_io.c step_io.h \
@@ -376,6 +387,7 @@ slurmapi_src = \
 	pmi_server.c pmi_server.h \
 	submit.c         \
 	suspend.c        \
+	topo_info.c      \
 	triggers.c       \
 	reconfigure.c    \
 	update_config.c
@@ -533,13 +545,16 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/pmi.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/pmi_server.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/reconfigure.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/reservation_info.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/signal.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurm_hostlist.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/slurm_pmi.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/step_ctx.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/step_io.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/step_launch.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/submit.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/suspend.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/topo_info.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/triggers.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/update_config.Plo@am__quote@
 

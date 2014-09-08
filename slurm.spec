@@ -1,4 +1,4 @@
-# $Id: slurm.spec 16983 2009-03-24 16:33:55Z da $
+# $Id: slurm.spec 17631 2009-05-28 21:18:15Z jette $
 #
 # Note that this package is not relocatable
 
@@ -9,6 +9,7 @@
 # --with authd       %_with_authd       1    build auth-authd RPM
 # --with auth_none   %_with_auth_none   1    build auth-none RPM
 # --with bluegene    %_with_bluegene    1    build bluegene RPM
+# --with cray_xt     %_with_cray_xt     1    build for Cray XT system
 # --with debug       %_with_debug       1    enable extra debugging within SLURM
 # --with elan        %_with_elan        1    build switch-elan RPM
 # --without munge    %_without_munge    1    don't build auth-munge RPM
@@ -33,11 +34,12 @@
 %define slurm_with() %{expand:%%{?slurm_with_%{1}:1}%%{!?slurm_with_%{1}:0}}
 
 #  Options that are off by default (enable with --with <opt>)
-%slurm_without_opt elan
+%slurm_without_opt auth_none
 %slurm_without_opt authd
 %slurm_without_opt bluegene
-%slurm_without_opt auth_none
+%slurm_without_opt cray
 %slurm_without_opt debug
+%slurm_without_opt elan
 %slurm_without_opt sun_const
 
 # These options are only here to force there to be these on the build.  
@@ -73,14 +75,14 @@
 %endif
 
 Name:    slurm
-Version: 1.3.15
+Version: 2.0.2
 Release: 1%{?dist}
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL 
 Group: System Environment/Base
-Source: slurm-1.3.15.tar.bz2
+Source: slurm-2.0.2.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: https://computing.llnl.gov/linux/slurm/
 
@@ -91,7 +93,9 @@ BuildRequires: python
 %endif
 
 %if %{?chaos}0
+BuildRequires: gtk2-devel >= 2.7.1
 BuildRequires: ncurses-devel
+BuildRequires: pkgconfig
 %endif
 
 %if %{slurm_with pam}
@@ -265,10 +269,11 @@ SLURM process tracking plugin for SGI job containers.
 #############################################################################
 
 %prep
-%setup -n slurm-1.3.15
+%setup -n slurm-2.0.2
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \
+	%{?slurm_with_cray_xt:--enable-cray-xt} \
 	%{?slurm_with_debug:--enable-debug} \
 	%{?slurm_with_sun_const:--enable-sun-const} \
 	%{?with_proctrack}	\
@@ -312,6 +317,7 @@ install -D -m644 etc/federation.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/fed
 %endif
 
 %if %{slurm_with bluegene}
+rm ${RPM_BUILD_ROOT}%{_bindir}/srun
 install -D -m644 etc/bluegene.conf.example ${RPM_BUILD_ROOT}%{_sysconfdir}/bluegene.conf.example
 %endif
 
@@ -322,11 +328,20 @@ if [ -d /etc/init.d ]; then
 fi
 
 LIST=./plugins.files
-test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/task_affinity.so &&
-   echo %{_libdir}/slurm/task_affinity.so >> $LIST
-test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/crypto_openssl.so &&
-   echo %{_libdir}/slurm/crypto_openssl.so >> $LIST
-
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/accounting_storage_mysql.so &&
+   echo %{_libdir}/slurm/accounting_storage_mysql.so >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/accounting_storage_pgsql.so &&
+   echo %{_libdir}/slurm/accounting_storage_pgsql.so >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/checkpoint_blcr.so          &&
+   echo %{_libdir}/slurm/checkpoint_blcr.so          >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/crypto_openssl.so           &&
+   echo %{_libdir}/slurm/crypto_openssl.so           >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/jobcomp_mysql.so            &&
+   echo %{_libdir}/slurm/jobcomp_mysql.so            >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/jobcomp_pgsql.so            &&
+   echo %{_libdir}/slurm/jobcomp_pgsql.so            >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/task_affinity.so            &&
+   echo %{_libdir}/slurm/task_affinity.so             >> $LIST
 
 #############################################################################
 
@@ -441,9 +456,7 @@ rm -rf $RPM_BUILD_ROOT
 %defattr(-,root,root)
 %dir %{_libdir}/slurm
 %{_libdir}/slurm/accounting_storage_filetxt.so
-%{_libdir}/slurm/accounting_storage_mysql.so
 %{_libdir}/slurm/accounting_storage_none.so
-%{_libdir}/slurm/accounting_storage_pgsql.so
 %{_libdir}/slurm/accounting_storage_slurmdbd.so
 %{_libdir}/slurm/checkpoint_none.so
 %{_libdir}/slurm/checkpoint_ompi.so
@@ -453,9 +466,9 @@ rm -rf $RPM_BUILD_ROOT
 %{_libdir}/slurm/jobacct_gather_none.so
 %{_libdir}/slurm/jobcomp_none.so
 %{_libdir}/slurm/jobcomp_filetxt.so
-%{_libdir}/slurm/jobcomp_mysql.so
-%{_libdir}/slurm/jobcomp_pgsql.so
 %{_libdir}/slurm/jobcomp_script.so
+%{_libdir}/slurm/priority_basic.so
+%{_libdir}/slurm/priority_multifactor.so
 %{_libdir}/slurm/proctrack_pgid.so
 %{_libdir}/slurm/proctrack_linuxproc.so
 %{_libdir}/slurm/sched_backfill.so
@@ -467,6 +480,9 @@ rm -rf $RPM_BUILD_ROOT
 %{_libdir}/slurm/select_cons_res.so
 %{_libdir}/slurm/select_linear.so
 %{_libdir}/slurm/switch_none.so
+%{_libdir}/slurm/topology_3d_torus.so
+%{_libdir}/slurm/topology_none.so
+%{_libdir}/slurm/topology_tree.so
 %{_libdir}/slurm/mpi_lam.so
 %{_libdir}/slurm/mpi_mpich1_p4.so
 %{_libdir}/slurm/mpi_mpich1_shmem.so

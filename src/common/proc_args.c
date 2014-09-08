@@ -7,7 +7,8 @@
  *  from existing SLURM source code, particularly src/srun/opt.c 
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -420,10 +421,12 @@ bool verify_socket_core_thread_count(const char *arg,
 
  	for (j=0;j<3;j++) {	
 		for (i=0;i<47;i++) {
-			if (*cur_ptr == '\0' || *cur_ptr ==':') break;
+			if (*cur_ptr == '\0' || *cur_ptr ==':')
+				break;
 			buf[j][i] = *cur_ptr++;
 		}
-		if (*cur_ptr == '\0') break;
+		if (*cur_ptr == '\0')
+			break;
 		xassert(*cur_ptr == ':');
 		buf[j][i] = '\0';
 		cur_ptr++;
@@ -511,7 +514,8 @@ bool verify_hint(const char *arg, int *min_sockets, int *max_sockets,
 		        *max_threads = 1;
 			*cpu_bind_type |= CPU_BIND_TO_THREADS;
 		} else {
-			error("unrecognized --hint argument \"%s\", see --hint=help", tok);
+			error("unrecognized --hint argument \"%s\", "
+			      "see --hint=help", tok);
 			xfree(buf);
 			return 1;
 		}
@@ -636,12 +640,17 @@ search_path(char *cwd, char *cmd, bool check_current_dir, int access_mode)
 char *print_commandline(const int script_argc, char **script_argv)
 {
 	int i;
-	char buf[256];
+	char tmp[256], *out_buf = NULL, *prefix;
 
-	buf[0] = '\0';
-	for (i = 0; i < script_argc; i++)
-		snprintf(buf, 256,  "%s", script_argv[i]);
-	return xstrdup(buf);
+	for (i = 0; i < script_argc; i++) {
+		if (out_buf)
+			prefix = " ";
+		else
+			prefix = "";
+		snprintf(tmp, 256,  "%s%s", prefix, script_argv[i]);
+		xstrcat(out_buf, tmp);
+	}
+	return out_buf;
 }
 
 char *print_geometry(const uint16_t *geometry)

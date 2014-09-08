@@ -7,10 +7,11 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  * 
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -76,6 +77,7 @@ enum {
 #ifdef HAVE_BGL
 	SORTID_USE,
 #endif
+	SORTID_NODE_INX,
 	SORTID_USER,
 	SORTID_CNT
 };
@@ -117,6 +119,8 @@ static display_data_t display_data_block[] = {
 #endif
 	{G_TYPE_STRING, SORTID_MLOADERIMAGE, "Mloader Image",
 	 FALSE, EDIT_NONE, refresh_block, create_model_block, admin_edit_block},
+	{G_TYPE_POINTER, SORTID_NODE_INX,  NULL, FALSE, EDIT_NONE, 
+	 refresh_resv, create_model_resv, admin_edit_resv},
 	{G_TYPE_INT, SORTID_UPDATED, NULL, FALSE, EDIT_NONE, refresh_block,
 	 create_model_block, admin_edit_block},
 	{G_TYPE_NONE, -1, NULL, FALSE, EDIT_NONE}
@@ -133,6 +137,7 @@ static display_data_t options_data_block[] = {
 	{G_TYPE_STRING, PART_PAGE, "Partition", TRUE, BLOCK_PAGE},
 	{G_TYPE_STRING, NODE_PAGE, "Base Partitions", TRUE, BLOCK_PAGE},
 	{G_TYPE_STRING, SUBMIT_PAGE, "Job Submit", FALSE, BLOCK_PAGE},
+	{G_TYPE_STRING, RESV_PAGE, "Reservation", TRUE, BLOCK_PAGE},
 	{G_TYPE_NONE, -1, NULL, FALSE, EDIT_NONE}
 };
 
@@ -336,6 +341,9 @@ static void _update_block_record(sview_block_info_t *block_ptr,
 	gtk_tree_store_set(treestore, iter, SORTID_NODELIST,
 			   block_ptr->nodes, -1);
 
+	gtk_tree_store_set(treestore, iter, 
+			   SORTID_NODE_INX, block_ptr->bp_inx, -1);
+
 #ifdef HAVE_BGL
 	gtk_tree_store_set(treestore, iter, SORTID_BLRTSIMAGE,
 			   block_ptr->blrtsimage, -1);
@@ -444,6 +452,27 @@ static void _update_info_block(List block_list,
 	remove_old(model, SORTID_UPDATED);
 }
 
+static int _sview_block_sort_aval_dec(sview_block_info_t* rec_a,
+				      sview_block_info_t* rec_b)
+{
+	int size_a = rec_a->node_cnt;
+	int size_b = rec_b->node_cnt;
+
+	if (size_a > size_b)
+		return -1;
+	else if (size_a < size_b)
+		return 1;
+
+	if(rec_a->nodes && rec_b->nodes) {
+		size_a = strcmp(rec_a->nodes, rec_b->nodes);
+		if (size_a > 0)
+			return -1;
+		else if (size_a < 0)
+			return 1;
+	}
+	return 0;
+}
+
 static List _create_block_list(partition_info_msg_t *part_info_ptr,
 			       node_select_info_msg_t *node_select_ptr,
 			       int changed)
@@ -457,7 +486,7 @@ static List _create_block_list(partition_info_msg_t *part_info_ptr,
 	if(!changed && block_list) {
 		return block_list;
 	}
-	
+
 	if(block_list) {
 		list_destroy(block_list);
 	}
@@ -518,12 +547,16 @@ static List _create_block_list(partition_info_msg_t *part_info_ptr,
 				break;
 			}
 		}
-		if(block_ptr->bg_conn_type == SELECT_SMALL)
+		if(block_ptr->bg_conn_type >= SELECT_SMALL)
 			block_ptr->size = 0;
 
 		list_append(block_list, block_ptr);
 	}
 	
+	list_sort(block_list,
+		  (ListCmpF)_sview_block_sort_aval_dec);
+
+
 	return block_list;
 }
 
@@ -566,7 +599,7 @@ need_refresh:
 				change_grid_color(
 					popup_win->grid_button_list,
 					block_ptr->bp_inx[j],
-					block_ptr->bp_inx[j+1], i);
+					block_ptr->bp_inx[j+1], i, true);
 				j += 2;
 			}
 			_layout_block_record(treeview, block_ptr, update);
@@ -627,6 +660,8 @@ extern int get_new_info_node_select(node_select_info_msg_t **node_select_ptr,
 	static bool changed = 0;
 		
 	if(!force && ((now - last) < global_sleep_time)) {
+		if(*node_select_ptr != bg_info_ptr)
+			error_code = SLURM_SUCCESS;
 		*node_select_ptr = bg_info_ptr;
 		if(changed) 
 			return SLURM_SUCCESS;
@@ -651,6 +686,10 @@ extern int get_new_info_node_select(node_select_info_msg_t **node_select_ptr,
 	}
 
 	bg_info_ptr = new_bg_ptr;
+
+	if(*node_select_ptr != bg_info_ptr) 
+		error_code = SLURM_SUCCESS;
+	
 	*node_select_ptr = new_bg_ptr;
 #endif
 	return error_code;
@@ -839,10 +878,11 @@ extern void get_info_block(GtkTable *table, display_data_t *display_data)
 
 	if((block_error_code = get_new_info_node_select(&node_select_ptr, 
 							force_refresh))
-	   == SLURM_NO_CHANGE_IN_DATA) { 
+	   == SLURM_NO_CHANGE_IN_DATA) {
 		if((!display_widget || view == ERROR_VIEW) 
-		   || (part_error_code != SLURM_NO_CHANGE_IN_DATA))
+		   || (part_error_code != SLURM_NO_CHANGE_IN_DATA)) {
 			goto display_it;
+		}
 		changed = 0;
 	} else if (block_error_code != SLURM_SUCCESS) {
 		if(view == ERROR_VIEW)
@@ -879,7 +919,7 @@ display_it:
 						  bp_inx[j],
 						  sview_block_info_ptr->
 						  bp_inx[j+1],
-						  i);
+						  i, true);
 			j += 2;
 		}
 		i++;
@@ -926,9 +966,7 @@ extern void specific_info_block(popup_info_t *popup_win)
 	int changed = 1;
 	sview_block_info_t *block_ptr = NULL;
 	int j=0, i=-1;
-	char *host = NULL, *host2 = NULL;
-	hostlist_t hostlist = NULL;
-	int found = 0;
+	hostset_t hostset = NULL;
 	ListIterator itr = NULL;
 	
 	if(!spec_info->display_widget) {
@@ -1015,11 +1053,8 @@ display_it:
 				 popup_win->display_data, SORTID_CNT);
 	}
 
-	if(!popup_win->grid_button_list) {
-		popup_win->grid_button_list = copy_main_button_list();
-		put_buttons_in_table(popup_win->grid_table,
-				     popup_win->grid_button_list);
-	}
+	setup_popup_grid_list(popup_win);
+
 	spec_info->view = INFO_VIEW;
 	if(spec_info->type == INFO_PAGE) {
 		_display_info_block(block_list, popup_win);
@@ -1039,29 +1074,18 @@ display_it:
 				  search_info->gchar_data)) 
 				continue;
 			break;
+		case RESV_PAGE:
 		case NODE_PAGE:
 			if(!block_ptr->nodes)
 				continue;
 			
-			hostlist = hostlist_create(search_info->gchar_data);
-			host = hostlist_shift(hostlist);
-			hostlist_destroy(hostlist);
-			if(!host) 
+			if(!(hostset = hostset_create(search_info->gchar_data)))
 				continue;
-
-			hostlist = hostlist_create(block_ptr->nodes);
-			found = 0;
-			while((host2 = hostlist_shift(hostlist))) { 
-				if(!strcmp(host, host2)) {
-					free(host2);
-					found = 1;
-					break; 
-				}
-				free(host2);
+			if(!hostset_intersects(hostset, block_ptr->nodes)) {
+				hostset_destroy(hostset);
+				continue;
 			}
-			hostlist_destroy(hostlist);
-			if(!found)
-				continue;
+			hostset_destroy(hostset);				
 			break;
 		case BLOCK_PAGE:
 			switch(search_info->search_type) {
@@ -1107,7 +1131,7 @@ display_it:
 			change_grid_color(
 				popup_win->grid_button_list,
 				block_ptr->bp_inx[j],
-				block_ptr->bp_inx[j+1], i);
+				block_ptr->bp_inx[j+1], i, false);
 			j += 2;
 		}
 	}
@@ -1153,12 +1177,17 @@ extern void popup_all_block(GtkTreeModel *model, GtkTreeIter *iter, int id)
 	int i=0;
 
 	gtk_tree_model_get(model, iter, SORTID_BLOCK, &name, -1);
+
 	switch(id) {
 	case JOB_PAGE:
 		snprintf(title, 100, "Jobs(s) in block %s", name);
 		break;
 	case PART_PAGE:
 		snprintf(title, 100, "Partition(s) containing block %s", name);
+		break;
+	case RESV_PAGE:
+		snprintf(title, 100, "Reservations(s) containing block %s",
+			 name);
 		break;
 	case NODE_PAGE:
 		snprintf(title, 100, "Base Partition(s) in block %s", name);
@@ -1192,6 +1221,14 @@ extern void popup_all_block(GtkTreeModel *model, GtkTreeIter *iter, int id)
 		gtk_window_present(GTK_WINDOW(popup_win->popup));
 		return;
 	}
+
+	/* Pass the model and the structs from the iter so we can always get
+	   the current node_inx.
+	*/
+	popup_win->model = model;
+	popup_win->iter = *iter;
+	popup_win->node_inx_id = SORTID_NODE_INX;
+
 	switch(id) {
 	case JOB_PAGE:
 		popup_win->spec_info->search_info->gchar_data = name;
@@ -1201,6 +1238,7 @@ extern void popup_all_block(GtkTreeModel *model, GtkTreeIter *iter, int id)
 		gtk_tree_model_get(model, iter, SORTID_PARTITION, &name, -1);
 		popup_win->spec_info->search_info->gchar_data = name;
 		break;
+	case RESV_PAGE: 
 	case NODE_PAGE: 
 		g_free(name);
 		gtk_tree_model_get(model, iter, SORTID_NODELIST, &name, -1);

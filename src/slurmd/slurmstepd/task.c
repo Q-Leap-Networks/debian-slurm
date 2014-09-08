@@ -2,13 +2,14 @@
  *  slurmd/slurmstepd/task.c - task launching functions for slurmstepd
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark A. Grondona <mgrondona@llnl.gov>.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -76,23 +77,24 @@
 
 #include <slurm/slurm_errno.h>
 
+#include "src/common/checkpoint.h"
 #include "src/common/env.h"
 #include "src/common/fd.h"
 #include "src/common/log.h"
+#include "src/common/mpi.h"
+#include "src/common/plugstack.h"
+#include "src/slurmd/common/proctrack.h"
 #include "src/common/switch.h"
+#include "src/slurmd/common/task_plugin.h"
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
-#include "src/common/mpi.h"
 #include "src/common/xmalloc.h"
-#include "src/common/plugstack.h"
 
 #include "src/slurmd/slurmd/slurmd.h"
-#include "src/slurmd/common/proctrack.h"
-#include "src/slurmd/common/task_plugin.h"
-#include "src/slurmd/slurmstepd/task.h"
-#include "src/slurmd/slurmstepd/ulimits.h"
 #include "src/slurmd/slurmstepd/io.h"
 #include "src/slurmd/slurmstepd/pdebug.h"
+#include "src/slurmd/slurmstepd/task.h"
+#include "src/slurmd/slurmstepd/ulimits.h"
 
 /*
  * Static prototype definitions.
@@ -345,11 +347,11 @@ exec_task(slurmd_job_t *job, int i, int waitfd)
 	if (i == 0)
 		_make_tmpdir(job);
 
-        /*
+	/*
 	 * Stall exec until all tasks have joined the same process group
 	 */
-        if ((rc = read (waitfd, &c, sizeof (c))) != 1) {
-	        error ("_exec_task read failed, fd = %d, rc=%d: %m", waitfd, rc);
+	if ((rc = read (waitfd, &c, sizeof (c))) != 1) {
+		error ("_exec_task read failed, fd = %d, rc=%d: %m", waitfd, rc);
 		log_fini();
 		exit(1);
 	}
@@ -370,13 +372,13 @@ exec_task(slurmd_job_t *job, int i, int waitfd)
 	job->envtp->localid = task->id;
 	job->envtp->task_pid = getpid();
 	job->envtp->distribution = job->task_dist;
-	job->envtp->plane_size   = job->plane_size;
 	job->envtp->cpu_bind = xstrdup(job->cpu_bind);
 	job->envtp->cpu_bind_type = job->cpu_bind_type;
 	job->envtp->mem_bind = xstrdup(job->mem_bind);
 	job->envtp->mem_bind_type = job->mem_bind_type;
 	job->envtp->distribution = -1;
-	job->envtp->ckpt_path = xstrdup(job->ckpt_path);
+	job->envtp->ckpt_dir = xstrdup(job->ckpt_dir);
+	job->envtp->batch_flag = job->batch;
 	setup_env(job->envtp);
 	setenvf(&job->envtp->env, "SLURMD_NODENAME", "%s", conf->node_name);
 	job->env = job->envtp->env;
@@ -426,7 +428,11 @@ exec_task(slurmd_job_t *job, int i, int waitfd)
 	}
 
 	/* task plugin hook */
-	pre_launch(job);
+	if (pre_launch(job)) {
+		error ("Failed task affinity setup");
+		exit (1);
+	}
+
 	if (conf->task_prolog) {
 		char *my_prolog;
 		slurm_mutex_lock(&conf->config_mutex);
@@ -447,6 +453,14 @@ exec_task(slurmd_job_t *job, int i, int waitfd)
 		debug("job->env is NULL");
 		job->env = (char **)xmalloc(sizeof(char *));
 		job->env[0] = (char *)NULL;
+	}
+
+	if (job->restart_dir) {
+		info("restart from %s", job->restart_dir);
+		/* no return on success */
+		checkpoint_restart_task(job, job->restart_dir, task->gtid); 
+		error("Restart task failed: %m");
+		exit(errno);
 	}
 
 	if (task->argv[0] == NULL) {

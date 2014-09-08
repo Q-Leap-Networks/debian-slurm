@@ -5,15 +5,16 @@
  *  NOTE: This software specifically supports only BlueGene/L for now. It 
  *	will be made more general in the future
  *
- *  $Id: node_select_info.h 13672 2008-03-19 23:10:58Z jette $
+ *  $Id: node_select_info.h 17534 2009-05-19 00:58:46Z da $
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -48,33 +49,32 @@
 #include <time.h>
 
 typedef struct {
-	char *nodes;
-	char *ionodes;
-	char *owner_name;
 	char *bg_block_id;
-	int state;
-	int conn_type;
-	int node_use;
-	int quarter;
-	int nodecard;
-	int node_cnt;
+	char *blrtsimage;       /* BlrtsImage for this block */
 	int *bp_inx;            /* list index pairs into node_table for *nodes:
 				 * start_range_1, end_range_1,
 				 * start_range_2, .., -1  */
+	int conn_type;
+	char *ionodes;
 	int *ionode_inx;        /* list index pairs for ionodes in the
 				 * node listed for *ionodes:
 				 * start_range_1, end_range_1,
 				 * start_range_2, .., -1  */
-	char *blrtsimage;       /* BlrtsImage for this block */
+	int job_running;
 	char *linuximage;       /* LinuxImage for this block */
 	char *mloaderimage;     /* mloaderImage for this block */
+	char *nodes;
+	int node_cnt;
+	int node_use;
+	char *owner_name;
 	char *ramdiskimage;     /* RamDiskImage for this block */
+	int state;
 } bg_info_record_t;
 
 typedef struct {
+	bg_info_record_t *bg_info_array;
 	time_t    last_update;
 	uint32_t  record_count;
-	bg_info_record_t *bg_info_array;
 } node_select_info_msg_t;
 
 /*

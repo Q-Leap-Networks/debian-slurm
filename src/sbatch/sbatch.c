@@ -1,16 +1,15 @@
 /*****************************************************************************\
- *  sbatch.c - Submit a SLURM batch script.
- *
- *  $Id: sbatch.c 15808 2008-12-02 23:38:47Z da $
+ *  sbatch.c - Submit a SLURM batch script.$
  *****************************************************************************
  *  Copyright (C) 2006-2007 The Regents of the University of California.
- *  Copyright (C) 2008 Lawrence Livermore National Security.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -37,6 +36,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/param.h>               /* MAXPATHLEN */
 #include <fcntl.h>
 
 #include <slurm/slurm.h>
@@ -46,17 +46,19 @@
 #include "src/common/slurm_rlimits_info.h"
 #include "src/common/xstring.h"
 #include "src/common/xmalloc.h"
+#include "src/common/plugstack.h"
 
 #include "src/sbatch/opt.h"
 
-#define MAX_RETRIES 3
+#define MAX_RETRIES 15
 
 static int   fill_job_desc_from_opts(job_desc_msg_t *desc);
 static void *get_script_buffer(const char *filename, int *size);
-static void  set_prio_process_env(void);
-static int   set_umask_env(void);
 static char *script_wrap(char *command_string);
-static int  _set_rlimit_env(void);
+static void  _set_prio_process_env(void);
+static int   _set_rlimit_env(void);
+static void  _set_submit_dir_env(void);
+static int   _set_umask_env(void);
 
 int main(int argc, char *argv[])
 {
@@ -69,6 +71,15 @@ int main(int argc, char *argv[])
 	int retries = 0;
 
 	log_init(xbasename(argv[0]), logopt, 0, NULL);
+
+	if (spank_init_allocator() < 0)
+		fatal("Failed to intialize plugin stack");
+
+	/* Be sure to call spank_fini when sbatch exits
+	 */
+	if (atexit((void (*) (void)) spank_fini) < 0)
+		error("Failed to register atexit handler for plugins: %m");
+
 	script_name = process_options_first_pass(argc, argv);
 	/* reinit log with new verbosity (if changed by command line) */
 	if (opt.verbose || opt.quiet) {
@@ -91,6 +102,9 @@ int main(int argc, char *argv[])
 		fatal("sbatch parameter parsing");
 	}
 
+	if (spank_init_post_opt() < 0)
+		fatal("Plugin stack post-option processing failed");
+
 	if (opt.get_user_env_time < 0) {
 		/* Moab does not propage the user's resource limits, so 
 		 * slurmd determines the values at the same time that it 
@@ -98,8 +112,9 @@ int main(int argc, char *argv[])
 		(void) _set_rlimit_env();
 	}
 
-	set_prio_process_env();
-	set_umask_env();
+	_set_prio_process_env();
+	_set_submit_dir_env();
+	_set_umask_env();
 	slurm_init_job_desc_msg(&desc);
 	if (fill_job_desc_from_opts(&desc) == -1) {
 		exit(2);
@@ -108,16 +123,27 @@ int main(int argc, char *argv[])
 	desc.script = (char *)script_body;
 
 	while (slurm_submit_batch_job(&desc, &resp) < 0) {
-		static char *msg = "Slurm job queue full, sleeping and retrying.";
-
-		if ((errno != ESLURM_ERROR_ON_DESC_TO_RECORD_COPY) ||
-		    (retries >= MAX_RETRIES)) {
+		static char *msg;
+		
+		if (errno == ESLURM_ERROR_ON_DESC_TO_RECORD_COPY)
+			msg = "Slurm job queue full, sleeping and retrying.";
+		else if (errno == ESLURM_NODES_BUSY) {
+			msg = "Job step creation temporarily disabled, "
+			      "retrying";
+		} else if (errno == EAGAIN) {
+			msg = "Slurm temporarily unable to accept job, "
+			      "sleeping and retrying.";
+		} else
+			msg = NULL;
+		if ((msg == NULL) || (retries >= MAX_RETRIES)) {
 			error("Batch job submission failed: %m");
 			exit(3);
 		}
 
 		if (retries)
 			debug(msg);
+		else if (errno == ESLURM_NODES_BUSY)
+			info(msg);	/* Not an error, powering up nodes */
 		else
 			error(msg);
 		sleep (++retries);
@@ -142,9 +168,8 @@ static int fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->name = xstrdup(opt.job_name);
 	else
 		desc->name = xstrdup("sbatch");
-
-	if(opt.wckey)
- 		xstrfmtcat(desc->name, "\"%s", opt.wckey);
+	desc->reservation  = xstrdup(opt.reservation);
+	desc->wckey  = xstrdup(opt.wckey);
 
 	desc->req_nodes = opt.nodelist;
 	desc->exc_nodes = opt.exc_nodes;
@@ -161,9 +186,19 @@ static int fill_job_desc_from_opts(job_desc_msg_t *desc)
 	desc->group_id = opt.gid;
 	if (opt.dependency)
 		desc->dependency = xstrdup(opt.dependency);
-	desc->task_dist  = opt.distribution;
+
+	if (opt.cpu_bind)
+		desc->cpu_bind       = opt.cpu_bind;
+	if (opt.cpu_bind_type)
+		desc->cpu_bind_type  = opt.cpu_bind_type;
+	if (opt.mem_bind)
+		desc->mem_bind       = opt.mem_bind;
+	if (opt.mem_bind_type)
+		desc->mem_bind_type  = opt.mem_bind_type;
 	if (opt.plane_size != NO_VAL)
-		desc->plane_size = opt.plane_size;
+		desc->plane_size     = opt.plane_size;
+	desc->task_dist  = opt.distribution;
+
 	desc->network = opt.network;
 	if (opt.nice)
 		desc->nice = NICE_OFFSET + opt.nice;
@@ -271,11 +306,31 @@ static int fill_job_desc_from_opts(job_desc_msg_t *desc)
 	if (opt.acctg_freq >= 0)
 		desc->acctg_freq = opt.acctg_freq;
 
+	desc->ckpt_dir = opt.ckpt_dir;
+	desc->ckpt_interval = (uint16_t)opt.ckpt_interval;
 	return 0;
 }
 
+/* Set SLURM_SUBMIT_DIR environment variable with current state */
+static void _set_submit_dir_env(void)
+{
+	char buf[MAXPATHLEN + 1];
+
+	if (getenv("SLURM_SUBMIT_DIR"))	/* use this value */
+		return;
+
+	if ((getcwd(buf, MAXPATHLEN)) == NULL)
+		fatal("getcwd failed: %m");
+
+	if (setenvf(NULL, "SLURM_SUBMIT_DIR", "%s", buf) < 0) {
+		error ("unable to set SLURM_SUBMIT_DIR in environment");
+		return;
+	}
+	debug ("propagating SUBMIT_DIR=%s", buf);
+}
+
 /* Set SLURM_UMASK environment variable with current state */
-static int set_umask_env(void)
+static int _set_umask_env(void)
 {
 	char mask_char[5];
 	mode_t mask;
@@ -297,13 +352,13 @@ static int set_umask_env(void)
 }
 
 /*
- * set_prio_process_env
+ * _set_prio_process_env
  *
  * Set the internal SLURM_PRIO_PROCESS environment variable to support
  * the propagation of the users nice value and the "PropagatePrioProcess"
  * config keyword.
  */
-static void  set_prio_process_env(void)
+static void  _set_prio_process_env(void)
 {
 	int retval;
 

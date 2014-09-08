@@ -2,12 +2,14 @@
  *  hostlist.c - Convert hostlist expressions between Slurm and Moab formats
  *****************************************************************************
  *  Copyright (C) 2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -81,7 +83,7 @@ extern char * moab2slurm_task_list(char *moab_tasklist, int *task_cnt)
 	static uint32_t cr_test = 0, cr_enabled = 0;
 
 	if (cr_test == 0) {
-		select_g_get_info_from_plugin(SELECT_CR_PLUGIN,
+		select_g_get_info_from_plugin(SELECT_CR_PLUGIN, NULL,
 						&cr_enabled);
 		cr_test = 1;
 	}
@@ -161,32 +163,43 @@ extern char * slurm_job2moab_task_list(struct job_record *job_ptr)
 /* Return task list in Moab format 1: tux0:tux0:tux1:tux1:tux2 */
 static char * _task_list(struct job_record *job_ptr)
 {
-	int i, j;
+	int i, j, node_inx = 0, task_cnt;
 	char *buf = NULL, *host;
-	hostlist_t hl = hostlist_create(job_ptr->nodes);
+	select_job_res_t select_ptr = job_ptr->select_job;
 
-	if (hl == NULL) {
-		error("hostlist_create error for job %u, %s",
-			job_ptr->job_id, job_ptr->nodes);
-		return buf;
-	}
-
-	for (i=0; i<job_ptr->alloc_lps_cnt; i++) {
-		host = hostlist_shift(hl);
-		if (host == NULL) {
-			error("bad alloc_lps_cnt for job %u (%s, %d)", 
-				job_ptr->job_id, job_ptr->nodes,
-				job_ptr->alloc_lps_cnt);
-			break;
+	xassert(select_ptr);
+	for (i=0; i<select_ptr->nhosts; i++) {
+		if (i == 0) {
+			xassert(select_ptr->cpus && select_ptr->node_bitmap);
+			node_inx = bit_ffs(select_ptr->node_bitmap);
+		} else {
+			for (node_inx++; node_inx<node_record_count; 
+			     node_inx++) {
+				if (bit_test(select_ptr->node_bitmap,node_inx))
+					break;
+			}
+			if (node_inx >= node_record_count) {
+				error("Improperly formed select_job for %u",
+				      job_ptr->job_id);
+				break;
+			}
 		}
-		for (j=0; j<job_ptr->alloc_lps[i]; j++) {
+		host = node_record_table_ptr[node_inx].name;
+
+		task_cnt = select_ptr->cpus[i];
+		if (job_ptr->details && job_ptr->details->cpus_per_task)
+			task_cnt /= job_ptr->details->cpus_per_task;
+		if (task_cnt < 1) {
+			error("Invalid task_cnt for job %u on node %s",
+			      job_ptr->job_id, host);
+			task_cnt = 1;
+		}
+		for (j=0; j<task_cnt; j++) {
 			if (buf)
 				xstrcat(buf, ":");
 			xstrcat(buf, host);
 		}
-		free(host);
 	}
-	hostlist_destroy(hl);
 	return buf;
 }
 
@@ -248,27 +261,39 @@ static void _append_hl_buf(char **buf, hostlist_t *hl_tmp, int *reps)
 /* Return task list in Moab format 2: tux[0-1]*2:tux2 */
 static char * _task_list_exp(struct job_record *job_ptr)
 {
-	int i, reps = -1;
+	int i, node_inx = 0, reps = -1, task_cnt;
 	char *buf = NULL, *host;
-	hostlist_t hl = hostlist_create(job_ptr->nodes);
 	hostlist_t hl_tmp = (hostlist_t) NULL;
+	select_job_res_t select_ptr = job_ptr->select_job;
 
-	if (hl == NULL) {
-		error("hostlist_create error for job %u, %s",
-			job_ptr->job_id, job_ptr->nodes);
-		return buf;
-	}
-
-	for (i=0; i<job_ptr->alloc_lps_cnt; i++) {
-		host = hostlist_shift(hl);
-		if (host == NULL) {
-			error("bad alloc_lps_cnt for job %u (%s, %d)", 
-				job_ptr->job_id, job_ptr->nodes,
-				job_ptr->alloc_lps_cnt);
-			break;
+	xassert(select_ptr);
+	for (i=0; i<select_ptr->nhosts; i++) {
+		if (i == 0) {
+			xassert(select_ptr->cpus && select_ptr->node_bitmap);
+			node_inx = bit_ffs(select_ptr->node_bitmap);
+		} else {
+			for (node_inx++; node_inx<node_record_count; 
+			     node_inx++) {
+				if (bit_test(select_ptr->node_bitmap,node_inx))
+					break;
+			}
+			if (node_inx >= node_record_count) {
+				error("Improperly formed select_job for %u",
+				      job_ptr->job_id);
+				break;
+			}
 		}
+		host = node_record_table_ptr[node_inx].name;
 
-		if (reps == job_ptr->alloc_lps[i]) {
+		task_cnt = select_ptr->cpus[i];
+		if (job_ptr->details && job_ptr->details->cpus_per_task)
+			task_cnt /= job_ptr->details->cpus_per_task;
+		if (task_cnt < 1) {
+			error("Invalid task_cnt for job %u on node %s",
+			      job_ptr->job_id, host);
+			task_cnt = 1;
+		}
+		if (reps == task_cnt) {
 			/* append to existing hostlist record */
 			if (hostlist_push(hl_tmp, host) == 0)
 				error("hostlist_push failure");
@@ -279,13 +304,11 @@ static char * _task_list_exp(struct job_record *job_ptr)
 			/* start new hostlist record */
 			hl_tmp = hostlist_create(host);
 			if (hl_tmp)
-				reps = job_ptr->alloc_lps[i];
+				reps = task_cnt;
 			else
 				error("hostlist_create failure");
 		}
-		free(host);
 	}
-	hostlist_destroy(hl);
 	if (hl_tmp)
 		_append_hl_buf(&buf, &hl_tmp, &reps);
 	return buf;

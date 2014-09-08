@@ -9,6 +9,12 @@ online documents at Cluster Resources Inc.:
 <a href="http://www.clusterresources.com/products/maui/docs/mauiadmin.shtml">
 http://www.clusterresources.com/products/maui/docs/mauiadmin.shtml</a>.
 
+<p>Maui uses SLURM commands and a wiki interface to communicate. See the 
+<a href="http://www.clusterresources.com/products/mwm/docs/wiki/wikiinterface.shtml">
+Wiki Interface Specification</a> and
+<a href="http://www.clusterresources.com/products/mwm/docs/wiki/socket.shtml">
+Wiki Socket Protocol Description</a> for more information.</p>
+
 <h2>Configuration</h2>
 <p>First, download the Maui scheduler kit from their web site
 <a href="http://www.clusterresources.com/pages/products/maui-cluster-scheduler.php">
@@ -32,12 +38,12 @@ Then build Maui from its source distribution. This is a two step process:</p>
 <p>The key of 42 is arbitrary. You can use any value, but it will need to 
 be a number no larger than 4,294,967,295 (2^32) and specify the same 
 value as a SLURM configuration parameter described below.
-Maui developers have assured us the authenticaion key will eventually be 
+Maui developers have assured us the authentication key will eventually be 
 set in a configuration file rather than at build time.</p>
 
 <p>Update the Maui configuration file <i>maui.conf</i> (Copy the file
 maui-3.2.6p9/maui.cfg.dist to maui.conf). Add the following configuration 
-paramters to maui.conf:</p>
+parameters to maui.conf:</p>
 <pre>
 RMCFG[host]       TYPE=WIKI
 RMPORT            7321            # selected port
@@ -94,10 +100,10 @@ SchedulerPort=7321
 SchedulerAuth=42 (for Slurm version 1.1 and earlier only)
 </pre>
 <p>In this case, "SchedulerAuth" has been set to 42, which was the 
-authenticaiton key specified when Maui was configured above. 
+authentication key specified when Maui was configured above. 
 Just make sure the numbers match.</p>
 
-<p>For Slurm version 1.2 or higher, the authentication key 
+<p>For SLURM version 1.2 or higher, the authentication key 
 is stored in a file specific to the wiki-plugin named 
 <i>wiki.conf</i>.
 This file should be protected from reading by users.
@@ -109,6 +115,18 @@ a man page distributed with SLURM, although that
 includes a description of keywords presently only 
 supported by the sched/wiki2 plugin for use with the 
 Moab Scheduler.</p>
+
+<p>SLURM version 2.0 and higher have internal scheduling capabilities
+that are not compatable with Maui.
+<ol>
+<li>Do not configure SLURM to use the "priority/multifactor" plugin 
+as it would set job priorities which conflict with those set by Maui.</li>
+<li>Do not use SLURM's <a href="reservations.html">reservation</a> 
+mechanism, but use that offered by Maui.</li>
+<li>Do not use SLURM's <a href="resource_limits.html">resource limits</a>
+as those may conflict with those managed by Maui.</li>
+</ol></p>
+
 
 <p>The wiki.conf keywords currently supported by Maui include:</p>
 
@@ -162,6 +180,6 @@ HidePartitionJobs=debug
 
 <p class="footer"><a href="#top">top</a></p>
 
-<p style="text-align:center;">Last modified 4 November 2008</p>
+<p style="text-align:center;">Last modified 8 May 2009</p>
 
 <!--#include virtual="footer.txt"-->

@@ -1,15 +1,15 @@
 /*****************************************************************************\
  *  step_ctx.c - step_ctx task functions for use by AIX/POE
- *
- *  $Id: step_ctx.c 15262 2008-10-01 22:58:26Z jette $
  *****************************************************************************
- *  Copyright (C) 2004 The Regents of the University of California.
+ *  Copyright (C) 2004-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>.
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -44,28 +44,38 @@
 
 #include <slurm/slurm.h>
 
+#include "src/common/bitstring.h"
 #include "src/common/hostlist.h"
 #include "src/common/net.h"
+#include "src/common/slurm_cred.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_defs.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 #include "src/common/slurm_cred.h"
-
 #include "src/api/step_ctx.h"
 
 static void
 _job_fake_cred(struct slurm_step_ctx_struct *ctx)
 {
 	slurm_cred_arg_t arg;
-	arg.alloc_lps_cnt = 0;
-	arg.alloc_lps     = NULL;
+	uint32_t node_cnt = ctx->step_resp->step_layout->node_cnt;
+
 	arg.hostlist      = ctx->step_req->node_list;
 	arg.job_mem       = 0;
 	arg.jobid         = ctx->job_id;
 	arg.stepid        = ctx->step_resp->job_step_id;
-	arg.task_mem      = 0;
 	arg.uid           = ctx->user_id;
+	arg.core_bitmap   = bit_alloc(node_cnt);
+	bit_nset(arg.core_bitmap, 0, node_cnt-1);
+	arg.cores_per_socket = xmalloc(sizeof(uint16_t));
+	arg.cores_per_socket[0] = 1;
+	arg.sockets_per_node = xmalloc(sizeof(uint16_t));
+	arg.sockets_per_node[0] = 1;
+	arg.sock_core_rep_count = xmalloc(sizeof(uint32_t));
+	arg.sock_core_rep_count[0] = node_cnt;
+	arg.job_nhosts    = node_cnt;
+	arg.job_hostlist  = ctx->step_resp->step_layout->node_list;
 	ctx->step_resp->cred = slurm_cred_faker(&arg);
 }
 
@@ -80,15 +90,17 @@ static job_step_create_request_msg_t *_create_step_request(
 	step_req->cpu_count = step_params->cpu_count;
 	step_req->num_tasks = step_params->task_count;
 	step_req->relative = step_params->relative;
+	step_req->resv_port_cnt = step_params->resv_port_cnt;
 	step_req->exclusive  = step_params->exclusive;
 	step_req->immediate  = step_params->immediate;
 	step_req->ckpt_interval = step_params->ckpt_interval;
-	step_req->ckpt_path = xstrdup(step_params->ckpt_path);
+	step_req->ckpt_dir = xstrdup(step_params->ckpt_dir);
 	step_req->task_dist = step_params->task_dist;
 	step_req->plane_size = step_params->plane_size;
 	step_req->node_list = xstrdup(step_params->node_list);
 	step_req->network = xstrdup(step_params->network);
 	step_req->name = xstrdup(step_params->name);
+	step_req->no_kill = step_params->no_kill;
 	step_req->overcommit = step_params->overcommit ? 1 : 0;
 	step_req->mem_per_task = step_params->mem_per_task;
 
@@ -140,7 +152,6 @@ slurm_step_ctx_create (const slurm_step_ctx_params_t *step_params)
 	ctx->magic	= STEP_CTX_MAGIC;
 	ctx->job_id	= step_req->job_id;
 	ctx->user_id	= step_req->user_id;
-	ctx->no_kill	= step_params->no_kill;
 	ctx->step_req   = step_req;
 	ctx->step_resp	= step_resp;
 	ctx->verbose_level = step_params->verbose_level;
@@ -215,7 +226,6 @@ slurm_step_ctx_create_no_alloc (const slurm_step_ctx_params_t *step_params,
 	ctx->magic	= STEP_CTX_MAGIC;
 	ctx->job_id	= step_req->job_id;
 	ctx->user_id	= step_req->user_id;
-	ctx->no_kill	= step_params->no_kill;
 	ctx->step_req   = step_req;
 	ctx->step_resp	= step_resp;
 	ctx->verbose_level = step_params->verbose_level;
@@ -445,6 +455,7 @@ extern void slurm_step_ctx_params_t_init (slurm_step_ctx_params_t *ptr)
 	ptr->relative = (uint16_t)NO_VAL;
 	ptr->task_dist = SLURM_DIST_CYCLIC;
 	ptr->plane_size = (uint16_t)NO_VAL;
+	ptr->resv_port_cnt = (uint16_t)NO_VAL;
 
 	ptr->uid = getuid();
 

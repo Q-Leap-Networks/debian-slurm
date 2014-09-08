@@ -7,10 +7,11 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>,
  *  Christopher J. Morrone <morrone2@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -55,7 +56,6 @@ struct slurm_step_ctx_struct {
 	struct step_launch_state *launch_state;
 	uint16_t verbose_level; /* for extra logging decisions in step
 				 * launch api */
-	bool no_kill;		/* if set, don't kill step on node DOWN */
 };
 
 #endif /* _STEP_CTX_H */

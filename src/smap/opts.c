@@ -1,13 +1,15 @@
 /****************************************************************************\
  *  opts.c - smap command line option processing functions
  *****************************************************************************
- *  Copyright (C) 2002 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -82,6 +84,8 @@ extern void parse_command_line(int argc, char *argv[])
 				tmp = BGPART;
 			else if (!strcmp(optarg, "c"))
 				tmp = COMMANDS;
+			else if (!strcmp(optarg, "r"))
+				tmp = RESERVATIONS;
 
 			params.display = tmp;
 			break;
@@ -154,29 +158,33 @@ static void _print_version(void)
 
 static void _usage(void)
 {
-	printf("\
-Usage: smap [-hVcp] [-D jsbc] [-i seconds]\n");
+#ifdef HAVE_BG
+	printf("Usage: smap [-chVp] [-D bcjrs] [-i seconds]\n");
+#else
+	printf("Usage: smap [-chVp] [-D jrs] [-i seconds]\n");
+#endif
 }
 
 static void _help(void)
 {
 	printf("\
 Usage: smap [OPTIONS]\n\
-  -D, --display              set which Display mode to use\n\
-      j=jobs\n\
-      s=slurm partitions\n\
-      b=Bluegene blocks\n\
-      c=set configuration\n\
+  -c, --commandline          output written with straight to the\n\
+                             commandline.\n\
+  -D, --display              set which display mode to use\n\
+                             b=bluegene blocks\n\
+                             c=set bluegene configuration\n\
+                             j=jobs\n\
+                             r=reservations\n\
+                             s=slurm partitions\n\
   -h, --noheader             no headers on output\n\
   -i, --iterate=seconds      specify an interation period\n\
-  -V, --version              output version information and exit\n\
-  -c, --commandline          output written with straight to the \
-commandline.\n\
-  -p, --parse                used with -c to not format output, but use \
-single tab delimitation.\n\
-  -R, --resolve              resolve an XYZ coord from a Rack/Midplane id \
-or vice versa.\n\
+  -p, --parse                used with -c to not format output, but use\n\
+                             single tab delimitation.\n\
+  -R, --resolve              resolve an XYZ coord from a Rack/Midplane id \n\
+                             or vice versa.\n\
                              (i.e. -R R101 for R/M input -R 101 for XYZ).\n\
+  -V, --version              output version information and exit\n\
 \nHelp options:\n\
   --help                     show this help message\n\
   --usage                    display brief usage message\n");

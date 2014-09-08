@@ -6,10 +6,11 @@
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -95,6 +96,16 @@ extern int init (void)
  */
 extern int fini (void)
 {
+	return SLURM_SUCCESS;
+}
+
+/*
+ * task_slurmd_batch_request()
+ */
+extern int task_slurmd_batch_request (uint32_t job_id, 
+				      batch_job_launch_msg_t *req)
+{
+	debug("task_slurmd_batch_request: %u", job_id);
 	return SLURM_SUCCESS;
 }
 

@@ -30,6 +30,7 @@ noinst_LTLIBRARIES = 			\
 
 libcommon_la_SOURCES = 			\
 	assoc_mgr.c assoc_mgr.h 	\
+	basil_resv_conf.c basil_resv_conf.h \
 	xmalloc.c xmalloc.h 		\
 	xassert.c xassert.h		\
 	xstring.c xstring.h		\
@@ -56,6 +57,8 @@ libcommon_la_SOURCES = 			\
 	slurm_cred.h       		\
 	slurm_cred.c			\
 	slurm_errno.c			\
+	slurm_priority.c		\
+	slurm_priority.h		\
 	slurm_protocol_api.c		\
 	slurm_protocol_api.h		\
 	slurm_protocol_pack.c		\
@@ -90,13 +93,17 @@ libcommon_la_SOURCES = 			\
 	hostlist.c hostlist.h		\
 	slurm_step_layout.c slurm_step_layout.h	\
 	checkpoint.c checkpoint.h	\
+	select_job_res.c select_job_res.h	\
 	parse_time.c parse_time.h	\
 	job_options.c job_options.h	\
 	global_defaults.c		\
 	timers.c timers.h		\
 	slurm_xlator.h			\
 	stepd_api.c stepd_api.h		\
-	proc_args.c proc_args.h		
+	write_labelled_message.c	\
+	write_labelled_message.h	\
+	proc_args.c proc_args.h		\
+	slurm_strcasestr.c slurm_strcasestr.h		
 
 EXTRA_libcommon_la_SOURCES = 	\
 	$(extra_unsetenv_src)
@@ -118,19 +125,19 @@ libcommon_la_LIBADD   = -ldl
 
 libcommon_la_LDFLAGS  = $(LIB_LDFLAGS) -module --export-dynamic
 
-# This was made so we chould export all symbols from libcommon 
+# This was made so we could export all symbols from libcommon 
 # on multiple platforms
 libcommon_o_SOURCES = 
 libcommon.o :  $(libcommon_la_OBJECTS) $(libcommon_la_DEPENDENCIES) 
-	$(libcommon_la_LINK)  $(libcommon_la_OBJECTS) 
+	$(LINK)  $(libcommon_la_OBJECTS) 
 
-# This was made so we chould export all symbols from libeio 
+# This was made so we could export all symbols from libeio 
 # on multiple platforms
 libeio_o_SOURCES = 
 libeio.o :  $(libeio_la_OBJECTS) $(libeio_la_DEPENDENCIES) 
 	$(LINK)  $(libeio_la_OBJECTS) 
 
-# This was made so we chould export all symbols from libspank 
+# This was made so we could export all symbols from libspank 
 # on multiple platforms
 libspank_o_SOURCES = 
 libspank.o :  $(libspank_la_OBJECTS) $(libspank_la_DEPENDENCIES) 

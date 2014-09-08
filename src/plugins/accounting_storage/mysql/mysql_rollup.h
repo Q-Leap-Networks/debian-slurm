@@ -7,10 +7,11 @@
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  LLNL-CODE-402394.
+ *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.llnl.gov/linux/slurm/>.
+ *  For details, see <https://computing.llnl.gov/linux/slurm/>.
+ *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -43,27 +44,11 @@
 
 #include "mysql_jobacct_process.h"
 
-#ifdef HAVE_MYSQL
-extern char *assoc_table;
-extern char *assoc_day_table;
-extern char *assoc_hour_table;
-extern char *assoc_month_table;
-extern char *cluster_day_table;
-extern char *cluster_hour_table;
-extern char *cluster_month_table;
-extern char *event_table;
-extern char *suspend_table;
-extern char *wckey_day_table;
-extern char *wckey_hour_table;
-extern char *wckey_month_table;
-
 extern int mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 			       time_t start, time_t end);
 extern int mysql_daily_rollup(mysql_conn_t *mysql_conn,
-			      time_t start, time_t end);
+			      time_t start, time_t end, uint16_t archive_data);
 extern int mysql_monthly_rollup(mysql_conn_t *mysql_conn,
-			       time_t start, time_t end);
-
-#endif
-
+				time_t start, time_t end,
+				uint16_t archive_data);
 #endif
