@@ -618,6 +618,13 @@ uint16_t _can_job_run_on_node(struct job_record *job_ptr, bitstr_t *core_map,
 {
 	uint16_t cpus;
 	uint32_t avail_mem, req_mem;
+	struct node_record *node_ptr = node_record_table_ptr + node_i;
+
+	if (!test_only && IS_NODE_COMPLETING(node_ptr)) {
+		/* Do not allocate more jobs to nodes with completing jobs */
+		cpus = 0;
+		return cpus;
+	}
 
 	switch (cr_type) {
 	case CR_CORE:
@@ -1413,7 +1420,7 @@ static int _eval_nodes_topo(struct job_record *job_ptr, bitstr_t *bitmap,
 			best_fit_inx = j;
 	}
 	if (best_fit_inx == -1) {
-		error("job %u: best_fit topology failure", job_ptr->job_id);
+		debug("job %u: best_fit topology failure", job_ptr->job_id);
 		rc = SLURM_ERROR;
 		goto fini;
 	}

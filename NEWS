@@ -1,6 +1,69 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 2.1.14
+=========================
+ -- Fixed coding mistakes in _slurm_rpc_resv_show() and job_alloc_info() found
+    while reviewing the code.
+ -- Fix select/cons_res logic to prevent allocating resources while jobs
+    previously allocated resources on the node are still completing.
+ -- Fixed typo in job_mgr.c dealing with qos instead of associations.
+ -- Make sure associations and qos' are initiated when added.
+ -- Fixed wrong initialization for wckeys in the association manager.
+ -- Added wiki.conf configuration parameter of HidePartitionNodes. See 
+    "man wiki.conf" for more information.
+ -- Add "JobAggregationTime=#" field SchedulerParameter configuration parameter
+    output.
+ -- Modify init.d/slurm and slurmdbd scripts to prevent the possible
+    inadvertent inclusion of "." in LD_LIBRARY_PATH environment variable.
+    To fail, the script would need to be executed by user root or SlurmUser
+    without the LD_LIBRARY_PATH environment variable set and there would
+    have to be a maliciously altered library in the working directory.
+    Thanks to Raphael Geissert for identifying the problem.
+
+* Changes in SLURM 2.1.13
+=========================
+ -- Fix race condition which can set a node state to IDLE on slurmctld startup
+    even if it has running jobs.
+
+* Changes in SLURM 2.1.12
+=========================
+ -- Fixes for building on OS X 10.5.
+ -- Fixed a few '-' without a '\' in front of them in the man pages.
+ -- Fixed issues in client tools where a requeued job did get displayed
+    correctly.
+ -- Update typos in doc/html/accounting.shtml doc/html/resource_limits.shtml
+    doc/man/man5/slurmdbd.conf.5 and doc/man/man5/slurm.conf.5
+ -- Fixed a bug in exitcode:signal display in sacct
+ -- Fix bug when request comes in for consumable resources and the -c option
+    is used in conjunction with -O
+ -- Fixed squeue -o "%h" output formatting
+ -- Change select/linear message "error: job xxx: best_fit topology failure"
+    to debug type.
+ -- BLUEGENE - Fix for sinfo -R to group all midplanes together in a single
+    line for midplanes in an error state instead of 1 line for each midplane.
+ -- Fix srun to work correctly with --uid when getting an allocation
+    and creating a step, also fix salloc to assume identity at the correct
+    time as well.
+ -- BLUEGENE - Fixed issue with jobs being refused when running dynamic mode
+    and every job on the system happens to be the same size.
+ -- Removed bad #define _SLURMD_H from slurmd/get_mach_stat.h.  Didn't appear
+    to cause any problems being there, just incorrect syntax.
+ -- Validate the job ID when salloc or srun receive an SRUN_JOB_COMPLETE RPC to
+    avoid killing the wrong job if the original command exits and the port gets
+    re-used by another command right away.
+ -- Fix to node in correct state in accounting when updating it to drain from
+    scontrol/sview.
+ -- BLUEGENE - Removed incorrect unlocking on error cases when starting jobs.
+ -- Improve logging of invalid sinfo and squeue print options.
+ -- BLUEGENE - Added check to libsched_if to allow root to run even outside of
+    SLURM.  This is needed when running certain blocks outside of SLURM in HTC
+    mode.
+
+* Changes in SLURM 2.1.11-2
+===========================
+ -- BLUEGENE - make it so libsched_if.so is named correctly on 'L' it is
+    libsched_if64.so and on 'P' it is libsched_if.so
 
 * Changes in SLURM 2.1.11
 =========================
@@ -5156,4 +5219,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 20850 2010-07-30 16:33:18Z da $
+$Id: NEWS 21192 2010-09-20 17:58:20Z jette $

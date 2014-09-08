@@ -1,4 +1,4 @@
-# $Id: configure.ac 20828 2010-07-28 20:38:55Z da $
+# $Id: configure.ac 20908 2010-08-06 17:51:35Z da $
 # This file is to be processed with autoconf to generate a configure script
 
 dnl Prologue
@@ -26,7 +26,15 @@ AC_CONFIG_HEADERS([slurm/slurm.h])
 
 dnl This needs to be close to the front to set CFLAGS=-m64
 X_AC_BGL
+
+dnl we need to know if this is a bgl in the Makefile.am to do
+dnl some things differently
+AM_CONDITIONAL(BGL_LOADED, test "x$ac_bluegene_loaded" = "xyes")
+AC_SUBST(BGL_LOADED)
+
 X_AC_BGP
+
+dnl ok now check if bluegene was loaded at all
 AM_CONDITIONAL(BLUEGENE_LOADED, test "x$ac_bluegene_loaded" = "xyes")
 AC_SUBST(BLUEGENE_LOADED)
 

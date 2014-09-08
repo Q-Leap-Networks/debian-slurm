@@ -2,7 +2,7 @@
  *  bg_job_run.c - blue gene job execution (e.g. initiation and termination)
  *  functions.
  *
- *  $Id: bg_job_run.c 20097 2010-04-20 16:42:16Z da $
+ *  $Id: bg_job_run.c 21007 2010-08-25 20:51:44Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -316,7 +316,6 @@ static int _make_sure_block_still_exists(bg_update_t *bg_update_ptr,
 			job_fail(bg_update_ptr->job_ptr->job_id);
 		}
 		unlock_slurmctld(job_write_lock);
-		slurm_mutex_unlock(&job_start_mutex);
 		return 0;
 	}
 	return 1;
@@ -529,7 +528,6 @@ static void _sync_agent(bg_update_t *bg_update_ptr)
 			job_fail(bg_update_ptr->job_ptr->job_id);
 		}
 		unlock_slurmctld(job_write_lock);
-		slurm_mutex_unlock(&job_start_mutex);
 		return;
 	}
 

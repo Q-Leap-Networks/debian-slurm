@@ -757,7 +757,19 @@ int _print_job_shared(job_info_t * job, int width, bool right_justify,
 	if (job == NULL)	/* Print the Header instead */
 		_print_str("SHARED", width, right_justify, true);
 	else {
-		_print_int(job->shared, width, right_justify, true);
+		switch (job->shared) {
+		case 0:
+			_print_str("no", width, right_justify, true);
+			break;
+		case 1:
+		case 2:
+			_print_str("yes", width, right_justify, true);
+			break;
+		case (uint16_t)NO_VAL:
+		default:
+			_print_str("unknwn", width, right_justify, true);
+			break;
+		}
 	}
 	if (suffix)
 		printf("%s", suffix);
@@ -1436,4 +1448,11 @@ static int _filter_step(job_step_info_t * step)
 	}
 
 	return 0;
+}
+
+int _print_com_invalid(void * p, int width, bool right, char* suffix)
+{
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
 }

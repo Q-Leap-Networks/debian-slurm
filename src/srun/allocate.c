@@ -132,10 +132,16 @@ static void _exit_on_signal(int signo)
 /* This typically signifies the job was cancelled by scancel */
 static void _job_complete_handler(srun_job_complete_msg_t *msg)
 {
-	if((int)msg->step_id >= 0)
-		info("Force Terminated job %u.%u", msg->job_id, msg->step_id);
-	else
+	if (pending_job_id && (pending_job_id != msg->job_id)) {
+		error("Ignoring bogus job_complete call: job %u is not "
+		      "job %u", pending_job_id, msg->job_id);
+		return;
+	}
+
+	if (msg->step_id == NO_VAL)
 		info("Force Terminated job %u", msg->job_id);
+	else
+		info("Force Terminated job %u.%u", msg->job_id, msg->step_id);
 }
 
 /*
@@ -231,7 +237,6 @@ static int _wait_bluegene_block_ready(resource_allocation_response_msg_t *alloc)
 	int max_delay = BG_FREE_PREVIOUS_BLOCK + BG_MIN_BLOCK_BOOT +
 		(BG_INCR_BLOCK_BOOT * alloc->node_cnt);
 
-	pending_job_id = alloc->job_id;
 	select_g_select_jobinfo_get(alloc->select_jobinfo,
 				    SELECT_JOBDATA_BLOCK_ID,
 				    &block_id);
@@ -271,7 +276,6 @@ static int _wait_bluegene_block_ready(resource_allocation_response_msg_t *alloc)
 		is_ready = 0;
 
 	xfree(block_id);
-	pending_job_id = 0;
 
 	return is_ready;
 }
@@ -401,6 +405,7 @@ allocate_nodes(void)
 		/*
 		 * Allocation granted!
 		 */
+		pending_job_id = resp->job_id;
 #ifdef HAVE_BG
 		if (!_wait_bluegene_block_ready(resp)) {
 			if(!destroy_job)
