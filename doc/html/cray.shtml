@@ -147,7 +147,7 @@ option or add <i>%_with_srun2aprun  1</i> to your <i>~/.rpmmacros</i> file.</p>
 
 <h2>Administrator Guide</h2>
 
-<h3>Install supporting rpms</h3>
+<h3>Install supporting RPMs</h3>
 
 <p>The build requires a few -devel RPMs listed below. You can obtain these from
 SuSe/Novell.
@@ -332,6 +332,31 @@ node/31:# emacs -nw /etc/pam.d/common-session
 <p>SLURM can be built and installed as on any other computer as described
 <a href="quickstart_admin.html">Quick Start Administrator Guide</a>.
 An example of building and installing SLURM version 2.3.0 is shown below.</p>
+
+<p><b>NOTE:</b> By default neither the <i>salloc</i> command or <i>srun</i>
+command wrapper can be executed as a background process. This is done for two
+reasons:</p>
+<ol>
+<li>Only one ALPS reservation can be created from each session ID. The
+<i>salloc</i> command can not change it's session ID without disconnecting
+itself from the terminal and its parent process, meaning the process could not
+be later put into the foreground or easily identified</li>
+<li>To better identify every process spawned under the <i>salloc</i> process
+using terminal foreground process group IDs</li>
+</ol>
+<p>You can optionally enable <i>salloc</i> and <i>srun</i> to execute as
+background processes by using the configure option
+<i>"--enable-salloc-background"</i>, however doing will result in failed
+resource allocations
+(<i>error: Failed to allocate resources: Requested reservation is in use</i>)
+if not executed sequentially and
+increase the likelyhood of orphaned processes.</p>
+<!-- Example:
+ Modify srun script or ask user to execute "/usr/bin/setsid"
+ before salloc or srun command -->
+<!-- Example:
+ salloc spawns zsh, zsh spawns bash, etc.
+ when salloc terminates, bash becomes a child of init -->
 
 <pre>
 login: # mkdir build && cd build
@@ -598,6 +623,14 @@ as appropriate to reference the proper file location (modify the variable
 login: # scp /home/crayadm/ben/slurm/etc/init.d.slurm boot:/rr/current/software/
 </pre>
 
+<p>SLURM will ignore any interactive jobs or nodes in interactive mode
+so set all your nodes to batch from any service node. Dropping the
+-n option will make all nodes batch.</p>
+
+<pre>
+# xtprocadmin -k m batch -n NODEIDS
+</pre>
+
 <p>Now create the needed directories for logs and state files then start the
 daemons on the sdb and login nodes as shown below.</p>
 
@@ -633,6 +666,6 @@ allocation.</p>
 
 <p class="footer"><a href="#top">top</a></p>
 
-<p style="text-align:center;">Last modified 1 August 2011</p></td>
+<p style="text-align:center;">Last modified 13 March 2012</p></td>
 
 <!--#include virtual="footer.txt"-->

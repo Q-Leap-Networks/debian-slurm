@@ -397,6 +397,19 @@ extern int schedule(uint32_t job_limit)
 
 	lock_slurmctld(job_write_lock);
 	if (!avail_front_end()) {
+		ListIterator job_iterator = list_iterator_create(job_list);
+		while ((job_ptr = (struct job_record *)
+				list_next(job_iterator))) {
+			if (!IS_JOB_PENDING(job_ptr))
+				continue;
+			if ((job_ptr->state_reason != WAIT_NO_REASON) &&
+			    (job_ptr->state_reason != WAIT_RESOURCES) &&
+			    (job_ptr->state_reason != WAIT_NODE_NOT_AVAIL))
+				continue;
+			job_ptr->state_reason = WAIT_FRONT_END;
+		}
+		list_iterator_destroy(job_iterator);
+
 		unlock_slurmctld(job_write_lock);
 		debug("sched: schedule() returning, no front end nodes are "
 		       "available");
@@ -1745,7 +1758,7 @@ extern int build_feature_list(struct job_record *job_ptr)
 	bool have_count = false, have_or = false;
 	struct feature_record *feat;
 
-	if (detail_ptr->features == NULL)	/* no constraints */
+	if (!detail_ptr || !detail_ptr->features)	/* no constraints */
 		return SLURM_SUCCESS;
 	if (detail_ptr->feature_list)		/* already processed */
 		return SLURM_SUCCESS;

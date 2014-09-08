@@ -1,6 +1,71 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 2.3.4
+========================
+ -- Set DEFAULT flag in partition structure when slurmctld reads the
+    configuration file. Patch from Rémi Palancher.
+ -- Fix for possible deadlock in accounting logic: Avoid calling
+    jobacct_gather_g_getinfo() until there is data to read from the socket.
+ -- Fix typo in accounting when using reservations. Patch from Alejandro
+    Lucero Palau.
+ -- Fix to the multifactor priority plugin to calculate effective usage earlier
+    to give a correct priority on the first decay cycle after a restart of the
+    slurmctld. Patch from Martin Perry, Bull.
+ -- Permit user root to run a job step for any job as any user. Patch from
+    Didier Gazen, Laboratoire d'Aerologie.
+ -- BLUEGENE - fix for not allowing jobs if all midplanes are drained and all
+    blocks are in an error state.
+ -- Avoid slurmctld abort due to bad pointer when setting an advanced
+    reservation MAINT flag if it contains no nodes (only licenses).
+ -- Fix bug when requeued batch job is scheduled to run on a different node
+    zero, but attemts job launch on old node zero.
+ -- Fix bug in step task distribution when nodes are not configured in numeric
+    order. Patch from Hongjia Cao, NUDT.
+ -- Fix for srun allocating running within existing allocation with --exclude
+    option and --nnodes count small enough to remove more nodes. Patch from
+    Phil Eckert, LLNL.
+ -- Work around to handle certain combinations of glibc/kernel
+    (i.e. glibc-2.14/Linux-3.1) to correctly open the pty of the slurmstepd
+    as the job user. Patch from Mark Grondona, LLNL.
+ -- Modify linking to include "-ldl" only when needed. Patch from Aleksej
+    Saushev.
+ -- Fix smap regression to display nodes that are drained or down correctly.
+ -- Several bug fixes and performance improvements with related to batch
+    scripts containing very large numbers of arguments. Patches from Par
+    Andersson, NSC.
+ -- Fixed extremely hard to reproduce threading issue in assoc_mgr.
+ -- Correct "scontrol show daemons" output if there is more than one
+    ControlMachine configured.
+ -- Add node read lock where needed in slurmctld/agent code.
+ -- Added test for LUA library named "liblua5.1.so.0" in addition to
+    "liblua5.1.so" as needed by Debian. Patch by Remi Palancher.
+ -- Added partition default_time field to job_submit LUA plugin. Patch by
+    Remi Palancher.
+ -- Fix bug in cray/srun wrapper stdin/out/err file handling.
+ -- In cray/srun wrapper, only include aprun "-q" option when srun "--quiet"
+    option is used.
+ -- BLUEGENE - fix issue where if a small block was in error it could hold up
+    the queue when trying to place a larger than midplane job.
+ -- CRAY - ignore all interactive nodes and jobs on interactive nodes.
+ -- Add new job state reason of "FrontEndDown" which applies only to Cray and
+    IBM BlueGene systems.
+ -- Cray - Enable configure option of "--enable-salloc-background" to permit
+    the srun and salloc commands to be executed in the background. This does
+    NOT remove the ALPS limitation that only one job reservation can be created
+    for each Linux session ID.
+ -- Cray - For srun wrapper when creating a job allocation, set the default job
+    name to the executable file's name.
+ -- Add support for Cray ALPS 5.0.0
+ -- FRONTEND - if a front end unexpectedly reboots kill all jobs but don't
+    mark front end node down.
+ -- FRONTEND - don't down a front end node if you have an epilog error.
+ -- Cray - fix for if a frontend slurmd was started after the slurmctld had
+    already pinged it on startup the unresponding flag would be removed from
+    the frontend node.
+ -- Cray - Fix issue on smap not displaying grid correctly.
+ -- Fixed minor memory leak in sview.
+
 * Changes in SLURM 2.3.3
 ========================
  -- Fix task/cgroup plugin error when used with GRES. Patch by Alexander

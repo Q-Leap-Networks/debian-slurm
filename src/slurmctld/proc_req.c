@@ -1640,7 +1640,7 @@ static void _slurm_rpc_job_step_create(slurm_msg_t * msg)
 	debug2("Processing RPC: REQUEST_JOB_STEP_CREATE from uid=%d", uid);
 
 	dump_step_desc(req_step_msg);
-	if (uid != req_step_msg->user_id) {
+	if (uid && (uid != req_step_msg->user_id)) {
 		error("Security violation, JOB_STEP_CREATE RPC from uid=%d "
 		      "to run as uid %u",
 		      uid, req_step_msg->user_id);
@@ -3501,7 +3501,7 @@ inline static void  _slurm_rpc_checkpoint_task_comp(slurm_msg_t * msg)
 /* Copy an array of type char **, xmalloc() the array and xstrdup() the
  * strings in the array */
 extern char **
-xduparray(uint16_t size, char ** array)
+xduparray(uint32_t size, char ** array)
 {
 	int i;
 	char ** result;
@@ -3519,7 +3519,7 @@ xduparray(uint16_t size, char ** array)
 /* Like xduparray(), but performs one xmalloc().  The output format of this
  * must be identical to _read_data_array_from_file() */
 static char **
-_xduparray2(uint16_t size, char ** array)
+_xduparray2(uint32_t size, char ** array)
 {
 	int i, len = 0;
 	char *ptr, ** result;

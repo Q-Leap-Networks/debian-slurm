@@ -128,6 +128,10 @@ dnl Checks for structures.
 dnl
 X_AC__SYSTEM_CONFIGURATION
 
+dnl Check for dlfcn
+dnl
+X_AC_DLFCN
+
 dnl check to see if glibc's program_invocation_name is available:
 dnl
 X_AC_SLURM_PROGRAM_INVOCATION_NAME
@@ -183,6 +187,7 @@ AC_CHECK_FUNCS( \
    setproctitle \
    sysctlbyname \
    cfmakeraw \
+   setresuid \
 )
 
 AC_CHECK_DECLS([hstrerror, strsignal, sys_siglist])
@@ -255,7 +260,7 @@ dnl check for how to emulate setproctitle
 dnl
 X_AC_SETPROCTITLE
 
-dnl check for debug compilation
+dnl check for debug compilation, must follow X_AC_CRAY
 dnl
 X_AC_DEBUG
 AM_CONDITIONAL(DEBUG_MODULES, test "x$ac_debug" = "xtrue")
