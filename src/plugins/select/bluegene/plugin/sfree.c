@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  sfree.c - free specified block or all blocks.
- *  $Id: sfree.c 18185 2009-07-17 19:02:22Z da $
+ *  $Id: sfree.c 18904 2009-10-15 15:52:20Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -364,6 +364,15 @@ static int _update_bg_record_state()
 				continue;
 			}
 			
+			/* If the call was busy, just skip this
+			   iteration.  It usually means something like
+			   rm_get_BG was called which can be a very
+			   long call */
+			if(rc == EBUSY) {
+				debug5("lock was busy, aborting");
+				break;
+			}
+
 			error("bridge_get_block_info(%s): %s", 
 			      name, 
 			      _bg_err_str(rc));

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/common/stepd_api.c - slurmstepd message API
- *  $Id: stepd_api.c 16867 2009-03-12 16:35:42Z jette $
+ *  $Id: stepd_api.c 18732 2009-09-21 21:34:51Z lipari $
  *****************************************************************************
  *  Copyright (C) 2005-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -203,7 +203,8 @@ stepd_connect(const char *directory, const char *nodename,
 	int len;
 
 	if (nodename == NULL) {
-		nodename = _guess_nodename();
+		if (!(nodename = _guess_nodename()))
+			return -1;
 	}
 	if (directory == NULL) {
 		slurm_ctl_conf_t *cf;
