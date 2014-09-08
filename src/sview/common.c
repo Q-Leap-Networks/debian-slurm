@@ -30,10 +30,34 @@
 #include "src/sview/sview.h"
 #include "src/common/parse_time.h"
 
+static bool menu_right_pressed = false;
+
 typedef struct {
 	GtkTreeModel *model;
 	GtkTreeIter iter;
 } treedata_t;
+
+/* These next 2 functions are here to make it so we don't magically
+ * click on something before we really want to in a menu.
+ */
+static gboolean _menu_button_pressed(GtkWidget *widget, GdkEventButton *event,
+				    gpointer extra)
+{
+	if(event->button == 3) {
+		menu_right_pressed = true;
+		return true;
+	}
+	return false;
+}
+
+static gboolean _menu_button_released(GtkWidget *widget, GdkEventButton *event,
+				      gpointer extra)
+{
+	if(event->button == 3 && !menu_right_pressed)
+		return true;
+	menu_right_pressed = false;
+	return false;
+}
 
 static gboolean _entry_changed(GtkWidget *widget, void *msg)
 {
@@ -372,8 +396,7 @@ static void _popup_state_changed(GtkCheckMenuItem *menuitem,
 	(display_data->refresh)(NULL, display_data->user_data);
 }
 
-static void _selected_page(GtkMenuItem *menuitem,
-			   display_data_t *display_data)
+static void _selected_page(GtkMenuItem *menuitem, display_data_t *display_data)
 {
 	treedata_t *treedata = (treedata_t *)display_data->user_data;
 
@@ -510,6 +533,13 @@ extern void make_fields_menu(popup_info_t *popup_win, GtkMenu *menu,
 	if(popup_win && popup_win->spec_info->type == INFO_PAGE)
 		return;
 
+	g_signal_connect(G_OBJECT(menu), "button-press-event",
+			 G_CALLBACK(_menu_button_pressed),
+			 NULL);
+	g_signal_connect(G_OBJECT(menu), "button-release-event",
+			 G_CALLBACK(_menu_button_released),
+			 NULL);
+
 	for(i=0; i<count; i++) {
 		while(display_data++) {
 			if(display_data->id == -1)
@@ -550,6 +580,14 @@ extern void make_options_menu(GtkTreeView *tree_view, GtkTreePath *path,
 	GtkWidget *menuitem = NULL;
 	treedata_t *treedata = xmalloc(sizeof(treedata_t));
 	treedata->model = gtk_tree_view_get_model(tree_view);
+
+	g_signal_connect(G_OBJECT(menu), "button-press-event",
+			 G_CALLBACK(_menu_button_pressed),
+			 NULL);
+	g_signal_connect(G_OBJECT(menu), "button-release-event",
+			 G_CALLBACK(_menu_button_released),
+			 NULL);
+
 	if (!gtk_tree_model_get_iter(treedata->model, &treedata->iter, path)) {
 		g_error("make menus error getting iter from model\n");
 		return;
@@ -1555,4 +1593,45 @@ extern void sview_widget_modify_bg(GtkWidget *widget, GtkStateType state,
 /* 			END_TIMER; */
 /* 			g_print("%d 3 took %s\n", grid_button->inx, TIME_STR); */
 
+}
+
+extern void sview_radio_action_set_current_value(GtkRadioAction *action,
+						 gint current_value)
+{
+#ifdef GTK2_USE_RADIO_SET
+	gtk_radio_action_set_current_value(action, current_value);
+#else
+	GSList *slist, *group;
+	int i=0;
+	/* gtk_radio_action_set_current_value wasn't added to
+	   GTK until 2.10, it turns out this is what is required to
+	   set the correct value.
+	*/
+	g_return_if_fail(GTK_IS_RADIO_ACTION(action));
+	if((group = gtk_radio_action_get_group(action))) {
+		/* for some reason groups are set backwards like a
+		   stack, g_slist_reverse will fix this but takes twice
+		   as long so just figure out the length, they add 1
+		   to it sense 0 isn't a number and then subtract the
+		   value to get the augmented in the stack.
+		*/
+		current_value = g_slist_length(group) - 1 - current_value;
+		if(current_value < 0) {
+			g_warning("Radio group does not contain an action "
+				  "with value '%d'\n", current_value);
+			return;
+		}
+
+		for (slist = group; slist; slist = slist->next) {
+			if(i == current_value) {
+				gtk_toggle_action_set_active(
+					GTK_TOGGLE_ACTION(slist->data), TRUE);
+				g_object_set(action, "value",
+					     current_value, NULL);
+				return;
+			}
+			i++;
+		}
+	}
+#endif
 }

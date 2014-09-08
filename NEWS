@@ -1,6 +1,43 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 2.1.9
+========================
+ -- In select/linear - Fix logic to prevent over-subscribing memory with shared
+    nodes (Shared=YES or Shared=FORCE).
+ -- Fix for handling -N and --ntasks-per-node without specifying -n with
+    salloc and sbatch.
+ -- Fix jobacct_gather/linux if not polling on tasks to give tasks time to
+    start before doing initial gather.
+ -- When changing priority with the multifactor plugin we make sure we update
+    the last_job_update variable.
+ -- Fixed sview for gtk < 2.10 to display correct debug level at first.
+ -- Fixed sview to not select too fast when using a mouse right click.
+ -- Fixed sacct to display correct timelimits for jobs from accounting.
+ -- Fixed sacct when running as root by default query all users as documented.
+ -- In proctrack/linuxproc, skip over files in /proc that are not really user
+    processes (e.g. "/proc/bus").
+ -- Fix documentation bug for slurmdbd.conf
+ -- Fix slurmctld to update qos preempt list without restart.
+ -- Fix bug in select/cons_res that in some cases would prevent a preempting job
+    from using of resources already allocated to a preemptable running job.
+ -- Fix for sreport in interactive mode to honor parsable/2 options.
+ -- Fixed minor bugs in sacct and sstat commands
+ -- BLUEGENE - Fixed issue if the slurmd becomes unresponsive and you have
+    blocks in an error state accounting is correct when the slurmd comes
+    back up.
+ -- Corrected documentation for -n option in srun/salloc/sbatch
+ -- BLUEGENE - when running a willrun test along with preemption the bluegene
+    plugin now does the correct thing.
+ -- Fix possible memory corruption issue which can cause slurmctld to abort.
+ -- BLUEGENE - fixed small memory leak when setting up env.
+ -- Fixed deadlock if using accounting and cluster changes size in the
+    database.  This can happen if you mistakenly have multiple primary
+    slurmctld's running for a single cluster, which should rarely if ever
+    happen.
+ -- Fixed sacct -c option.
+ -- Critical bug fix in sched/backfill plugin that caused in memory corruption.
+
 * Changes in SLURM 2.1.8
 ========================
  -- Update BUILD_NOTES for AIX and bgp systems on how to get sview to
@@ -5037,4 +5074,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 20218 2010-05-07 21:29:56Z jette $
+$Id: NEWS 20444 2010-06-08 22:20:32Z jette $
