@@ -200,7 +200,7 @@ static int _get_gres_alloc(struct job_record *job_ptr)
 /*
  * _get_gres_config - Fill in the gres_alloc string field for a given
  *      job_record with the count of gres on each node (e.g. for whole node
- *	allocations.
+ *	allocations).
  * IN job_ptr - the job record whose "gres_alloc" field is to be constructed
  * RET Error number.  Currently not used (always set to 0).
  */
@@ -602,8 +602,8 @@ extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
 	if (agent_args->node_count == 0) {
 		if ((job_ptr->details->expanding_jobid == 0) &&
 		    (select_serial == 0)) {
-			error("Job %u allocated no nodes to be killed on",
-			      job_ptr->job_id);
+			error("%s: job %u allocated no nodes to be killed on",
+			      __func__, job_ptr->job_id);
 		}
 		slurm_free_kill_job_msg(kill_job);
 		hostlist_destroy(agent_args->hostlist);
@@ -681,8 +681,8 @@ static int _match_feature(char *seek, struct node_set *node_set_ptr)
  *	1		= exclusive
  *
  * Return values:
- *	0 = no sharing
- *	1 = share resources
+ *	0 = requires idle nodes
+ *	1 = can use non-idle nodes
  */
 static int
 _resolve_shared_status(struct job_record *job_ptr, uint16_t part_max_share,
@@ -691,31 +691,36 @@ _resolve_shared_status(struct job_record *job_ptr, uint16_t part_max_share,
 	/* no sharing if partition Shared=EXCLUSIVE */
 	if (part_max_share == 0) {
 		job_ptr->details->whole_node = 1;
+		job_ptr->details->share_res = 0;
 		return 0;
 	}
 
 	/* sharing if partition Shared=FORCE with count > 1 */
 	if ((part_max_share & SHARED_FORCE) &&
-	    ((part_max_share & (~SHARED_FORCE)) > 1))
+	    ((part_max_share & (~SHARED_FORCE)) > 1)) {
+		job_ptr->details->share_res = 1;
 		return 1;
+	}
 
 	if (cons_res_flag) {
-		if (part_max_share == 1) /* partition configured Shared=NO */
-			return 0;
 		if ((job_ptr->details->share_res  == 0) ||
-		    (job_ptr->details->share_res  == (uint8_t) NO_VAL) ||
-		    (job_ptr->details->whole_node == 1))
+		    (job_ptr->details->whole_node == 1)) {
+			job_ptr->details->share_res = 0;
 			return 0;
+		}
 		return 1;
 	} else {
 		job_ptr->details->whole_node = 1;
-		if (part_max_share == 1) /* partition configured Shared=NO */
+		if (part_max_share == 1) { /* partition configured Shared=NO */
+			job_ptr->details->share_res = 0;
 			return 0;
+		}
 		/* share if the user requested it */
 		if (job_ptr->details->share_res == 1)
 			return 1;
+		job_ptr->details->share_res = 0;
+		return 0;
 	}
-	return 0;
 }
 
 /*
@@ -1078,7 +1083,6 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 
 	shared = _resolve_shared_status(job_ptr, part_ptr->max_share,
 					cr_enabled);
-	job_ptr->details->share_res = shared;
 	if (cr_enabled)
 		job_ptr->cr_enabled = cr_enabled; /* CR enabled for this job */
 
@@ -1587,8 +1591,9 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 	}
 
 	if (job_ptr->priority == 0) {	/* user/admin hold */
-		if ((job_ptr->state_reason != WAIT_HELD) &&
-		    (job_ptr->state_reason != WAIT_HELD_USER)) {
+		if (job_ptr->state_reason != FAIL_BAD_CONSTRAINTS
+		    && (job_ptr->state_reason != WAIT_HELD)
+		    && (job_ptr->state_reason != WAIT_HELD_USER)) {
 			job_ptr->state_reason = WAIT_HELD;
 		}
 		return ESLURM_JOB_HELD;
@@ -1794,6 +1799,7 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 	select_bitmap = NULL;	/* nothing left to free */
 	allocate_nodes(job_ptr);
 	build_node_details(job_ptr, true);
+	rebuild_job_part_list(job_ptr);
 
 	/* This could be set in the select plugin so we want to keep
 	   the flag. */
