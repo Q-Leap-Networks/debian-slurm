@@ -4,7 +4,7 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -36,8 +36,6 @@
 
 #include "src/api/step_io.h"
 #include "src/srun/srun_job.h"
-
-extern pid_t srun_ppid;		/* required for OpenMPI checkpoint */
 
 void srun_set_stdio_fds(srun_job_t *job, slurm_step_io_fds_t *cio_fds);
 

@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/mgr.c - job manager functions for slurmstepd
- *  $Id: mgr.c 13414 2008-02-28 23:22:33Z da $
+ *  $Id: mgr.c 13971 2008-05-02 20:23:00Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -82,7 +82,7 @@
 #include "src/common/node_select.h"
 #include "src/common/fd.h"
 #include "src/common/safeopen.h"
-#include "src/common/slurm_jobacct.h"
+#include "src/common/slurm_jobacct_gather.h"
 #include "src/common/switch.h"
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
@@ -158,6 +158,7 @@ typedef struct kill_thread {
 /* 
  * Job manager related prototypes
  */
+static int  _access(const char *path, int modes, uid_t uid, gid_t gid);
 static void _send_launch_failure(launch_tasks_request_msg_t *, 
                                  slurm_addr *, int);
 static int  _fork_all_tasks(slurmd_job_t *job);
@@ -342,7 +343,7 @@ _setup_normal_io(slurmd_job_t *job)
 
 	/*
 	 * Temporarily drop permissions, initialize task stdio file
-	 * decriptors (which may be connected to files), then
+	 * descriptors (which may be connected to files), then
 	 * reclaim privileges.
 	 */
 	if (_drop_privileges(job, true, &sprivs) < 0)
@@ -511,11 +512,11 @@ _one_step_complete_msg(slurmd_job_t *job, int first, int last)
 	msg.range_first = first;
 	msg.range_last = last;
 	msg.step_rc = step_complete.step_rc;
-	msg.jobacct = jobacct_g_alloc(NULL);
+	msg.jobacct = jobacct_gather_g_create(NULL);
 	/************* acct stuff ********************/
 	if(!acct_sent) {
-		jobacct_g_aggregate(step_complete.jobacct, job->jobacct);
-		jobacct_g_getinfo(step_complete.jobacct, JOBACCT_DATA_TOTAL, 
+		jobacct_gather_g_aggregate(step_complete.jobacct, job->jobacct);
+		jobacct_gather_g_getinfo(step_complete.jobacct, JOBACCT_DATA_TOTAL, 
 				  msg.jobacct);
 		acct_sent = true;
 	}
@@ -560,7 +561,7 @@ _one_step_complete_msg(slurmd_job_t *job, int first, int last)
 		error("Rank %d failed sending step completion message"
 		      " directly to slurmctld", step_complete.rank);
 finished:
-	jobacct_g_free(msg.jobacct);
+	jobacct_gather_g_destroy(msg.jobacct);
 }
 
 /* Given a starting bit in the step_complete.bits bitstring, "start",
@@ -670,7 +671,7 @@ job_manager(slurmd_job_t *job)
 	    || slurmd_task_init() != SLURM_SUCCESS
 	    || mpi_hook_slurmstepd_init(&job->env) != SLURM_SUCCESS
 	    || slurm_proctrack_init() != SLURM_SUCCESS
-	    || jobacct_init() != SLURM_SUCCESS) {
+	    || slurm_jobacct_gather_init() != SLURM_SUCCESS) {
 		rc = SLURM_FAILURE;
 		goto fail1;
 	}
@@ -733,7 +734,7 @@ job_manager(slurmd_job_t *job)
 	_send_launch_resp(job, 0);
 
 	_wait_for_all_tasks(job);
-	jobacct_g_endpoll();
+	jobacct_gather_g_endpoll();
 		
 	job->state = SLURMSTEPD_STEP_ENDING;
 
@@ -913,7 +914,7 @@ _fork_all_tasks(slurmd_job_t *job)
 				if (j > i)
 					close(readfds[j]);
 			}
-			/* jobacct_g_endpoll();	
+			/* jobacct_gather_g_endpoll();	
 			 * closing jobacct files here causes deadlock */
 
 			if (conf->propagate_prio == 1)
@@ -966,19 +967,26 @@ _fork_all_tasks(slurmd_job_t *job)
 
 	for (i = 0; i < job->ntasks; i++) {
 		/*
-                 * Put this task in the step process group
-                 */
-                if (setpgid (job->task[i]->pid, job->pgid) < 0)
-                        error ("Unable to put task %d (pid %ld) into pgrp %ld",
-                               i, job->task[i]->pid, job->pgid);
+		 * Put this task in the step process group
+		 * login_tty() must put task zero in its own
+		 * session, causing setpgid() to fail, setsid()
+		 * has already set its process group as desired
+		 */
+		if ((job->pty == 0)
+		&&  (setpgid (job->task[i]->pid, job->pgid) < 0)) {
+			error("Unable to put task %d (pid %ld) into "
+				"pgrp %ld: %m",
+				i, job->task[i]->pid, job->pgid);
+		}
 
-                if (slurm_container_add(job, job->task[i]->pid) == SLURM_ERROR) {
-                        error("slurm_container_create: %m");
+                if (slurm_container_add(job, job->task[i]->pid)
+		    == SLURM_ERROR) {
+                        error("slurm_container_add: %m");
 			goto fail1;
                 }
 		jobacct_id.nodeid = job->nodeid;
 		jobacct_id.taskid = job->task[i]->gtid;
-		jobacct_g_add_task(job->task[i]->pid, 
+		jobacct_gather_g_add_task(job->task[i]->pid, 
 				   &jobacct_id);
 
 		if (spank_task_post_fork (job, i) < 0) {
@@ -986,8 +994,8 @@ _fork_all_tasks(slurmd_job_t *job)
 			return SLURM_ERROR;
 		}
 	}
-	jobacct_g_set_proctrack_container_id(job->cont_id);
-
+	jobacct_gather_g_set_proctrack_container_id(job->cont_id);
+	
 	/*
 	 * Now it's ok to unblock the tasks, so they may call exec.
 	 */
@@ -1108,12 +1116,12 @@ _wait_for_any_task(slurmd_job_t *job, bool waitflag)
 		}
 
 		/************* acct stuff ********************/
-		jobacct = jobacct_g_remove_task(pid);
+		jobacct = jobacct_gather_g_remove_task(pid);
 		if(jobacct) {
-			jobacct_g_setinfo(jobacct, 
-					  JOBACCT_DATA_RUSAGE, &rusage);
-			jobacct_g_aggregate(job->jobacct, jobacct);
-			jobacct_g_free(jobacct);
+			jobacct_gather_g_setinfo(jobacct, 
+						 JOBACCT_DATA_RUSAGE, &rusage);
+			jobacct_gather_g_aggregate(job->jobacct, jobacct);
+			jobacct_gather_g_destroy(jobacct);
 		} 		
 		/*********************************************/	
 	
@@ -1141,7 +1149,7 @@ _wait_for_any_task(slurmd_job_t *job, bool waitflag)
 			if (job->task_epilog) {
 				_run_script_as_user("user task_epilog",
 						    job->task_epilog,
-						    job, 2, job->env);
+						    job, 5, job->env);
 			}
 			if (conf->task_epilog) {
 				char *my_epilog;
@@ -1672,6 +1680,34 @@ _initgroups(slurmd_job_t *job)
 }
 
 /*
+ * Check this user's access rights to a file
+ * path IN: pathname of file to test
+ * modes IN: desired access
+ * uid IN: user ID to access the file
+ * gid IN: group ID to access the file
+ * RET 0 on success, -1 on failure
+ */
+static int _access(const char *path, int modes, uid_t uid, gid_t gid)
+{
+	struct stat buf;
+	int f_mode;
+
+	if (stat(path, &buf) != 0)
+		return -1;
+
+	if (buf.st_uid == uid)
+		f_mode = (buf.st_mode >> 6) & 07;
+	else if (buf.st_gid == gid)
+		f_mode = (buf.st_mode >> 3) & 07;
+	else
+		f_mode = buf.st_mode & 07;
+
+	if ((f_mode & modes) == modes)
+		return 0;
+	return -1;
+}
+
+/*
  * Run a script as a specific user, with the specified uid, gid, and 
  * extended groups.
  *
@@ -1697,8 +1733,8 @@ _run_script_as_user(const char *name, const char *path, slurmd_job_t *job,
 
 	debug("[job %u] attempting to run %s [%s]", job->jobid, name, path);
 
-	if (access(path, R_OK | X_OK) < 0) {
-		error("Could not run %s [%s]: %m", name, path);
+	if (_access(path, 5, job->pwd->pw_uid, job->pwd->pw_gid) < 0) {
+		error("Could not run %s [%s]: access denied", name, path);
 		return -1;
 	}
 
@@ -1729,7 +1765,11 @@ _run_script_as_user(const char *name, const char *path, slurmd_job_t *job,
 		}
 
 		chdir(job->cwd);
+#ifdef SETPGRP_TWO_ARGS
+		setpgrp(0, 0);
+#else
 		setpgrp();
+#endif
 		execve(path, argv, env);
 		error("execve(): %m");
 		exit(127);

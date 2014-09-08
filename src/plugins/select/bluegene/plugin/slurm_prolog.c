@@ -2,13 +2,11 @@
  *  slurm_ prolog.c - Wait until the specified partition is ready and owned by 
  *	this user. This is executed via SLURM to synchronize the user's job 
  *	execution with slurmctld configuration of partitions.
- *
- *  $Id: slurm_prolog.c 10574 2006-12-15 23:38:29Z jette $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -61,15 +59,15 @@
 
 /*
  * Check the bgblock's status every POLL_SLEEP seconds. 
- * Retry for a period of MIN_FREE_PERVIOUS_BLOCK_DELAY + MIN_DELAY + 
- * (INCR_DELAY * POLL_SLEEP * base partition count).
- * For example if MIN_DELAY=300 and INCR_DELAY=20 and POLL_SLEEP=3, 
- * wait up to 1260 seconds.
- * For a 16 base partition bgblock to be ready (300 + (20 * 3 * 16).
+ * Retry for a period of 
+ * MIN_FREE_PERVIOUS_BLOCK_DELAY + MIN_DELAY + (INCR_DELAY * base partition count)
+ * For example if MIN_FREE_PERVIOUS_BLOCK_DELAY=300 and MIN_DELAY=600 and 
+ * INCR_DELAY=20 and job_size=4 base partitions then wait up to 980 seconds
+ * 300 + 600 + (20 * 4)
  */ 
 #define POLL_SLEEP 3			/* retry interval in seconds  */
 #define MIN_FREE_PERVIOUS_BLOCK_DELAY 300 /* time in seconds */
-#define MIN_DELAY  300			/* time in seconds */
+#define MIN_DELAY  600			/* time in seconds */
 #define INCR_DELAY 20			/* time in seconds per BP */
 
 int max_delay = MIN_DELAY + MIN_FREE_PERVIOUS_BLOCK_DELAY;
@@ -115,7 +113,7 @@ static int _wait_part_ready(uint32_t job_id)
 {
 	int is_ready = 0, i, rc;
 	
-	max_delay = MIN_DELAY + MIN_FREE_PERVIOUS_BLOCK_DELAY +
+	max_delay = MIN_FREE_PERVIOUS_BLOCK_DELAY + MIN_DELAY +
 		(INCR_DELAY * _get_job_size(job_id));
 
 #if _DEBUG

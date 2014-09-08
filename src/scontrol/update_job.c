@@ -1,10 +1,11 @@
 /*****************************************************************************\
  *  update_job.c - update job functions for scontrol.
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -214,13 +215,13 @@ scontrol_update_job (int argc, char *argv[])
 			update_cnt++;
 		}
 		else if (strncasecmp(argv[i], "TimeLimit=", 10) == 0) {
-			if ((strcasecmp(&argv[i][10], "UNLIMITED") == 0) ||
-			    (strcasecmp(&argv[i][10], "INFINITE") == 0))
-				job_msg.time_limit = INFINITE;
-			else
-				job_msg.time_limit = 
-					(uint32_t) strtol(&argv[i][10], 
-							  (char **) NULL, 10);
+			int time_limit = time_str2mins(&argv[i][10]);
+			if ((time_limit < 0) && (time_limit != INFINITE)) {
+				error("Invalid TimeLimit value");
+				exit_code = 1;
+				return 0;
+			}
+			job_msg.time_limit = time_limit;
 			update_cnt++;
 		}
 		else if (strncasecmp(argv[i], "Priority=", 9) == 0) {
@@ -248,6 +249,12 @@ scontrol_update_job (int argc, char *argv[])
 		else if (strncasecmp(argv[i], "ReqProcs=", 9) == 0) {
 			job_msg.num_procs = 
 				(uint32_t) strtol(&argv[i][9], 
+						(char **) NULL, 10);
+			update_cnt++;
+		}
+		else if (strncasecmp(argv[i], "Requeue=", 8) == 0) {
+			job_msg.requeue = 
+				(uint16_t) strtol(&argv[i][8], 
 						(char **) NULL, 10);
 			update_cnt++;
 		}
@@ -376,9 +383,7 @@ scontrol_update_job (int argc, char *argv[])
 			update_cnt++;
 		}
 		else if (strncasecmp(argv[i], "Dependency=", 11) == 0) {
-			job_msg.dependency =
-				(uint32_t) strtol(&argv[i][11],
-					(char **) NULL, 10);
+			job_msg.dependency = &argv[i][11];
 			update_cnt++;
 		}
 #ifdef HAVE_BG
@@ -435,6 +440,10 @@ scontrol_update_job (int argc, char *argv[])
 			update_cnt++;
 		}
 #endif
+		else if (strncasecmp(argv[i], "Licenses=", 9) == 0) {
+			job_msg.licenses = &argv[i][9];
+			update_cnt++;
+		}
 		else if (strncasecmp(argv[i], "StartTime=", 10) == 0) {
 			job_msg.begin_time = parse_time(&argv[i][10]);
 			update_cnt++;
@@ -458,3 +467,35 @@ scontrol_update_job (int argc, char *argv[])
 	else
 		return 0;
 }
+
+/*
+ * Send message to stdout of specified job
+ * argv[0] == jobid
+ * argv[1]++ the message
+ */
+extern int
+scontrol_job_notify(int argc, char *argv[])
+{
+	int i;
+	uint32_t job_id;
+	char message[256];
+
+	job_id = atoi(argv[0]);
+	if (job_id <= 0) {
+		fprintf(stderr, "Invalid job_id %s", argv[0]);
+		return 1;
+	}
+
+	message[0] = '\0';
+	for (i=1; i<argc; i++) {
+		if (i > 1)
+			strncat(message, " ", sizeof(message));
+		strncat(message, argv[i], sizeof(message));
+	}
+			
+	if (slurm_notify_job(job_id, message))
+		return slurm_get_errno ();
+	else
+		return 0;
+}
+

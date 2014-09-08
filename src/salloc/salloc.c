@@ -6,7 +6,7 @@
  *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -49,7 +49,6 @@
 
 #include "src/salloc/salloc.h"
 #include "src/salloc/opt.h"
-#include "src/salloc/msg.h"
 
 #define MAX_RETRIES 3
 
@@ -70,6 +69,11 @@ static void _pending_callback(uint32_t job_id);
 static void _ignore_signal(int signo);
 static void _exit_on_signal(int signo);
 static void _signal_while_allocating(int signo);
+static void _job_complete_handler(srun_job_complete_msg_t *msg);
+static void _timeout_handler(srun_timeout_msg_t *msg);
+static void _user_msg_handler(srun_user_msg_t *msg);
+static void _ping_handler(srun_ping_msg_t *msg);
+static void _node_fail_handler(srun_node_fail_msg_t *msg);
 
 int main(int argc, char *argv[])
 {
@@ -77,7 +81,7 @@ int main(int argc, char *argv[])
 	job_desc_msg_t desc;
 	resource_allocation_response_msg_t *alloc;
 	time_t before, after;
-	salloc_msg_thread_t *msg_thr;
+	allocation_msg_thread_t *msg_thr;
 	char **env = NULL;
 	int status = 0;
 	int errnum = 0;
@@ -86,6 +90,7 @@ int main(int argc, char *argv[])
 	pid_t rc_pid = 0;
 	int rc = 0;
 	static char *msg = "Slurm job queue full, sleeping and retrying.";
+	slurm_allocation_callbacks_t callbacks;
 
 	log_init(xbasename(argv[0]), logopt, 0, NULL);
 	if (initialize_and_process_args(argc, argv) < 0) {
@@ -126,9 +131,13 @@ int main(int argc, char *argv[])
 		exit(1);
 	}
 
+	callbacks.ping = _ping_handler;
+	callbacks.timeout = _timeout_handler;
+	callbacks.job_complete = _job_complete_handler;
+	callbacks.user_msg = _user_msg_handler;
+	callbacks.node_fail = _node_fail_handler;
 	/* create message thread to handle pings and such from slurmctld */
-	msg_thr = msg_thr_create(&desc.other_port);
-	desc.other_hostname = xshort_hostname();
+	msg_thr = slurm_allocation_msg_thr_create(&desc.other_port, &callbacks);
 
 	xsignal(SIGHUP, _signal_while_allocating);
 	xsignal(SIGINT, _signal_while_allocating);
@@ -160,7 +169,7 @@ int main(int argc, char *argv[])
 		} else {
 			error("Failed to allocate resources: %m");
 		}
-		msg_thr_destroy(msg_thr);
+		slurm_allocation_msg_thr_destroy(msg_thr);
 		exit(1);
 	}
 	after = time(NULL);
@@ -204,6 +213,14 @@ int main(int argc, char *argv[])
 		env_array_append_fmt(&env, "SLURM_OVERCOMMIT", "%d", 
 			opt.overcommit);
 	}
+	if (opt.acctg_freq >= 0) {
+		env_array_append_fmt(&env, "SLURM_ACCTG_FREQ", "%d",
+			opt.acctg_freq);
+	}
+	if (opt.task_mem >= 0) {
+		env_array_append_fmt(&env, "SLURM_TASK_MEM", "%d",
+			opt.task_mem);
+	}
 	env_array_set_environment(env);
 	env_array_free(env);
 	pthread_mutex_lock(&allocation_state_lock);
@@ -240,7 +257,8 @@ relinquish:
 	pthread_mutex_lock(&allocation_state_lock);
 	if (allocation_state != REVOKED) {
 		info("Relinquishing job allocation %d", alloc->job_id);
-		if (slurm_complete_job(alloc->job_id, 0) != 0)
+		if (slurm_complete_job(alloc->job_id, status)
+		    != 0)
 			error("Unable to clean up job allocation %d: %m",
 			      alloc->job_id);
 		else
@@ -249,7 +267,7 @@ relinquish:
 	pthread_mutex_unlock(&allocation_state_lock);
 
 	slurm_free_resource_allocation_response_msg(alloc);
-	msg_thr_destroy(msg_thr);
+	slurm_allocation_msg_thr_destroy(msg_thr);
 
 	/*
 	 * Figure out what return code we should use.  If the user's command
@@ -257,6 +275,7 @@ relinquish:
 	 */
 	rc = 1;
 	if (rc_pid != -1) {
+		
 		if (WIFEXITED(status)) {
 			rc = WEXITSTATUS(status);
 		} else if (WIFSIGNALED(status)) {
@@ -284,7 +303,13 @@ static int fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->max_nodes = opt.max_nodes;
 	desc->user_id = opt.uid;
 	desc->group_id = opt.gid;
-	desc->dependency = opt.dependency;
+	if (opt.dependency)
+		desc->dependency = xstrdup(opt.dependency);
+	desc->task_dist  = opt.distribution;
+	if (opt.plane_size != NO_VAL)
+		desc->plane_size = opt.plane_size;
+	if (opt.licenses)
+		desc->licenses = xstrdup(opt.licenses);
 	if (opt.nice)
 		desc->nice = NICE_OFFSET + opt.nice;
 	desc->mail_type = opt.mail_type;
@@ -320,6 +345,8 @@ static int fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->mloaderimage = xstrdup(opt.mloaderimage);
 	if (opt.ramdiskimage)
 		desc->ramdiskimage = xstrdup(opt.ramdiskimage);
+
+	/* job constraints */
 	if (opt.mincpus > -1)
 		desc->job_min_procs = opt.mincpus;
 	if (opt.minsockets > -1)
@@ -341,6 +368,27 @@ static int fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->num_tasks = opt.nprocs;
 	if (opt.cpus_set)
 		desc->cpus_per_task = opt.cpus_per_task;
+	if (opt.ntasks_per_node > -1)
+		desc->ntasks_per_node = opt.ntasks_per_node;
+	if (opt.ntasks_per_socket > -1)
+		desc->ntasks_per_socket = opt.ntasks_per_socket;
+	if (opt.ntasks_per_core > -1)
+		desc->ntasks_per_core = opt.ntasks_per_core;
+
+	/* node constraints */
+	if (opt.min_sockets_per_node > -1)
+		desc->min_sockets = opt.min_sockets_per_node;
+	if (opt.max_sockets_per_node > -1)
+		desc->max_sockets = opt.max_sockets_per_node;
+	if (opt.min_cores_per_socket > -1)
+		desc->min_cores = opt.min_cores_per_socket;
+	if (opt.max_cores_per_socket > -1)
+		desc->max_cores = opt.max_cores_per_socket;
+	if (opt.min_threads_per_core > -1)
+		desc->min_threads = opt.min_threads_per_core;
+	if (opt.max_threads_per_core > -1)
+		desc->max_threads = opt.max_threads_per_core;
+
 	if (opt.no_kill)
 		desc->kill_on_node_fail = 0;
 	if (opt.time_limit  != NO_VAL)
@@ -401,4 +449,68 @@ static void _ignore_signal(int signo)
 static void _exit_on_signal(int signo)
 {
 	exit_flag = true;
+}
+
+/* This typically signifies the job was cancelled by scancel */
+static void _job_complete_handler(srun_job_complete_msg_t *comp)
+{
+	if (comp->step_id == NO_VAL) {
+		pthread_mutex_lock(&allocation_state_lock);
+		if (allocation_state != REVOKED) {
+			/* If the allocation_state is already REVOKED, then
+			 * no need to print this message.  We probably
+			 * relinquished the allocation ourself.
+			 */
+			info("Job allocation %u has been revoked.",
+			     comp->job_id);
+		}
+		if (allocation_state == GRANTED
+		    && command_pid > -1
+		    && opt.kill_command_signal_set) {
+			verbose("Sending signal %d to command \"%s\", pid %d",
+				opt.kill_command_signal,
+				command_argv[0], command_pid);
+			kill(command_pid, opt.kill_command_signal);
+		}
+		allocation_state = REVOKED;
+		pthread_mutex_unlock(&allocation_state_lock);
+	} else {
+		verbose("Job step %u.%u is finished.",
+			comp->job_id, comp->step_id);
+	}
+}
+
+/*
+ * Job has been notified of it's approaching time limit. 
+ * Job will be killed shortly after timeout.
+ * This RPC can arrive multiple times with the same or updated timeouts.
+ * FIXME: We may want to signal the job or perform other action for this.
+ * FIXME: How much lead time do we want for this message? Some jobs may 
+ *	require tens of minutes to gracefully terminate.
+ */
+static void _timeout_handler(srun_timeout_msg_t *msg)
+{
+	static time_t last_timeout = 0;
+
+	if (msg->timeout != last_timeout) {
+		last_timeout = msg->timeout;
+		verbose("Job allocation time limit to be reached at %s", 
+			ctime(&msg->timeout));
+	}
+}
+
+static void _user_msg_handler(srun_user_msg_t *msg)
+{
+	info("%s", msg->msg);
+}
+
+static void _ping_handler(srun_ping_msg_t *msg) 
+{
+	/* the api will respond so there really isn't anything to do
+	   here */
+}
+
+static void _node_fail_handler(srun_node_fail_msg_t *msg)
+{
+	error("Node failure on %s", msg->nodelist);
 }

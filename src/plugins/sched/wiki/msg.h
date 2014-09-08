@@ -4,7 +4,7 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -99,10 +99,16 @@ extern uint16_t	job_aggregation_time;
 extern uint16_t kill_wait;
 extern uint16_t use_host_exp;
 
+extern char *   bitmap2wiki_node_name(bitstr_t *bitmap);
 extern int	event_notify(char *msg);
 extern int	spawn_msg_thread(void);
 extern void	term_msg_thread(void);
-extern char *   bitmap2wiki_node_name(bitstr_t *bitmap);
+extern char *   get_wiki_conf(void);
+
+/*
+ * Given a string, replace the first space found with '\0'
+ */
+extern void	null_term(char *str);
 
 /* Functions called from within msg.c (rather than creating a bunch 
  * more header files with one function definition each */

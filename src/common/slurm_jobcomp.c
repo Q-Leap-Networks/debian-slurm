@@ -5,7 +5,7 @@
  *  Copyright (C) 2003 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jay Windley <jwindley@lnxi.com>, Morris Jette <jette1@llnl.com>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -65,6 +65,9 @@ typedef struct slurm_jobcomp_ops {
 	int          (*job_write) ( struct job_record *job_ptr);
 	int          (*sa_errno)  ( void );
 	char *       (*job_strerror)  ( int errnum );
+	List         (*get_jobs)  ( List selected_steps,
+				    List selected_parts, void *params );
+	void         (*archive)   ( List selected_parts, void *params );
 } slurm_jobcomp_ops_t;
 
 
@@ -146,7 +149,9 @@ _slurm_jobcomp_get_ops( slurm_jobcomp_context_t c )
 		"slurm_jobcomp_set_location",
 		"slurm_jobcomp_log_record",
 		"slurm_jobcomp_get_errno",
-		"slurm_jobcomp_strerror"
+		"slurm_jobcomp_strerror",
+		"slurm_jobcomp_get_jobs",
+		"slurm_jobcomp_archive"
 	};
         int n_syms = sizeof( syms ) / sizeof( char * );
 
@@ -187,6 +192,33 @@ _slurm_jobcomp_get_ops( slurm_jobcomp_context_t c )
 
         return &c->ops;
 }
+
+extern void 
+jobcomp_destroy_job(void *object)
+{
+	jobcomp_job_rec_t *job = (jobcomp_job_rec_t *)object;
+	if (job) {
+		xfree(job->partition);
+		xfree(job->start_time);
+		xfree(job->end_time);
+		xfree(job->uid_name);
+		xfree(job->gid_name);
+		xfree(job->nodelist);
+		xfree(job->jobname);
+		xfree(job->state);
+		xfree(job->timelimit);
+#ifdef HAVE_BG
+		xfree(job->blockid);
+		xfree(job->connection);
+		xfree(job->reboot);
+		xfree(job->rotate);
+		xfree(job->geo);
+		xfree(job->bg_start_point);
+#endif
+		xfree(job);
+	}
+}
+
 
 extern int
 g_slurm_jobcomp_init( char *jobcomp_loc )
@@ -280,4 +312,30 @@ g_slurm_jobcomp_strerror(int errnum)
 		error ("slurm_jobcomp plugin context not initialized");
 	slurm_mutex_unlock( &context_lock );
 	return retval;
+}
+
+extern List
+g_slurm_jobcomp_get_jobs(List selected_steps,
+			 List selected_parts, void *params)
+{
+	slurm_mutex_lock( &context_lock );
+	if ( g_context )
+		return (*(g_context->ops.get_jobs))
+			(selected_steps, selected_parts, params);
+	else
+		error ("slurm_jobcomp plugin context not initialized");
+	slurm_mutex_unlock( &context_lock );
+	return NULL ;
+}
+
+extern void
+g_slurm_jobcomp_archive(List selected_parts, void *params)
+{
+	slurm_mutex_lock( &context_lock );
+	if ( g_context )
+		(*(g_context->ops.archive))(selected_parts, params);
+	else
+		error ("slurm_jobcomp plugin context not initialized");
+	slurm_mutex_unlock( &context_lock );
+	return;
 }

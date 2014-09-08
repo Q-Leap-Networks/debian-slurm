@@ -10,7 +10,7 @@
 # Copyright (C) 2006-2007 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Danny Auble <da@llnl.gov>
-# UCRL-CODE-226842.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -62,15 +62,15 @@ set timeout [expr $max_job_delay + $sleep_time]
 
 # make a 512 cnode block
 
-spawn $srun --batch --output=$file_out --error=$file_err -t2 -N512-512 $file_in
+set sbatch_pid [spawn $sbatch --output=$file_out --error=$file_err -t2 -N512-512 $file_in]
 expect {
-	-re "jobid ($number) submitted" {
+	-re "Submitted batch job ($number)" {
 		set job_id $expect_out(1,string)
 		exp_continue
 	}
 	timeout {
-		send_user "\nFAILURE: srun not responding\n"
-		kill_srun
+		send_user "\nFAILURE: sbatch not responding\n"
+		slow_kill $sbatch_pid
 		exit 1
 	}
 	eof {
@@ -127,15 +127,15 @@ if {$exit_code != 0} {
 # make a 128 cnode block
 
 
-spawn $srun --batch --output=$file_out --error=$file_err -t2 -N128-128 $file_in
+set sbatch_pid [spawn $sbatch --output=$file_out --error=$file_err -t2 -N128-128 $file_in]
 expect {
-	-re "jobid ($number) submitted" {
+	-re "Submitted batch job ($number)" {
 		set job_id $expect_out(1,string)
 		exp_continue
 	}
 	timeout {
-		send_user "\nFAILURE: srun not responding\n"
-		kill_srun
+		send_user "\nFAILURE: sbatch not responding\n"
+		slow_kill $sbatch_pid
 		exit 1
 	}
 	eof {
@@ -195,15 +195,15 @@ if {$matches != 1} {
 
 # make a 32 cnode block
 
-spawn $srun --batch --output=$file_out --error=$file_err -t2 -N32-32 $file_in
+set sbatch_pid [spawn $sbatch --output=$file_out --error=$file_err -t2 -N32-32 $file_in]
 expect {
-	-re "jobid ($number) submitted" {
+	-re "Submitted batch job ($number)" {
 		set job_id $expect_out(1,string)
 		exp_continue
 	}
 	timeout {
-		send_user "\nFAILURE: srun not responding\n"
-		kill_srun
+		send_user "\nFAILURE: sbatch not responding\n"
+		slow_kill $sbatch_pid
 		exit 1
 	}
 	eof {
@@ -226,7 +226,8 @@ if {[wait_for_job $job_id "DONE"] != 0} {
 set matches 0
 spawn $scontrol show job $job_id
 expect {
-	-re "BP_List=$alpha_numeric\[$number-$number\]" {
+#	Could be one or multiple node cards (e.g. "bgl000[0]" or "bgl000[0-1]")
+	-re "BP_List=$alpha_numeric\[$number" {
 		incr matches
 		exp_continue
 	}

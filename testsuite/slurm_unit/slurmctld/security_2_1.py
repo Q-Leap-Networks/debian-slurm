@@ -54,6 +54,8 @@ def main(argv=None):
     #
     print
     print "NOTE: slurm_epilog and slurm_prolog only exist on BlueGene systems"
+    print "NOTE: federation.conf only exists on AIX systems"
+    print "NOTE: sview, slurmdbd and slurmdbd.conf exists only on selected systems"
     print "NOTE: JobCredentialPrivateKey, SlurmctldLogFile, and StateSaveLocation only on control host"
     print "NOTE: SlurmdLogFile and SlurmdSpoolDir only exist on compute servers" 
     print
@@ -63,9 +65,12 @@ def main(argv=None):
     files.append(options.conf)
     files.append(options.sysconfdir+'/bluegene.conf')
     files.append(options.sysconfdir+'/federation.conf')
+    files.append(options.sysconfdir+'/slurm.conf')
+    files.append(options.sysconfdir+'/slurmdbd.conf')
     files.append(options.sysconfdir+'/wiki.conf')
-    files.append(options.prefix+'/bin/srun')
+    files.append(options.prefix+'/bin/mpiexec')
     files.append(options.prefix+'/bin/sacct')
+    files.append(options.prefix+'/bin/sacctmgr')
     files.append(options.prefix+'/bin/salloc')
     files.append(options.prefix+'/bin/sattach')
     files.append(options.prefix+'/bin/sbatch')
@@ -73,13 +78,14 @@ def main(argv=None):
     files.append(options.prefix+'/bin/scancel')
     files.append(options.prefix+'/bin/scontrol')
     files.append(options.prefix+'/bin/sinfo')
-    files.append(options.prefix+'/bin/slaunch')
     files.append(options.prefix+'/bin/smap')
     files.append(options.prefix+'/bin/squeue')
+    files.append(options.prefix+'/bin/srun')
     files.append(options.prefix+'/bin/strigger')
     files.append(options.prefix+'/bin/sview')
     files.append(options.prefix+'/sbin/slurmctld')
     files.append(options.prefix+'/sbin/slurmd')
+    files.append(options.prefix+'/sbin/slurmdbd')
     files.append(options.prefix+'/sbin/slurmstepd')
     files.append(options.prefix+'/sbin/slurm_epilog')
     files.append(options.prefix+'/sbin/slurm_prolog')
@@ -108,6 +114,7 @@ def main(argv=None):
     print "Ensuring the following are not world readable:"
     files = []
     append_file(files, confpairs, 'JobCredentialPrivateKey')
+    files.append(options.sysconfdir+'/slurmdbd.conf')
     files.append(options.sysconfdir+'/wiki.conf')
 
     for fname in files:

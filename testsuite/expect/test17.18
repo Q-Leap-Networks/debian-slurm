@@ -8,10 +8,10 @@
 #          "FAILURE: ..." otherwise with an explanation of the failure, OR
 #          anything else indicates a failure mode that must be investigated.
 ############################################################################
-# Copyright (C) 2004-2006 The Regents of the University of California.
+# Copyright (C) 2004-2007 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-226842.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -82,7 +82,7 @@ make_bash_script $file_in "$scontrol show job $job_id1"
 set match_acct  0
 set match_state 0
 set timeout 30
-spawn $sbatch --dependency=$job_id1 --output=$file_out $file_in
+spawn $sbatch --dependency=afterany:$job_id1 --output=$file_out $file_in
 expect {
 	-re "Submitted batch job ($number)" {
 		set job_id2 $expect_out(1,string)
@@ -101,8 +101,11 @@ if {$job_id2 == 0} {
 #
 if {[wait_for_job $job_id2 "DONE"] != 0} {
 	send_user "\nFAILURE: waiting for job to complete\n"
+	cancel_job $job_id2
+	cancel_job $job_id1
 	exit 1
 }
+cancel_job $job_id1
 
 #
 # Inspect the job's output file
@@ -113,7 +116,8 @@ if {[wait_for_file $file_out] != 0} {
 
 spawn $bin_cat $file_out
 expect {
-	-re "JobState=COMPLETED" {
+#	Could be COMPLETED or COMPLETING
+	-re "JobState=COMPLET" {
 		set match_state 1
 		exp_continue
 	}
@@ -142,7 +146,7 @@ set match_acct 0
 set match_jobid 0
 spawn $scontrol show job $job_id2
 expect {
-	-re "Dependency=($number)" {
+	-re "Dependency=afterany:($number)" {
 		set match_jobid $expect_out(1,string)
 		exp_continue
 	}
@@ -185,6 +189,7 @@ if {$job_id1 == 0} {
 	send_user "\nFAILURE: batch submit failure\n"
 	exit 1
 }
+
 exec $bin_sleep 5
 set match 0
 spawn $scontrol show job $job_id1
@@ -214,6 +219,7 @@ if {$match != 2} {
 	send_user "\nFAILURE: unexpected JobState or StartTime\n"
 	set exit_code 1
 }
+
 # Reset start time and test for completion
 spawn $scontrol update JobId=$job_id1 StartTime=now
 expect {

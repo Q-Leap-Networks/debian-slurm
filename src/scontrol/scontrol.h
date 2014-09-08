@@ -4,7 +4,7 @@
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -99,6 +99,7 @@ extern int quiet_flag;	/* quiet=1, verbose=-1, normal=0 */
 
 extern int	scontrol_checkpoint(char *op, char *job_step_id_str);
 extern int	scontrol_encode_hostlist(char *hostlist);
+extern int	scontrol_job_notify(int argc, char *argv[]);
 extern int 	scontrol_load_jobs (job_info_msg_t ** job_buffer_pptr);
 extern int 	scontrol_load_nodes (node_info_msg_t ** node_buffer_pptr, 
 			uint16_t show_flags);

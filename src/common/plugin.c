@@ -4,7 +4,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jay Windley <jwindley@lnxi.com>.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -220,8 +220,12 @@ plugin_get_syms( plugin_handle_t plug,
         count = 0;
         for ( i = 0; i < n_syms; ++i ) {
                 ptrs[ i ] = dlsym( plug, names[ i ] );
-                if ( ptrs[ i ] ) ++count;
-        }
+                if ( ptrs[ i ] ) 
+			++count;
+		else 
+			error("Couldn't find sym '%s' in the plugin",
+			      names[ i ]);
+	}
 
         return count;
 }

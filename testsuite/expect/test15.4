@@ -10,7 +10,7 @@
 # Copyright (C) 2002-2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-226842.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -71,7 +71,7 @@ if {$got_login_grps == 0} {
 #
 set timeout $max_job_delay
 set job_id 0
-set salloc_pid [spawn $salloc -N1 -t1 $slaunch $bin_id]
+set salloc_pid [spawn $salloc -N1 -t1 $srun $bin_id]
 expect {
 	-re "Granted job allocation ($number)" {
 		set job_id $expect_out(1,string)

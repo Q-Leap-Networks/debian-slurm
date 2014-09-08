@@ -1,10 +1,11 @@
 /*****************************************************************************\
  *  read_config.c - read the overall slurm configuration file
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -64,6 +65,7 @@
 #include "src/common/xstring.h"
 #include "src/common/slurm_rlimits_info.h"
 #include "src/common/parse_config.h"
+#include "src/common/parse_time.h"
 #include "src/common/slurm_selecttype_info.h"
 
 /* Instantiation of the "extern slurm_ctl_conf_t slurmcltd_conf"
@@ -119,48 +121,81 @@ static void validate_and_set_defaults(slurm_ctl_conf_t *conf,
 				      s_p_hashtbl_t *hashtbl);
 
 s_p_options_t slurm_conf_options[] = {
+	{"AccountingStorageEnforce", S_P_UINT16},
+	{"AccountingStorageHost", S_P_STRING},
+	{"AccountingStorageLoc", S_P_STRING},
+	{"AccountingStoragePass", S_P_STRING},
+	{"AccountingStoragePort", S_P_UINT32},
+	{"AccountingStorageType", S_P_STRING},
+	{"AccountingStorageUser", S_P_STRING},
 	{"AuthType", S_P_STRING},
-	{"CheckpointType", S_P_STRING},
-	{"CacheGroups", S_P_UINT16},
 	{"BackupAddr", S_P_STRING},
 	{"BackupController", S_P_STRING},
+	{"CheckpointType", S_P_STRING},
+	{"CacheGroups", S_P_UINT16},
+	{"ClusterName", S_P_STRING},
 	{"ControlAddr", S_P_STRING},
 	{"ControlMachine", S_P_STRING},
-	{"DisableRootJobs", S_P_UINT16},
+	{"CryptoType", S_P_STRING},
+	{"DefaultStorageHost", S_P_STRING},
+	{"DefaultStorageLoc", S_P_STRING},
+	{"DefaultStoragePass", S_P_STRING},
+	{"DefaultStoragePort", S_P_UINT32},
+	{"DefaultStorageType", S_P_STRING},
+	{"DefaultStorageUser", S_P_STRING},
+	{"DefMemPerTask", S_P_UINT32},
+	{"DisableRootJobs", S_P_BOOLEAN},
 	{"Epilog", S_P_STRING},
+	{"EpilogMsgTime", S_P_UINT32},
 	{"FastSchedule", S_P_UINT16},
 	{"FirstJobId", S_P_UINT32},
+	{"GetEnvTimeout", S_P_UINT16},
 	{"HashBase", S_P_LONG, defunct_option},
 	{"HeartbeatInterval", S_P_LONG, defunct_option},
+	{"HealthCheckInterval", S_P_UINT16},
+	{"HealthCheckProgram", S_P_STRING},
 	{"InactiveLimit", S_P_UINT16},
+	{"JobAcctGatherType", S_P_STRING},
+	{"JobAcctFrequency", S_P_UINT16, defunct_option},
+	{"JobAcctGatherFrequency", S_P_UINT16},
 	{"JobAcctLogFile", S_P_STRING},
-	{"JobAcctFrequency", S_P_UINT16},
 	{"JobAcctType", S_P_STRING},
+	{"JobCompHost", S_P_STRING},
 	{"JobCompLoc", S_P_STRING},
+	{"JobCompPass", S_P_STRING},
+	{"JobCompPort", S_P_UINT32},
 	{"JobCompType", S_P_STRING},
+	{"JobCompUser", S_P_STRING},
 	{"JobCredentialPrivateKey", S_P_STRING},
 	{"JobCredentialPublicCertificate", S_P_STRING},
 	{"JobFileAppend", S_P_UINT16},
-	{"GetEnvTimeout", S_P_UINT16},
+	{"JobRequeue", S_P_UINT16},
 	{"KillTree", S_P_UINT16, defunct_option},
 	{"KillWait", S_P_UINT16},
+	{"Licenses", S_P_STRING},
 	{"MailProg", S_P_STRING},
 	{"MaxJobCount", S_P_UINT16},
+	{"MaxMemPerTask", S_P_UINT32},
 	{"MessageTimeout", S_P_UINT16},
 	{"MinJobAge", S_P_UINT16},
-	{"MpichGmDirectSupport", S_P_LONG},
+	{"MpichGmDirectSupport", S_P_LONG, defunct_option},
 	{"MpiDefault", S_P_STRING},
 	{"PluginDir", S_P_STRING},
 	{"PlugStackConfig", S_P_STRING},
+	{"PrivateData", S_P_UINT16},
 	{"ProctrackType", S_P_STRING},
 	{"Prolog", S_P_STRING},
 	{"PropagatePrioProcess", S_P_UINT16},
 	{"PropagateResourceLimitsExcept", S_P_STRING},
 	{"PropagateResourceLimits", S_P_STRING},
+	{"ResumeProgram", S_P_STRING},
+	{"ResumeRate", S_P_UINT16},
 	{"ReturnToService", S_P_UINT16},
-	{"SchedulerAuth", S_P_STRING},
+	{"SchedulerAuth", S_P_STRING, defunct_option},
+	{"SchedulerParameters", S_P_STRING},
 	{"SchedulerPort", S_P_UINT16},
 	{"SchedulerRootFilter", S_P_UINT16},
+	{"SchedulerTimeSlice", S_P_UINT16},
 	{"SchedulerType", S_P_STRING},
 	{"SelectType", S_P_STRING},
 	{"SelectTypeParameters", S_P_STRING},
@@ -179,6 +214,11 @@ s_p_options_t slurm_conf_options[] = {
 	{"SrunEpilog", S_P_STRING},
 	{"SrunProlog", S_P_STRING},
 	{"StateSaveLocation", S_P_STRING},
+	{"SuspendExcNodes", S_P_STRING},
+	{"SuspendExcParts", S_P_STRING},
+	{"SuspendProgram", S_P_STRING},
+	{"SuspendRate", S_P_UINT16},
+	{"SuspendTime", S_P_LONG},
 	{"SwitchType", S_P_STRING},
 	{"TaskEpilog", S_P_STRING},
 	{"TaskProlog", S_P_STRING},
@@ -214,10 +254,10 @@ static int parse_nodename(void **dest, slurm_parser_enum_t type,
 	s_p_hashtbl_t *tbl, *dflt;
 	slurm_conf_node_t *n;
 	static s_p_options_t _nodename_options[] = {
-		{"NodeHostname", S_P_STRING},
-		{"NodeAddr", S_P_STRING},
 		{"CoresPerSocket", S_P_UINT16},
 		{"Feature", S_P_STRING},
+		{"NodeAddr", S_P_STRING},
+		{"NodeHostname", S_P_STRING},
 		{"Port", S_P_UINT16},
 		{"Procs", S_P_UINT16},
 		{"RealMemory", S_P_UINT32},
@@ -280,8 +320,8 @@ static int parse_nodename(void **dest, slurm_parser_enum_t type,
 
 		if (!s_p_get_uint16(&n->port, "Port", tbl)
 		    && !s_p_get_uint16(&n->port, "Port", dflt)) {
-			/* This gets resolved in slurm_conf_get_port()
-			 * and slurm_conf_get_addr(). For now just
+			/* This gets resolved in slurm_conf_get_port() 
+			 * and slurm_conf_get_addr(). For now just 
 			 * leave with a value of zero */
 			n->port = 0;
 		}
@@ -400,11 +440,13 @@ static int parse_partitionname(void **dest, slurm_parser_enum_t type,
 	static s_p_options_t _partition_options[] = {
 		{"AllowGroups", S_P_STRING},
 		{"Default", S_P_BOOLEAN}, /* YES or NO */
+		{"DisableRootJobs", S_P_BOOLEAN}, /* YES or NO */
 		{"Hidden", S_P_BOOLEAN}, /* YES or NO */
-		{"MaxTime", S_P_UINT32}, /* INFINITE or a number */
+		{"MaxTime", S_P_STRING},
 		{"MaxNodes", S_P_UINT32}, /* INFINITE or a number */
 		{"MinNodes", S_P_UINT32},
 		{"Nodes", S_P_STRING},
+		{"Priority", S_P_UINT16},
 		{"RootOnly", S_P_BOOLEAN}, /* YES or NO */
 		{"Shared", S_P_STRING}, /* YES, NO, or FORCE */
 		{"State", S_P_BOOLEAN}, /* UP or DOWN */
@@ -439,13 +481,29 @@ static int parse_partitionname(void **dest, slurm_parser_enum_t type,
 		    && !s_p_get_boolean(&p->default_flag, "Default", dflt))
 			p->default_flag = false;
 
+		if (!s_p_get_boolean((bool *)&p->disable_root_jobs,
+				     "DisableRootJobs", tbl))
+			p->disable_root_jobs = (uint16_t)NO_VAL;
+
 		if (!s_p_get_boolean(&p->hidden_flag, "Hidden", tbl)
 		    && !s_p_get_boolean(&p->hidden_flag, "Hidden", dflt))
 			p->hidden_flag = false;
 
-		if (!s_p_get_uint32(&p->max_time, "MaxTime", tbl)
-		    && !s_p_get_uint32(&p->max_time, "MaxTime", dflt))
+		if (!s_p_get_string(&tmp, "MaxTime", tbl) &&
+		    !s_p_get_string(&tmp, "MaxTime", dflt))
 			p->max_time = INFINITE;
+		else {
+			int max_time = time_str2mins(tmp);
+			if ((max_time < 0) && (max_time != INFINITE)) {
+				error("Bad value \"%s\" for MaxTime", tmp);
+				destroy_partitionname(p);
+				s_p_hashtbl_destroy(tbl);
+				xfree(tmp);
+				return -1;
+			}
+			p->max_time = max_time;
+			xfree(tmp);
+		}
 
 		if (!s_p_get_uint32(&p->max_nodes, "MaxNodes", tbl)
 		    && !s_p_get_uint32(&p->max_nodes, "MaxNodes", dflt))
@@ -470,20 +528,27 @@ static int parse_partitionname(void **dest, slurm_parser_enum_t type,
 		    && !s_p_get_boolean(&p->root_only_flag, "RootOnly", dflt))
 			p->root_only_flag = false;
 
-		if (!s_p_get_string(&tmp, "Shared", tbl)
-		    && !s_p_get_string(&tmp, "Shared", dflt)) {
-			p->shared = SHARED_NO;
-		} else {
+		if (!s_p_get_uint16(&p->priority, "Priority", tbl) &&
+		    !s_p_get_uint16(&p->priority, "Priority", dflt))
+			p->priority = 1;
+
+		if (s_p_get_string(&tmp, "Shared", tbl) ||
+		    s_p_get_string(&tmp, "Shared", dflt)) {
 			if (strcasecmp(tmp, "NO") == 0)
-				p->shared = SHARED_NO;
+				p->max_share = 1;
 #ifndef HAVE_XCPU
 			/* Only "Shared=NO" is valid on XCPU systems */
-			else if (strcasecmp(tmp, "YES") == 0)
-				p->shared = SHARED_YES;
 			else if (strcasecmp(tmp, "EXCLUSIVE") == 0)
-				p->shared = SHARED_EXCLUSIVE;
-			else if (strcasecmp(tmp, "FORCE") == 0)
-				p->shared = SHARED_FORCE;
+				p->max_share = 0;
+			else if (strncasecmp(tmp, "YES:", 4) == 0)
+				p->max_share = strtol(&tmp[4], (char **) NULL, 10);
+			else if (strcasecmp(tmp, "YES") == 0) 
+				p->max_share = 4;
+			else if (strncasecmp(tmp, "FORCE:", 6) == 0) {
+				p->max_share = strtol(&tmp[6], (char **) NULL, 10) |
+					SHARED_FORCE;
+			} else if (strcasecmp(tmp, "FORCE") == 0)
+				p->max_share = 4 | SHARED_FORCE;
 #endif
 			else {
 				error("Bad value \"%s\" for Shared", tmp);
@@ -492,7 +557,9 @@ static int parse_partitionname(void **dest, slurm_parser_enum_t type,
 				xfree(tmp);
 				return -1;
 			}
-		}
+		} else
+			p->max_share = 1;
+
 		xfree(tmp);
 
 		if (!s_p_get_boolean(&p->state_up_flag, "State", tbl)
@@ -875,8 +942,8 @@ extern uint16_t slurm_conf_get_port(const char *node_name)
 	p = node_to_host_hashtbl[idx];
 	while (p) {
 		if (strcmp(p->alias, node_name) == 0) {
-			uint16_t port = p->port;
-			if (!port)
+			uint16_t port;
+			if (!p->port)
 				p->port = (uint16_t) conf_ptr->slurmd_port;
 			port = p->port;
 			slurm_conf_unlock();
@@ -998,46 +1065,60 @@ gethostname_short (char *name, size_t len)
 extern void
 free_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr, bool purge_node_hash)
 {
+	xfree (ctl_conf_ptr->accounting_storage_host);
+	xfree (ctl_conf_ptr->accounting_storage_loc);
+	xfree (ctl_conf_ptr->accounting_storage_pass);
+	xfree (ctl_conf_ptr->accounting_storage_type);
+	xfree (ctl_conf_ptr->accounting_storage_user);
 	xfree (ctl_conf_ptr->authtype);
-	xfree (ctl_conf_ptr->checkpoint_type);
 	xfree (ctl_conf_ptr->backup_addr);
 	xfree (ctl_conf_ptr->backup_controller);
+	xfree (ctl_conf_ptr->checkpoint_type);
+	xfree (ctl_conf_ptr->cluster_name);
 	xfree (ctl_conf_ptr->control_addr);
 	xfree (ctl_conf_ptr->control_machine);
+	xfree (ctl_conf_ptr->crypto_type);
 	xfree (ctl_conf_ptr->epilog);
-	xfree (ctl_conf_ptr->job_acct_logfile);
-	xfree (ctl_conf_ptr->job_acct_type);
+	xfree (ctl_conf_ptr->health_check_program);
+	xfree (ctl_conf_ptr->job_acct_gather_type);
+	xfree (ctl_conf_ptr->job_comp_host);
 	xfree (ctl_conf_ptr->job_comp_loc);
+	xfree (ctl_conf_ptr->job_comp_pass);
 	xfree (ctl_conf_ptr->job_comp_type);
+	xfree (ctl_conf_ptr->job_comp_user);
 	xfree (ctl_conf_ptr->job_credential_private_key);
 	xfree (ctl_conf_ptr->job_credential_public_certificate);
+	xfree (ctl_conf_ptr->licenses);
 	xfree (ctl_conf_ptr->mail_prog);
 	xfree (ctl_conf_ptr->mpi_default);
+	xfree (ctl_conf_ptr->node_prefix);
 	xfree (ctl_conf_ptr->plugindir);
 	xfree (ctl_conf_ptr->plugstack);
 	xfree (ctl_conf_ptr->proctrack_type);
 	xfree (ctl_conf_ptr->prolog);
 	xfree (ctl_conf_ptr->propagate_rlimits_except);
 	xfree (ctl_conf_ptr->propagate_rlimits);
+	xfree (ctl_conf_ptr->resume_program);
+	xfree (ctl_conf_ptr->slurm_conf);
 	xfree (ctl_conf_ptr->schedtype);
 	xfree (ctl_conf_ptr->select_type);
-	xfree (ctl_conf_ptr->slurm_conf);
 	xfree (ctl_conf_ptr->slurm_user_name);
 	xfree (ctl_conf_ptr->slurmctld_logfile);
 	xfree (ctl_conf_ptr->slurmctld_pidfile);
 	xfree (ctl_conf_ptr->slurmd_logfile);
 	xfree (ctl_conf_ptr->slurmd_pidfile);
 	xfree (ctl_conf_ptr->slurmd_spooldir);
-	xfree (ctl_conf_ptr->state_save_location);
-	xfree (ctl_conf_ptr->switch_type);
-	xfree (ctl_conf_ptr->tmp_fs);
-	xfree (ctl_conf_ptr->task_epilog);
-	xfree (ctl_conf_ptr->task_prolog);
-	xfree (ctl_conf_ptr->task_plugin);
-	xfree (ctl_conf_ptr->tmp_fs);
-	xfree (ctl_conf_ptr->srun_prolog);
 	xfree (ctl_conf_ptr->srun_epilog);
-	xfree (ctl_conf_ptr->node_prefix);
+	xfree (ctl_conf_ptr->srun_prolog);
+	xfree (ctl_conf_ptr->state_save_location);
+	xfree (ctl_conf_ptr->suspend_exc_nodes);
+	xfree (ctl_conf_ptr->suspend_exc_parts);
+	xfree (ctl_conf_ptr->suspend_program);
+	xfree (ctl_conf_ptr->switch_type);
+	xfree (ctl_conf_ptr->task_epilog);
+	xfree (ctl_conf_ptr->task_plugin);
+	xfree (ctl_conf_ptr->task_prolog);
+	xfree (ctl_conf_ptr->tmp_fs);
 	xfree (ctl_conf_ptr->unkillable_program);
 
 	if (purge_node_hash)
@@ -1054,44 +1135,69 @@ void
 init_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr)
 {
 	ctl_conf_ptr->last_update		= time(NULL);
-	xfree (ctl_conf_ptr->authtype);
 	ctl_conf_ptr->cache_groups		= (uint16_t) NO_VAL;
-	xfree (ctl_conf_ptr->checkpoint_type);
+	xfree (ctl_conf_ptr->accounting_storage_host);
+	xfree (ctl_conf_ptr->accounting_storage_loc);
+	xfree (ctl_conf_ptr->accounting_storage_pass);
+	ctl_conf_ptr->accounting_storage_port             = 0;
+	xfree (ctl_conf_ptr->accounting_storage_type);
+	xfree (ctl_conf_ptr->accounting_storage_user);
+	xfree (ctl_conf_ptr->authtype);
 	xfree (ctl_conf_ptr->backup_addr);
 	xfree (ctl_conf_ptr->backup_controller);
+	ctl_conf_ptr->cache_groups		= 0;
+	xfree (ctl_conf_ptr->checkpoint_type);
+	xfree (ctl_conf_ptr->cluster_name);
 	xfree (ctl_conf_ptr->control_addr);
 	xfree (ctl_conf_ptr->control_machine);
+	xfree (ctl_conf_ptr->crypto_type);
+	ctl_conf_ptr->def_mem_per_task          = 0;
 	ctl_conf_ptr->disable_root_jobs         = 0;
 	xfree (ctl_conf_ptr->epilog);
+	ctl_conf_ptr->epilog_msg_time		= (uint32_t) NO_VAL;
 	ctl_conf_ptr->fast_schedule		= (uint16_t) NO_VAL;
 	ctl_conf_ptr->first_job_id		= (uint32_t) NO_VAL;
+	ctl_conf_ptr->get_env_timeout		= 0;
+	ctl_conf_ptr->health_check_interval	= 0;
+	xfree(ctl_conf_ptr->health_check_program);
 	ctl_conf_ptr->inactive_limit		= (uint16_t) NO_VAL;
-	xfree (ctl_conf_ptr->job_acct_logfile);
-	ctl_conf_ptr->job_acct_freq             = 0;
-	xfree (ctl_conf_ptr->job_acct_type);
+	xfree (ctl_conf_ptr->job_acct_gather_type);
+	ctl_conf_ptr->job_acct_gather_freq             = 0;
 	xfree (ctl_conf_ptr->job_comp_loc);
+	xfree (ctl_conf_ptr->job_comp_pass);
+	ctl_conf_ptr->job_comp_port             = 0;
 	xfree (ctl_conf_ptr->job_comp_type);
+	xfree (ctl_conf_ptr->job_comp_user);
 	xfree (ctl_conf_ptr->job_credential_private_key);
 	xfree (ctl_conf_ptr->job_credential_public_certificate);
 	ctl_conf_ptr->job_file_append		= (uint16_t) NO_VAL;
+	ctl_conf_ptr->job_requeue		= (uint16_t) NO_VAL;
 	ctl_conf_ptr->kill_wait			= (uint16_t) NO_VAL;
+	xfree (ctl_conf_ptr->licenses);
 	xfree (ctl_conf_ptr->mail_prog);
 	ctl_conf_ptr->max_job_cnt		= (uint16_t) NO_VAL;
+	ctl_conf_ptr->max_mem_per_task          = 0;
 	ctl_conf_ptr->min_job_age		= (uint16_t) NO_VAL;
 	xfree (ctl_conf_ptr->mpi_default);
 	ctl_conf_ptr->msg_timeout		= (uint16_t) NO_VAL;
 	ctl_conf_ptr->next_job_id		= (uint32_t) NO_VAL;
+	xfree (ctl_conf_ptr->node_prefix);
 	xfree (ctl_conf_ptr->plugindir);
 	xfree (ctl_conf_ptr->plugstack);
+	ctl_conf_ptr->private_data              = 0;
 	xfree (ctl_conf_ptr->proctrack_type);
 	xfree (ctl_conf_ptr->prolog);
 	ctl_conf_ptr->propagate_prio_process	= (uint16_t) NO_VAL;
-	xfree (ctl_conf_ptr->propagate_rlimits_except);
 	xfree (ctl_conf_ptr->propagate_rlimits);
+	xfree (ctl_conf_ptr->propagate_rlimits_except);
+	xfree (ctl_conf_ptr->resume_program);
+	ctl_conf_ptr->resume_rate		= (uint16_t) NO_VAL;
 	ctl_conf_ptr->ret2service		= (uint16_t) NO_VAL;
+	xfree( ctl_conf_ptr->sched_params );
+	ctl_conf_ptr->sched_time_slice		= (uint16_t) NO_VAL;
+	xfree( ctl_conf_ptr->schedtype );
 	ctl_conf_ptr->schedport			= (uint16_t) NO_VAL;
 	ctl_conf_ptr->schedrootfltr		= (uint16_t) NO_VAL;
-	xfree( ctl_conf_ptr->schedtype );
 	xfree( ctl_conf_ptr->select_type );
 	ctl_conf_ptr->select_type_param         = (uint16_t) NO_VAL;
 	ctl_conf_ptr->slurm_user_id		= (uint16_t) NO_VAL; 
@@ -1107,20 +1213,25 @@ init_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr)
  	ctl_conf_ptr->slurmd_port		= (uint32_t) NO_VAL;
 	xfree (ctl_conf_ptr->slurmd_spooldir);
 	ctl_conf_ptr->slurmd_timeout		= (uint16_t) NO_VAL;
-	xfree (ctl_conf_ptr->state_save_location);
-	xfree (ctl_conf_ptr->switch_type);
-	xfree (ctl_conf_ptr->task_epilog);
-	xfree (ctl_conf_ptr->task_prolog);
-	xfree (ctl_conf_ptr->task_plugin);
-	xfree (ctl_conf_ptr->tmp_fs);
-	ctl_conf_ptr->wait_time			= (uint16_t) NO_VAL;
 	xfree (ctl_conf_ptr->srun_prolog);
 	xfree (ctl_conf_ptr->srun_epilog);
-	xfree (ctl_conf_ptr->node_prefix);
+	xfree (ctl_conf_ptr->state_save_location);
+	xfree (ctl_conf_ptr->suspend_exc_nodes);
+	xfree (ctl_conf_ptr->suspend_exc_parts);
+	xfree (ctl_conf_ptr->suspend_program);
+	ctl_conf_ptr->suspend_rate		= (uint16_t) NO_VAL;
+	ctl_conf_ptr->suspend_time		= (uint16_t) NO_VAL;
+	xfree (ctl_conf_ptr->switch_type);
+	xfree (ctl_conf_ptr->task_epilog);
+	xfree (ctl_conf_ptr->task_plugin);
+	ctl_conf_ptr->task_plugin_param		= 0;
+	xfree (ctl_conf_ptr->task_prolog);
+	xfree (ctl_conf_ptr->tmp_fs);
 	ctl_conf_ptr->tree_width       		= (uint16_t) NO_VAL;
-	ctl_conf_ptr->use_pam			= 0;
 	xfree (ctl_conf_ptr->unkillable_program);
 	ctl_conf_ptr->unkillable_timeout        = (uint16_t) NO_VAL;
+	ctl_conf_ptr->use_pam			= 0;
+	ctl_conf_ptr->wait_time			= (uint16_t) NO_VAL;
 
 	_free_name_hashtbl();
 	_init_name_hashtbl();
@@ -1339,8 +1450,13 @@ static void
 validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 {
 	char *temp_str = NULL;
+	long long_suspend_time;
 	bool truth;
-
+	char *default_storage_type = NULL, *default_storage_host = NULL;
+	char *default_storage_user = NULL, *default_storage_pass = NULL;
+	char *default_storage_loc = NULL;
+	uint32_t default_storage_port = 0;
+		
 	if (s_p_get_string(&conf->backup_controller, "BackupController",
 			   hashtbl)
 	    && strcasecmp("localhost", conf->backup_controller) == 0) {
@@ -1358,6 +1474,8 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 		if (conf->backup_controller != NULL)
 			conf->backup_addr = xstrdup(conf->backup_controller);
 	}
+
+	s_p_get_string(&conf->cluster_name, "ClusterName", hashtbl);
 
 	if (!s_p_get_string(&conf->control_machine, "ControlMachine", hashtbl))
 		fatal ("validate_and_set_defaults: "
@@ -1380,6 +1498,13 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 		xfree(conf->backup_controller);
 	}
 
+	s_p_get_string(&default_storage_type, "DefaultStorageType", hashtbl);
+	s_p_get_string(&default_storage_host, "DefaultStorageHost", hashtbl);
+	s_p_get_string(&default_storage_user, "DefaultStorageUser", hashtbl);
+	s_p_get_string(&default_storage_pass, "DefaultStoragePass", hashtbl);
+	s_p_get_string(&default_storage_loc, "DefaultStorageLoc", hashtbl);
+	s_p_get_uint32(&default_storage_port, "DefaultStoragePort", hashtbl);
+
 	if (!s_p_get_string(&conf->job_credential_private_key,
 			    "JobCredentialPrivateKey", hashtbl))
 		fatal("JobCredentialPrivateKey not set");
@@ -1400,11 +1525,20 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 	if (!s_p_get_string(&conf->checkpoint_type, "CheckpointType", hashtbl))
 		conf->checkpoint_type = xstrdup(DEFAULT_CHECKPOINT_TYPE);
 
-	if (!s_p_get_uint16(&conf->disable_root_jobs, "DisableRootJobs", 
-			    hashtbl))
+	if (!s_p_get_string(&conf->crypto_type, "CryptoType", hashtbl))
+		 conf->crypto_type = xstrdup(DEFAULT_CRYPTO_TYPE);
+
+	if (!s_p_get_uint32(&conf->def_mem_per_task, "DefMemPerTask", hashtbl))
+		conf->def_mem_per_task = DEFAULT_MEM_PER_TASK;
+
+	if (!s_p_get_boolean((bool *) &conf->disable_root_jobs, 
+			     "DisableRootJobs", hashtbl))
 		conf->disable_root_jobs = DEFAULT_DISABLE_ROOT_JOBS;
 
 	s_p_get_string(&conf->epilog, "Epilog", hashtbl);
+
+	if (!s_p_get_uint32(&conf->epilog_msg_time, "EpilogMsgTime", hashtbl))
+		conf->epilog_msg_time = DEFAULT_EPILOG_MSG_TIME;
 
 	if (!s_p_get_uint16(&conf->fast_schedule, "FastSchedule", hashtbl))
 		conf->fast_schedule = DEFAULT_FAST_SCHEDULE;
@@ -1428,29 +1562,92 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 		conf->inactive_limit = DEFAULT_INACTIVE_LIMIT;
 	}
 
-	if (!s_p_get_string(&conf->job_acct_logfile, 
-			    "JobAcctLogFile", hashtbl))
-		conf->job_acct_logfile = xstrdup(DEFAULT_JOB_ACCT_LOGFILE);
+	if (!s_p_get_uint16(&conf->job_acct_gather_freq,
+			    "JobAcctGatherFrequency", hashtbl))
+		conf->job_acct_gather_freq = DEFAULT_JOB_ACCT_GATHER_FREQ;
 
-	if (!s_p_get_uint16(&conf->job_acct_freq, "JobAcctFrequency", hashtbl))
-		conf->job_acct_freq = DEFAULT_JOB_ACCT_FREQ;
+	if (s_p_get_string(&conf->job_acct_gather_type,
+			    "JobAcctType", hashtbl)) {
+		fatal("JobAcctType is no longer a valid parameter.\n"
+		      "The job accounting plugin has changed to 2 different "
+		      "plugins one for gathering and one for storing the "
+		      "gathered information.\n"
+		      "Please change this to JobAcctGatherType to "
+		      "correctly work.\n"
+		      "The major 'jobacct' is now 'jobacct_gather' and "
+		      "'jobacct_storage' your declarations will also need "
+		      "to change in your slurm.conf file.\n"
+		      "Refer to the slurm.conf man page or the web "
+		      "documentation for further explanation.");
+	}
+	
+	if(!s_p_get_string(&conf->job_acct_gather_type,
+			   "JobAcctGatherType", hashtbl))
+		conf->job_acct_gather_type =
+			xstrdup(DEFAULT_JOB_ACCT_GATHER_TYPE);
 
-	if (!s_p_get_string(&conf->job_acct_type, "JobAcctType", hashtbl))
-		conf->job_acct_type = xstrdup(DEFAULT_JOB_ACCT_TYPE);
+	if (!s_p_get_string(&conf->job_comp_type, "JobCompType", hashtbl)) {
+		if(default_storage_type)
+			conf->job_comp_type =
+				xstrdup_printf("jobcomp/%s",
+					       default_storage_type);
+		else
+			conf->job_comp_type = xstrdup(DEFAULT_JOB_COMP_TYPE);
+	}
+	if (!s_p_get_string(&conf->job_comp_loc, "JobCompLoc", hashtbl)) {
+		if(default_storage_loc)
+			conf->job_comp_loc = xstrdup(default_storage_loc);
+		else
+			conf->job_comp_loc = xstrdup(DEFAULT_JOB_COMP_LOC);
+	}
 
-	s_p_get_string(&conf->job_comp_loc, "JobCompLoc", hashtbl);
-
-	if (!s_p_get_string(&conf->job_comp_type, "JobCompType", hashtbl))
-		conf->job_comp_type = xstrdup(DEFAULT_JOB_COMP_TYPE);
-
+	if (!s_p_get_string(&conf->job_comp_host, "JobCompHost",
+			    hashtbl)) {
+		if(default_storage_host)
+			conf->job_comp_host =
+				xstrdup(default_storage_host);
+		else
+			conf->job_comp_host = xstrdup(DEFAULT_STORAGE_HOST);
+	}
+	if (!s_p_get_string(&conf->job_comp_user, "JobCompUser",
+			    hashtbl)) {
+		if(default_storage_user)
+			conf->job_comp_user =
+				xstrdup(default_storage_user);
+		else
+			conf->job_comp_user = xstrdup(DEFAULT_STORAGE_USER);
+	}
+	if (!s_p_get_string(&conf->job_comp_pass, "JobCompPass",
+			    hashtbl)) {
+		if(default_storage_pass)
+			conf->job_comp_pass =
+				xstrdup(default_storage_pass);
+	}
+	if (!s_p_get_uint32(&conf->job_comp_port, "JobCompPort",
+			    hashtbl)) {
+		if(default_storage_port)
+			conf->job_comp_port = default_storage_port;
+		else
+			conf->job_comp_port = DEFAULT_STORAGE_PORT;
+	}
 	if (!s_p_get_uint16(&conf->job_file_append, "JobFileAppend", hashtbl))
 		conf->job_file_append = 0;
+
+	if (!s_p_get_uint16(&conf->job_requeue, "JobRequeue", hashtbl))
+		conf->job_requeue = 1;
+	else if (conf->job_requeue > 1)
+		conf->job_requeue = 1;
 
 	if (!s_p_get_uint16(&conf->get_env_timeout, "GetEnvTimeout", hashtbl))
 		conf->get_env_timeout = DEFAULT_GET_ENV_TIMEOUT;
 
+	s_p_get_uint16(&conf->health_check_interval, "HealthCheckInterval", hashtbl);
+	s_p_get_string(&conf->health_check_program, "HealthCheckProgram", hashtbl);
+
 	if (!s_p_get_uint16(&conf->kill_wait, "KillWait", hashtbl))
 		conf->kill_wait = DEFAULT_KILL_WAIT;
+
+	s_p_get_string(&conf->licenses, "Licenses", hashtbl);
 
 	if (!s_p_get_string(&conf->mail_prog, "MailProg", hashtbl))
 		conf->mail_prog = xstrdup(DEFAULT_MAIL_PROG);
@@ -1458,10 +1655,15 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 	if (!s_p_get_uint16(&conf->max_job_cnt, "MaxJobCount", hashtbl))
 		conf->max_job_cnt = DEFAULT_MAX_JOB_COUNT;
 
+	if (!s_p_get_uint32(&conf->max_mem_per_task, "MaxMemPerTask", hashtbl))
+		conf->max_mem_per_task = DEFAULT_MAX_MEM_PER_TASK;
+
 	if (!s_p_get_uint16(&conf->msg_timeout, "MessageTimeout", hashtbl))
 		conf->msg_timeout = DEFAULT_MSG_TIMEOUT;
-	else if (conf->msg_timeout > 100)
-		info("WARNING: MessageTimeout is too high for effective fault-tolerance");
+	else if (conf->msg_timeout > 100) {
+		info("WARNING: MessageTimeout is too high for effective "
+			"fault-tolerance");
+	}
 
 	if (!s_p_get_uint16(&conf->min_job_age, "MinJobAge", hashtbl))
 		conf->min_job_age = DEFAULT_MIN_JOB_AGE;
@@ -1469,6 +1671,69 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 	if (!s_p_get_string(&conf->mpi_default, "MpiDefault", hashtbl))
 		conf->mpi_default = xstrdup(DEFAULT_MPI_DEFAULT);
 
+	if (!s_p_get_string(&conf->accounting_storage_type,
+			    "AccountingStorageType", hashtbl)) {
+		if(default_storage_type)
+			conf->accounting_storage_type =
+				xstrdup_printf("accounting_storage/%s",
+					       default_storage_type);
+		else	
+			conf->accounting_storage_type =
+				xstrdup(DEFAULT_ACCOUNTING_STORAGE_TYPE);
+	}
+
+	if (!s_p_get_uint16(&conf->accounting_storage_enforce, 
+			    "AccountingStorageEnforce", hashtbl))
+		conf->accounting_storage_enforce = DEFAULT_ACCOUNTING_ENFORCE;
+
+	if (!s_p_get_string(&conf->accounting_storage_host,
+			    "AccountingStorageHost", hashtbl)) {
+		if(default_storage_host)
+			conf->accounting_storage_host =
+				xstrdup(default_storage_host);
+		else
+			conf->accounting_storage_host =
+				xstrdup(DEFAULT_STORAGE_HOST);
+	}
+
+	/* AccountingStorageLoc replaces JobAcctLogFile since it now represents
+	 * the database name also depending on the storage type you
+	 * use so we still check JobAcctLogFile for the same thing
+	 */
+	if (!s_p_get_string(&conf->accounting_storage_loc,
+			    "AccountingStorageLoc", hashtbl)
+		&& !s_p_get_string(&conf->accounting_storage_loc,
+			       "JobAcctLogFile", hashtbl)) {
+		if(default_storage_loc)
+			conf->accounting_storage_loc =
+				xstrdup(default_storage_loc);
+		else
+			conf->accounting_storage_loc =
+				xstrdup(DEFAULT_STORAGE_LOC);
+	}
+
+	if (!s_p_get_string(&conf->accounting_storage_user,
+			    "AccountingStorageUser", hashtbl)) {
+		if(default_storage_user)
+			conf->accounting_storage_user =
+				xstrdup(default_storage_user);
+		else
+			conf->accounting_storage_user =
+				xstrdup(DEFAULT_STORAGE_USER);
+	}
+	if (!s_p_get_string(&conf->accounting_storage_pass,
+			    "AccountingStoragePass", hashtbl)) {
+		if(default_storage_pass)
+			conf->accounting_storage_pass =
+				xstrdup(default_storage_pass);
+	}
+	if (!s_p_get_uint32(&conf->accounting_storage_port,
+			    "AccountingStoragePort", hashtbl)) {
+		if(default_storage_port)
+			conf->accounting_storage_port = default_storage_port;
+		else
+			conf->accounting_storage_port = DEFAULT_STORAGE_PORT;
+	}
 	if (!s_p_get_string(&conf->plugindir, "PluginDir", hashtbl))
 		conf->plugindir = xstrdup(default_plugin_path);
 
@@ -1488,6 +1753,8 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 	if ((!strcmp(conf->switch_type, "switch/elan"))
 	    && (!strcmp(conf->proctrack_type,"proctrack/linuxproc")))
 		fatal("proctrack/linuxproc is incompatable with switch/elan");
+
+	s_p_get_uint16(&conf->private_data, "PrivateData", hashtbl);
 
 	s_p_get_string(&conf->prolog, "Prolog", hashtbl);
 
@@ -1518,6 +1785,12 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 	if (!s_p_get_uint16(&conf->ret2service, "ReturnToService", hashtbl))
 		conf->ret2service = DEFAULT_RETURN_TO_SERVICE;
 
+	s_p_get_string(&conf->resume_program, "ResumeProgram", hashtbl);
+	if (!s_p_get_uint16(&conf->resume_rate, "ResumeRate", hashtbl))
+		conf->resume_rate = DEFAULT_RESUME_RATE;
+
+	s_p_get_string(&conf->sched_params, "SchedulerParameters", hashtbl);
+
 	if (s_p_get_uint16(&conf->schedport, "SchedulerPort", hashtbl)) {
 		if (conf->schedport == 0) {
 			error("SchedulerPort=0 is invalid");
@@ -1530,6 +1803,10 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 	if (!s_p_get_uint16(&conf->schedrootfltr,
 			    "SchedulerRootFilter", hashtbl))
 		conf->schedrootfltr = DEFAULT_SCHEDROOTFILTER;
+
+	if (!s_p_get_uint16(&conf->sched_time_slice, "SchedulerTimeSlice",
+	    hashtbl))
+		conf->sched_time_slice = DEFAULT_SCHED_TIME_SLICE;
 
 	if (!s_p_get_string(&conf->schedtype, "SchedulerType", hashtbl))
 		conf->schedtype = xstrdup(DEFAULT_SCHEDTYPE);
@@ -1565,11 +1842,7 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 			       conf->slurm_user_name);
 			xfree(conf->slurm_user_name);
 		} else {
-			if (slurm_passwd->pw_uid > 0xffff)
-				error("SlurmUser numeric overflow, "
-				      "will be fixed soon");
-			else
-				conf->slurm_user_id = slurm_passwd->pw_uid;
+			conf->slurm_user_id = slurm_passwd->pw_uid;
 		}
 	}
 
@@ -1617,6 +1890,16 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 			    "StateSaveLocation", hashtbl))
 		conf->state_save_location = xstrdup(DEFAULT_SAVE_STATE_LOC);
 
+	s_p_get_string(&conf->suspend_exc_nodes, "SuspendExcNodes", hashtbl);
+	s_p_get_string(&conf->suspend_exc_parts, "SuspendExcParts", hashtbl);
+	s_p_get_string(&conf->suspend_program, "SuspendProgram", hashtbl);
+	if (!s_p_get_uint16(&conf->suspend_rate, "SuspendRate", hashtbl))
+		conf->suspend_rate = DEFAULT_SUSPEND_RATE;
+	if (s_p_get_long(&long_suspend_time, "SuspendTime", hashtbl))
+		conf->suspend_time = long_suspend_time + 1;
+	else
+		conf->suspend_time = 0;
+
 	/* see above for switch_type, order dependent */
 
 	if (!s_p_get_string(&conf->task_plugin, "TaskPlugin", hashtbl))
@@ -1663,6 +1946,11 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 	if (!s_p_get_uint16(&conf->unkillable_timeout,
 			    "UnkillableStepTimeout", hashtbl))
 		conf->unkillable_timeout = DEFAULT_UNKILLABLE_TIMEOUT;
+	xfree(default_storage_type);
+	xfree(default_storage_loc);
+	xfree(default_storage_host);
+	xfree(default_storage_user);
+	xfree(default_storage_pass);
 }
 
 /*

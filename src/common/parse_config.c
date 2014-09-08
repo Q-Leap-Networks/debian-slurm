@@ -3,12 +3,12 @@
  *
  *  NOTE: when you see the prefix "s_p_", think "slurm parser".
  *
- *  $Id: parse_config.c 10574 2006-12-15 23:38:29Z jette $
+ *  $Id: parse_config.c 14064 2008-05-15 23:53:06Z jette $
  *****************************************************************************
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -511,10 +511,14 @@ static int _handle_uint32(s_p_values_t *v,
 
 		errno = 0;
 		num = strtoul(value, &endptr, 0);
+		if ((endptr[0] == 'k') || (endptr[0] == 'K')) {
+			num *= 1024;
+			endptr++;
+		}
 		if ((num == 0 && errno == EINVAL)
 		    || (*endptr != '\0')) {
-			if (strcasecmp(value, "UNLIMITED") == 0
-			    || strcasecmp(value, "INFINITE") == 0) {
+			if ((strcasecmp(value, "UNLIMITED") == 0) ||
+			    (strcasecmp(value, "INFINITE")  == 0)) {
 				num = (uint32_t)-1;
 			} else {
 				error("%s value (%s) is not a valid number", 

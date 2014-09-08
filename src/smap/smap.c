@@ -1,12 +1,12 @@
 /*****************************************************************************\
  *  smap.c - Report overall state the system
- *  $Id: smap.c 13794 2008-04-04 15:56:01Z da $
+ *  $Id: smap.c 13795 2008-04-04 15:59:14Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.

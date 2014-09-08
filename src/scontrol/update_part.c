@@ -4,7 +4,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -35,7 +35,8 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#include "scontrol.h"
+#include "src/common/proc_args.h"
+#include "src/scontrol/scontrol.h"
 
 
 /* 
@@ -49,7 +50,7 @@
 extern int
 scontrol_update_part (int argc, char *argv[]) 
 {
-	int i, update_cnt = 0;
+	int i, min, max, update_cnt = 0;
 	update_part_msg_t part_msg;
 
 	slurm_init_part_desc_msg ( &part_msg );
@@ -57,29 +58,32 @@ scontrol_update_part (int argc, char *argv[])
 		if (strncasecmp(argv[i], "PartitionName=", 14) == 0)
 			part_msg.name = &argv[i][14];
 		else if (strncasecmp(argv[i], "MaxTime=", 8) == 0) {
-			if ((strcasecmp(&argv[i][8],"UNLIMITED") == 0) ||
-			    (strcasecmp(&argv[i][8],"INFINITE") == 0))
-				part_msg.max_time = INFINITE;
-			else
-				part_msg.max_time = 
-					(uint32_t) strtol(&argv[i][8], 
-						(char **) NULL, 10);
+			int max_time = time_str2mins(&argv[i][8]);
+			if ((max_time < 0) && (max_time != INFINITE)) {
+				exit_code = 1;
+				error("Invalid input %s", argv[i]);
+				return 0;
+			}
+			part_msg.max_time = max_time;
 			update_cnt++;
 		}
 		else if (strncasecmp(argv[i], "MaxNodes=", 9) == 0) {
 			if ((strcasecmp(&argv[i][9],"UNLIMITED") == 0) ||
 			    (strcasecmp(&argv[i][8],"INFINITE") == 0))
 				part_msg.max_nodes = (uint32_t) INFINITE;
-			else
-				part_msg.max_nodes = 
-					(uint32_t) strtol(&argv[i][9], 
-						(char **) NULL, 10);
+			else {
+				min = 1;
+				get_resource_arg_range(&argv[i][9],
+					"MaxNodes", &min, &max, true);
+				part_msg.max_nodes = min;
+			}
 			update_cnt++;
 		}
 		else if (strncasecmp(argv[i], "MinNodes=", 9) == 0) {
-			part_msg.min_nodes = 
-				(uint32_t) strtol(&argv[i][9], 
-					(char **) NULL, 10);
+			min = 1;
+			get_resource_arg_range(&argv[i][9],
+				"MinNodes", &min, &max, true);
+			part_msg.min_nodes = min;
 			update_cnt++;
 		}
 		else if (strncasecmp(argv[i], "Default=", 8) == 0) {
@@ -89,10 +93,9 @@ scontrol_update_part (int argc, char *argv[])
 				part_msg.default_part = 1;
 			else {
 				exit_code = 1;
-				fprintf (stderr, "Invalid input: %s\n", 
-					 argv[i]);
-				fprintf (stderr, "Acceptable Default values "
-					"are YES and NO\n");
+				error("Invalid input: %s", argv[i]);
+				error("Acceptable Default values "
+					"are YES and NO");
 				return 0;
 			}
 			update_cnt++;
@@ -104,10 +107,9 @@ scontrol_update_part (int argc, char *argv[])
 				part_msg.hidden = 1;
 			else {
 				exit_code = 1;
-				fprintf (stderr, "Invalid input: %s\n", 
-					 argv[i]);
-				fprintf (stderr, "Acceptable Hidden values "
-					"are YES and NO\n");
+				error("Invalid input: %s", argv[i]);
+				error("Acceptable Hidden values "
+					"are YES and NO");
 				return 0;
 			}
 			update_cnt++;
@@ -119,31 +121,41 @@ scontrol_update_part (int argc, char *argv[])
 				part_msg.root_only = 1;
 			else {
 				exit_code = 1;
-				fprintf (stderr, "Invalid input: %s\n", 
-					 argv[i]);
-				fprintf (stderr, "Acceptable RootOnly values "
-					"are YES and NO\n");
+				error("Invalid input: %s", argv[i]);
+				error("Acceptable RootOnly values "
+					"are YES and NO");
 				return 0;
 			}
 			update_cnt++;
 		}
 		else if (strncasecmp(argv[i], "Shared=", 7) == 0) {
-			if (strcasecmp(&argv[i][7], "NO") == 0)
-				part_msg.shared = SHARED_NO;
-			else if (strcasecmp(&argv[i][7], "YES") == 0)
-				part_msg.shared = SHARED_YES;
-			else if (strcasecmp(&argv[i][7], "EXCLUSIVE") == 0)
-				part_msg.shared = SHARED_EXCLUSIVE;
-			else if (strcasecmp(&argv[i][7], "FORCE") == 0)
-				part_msg.shared = SHARED_FORCE;
-			else {
+			if (strncasecmp(&argv[i][7], "NO", 2) == 0) {
+				part_msg.max_share = 1;
+			} else if (strncasecmp(&argv[i][7], "EXCLUSIVE", 9) == 0) {
+				part_msg.max_share = 0;
+			} else if (strncasecmp(&argv[i][7], "YES:", 4) == 0) {
+				part_msg.max_share = (uint16_t) strtol(&argv[i][11], 
+					(char **) NULL, 10);
+			} else if (strncasecmp(&argv[i][7], "YES", 3) == 0) {
+				part_msg.max_share = (uint16_t) 4;
+			} else if (strncasecmp(&argv[i][7], "FORCE:", 6) == 0) {
+				part_msg.max_share = (uint16_t) strtol(&argv[i][13],
+					(char **) NULL, 10) | SHARED_FORCE;
+			} else if (strncasecmp(&argv[i][7], "FORCE", 5) == 0) {
+				part_msg.max_share = (uint16_t) 4 |
+					SHARED_FORCE;
+			} else {
 				exit_code = 1;
-				fprintf (stderr, "Invalid input: %s\n", 
-					 argv[i]);
-				fprintf (stderr, "Acceptable Shared values "
-					"are YES, NO and FORCE\n");
+				error("Invalid input: %s", argv[i]);
+				error("Acceptable Shared values are "
+					"NO, EXCLUSIVE, YES:#, and FORCE:#");
 				return 0;
 			}
+			update_cnt++;
+		}
+		else if (strncasecmp(argv[i], "Priority=", 9) == 0) {
+			part_msg.priority = (uint16_t) strtol(&argv[i][9], 
+					(char **) NULL, 10);
 			update_cnt++;
 		}
 		else if (strncasecmp(argv[i], "State=", 6) == 0) {
@@ -153,10 +165,9 @@ scontrol_update_part (int argc, char *argv[])
 				part_msg.state_up = 1;
 			else {
 				exit_code = 1;
-				fprintf (stderr, "Invalid input: %s\n", 
-					 argv[i]);
-				fprintf (stderr, "Acceptable State values "
-					"are UP and DOWN\n");
+				error("Invalid input: %s", argv[i]);
+				error("Acceptable State values "
+					"are UP and DOWN");
 				return 0;
 			}
 			update_cnt++;
@@ -171,15 +182,15 @@ scontrol_update_part (int argc, char *argv[])
 		}
 		else {
 			exit_code = 1;
-			fprintf (stderr, "Invalid input: %s\n", argv[i]);
-			fprintf (stderr, "Request aborted\n");
+			error("Invalid input: %s", argv[i]);
+			error("Request aborted");
 			return 0;
 		}
 	}
 
 	if (update_cnt == 0) {
 		exit_code = 1;
-		fprintf (stderr, "No changes specified\n");
+		error("No changes specified");
 		return 0;
 	}
 

@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  allocate.c - allocate nodes for a job or step with supplied contraints
- *  $Id: allocate.c 11342 2007-04-10 22:54:27Z da $
+ *  $Id: allocate.c 13722 2008-03-27 16:39:22Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -16,7 +16,7 @@
  *  any later version.
  *
  *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
+ *  to link the code of portions of this program with the OpenSSL library under
  *  certain conditions as described in each individual source file, and 
  *  distribute linked combinations including the two. You must obey the GNU 
  *  General Public License in all respects for all of the code used other than 
@@ -63,7 +63,9 @@ extern pid_t getsid(pid_t pid);		/* missing from <unistd.h> */
 #include "src/common/xstring.h"
 #include "src/common/forward.h"
 #include "src/common/fd.h"
+#include "src/common/parse_time.h"
 #include "src/common/slurm_auth.h"
+#include "src/common/slurm_protocol_defs.h"
 
 #define BUFFER_SIZE 1024
 #define MAX_ALLOC_WAIT 60	/* seconds */
@@ -212,7 +214,6 @@ slurm_allocate_resources_blocking (const job_desc_msg_t *user_req,
 			xfree(req);
 			return NULL;
 		}
-		req->alloc_resp_hostname = listen->hostname;
 		req->alloc_resp_port = listen->port;
 	}
 
@@ -279,7 +280,6 @@ slurm_allocate_resources_blocking (const job_desc_msg_t *user_req,
 	return resp;
 }
 
-
 /*
  * slurm_job_will_run - determine if a job would execute immediately if 
  *	submitted now
@@ -288,19 +288,40 @@ slurm_allocate_resources_blocking (const job_desc_msg_t *user_req,
  */
 int slurm_job_will_run (job_desc_msg_t *req)
 {
-	slurm_msg_t req_msg;
-	int rc;
+	slurm_msg_t req_msg, resp_msg;
+	will_run_response_msg_t *will_run_resp;
+	char buf[64];
 
 	/* req.immediate = true;    implicit */
+	if ((req->alloc_node == NULL)
+	&&  (gethostname_short(buf, sizeof(buf)) == 0))
+		req->alloc_node = buf;
 	slurm_msg_t_init(&req_msg);
 	req_msg.msg_type = REQUEST_JOB_WILL_RUN;
 	req_msg.data     = req; 
 	
-	if (slurm_send_recv_controller_rc_msg(&req_msg, &rc) < 0)
+	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg) < 0)
 		return SLURM_SOCKET_ERROR;
 
-	if (rc)
-		slurm_seterrno_ret(rc);
+	switch (resp_msg.msg_type) {
+	case RESPONSE_SLURM_RC:
+		if (_handle_rc_msg(&resp_msg) < 0)
+			return SLURM_PROTOCOL_ERROR;
+		break;
+	case RESPONSE_JOB_WILL_RUN:
+		will_run_resp = (will_run_response_msg_t *) resp_msg.data;
+		slurm_make_time_str(&will_run_resp->start_time,
+				    buf, sizeof(buf));
+		info("Job %u to start at %s using %u processors on %s",
+			will_run_resp->job_id, buf,
+			will_run_resp->proc_cnt,
+			will_run_resp->node_list);
+		slurm_free_will_run_response_msg(will_run_resp);
+		break;
+	default:
+		slurm_seterrno_ret(SLURM_UNEXPECTED_MSG_ERROR);
+		break;
+	}
 
 	return SLURM_PROTOCOL_SUCCESS;
 }
@@ -316,8 +337,7 @@ int
 slurm_job_step_create (job_step_create_request_msg_t *req, 
                        job_step_create_response_msg_t **resp)
 {
-	slurm_msg_t req_msg;
-	slurm_msg_t resp_msg;
+	slurm_msg_t req_msg, resp_msg;
 
 	slurm_msg_t_init(&req_msg);
 	slurm_msg_t_init(&resp_msg);
@@ -556,12 +576,9 @@ static listen_t *_create_allocation_response_socket(char *interface_hostname)
 	listen_t *listen = NULL;
 
 	listen = xmalloc(sizeof(listen_t));
-	if (listen == NULL)
-		return NULL;
 
 	/* port "0" lets the operating system pick any port */
-	slurm_set_addr(&listen->address, 0, interface_hostname);
-	if ((listen->fd = slurm_init_msg_engine(&listen->address)) < 0) {
+	if ((listen->fd = slurm_init_msg_engine_port(0)) < 0) {
 		error("slurm_init_msg_engine_port error %m");
 		return NULL;
 	}
@@ -596,7 +613,7 @@ static void _destroy_allocation_response_socket(listen_t *listen)
 static int
 _handle_msg(slurm_msg_t *msg, resource_allocation_response_msg_t **resp)
 {
-	uid_t req_uid   = g_slurm_auth_get_uid(msg->auth_cred);
+	uid_t req_uid   = g_slurm_auth_get_uid(msg->auth_cred, NULL);
 	uid_t uid       = getuid();
 	uid_t slurm_uid = (uid_t) slurm_get_slurm_user_id();
 	int rc = 0;

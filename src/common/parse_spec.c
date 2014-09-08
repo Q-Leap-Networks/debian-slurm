@@ -1,11 +1,11 @@
-/* $Id: parse_spec.c 12452 2007-10-05 19:07:07Z da $ */
+/* $Id: parse_spec.c 13672 2008-03-19 23:10:58Z jette $ */
 /*****************************************************************************\
  * parse_spec.c - configuration file parser
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.

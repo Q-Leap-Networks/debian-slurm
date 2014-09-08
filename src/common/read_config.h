@@ -5,7 +5,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Mette <jette1@llnl.gov>.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -16,7 +16,7 @@
  *  any later version.
  *
  *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
+ *  to link the code of portions of this program with the OpenSSL library under
  *  certain conditions as described in each individual source file, and 
  *  distribute linked combinations including the two. You must obey the GNU 
  *  General Public License in all respects for all of the code used other than 
@@ -48,22 +48,30 @@ extern char *default_slurm_config_file;
 extern char *default_plugin_path;
 extern char *default_plugstack;
 
+#define DEFAULT_ACCOUNTING_ENFORCE  0
+#define DEFAULT_ACCOUNTING_STORAGE_TYPE "accounting_storage/none"
 #define DEFAULT_AUTH_TYPE          "auth/none"
 #define DEFAULT_CACHE_GROUPS        0
-#define DEFAULT_DISABLE_ROOT_JOBS   0
+#define DEFAULT_CRYPTO_TYPE        "crypto/openssl"
+#define DEFAULT_EPILOG_MSG_TIME     2000
 #define DEFAULT_FAST_SCHEDULE       1
 #define DEFAULT_FIRST_JOB_ID        1
 #define DEFAULT_GET_ENV_TIMEOUT     2
 /* NOTE: DEFAULT_INACTIVE_LIMIT must be 0 for Blue Gene/L systems */
 #define DEFAULT_INACTIVE_LIMIT      0
-#define DEFAULT_JOB_ACCT_LOGFILE    "/var/log/slurm_accounting.log"
-#define DEFAULT_JOB_ACCT_FREQ       30
-#define DEFAULT_JOB_ACCT_TYPE       "jobacct/none"
+#define DEFAULT_JOB_ACCT_GATHER_TYPE  "jobacct_gather/none"
+#define JOB_ACCT_GATHER_TYPE_NONE "jobacct_gather/none"
+#define DEFAULT_JOB_ACCT_GATHER_FREQ  30
+#define ACCOUNTING_STORAGE_TYPE_NONE "accounting_storage/none"
+#define DEFAULT_DISABLE_ROOT_JOBS   0
 #define DEFAULT_JOB_COMP_TYPE       "jobcomp/none"
+#define DEFAULT_JOB_COMP_LOC        "/var/log/slurm_jobcomp.log"
 #define DEFAULT_KILL_TREE           0
 #define DEFAULT_KILL_WAIT           30
 #define DEFAULT_MAIL_PROG           "/bin/mail"
-#define DEFAULT_MAX_JOB_COUNT       2000
+#define DEFAULT_MAX_JOB_COUNT       5000
+#define DEFAULT_MEM_PER_TASK        0
+#define DEFAULT_MAX_MEM_PER_TASK    0
 #define DEFAULT_MIN_JOB_AGE         300
 #define DEFAULT_MPI_DEFAULT         "none"
 #define DEFAULT_MSG_TIMEOUT         10
@@ -76,9 +84,11 @@ extern char *default_plugstack;
 #endif
 #define DEFAULT_PROPAGATE_PRIO_PROCESS 0
 #define DEFAULT_RETURN_TO_SERVICE   0
+#define DEFAULT_RESUME_RATE         60
 #define DEFAULT_SAVE_STATE_LOC      "/tmp"
 #define DEFAULT_SCHEDROOTFILTER     1
 #define DEFAULT_SCHEDULER_PORT      7321
+#define DEFAULT_SCHED_TIME_SLICE    30
 #define DEFAULT_SCHEDTYPE           "sched/builtin"
 #ifdef HAVE_BG		/* Blue Gene specific default configuration parameters */
 #  define DEFAULT_SELECT_TYPE       "select/bluegene"
@@ -90,6 +100,12 @@ extern char *default_plugstack;
 #define DEFAULT_SLURMD_PIDFILE      "/var/run/slurmd.pid"
 #define DEFAULT_SLURMD_TIMEOUT      300
 #define DEFAULT_SPOOLDIR            "/var/spool/slurmd"
+#define DEFAULT_STORAGE_HOST        "localhost"
+#define DEFAULT_STORAGE_LOC         "/var/log/slurm_jobacct.log"
+#define DEFAULT_STORAGE_USER        "root"
+#define DEFAULT_STORAGE_PORT        0
+#define DEFAULT_SUSPEND_RATE        60
+#define DEFAULT_SUSPEND_TIME        0
 #define DEFAULT_SWITCH_TYPE         "switch/none"
 #define DEFAULT_TASK_PLUGIN         "task/none"
 #define DEFAULT_TMP_FS              "/tmp"
@@ -116,6 +132,9 @@ typedef struct slurm_conf_node {
 } slurm_conf_node_t;
 
 typedef struct slurm_conf_partition {
+	uint16_t disable_root_jobs; /* if set then user root can't run
+				     * jobs if NO_VAL use global
+				     * default */
 	char	*name;		/* name of the partition */
 	bool     hidden_flag;	/* 1 if hidden by default */
 	uint32_t max_time;	/* minutes or INFINITE */
@@ -123,10 +142,10 @@ typedef struct slurm_conf_partition {
 	uint32_t min_nodes;	/* per job */
 	uint32_t total_nodes;	/* total number of nodes in the partition */
 	uint32_t total_cpus;	/* total number of cpus in the partition */
+	uint16_t priority;	/* scheduling priority for jobs */
 	bool     root_only_flag;/* 1 if allocate/submit RPC can only be 
 				   issued by user root */
-	uint16_t shared;	/* 1 if job can share a node,
-				   2 if sharing required */
+	uint16_t max_share;	/* number of jobs to gang schedule */
 	bool     state_up_flag;	/* 1 if state is up, 0 if down */
 	char *nodes;		/* comma delimited list names of nodes */
 	char *allow_groups;	/* comma delimited list of groups, 

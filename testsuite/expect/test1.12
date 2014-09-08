@@ -1,19 +1,17 @@
 #!/usr/bin/expect
 ############################################################################
 # Purpose: Test of SLURM functionality
-#          Test of processors, memory, and temporary disk space 
-#          constraints options (--mincpus, --mem, and --tmp options).
-#          Also test that priority zero job is not started (--hold 
-#          option).
+#          Test of --checkpoint option. This does not validate the 
+#           checkpoint file itself.
 #
 # Output:  "TEST: #.#" followed by "SUCCESS" if test was successful, OR
 #          "FAILURE: ..." otherwise with an explanation of the failure, OR
 #          anything else indicates a failure mode that must be investigated.
 ############################################################################
-# Copyright (C) 2002-2006 The Regents of the University of California.
+# Copyright (C) 2007 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-226842.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -30,39 +28,35 @@
 # 
 # You should have received a copy of the GNU General Public License along
 # with SLURM; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
+# 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA.
 ############################################################################
 source ./globals
 
-set test_id     "1.12"
-set exit_code   0
-set file_in     "test$test_id.input"
-set job_id      0
-
-set cpu_cnt     1
-set mem_size    13
-set tmp_size    2
-set matches     0
+set test_id              "1.12"
+set exit_code            0
+set file_in              "test$test_id.input"
+set ckpt_in              12
+set ckpt_out             -1
 
 print_header $test_id
 
 #
-# Delete left-over input script
-# Build input script file
+# Submit a slurm job that print it's info from scontrol
 #
 exec $bin_rm -f $file_in
 make_bash_script $file_in "
-  $bin_sleep 10
+  $scontrol show step \$SLURM_JOBID.\$SLURM_STEPID
 "
 
-#
-# Spawn a srun batch job with constraints and stdout/err
-#
-set srun_pid [spawn $srun --batch --output=none --error=none --mincpus=$cpu_cnt --mem=$mem_size --tmp=$tmp_size --hold -t1 $file_in]
+set srun_pid [spawn $srun -N1 -t1 --checkpoint=$ckpt_in $file_in]
 expect {
-	-re "jobid ($number) submitted" {
-		set job_id $expect_out(1,string)
+	-re "Checkpoint=($number)" {
+		set ckpt_out $expect_out(1,string)
 		exp_continue
+	}
+	-re "Unable to contact" {
+		send_user "\nFAILURE: slurm appears to be down\n"
+		exit 1
 	}
 	timeout {
 		send_user "\nFAILURE: srun not responding\n"
@@ -74,67 +68,14 @@ expect {
 	}
 }
 
-if {$job_id == 0} {
-	send_user "\nFAILURE: batch submit failure\n"
-	exit 1
-}
-
-#
-# Confirm constraints are registered and wait for job completion
-#
-spawn $scontrol show job $job_id
-expect {
-	-re "Priority=($number)" {
-		set read_prio $expect_out(1,string)
-		if {$read_prio == 0} {
-			incr matches
-			send_user "match of Priority\n"
-		}
-		exp_continue
-	}
-	-re "JobState=PENDING" {
-		incr matches
-		send_user "match of JobState\n"
-		exp_continue
-	}
-	-re "MinProcs=($number)" {
-		set read_proc $expect_out(1,string)
-		if {$read_proc == $cpu_cnt} {
-			incr matches
-			send_user "match of MinProcs\n"
-		}
-		exp_continue
-	}
-	-re "MinMemory=($number)" {
-		set read_mem $expect_out(1,string)
-		if {$read_mem == $mem_size} {
-			incr matches
-			send_user "match of MinMemory\n"
-		}
-		exp_continue
-	}
-	-re "MinTmpDisk=($number)" {
-		set read_disk $expect_out(1,string)
-		if {$read_disk == $tmp_size} {
-			incr matches
-			send_user "match of MinTmpDisk\n"
-		}
-		exp_continue
-	}
-	timeout {
-		send_user "\nFAILURE: scontrol not responding\n"
-		set exit_code 1
-	}
-	eof {
-		wait
-	}
-}
-cancel_job $job_id
-
-if {$matches != 5} {
-	send_user "\nFAILURE: Did not get proper constraints\n"
+if {$ckpt_out == -1} {
+	send_user "\nFAILURE: No Checkpoint time reported for job step\n"
+	set exit_code 1
+} elseif {$ckpt_in != $ckpt_out} {
+	send_user "\nFAILURE: No Checkpoint time not set properly\n"
 	set exit_code 1
 }
+
 if {$exit_code == 0} {
 	exec $bin_rm -f $file_in
 	send_user "\nSUCCESS\n"

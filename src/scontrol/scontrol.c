@@ -5,7 +5,7 @@
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -572,7 +572,7 @@ _process_command (int argc, char *argv[])
 				        argv[0]);
 		}
 		else {
-			error_code =scontrol_checkpoint(argv[1], argv[2]);
+			error_code = scontrol_checkpoint(argv[1], argv[2]);
 			if (error_code) {
 				exit_code = 1;
 				if (quiet_flag != 1)
@@ -594,7 +594,7 @@ _process_command (int argc, char *argv[])
 					"too few arguments for keyword:%s\n",
 					argv[0]);
 		} else {
-			error_code =scontrol_requeue(argv[1]);
+			error_code = scontrol_requeue(argv[1]);
 			if (error_code) {
 				exit_code = 1;
 				if (quiet_flag != 1)
@@ -624,6 +624,51 @@ _process_command (int argc, char *argv[])
 				exit_code = 1;
 				if (quiet_flag != 1)
 					slurm_perror ("slurm_suspend error");
+			}
+		}
+	}
+	else if (strncasecmp (argv[0], "setdebug", 4) == 0) {
+		if (argc > 2) {
+			exit_code = 1;
+			if (quiet_flag != 1)
+				fprintf(stderr, "too many arguments for keyword:%s\n",
+					argv[0]);
+		} else if (argc < 2) {
+			exit_code = 1;
+			if (quiet_flag != 1)
+				fprintf(stderr, "too few arguments for keyword:%s\n",
+					argv[0]);
+		} else {
+			int level = -1;
+			char *endptr;
+			char *levels[] = {
+				"quiet", "fatal", "error", "info", "verbose",
+				"debug", "debug2", "debug3", "debug4", "debug5", NULL};
+			int index = 0;
+			while (levels[index]) {
+				if (strcasecmp(argv[1], levels[index]) == 0) {
+					level = index;
+					break;
+				}
+				index ++;
+			}
+			if (level == -1) {
+				level = (int)strtoul (argv[1], &endptr, 10);    /* effective levels: 0 - 9 */
+				if (*endptr != '\0' || level > 9) {
+					level = -1;
+					exit_code = 1;
+					if (quiet_flag != 1)
+						fprintf(stderr, "invalid debug level: %s\n",
+							argv[1]);
+				}
+			}
+			if (level != -1) {
+				error_code = slurm_set_debug_level(level);
+				if (error_code) {
+					exit_code = 1;
+					if (quiet_flag != 1)
+						slurm_perror ("slurm_set_debug_level error");
+				}
 			}
 		}
 	}
@@ -771,6 +816,17 @@ _process_command (int argc, char *argv[])
 		} else {
 			scontrol_list_pids (argc == 1 ? NULL : argv[1],
 					    argc <= 2 ? NULL : argv[2]);
+		}
+	}
+	else if (strncasecmp (argv[0], "notify", 6) == 0) {
+		if (argc < 3) {
+			exit_code = 1;
+			fprintf (stderr, 
+				 "too few arguments for keyword:%s\n", 
+				 argv[0]);
+		} else if (scontrol_job_notify(argc-1, &argv[1])) {
+			exit_code = 1;
+			slurm_perror("job notify failure");
 		}
 	}
 	else {
@@ -996,6 +1052,7 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
                               scontrol is ran on, and only for those       \n\
                               processes spawned by SLURM and their         \n\
                               descendants)                                 \n\
+     notify <job_id> msg      send message to specified job                \n\
      oneliner                 report output one record per line.           \n\
      pidinfo <pid>            return slurm job information for given pid.  \n\
      ping                     print status of slurmctld daemons.           \n\
@@ -1003,11 +1060,13 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
      quit                     terminate this command.                      \n\
      reconfigure              re-read configuration files.                 \n\
      requeue <job_id>         re-queue a batch job                         \n\
+     setdebug <LEVEL>         reset slurmctld debug level                  \n\
      show <ENTITY> [<ID>]     display state of identified entity, default  \n\
                               is all records.                              \n\
      shutdown                 shutdown slurm controller.                   \n\
      suspend <job_id>         susend specified job                         \n\
      resume <job_id>          resume previously suspended job              \n\
+     setdebug <level>         set slurmctld debug level                    \n\
      update <SPECIFICATIONS>  update job, node, partition, or bluegene     \n\
                               block/subbp configuration                    \n\
      verbose                  enable detailed logging.                     \n\
@@ -1024,6 +1083,10 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
   <HOSTLIST> may either be a comma separated list of host names or the     \n\
        absolute pathname of a file (with leading '/' containing host names \n\
        either separated by commas or new-lines                             \n\
+                                                                           \n\
+  <LEVEL> may be an integer value like SlurmctldDebug in the slurm.conf    \n\
+       file or the name of the most detailed errors to report (e.g. \"info\",\n\
+       \"verbose\", \"debug\", \"debug2\", etc.).                          \n\
                                                                            \n\
   Node names may be specified using simple range expressions,              \n\
   (e.g. \"lx[10-20]\" corresponsds to lx10, lx11, lx12, ...)               \n\

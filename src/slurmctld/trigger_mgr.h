@@ -2,9 +2,10 @@
  *  trigger_mgr.h - header to manager event triggers
  *****************************************************************************
  *  Copyright (C) 2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -51,6 +52,8 @@ extern int trigger_set(uid_t uid, gid_t gid, trigger_info_msg_t *msg);
 /* Note the some event has occured and flag triggers as needed */
 extern void trigger_block_error(void);
 extern void trigger_node_down(struct node_record *node_ptr);
+extern void trigger_node_drained(struct node_record *node_ptr);
+extern void trigger_node_failing(struct node_record *node_ptr);
 extern void trigger_node_up(struct node_record *node_ptr);
 extern void trigger_reconfig(void);
 

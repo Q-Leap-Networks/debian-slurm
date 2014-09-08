@@ -1,12 +1,12 @@
 /*****************************************************************************\
  *  sinfo.c - Report overall state the system
  *
- *  $Id: sinfo.c 13835 2008-04-09 18:57:18Z jette $
+ *  $Id: sinfo.c 13929 2008-04-23 16:11:29Z jette $
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>, Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -552,9 +552,13 @@ static bool _match_node_data(sinfo_data_t *sinfo_ptr,
 	    (_strcmp(node_ptr->reason, sinfo_ptr->reason)))
 		return false;
 
-	if (params.match_flags.state_flag &&
-	    (node_ptr->node_state != sinfo_ptr->node_state))
-		return false;
+	if (params.match_flags.state_flag) {
+		char *state1, *state2;
+		state1 = node_state_string(node_ptr->node_state);
+		state2 = node_state_string(sinfo_ptr->node_state);
+		if (strcmp(state1, state2))
+			return false;
+	}
 
 	/* If no need to exactly match sizes, just return here 
 	 * otherwise check cpus, disk, memory and weigth individually */
@@ -629,7 +633,11 @@ static bool _match_part_data(sinfo_data_t *sinfo_ptr,
 		return false;
 
 	if (params.match_flags.share_flag &&
-	    (part_ptr->shared != sinfo_ptr->part_info->shared))
+	    (part_ptr->max_share != sinfo_ptr->part_info->max_share))
+		return false;
+
+	if (params.match_flags.priority_flag &&
+	    (part_ptr->priority != sinfo_ptr->part_info->priority))
 		return false;
 
 	return true;

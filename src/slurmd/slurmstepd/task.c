@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  slurmd/slurmstepd/task.c - task launching functions for slurmstepd
- *  $Id: task.c 12573 2007-10-26 15:57:01Z jette $
+ *  $Id: task.c 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark A. Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -62,6 +62,14 @@
 #  include <sys/checkpnt.h>
 #endif
 
+#ifdef HAVE_PTY_H
+#  include <pty.h>
+#endif
+
+#ifdef HAVE_UTMP_H
+#  include <utmp.h>
+#endif
+
 #include <sys/resource.h>
 
 #include <slurm/slurm_errno.h>
@@ -69,7 +77,6 @@
 #include "src/common/env.h"
 #include "src/common/fd.h"
 #include "src/common/log.h"
-#include "src/common/slurm_jobacct.h"
 #include "src/common/switch.h"
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
@@ -291,6 +298,16 @@ exec_task(slurmd_job_t *job, int i, int waitfd)
 	int rc;
 	slurmd_task_info_t *task = job->task[i];
 
+#ifdef HAVE_PTY_H
+	/* Execute login_tty() before setpgid() calls */
+	if (job->pty && (task->gtid == 0)) {
+		if (login_tty(task->stdin_fd))
+			error("login_tty: %m");
+		else
+			debug3("login_tty good");
+	}
+#endif
+
 	if (set_user_limits(job) < 0) {
 		debug("Unable to set user limits");
 		log_fini();
@@ -331,6 +348,7 @@ exec_task(slurmd_job_t *job, int i, int waitfd)
 	job->envtp->mem_bind = xstrdup(job->mem_bind);
 	job->envtp->mem_bind_type = job->mem_bind_type;
 	job->envtp->distribution = -1;
+	job->envtp->ckpt_path = xstrdup(job->ckpt_path);
 	setup_env(job->envtp);
 	setenvf(&job->envtp->env, "SLURMD_NODENAME", "%s", conf->node_name);
 	job->env = job->envtp->env;
@@ -361,12 +379,19 @@ exec_task(slurmd_job_t *job, int i, int waitfd)
 		pdebug_stop_current(job);
 	}
 
-	io_dup_stdio(task);
+#ifdef HAVE_PTY_H
+	if (job->pty && (task->gtid == 0)) {
+		/* Need to perform the login_tty() before all tasks
+		 * register and the process groups are reset, otherwise
+		 * login_tty() gets disabled */
+	} else
+#endif
+		io_dup_stdio(task);
 
 	/* task-specific pre-launch activities */
 
 	if (spank_user_task (job, i) < 0) {
-		error ("Failed to invoke task plugin stack\n");
+		error ("Failed to invoke task plugin stack");
 		exit (1);
 	}
 

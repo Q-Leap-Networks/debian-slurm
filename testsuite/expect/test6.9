@@ -13,7 +13,7 @@
 # Copyright (C) 2002-2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-226842.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -52,17 +52,17 @@ make_bash_script $file_in "
 "
 
 #
-# Spawn srun batch job
+# Spawn sbatch job
 #
-set srun_pid [spawn $srun --batch --output=/dev/null --error=/dev/null --job-name=job.$test_id -t5 $file_in]
+set sbatch_pid [spawn $sbatch --output=/dev/null --error=/dev/null --job-name=job.$test_id -t5 $file_in]
 expect {
-	-re "jobid ($number) submitted" {
+	-re "Submitted batch job ($number)" {
 		set job_id $expect_out(1,string)
 		exp_continue
 	}
 	timeout {
 		send_user "\nFAILURE: srun not responding\n"
-		slow_kill $srun_pid
+		slow_kill $sbatch_pid
 		exit 1
 	}
 	eof {

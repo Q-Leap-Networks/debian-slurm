@@ -1,12 +1,12 @@
 /*****************************************************************************\
- *  $Id: hostlist.h 11402 2007-04-25 17:39:08Z da $
+ *  $Id: hostlist.h 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
  *  $LSDId: hostlist.h,v 1.4 2003/09/19 21:37:34 grondo Exp $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.

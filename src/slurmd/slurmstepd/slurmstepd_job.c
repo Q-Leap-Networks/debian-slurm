@@ -1,11 +1,11 @@
 /*****************************************************************************\
  * src/slurmd/slurmstepd/slurmstepd_job.c - slurmd_job_t routines
- * $Id: slurmstepd_job.c 12580 2007-10-29 20:17:09Z jette $
+ * $Id: slurmstepd_job.c 13755 2008-04-01 19:12:53Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -54,6 +54,7 @@
 #include "src/common/fd.h"
 #include "src/common/log.h"
 #include "src/common/eio.h"
+#include "src/common/slurm_jobacct_gather.h"
 #include "src/common/slurm_protocol_api.h"
 
 #include "src/slurmd/slurmd/slurmd.h"
@@ -155,7 +156,7 @@ job_create(launch_tasks_request_msg_t *msg)
 	srun_info_t   *srun = NULL;
 	slurm_addr     resp_addr;
 	slurm_addr     io_addr;
-	int           nodeid = NO_VAL;
+	int            nodeid = NO_VAL;
 	
 	xassert(msg != NULL);
 	xassert(msg->complete_nodelist != NULL);
@@ -185,23 +186,33 @@ job_create(launch_tasks_request_msg_t *msg)
 		return NULL;
 	}
 	
-	job->state   = SLURMSTEPD_STEP_STARTING;
-	job->pwd     = pwd;
-	job->ntasks  = msg->tasks_to_launch[nodeid];
-	job->nprocs  = msg->nprocs;
-	job->jobid   = msg->job_id;
-	job->stepid  = msg->job_step_id;
+	job->state	= SLURMSTEPD_STEP_STARTING;
+	job->pwd	= pwd;
+	job->ntasks	= msg->tasks_to_launch[nodeid];
+	job->nprocs	= msg->nprocs;
+	job->jobid	= msg->job_id;
+	job->stepid	= msg->job_step_id;
+
+	job->job_mem	= msg->job_mem;
+	job->task_mem	= msg->task_mem;
+	if (job->job_mem)
+		jobacct_common_set_mem_limit(job->jobid, job->job_mem);
+	else if (job->task_mem && job->ntasks) {
+		jobacct_common_set_mem_limit(job->jobid, 
+					     (job->task_mem * job->ntasks));
+	}
 	
-	job->uid     = (uid_t) msg->uid;
-	job->gid     = (gid_t) msg->gid;
-	job->cwd     = xstrdup(msg->cwd);
-	job->task_dist  = msg->task_dist;
-	job->plane_size = msg->plane_size;
+	job->uid	= (uid_t) msg->uid;
+	job->gid	= (gid_t) msg->gid;
+	job->cwd	= xstrdup(msg->cwd);
+	job->task_dist	= msg->task_dist;
+	job->plane_size	= msg->plane_size;
 	
 	job->cpu_bind_type = msg->cpu_bind_type;
 	job->cpu_bind = xstrdup(msg->cpu_bind);
 	job->mem_bind_type = msg->mem_bind_type;
 	job->mem_bind = xstrdup(msg->mem_bind);
+	job->ckpt_path = xstrdup(msg->ckpt_path);
 
 	job->env     = _array_copy(msg->envc, msg->env);
 	job->eio     = eio_handle_create();
@@ -229,6 +240,7 @@ job_create(launch_tasks_request_msg_t *msg)
 	job->envtp->cpu_bind = NULL;
 	job->envtp->mem_bind_type = 0;
 	job->envtp->mem_bind = NULL;
+	job->envtp->ckpt_path = NULL;
 	
 	memcpy(&resp_addr, &msg->orig_addr, sizeof(slurm_addr));
 	slurm_set_addr(&resp_addr,
@@ -256,12 +268,15 @@ job_create(launch_tasks_request_msg_t *msg)
 	job->nodeid  = nodeid;
 	job->debug   = msg->slurmd_debug;
 	job->cpus    = msg->cpus_allocated[nodeid];
+	if (msg->acctg_freq != (uint16_t) NO_VAL)
+		jobacct_gather_g_change_poll(msg->acctg_freq);
 	job->multi_prog  = msg->multi_prog;
 	job->timelimit   = (time_t) -1;
 	job->task_flags  = msg->task_flags;
-	job->switch_job = msg->switch_job;
-
-	job->options =    msg->options;
+	job->switch_job  = msg->switch_job;
+	job->pty         = msg->pty;
+	job->open_mode   = msg->open_mode;
+	job->options     = msg->options;
 	
 	list_append(job->sruns, (void *) srun);
 
@@ -314,10 +329,18 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 	job->nprocs  = msg->nprocs;
 	job->jobid   = msg->job_id;
 	job->stepid  = msg->step_id;
+
+	job->job_mem = msg->job_mem;
+	if (job->job_mem)
+		jobacct_common_set_mem_limit(job->jobid, job->job_mem);
+
 	job->batch   = true;
+	if (msg->acctg_freq != (uint16_t) NO_VAL)
+		jobacct_gather_g_change_poll(msg->acctg_freq);
 	job->multi_prog = 0;
+	job->open_mode  = msg->open_mode;
 	job->overcommit = (bool) msg->overcommit;
-	job->node_name = xstrdup(conf->node_name);
+	job->node_name  = xstrdup(conf->node_name);
 
 	job->uid     = (uid_t) msg->uid;
 	job->gid     = (gid_t) msg->gid;
@@ -340,6 +363,7 @@ job_batch_job_create(batch_job_launch_msg_t *msg)
 	job->envtp->cpu_bind = NULL;
 	job->envtp->mem_bind_type = 0;
 	job->envtp->mem_bind = NULL;
+	job->envtp->ckpt_path = NULL;
 	
 	srun = srun_info_create(NULL, NULL, NULL);
 

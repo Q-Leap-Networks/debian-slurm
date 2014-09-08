@@ -4,7 +4,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov> et. al.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -119,7 +119,7 @@ extern int fini ( void )
 }
 
 slurm_auth_credential_t *
-slurm_auth_create( void *argv[] )
+slurm_auth_create( void *argv[], char *auth_info )
 {
 	int ttl;	
 	int rc;
@@ -178,7 +178,7 @@ slurm_auth_destroy( slurm_auth_credential_t *cred )
 }
 
 int
-slurm_auth_verify( slurm_auth_credential_t *cred, void *argv[] )
+slurm_auth_verify( slurm_auth_credential_t *cred, void *argv[], char *auth_info )
 {
 	int rc;
 	time_t now;
@@ -206,7 +206,7 @@ slurm_auth_verify( slurm_auth_credential_t *cred, void *argv[] )
 
 
 uid_t
-slurm_auth_get_uid( slurm_auth_credential_t *cred )
+slurm_auth_get_uid( slurm_auth_credential_t *cred, char *auth_info )
 {
 	if ( cred == NULL ) {
 		plugin_errno = SLURM_AUTH_BADARG;
@@ -217,7 +217,7 @@ slurm_auth_get_uid( slurm_auth_credential_t *cred )
 
 
 gid_t
-slurm_auth_get_gid( slurm_auth_credential_t *cred )
+slurm_auth_get_gid( slurm_auth_credential_t *cred, char *auth_info )
 {
 	if ( cred == NULL ) {
 		plugin_errno = SLURM_AUTH_BADARG;
@@ -258,7 +258,7 @@ slurm_auth_pack( slurm_auth_credential_t *cred, Buf buf )
 slurm_auth_credential_t *
 slurm_auth_unpack( Buf buf )
 {
-	slurm_auth_credential_t *cred;
+	slurm_auth_credential_t *cred = NULL;
 	uint16_t sig_size; /* ignored */
 	uint32_t version, tmpint;	
 	char *data;
@@ -270,19 +270,13 @@ slurm_auth_unpack( Buf buf )
 
 	
 	/* Check the plugin type. */
-	if ( unpackmem_ptr( &data, &sig_size, buf ) != SLURM_SUCCESS ) {
-		plugin_errno = SLURM_AUTH_UNPACK;
-		return NULL;
-	}
+	safe_unpackmem_ptr( &data, &sig_size, buf );
 	if ( strcmp( data, plugin_type ) != 0 ) {
 		plugin_errno = SLURM_AUTH_MISMATCH;
 		return NULL;
 	}
 
-	if ( unpack32( &version, buf ) != SLURM_SUCCESS ) {
-		plugin_errno = SLURM_AUTH_UNPACK;
-		return NULL;
-	}
+	safe_unpack32( &version, buf );
 	if( version != plugin_version ) {
 		plugin_errno = SLURM_AUTH_MISMATCH;
 		return NULL;
@@ -293,33 +287,19 @@ slurm_auth_unpack( Buf buf )
 		xmalloc( sizeof( slurm_auth_credential_t ) );
 	cred->cr_errno = SLURM_SUCCESS;
 
-	if ( unpack32( &tmpint, buf ) != SLURM_SUCCESS ) {
-		plugin_errno = SLURM_AUTH_UNPACK;
-		goto unpack_error;
-	}
+	safe_unpack32( &tmpint, buf );
 	cred->cred.uid = tmpint;
-	if ( unpack32( &tmpint, buf ) != SLURM_SUCCESS ) {
-		plugin_errno = SLURM_AUTH_UNPACK;
-		goto unpack_error;
-	}
+	safe_unpack32( &tmpint, buf );
 	cred->cred.gid = tmpint;
-	if ( unpack_time( &cred->cred.valid_from, buf ) != SLURM_SUCCESS ) {
-		plugin_errno = SLURM_AUTH_UNPACK;
-		goto unpack_error;
-	}
-	if ( unpack_time( &cred->cred.valid_to, buf ) != SLURM_SUCCESS ) {
-		plugin_errno = SLURM_AUTH_UNPACK;
-		goto unpack_error;
-	}
-	if ( unpackmem_ptr( &data, &sig_size, buf ) != SLURM_SUCCESS ) {
-		plugin_errno = SLURM_AUTH_UNPACK;
-		goto unpack_error;
-	}
+	safe_unpack_time( &cred->cred.valid_from, buf );
+	safe_unpack_time( &cred->cred.valid_to, buf );
+	safe_unpackmem_ptr( &data, &sig_size, buf );
 	memcpy( cred->sig.data, data, sizeof( signature ) );
 
 	return cred;
 
  unpack_error:
+	plugin_errno = SLURM_AUTH_UNPACK;
 	xfree( cred );
 	return NULL;
 }

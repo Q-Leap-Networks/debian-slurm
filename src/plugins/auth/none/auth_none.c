@@ -4,7 +4,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov> et. al.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -144,9 +144,7 @@ static int plugin_errno = SLURM_SUCCESS;
  * the general ones.
  */
 enum {
-	SLURM_AUTH_UNPACK_TYPE = SLURM_AUTH_FIRST_LOCAL_ERROR,
-	SLURM_AUTH_UNPACK_VERSION,
-	SLURM_AUTH_UNPACK_CRED
+	SLURM_AUTH_UNPACK
 };
 
 /*
@@ -174,7 +172,7 @@ extern int fini ( void )
  * NULL if it cannot allocate a credential.
  */
 slurm_auth_credential_t *
-slurm_auth_create( void *argv[] )
+slurm_auth_create( void *argv[], char *auth_info )
 {
 	slurm_auth_credential_t *cred;
 
@@ -207,7 +205,7 @@ slurm_auth_destroy( slurm_auth_credential_t *cred )
  * Return SLURM_SUCCESS if the credential is in order and valid.
  */
 int
-slurm_auth_verify( slurm_auth_credential_t *cred, void *argv[] )
+slurm_auth_verify( slurm_auth_credential_t *cred, void *argv[], char *auth_info )
 {
 	return SLURM_SUCCESS;
 }
@@ -217,7 +215,7 @@ slurm_auth_verify( slurm_auth_credential_t *cred, void *argv[] )
  * is not assured until slurm_auth_verify() has been called for it.
  */
 uid_t
-slurm_auth_get_uid( slurm_auth_credential_t *cred )
+slurm_auth_get_uid( slurm_auth_credential_t *cred, char *auth_info )
 {
 	if ( cred == NULL ) {
 		plugin_errno = SLURM_AUTH_BADARG;
@@ -232,7 +230,7 @@ slurm_auth_get_uid( slurm_auth_credential_t *cred )
  * above for details on correct behavior.
  */
 gid_t
-slurm_auth_get_gid( slurm_auth_credential_t *cred )
+slurm_auth_get_gid( slurm_auth_credential_t *cred, char *auth_info )
 {
 	if ( cred == NULL ) {
 		plugin_errno = SLURM_AUTH_BADARG;
@@ -276,11 +274,11 @@ slurm_auth_pack( slurm_auth_credential_t *cred, Buf buf )
 slurm_auth_credential_t *
 slurm_auth_unpack( Buf buf )
 {
-	slurm_auth_credential_t *cred;
+	slurm_auth_credential_t *cred = NULL;
 	char *tmpstr;
 	uint32_t tmpint;
 	uint32_t version;
-	uint16_t size;
+	uint32_t size;
 	
 	if ( buf == NULL ) {
 		plugin_errno = SLURM_AUTH_BADARG;
@@ -290,19 +288,13 @@ slurm_auth_unpack( Buf buf )
 	/*
 	 * Get the authentication type.
 	 */
-	if ( unpackmem_ptr( &tmpstr, &size, buf ) != SLURM_SUCCESS ) {
-		plugin_errno = SLURM_AUTH_UNPACK_TYPE;
-		return NULL;
-	}
+	safe_unpackmem_ptr( &tmpstr, &size, buf );
 	if (( tmpstr == NULL )
 	||  ( strcmp( tmpstr, plugin_type ) != 0 )) {
 		plugin_errno = SLURM_AUTH_MISMATCH;
 		return NULL;
 	}
-	if ( unpack32( &version, buf ) != SLURM_SUCCESS ) {
-		plugin_errno = SLURM_AUTH_UNPACK_VERSION;
-		return NULL;
-	}
+	safe_unpack32( &version, buf );
 	if ( version != plugin_version ) {
 		plugin_errno = SLURM_AUTH_MISMATCH;
 		return NULL;
@@ -321,20 +313,17 @@ slurm_auth_unpack( Buf buf )
 	 * clobbering if they really aren't.  This technique ensures a
 	 * warning at compile time if the sizes are incompatible.
 	 */
-	if ( unpack32( &tmpint, buf ) != SLURM_SUCCESS ) {
-		plugin_errno = SLURM_AUTH_UNPACK_CRED;
-		xfree( cred );
-		return NULL;
-	}
+	safe_unpack32( &tmpint, buf );
 	cred->uid = tmpint;
-	if ( unpack32( &tmpint, buf ) != SLURM_SUCCESS ) {
-		plugin_errno = SLURM_AUTH_UNPACK_CRED;
-		xfree( cred );
-		return NULL;
-	}
+	safe_unpack32( &tmpint, buf );
 	cred->gid = tmpint;
 
 	return cred;
+
+  unpack_error:
+	plugin_errno = SLURM_AUTH_UNPACK;
+	xfree( cred );
+	return NULL;
 }
 
 /*
@@ -386,9 +375,7 @@ slurm_auth_errstr( int slurm_errno )
 		int err;
 		char *msg;
 	} tbl[] = {
-		{ SLURM_AUTH_UNPACK_TYPE, "cannot unpack authentication type" },
-		{ SLURM_AUTH_UNPACK_VERSION, "cannot unpack credential version" },
-		{ SLURM_AUTH_UNPACK_CRED, "cannot unpack credential" },
+		{ SLURM_AUTH_UNPACK, "cannot unpack credential" },
 		{ 0, NULL }
 	};
 

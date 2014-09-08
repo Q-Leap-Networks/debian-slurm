@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  controller.c - main control machine daemon for slurm
- *  $Id: controller.c 13506 2008-03-07 00:13:15Z jette $
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>, Kevin Tew <tew1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -68,7 +68,8 @@
 #include "src/common/node_select.h"
 #include "src/common/pack.h"
 #include "src/common/read_config.h"
-#include "src/common/slurm_jobacct.h"
+#include "src/common/slurm_jobacct_gather.h"
+#include "src/common/slurm_accounting_storage.h"
 #include "src/common/slurm_auth.h"
 #include "src/common/slurm_jobcomp.h"
 #include "src/common/slurm_protocol_api.h"
@@ -76,8 +77,11 @@
 #include "src/common/uid.h"
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
+#include "src/common/assoc_mgr.h"
 
 #include "src/slurmctld/agent.h"
+#include "src/slurmctld/job_scheduler.h"
+#include "src/slurmctld/licenses.h"
 #include "src/slurmctld/locks.h"
 #include "src/slurmctld/ping_nodes.h"
 #include "src/slurmctld/proc_req.h"
@@ -121,6 +125,8 @@
  *    (640 bytes), it is really not lost.
  * The _keyvalue_regex_init() function will generate two blocks "definitely
  *    lost", both of size zero. We haven't bothered to address this.
+ * On some systems dlopen() will generate a small number of "definitely
+ *    lost" blocks that are not cleared by dlclose().
  * On some systems, pthread_create() will generated a small number of 
  *    "possibly lost" blocks.
  * Otherwise the report should be free of errors. Remember to reset 
@@ -134,6 +140,9 @@ log_options_t log_opts = LOG_OPTS_INITIALIZER;
 /* Global variables */
 slurmctld_config_t slurmctld_config;
 int bg_recover = DEFAULT_RECOVER;
+char *slurmctld_cluster_name = NULL; /* name of cluster */
+void *acct_db_conn = NULL;
+int accounting_enforce = 0;
 
 /* Local variables */
 static int	daemonize = DEFAULT_DAEMONIZE;
@@ -158,8 +167,8 @@ static int controller_sigarray[] = {
 
 static void         _default_sigaction(int sig);
 inline static void  _free_server_thread(void);
-static int          _gold_cluster_ready();
-static int          _gold_mark_all_nodes_down(char *reason, time_t event_time);
+static int          _accounting_cluster_ready();
+static int          _accounting_mark_all_nodes_down(char *reason);
 static void         _init_config(void);
 static void         _init_pidfile(void);
 static void         _kill_old_slurmctld(void);
@@ -181,9 +190,12 @@ typedef struct connection_arg {
 /* main - slurmctld main function, start various threads and process RPCs */
 int main(int argc, char *argv[])
 {
-	int error_code;
+	int cnt, error_code, i;
 	pthread_attr_t thread_attr;
 	struct stat stat_buf;
+	/* Locks: Write configuration, job, node, and partition */
+	slurmctld_lock_t config_write_lock = {
+		WRITE_LOCK, WRITE_LOCK, WRITE_LOCK, WRITE_LOCK };
 
 	/*
 	 * Establish initial configuration
@@ -222,6 +234,22 @@ int main(int argc, char *argv[])
 	if (stat(slurmctld_conf.mail_prog, &stat_buf) != 0)
 		error("Configured MailProg is invalid");
 
+	if (!strcmp(slurmctld_conf.accounting_storage_type, 
+		    "accounting_storage/none")) {
+		if (strcmp(slurmctld_conf.job_acct_gather_type, 
+			   "jobacct_gather/none"))
+			error("Job accounting information gathered, "
+			      "but not stored"); 
+	} else {
+		if (!strcmp(slurmctld_conf.job_acct_gather_type, 
+			    "jobacct_gather/none"))
+			info("Job accounting information stored, "
+			     "but details not gathered");
+	}
+
+	if (license_init(slurmctld_conf.licenses) != SLURM_SUCCESS)
+		fatal("Invalid Licenses value: %s", slurmctld_conf.licenses);
+
 #ifndef NDEBUG
 #  ifdef PR_SET_DUMPABLE
 	if (prctl(PR_SET_DUMPABLE, 1) < 0)
@@ -236,11 +264,11 @@ int main(int argc, char *argv[])
 		fatal("Unable to initialize StateSaveLocation");
 
 	if (daemonize) {
-		error_code = daemon(1, 1);
+		slurmctld_config.daemonize = 1;
+		if (daemon(1, 1))
+			error("daemon(): %m");
 		log_alter(log_opts, LOG_DAEMON, 
 			  slurmctld_conf.slurmctld_logfile);
-		if (error_code)
-			error("daemon error %d", error_code);
 		if (slurmctld_conf.slurmctld_logfile
 		&&  (slurmctld_conf.slurmctld_logfile[0] == '/')) {
 			char *slash_ptr, *work_dir;
@@ -259,8 +287,25 @@ int main(int argc, char *argv[])
 					slurmctld_conf.state_save_location);
 			}
 		}
+	} else {
+		slurmctld_config.daemonize = 0;
 	}
-	info("slurmctld version %s started", SLURM_VERSION);
+
+	/* This needs to be copied for other modules to access the
+	 * memory, it will report 'HashBase' if it is not duped
+	 */
+	slurmctld_cluster_name = xstrdup(slurmctld_conf.cluster_name);
+	accounting_enforce = slurmctld_conf.accounting_storage_enforce;
+	acct_db_conn = acct_storage_g_get_connection(true, false);
+	if (assoc_mgr_init(acct_db_conn, accounting_enforce) &&
+	    accounting_enforce) {
+		error("assoc_mgr_init failure");
+		fatal("slurmdbd and/or database must be up at "
+		      "slurmctld start time");
+	}
+
+	info("slurmctld version %s started on cluster %s",
+	     SLURM_VERSION, slurmctld_cluster_name);
 
 	if ((error_code = gethostname_short(node_name, MAX_SLURM_NAME)))
 		fatal("getnodename error %s", slurm_strerror(error_code));
@@ -268,8 +313,10 @@ int main(int argc, char *argv[])
 	/* init job credential stuff */
 	slurmctld_config.cred_ctx = slurm_cred_creator_ctx_create(
 			slurmctld_conf.job_credential_private_key);
-	if (!slurmctld_config.cred_ctx)
-		fatal("slurm_cred_creator_ctx_create: %m");
+	if (!slurmctld_config.cred_ctx) {
+		fatal("slurm_cred_creator_ctx_create(%s): %m",
+			slurmctld_conf.job_credential_private_key);
+	}
 
 
 	/* Not used in creator
@@ -290,7 +337,12 @@ int main(int argc, char *argv[])
 			SLURM_SUCCESS )
 		fatal( "failed to initialize checkpoint plugin" );
 	if (slurm_select_init() != SLURM_SUCCESS )
-		fatal( "failed to initialize node selection plugin state");
+		fatal( "failed to initialize node selection plugin");
+	if (slurm_acct_storage_init(NULL) != SLURM_SUCCESS )
+		fatal( "failed to initialize accounting_storage plugin");
+
+	if (slurm_jobacct_gather_init() != SLURM_SUCCESS )
+		fatal( "failed to initialize jobacct_gather plugin");
 
 	while (1) {
 		/* initialization for each primary<->backup switch */
@@ -311,43 +363,23 @@ int main(int argc, char *argv[])
 			if (switch_restore(slurmctld_conf.state_save_location,
 					   recover ? true : false))
 				fatal(" failed to initialize switch plugin" );
+			lock_slurmctld(config_write_lock);
 			if ((error_code = read_slurm_conf(recover))) {
 				fatal("read_slurm_conf reading %s: %s",
 					slurmctld_conf.slurm_conf,
 					slurm_strerror(error_code));
 			}
+			unlock_slurmctld(config_write_lock);
 			
-			if (recover == 0)
-				_gold_mark_all_nodes_down("cold-start",
-							  time(NULL));
-			else if (!stat("/tmp/slurm_gold_first", &stat_buf)) {
-				/* this is here for when slurm is
-				 * started with gold for the first
-				 * time to log any downed nodes.
-				 */
-				struct node_record *node_ptr =
-					node_record_table_ptr;
-				int i=0;
-				time_t event_time = time(NULL);
-				debug("found /tmp/slurm_gold_first, "
-				      "setting nodes down");
-				for (i = 0;
-				     i < node_record_count;
-				     i++, node_ptr++) {
-					if (node_ptr->name == '\0'
-					    || !node_ptr->reason)
-						continue;
-					
-					if(jobacct_g_node_down(
-						   node_ptr,
-						   event_time,
-						   node_ptr->reason)
-					   == SLURM_ERROR) 
-						break;
-				}
-				 if(unlink("/tmp/slurm_gold_first") < 0)
-					 error("Error deleting "
-					       "/tmp/slurm_gold_first");
+			if ((recover == 0) || 
+			    (!stat("/tmp/slurm_accounting_first", &stat_buf))) {
+				/* When first starting to write node state
+				 * information to Gold or SlurmDBD, create 
+				 * a file called "/tmp/slurm_accounting_first" to 
+				 * capture node initialization information */
+		   
+				_accounting_mark_all_nodes_down("cold-start");
+				 unlink("/tmp/slurm_accounting_first");
 			}
 		} else {
 			error("this host (%s) not valid controller (%s or %s)",
@@ -355,8 +387,20 @@ int main(int argc, char *argv[])
 				slurmctld_conf.backup_controller);
 			exit(0);
 		}
+
+		if(!acct_db_conn) {
+			acct_db_conn = 
+				acct_storage_g_get_connection(true, false);
+			if (assoc_mgr_init(acct_db_conn, accounting_enforce) &&
+			    accounting_enforce) {
+				error("assoc_mgr_init failure");
+				fatal("slurmdbd and/or database must be up at "
+				      "slurmctld start time");
+			}
+		}
+
 		info("Running as primary controller");
-		_gold_cluster_ready();
+		_accounting_cluster_ready();
 		if (slurm_sched_init() != SLURM_SUCCESS)
 			fatal("failed to initialize scheduling plugin");
 
@@ -368,9 +412,12 @@ int main(int argc, char *argv[])
 		slurm_mutex_unlock(&slurmctld_config.thread_count_lock);
 		slurm_attr_init(&thread_attr);
 		if (pthread_create(&slurmctld_config.thread_id_rpc, 
-				&thread_attr,_slurmctld_rpc_mgr, NULL))
+				&thread_attr, _slurmctld_rpc_mgr, NULL))
 			fatal("pthread_create error %m");
 		slurm_attr_destroy(&thread_attr);
+		clusteracct_storage_g_register_ctld(
+					slurmctld_conf.cluster_name, 
+					slurmctld_conf.slurmctld_port);
 
 		/*
 		 * create attached thread for signal handling
@@ -420,6 +467,10 @@ int main(int argc, char *argv[])
 		if (slurmctld_config.resume_backup == false)
 			break;
 		recover = 2;
+
+		/* Save any pending state save RPCs */
+		acct_storage_g_close_connection(&acct_db_conn);
+		assoc_mgr_fini();
 	}
 
 	/* Since pidfile is created as user root (its owner is
@@ -428,14 +479,10 @@ int main(int argc, char *argv[])
 	if (unlink(slurmctld_conf.slurmctld_pidfile) < 0)
 		verbose("Unable to remove pidfile '%s': %m",
 			slurmctld_conf.slurmctld_pidfile);
-
-	jobacct_g_fini_slurmctld();  /* Save pending message traffic */
-
+	
 #ifdef MEMORY_LEAK_DEBUG
-{
 	/* This should purge all allocated memory,   *\
 	\*   Anything left over represents a leak.   */
-	int i, cnt;
 
 	/* Give running agents a chance to complete and free memory.
 	 * Wait up to 30 seconds (3 seconds * 10) */
@@ -458,21 +505,38 @@ int main(int argc, char *argv[])
 	/* Plugins are needed to purge job/node data structures,
 	 * unplug after other data structures are purged */
 	g_slurm_jobcomp_fini();
+	slurm_acct_storage_fini();
+	slurm_jobacct_gather_fini();
 	slurm_sched_fini();
 	slurm_select_fini();
 	checkpoint_fini();
 	slurm_auth_fini();
 	switch_fini();
+	assoc_mgr_fini();
 
 	/* purge remaining data structures */
 	slurm_cred_ctx_destroy(slurmctld_config.cred_ctx);
+	slurm_crypto_fini();	/* must be after ctx_destroy */
 	slurm_conf_destroy();
 	slurm_api_clear_config();
 	sleep(2);
-}
+#else
+	/* Give REQUEST_SHUTDOWN a chance to get propagated, 
+	 * up to 3 seconds. */
+	for (i=0; i<3; i++) {
+		agent_purge();
+		cnt = get_agent_count();
+		if (cnt == 0)
+			break;
+		sleep(1);
+	}
 #endif
 
-	info("Slurmctld shutdown completing");
+	xfree(slurmctld_cluster_name);
+	if (cnt) {
+		info("Slurmctld shutdown completing with %d active agent "
+			"threads\n\n", cnt);
+	}
 	log_fini();
 	
 	if (dump_core)
@@ -507,6 +571,7 @@ static void  _init_config(void)
 		(void) setrlimit(RLIMIT_DATA, &rlim);
 	}
 
+	slurmctld_config.boot_time      = time(NULL);
 	slurmctld_config.daemonize      = DEFAULT_DAEMONIZE;
 	slurmctld_config.resume_backup  = false;
 	slurmctld_config.server_thread_count = 0;
@@ -525,6 +590,35 @@ static void  _init_config(void)
 #endif
 }
 
+/* Read configuration file.
+ * Same name as API function for use in accounting_storage plugin */
+extern int slurm_reconfigure(void)
+{
+	/* Locks: Write configuration, job, node, and partition */
+	slurmctld_lock_t config_write_lock = { 
+		WRITE_LOCK, WRITE_LOCK, WRITE_LOCK, WRITE_LOCK };
+	int rc;
+
+	/*
+	 * XXX - need to shut down the scheduler
+	 * plugin, re-read the configuration, and then
+	 * restart the (possibly new) plugin.
+	 */
+	lock_slurmctld(config_write_lock);
+	rc = read_slurm_conf(0);
+	if (rc)
+		error("read_slurm_conf: %s", slurm_strerror(rc));
+	else {
+		_update_cred_key();
+		set_slurmctld_state_loc();
+	}
+	unlock_slurmctld(config_write_lock);
+	trigger_reconfig();
+	slurm_sched_partition_change();	/* notify sched plugin */
+	select_g_reconfigure();		/* notify select plugin too */
+	return rc;
+}
+
 /* _slurmctld_signal_hand - Process daemon-wide signals */
 static void *_slurmctld_signal_hand(void *no_data)
 {
@@ -535,9 +629,6 @@ static void *_slurmctld_signal_hand(void *no_data)
 	/* Locks: Read configuration */
 	slurmctld_lock_t config_read_lock = { 
 		READ_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
-	/* Locks: Write configuration, job, node, and partition */
-	slurmctld_lock_t config_write_lock = { 
-		WRITE_LOCK, WRITE_LOCK, WRITE_LOCK, WRITE_LOCK };
 
 	(void) pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 	(void) pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
@@ -571,23 +662,7 @@ static void *_slurmctld_signal_hand(void *no_data)
 			break;
 		case SIGHUP:	/* kill -1 */
 			info("Reconfigure signal (SIGHUP) received");
-			/*
-			 * XXX - need to shut down the scheduler
-			 * plugin, re-read the configuration, and then
-			 * restart the (possibly new) plugin.
-			 */
-			lock_slurmctld(config_write_lock);
-			rc = read_slurm_conf(0);
-			if (rc)
-				error("read_slurm_conf: %s",
-				      slurm_strerror(rc));
-			else {
-				_update_cred_key();
-				set_slurmctld_state_loc();
-			}
-			unlock_slurmctld(config_write_lock);
-			trigger_reconfig();
-			slurm_sched_partition_change();
+			slurm_reconfigure();
 			break;
 		case SIGABRT:	/* abort */
 			info("SIGABRT received");
@@ -805,7 +880,7 @@ static void _free_server_thread(void)
 	pthread_cond_broadcast(&server_thread_cond);
 }
 
-static int _gold_cluster_ready()
+static int _accounting_cluster_ready()
 {
 	uint32_t procs = 0;
 	struct node_record *node_ptr;
@@ -827,34 +902,47 @@ static int _gold_cluster_ready()
 #endif
 	}
 
-	rc = jobacct_g_cluster_procs(procs, event_time);
+	rc = clusteracct_storage_g_cluster_procs(acct_db_conn,
+						 slurmctld_cluster_name,
+						 procs, event_time);
 
 	return rc;
 }
 
-static int _gold_mark_all_nodes_down(char *reason, time_t event_time)
+static int _accounting_mark_all_nodes_down(char *reason)
 {
 	char *state_file;
 	struct stat stat_buf;
 	struct node_record *node_ptr;
 	int i;
+	time_t event_time;
 	int rc = SLURM_ERROR;
 
 	state_file = xstrdup (slurmctld_conf.state_save_location);
 	xstrcat (state_file, "/node_state");
 	if (stat(state_file, &stat_buf)) {
-		debug("_gold_mark_all_nodes_down: could not stat(%s) "
+		debug("_accounting_mark_all_nodes_down: could not stat(%s) "
 		      "to record node down time", state_file);
-		xfree(state_file);
-		return rc;
+		event_time = time(NULL);
+	} else {
+		event_time = stat_buf.st_mtime;
 	}
 	xfree(state_file);
+
+	if((rc = acct_storage_g_flush_jobs_on_cluster(acct_db_conn,
+						      slurmctld_cluster_name,
+						      event_time))
+	   == SLURM_ERROR)
+		return rc;
 
 	node_ptr = node_record_table_ptr;
 	for (i = 0; i < node_record_count; i++, node_ptr++) {
 		if (node_ptr->name == '\0')
 			continue;
-		if((rc = jobacct_g_node_down(node_ptr, event_time, reason))
+		if((rc = clusteracct_storage_g_node_down(acct_db_conn,
+							 slurmctld_cluster_name,
+							 node_ptr, event_time,
+							 reason))
 		   == SLURM_ERROR) 
 			break;
 	}
@@ -947,9 +1035,10 @@ static void *_slurmctld_background(void *no_data)
 
 		if (difftime(now, last_timelimit_time) >= PERIODIC_TIMEOUT) {
 			last_timelimit_time = now;
-			debug2("Performing job time limit check");
+			debug2("Performing job time limit and checkpoint test");
 			lock_slurmctld(job_write_lock);
 			job_time_limit();
+			step_checkpoint();
 			unlock_slurmctld(job_write_lock);
 		}
 
@@ -978,8 +1067,8 @@ static void *_slurmctld_background(void *no_data)
 			unlock_slurmctld(job_read_lock);
 		}
 
-		/* Process pending agent work */
-		agent_retry(RPC_RETRY_INTERVAL);
+		/* Process any pending agent work */
+		agent_retry(RPC_RETRY_INTERVAL, true);
 
 		if (difftime(now, last_group_time) >= PERIODIC_GROUP_CHECK) {
 			last_group_time = now;
@@ -1020,7 +1109,7 @@ static void *_slurmctld_background(void *no_data)
 			 * or reconfigured nodes */
 			last_node_acct = now;
 			lock_slurmctld(node_read_lock);
-			_gold_cluster_ready();
+			_accounting_cluster_ready();
 			unlock_slurmctld(node_read_lock);
 		}
 		/* Reassert this machine as the primary controller.

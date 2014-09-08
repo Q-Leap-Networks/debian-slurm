@@ -1,12 +1,12 @@
 /*****************************************************************************\
  *  slurm_protocol_socket_implementation.c - slurm communications interfaces 
  *                                           based upon sockets.
- *  $Id: slurm_protocol_socket_implementation.c 12827 2007-12-14 22:29:30Z da $
+ *  $Id: slurm_protocol_socket_implementation.c 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov>, et. al.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -466,8 +466,11 @@ slurm_fd _slurm_open_stream(slurm_addr *addr, bool retry)
         int retry_cnt;
         slurm_fd fd;
 
-        if ( (addr->sin_family == 0) || (addr->sin_port  == 0) ) 
-                return SLURM_SOCKET_ERROR;
+	if ( (addr->sin_family == 0) || (addr->sin_port  == 0) ) {
+		error("Error connecting, bad data: family = %u, port = %u",
+			addr->sin_family, addr->sin_port);
+		return SLURM_SOCKET_ERROR;
+	}
 
         for (retry_cnt=0; ; retry_cnt++) {
                 int rc;
@@ -614,7 +617,7 @@ again:	rc = poll(&ufds, 1, 5000);
 		/* poll failed */
 		if (errno == EINTR) {
 			/* NOTE: connect() is non-interruptible in Linux */
-			debug3("_slurm_connect poll failed: %m");
+			debug2("_slurm_connect poll failed: %m");
 			goto again;
 		} else
 			error("_slurm_connect poll failed: %m");

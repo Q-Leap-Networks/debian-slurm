@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  src/common/stepd_api.h - slurmstepd message API
- *  $Id: stepd_api.h 10574 2006-12-15 23:38:29Z jette $
+ *  $Id: stepd_api.h 13695 2008-03-21 21:28:17Z jette $
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher Morrone <morrone2@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -44,6 +44,7 @@
 #include "slurm/slurm.h"
 #include "src/common/list.h"
 #include "src/common/slurm_protocol_defs.h"
+#include "src/common/io_hdr.h"
 
 typedef struct step_location {
 	uint32_t jobid;
@@ -83,6 +84,7 @@ typedef struct {
 	uint32_t jobid;
 	uint32_t stepid;
 	uint32_t nodeid;
+	uint32_t job_mem_limit;		/* job's memory limit, MB */
 } slurmstepd_info_t;
 
 typedef struct {
@@ -130,6 +132,11 @@ slurmstepd_info_t *stepd_get_info(int fd);
  * Send a signal to the process group of a job step.
  */
 int stepd_signal(int fd, int signal);
+
+/*
+ * Send a checkpoint request to all tasks of a job step.
+ */
+int stepd_checkpoint(int fd, int signal, time_t timestamp);
 
 /*
  * Send a signal to a single task in a job step.
@@ -190,7 +197,7 @@ pid_t stepd_daemon_pid(int fd);
  * Returns SLURM_SUCCESS is successful.  On error returns SLURM_ERROR
  * and sets errno.
  */
-int stepd_suspend(int fd);
+int stepd_suspend(int *fd, int size, uint32_t jobid);
 
 /*
  * Resume execution of the job step that has been suspended by a
@@ -212,7 +219,7 @@ int stepd_completion(int fd, step_complete_msg_t *sent);
 /*
  *
  * Returns SLURM_SUCCESS on success or SLURM_ERROR on error.  
- * resp recieves a jobacctinfo_t which must be freed if SUCCESS.
+ * resp receives a jobacctinfo_t which must be freed if SUCCESS.
  */
 int stepd_stat_jobacct(int fd, stat_jobacct_msg_t *sent, 
 		       stat_jobacct_msg_t *resp);

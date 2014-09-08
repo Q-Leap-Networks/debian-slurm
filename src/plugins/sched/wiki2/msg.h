@@ -4,7 +4,7 @@
  *  Copyright (C) 2006-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -101,18 +101,55 @@ extern uint16_t	job_aggregation_time;
 extern uint16_t kill_wait;
 extern uint16_t use_host_exp;
 
-extern int	event_notify(int event_code, char *desc);
-extern int	spawn_msg_thread(void);
-extern void	term_msg_thread(void);
+/*
+ * bitmap2wiki_node_name  - given a bitmap, build a list of colon separated 
+ *	node names (if we can't use node range expressions), or the 
+ *	normal slurm node name expression
+ *
+ * IN bitmap - bitmap pointer
+ * RET pointer to node list or NULL on error 
+ * globals: node_record_table_ptr - pointer to node table
+ * NOTE: the caller must xfree the returned pointer when no longer required
+ */
 extern char *   bitmap2wiki_node_name(bitstr_t *bitmap);
+
+/*
+ * event_notify - Notify Moab of some event
+ * event_code IN - message code to send Moab
+ *          1234 - job state change
+ *          1235  - partition state change
+ * desc IN - event description
+ * RET 0 on success, -1 on failure
+ */
+extern int	event_notify(int event_code, char *desc);
+
+/*
+ * Spawn message hander thread
+ */
+extern int spawn_msg_thread(void);
+
+/*
+ * Terminate message hander thread
+ */
+extern void	term_msg_thread(void);
+
+/*
+ * Return a string containing any scheduling plugin configuration information 
+ * that we want to expose via "scontrol show configuration".
+ * NOTE: the caller must xfree the returned pointer
+ */
+extern char *	get_wiki_conf(void);
 
 /*
  * Given a string, replace the first space found with '\0'
  */
 extern void	null_term(char *str);
 
-/* Functions called from within msg.c (rather than creating a bunch 
- * more header files with one function definition each */
+
+/*
+ * Functions called from within msg.c (rather than creating a bunch 
+ * more header files with one function definition each)
+ */
 extern int	cancel_job(char *cmd_ptr, int *err_code, char **err_msg);
 extern int	get_jobs(char *cmd_ptr, int *err_code, char **err_msg);
 extern int 	get_nodes(char *cmd_ptr, int *err_code, char **err_msg);
@@ -130,3 +167,4 @@ extern char *	slurm_job2moab_task_list(struct job_record *job_ptr);
 extern int	start_job(char *cmd_ptr, int *err_code, char **err_msg);
 extern int	suspend_job(char *cmd_ptr, int *err_code, char **err_msg);
 extern int	resume_job(char *cmd_ptr, int *err_code, char **err_msg);
+extern void     wiki_job_requeue(struct job_record *job_ptr, char *reason);

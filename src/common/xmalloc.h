@@ -3,13 +3,13 @@
  *  - default: never return if errors are encountered.
  *  - attempt to report file, line, and calling function on assertion failure
  *  - use configurable slurm log facility for reporting errors
- *  $Id: xmalloc.h 11400 2007-04-24 18:50:38Z da $
+ *  $Id: xmalloc.h 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jim Garlick <garlick1@llnl.gov> and 
  *	Mark Grondona <mgrondona@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.

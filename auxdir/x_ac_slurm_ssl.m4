@@ -1,5 +1,5 @@
 ##*****************************************************************************
-## $Id: x_ac_slurm_ssl.m4 12827 2007-12-14 22:29:30Z da $
+## $Id: x_ac_slurm_ssl.m4 13975 2008-05-02 23:48:39Z da $
 ##*****************************************************************************
 #  AUTHOR:
 #     Mark Grondona <mgrondona@llnl.gov>
@@ -15,16 +15,15 @@
 
 AC_DEFUN([X_AC_SLURM_WITH_SSL], [
 
-  ac_slurm_with_ssl=no
   ssl_default_dirs="/usr/local/openssl64 /usr/local/openssl /usr/lib/openssl    \
                     /usr/local/ssl /usr/lib/ssl /usr/local \
-                    /usr/pkg /opt /opt/openssl"
+                    /usr/pkg /opt /opt/openssl /usr"
   
   AC_SUBST(SSL_LDFLAGS)
   AC_SUBST(SSL_LIBS)
   AC_SUBST(SSL_CPPFLAGS)
   
-  SSL_LIBS="-lcrypto"
+  SSL_LIB_TEST="-lcrypto"
   
   AC_ARG_WITH(ssl,
     AS_HELP_STRING(--with-ssl=PATH,Specify path to OpenSSL installation),
@@ -36,7 +35,7 @@ AC_DEFUN([X_AC_SLURM_WITH_SSL], [
   	# which is specified with --with-ssl), and libtool is not setting
   	# the correct runtime library path in the binaries.
   	if test "x$ac_have_aix" = "xyes"; then
-  		SSL_LIBS="-lcrypto-static"
+  		SSL_LIB_TEST="-lcrypto-static"
   	fi
     ])
   
@@ -46,21 +45,20 @@ AC_DEFUN([X_AC_SLURM_WITH_SSL], [
   if test "x$prefix" != "xNONE" ; then
   	tryssldir="$tryssldir $prefix"
   fi
-  if test "x$tryssldir" == "xno" ; then
-     AC_MSG_ERROR([OpenSSL libary is required for SLURM operation, download from www.openssl.org])
-  fi
-  
-  AC_CACHE_CHECK([for OpenSSL directory], ac_cv_openssldir, [
+
+  if test "x$tryssldir" != "xno" ; then
+    AC_CACHE_CHECK([for OpenSSL directory], ac_cv_openssldir, [
   	for ssldir in $tryssldir "" $ssl_default_dirs; do 
   		CPPFLAGS="$saved_CPPFLAGS"
   		LDFLAGS="$saved_LDFLAGS"
-  		LIBS="$saved_LIBS $SSL_LIBS"
+  		LIBS="$saved_LIBS $SSL_LIB_TEST"
   		
   		# Skip directories if they don't exist
   		if test ! -z "$ssldir" -a ! -d "$ssldir" ; then
   			continue;
   		fi
-  		if test ! -z "$ssldir" -a "x$ssldir" != "x/usr"; then
+  		sslincludedir="$ssldir"
+  		if test ! -z "$ssldir"; then
   			# Try to use $ssldir/lib if it exists, otherwise 
   			# $ssldir
   			if test -d "$ssldir/lib" ; then
@@ -77,12 +75,16 @@ AC_DEFUN([X_AC_SLURM_WITH_SSL], [
   			# Try to use $ssldir/include if it exists, otherwise 
   			# $ssldir
   			if test -d "$ssldir/include" ; then
+				sslincludedir="$ssldir/include"
   				CPPFLAGS="-I$ssldir/include $saved_CPPFLAGS"
   			else
   				CPPFLAGS="-I$ssldir $saved_CPPFLAGS"
   			fi
   		fi
-  
+		test -f "$sslincludedir/openssl/rand.h" || continue
+		test -f "$sslincludedir/openssl/hmac.h" || continue
+		test -f "$sslincludedir/openssl/sha.h" || continue
+
   		# Basic test to check for compatible version and correct linking
   		AC_RUN_IFELSE([AC_LANG_SOURCE([[
   #include <stdlib.h>
@@ -99,27 +101,26 @@ AC_DEFUN([X_AC_SLURM_WITH_SSL], [
   	return(RAND_status() <= 0);
   }
   			]])],[
-  				found_crypto=1
+  				ac_have_openssl="yes"
   				break;
   			],[
   		],[])
   
-  		if test ! -z "$found_crypto" ; then
+  		if test ! -z "$ac_have_openssl" ; then
   			break;
   		fi
   	done
   
-  	if test -z "$found_crypto" ; then
-  		AC_MSG_ERROR([Could not find working OpenSSL library, download from www.openssl.org])
-  	fi
-  	if test -z "$ssldir" ; then
-  		ssldir="(system)"
-  	fi
-  
-  	ac_cv_openssldir=$ssldir
-  ])
-  
-  if (test ! -z "$ac_cv_openssldir" && test "x$ac_cv_openssldir" != "x(system)") ; then
+	if test ! -z "$ac_have_openssl" ; then
+		ac_cv_openssldir=$ssldir
+	fi
+    ])
+  fi
+
+  if test ! -z "$ac_have_openssl" ; then
+    SSL_LIBS="$SSL_LIB_TEST"
+    AC_DEFINE(HAVE_OPENSSL, 1, [define if you have openssl.])
+    if (test ! -z "$ac_cv_openssldir") ; then
   	dnl Need to recover ssldir - test above runs in subshell
   	ssldir=$ac_cv_openssldir
   	if test ! -z "$ssldir" -a "x$ssldir" != "x/usr"; then
@@ -138,10 +139,14 @@ AC_DEFUN([X_AC_SLURM_WITH_SSL], [
   			SSL_CPPFLAGS="-I$ssldir"
   		fi
   	fi
-  fi
+    fi
   
-  AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <openssl/evp.h>]], [[EVP_MD_CTX_cleanup(NULL);]])],[AC_DEFINE(HAVE_EVP_MD_CTX_CLEANUP, 1,
+    AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <openssl/evp.h>]], [[EVP_MD_CTX_cleanup(NULL);]])],[AC_DEFINE(HAVE_EVP_MD_CTX_CLEANUP, 1,
                [Define to 1 if function EVP_MD_CTX_cleanup exists.])],[])
+  else
+    SSL_LIBS=""
+    AC_MSG_WARN([Could not find working OpenSSL library])
+  fi
   
   LIBS="$saved_LIBS"
   CPPFLAGS="$saved_CPPFLAGS"

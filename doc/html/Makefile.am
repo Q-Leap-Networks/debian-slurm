@@ -2,19 +2,24 @@
 htmldir = ${prefix}/share/doc/@PACKAGE@-@VERSION@/html
 
 generated_html = \
+	accounting.html \
 	api.html \
 	authplugins.html \
 	big_sys.html \
 	bluegene.html \
 	checkpoint_plugins.html \
 	cons_res.html \
+	cons_res_share.html \
+	crypto_plugins.html \
 	dist_plane.html \
 	documentation.html \
 	download.html \
 	faq.html \
+	gang_scheduling.html \
 	help.html \
 	ibm.html \
-	jobacctplugins.html \
+	jobacct_gatherplugins.html \
+	jobacct_storageplugins.html \
 	jobcompplugins.html \
 	mail.html \
 	maui.html \
@@ -26,6 +31,7 @@ generated_html = \
 	platforms.html \
 	plugins.html \
 	power_save.html \
+	preempt.html \
 	proctrack_plugins.html \
 	programmer_guide.html \
 	publications.html \

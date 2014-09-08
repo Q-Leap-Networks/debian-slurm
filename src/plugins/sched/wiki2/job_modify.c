@@ -4,7 +4,7 @@
  *  Copyright (C) 2006-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -37,6 +37,7 @@
 
 #include "./msg.h"
 #include <strings.h>
+#include "src/slurmctld/job_scheduler.h"
 #include "src/slurmctld/locks.h"
 #include "src/slurmctld/slurmctld.h"
 
@@ -54,27 +55,11 @@ extern void	null_term(char *str)
 	}
 }
 
-/* return -1 on error */
-static int32_t _get_depend_id(char *str)
-{
-	/* stand-alone job_id */
-	if (isdigit(str[0]))
-		return (int32_t) atol(str);
-
-	if (strncasecmp(str, "afterany:", 9) != 0)	/* invalid spec */
-		return (int32_t) -1;
-
-	str += 9;
-	if (!isdigit(str[0]))
-		return (int32_t) -1;
-	return (int32_t) atol(str);
-}
-
 static int	_job_modify(uint32_t jobid, char *bank_ptr, 
-			int32_t depend_id, char *new_hostlist,
+			char *depend_ptr, char *new_hostlist,
 			uint32_t new_node_cnt, char *part_name_ptr, 
 			uint32_t new_time_limit, char *name_ptr,
-			char *start_ptr)
+			char *start_ptr, char *feature_ptr)
 {
 	struct job_record *job_ptr;
 	time_t now = time(NULL);
@@ -89,9 +74,16 @@ static int	_job_modify(uint32_t jobid, char *bank_ptr,
 		return ESLURM_DISABLED;
 	}
 
-	if (depend_id != -1) {
-		info("wiki: changing job dependency to %d", depend_id);
-		job_ptr->dependency = depend_id;
+	if (depend_ptr) {
+		int rc = update_job_dependency(job_ptr, depend_ptr);
+		if (rc == SLURM_SUCCESS) {
+			info("wiki: changed job %u dependency to %s", 
+				jobid, depend_ptr);
+		} else {
+			error("wiki: changing job %u dependency to %s", 
+				jobid, depend_ptr);
+			return EINVAL;
+		}
 	}
 
 	if (new_time_limit) {
@@ -114,6 +106,20 @@ static int	_job_modify(uint32_t jobid, char *bank_ptr,
 		last_job_update = now;
 	}
 
+	if (feature_ptr) {
+		if ((job_ptr->job_state == JOB_PENDING) &&
+		    (job_ptr->details)) {
+			info("wiki: change job %u features to %s", 
+				jobid, feature_ptr);
+			job_ptr->details->features = xstrdup(feature_ptr);
+			last_job_update = now;
+		} else {
+			error("wiki: MODIFYJOB features of non-pending "
+				"job %u", jobid);
+			return ESLURM_DISABLED;
+		}
+	}
+
 	if (start_ptr) {
 		char *end_ptr;
 		uint32_t begin_time = strtol(start_ptr, &end_ptr, 10);
@@ -122,6 +128,7 @@ static int	_job_modify(uint32_t jobid, char *bank_ptr,
 			info("wiki: change job %u begin time to %u", 
 				jobid, begin_time);
 			job_ptr->details->begin_time = begin_time;
+			last_job_update = now;
 		} else {
 			error("wiki: MODIFYJOB begin_time of non-pending "
 				"job %u", jobid);
@@ -131,7 +138,8 @@ static int	_job_modify(uint32_t jobid, char *bank_ptr,
 
 	if (name_ptr) {
 		info("wiki: change job %u name %s", jobid, name_ptr);
-		strncpy(job_ptr->name, name_ptr, sizeof(job_ptr->name));
+		xfree(job_ptr->name);
+		job_ptr->name = xstrdup(name_ptr);
 		last_job_update = now;
 	}
 
@@ -201,7 +209,8 @@ host_fini:	if (rc) {
 		}
 		info("wiki: change job %u partition %s",
 			jobid, part_name_ptr);
-		strncpy(job_ptr->partition, part_name_ptr, MAX_SLURM_NAME);
+		xfree(job_ptr->partition);
+		job_ptr->partition = xstrdup(part_name_ptr);
 		job_ptr->part_ptr = part_ptr;
 		last_job_update = now;
 	}
@@ -228,14 +237,14 @@ host_fini:	if (rc) {
 /* Modify a job:
  *	CMD=MODIFYJOB ARG=<jobid> PARTITION=<name> NODES=<number>
  *		DEPEND=afterany:<jobid> TIMELIMT=<seconds> BANK=<name>
- *		MINSTARTTIME=<uts>
+ *		MINSTARTTIME=<uts> RFEATURES=<features>
  * RET 0 on success, -1 on failure */
 extern int	job_modify_wiki(char *cmd_ptr, int *err_code, char **err_msg)
 {
 	char *arg_ptr, *bank_ptr, *depend_ptr, *nodes_ptr, *start_ptr;
 	char *host_ptr, *name_ptr, *part_ptr, *time_ptr, *tmp_char;
+	char *feature_ptr;
 	int i, slurm_rc;
-	int depend_id = -1;
 	uint32_t jobid, new_node_cnt = 0, new_time_limit = 0;
 	static char reply_msg[128];
 	/* Locks: write job, read node and partition info */
@@ -260,14 +269,15 @@ extern int	job_modify_wiki(char *cmd_ptr, int *err_code, char **err_msg)
 		error("wiki: MODIFYJOB has invalid jobid");
 		return -1;
 	}
-	bank_ptr   = strstr(cmd_ptr, "BANK=");
-	depend_ptr = strstr(cmd_ptr, "DEPEND=");
-	name_ptr   = strstr(cmd_ptr, "JOBNAME=");
-	host_ptr   = strstr(cmd_ptr, "HOSTLIST=");
-	start_ptr  = strstr(cmd_ptr, "MINSTARTTIME=");
-	nodes_ptr  = strstr(cmd_ptr, "NODES=");
-	part_ptr   = strstr(cmd_ptr, "PARTITION=");
-	time_ptr   = strstr(cmd_ptr, "TIMELIMIT=");
+	bank_ptr    = strstr(cmd_ptr, "BANK=");
+	depend_ptr  = strstr(cmd_ptr, "DEPEND=");
+	host_ptr    = strstr(cmd_ptr, "HOSTLIST=");
+	name_ptr    = strstr(cmd_ptr, "JOBNAME=");
+	start_ptr   = strstr(cmd_ptr, "MINSTARTTIME=");
+	nodes_ptr   = strstr(cmd_ptr, "NODES=");
+	part_ptr    = strstr(cmd_ptr, "PARTITION=");
+	feature_ptr = strstr(cmd_ptr, "RFEATURES=");
+	time_ptr    = strstr(cmd_ptr, "TIMELIMIT=");
 	if (bank_ptr) {
 		bank_ptr[4] = ':';
 		bank_ptr += 5;
@@ -276,14 +286,12 @@ extern int	job_modify_wiki(char *cmd_ptr, int *err_code, char **err_msg)
 	if (depend_ptr) {
 		depend_ptr[6] = ':';
 		depend_ptr += 7;
-		depend_id = _get_depend_id(depend_ptr);
-		if (depend_id == -1) {
-			*err_code = -300;
-			*err_msg = "MODIFYJOB has invalid DEPEND specificiation";
-			error("wiki: MODIFYJOB has invalid DEPEND spec: %s",
-				depend_ptr);
-			return -1;
-		}
+		null_term(depend_ptr);
+	}
+	if (feature_ptr) {
+		feature_ptr[9] = ':';
+		feature_ptr += 10;
+		null_term(feature_ptr);
 	}
 	if (host_ptr) {
 		host_ptr[8] = ':';
@@ -295,7 +303,7 @@ extern int	job_modify_wiki(char *cmd_ptr, int *err_code, char **err_msg)
 		name_ptr += 8;
 		if (name_ptr[0] == '\"') {
 			name_ptr++;
-			for (i=0; i<MAX_JOBNAME_LEN; i++) {
+			for (i=0; ; i++) {
 				if (name_ptr[i] == '\0')
 					break;
 				if (name_ptr[i] == '\"') {
@@ -303,11 +311,9 @@ extern int	job_modify_wiki(char *cmd_ptr, int *err_code, char **err_msg)
 					break;
 				}
 			}
-			if (i == MAX_JOBNAME_LEN)
-				name_ptr[i-1] = '\0';
 		} else if (name_ptr[0] == '\'') {
 			name_ptr++;
-			for (i=0; i<MAX_JOBNAME_LEN; i++) {
+			for (i=0; ; i++) {
 				if (name_ptr[i] == '\0')
 					break;
 				if (name_ptr[i] == '\'') {
@@ -315,8 +321,6 @@ extern int	job_modify_wiki(char *cmd_ptr, int *err_code, char **err_msg)
 					break;
 				}
 			}
-			if (i == MAX_JOBNAME_LEN)
-				name_ptr[i-1] = '\0';
 		} else
 			null_term(name_ptr);
 	}
@@ -351,9 +355,9 @@ extern int	job_modify_wiki(char *cmd_ptr, int *err_code, char **err_msg)
 	}
 
 	lock_slurmctld(job_write_lock);
-	slurm_rc = _job_modify(jobid, bank_ptr, depend_id, host_ptr,
+	slurm_rc = _job_modify(jobid, bank_ptr, depend_ptr, host_ptr,
 			new_node_cnt, part_ptr, new_time_limit, name_ptr,
-			start_ptr);
+			start_ptr, feature_ptr);
 	unlock_slurmctld(job_write_lock);
 	if (slurm_rc != SLURM_SUCCESS) {
 		*err_code = -700;

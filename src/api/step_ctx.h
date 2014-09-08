@@ -7,7 +7,7 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>,
  *  Christopher J. Morrone <morrone2@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -47,12 +47,14 @@ struct slurm_step_ctx_struct {
 
 	uint32_t job_id;	/* assigned job id */
 	uint32_t user_id;	/* user the job runs as */
-	
+
 	job_step_create_request_msg_t *step_req;
 	job_step_create_response_msg_t *step_resp;
 
 	/* Used by slurm_step_launch() */
 	struct step_launch_state *launch_state;
+	uint16_t verbose_level; /* for extra logging decisions in step
+				   launch api */
 };
 
 #endif /* _STEP_CTX_H */

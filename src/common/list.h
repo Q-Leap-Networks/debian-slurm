@@ -145,6 +145,21 @@ void * list_append (List l, void *x);
  *  Returns the data's ptr, or lsd_nomem_error() if insertion failed.
  */
 
+int list_append_list (List l, List sub);
+/*
+ *  Inserts list [sub] at the end of list [l].
+ *  Note: list [l] must have a destroy function of NULL.
+ *  Returns a count of the number of items added to list [l].
+ */
+
+int list_transfer (List l, List sub);
+/*
+ *  Pops off list [sub] and appends data at the end of list [l].
+ *  Note: list [l] must have the same destroy function as list [sub].
+ *  Note: list [sub] will be returned empty, but not destroyed.
+ *  Returns a count of the number of items added to list [l].
+ */
+
 void * list_prepend (List l, void *x);
 /*
  *  Inserts data [x] at the beginning of list [l].
@@ -178,13 +193,20 @@ int list_for_each (List l, ListForF f, void *arg);
  *    function returns the negative of that item's position in the list.
  */
 
+int list_flush (List l);
+/*
+ *  Traverses list [l] and removes all items in list
+ *  If a deletion function was specified when the list was
+ *  created, it will be called to deallocate each item being removed.
+ *  Returns a count of the number of items removed from the list.
+ */
+
 void list_sort (List l, ListCmpF f);
 /*
  *  Sorts list [l] into ascending order according to the function [f].
  *  Note: Sorting a list resets all iterators associated with the list.
  *  Note: The sort algorithm is stable.
  */
-
 
 /****************************
  *  Stack Access Functions  *
@@ -281,7 +303,7 @@ void * list_remove (ListIterator i);
  *  Note: The client is responsible for freeing the returned data.
  */
 
-int list_delete (ListIterator i);
+int list_delete_item (ListIterator i);
 /*
  *  Removes from the list the last item returned via list iterator [i];
  *    if a deletion function was specified when the list was created,

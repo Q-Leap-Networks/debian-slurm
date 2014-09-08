@@ -4,7 +4,7 @@
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher Morrone <morrone2@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -72,7 +72,11 @@ run_script(const char *name, const char *path, uint32_t jobid,
 	if (path == NULL || path[0] == '\0')
 		return 0;
 
-	debug("[job %u] attempting to run %s [%s]", jobid, name, path);
+	if (jobid) {
+		debug("[job %u] attempting to run %s [%s]", 
+			jobid, name, path);
+	} else
+		debug("attempting to run %s [%s]", name, path);
 
 	if (access(path, R_OK | X_OK) < 0) {
 		debug("Not running %s [%s]: %m", name, path);

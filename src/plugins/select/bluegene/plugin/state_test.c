@@ -2,7 +2,7 @@
  *  state_test.c - Test state of Bluegene base partitions and switches. 
  *  DRAIN nodes in SLURM that are not usable. 
  *
- *  $Id: state_test.c 11400 2007-04-24 18:50:38Z da $
+ *  $Id: state_test.c 12928 2007-12-28 21:59:29Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -309,6 +309,7 @@ extern bool node_already_down(char *node_name)
 {
 	uint16_t base_state;
 	struct node_record *node_ptr = find_node_record(node_name);
+	
 	if (node_ptr) {
 		base_state = node_ptr->node_state & 
 			(~NODE_STATE_NO_RESPOND);

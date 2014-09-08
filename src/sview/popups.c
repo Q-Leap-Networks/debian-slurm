@@ -4,7 +4,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>, et. al.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -222,235 +222,326 @@ static void _layout_ctl_conf(GtkTreeStore *treestore,
 	slurm_make_time_str((time_t *)&slurm_ctl_conf_ptr->last_update, 
 			    temp_str, sizeof(temp_str));
 	add_display_treestore_line(update, treestore, &iter, 
-			    "Configuration data as of", temp_str);
+				   "Configuration data as of", temp_str);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "AuthType",	slurm_ctl_conf_ptr->authtype);
+				   "AccountingStorageHost", 
+				   slurm_ctl_conf_ptr->accounting_storage_host);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "BackupAddr", slurm_ctl_conf_ptr->backup_addr);
+				   "AccountingStorageType", 
+				   slurm_ctl_conf_ptr->accounting_storage_type);
+	snprintf(temp_str, sizeof(temp_str), "%u", 
+		 slurm_ctl_conf_ptr->accounting_storage_port);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "BackupController", 
-			    slurm_ctl_conf_ptr->backup_controller);
+				   "AccountingStoragePort", 
+				   temp_str);
+	add_display_treestore_line(update, treestore, &iter, 
+				   "AccountingStorageUser", 
+				   slurm_ctl_conf_ptr->accounting_storage_user);
+	add_display_treestore_line(update, treestore, &iter, 
+				   "AuthType", slurm_ctl_conf_ptr->authtype);
+	add_display_treestore_line(update, treestore, &iter, 
+				   "BackupAddr",
+				   slurm_ctl_conf_ptr->backup_addr);
+	add_display_treestore_line(update, treestore, &iter, 
+				   "BackupController", 
+				   slurm_ctl_conf_ptr->backup_controller);
+	slurm_make_time_str ((time_t *)&slurm_ctl_conf_ptr->boot_time,
+			     temp_str, sizeof(temp_str));
+	add_display_treestore_line(update, treestore, &iter, 
+				   "BOOT_TIME", temp_str); 
 	snprintf(temp_str, sizeof(temp_str), "%u", 
 		 slurm_ctl_conf_ptr->cache_groups);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "CacheGroups", temp_str); 
+				   "CacheGroups", temp_str); 
 	add_display_treestore_line(update, treestore, &iter, 
-			    "CheckpointType",
-			    slurm_ctl_conf_ptr->checkpoint_type);
+				   "CheckpointType",
+				   slurm_ctl_conf_ptr->checkpoint_type);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "ControlAddr", 
-			    slurm_ctl_conf_ptr->control_addr);
+				   "ControlAddr", 
+				   slurm_ctl_conf_ptr->control_addr);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "ControlMachine", 
-			    slurm_ctl_conf_ptr->control_machine);
+				   "ControlMachine", 
+				   slurm_ctl_conf_ptr->control_machine);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "Epilog", 
-			    slurm_ctl_conf_ptr->epilog);
+				   "CryptoType", 
+				   slurm_ctl_conf_ptr->crypto_type);
+	snprintf(temp_str, sizeof(temp_str), "%u", 
+		 slurm_ctl_conf_ptr->def_mem_per_task);
+	add_display_treestore_line(update, treestore, &iter, 
+				   "DefMemPerTask", 
+				   temp_str);
+	add_display_treestore_line(update, treestore, &iter, 
+				   "Epilog", 
+				   slurm_ctl_conf_ptr->epilog);
 	snprintf(temp_str, sizeof(temp_str), "%u", 
 		 slurm_ctl_conf_ptr->fast_schedule);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "FastSchedule", 
-			    temp_str);
+				   "FastSchedule", 
+				   temp_str);
 	snprintf(temp_str, sizeof(temp_str), "%u", 
 		 slurm_ctl_conf_ptr->first_job_id);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "FirstJobId", 
-			    temp_str);
+				   "FirstJobId", 
+				   temp_str);
 #ifdef HAVE_XCPU
 	add_display_treestore_line(update, treestore, &iter, 
-			    "HAVE_XCPU", "1");
+				   "HAVE_XCPU", "1");
 #endif
 	snprintf(temp_str, sizeof(temp_str), "%u", 
 		 slurm_ctl_conf_ptr->inactive_limit);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "InactiveLimit", 
-			    temp_str);
+				   "InactiveLimit", 
+				   temp_str);
+
 	add_display_treestore_line(update, treestore, &iter, 
-			    "JobAcctLogFile", 
-			    slurm_ctl_conf_ptr->job_acct_logfile);
+				   "JobAcctGatherType", 
+				   slurm_ctl_conf_ptr->job_acct_gather_type);
 	snprintf(temp_str, sizeof(temp_str), "%u", 
-		 slurm_ctl_conf_ptr->job_acct_freq);
+		 slurm_ctl_conf_ptr->job_acct_gather_freq);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "JobAcctFrequency",
-			    temp_str);
+				   "JobAcctGatherFrequency",
+				   temp_str);
+
 	add_display_treestore_line(update, treestore, &iter, 
-			    "JobAcctType", 
-			    slurm_ctl_conf_ptr->job_acct_type);
+				   "JobCompHost", 
+				   slurm_ctl_conf_ptr->job_comp_host);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "JobCompLoc", 
-			    slurm_ctl_conf_ptr->job_comp_loc);
+				   "JobCompLoc", 
+				   slurm_ctl_conf_ptr->job_comp_loc);
+	snprintf(temp_str, sizeof(temp_str), "%u", 
+		 slurm_ctl_conf_ptr->job_comp_port);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "JobCompType", 
-			    slurm_ctl_conf_ptr->job_comp_type);
+				   "JobCompPort", 
+				   temp_str);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "JobCredentialPrivateKey", 
-			    slurm_ctl_conf_ptr->job_credential_private_key);
+				   "JobCompType", 
+				   slurm_ctl_conf_ptr->job_comp_type);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "JobCredentialPublicCertificate", 
-			    slurm_ctl_conf_ptr->
-			    job_credential_public_certificate);
+				   "JobCompUser", 
+				   slurm_ctl_conf_ptr->job_comp_user);
+
+	add_display_treestore_line(update, treestore, &iter, 
+				   "JobCredentialPrivateKey", 
+				   slurm_ctl_conf_ptr->job_credential_private_key);
+	add_display_treestore_line(update, treestore, &iter, 
+				   "JobCredentialPublicCertificate", 
+				   slurm_ctl_conf_ptr->
+				   job_credential_public_certificate);
+	snprintf(temp_str, sizeof(temp_str), "%u",
+		 slurm_ctl_conf_ptr->job_file_append);
+	add_display_treestore_line(update, treestore, &iter, 
+				   "JobFileAppend", temp_str);
 	snprintf(temp_str, sizeof(temp_str), "%u", 
 		 slurm_ctl_conf_ptr->kill_wait);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "KillWait", 
-			    temp_str);
+				   "KillWait", 
+				   temp_str);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "MailProg",
-			    slurm_ctl_conf_ptr->mail_prog);
+				   "MailProg",
+				   slurm_ctl_conf_ptr->mail_prog);
 	snprintf(temp_str, sizeof(temp_str), "%u", 
 		 slurm_ctl_conf_ptr->max_job_cnt);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "MaxJobCount", 
-			    temp_str);
+				   "MaxJobCount", 
+				   temp_str);
+	snprintf(temp_str, sizeof(temp_str), "%u", 
+		 slurm_ctl_conf_ptr->max_mem_per_task);
+	add_display_treestore_line(update, treestore, &iter, 
+				   "MaxMemPerTask", 
+				   temp_str);
 	snprintf(temp_str, sizeof(temp_str), "%u", 
 		 slurm_ctl_conf_ptr->msg_timeout);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "MessageTimeout",
-			    temp_str);
+				   "MessageTimeout",
+				   temp_str);
 	snprintf(temp_str, sizeof(temp_str), "%u", 
 		 slurm_ctl_conf_ptr->min_job_age);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "MinJobAge", 
-			    temp_str);
+				   "MinJobAge", 
+				   temp_str);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "MpiDefault",
-			    slurm_ctl_conf_ptr->mpi_default);
+				   "MpiDefault",
+				   slurm_ctl_conf_ptr->mpi_default);
 #ifdef MULTIPLE_SLURMD
 	add_display_treestore_line(update, treestore, &iter, 
-			    "MULTIPLE_SLURMD", "1");
+				   "MULTIPLE_SLURMD", "1");
 #endif
 	snprintf(temp_str, sizeof(temp_str), "%u", 
 		 slurm_ctl_conf_ptr->next_job_id);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "NEXT_JOB_ID",
-			    temp_str);
+				   "NEXT_JOB_ID",
+				   temp_str);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "PluginDir", 
-			    slurm_ctl_conf_ptr->plugindir);
+				   "PluginDir", 
+				   slurm_ctl_conf_ptr->plugindir);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "PlugStackConfig",
-			    slurm_ctl_conf_ptr->plugstack);
+				   "PlugStackConfig",
+				   slurm_ctl_conf_ptr->plugstack);
+	snprintf(temp_str, sizeof(temp_str), "%u", 
+		 slurm_ctl_conf_ptr->private_data);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "ProctrackType",
-			    slurm_ctl_conf_ptr->proctrack_type);
+				   "PrivateData",
+				   temp_str);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "Prolog", 
-			    slurm_ctl_conf_ptr->prolog);
+				   "ProctrackType",
+				   slurm_ctl_conf_ptr->proctrack_type);
+	add_display_treestore_line(update, treestore, &iter, 
+				   "Prolog", 
+				   slurm_ctl_conf_ptr->prolog);
 	snprintf(temp_str, sizeof(temp_str), "%u", 
 		 slurm_ctl_conf_ptr->propagate_prio_process);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "PropagatePrioProcess", temp_str);
+				   "PropagatePrioProcess", temp_str);
         add_display_treestore_line(update, treestore, &iter, 
-			    "PropagateResourceLimits",
-			    slurm_ctl_conf_ptr->propagate_rlimits);
+				   "PropagateResourceLimits",
+				   slurm_ctl_conf_ptr->propagate_rlimits);
         add_display_treestore_line(update, treestore, &iter, 
-			    "PropagateResourceLimitsExcept", 
-			    slurm_ctl_conf_ptr->propagate_rlimits_except);
+				   "PropagateResourceLimitsExcept", 
+				   slurm_ctl_conf_ptr->
+				   propagate_rlimits_except);
+	add_display_treestore_line(update, treestore, &iter, 
+				   "ResumeProgram", temp_str);
+	snprintf(temp_str, sizeof(temp_str), "%u", 
+		 slurm_ctl_conf_ptr->resume_rate);
+	add_display_treestore_line(update, treestore, &iter, 
+				   "ResumeRate", temp_str);
 	snprintf(temp_str, sizeof(temp_str), "%u", 
 		 slurm_ctl_conf_ptr->ret2service);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "ReturnToService", temp_str);
+				   "ReturnToService", temp_str);
 	snprintf(temp_str, sizeof(temp_str), "%u", 
 		 slurm_ctl_conf_ptr->schedport);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "SchedulerPort", temp_str);
+				   "SchedulerPort", temp_str);
 	snprintf(temp_str, sizeof(temp_str), "%u", 
 		 slurm_ctl_conf_ptr->schedrootfltr);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "SchedulerRootFilter", temp_str);
+				   "SchedulerRootFilter", temp_str);
+	snprintf(temp_str, sizeof(temp_str), "%u", 
+		 slurm_ctl_conf_ptr->sched_time_slice);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "SchedulerType",
-			    slurm_ctl_conf_ptr->schedtype);
+				   "SchedulerTimeSlice", temp_str);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "SelectType",
-			    slurm_ctl_conf_ptr->select_type);
+				   "SchedulerType",
+				   slurm_ctl_conf_ptr->schedtype);
+	add_display_treestore_line(update, treestore, &iter, 
+				   "SelectType",
+				   slurm_ctl_conf_ptr->select_type);
 	snprintf(temp_str, sizeof(temp_str), "%s(%u)", 
 		 slurm_ctl_conf_ptr->slurm_user_name,
 		 slurm_ctl_conf_ptr->slurm_user_id);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "SlurmUser", temp_str);
+				   "SlurmUser", temp_str);
 	snprintf(temp_str, sizeof(temp_str), "%u", 
 		 slurm_ctl_conf_ptr->slurmctld_debug);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "SlurmctldDebug", temp_str);
+				   "SlurmctldDebug", temp_str);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "SlurmctldLogFile", 
-			    slurm_ctl_conf_ptr->slurmctld_logfile);
+				   "SlurmctldLogFile", 
+				   slurm_ctl_conf_ptr->slurmctld_logfile);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "SlurmctldPidFile", 
-			    slurm_ctl_conf_ptr->slurmctld_pidfile);
+				   "SlurmctldPidFile", 
+				   slurm_ctl_conf_ptr->slurmctld_pidfile);
 	snprintf(temp_str, sizeof(temp_str), "%u", 
 		 slurm_ctl_conf_ptr->slurmctld_port);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "SlurmctldPort", temp_str);
+				   "SlurmctldPort", temp_str);
 	snprintf(temp_str, sizeof(temp_str), "%u", 
 		 slurm_ctl_conf_ptr->slurmctld_timeout);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "SlurmctldTimeout", temp_str);
+				   "SlurmctldTimeout", temp_str);
 	snprintf(temp_str, sizeof(temp_str), "%u", 
 		 slurm_ctl_conf_ptr->slurmd_debug);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "SlurmdDebug", temp_str);
+				   "SlurmdDebug", temp_str);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "SlurmdLogFile", 
-			    slurm_ctl_conf_ptr->slurmd_logfile);
+				   "SlurmdLogFile", 
+				   slurm_ctl_conf_ptr->slurmd_logfile);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "SlurmdPidFile", 
-			    slurm_ctl_conf_ptr->slurmd_pidfile);
+				   "SlurmdPidFile", 
+				   slurm_ctl_conf_ptr->slurmd_pidfile);
 #ifndef MULTIPLE_SLURMD
 	snprintf(temp_str, sizeof(temp_str), "%u", 
 		 slurm_ctl_conf_ptr->slurmd_port);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "SlurmdPort", temp_str);
+				   "SlurmdPort", temp_str);
 #endif
 	add_display_treestore_line(update, treestore, &iter, 
-			    "SlurmdSpoolDir", 
-			    slurm_ctl_conf_ptr->slurmd_spooldir);
+				   "SlurmdSpoolDir", 
+				   slurm_ctl_conf_ptr->slurmd_spooldir);
 	snprintf(temp_str, sizeof(temp_str), "%u", 
 		 slurm_ctl_conf_ptr->slurmd_timeout);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "SlurmdTimeout", temp_str);
+				   "SlurmdTimeout", temp_str);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "SLURM_CONFIG_FILE", 
-			    slurm_ctl_conf_ptr->slurm_conf);
+				   "SLURM_CONFIG_FILE", 
+				   slurm_ctl_conf_ptr->slurm_conf);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "SLURM_VERSION", SLURM_VERSION);
+				   "SLURM_VERSION", SLURM_VERSION);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "SrunProlog",
-			    slurm_ctl_conf_ptr->srun_prolog);
+				   "SrunEpilog",
+				   slurm_ctl_conf_ptr->srun_epilog);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "SrunEpilog",
-			    slurm_ctl_conf_ptr->srun_epilog);
+				   "SrunProlog",
+				   slurm_ctl_conf_ptr->srun_prolog);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "StateSaveLocation", 
-			    slurm_ctl_conf_ptr->state_save_location);
+				   "StateSaveLocation", 
+				   slurm_ctl_conf_ptr->state_save_location);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "SwitchType",
-			    slurm_ctl_conf_ptr->switch_type);
+				   "SuspendExcNodes", 
+				   slurm_ctl_conf_ptr->suspend_exc_nodes);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "TaskEpilog",
-			    slurm_ctl_conf_ptr->task_epilog);
+				   "SuspendExcParts", 
+				   slurm_ctl_conf_ptr->suspend_exc_parts);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "TaskPlugin",
-			    slurm_ctl_conf_ptr->task_plugin);
+				   "SuspendProgram", 
+				   slurm_ctl_conf_ptr->suspend_program);
+	snprintf(temp_str, sizeof(temp_str), "%u", 
+		 slurm_ctl_conf_ptr->suspend_rate);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "TaskProlog",
-			    slurm_ctl_conf_ptr->task_prolog);
+				   "SuspendRate", temp_str);
+	snprintf(temp_str, sizeof(temp_str), "%d", 
+		 ((int)slurm_ctl_conf_ptr->suspend_time - 1));
 	add_display_treestore_line(update, treestore, &iter, 
-			    "TmpFS", 
-			    slurm_ctl_conf_ptr->tmp_fs);
+				   "SuspendTime", temp_str);
+	add_display_treestore_line(update, treestore, &iter, 
+				   "SwitchType",
+				   slurm_ctl_conf_ptr->switch_type);
+	add_display_treestore_line(update, treestore, &iter, 
+				   "TaskEpilog",
+				   slurm_ctl_conf_ptr->task_epilog);
+	add_display_treestore_line(update, treestore, &iter, 
+				   "TaskPlugin",
+				   slurm_ctl_conf_ptr->task_plugin);
+        snprintf(temp_str, sizeof(temp_str), "%u",
+                 slurm_ctl_conf_ptr->task_plugin_param);
+	add_display_treestore_line(update, treestore, &iter, 
+				   "TaskPluginParam", temp_str);
+	add_display_treestore_line(update, treestore, &iter, 
+				   "TaskProlog",
+				   slurm_ctl_conf_ptr->task_prolog);
+	add_display_treestore_line(update, treestore, &iter, 
+				   "TmpFS", 
+				   slurm_ctl_conf_ptr->tmp_fs);
 	snprintf(temp_str, sizeof(temp_str), "%u", 
 		 slurm_ctl_conf_ptr->tree_width);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "TreeWidth", temp_str);
+				   "TreeWidth", temp_str);
 	snprintf(temp_str, sizeof(temp_str), "%u", 
 		 slurm_ctl_conf_ptr->use_pam);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "UsePam", temp_str);
+				   "UsePam", temp_str);
+	add_display_treestore_line(update, treestore, &iter,
+				   "UnkillableStepProgram",
+				     slurm_ctl_conf_ptr->unkillable_program);
+	snprintf(temp_str, sizeof(temp_str), "%u",
+		 slurm_ctl_conf_ptr->unkillable_timeout);
+	add_display_treestore_line(update, treestore, &iter,
+				   "UnkillableStepTimeout", temp_str);
 	snprintf(temp_str, sizeof(temp_str), "%u", 
 		 slurm_ctl_conf_ptr->wait_time);
 	add_display_treestore_line(update, treestore, &iter, 
-			    "WaitTime", temp_str);
+				   "WaitTime", temp_str);
 }
 
 extern void create_config_popup(GtkAction *action, gpointer user_data)

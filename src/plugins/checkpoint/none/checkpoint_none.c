@@ -4,7 +4,7 @@
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -134,3 +134,10 @@ extern int slurm_ckpt_unpack_job(check_jobinfo_t jobinfo, Buf buffer)
 {
 	return SLURM_SUCCESS;
 }
+
+extern int slurm_ckpt_task_comp ( struct step_record * step_ptr, uint32_t task_id,
+				  time_t event_time, uint32_t error_code, char *error_msg )
+{
+	return SLURM_SUCCESS;
+}
+

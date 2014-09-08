@@ -4,7 +4,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov> et. al.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -136,8 +136,10 @@ int slurm_auth_context_destroy( slurm_auth_context_t ctxt );
 
 /*
  * Prepare the global context.
+ * auth_type IN: authentication mechanism (e.g. "auth/munge") or 
+ *	NULL to select based upon slurm_get_auth_type() results
  */
-extern int slurm_auth_init( void );
+extern int slurm_auth_init( char *auth_type );
 
 /*
  * Destroy global context, free memory.
@@ -147,11 +149,12 @@ extern int slurm_auth_fini( void );
 /*
  * Static bindings for the global authentication context.
  */
-extern void	*g_slurm_auth_create( void *hosts, int timeout );
+extern void *	g_slurm_auth_create( void *hosts, int timeout, char *auth_info );
 extern int	g_slurm_auth_destroy( void *cred );
-extern int	g_slurm_auth_verify( void *cred, void *hosts, int timeout );
-extern uid_t	g_slurm_auth_get_uid( void *cred );
-extern gid_t	g_slurm_auth_get_gid( void *cred );
+extern int	g_slurm_auth_verify( void *cred, void *hosts, int timeout, 
+				     char *auth_info );
+extern uid_t	g_slurm_auth_get_uid( void *cred, char *auth_info );
+extern gid_t	g_slurm_auth_get_gid( void *cred, char *auth_info );
 extern int	g_slurm_auth_pack( void *cred, Buf buf );
 
 /*

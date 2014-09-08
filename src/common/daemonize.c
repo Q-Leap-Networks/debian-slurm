@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  daemonize.c - daemonization routine
- *  $Id: daemonize.c 12723 2007-11-29 18:55:48Z jette $
+ *  $Id: daemonize.c 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark A. Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.

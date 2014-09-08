@@ -4,7 +4,7 @@
  *  Copyright (C) 2006-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -39,6 +39,7 @@
 #include "src/common/node_select.h"
 #include "src/common/slurm_protocol_defs.h"
 #include "src/common/xstring.h"
+#include "src/slurmctld/job_scheduler.h"
 #include "src/slurmctld/locks.h"
 #include "src/slurmctld/slurmctld.h"
 #include "src/slurmctld/state_save.h"
@@ -115,28 +116,36 @@ extern int	start_job(char *cmd_ptr, int *err_code, char **err_msg)
 		return -1;
 	}
 	task_ptr += 9;	/* skip over "TASKLIST=" */
-	tasklist = moab2slurm_task_list(task_ptr, &task_cnt);
-	if (tasklist)
-		hl = hostlist_create(tasklist);
-	if ((tasklist == NULL) || (hl == NULL)) {
-		*err_code = -300;
-		*err_msg = "STARTJOB TASKLIST is invalid";
-		error("wiki: STARTJOB TASKLIST is invalid: %s",
-			task_ptr);
-		xfree(tasklist);
-		return -1;
-	}
-	hostlist_uniq(hl);
-	hostlist_sort(hl);
-	i = hostlist_ranged_string(hl, sizeof(host_string), host_string);
-	hostlist_destroy(hl);
-	if (i < 0) {
-		*err_code = -300;
-		*err_msg = "STARTJOB has invalid TASKLIST";
-		error("wiki: STARTJOB has invalid TASKLIST: %s",
-			host_string);
-		xfree(tasklist);
-		return -1;
+	if ((task_ptr[0] == '\0') || isspace(task_ptr[0])) {
+		/* No TASKLIST specification, useful for testing */
+		host_string[0] = '0';
+		task_cnt = 0;
+		tasklist = NULL;
+	} else {
+		null_term(task_ptr);
+		tasklist = moab2slurm_task_list(task_ptr, &task_cnt);
+		if (tasklist)
+			hl = hostlist_create(tasklist);
+		if ((tasklist == NULL) || (hl == NULL)) {
+			*err_code = -300;
+			*err_msg = "STARTJOB TASKLIST is invalid";
+			error("wiki: STARTJOB TASKLIST is invalid: %s",
+			      task_ptr);
+			xfree(tasklist);
+			return -1;
+		}
+		hostlist_uniq(hl);
+		hostlist_sort(hl);
+		i = hostlist_ranged_string(hl, sizeof(host_string), host_string);
+		hostlist_destroy(hl);
+		if (i < 0) {
+			*err_code = -300;
+			*err_msg = "STARTJOB has invalid TASKLIST";
+			error("wiki: STARTJOB has invalid TASKLIST: %s",
+			      host_string);
+			xfree(tasklist);
+			return -1;
+		}
 	}
 
 	rc = _start_job(jobid, task_cnt, host_string, tasklist, comment_ptr,
@@ -172,7 +181,8 @@ static int	_start_job(uint32_t jobid, int task_cnt, char *hostlist,
 		NO_LOCK, WRITE_LOCK, READ_LOCK, NO_LOCK };
 	char *new_node_list = NULL;
 	static char tmp_msg[128];
-	bitstr_t *new_bitmap, *save_req_bitmap = (bitstr_t *) NULL;
+	bitstr_t *new_bitmap = (bitstr_t *) NULL;
+	bitstr_t *save_req_bitmap = (bitstr_t *) NULL;
 	bitoff_t i, bsize;
 	int ll; /* layout info index */
 	char *node_name, *node_idx, *node_cur, *save_req_nodes = NULL;
@@ -216,29 +226,21 @@ static int	_start_job(uint32_t jobid, int task_cnt, char *hostlist,
 		job_ptr->comment = xstrdup(comment_ptr);
 	}
 
-	new_node_list = xstrdup(hostlist);
-	if (hostlist && (new_node_list == NULL)) {
-		*err_code = -700;
-		*err_msg = "Invalid TASKLIST";
-		error("wiki: Attempt to set invalid node list for job %u, %s",
-			jobid, hostlist);
-		rc = -1;
-		goto fini;
-	}
-
-	if (node_name2bitmap(new_node_list, false, &new_bitmap) != 0) {
-		*err_code = -700;
-		*err_msg = "Invalid TASKLIST";
-		error("wiki: Attempt to set invalid node list for job %u, %s",
-			jobid, hostlist);
-		xfree(new_node_list);
-		rc = -1;
-		goto fini;
-	}
-
-	/* User excluded node list incompatable with Wiki
-	 * Exclude all nodes not explicitly requested */
 	if (task_cnt) {
+		new_node_list = xstrdup(hostlist);
+		if (node_name2bitmap(new_node_list, false, &new_bitmap) != 0) {
+			*err_code = -700;
+			*err_msg = "Invalid TASKLIST";
+			error("wiki: Attempt to set invalid node list for "
+				"job %u, %s",
+				jobid, hostlist);
+			xfree(new_node_list);
+			rc = -1;
+			goto fini;
+		}
+
+		/* User excluded node list incompatable with Wiki
+		 * Exclude all nodes not explicitly requested */
 		FREE_NULL_BITMAP(job_ptr->details->exc_node_bitmap);
 		job_ptr->details->exc_node_bitmap = bit_copy(new_bitmap);
 		bit_not(job_ptr->details->exc_node_bitmap);
@@ -281,7 +283,7 @@ static int	_start_job(uint32_t jobid, int task_cnt, char *hostlist,
 		}
 	}
 
-	/* get job ready to start now */
+	/* save and update job state to start now */
 	save_req_nodes = job_ptr->details->req_nodes;
 	job_ptr->details->req_nodes = new_node_list;
 	save_req_bitmap = job_ptr->details->req_node_bitmap;

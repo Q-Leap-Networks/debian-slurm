@@ -11,7 +11,7 @@
 # Copyright (C) 2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-226842.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -119,9 +119,14 @@ puts $file "# multi-program configuration file
 close $file
 exec $bin_chmod 700 $file_in
 
+set job_id    -
 set matches   0
-set srun_pid [spawn $srun -N1 -n4 --overcommit -l -t1 --multi-prog --debugger-test ./$file_in]
+set srun_pid [spawn $srun -N1 -n4 --overcommit -l -t1 --multi-prog --debugger-test -v ./$file_in]
 expect {
+	-re "launching ($number)" {
+		set job_id $expect_out(1,string)
+		exp_continue
+	}
 	-re "executable:(/bin/)($alpha)" {
 		if {[string compare $expect_out(2,string) "date"] != 0} {
 			incr matches
@@ -146,6 +151,12 @@ expect {
 if {$matches != 4} {
 	send_user "\nFAILURE: did not generate full list of executables.\n"
 	set exit_code 1
+}
+if {$job_id == 0} {
+	send_user "\nFAILURE: failed to get job id\n"
+	set exit_code 1
+} else {
+	cancel_job $job_id
 }
 
 if {$exit_code != 0} {

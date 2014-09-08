@@ -5,7 +5,7 @@
  *  Copyright (C) 2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -56,6 +56,7 @@ static int call_external_program(void);
 void step_terminate_monitor_start(uint32_t jobid, uint32_t stepid)
 {
 	slurm_ctl_conf_t *conf;
+	pthread_attr_t attr;
 
 	pthread_mutex_lock(&lock);
 
@@ -75,7 +76,9 @@ void step_terminate_monitor_start(uint32_t jobid, uint32_t stepid)
 	program_name = xstrdup(conf->unkillable_program);
 	slurm_conf_unlock();
 
-	pthread_create(&tid, NULL, monitor, NULL);
+	slurm_attr_init(&attr);
+	pthread_create(&tid, &attr, monitor, NULL);
+	slurm_attr_destroy(&attr);
 	running_flag = 1;
 	recorded_jobid = jobid;
 	recorded_stepid = stepid;

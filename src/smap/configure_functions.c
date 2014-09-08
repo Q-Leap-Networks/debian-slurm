@@ -1,12 +1,12 @@
 /*****************************************************************************\
  *  configure_functions.c - Functions related to configure mode of smap.
- *  $Id: configure_functions.c 13270 2008-02-14 19:40:44Z da $
+ *  $Id: configure_functions.c 13783 2008-04-03 00:07:07Z da $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -585,11 +585,14 @@ static int _change_state_bps(char *com, int state)
 #ifdef HAVE_BG
 	if ((com[i+3] == 'x')
 	    || (com[i+3] == '-')) {
-		for(j=0; j<3; j++) 
-			if((i+j)>len 
-			   || (com[i+j] < '0' || com[i+j] > 'Z'
-			       || (com[i+j] > '9' && com[i+j] < 'A'))) 
-				goto error_message2;
+		for(j=0; j<3; j++) {
+			if (((i+j) <= len) &&
+			    (((com[i+j] >= '0') && (com[i+j] <= '9')) ||
+			     ((com[i+j] >= 'A') && (com[i+j] <= 'Z'))))
+				continue;
+			goto error_message2; 
+
+		}
 		number = xstrntol(com + i, NULL,
 				  BA_SYSTEM_DIMENSIONS, HOSTLIST_BASE);
 		start[X] = number / (HOSTLIST_BASE * HOSTLIST_BASE);
@@ -598,11 +601,13 @@ static int _change_state_bps(char *com, int state)
 		start[Z] = (number % HOSTLIST_BASE);
 		
 		i += 4;
-		for(j=0; j<3; j++) 
-			if((i+j)>len 
-			   || (com[i+j] < '0' || com[i+j] > 'Z'
-			       || (com[i+j] > '9' && com[i+j] < 'A'))) 
-				goto error_message2;
+		for(j=0; j<3; j++) {
+			if (((i+j) <= len) &&
+			    (((com[i+j] >= '0') && (com[i+j] <= '9')) ||
+			     ((com[i+j] >= 'A') && (com[i+j] <= 'Z'))))
+				continue; 
+			goto error_message2;
+		}
 		number = xstrntol(com + i, NULL,
 				  BA_SYSTEM_DIMENSIONS, HOSTLIST_BASE);
 		end[X] = number / (HOSTLIST_BASE * HOSTLIST_BASE);
@@ -610,11 +615,13 @@ static int _change_state_bps(char *com, int state)
 			/ HOSTLIST_BASE;
 		end[Z] = (number % HOSTLIST_BASE);			
 	} else {
-		for(j=0; j<3; j++) 
-			if((i+j)>len 
-			   || (com[i+j] < '0' || com[i+j] > 'Z'
-			       || (com[i+j] > '9' && com[i+j] < 'A')))
-				goto error_message2;
+		for(j=0; j<3; j++) {
+			if (((i+j) <= len) &&
+			    (((com[i+j] >= '0') && (com[i+j] <= '9')) ||
+			     ((com[i+j] >= 'A') && (com[i+j] <= 'Z'))))
+				continue;
+			goto error_message2;
+		}
 		number = xstrntol(com + i, NULL,
 				  BA_SYSTEM_DIMENSIONS, HOSTLIST_BASE);
 		start[X] = end[X] = number / (HOSTLIST_BASE * HOSTLIST_BASE);
@@ -649,7 +656,7 @@ static int _change_state_bps(char *com, int state)
 	if ((com[i+3] == 'x')
 	    || (com[i+3] == '-')) {
 		start[X] =  xstrntol(com + i, NULL,
-				    BA_SYSTEM_DIMENSIONS, HOSTLIST_BASE);;
+				    BA_SYSTEM_DIMENSIONS, HOSTLIST_BASE);
 		i += 4;
 		end[X] =  xstrntol(com + i, NULL, 
 				   BA_SYSTEM_DIMENSIONS, HOSTLIST_BASE);

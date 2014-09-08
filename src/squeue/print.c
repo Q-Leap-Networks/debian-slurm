@@ -1,12 +1,12 @@
 /*****************************************************************************\
  *  print.c - squeue print job functions
- *  $Id: print.c 12951 2008-01-04 00:29:45Z jette $
  *****************************************************************************
- *  Copyright (C) 2002 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>, 
  *             Morris Jette <jette1@llnl.gov>, et. al.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *    
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -525,6 +525,20 @@ int _print_job_priority(job_info_t * job, int width, bool right, char* suffix)
 	return SLURM_SUCCESS;
 }
 
+int _print_job_priority_long(job_info_t * job, int width, bool right, char* suffix)
+{
+	char temp[FORMAT_STRING_SIZE];
+	if (job == NULL)	/* Print the Header instead */
+		_print_str("PRIORITY", width, right, true);
+	else {
+		sprintf(temp, "%u", job->priority);
+		_print_str(temp, width, right, true);
+	}
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
 int _print_job_nodes(job_info_t * job, int width, bool right, char* suffix)
 {
 	if (job == NULL) {       /* Print the Header instead */
@@ -870,19 +884,12 @@ int _print_job_min_memory(job_info_t * job, int width, bool right_justify,
 			  char* suffix)
 {
 	char min_mem[10];
-	char max_mem[10];
 	char tmp_char[21];
 	
 	if (job == NULL)	/* Print the Header instead */
 		_print_str("MIN_MEMORY", width, right_justify, true);
 	else {
 	    	tmp_char[0] = '\0';
-		if (job->job_max_memory < job->job_min_memory) {
-			convert_num_unit((float)job->job_max_memory, max_mem, 
-					 sizeof(max_mem), UNIT_NONE);
-			strcat(tmp_char, max_mem);
-			strcat(tmp_char, "-");
-		 }
 		convert_num_unit((float)job->job_min_memory, min_mem, 
 				 sizeof(min_mem), UNIT_NONE);
 		strcat(tmp_char, min_mem);
@@ -1024,11 +1031,10 @@ int _print_job_dependency(job_info_t * job, int width, bool right_justify,
 {
 	if (job == NULL)	/* Print the Header instead */
 		_print_str("DEPENDENCY", width, right_justify, true);
-	else {
-		char id[FORMAT_STRING_SIZE];
-		snprintf(id, FORMAT_STRING_SIZE, "%u", job->dependency);
-		_print_str(id, width, right_justify, true);
-	}
+	else if (job->dependency)
+		_print_str(job->dependency, width, right_justify, true);
+	else
+		_print_str("", width, right_justify, true);
 	if (suffix)
 		printf("%s", suffix); 
 	return SLURM_SUCCESS;

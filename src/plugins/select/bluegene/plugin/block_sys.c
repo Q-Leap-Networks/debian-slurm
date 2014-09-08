@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  block_sys.c - component used for wiring up the blocks
  *
- *  $Id: block_sys.c 11400 2007-04-24 18:50:38Z da $
+ *  $Id: block_sys.c 13960 2008-04-30 21:45:26Z jette $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -654,7 +654,7 @@ int read_bg_blocks()
 		       bg_record->bg_block_id, 
 		       bg_record->state);
 		
-		process_nodes(bg_record);
+		process_nodes(bg_record, false);
 	
 		if(bluegene_layout_mode == LAYOUT_DYNAMIC) {
 			bg_record_t *tmp_record = xmalloc(sizeof(bg_record_t));

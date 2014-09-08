@@ -11,7 +11,7 @@
 # Copyright (C) 2005-2007 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-226842.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -93,7 +93,7 @@ send_user "Node config: Sockets=$num_sockets Cores=$num_cores Threads=$num_threa
 # Build a test program to report affinity by task
 #
 exec $bin_rm -f $file_prog
-exec $bin_make -f /dev/null $file_prog
+exec $bin_cc -I$build_dir $file_prog.c -o $file_prog
 exec $bin_chmod 700 $file_prog
 
 #
@@ -411,6 +411,9 @@ expect {
 if {$exit_code == 0} {
 	exec $bin_rm -f $file_prog
 	send_user "\nSUCCESS\n"
+} else {
+	send_user "\nNOTE: This test can fail if the node configuration in slurm.conf \n"
+	send_user "  (sockets, cores, threads) differs from the actual configuration\n"
 }
 exit $exit_code
 

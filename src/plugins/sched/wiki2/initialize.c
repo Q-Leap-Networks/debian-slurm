@@ -4,7 +4,7 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -40,7 +40,16 @@
 #include "src/slurmctld/locks.h"
 #include "src/slurmctld/slurmctld.h"
 
-/* RET 0 on success, -1 on failure */
+/*
+ * initialize_wiki - used by Moab to communication desired format information
+ * cmd_ptr IN   - CMD=INITIALIZE EPORT=<port> USEHOSTEXP=[N|T|F]
+ *                USEHOSTEXP=N : use hostlist expression for GETNODES messages
+ *                USEHOSTEXP=T : use hostlist expression for GETJOBS messages
+ *                USEHOSTEXP=F : use no hostlist expressions
+ * err_code OUT - 0 or an error code
+ * err_msg OUT  - response message
+ * RET 0 on success, -1 on failure
+ */
 extern int	initialize_wiki(char *cmd_ptr, int *err_code, char **err_msg)
 {
 	char *arg_ptr, *eport_ptr, *exp_ptr, *use_ptr;
@@ -65,6 +74,8 @@ extern int	initialize_wiki(char *cmd_ptr, int *err_code, char **err_msg)
 			use_host_exp = 1;
 		else if (exp_ptr[0] == 'F')
 			use_host_exp = 0;
+		else if (exp_ptr[0] == 'N')
+			use_host_exp = 2;
 		else {
 			*err_code = -300;
 			*err_msg = "INITIALIZE has invalid USEHOSTEXP";
@@ -73,7 +84,9 @@ extern int	initialize_wiki(char *cmd_ptr, int *err_code, char **err_msg)
 		}
 	}
 
-	if (use_host_exp)
+	if      (use_host_exp == 2)
+		use_ptr = "N";
+	else if (use_host_exp == 1)
 		use_ptr = "T";
 	else
 		use_ptr = "F";

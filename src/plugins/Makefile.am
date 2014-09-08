@@ -1,2 +1,1 @@
-
-SUBDIRS = auth checkpoint jobacct jobcomp mpi proctrack sched select switch task
+SUBDIRS = accounting_storage auth checkpoint crypto jobacct_gather jobcomp mpi proctrack sched select switch task

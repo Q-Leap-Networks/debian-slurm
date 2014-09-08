@@ -5,7 +5,7 @@
 <h2>Overview</h2>
 
 <p>This document describes the unique features of SLURM on the
-<a href="http://www.research.ibm.com/bluegene">IBM BlueGene</a> systems. 
+<a href="http://www.research.ibm.com/bluegene/">IBM BlueGene</a> systems. 
 You should be familiar with the SLURM's mode of operation on Linux clusters 
 before studying the relatively few differences in BlueGene operation 
 described in this document.</p>
@@ -36,12 +36,11 @@ to represent multiples of 1024 (e.g. "2k" is equivalent to "2048").</p>
 
 <h2>User Tools</h2>
 
-<p>The normal set of SLURM user tools: srun, sbatch, scancel, sinfo, squeue,
-and scontrol 
+<p>The normal set of SLURM user tools: sbatch, scancel, sinfo, squeue, and scontrol 
 provide all of the expected services except support for job steps. 
 SLURM performs resource allocation for the job, but initiation of tasks is performed 
 using the <i>mpirun</i> command. SLURM has no concept of a job step on BlueGene.
-Seven new srun, sbatch options are available: 
+Seven new sbatch options are available: 
 <i>--geometry</i> (specify job size in each dimension),
 <i>--no-rotate</i> (disable rotation of geometry), 
 <i>--conn-type</i> (specify interconnect type between base partitions, mesh or torus).
@@ -54,15 +53,15 @@ to be available.
 
 Note that this is a c-node count.</p>
 
-<p>To reiterate: srun is used to submit a job script, but mpirun is used to launch the parallel tasks. 
-<b>It is highly recommended that the srun <i>--batch</i> option be used to submit a script.</b> 
+<p>To reiterate: sbatch is used to submit a job script, 
+but mpirun is used to launch the parallel tasks. 
 Note that a SLURM batch job's default stdout and stderr file names are generated 
 using the SLURM job ID. 
 When the SLURM control daemon is restarted, SLURM job ID values can be repeated, 
 therefore it is recommended that batch jobs explicitly specify unique names for 
 stdout and stderr files using the srun options <i>--output</i> and <i>--error</i>
 respectively.
-While the srun <i>--allocate</i> option may be used to create an interactive SLURM job, 
+While the salloc command may be used to create an interactive SLURM job, 
 it will be the responsibility of the user to insure that the <i>bgblock</i> 
 is ready for use before initiating any mpirun commands. 
 SLURM will assume this responsibility for batch jobs. 
@@ -407,7 +406,10 @@ and <i>NodeCardNodeCnt=NODE_COUNT</i> respectively in the <i>bluegene.conf</i>
 file (i.e. <i>BasePartitionNodeCnt=512</i> and <i>NodeCardNodeCnt=32</i>).</p>
 
 <p>Note that the <i>Numpsets</i> values defined in 
-<i>bluegene.conf</i> are used only when SLURM creates bgblocks.
+<i>bluegene.conf</i> is used only when SLURM creates bgblocks this
+determines if the system is IO rich or not.  For most bluegene/L
+systems this value is either 8 (for IO poor systems) or 64 (for IO rich
+systems).
 <p>The <i>Images</i> can change during job start based on input from
 the user.
 If you change the bgblock layout, then slurmctld and slurmd should 
@@ -491,7 +493,7 @@ AltRamDiskImage=*  Groups=da,adamb
 LayoutMode=STATIC
 BasePartitionNodeCnt=512
 NodeCardNodeCnt=32
-Numpsets=8
+NumPsets=64	# An I/O rich environment
 BridgeAPILogFile=/var/log/slurm/bridgeapi.log
 BridgeAPIVerbose=0
 
@@ -629,6 +631,6 @@ scheduling logic, etc. </p>
  
 <p class="footer"><a href="#top">top</a></p>
 
-<p style="text-align:center;">Last modified 23 January 2007</p>
+<p style="text-align:center;">Last modified 23 April 2008</p>
 
 <!--#include virtual="footer.txt"-->

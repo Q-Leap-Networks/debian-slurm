@@ -98,6 +98,9 @@
 /* Define to 1 if you have the `mtrace' function. */
 #undef HAVE_MTRACE
 
+/* Define to 1 if using MySQL libaries */
+#undef HAVE_MYSQL
+
 /* Define to 1 if you have the <ncurses.h> header file. */
 #undef HAVE_NCURSES_H
 
@@ -107,11 +110,17 @@
 /* define if numa library installed */
 #undef HAVE_NUMA
 
+/* define if you have openssl. */
+#undef HAVE_OPENSSL
+
 /* define if you have the PAM library */
 #undef HAVE_PAM
 
 /* Define to 1 if you have the <pam/pam_appl.h> header file. */
 #undef HAVE_PAM_PAM_APPL_H
+
+/* Define to 1 if using PostgreSQL libaries */
+#undef HAVE_PGSQL
 
 /* define if plpa library installed */
 #undef HAVE_PLPA
@@ -133,6 +142,9 @@
 
 /* Define to 1 if you have the `ptrace64' function. */
 #undef HAVE_PTRACE64
+
+/* Define to 1 if you have the <pty.h> header file. */
+#undef HAVE_PTY_H
 
 /* Define if you are compiling with readline. */
 #undef HAVE_READLINE
@@ -233,6 +245,9 @@
 /* Define to 1 if you have the `unsetenv' function. */
 #undef HAVE_UNSETENV
 
+/* Define to 1 if you have the <utmp.h> header file. */
+#undef HAVE_UTMP_H
+
 /* Define to 1 if you have the <values.h> header file. */
 #undef HAVE_VALUES_H
 
@@ -309,6 +324,9 @@
 
 /* Define the default port number for slurmctld */
 #undef SLURMCTLD_PORT
+
+/* Define the default port number for slurmdbd */
+#undef SLURMDBD_PORT
 
 /* Define the default port number for slurmd */
 #undef SLURMD_PORT

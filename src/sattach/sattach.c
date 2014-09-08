@@ -6,7 +6,7 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -365,6 +365,7 @@ static message_thread_state_t *_msg_thr_create(int num_nodes, int num_tasks)
 	eio_obj_t *obj;
 	int i;
 	message_thread_state_t *mts;
+	pthread_attr_t attr;
 
 	debug("Entering _msg_thr_create()");
 	mts = (message_thread_state_t *)xmalloc(sizeof(message_thread_state_t));
@@ -386,11 +387,14 @@ static message_thread_state_t *_msg_thr_create(int num_nodes, int num_tasks)
 		eio_new_initial_obj(mts->msg_handle, obj);
 	}
 
-	if (pthread_create(&mts->msg_thread, NULL,
+	slurm_attr_init(&attr);
+	if (pthread_create(&mts->msg_thread, &attr,
 			   _msg_thr_internal, (void *)mts) != 0) {
 		error("pthread_create of message thread: %m");
+		slurm_attr_destroy(&attr);
 		goto fail;
 	}
+	slurm_attr_destroy(&attr);
 
 	return mts;
 fail:
@@ -558,7 +562,7 @@ _exit_handler(message_thread_state_t *mts, slurm_msg_t *exit_msg)
 static void
 _handle_msg(message_thread_state_t *mts, slurm_msg_t *msg)
 {
-	uid_t req_uid = g_slurm_auth_get_uid(msg->auth_cred);
+	uid_t req_uid = g_slurm_auth_get_uid(msg->auth_cred, NULL);
 	static uid_t slurm_uid;
 	static bool slurm_uid_set = false;
 	uid_t uid = getuid();

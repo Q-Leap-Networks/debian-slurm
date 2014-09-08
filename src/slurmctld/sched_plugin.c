@@ -4,7 +4,7 @@
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jay Windley <jwindley@lnxi.com>.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -52,6 +52,8 @@
 /* ************************************************************************ */
 typedef struct slurm_sched_ops {
 	int		(*schedule)		( void );
+	int		(*newalloc)		( struct job_record * );
+	int		(*freealloc)		( struct job_record * );
 	uint32_t	(*initial_priority)	( uint32_t, 
 						  struct job_record * );
 	void            (*job_is_pending)     	( void );
@@ -59,6 +61,9 @@ typedef struct slurm_sched_ops {
 	void            (*partition_change)    	( void );
 	int		(*get_errno)		( void );
 	char *		(*strerror)		( int );
+	void		(*job_requeue)		( struct job_record *,
+						  char *reason );
+	char *		(*get_conf)		( void );
 } slurm_sched_ops_t;
 
 
@@ -88,12 +93,16 @@ slurm_sched_get_ops( slurm_sched_context_t *c )
 	 */
 	static const char *syms[] = {
 		"slurm_sched_plugin_schedule",
+		"slurm_sched_plugin_newalloc",
+		"slurm_sched_plugin_freealloc",
 		"slurm_sched_plugin_initial_priority",
 		"slurm_sched_plugin_job_is_pending",
 		"slurm_sched_plugin_reconfig",
 		"slurm_sched_plugin_partition_change",
 		"slurm_sched_get_errno",
-		"slurm_sched_strerror"
+		"slurm_sched_strerror",
+		"slurm_sched_plugin_requeue",
+		"slurm_sched_get_conf"
 	};
 	int n_syms = sizeof( syms ) / sizeof( char * );
 
@@ -260,6 +269,30 @@ slurm_sched_schedule( void )
 	return (*(g_sched_context->ops.schedule))();
 }
 
+/* *********************************************************************** */
+/*  TAG(                        slurm_sched_newalloc                    )  */
+/* *********************************************************************** */
+int
+slurm_sched_newalloc( struct job_record *job_ptr )
+{
+	if ( slurm_sched_init() < 0 )
+		return SLURM_ERROR;
+	
+	return (*(g_sched_context->ops.newalloc))( job_ptr );
+}
+
+/* *********************************************************************** */
+/*  TAG(                        slurm_sched_freealloc                    )  */
+/* *********************************************************************** */
+int
+slurm_sched_freealloc( struct job_record *job_ptr )
+{
+	if ( slurm_sched_init() < 0 )
+		return SLURM_ERROR;
+	
+	return (*(g_sched_context->ops.freealloc))( job_ptr );
+}
+
 
 /* *********************************************************************** */
 /*  TAG(                   slurm_sched_initital_priority                )  */
@@ -322,3 +355,29 @@ slurm_sched_p_strerror( int errnum )
 
 	return (*(g_sched_context->ops.strerror))( errnum );
 }
+
+/* *********************************************************************** */
+/*  TAG(                   slurm_sched_requeue                          )  */
+/* *********************************************************************** */
+void
+slurm_sched_requeue( struct job_record *job_ptr, char *reason )
+{
+        if ( slurm_sched_init() < 0 )
+                return;
+
+        (*(g_sched_context->ops.job_requeue))( job_ptr, reason );
+}
+
+/* *********************************************************************** */
+/*  TAG(                   slurm_sched_p_get_conf                       )  */
+/* *********************************************************************** */
+char *
+slurm_sched_p_get_conf( void )
+{
+        if ( slurm_sched_init() < 0 )
+                return NULL;
+
+        return (*(g_sched_context->ops.get_conf))( );
+}
+
+

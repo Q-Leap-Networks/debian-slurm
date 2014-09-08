@@ -92,6 +92,22 @@ to indicate the reason for failure.</p>
 the plugin should return SLURM_ERROR and set the errno to an appropriate value 
 to indicate the reason for failure.</p>
 
+<p class="commandline">int slurm_sched_plugin_newalloc (void);</p>
+<p style="margin-left:.2in"><b>Description</b>: Note the successful allocation of resources to a job.</p>
+<p style="margin-left:.2in"><b>Arguments</b>: Pointer to the slurmctld job structure. This can be used to
+get partition, allocated resources, time limit, etc.</p>
+<p style="margin-left:.2in"><b>Returns</b>: SLURM_SUCCESS if successful. On failure, 
+the plugin should return SLURM_ERROR and set the errno to an appropriate value 
+to indicate the reason for failure.</p>
+
+<p class="commandline">int slurm_sched_plugin_freealloc (void);</p>
+<p style="margin-left:.2in"><b>Description</b>: Note the successful release of resources for a job.</p>
+<p style="margin-left:.2in"><b>Arguments</b>: Pointer to the slurmctld job structure. This can be used to
+get partition, allocated resources, time limit, etc.</p>
+<p style="margin-left:.2in"><b>Returns</b>: SLURM_SUCCESS if successful. On failure, 
+the plugin should return SLURM_ERROR and set the errno to an appropriate value 
+to indicate the reason for failure.</p>
+
 <p class="commandline">uint32_t slurm_sched_plugin_initial_priority (
 uint32_t last_prio, struct job_record *job_ptr);</p>
 <p style="margin-left:.2in"><b>Description</b>: Establish the initial priority of a new job.</p>
@@ -120,12 +136,19 @@ happened such as time or size limits.</p>
 <p style="margin-left:.2in"><b>Returns</b>: Nothing.</p>
 <p class="footer"><a href="#top">top</a></p>
 
+<p class="commandline">char *slurm_sched_get_conf (void);</p></a>
+<p style="margin-left:.2in"><b>Description</b>: Return scheduler specific 
+configuration information to be reported for the <i>scontrol show configuration</i>
+command.</p>
+<p style="margin-left:.2in"><b>Arguments</b>: None</p>
+<p style="margin-left:.2in"><b>Returns</b>: A string containing configuration 
+information. The return value is released using the <i>xfree()</i> function.</p>
+
 <a name="get_errno"><p class="commandline">int slurm_sched_get_errno (void);</p></a>
 <p style="margin-left:.2in"><b>Description</b>: Return the number of a scheduler
 specific error.</p>
 <p style="margin-left:.2in"><b>Arguments</b>: None</p>
-<p style="margin-left:.2in"><b>Returns</b>: Error number for the last failure encountered by
-the scheduler plugin.</p>
+<p style="margin-left:.2in"><b>Returns</b>: Error number for the last failure encountered by the scheduler plugin.</p>
 
 <p class="commandline"><a name="strerror">const char *slurm_sched_strerror(int errnum);</a></p>
 <p style="margin-left:.2in"><b>Description</b>: Return a string description of a scheduler
@@ -143,6 +166,6 @@ releases of SLURM may revise this API. A scheduler plugin conveys its ability
 to implement a particular API version using the mechanism outlined for SLURM plugins.</p>
 <p class="footer"><a href="#top">top</a></p>
 
-<p style="text-align:center;">Last modified 16 August 2007</p>
+<p style="text-align:center;">Last modified 8 November 2007</p>
 
 <!--#include virtual="footer.txt"-->

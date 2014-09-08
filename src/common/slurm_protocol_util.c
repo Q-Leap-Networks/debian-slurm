@@ -4,7 +4,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov> et. al.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -53,10 +53,9 @@
  */
 int check_header_version(header_t * header)
 {
-	if (header->version != SLURM_PROTOCOL_VERSION) {
-		debug("Invalid Protocol Version %d", header->version);
+	if (header->version != SLURM_PROTOCOL_VERSION)
 		slurm_seterrno_ret(SLURM_PROTOCOL_VERSION_ERROR);
-	}
+
 	return SLURM_PROTOCOL_SUCCESS;
 }
 

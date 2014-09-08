@@ -4,7 +4,7 @@
  *  Copyright (C) 2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -257,7 +257,7 @@ extern int slurm_ckpt_pack_job(check_jobinfo_t jobinfo, Buf buffer)
 
 extern int slurm_ckpt_unpack_job(check_jobinfo_t jobinfo, Buf buffer)
 {
-	uint16_t uint16_tmp;
+	uint32_t uint32_tmp;
 	struct check_job_info *check_ptr =
 		(struct check_job_info *)jobinfo;
 
@@ -266,7 +266,7 @@ extern int slurm_ckpt_unpack_job(check_jobinfo_t jobinfo, Buf buffer)
 	safe_unpack16(&check_ptr->wait_time, buffer);
 
 	safe_unpack32(&check_ptr->error_code, buffer);
-	safe_unpackstr_xmalloc(&check_ptr->error_msg, &uint16_tmp, buffer);
+	safe_unpackstr_xmalloc(&check_ptr->error_msg, &uint32_tmp, buffer);
 	safe_unpack_time(&check_ptr->time_stamp, buffer);
 	
 	return SLURM_SUCCESS; 
@@ -307,3 +307,10 @@ static int _ckpt_step(struct step_record * step_ptr, uint16_t wait, int vacate)
 		job_ptr->job_id, step_ptr->step_id);
 	return SLURM_SUCCESS;
 }
+
+extern int slurm_ckpt_task_comp ( struct step_record * step_ptr, uint32_t task_id,
+				  time_t event_time, uint32_t error_code, char *error_msg )
+{
+	return SLURM_SUCCESS;
+}
+

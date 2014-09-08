@@ -61,7 +61,6 @@ hv_to_job_desc_msg(HV* hv, job_desc_msg_t* job_desc_msg)
 	FETCH_FIELD(hv, job_desc_msg, job_min_cores, uint16_t, FALSE);
 	FETCH_FIELD(hv, job_desc_msg, job_min_threads, uint16_t, FALSE);
 	FETCH_FIELD(hv, job_desc_msg, job_min_memory, uint16_t, FALSE);
-	FETCH_FIELD(hv, job_desc_msg, job_max_memory, uint16_t, FALSE);
 	FETCH_FIELD(hv, job_desc_msg, job_min_tmp_disk, uint16_t, FALSE);
 	FETCH_FIELD(hv, job_desc_msg, partition, charp, FALSE);
 	FETCH_FIELD(hv, job_desc_msg, priority, uint32_t, FALSE);
@@ -89,7 +88,7 @@ hv_to_job_desc_msg(HV* hv, job_desc_msg_t* job_desc_msg)
 			argv_av = (AV*)SvRV(*svp);
 			job_desc_msg->argc = av_len(argv_av) + 1;
 			if (job_desc_msg->argc > 0) {
-				Newz(0, job_desc_msg->argv, job_desc_msg->argc + 1, char*);
+				Newz(0, job_desc_msg->argv, (int32_t)(job_desc_msg->argc + 1), char*);
 				for(i = 0; i < job_desc_msg->argc; i ++) {
 					if((svp = av_fetch(argv_av, i, FALSE)))
 						*(job_desc_msg->argv + i) = (char*) SvPV_nolen(*svp);
@@ -112,11 +111,10 @@ hv_to_job_desc_msg(HV* hv, job_desc_msg_t* job_desc_msg)
 	FETCH_FIELD(hv, job_desc_msg, work_dir, charp, FALSE);
 	FETCH_FIELD(hv, job_desc_msg, alloc_node, charp, FALSE);
 	FETCH_FIELD(hv, job_desc_msg, alloc_sid, uint32_t, FALSE);
-	FETCH_FIELD(hv, job_desc_msg, alloc_resp_hostname, charp, FALSE);
+	FETCH_FIELD(hv, job_desc_msg, resp_host, charp, FALSE);
 	FETCH_FIELD(hv, job_desc_msg, alloc_resp_port, uint16_t, FALSE);
-	FETCH_FIELD(hv, job_desc_msg, other_hostname, charp, FALSE);
 	FETCH_FIELD(hv, job_desc_msg, other_port, uint16_t, FALSE);
-	FETCH_FIELD(hv, job_desc_msg, dependency, uint32_t, FALSE);
+	FETCH_FIELD(hv, job_desc_msg, dependency, charp, FALSE);
 	FETCH_FIELD(hv, job_desc_msg, overcommit, uint16_t, FALSE);
 	FETCH_FIELD(hv, job_desc_msg, num_tasks, uint32_t, FALSE);
 	FETCH_FIELD(hv, job_desc_msg, nice, uint16_t, FALSE);
@@ -128,7 +126,7 @@ hv_to_job_desc_msg(HV* hv, job_desc_msg_t* job_desc_msg)
 	FETCH_FIELD(hv, job_desc_msg, begin_time, time_t, FALSE);
 	FETCH_FIELD(hv, job_desc_msg, mail_type, uint16_t, FALSE);
 	FETCH_FIELD(hv, job_desc_msg, mail_user, charp, FALSE);
-	FETCH_FIELD(hv, job_desc_msg, no_requeue, uint16_t, FALSE);
+	FETCH_FIELD(hv, job_desc_msg, requeue, uint16_t, FALSE);
 	/* geometry */
 #if SYSTEM_DIMENSIONS
 	if((svp = hv_fetch(hv, "geometry", 8, FALSE))) {

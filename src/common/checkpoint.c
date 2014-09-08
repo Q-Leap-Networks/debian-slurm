@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  checkpoint.c - implementation-independent checkpoint functions
- *  $Id: checkpoint.c 10574 2006-12-15 23:38:29Z jette $
+ *  $Id: checkpoint.c 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.com>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -62,6 +62,8 @@ typedef struct slurm_checkpoint_ops {
 			 uint32_t *error_code, char **error_msg);
 	int	(*ckpt_comp) (struct step_record * step_ptr, time_t event_time,
 			 uint32_t error_code, char *error_msg);
+	int	(*ckpt_task_comp) (struct step_record * step_ptr, uint32_t task_id,
+			 time_t event_time, uint32_t error_code, char *error_msg);
 
 	int	(*ckpt_alloc_jobinfo) (check_jobinfo_t *jobinfo);
 	int	(*ckpt_free_jobinfo) (check_jobinfo_t jobinfo);
@@ -146,6 +148,7 @@ _slurm_checkpoint_get_ops( slurm_checkpoint_context_t c )
 	static const char *syms[] = {
 		"slurm_ckpt_op",
 		"slurm_ckpt_comp",
+		"slurm_ckpt_task_comp",
 		"slurm_ckpt_alloc_job",
 		"slurm_ckpt_free_job",
 		"slurm_ckpt_pack_job",
@@ -268,6 +271,25 @@ checkpoint_comp(void * step_ptr, time_t event_time, uint32_t error_code,
 	if ( g_context )
 		retval = (*(g_context->ops.ckpt_comp))(
 			(struct step_record *) step_ptr,
+			event_time, error_code, error_msg);
+	else {
+		error ("slurm_checkpoint plugin context not initialized");
+		retval = ENOENT;
+	}
+	slurm_mutex_unlock( &context_lock );
+	return retval;
+}
+
+extern int
+checkpoint_task_comp(void * step_ptr, uint32_t task_id, time_t event_time,
+		     uint32_t error_code, char *error_msg)
+{
+	int retval = SLURM_SUCCESS;
+
+	slurm_mutex_lock( &context_lock );
+	if ( g_context )
+		retval = (*(g_context->ops.ckpt_task_comp))(
+			(struct step_record *) step_ptr, task_id, 
 			event_time, error_code, error_msg);
 	else {
 		error ("slurm_checkpoint plugin context not initialized");

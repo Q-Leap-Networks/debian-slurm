@@ -1,12 +1,12 @@
 /*****************************************************************************\
  *  select_bluegene.c - node selection plugin for Blue Gene system.
  * 
- *  $Id: select_bluegene.c 13423 2008-02-29 17:30:38Z da $
+ *  $Id: select_bluegene.c 14091 2008-05-20 21:34:02Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Dan Phung <phung4@llnl.gov> Danny Auble <da@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -38,6 +38,11 @@
 \*****************************************************************************/
 
 #include "bluegene.h"
+
+#ifndef HAVE_BG
+#include "defined_block.h"
+#endif
+
 #include "src/slurmctld/trigger_mgr.h"
 #include <fcntl.h>
  
@@ -45,7 +50,7 @@
 
 /* Change BLOCK_STATE_VERSION value when changing the state save
  * format i.e. pack_block() */
-#define BLOCK_STATE_VERSION      "VER000"
+#define BLOCK_STATE_VERSION      "VER001"
 
 /* global */
 int procs_per_node = 512;
@@ -80,7 +85,7 @@ int procs_per_node = 512;
  */
 const char plugin_name[]       	= "Blue Gene node selection plugin";
 const char plugin_type[]       	= "select/bluegene";
-const uint32_t plugin_version	= 90;
+const uint32_t plugin_version	= 100;
 
 /* pthread stuff for updating BG node status */
 static pthread_t bluegene_thread = 0;
@@ -90,6 +95,8 @@ static pthread_mutex_t thread_flag_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int _init_status_pthread(void);
 static int _wait_for_thread (pthread_t thread_id);
 static char *_block_state_str(int state);
+
+extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data);
 
 /*
  * init() is called when the plugin is loaded, before any other functions
@@ -117,6 +124,7 @@ extern int init ( void )
 	if ((SELECT_COPROCESSOR_MODE  != RM_PARTITION_COPROCESSOR_MODE)
 	||  (SELECT_VIRTUAL_NODE_MODE != RM_PARTITION_VIRTUAL_NODE_MODE))
 		fatal("enum node_use_type out of sync with rm_api.h");
+	
 #endif
 
 	verbose("%s loading...", plugin_name);
@@ -213,9 +221,22 @@ extern int fini ( void )
 		fatal("Error, could not read the file");
 		return SLURM_ERROR;
 	}
+	if(part_list) {
+		struct part_record *part_ptr = NULL;
+		ListIterator itr = list_iterator_create(part_list);
+		while((part_ptr = list_next(itr))) {
+			part_ptr->max_nodes = part_ptr->max_nodes_orig;
+			part_ptr->min_nodes = part_ptr->min_nodes_orig;
+			select_p_alter_node_cnt(SELECT_SET_BP_CNT, 
+						&part_ptr->max_nodes);
+			select_p_alter_node_cnt(SELECT_SET_BP_CNT,
+						&part_ptr->min_nodes);
+		}
+		list_iterator_destroy(itr);
+	}
 #else
 	/*looking for blocks only I created */
-	if (create_defined_blocks(bluegene_layout_mode) 
+	if (create_defined_blocks(bluegene_layout_mode, NULL) 
 			== SLURM_ERROR) {
 		/* error in creating the static blocks, so
 		 * blocks referenced by submitted jobs won't
@@ -225,7 +246,7 @@ extern int fini ( void )
 		return SLURM_ERROR;
 	}
 #endif
-	
+
 	return SLURM_SUCCESS; 
 }
 
@@ -337,7 +358,7 @@ extern int select_p_state_restore(char *dir_name)
 	List results = NULL;
 	int data_allocated, data_read = 0;
 	char *ver_str = NULL;
-	uint16_t ver_str_len;
+	uint32_t ver_str_len;
 	struct passwd *pw_ent = NULL;
 	int blocks = 0;
 
@@ -385,10 +406,9 @@ extern int select_p_state_restore(char *dir_name)
 	 * we don't try to unpack data using the wrong format routines
 	 */
 	if(size_buf(buffer)
-	   >= sizeof(uint16_t) + strlen(BLOCK_STATE_VERSION)) {
+	   >= sizeof(uint32_t) + strlen(BLOCK_STATE_VERSION)) {
 	        char *ptr = get_buf_data(buffer);
-		
-	        if (!memcmp(&ptr[sizeof(uint16_t)], BLOCK_STATE_VERSION, 3)) {
+		if (!memcmp(&ptr[sizeof(uint32_t)], BLOCK_STATE_VERSION, 3)) {
 		        safe_unpackstr_xmalloc(&ver_str, &ver_str_len, buffer);
 		        debug3("Version string in block_state header is %s",
 			       ver_str);
@@ -402,9 +422,10 @@ extern int select_p_state_restore(char *dir_name)
 		return EFAULT;
 	}
 	xfree(ver_str);
-	if(select_g_unpack_node_info(&node_select_ptr, buffer) == SLURM_ERROR) 
+	if(select_g_unpack_node_info(&node_select_ptr, buffer) == SLURM_ERROR) { 
+		error("select_p_state_restore: problem unpacking node_info");
 		goto unpack_error;
-	
+	}
 	reset_ba_system(false);
 
 	node_bitmap = bit_alloc(node_record_count);	
@@ -416,6 +437,21 @@ extern int select_p_state_restore(char *dir_name)
 		bit_nclear(node_bitmap, 0, bit_size(node_bitmap) - 1);
 		bit_nclear(ionode_bitmap, 0, bit_size(ionode_bitmap) - 1);
 		
+		j = 0;
+		while(bg_info_record->bp_inx[j] >= 0) {
+			if (bg_info_record->bp_inx[j+1]
+			    >= node_record_count) {
+				fatal("Job state recovered incompatable with "
+					"bluegene.conf. bp=%u state=%d",
+					node_record_count,
+					bg_info_record->bp_inx[j+1]);
+			}
+			bit_nset(node_bitmap,
+				 bg_info_record->bp_inx[j],
+				 bg_info_record->bp_inx[j+1]);
+			j += 2;
+		}		
+
 		j = 0;
 		while(bg_info_record->ionode_inx[j] >= 0) {
 			if (bg_info_record->ionode_inx[j+1]
@@ -434,9 +470,10 @@ extern int select_p_state_restore(char *dir_name)
 		while((bg_record = list_next(itr))) {
 			if(bit_equal(bg_record->bitmap, node_bitmap)
 			   && bit_equal(bg_record->ionode_bitmap,
-					ionode_bitmap)) 
+					ionode_bitmap))
 				break;			
 		}
+
 		list_iterator_reset(itr);
 		if(bg_record) {
 			slurm_mutex_lock(&block_state_mutex);
@@ -456,9 +493,10 @@ extern int select_p_state_restore(char *dir_name)
 			continue;
 #endif
 			if(bluegene_layout_mode != LAYOUT_DYNAMIC) {
-				error("Only adding state save blocks in "
-				      "Dynamic block creation Mode not "
-				      "adding %s",
+				error("Evidently we found a block (%s) which "
+				      "we had before but no longer care about. "
+				      "We are not adding it since we aren't "
+				      "using Dynamic mode",
 				      bg_info_record->bg_block_id);
 				continue;
 			}
@@ -492,7 +530,7 @@ extern int select_p_state_restore(char *dir_name)
 			bg_record->conn_type = bg_info_record->conn_type;
 			bg_record->boot_state = 0;
 
-			process_nodes(bg_record);
+			process_nodes(bg_record, true);
 
 			slurm_conf_lock();
 			bg_record->target_name = 
@@ -542,13 +580,18 @@ extern int select_p_state_restore(char *dir_name)
 
 			xfree(name);
 			if(strcmp(temp, bg_record->nodes)) {
+#ifdef HAVE_BG_FILES
 				fatal("given list of %s "
 				      "but allocated %s, "
 				      "your order might be "
-				      "wrong in the "
-				      "bluegene.conf",
-				      bg_record->nodes,
-				      temp);
+				      "wrong in bluegene.conf",
+				      bg_record->nodes, temp);
+#else
+				fatal("bad wiring in preserved state "
+				      "(found %s, but allocated %s) "
+				      "YOU MUST COLDSTART",
+				      bg_record->nodes, temp);
+#endif
 			}
 			if(bg_record->bg_block_list)
 				list_destroy(bg_record->bg_block_list);
@@ -566,7 +609,9 @@ extern int select_p_state_restore(char *dir_name)
 	FREE_NULL_BITMAP(node_bitmap);
 	list_iterator_destroy(itr);
 
+	slurm_mutex_lock(&block_state_mutex);
 	sort_bg_record_inc_size(bg_list);
+	slurm_mutex_unlock(&block_state_mutex);
 		
 	info("Recovered %d blocks", blocks);
 	select_g_free_node_info(&node_select_ptr);
@@ -599,33 +644,52 @@ extern int select_p_node_init(struct node_record *node_ptr, int node_cnt)
  *	identify the nodes which "best" satify the request. The specified 
  *	nodes may be DOWN or BUSY at the time of this test as may be used 
  *	to deterime if a job could ever run.
- * IN job_ptr - pointer to job being scheduled
+ * IN/OUT job_ptr - pointer to job being scheduled start_time is set
+ *	when we can possibly start job.
  * IN/OUT bitmap - usable nodes are set on input, nodes not required to 
  *	satisfy the request are cleared, other left set
  * IN min_nodes - minimum count of nodes
  * IN max_nodes - maximum count of nodes (0==don't care)
  * IN req_nodes - requested (or desired) count of nodes
- * IN test_only - if true, only test if ever could run, not necessarily now
+ * IN mode - SELECT_MODE_RUN_NOW: try to schedule job now
+ *           SELECT_MODE_TEST_ONLY: test if job can ever run
+ *           SELECT_MODE_WILL_RUN: determine when and where job can run
  * RET zero on success, EINVAL otherwise
  * NOTE: bitmap must be a superset of req_nodes at the time that 
  *	select_p_job_test is called
  */
 extern int select_p_job_test(struct job_record *job_ptr, bitstr_t *bitmap,
-			uint32_t min_nodes, uint32_t max_nodes, 
-			uint32_t req_nodes, bool test_only)
+			     uint32_t min_nodes, uint32_t max_nodes, 
+			     uint32_t req_nodes, int mode)
 {
-	/* bg block test - is there a block where we have:
+	/* submit_job - is there a block where we have:
 	 * 1) geometry requested
 	 * 2) min/max nodes (BPs) requested
 	 * 3) type: TORUS or MESH or NAV (torus else mesh)
-	 * 4) use: VIRTUAL or COPROCESSOR
 	 * 
 	 * note: we don't have to worry about security at this level
 	 * as the SLURM block logic will handle access rights.
 	 */
 
 	return submit_job(job_ptr, bitmap, min_nodes, max_nodes, 
-			  req_nodes, test_only);
+			  req_nodes, mode);
+}
+
+/*
+ * select_p_job_list_test - Given a list of select_will_run_t's in
+ *	accending priority order we will see if we can start and
+ *	finish all the jobs without increasing the start times of the
+ *	jobs specified and fill in the est_start of requests with no
+ *	est_start.  If you are looking to see if one job will ever run
+ *	then use select_p_job_test instead.
+ * IN/OUT req_list - list of select_will_run_t's in asscending
+ *	             priority order on success of placement fill in
+ *	             est_start of request with time.
+ * RET zero on success, EINVAL otherwise
+ */
+extern int select_p_job_list_test(List req_list)
+{
+	return test_job_list(req_list);
 }
 
 extern int select_p_job_begin(struct job_record *job_ptr)
@@ -644,6 +708,11 @@ extern int select_p_job_suspend(struct job_record *job_ptr)
 }
 
 extern int select_p_job_resume(struct job_record *job_ptr)
+{
+	return ESLURM_NOT_SUPPORTED;
+}
+
+extern int select_p_get_job_cores(uint32_t job_id, int alloc_index, int s)
 {
 	return ESLURM_NOT_SUPPORTED;
 }
@@ -1049,7 +1118,14 @@ extern int select_p_get_extra_jobinfo (struct node_record *node_ptr,
                                        enum select_data_info info,
                                        void *data)
 {
-       return SLURM_SUCCESS;
+	if (info == SELECT_AVAIL_CPUS) {
+		/* Needed to track CPUs allocated to jobs on whole nodes
+		 * for sched/wiki2 (Moab scheduler). Small block allocations
+		 * handled through use of job_ptr->num_procs in slurmctld */
+		uint16_t *cpus_per_bp = (uint16_t *) data;
+		*cpus_per_bp = procs_per_node;
+	}
+	return SLURM_SUCCESS;
 }
 
 extern int select_p_get_info_from_plugin (enum select_data_info info, 
@@ -1091,14 +1167,31 @@ extern int select_p_update_node_state (int index, uint16_t state)
 extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 {
 	job_desc_msg_t *job_desc = (job_desc_msg_t *)data;
-	uint32_t *nodes = (uint32_t *)data;
-	int tmp, i;
+	uint32_t *nodes = (uint32_t *)data, tmp;
+	int i;
 	uint16_t req_geometry[BA_SYSTEM_DIMENSIONS];
 	
+	if(!bluegene_bp_node_cnt) {
+		fatal("select_g_alter_node_cnt: This can't be called "
+		      "before select_g_block_init");
+	}
+
 	switch (type) {
 	case SELECT_GET_NODE_SCALING:
 		if((*nodes) != INFINITE)
 			(*nodes) = bluegene_bp_node_cnt;
+		break;
+	case SELECT_SET_BP_CNT:
+		if(((*nodes) == INFINITE) || ((*nodes) == NO_VAL))
+			tmp = (*nodes);
+		else if((*nodes) > bluegene_bp_node_cnt) {
+			tmp = (*nodes);
+			tmp /= bluegene_bp_node_cnt;
+			if(tmp < 1) 
+				tmp = 1;
+		} else 
+			tmp = 1;
+		(*nodes) = tmp;
 		break;
 	case SELECT_APPLY_NODE_MIN_OFFSET:
 		if((*nodes) == 1) {
@@ -1151,15 +1244,15 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 		/* See if min_nodes is greater than one base partition */
 		if(job_desc->min_nodes > bluegene_bp_node_cnt) {
 			/*
-			  if it is make sure it is a factor of 
-			  bluegene_bp_node_cnt, if it isn't make it 
-			  that way 
-			*/
+			 * if it is make sure it is a factor of 
+			 * bluegene_bp_node_cnt, if it isn't make it 
+			 * that way 
+			 */
 			tmp = job_desc->min_nodes % bluegene_bp_node_cnt;
 			if(tmp > 0)
 				job_desc->min_nodes += 
 					(bluegene_bp_node_cnt-tmp);
-		}
+		}				
 		tmp = job_desc->min_nodes / bluegene_bp_node_cnt;
 		
 		/* this means it is greater or equal to one bp */
@@ -1233,5 +1326,20 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 		error("unknown option %d for alter_node_cnt",type);
 	}
 	
+	return SLURM_SUCCESS;
+}
+
+extern int select_p_reconfigure(void)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int select_p_step_begin(struct step_record *step_ptr)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int select_p_step_fini(struct step_record *step_ptr)
+{
 	return SLURM_SUCCESS;
 }

@@ -23,6 +23,7 @@ slurm_ctl_conf_to_hv(slurm_ctl_conf_t* conf, HV* hv)
 		STORE_FIELD(hv, conf, backup_addr, charp);
 	if(conf->backup_controller)
 		STORE_FIELD(hv, conf, backup_controller, charp);
+	STORE_FIELD(hv, conf, boot_time, time_t);
 	STORE_FIELD(hv, conf, cache_groups, uint16_t);
 	if(conf->checkpoint_type)
 		STORE_FIELD(hv, conf, checkpoint_type, charp);
@@ -30,21 +31,40 @@ slurm_ctl_conf_to_hv(slurm_ctl_conf_t* conf, HV* hv)
 		STORE_FIELD(hv, conf, control_addr, charp);
 	if(conf->control_machine)
 		STORE_FIELD(hv, conf, control_machine, charp);
+	if(conf->crypto_type)
+		STORE_FIELD(hv, conf, crypto_type, charp);
 	if(conf->epilog)
 		STORE_FIELD(hv, conf, epilog, charp);
 	STORE_FIELD(hv, conf, first_job_id, uint32_t);
 	STORE_FIELD(hv, conf, next_job_id, uint32_t);
 	STORE_FIELD(hv, conf, fast_schedule, uint16_t);
 	STORE_FIELD(hv, conf, inactive_limit, uint16_t);
-	if(conf->job_acct_logfile)
-		STORE_FIELD(hv, conf, job_acct_logfile, charp);
-	STORE_FIELD(hv, conf, job_acct_freq, uint16_t);
-	if(conf->job_acct_type)
-		STORE_FIELD(hv, conf, job_acct_type, charp);
-	if(conf->job_comp_type)
-		STORE_FIELD(hv, conf, job_comp_type, charp);
+	if(conf->job_acct_gather_type)
+		STORE_FIELD(hv, conf, job_acct_gather_type, charp);
+	STORE_FIELD(hv, conf, job_acct_gather_freq, uint16_t);
+	if(conf->accounting_storage_loc)
+		STORE_FIELD(hv, conf, accounting_storage_loc, charp);
+	if(conf->accounting_storage_type)
+		STORE_FIELD(hv, conf, accounting_storage_type, charp);
+	if(conf->accounting_storage_user)
+		STORE_FIELD(hv, conf, accounting_storage_user, charp);
+	if(conf->accounting_storage_host)
+		STORE_FIELD(hv, conf, accounting_storage_host, charp);
+	if(conf->accounting_storage_pass)
+		STORE_FIELD(hv, conf, accounting_storage_pass, charp);
+	STORE_FIELD(hv, conf, accounting_storage_port, uint32_t);
 	if(conf->job_comp_loc)
 		STORE_FIELD(hv, conf, job_comp_loc, charp);
+	if(conf->job_comp_type)
+		STORE_FIELD(hv, conf, job_comp_type, charp);
+	if(conf->job_comp_user)
+		STORE_FIELD(hv, conf, job_comp_user, charp);
+	if(conf->job_comp_host)
+		STORE_FIELD(hv, conf, job_comp_host, charp);
+	if(conf->job_comp_pass)
+		STORE_FIELD(hv, conf, job_comp_pass, charp);
+	STORE_FIELD(hv, conf, job_comp_port, uint32_t);
+	STORE_FIELD(hv, conf, job_file_append, uint16_t); 
 	STORE_FIELD(hv, conf, kill_wait, uint16_t);
 	if(conf->mail_prog)
 		STORE_FIELD(hv, conf, mail_prog, charp);
@@ -57,6 +77,7 @@ slurm_ctl_conf_to_hv(slurm_ctl_conf_t* conf, HV* hv)
 		STORE_FIELD(hv, conf, plugindir, charp);
 	if(conf->plugstack)
 		STORE_FIELD(hv, conf, plugstack, charp);
+	STORE_FIELD(hv, conf, private_data, uint16_t);
 	if(conf->proctrack_type)
 		STORE_FIELD(hv, conf, proctrack_type, charp);
 	if(conf->prolog)
@@ -67,6 +88,9 @@ slurm_ctl_conf_to_hv(slurm_ctl_conf_t* conf, HV* hv)
 	if(conf->propagate_rlimits_except)
 		STORE_FIELD(hv, conf, propagate_rlimits_except, charp);
 	STORE_FIELD(hv, conf, ret2service, uint16_t);
+	STORE_FIELD(hv, conf, resume_rate, uint16_t);
+	if(conf->resume_program)
+		STORE_FIELD(hv, conf, resume_program, charp);
 	if(conf->schedtype)
 		STORE_FIELD(hv, conf, schedtype, charp);
 	STORE_FIELD(hv, conf, schedport, uint16_t);
@@ -97,6 +121,14 @@ slurm_ctl_conf_to_hv(slurm_ctl_conf_t* conf, HV* hv)
 		STORE_FIELD(hv, conf, slurm_conf, charp);
 	if(conf->state_save_location)
 		STORE_FIELD(hv, conf, state_save_location, charp);
+	if(conf->suspend_exc_nodes)
+		STORE_FIELD(hv, conf, suspend_exc_nodes, charp);
+	if(conf->suspend_exc_parts)
+		STORE_FIELD(hv, conf, suspend_exc_parts, charp);
+	if(conf->suspend_program)
+		STORE_FIELD(hv, conf, suspend_program, charp);
+	STORE_FIELD(hv, conf, suspend_rate, uint16_t);
+	STORE_FIELD(hv, conf, suspend_time, uint16_t);
 	if(conf->switch_type)
 		STORE_FIELD(hv, conf, switch_type, charp);
 	if(conf->task_epilog)
@@ -121,6 +153,9 @@ slurm_ctl_conf_to_hv(slurm_ctl_conf_t* conf, HV* hv)
 		STORE_FIELD(hv, conf, node_prefix, charp);
 	STORE_FIELD(hv, conf, tree_width, uint16_t);
 	STORE_FIELD(hv, conf, use_pam, uint16_t);
+	if(conf->unkillable_program)
+		STORE_FIELD(hv, conf, unkillable_program, charp);
+	STORE_FIELD(hv, conf, unkillable_timeout, uint16_t);
 	return 0;
 }
 

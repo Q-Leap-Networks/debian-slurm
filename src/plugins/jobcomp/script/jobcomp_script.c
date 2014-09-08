@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  jobcomp_script.c - Script running slurm job completion logging plugin.
- *  $Id: jobcomp_script.c 11930 2007-08-03 05:40:18Z grondo $
+ *  $Id: jobcomp_script.c 14054 2008-05-14 17:06:31Z da $
  *****************************************************************************
  *  Produced at Center for High Performance Computing, North Dakota State
  *  University
  *  Written by Nathan Huff <nhuff@acm.org>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -98,7 +98,7 @@
  */
 const char plugin_name[]       	= "Job completion logging script plugin";
 const char plugin_type[]       	= "jobcomp/script";
-const uint32_t plugin_version	= 90;
+const uint32_t plugin_version	= 100;
 
 static char * script = NULL;
 static List comp_list = NULL;
@@ -145,8 +145,10 @@ static const char * _jobcomp_script_strerror (int errnum)
 struct jobcomp_info {
 	uint32_t jobid;
 	uint32_t uid;
+	uint32_t gid;
 	uint32_t limit;
 	uint32_t nprocs;
+	uint32_t nnodes;
 	uint16_t batch_flag;
 	time_t submit;
 	time_t start;
@@ -165,6 +167,7 @@ static struct jobcomp_info * _jobcomp_info_create (struct job_record *job)
 
 	j->jobid = job->job_id;
 	j->uid = job->user_id;
+	j->gid = job->group_id;
 	j->name = xstrdup (job->name);
 
 	/*
@@ -179,10 +182,11 @@ static struct jobcomp_info * _jobcomp_info_create (struct job_record *job)
 	j->limit = job->time_limit;
 	j->start = job->start_time;
 	j->end = job->end_time;
-	j->submit = job->details ? job->details->submit_time:job->start_time;;
+	j->submit = job->details ? job->details->submit_time:job->start_time;
 	j->batch_flag = job->batch_flag;
 	j->nodes = xstrdup (job->nodes);
-	j->nprocs = job->num_procs;
+	j->nprocs = job->total_procs;
+	j->nnodes = job->node_cnt;
 	j->account = job->account ? xstrdup (job->account) : NULL;
 
 	return (j);
@@ -287,10 +291,12 @@ static char ** _create_environment (struct jobcomp_info *job)
 
 	_env_append_fmt (&env, "JOBID", "%u",  job->jobid);
 	_env_append_fmt (&env, "UID",   "%u",  job->uid);
+	_env_append_fmt (&env, "GID",   "%u",  job->gid);
 	_env_append_fmt (&env, "START", "%lu", job->start);
 	_env_append_fmt (&env, "END",   "%lu", job->end);
 	_env_append_fmt (&env, "SUBMIT","%lu", job->submit);
 	_env_append_fmt (&env, "PROCS", "%u",  job->nprocs);
+	_env_append_fmt (&env, "NODECNT", "%u", job->nnodes);
 
 	_env_append (&env, "BATCH", (job->batch_flag ? "yes" : "no"));
 	_env_append (&env, "NODES",     job->nodes);
@@ -556,4 +562,27 @@ extern int fini ( void )
 	}
 
 	return rc;
+}
+
+/* 
+ * get info from the storage 
+ * in/out job_list List of job_rec_t *
+ * note List needs to be freed when called
+ */
+extern List slurm_jobcomp_get_jobs(List selected_steps,
+				   List selected_parts,
+				   void *params)
+{
+
+	info("This function is not implemented.");
+	return NULL;
+}
+
+/* 
+ * expire old info from the storage 
+ */
+extern void slurm_jobcomp_archive(List selected_parts, void *params)
+{
+	info("This function is not implemented.");
+	return;
 }

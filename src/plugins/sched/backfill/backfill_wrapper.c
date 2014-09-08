@@ -6,7 +6,7 @@
  *  Copyright (C) 2003 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jay Windley <jwindley@lnxi.com>, Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -137,6 +137,24 @@ slurm_sched_plugin_schedule( void )
 	return SLURM_SUCCESS;
 }
 
+/***************************************************************************/
+/*  TAG(                   slurm_sched_plugin_newalloc                   ) */
+/***************************************************************************/
+int
+slurm_sched_plugin_newalloc( struct job_record *job_ptr )
+{
+	return SLURM_SUCCESS;
+}
+
+/***************************************************************************/
+/*  TAG(                   slurm_sched_plugin_freealloc                  ) */
+/***************************************************************************/
+int
+slurm_sched_plugin_freealloc( struct job_record *job_ptr )
+{
+	return SLURM_SUCCESS;
+}
+
 
 /**************************************************************************/
 /* TAG(                   slurm_sched_plugin_initial_priority           ) */
@@ -183,3 +201,18 @@ char *slurm_sched_strerror( int errnum )
 	return NULL;
 }
 
+/**************************************************************************/
+/* TAG(              slurm_sched_plugin_requeue                         ) */
+/**************************************************************************/
+void slurm_sched_plugin_requeue( struct job_record *job_ptr, char *reason )
+{
+	/* Empty. */
+}
+
+/**************************************************************************/
+/* TAG(              slurm_sched_get_conf                               ) */
+/**************************************************************************/
+char *slurm_sched_get_conf( void )
+{
+	return NULL;
+}

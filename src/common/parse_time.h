@@ -5,7 +5,7 @@
  *  Copyright (C) 2005-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -16,7 +16,7 @@
  *  any later version.
  *
  *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
+ *  to link the code of portions of this program with the OpenSSL library under
  *  certain conditions as described in each individual source file, and 
  *  distribute linked combinations including the two. You must obey the GNU 
  *  General Public License in all respects for all of the code used other than 
@@ -38,6 +38,19 @@
 
 #ifndef _PARSE_TIME_H_
 #define _PARSE_TIME_H_
+
+#if HAVE_CONFIG_H
+#  include "config.h"
+#  if HAVE_INTTYPES_H
+#    include <inttypes.h>
+#  else
+#    if HAVE_STDINT_H
+#      include <stdint.h>
+#    endif
+#  endif                        /* HAVE_INTTYPES_H */
+#else                           /* !HAVE_CONFIG_H */
+#  include <inttypes.h>
+#endif
 
 #include <time.h>
 
@@ -62,8 +75,7 @@ extern time_t parse_time(char *time_str);
  * IN size - length of string buffer, we recommend a size of 32 bytes to
  *	easily support different site-specific formats
  */
-extern void
-slurm_make_time_str (time_t *time, char *string, int size);
+extern void slurm_make_time_str (time_t *time, char *string, int size); 
 
 /* Convert a string to an equivalent time value
  * input formats:
@@ -82,5 +94,6 @@ extern int time_str2mins(char *string);
  * fill in string with HH:MM:SS or D-HH:MM:SS
  */
 extern void secs2time_str(time_t time, char *string, int size);
+extern void mins2time_str(uint32_t time, char *string, int size);
 
 #endif

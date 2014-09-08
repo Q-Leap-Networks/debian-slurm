@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  log.c - slurm logging facilities
- *  $Id: log.c 12825 2007-12-14 21:23:57Z jette $
+ *  $Id: log.c 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  Much of this code was derived or adapted from the log.c component of 
  *  openssh which contains the following notices:

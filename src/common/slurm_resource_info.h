@@ -4,7 +4,7 @@
  *****************************************************************************
  *  Copyright (C) 2006 Hewlett-Packard Development Company, L.P.
  *  Written by Susanne M. Balle, <susanne.balle@hp.com>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -62,9 +62,7 @@ int slurm_get_avail_procs(const uint16_t mxsockets,
 			  uint16_t *sockets, 
 			  uint16_t *cores, 
 			  uint16_t *threads,
-			  const uint16_t alloc_sockets,
 			  const uint16_t *alloc_cores,
-			  const uint16_t alloc_lps,
 			  const select_type_plugin_info_t cr_type,
 			  uint32_t job_id, char *name);
 

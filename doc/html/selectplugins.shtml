@@ -25,7 +25,7 @@ This plugin is recommended for systems without shared nodes.</li>
 memory, etc. within nodes. This plugin is recommended for systems with 
 many non-parallel programs sharing nodes. For more information see
 <a href=cons_res.html>Consumable Resources in SLURM</a>.</li>
-<li><b>bluegene</b>&#151;<a href="http://www.research.ibm.com/bluegene">IBM Blue Gene</a>  
+<li><b>bluegene</b>&#151;<a href="http://www.research.ibm.com/bluegene/">IBM Blue Gene</a>  
 node selector. Note that this plugin not only selects the nodes for a job, but performs 
 some initialization and termination functions for the job.</li>
 </ul>
@@ -154,9 +154,10 @@ the plugin should return SLURM_ERROR.</p>
 <p class="commandline">int select_p_pack_node_info (time_t last_query_time, Buf *buffer_ptr);</p>
 <p style="margin-left:.2in"><b>Description</b>: pack node specific information into a buffer.</p>
 <p style="margin-left:.2in"><b>Arguments</b>:
-<span class="commandline"> last_query_time</span>&nbsp;&nbsp;&nbsp;(input) time that the data
-was last saved. If it has not changed since this time, return SLURM_NO_CHANGE_IN_DATA. <br>
-<span class="commandline"> buffer_ptre</span>&nbsp;&nbsp;&nbsp;(input/output) buffer into 
+<span class="commandline">
+last_query_time</span>&nbsp;&nbsp;&nbsp;(input) time that the data was
+last saved.<br>
+<span class="commandline"> buffer_ptr</span>&nbsp;&nbsp;&nbsp;(input/output) buffer into 
 which the node data is appended.</p>
 <p style="margin-left:.2in"><b>Returns</b>: SLURM_SUCCESS if successful, 
 SLURM_NO_CHANGE_IN_DATA if data has not changed since last packed, otherwise SLURM_ERROR</p>
@@ -265,6 +266,21 @@ identify the nodes which were selected for this job to use.</p>
 <p style="margin-left:.2in"><b>Returns</b>: SLURM_SUCCESS if successful. On
 failure, the plugin should return a SLURM error code.</p>
 
+<p class="commandline">int select_p_get_job_cores (uint32_t job_id, int
+alloc_index, int s);</p>
+<p style="margin-left:.2in"><b>Description</b>: Get socket-specific core
+information from a job.</p>
+<p style="margin-left:.2in"><b>Arguments</b>:
+<span class="commandline"> job_id</span>&nbsp; &nbsp;&nbsp;(input) ID of the job
+from which to obtain the data.<br>
+<span class="commandline"> alloc_index</span>&nbsp; &nbsp;&nbsp;(input) index of
+the allocated node to the job from which to obtain the data.<br>
+<span class="commandline"> s</span>&nbsp; &nbsp;&nbsp;(input) socket index from
+which to obtain the data.</p>
+<p style="margin-left:.2in"><b>Returns</b>: the number of cores allocated to the
+given socket on the given node for the given job. On failure, the plugin should
+return zero.</p>
+
 <p class="footer"><a href="#top">top</a></p>
 
 <h3>Get/set plugin information</h3>
@@ -338,7 +354,7 @@ state of the node.</p>
 <p class="commandline">int select_p_alter_node_cnt (enum
 select_node_cnt type, void *data);</p>
 <p style="margin-left:.2in"><b>Description</b>: Used for systems like
-a Bluegene system where slurm sees 1 node where many nodes really
+a Bluegene system where SLURM sees 1 node where many nodes really
 exists, in Bluegene's case 1 node reflects 512 nodes in real live, but
 since usually 512 is the smallest allocatable block slurm only handles
 it as 1 node.  This is a function so the user can issue a 'real'
@@ -351,6 +367,13 @@ telling the plug in what the user is really wanting.<br>
 Is a void * so depending on the type sent in argument 1 this should 
 adjust the variable returning what the user is asking for.</p>
 <p style="margin-left:.2in"><b>Returns</b>: SLURM_SUCCESS if successful, otherwise SLURM_ERROR</p>
+
+<p class="commandline">int select_p_reconfigure (void);</p>
+<p style="margin-left:.2in"><b>Description</b>: Used to notify plugin 
+of change in partition configuration or general configuration change.
+The plugin will test global variables for changes as appropriate.</p>
+<p style="margin-left:.2in"><b>Returns</b>: SLURM_SUCCESS if successful, otherwise SLURM_ERROR</p>
+
 <p class="footer"><a href="#top">top</a></p>
 
 <h2>Versioning</h2>
@@ -363,6 +386,6 @@ to maintain data format compatibility across different versions of the plugin.</
 
 <p class="footer"><a href="#top">top</a></p>
 
-<p style="text-align:center;">Last modified 12 October 2006</p>
+<p style="text-align:center;">Last modified 8 October 2007</p>
 
 <!--#include virtual="footer.txt"-->

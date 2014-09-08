@@ -14,10 +14,13 @@ select_bluegene_la_SOURCES = select_bluegene.c \
 				bg_job_place.c bg_job_place.h \
 				bg_job_run.c bg_job_run.h \
 				bg_block_info.c bg_block_info.h \
+				bg_record_functions.c bg_record_functions.h \
 				bluegene.c bluegene.h \
 				state_test.c state_test.h \
 				bg_switch_connections.c \
 				block_sys.c \
+				dynamic_block.c dynamic_block.h \
+				defined_block.c defined_block.h \
 				../wrap_rm_api.h
 
 select_bluegene_la_LDFLAGS = $(SO_LDFLAGS) $(PLUGIN_FLAGS)
@@ -32,12 +35,9 @@ libsched_if64_la_LDFLAGS = $(SO_LDFLAGS) $(PLUGIN_FLAGS)
 
 sbin_PROGRAMS = slurm_prolog slurm_epilog sfree
 
-sfree_LDADD = $(top_builddir)/src/common/libcommon.la \
-		$(top_builddir)/src/api/libslurm.la
-slurm_prolog_LDADD = $(top_builddir)/src/common/libcommon.la \
-		$(top_builddir)/src/api/libslurm.la
-slurm_epilog_LDADD =  $(top_builddir)/src/common/libcommon.la \
-		$(top_builddir)/src/api/libslurm.la
+sfree_LDADD = $(top_builddir)/src/api/libslurmhelper.la
+slurm_prolog_LDADD = $(top_builddir)/src/api/libslurmhelper.la
+slurm_epilog_LDADD = $(top_builddir)/src/api/libslurmhelper.la
 sfree_SOURCES = sfree.c sfree.h opts.c \
 		../block_allocator/bridge_linker.c \
 		../block_allocator/bridge_linker.h 

@@ -1,12 +1,12 @@
 /****************************************************************************\
  *  sinfo.h - definitions used for sinfo data functions
  *
- *  $Id: sinfo.h 10732 2007-01-10 18:39:14Z da $
+ *  $Id: sinfo.h 13672 2008-03-19 23:10:58Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>, Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -105,7 +105,7 @@ typedef struct {
 	hostlist_t ionodes;
 #endif
 	/* part_info contains partition, avail, max_time, job_size, 
-	 * root, share, groups */
+	 * root, share, groups, priority */
 	partition_info_t* part_info;
 	uint16_t part_inx;
 } sinfo_data_t;
@@ -126,6 +126,7 @@ struct sinfo_match_flags {
 	bool max_time_flag;
 	bool memory_flag;
 	bool partition_flag;
+	bool priority_flag;
 	bool reason_flag;
 	bool root_flag;
 	bool share_flag;

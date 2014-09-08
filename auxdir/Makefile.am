@@ -1,5 +1,5 @@
 ##****************************************************************************
-## $Id: Makefile.am 7550 2006-03-21 00:16:26Z jette $
+## $Id: Makefile.am 14089 2008-05-20 21:17:09Z da $
 ##****************************************************************************
 ## Process this file with automake to produce Makefile.in.
 ##****************************************************************************
@@ -12,6 +12,7 @@ EXTRA_DIST = \
     x_ac_affinity.m4 \
     x_ac_aix.m4 \
     x_ac_bluegene.m4 \
+    x_ac_cflags.m4 \
     x_ac_debug.m4 \
     x_ac_elan.m4 \
     x_ac_federation.m4 \

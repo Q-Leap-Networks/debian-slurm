@@ -4,7 +4,7 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -50,10 +50,16 @@ static char *	_get_node_state(struct node_record *node_ptr);
  * RET 0 on success, -1 on failure
  *
  * Response format
- * ARG=<cnt>#<NODEID>:STATE=<state>;
- *                    FEATURE=<feature:feature>;
- *                    CMEMORY=<mb>;CDISK=<mb>;CPROC=<cpus>;
- *         [#<NODEID>:...];
+ * Response format
+ * ARG=<cnt>#<NODEID>:
+ *	STATE=<state>;		 Moab equivalent node state
+ *	[ARCH=<architecture>;]	 Computer architecture
+ *	[OS=<operating_system>;] Operating system
+ *	CMEMORY=<MB>;		 MB of memory on node
+ *	CDISK=<MB>;		 MB of disk space on node
+ *	CPROCS=<cpus>;		 CPU count on node
+ *	[FEATURE=<feature>;]	 Features associated with node, if any
+ *  [#<NODEID>:...];
  */
 extern int	get_nodes(char *cmd_ptr, int *err_code, char **err_msg)
 {
@@ -84,12 +90,17 @@ extern int	get_nodes(char *cmd_ptr, int *err_code, char **err_msg)
 		/* report all nodes */
 		buf = _dump_all_nodes(&node_rec_cnt, update_time);
 	} else {
-		struct node_record *node_ptr;
-		char *node_name, *tmp2_char;
+		struct node_record *node_ptr = NULL;
+		char *node_name = NULL, *tmp2_char = NULL;
 
 		node_name = strtok_r(tmp_char, ":", &tmp2_char);
 		while (node_name) {
 			node_ptr = find_node_record(node_name);
+			if (node_ptr == NULL) {
+				error("sched/wiki2: bad hostname %s",
+				      node_name);
+				continue;
+			}
 			tmp_buf = _dump_node(node_ptr, update_time);
 			if (node_rec_cnt > 0)
 				xstrcat(buf, "#");
@@ -105,7 +116,10 @@ extern int	get_nodes(char *cmd_ptr, int *err_code, char **err_msg)
 	if (buf)
 		buf_size = strlen(buf);
 	tmp_buf = xmalloc(buf_size + 32);
-	sprintf(tmp_buf, "SC=0 ARG=%d#%s", node_rec_cnt, buf);
+	if (node_rec_cnt)
+		sprintf(tmp_buf, "SC=0 ARG=%d#%s", node_rec_cnt, buf);
+	else
+		sprintf(tmp_buf, "SC=0 ARG=0#");
 	xfree(buf);
 	*err_code = 0;
 	*err_msg = tmp_buf;
@@ -144,7 +158,30 @@ static char *	_dump_node(struct node_record *node_ptr, time_t update_time)
 		node_ptr->name, 
 		_get_node_state(node_ptr));
 	xstrcat(buf, tmp);
-	
+
+	if (node_ptr->arch) {
+		snprintf(tmp, sizeof(tmp), "ARCH=%s;", node_ptr->arch);
+		xstrcat(buf, tmp);
+	}
+
+	if (node_ptr->os) {
+		snprintf(tmp, sizeof(tmp), "OS=%s;", node_ptr->os);
+		xstrcat(buf, tmp);
+	}
+
+	if (node_ptr->config_ptr
+	&&  node_ptr->config_ptr->feature) {
+		snprintf(tmp, sizeof(tmp), "FEATURES=%s;",
+			node_ptr->config_ptr->feature);
+		/* comma separated to colon */
+		for (i=0; (tmp[i] != '\0'); i++) {
+			if ((tmp[i] == ',')
+			||  (tmp[i] == '|'))
+				tmp[i] = ':';
+		}
+		xstrcat(buf, tmp);
+	}
+
 	if (update_time > 0)
 		return buf;
 
@@ -165,19 +202,6 @@ static char *	_dump_node(struct node_record *node_ptr, time_t update_time)
 	}
 	xstrcat(buf, tmp);
 
-	if (node_ptr->config_ptr
-	&&  node_ptr->config_ptr->feature) {
-		snprintf(tmp, sizeof(tmp), "FEATURES=%s;",
-			node_ptr->config_ptr->feature);
-		/* comma separated to colon */
-		for (i=0; (tmp[i] != '\0'); i++) {
-			if ((tmp[i] == ',')
-			||  (tmp[i] == '|'))
-				tmp[i] = ':';
-		}
-		xstrcat(buf, tmp);
-	}
-
 	return buf;
 }
 
@@ -186,7 +210,8 @@ static char *	_get_node_state(struct node_record *node_ptr)
 	uint16_t state = node_ptr->node_state;
 	uint16_t base_state = state & NODE_STATE_BASE;
 
-	if (state & NODE_STATE_DRAIN)
+	if ((state & NODE_STATE_DRAIN)
+	||  (state & NODE_STATE_FAIL))
 		return "Draining";
 	if (state & NODE_STATE_COMPLETING)
 		return "Busy";

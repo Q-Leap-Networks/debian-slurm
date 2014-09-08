@@ -6,7 +6,7 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
- *  UCRL-CODE-226842. 
+ *  LLNL-CODE-402394. 
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -87,7 +87,6 @@ enum {
 	SORTID_LINUXIMAGE,
 #endif
 	SORTID_MAX_CORES,
-	SORTID_MAX_MEM,
 	SORTID_MAX_NODES,
 	SORTID_MAX_SOCKETS,
 #ifdef HAVE_BG
@@ -263,8 +262,6 @@ static display_data_t display_data_job[] = {
 	 FALSE, EDIT_NONE, refresh_job, create_model_job, admin_edit_job},
 	{G_TYPE_STRING, SORTID_MIN_MEM, "Min Memory", 
 	 FALSE, EDIT_TEXTBOX, refresh_job, create_model_job, admin_edit_job},
-	{G_TYPE_STRING, SORTID_MAX_MEM, "Max Memory", 
-	 FALSE, EDIT_NONE, refresh_job, create_model_job, admin_edit_job},
 	{G_TYPE_STRING, SORTID_TMP_DISK, "Tmp Disk", 
 	 FALSE, EDIT_TEXTBOX, refresh_job, create_model_job, admin_edit_job},
 	{G_TYPE_STRING, SORTID_NICE, "Nice", 
@@ -696,12 +693,8 @@ static const char *_set_job_msg(job_desc_msg_t *job_msg, const char *new_text,
 		type = "account";
 		break;
 	case SORTID_DEPENDENCY:
-		temp_int = strtol(new_text, (char **)NULL, 10);
-		
+		job_msg->dependency = xstrdup(new_text);	
 		type = "dependency";
-		if(temp_int <= 0)
-			goto return_error;
-		job_msg->dependency = (uint32_t)temp_int;
 		break;
 #ifdef HAVE_BG
 	case SORTID_GEOMETRY:
@@ -1396,14 +1389,10 @@ static void _layout_job_record(GtkTreeView *treeview,
 						 SORTID_FEATURES),
 				   job_ptr->features);
 	
-	if(job_ptr->dependency > 0) 
-		sprintf(tmp_char, "%u", job_ptr->dependency);
-	else 
-		sprintf(tmp_char, " ");
 	add_display_treestore_line(update, treestore, &iter, 
 				   find_col_name(display_data_job,
 						 SORTID_DEPENDENCY),
-				   tmp_char);
+				   job_ptr->dependency);
 	
 	add_display_treestore_line(update, treestore, &iter, 
 				   find_col_name(display_data_job,
@@ -1679,21 +1668,16 @@ static void _update_job_record(sview_job_info_t *sview_job_info_ptr,
 	gtk_tree_store_set(treestore, iter,
 			   SORTID_MIN_MEM, tmp_char, -1);
 
-	sprintf(tmp_char, "%u", job_ptr->job_max_memory);
-	gtk_tree_store_set(treestore, iter,
-			   SORTID_MAX_MEM, tmp_char, -1);
-	
 	sprintf(tmp_char, "%u", job_ptr->job_min_tmp_disk);
 	gtk_tree_store_set(treestore, iter,
 			   SORTID_TMP_DISK, tmp_char, -1);
 
 	gtk_tree_store_set(treestore, iter,
 			   SORTID_ACCOUNT, job_ptr->account, -1);
-	if(job_ptr->dependency > 0) {
-		sprintf(tmp_char, "%u", job_ptr->dependency);
-		gtk_tree_store_set(treestore, iter,
-				   SORTID_DEPENDENCY, tmp_char, -1);
-	}
+
+	gtk_tree_store_set(treestore, iter,
+			   SORTID_DEPENDENCY, job_ptr->dependency, -1);
+
 	sprintf(tmp_char, "%u", job_ptr->priority);
 	gtk_tree_store_set(treestore, iter,
 			   SORTID_PRIORITY, tmp_char, -1);
@@ -2151,6 +2135,7 @@ static List _create_job_info_list(job_info_msg_t *job_info_ptr,
 		count = 0;
 		while(job_ptr->node_inx[count] != -1)
 			count++;
+		count++; // for the -1;
 #endif
 	
 		for(j = 0; j < step_info_ptr->job_step_count; j++) {
@@ -2214,6 +2199,7 @@ void _display_info_job(List info_list, popup_info_t *popup_win)
 	}
 	if(!list_count(popup_win->grid_button_list)) 
 		first_time = 1;
+
 need_refresh:
 	if(!spec_info->display_widget) {
 		treeview = create_treeview_2cols_attach_to_table(

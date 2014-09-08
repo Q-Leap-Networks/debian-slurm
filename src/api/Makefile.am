@@ -59,6 +59,7 @@ noinst_LTLIBRARIES = libslurmhelper.la
 
 slurmapi_src =           \
 	allocate.c       \
+	allocate_msg.c   \
 	cancel.c         \
 	checkpoint.c     \
 	complete.c       \
@@ -104,6 +105,11 @@ libslurm_la_LDFLAGS        = \
         -version-info $(current):$(rev):$(age) \
         $(OTHER_FLAGS)
 
+#
+# The libpmi_la_LIBADD specification below causes libpmi.la to relink
+# when running "make install", but removing it prevents essential slurm
+# symbols from being available in programs linking with libpmi
+#
 libpmi_la_SOURCES = pmi.c
 libpmi_la_LIBADD = $(top_builddir)/src/api/libslurm.la
 libpmi_la_LDFLAGS = $(LIB_LDFLAGS) \

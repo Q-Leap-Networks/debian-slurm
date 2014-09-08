@@ -4,7 +4,7 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -36,30 +36,40 @@
 \*****************************************************************************/
 
 #include "./msg.h"
+#include "src/common/hostlist.h"
 #include "src/slurmctld/locks.h"
 #include "src/slurmctld/slurmctld.h"
 
 static char *	_dump_all_nodes(int *node_cnt, time_t update_time);
-static char *	_dump_node(struct node_record *node_ptr, time_t update_time);
+static char *	_dump_node(struct node_record *node_ptr, hostlist_t hl, 
+			   time_t update_time);
 static char *	_get_node_state(struct node_record *node_ptr);
+static int	_same_info(struct node_record *node1_ptr, 
+			   struct node_record *node2_ptr, time_t update_time);
+static int	_str_cmp(char *s1, char *s2);
 
 /*
  * get_nodes - get information on specific node(s) changed since some time
- * cmd_ptr IN - CMD=GETNODES ARG=[<UPDATETIME>:<NODEID>[:<NODEID>]...]
+ * cmd_ptr IN   - CMD=GETNODES ARG=[<UPDATETIME>:<NODEID>[:<NODEID>]...]
  *                               [<UPDATETIME>:ALL]
+ * err_code OUT - 0 or an error code
+ * err_msg OUT  - response message
+ * NOTE: xfree() err_msg if err_code is zero
  * RET 0 on success, -1 on failure
  *
  * Response format
  * ARG=<cnt>#<NODEID>:
- *	STATE=<state>;		Moab equivalent node state
- *	CCLASS=<[part:cpus]>;	SLURM partition with CPU count of node,
- *				make have more than one partition
- *	CMEMORY=<MB>;		MB of memory on node
- *	CDISK=<MB>;		MB of disk space on node
- *	CPROCS=<cpus>;		CPU count on node
- *	[FEATURE=<feature>;]	features associated with node, if any,
- *	[CAT=<reason>];		Reason for a node being down or drained
- *				colon separator
+ *	STATE=<state>;		 Moab equivalent node state
+ *	[CAT=<reason>];		 Reason for a node being down or drained
+ *				 colon separator
+ *	CCLASS=<[part:cpus]>;	 SLURM partition with CPU count of node,
+ *				 make have more than one partition
+ *	[ARCH=<architecture>;]	 Computer architecture
+ *	[OS=<operating_system>;] Operating system
+ *	CMEMORY=<MB>;		 MB of memory on node
+ *	CDISK=<MB>;		 MB of disk space on node
+ *	CPROCS=<cpus>;		 CPU count on node
+ *	[FEATURE=<feature>;]	 Features associated with node, if any
  *  [#<NODEID>:...];
  */
 extern int	get_nodes(char *cmd_ptr, int *err_code, char **err_msg)
@@ -92,19 +102,31 @@ extern int	get_nodes(char *cmd_ptr, int *err_code, char **err_msg)
 		buf = _dump_all_nodes(&node_rec_cnt, update_time);
 	} else {
 		struct node_record *node_ptr = NULL;
-		char *node_name = NULL, *tmp2_char = NULL;
+		char *node_name, *slurm_hosts;
+		int node_cnt;
+		hostset_t slurm_hostset;
 
-		node_name = strtok_r(tmp_char, ":", &tmp2_char);
-		while (node_name) {
-			node_ptr = find_node_record(node_name);
-			tmp_buf = _dump_node(node_ptr, update_time);
-			if (node_rec_cnt > 0)
-				xstrcat(buf, "#");
-			xstrcat(buf, tmp_buf);
-			xfree(tmp_buf);
-			node_rec_cnt++;
-			node_name = strtok_r(NULL, ":", &tmp2_char);
+		slurm_hosts = moab2slurm_task_list(tmp_char, &node_cnt);
+		if ((slurm_hostset = hostset_create(slurm_hosts))) {
+			while ((node_name = hostset_shift(slurm_hostset))) {
+				node_ptr = find_node_record(node_name);
+				if (node_ptr == NULL) {
+					error("sched/wiki2: bad hostname %s", 
+					      node_name);
+					continue;
+				}
+				tmp_buf = _dump_node(node_ptr, NULL, update_time);
+				if (node_rec_cnt > 0)
+					xstrcat(buf, "#");
+				xstrcat(buf, tmp_buf);
+				xfree(tmp_buf);
+				node_rec_cnt++;
+			}
+			hostset_destroy(slurm_hostset);
+		} else {
+			error("hostset_create(%s): %m", slurm_hosts);
 		}
+		xfree(slurm_hosts);
 	}
 	unlock_slurmctld(node_read_lock);
 
@@ -112,7 +134,10 @@ extern int	get_nodes(char *cmd_ptr, int *err_code, char **err_msg)
 	if (buf)
 		buf_size = strlen(buf);
 	tmp_buf = xmalloc(buf_size + 32);
-	sprintf(tmp_buf, "SC=0 ARG=%d#%s", node_rec_cnt, buf);
+	if (node_rec_cnt)
+		sprintf(tmp_buf, "SC=0 ARG=%d#%s", node_rec_cnt, buf);
+	else
+		sprintf(tmp_buf, "SC=0 ARG=0#");
 	xfree(buf);
 	*err_code = 0;
 	*err_msg = tmp_buf;
@@ -121,36 +146,143 @@ extern int	get_nodes(char *cmd_ptr, int *err_code, char **err_msg)
 
 static char *	_dump_all_nodes(int *node_cnt, time_t update_time)
 {
-	int i, cnt = 0;
+	int i, cnt = 0, rc;
 	struct node_record *node_ptr = node_record_table_ptr;
 	char *tmp_buf = NULL, *buf = NULL;
-
+	struct node_record *uniq_node_ptr = NULL;
+	hostlist_t hl = NULL;
+	
 	for (i=0; i<node_record_count; i++, node_ptr++) {
 		if (node_ptr->name == NULL)
 			continue;
-		tmp_buf = _dump_node(node_ptr, update_time);
+		if (use_host_exp == 2) {
+			rc = _same_info(uniq_node_ptr, node_ptr, update_time);
+			if (rc == 0) {
+				uniq_node_ptr = node_ptr;
+				if (hl) {
+					hostlist_push(hl, node_ptr->name);
+				} else {
+					hl = hostlist_create(node_ptr->name);
+					if (hl == NULL)
+						fatal("malloc failure");
+				}
+				continue;
+			} else {
+				tmp_buf = _dump_node(uniq_node_ptr, hl, 
+						     update_time);
+				hostlist_destroy(hl);
+				hl = hostlist_create(node_ptr->name);
+				if (hl == NULL)
+					fatal("malloc failure");
+				uniq_node_ptr = node_ptr;
+			}
+		} else {
+			tmp_buf = _dump_node(node_ptr, hl, update_time);
+		}
 		if (cnt > 0)
 			xstrcat(buf, "#");
 		xstrcat(buf, tmp_buf);
 		xfree(tmp_buf);
 		cnt++;
 	}
+
+	if (hl) {
+		tmp_buf = _dump_node(uniq_node_ptr, hl, update_time);
+		hostlist_destroy(hl);
+		if (cnt > 0)
+			xstrcat(buf, "#");
+		xstrcat(buf, tmp_buf);
+		xfree(tmp_buf);
+		cnt++;
+	}
+
 	*node_cnt = cnt;
 	return buf;
 }
 
-static char *	_dump_node(struct node_record *node_ptr, time_t update_time)
+/* Determine if node1 and node2 have the same parameters that we report to Moab
+ * RET 0 of node1 is NULL or their parameters are the same
+ *     >0 otherwise
+ */
+static int	_same_info(struct node_record *node1_ptr, 
+			   struct node_record *node2_ptr, time_t update_time)
 {
-	char tmp[512], *buf = NULL;
+	int i;
+
+	if (node1_ptr == NULL)	/* first record, treat as a match */
+		return 0;
+
+	if (node1_ptr->node_state != node2_ptr->node_state)
+		return 1;
+	if (_str_cmp(node1_ptr->reason, node2_ptr->reason))
+		return 2;
+	if (update_time > last_node_update)
+		return 0;
+
+	if (slurmctld_conf.fast_schedule) {
+		/* config from slurm.conf */
+		if (node1_ptr->config_ptr->cpus != node2_ptr->config_ptr->cpus)
+			return 3;
+	} else {
+		/* config as reported by slurmd */
+		if (node1_ptr->cpus != node2_ptr->cpus)
+			return 4;
+	}
+	if (node1_ptr->part_cnt != node2_ptr->part_cnt)
+		return 5;
+	for (i=0; i<node1_ptr->part_cnt; i++) {
+		if (node1_ptr->part_pptr[i] !=  node2_ptr->part_pptr[i])
+			return 6;
+	}
+	if (_str_cmp(node1_ptr->arch, node2_ptr->arch))
+		return 7;
+	if (_str_cmp(node1_ptr->os, node2_ptr->os))
+		return 8;
+	if (update_time > 0)
+		return 0;
+
+	if (slurmctld_conf.fast_schedule) {
+		/* config from slurm.conf */
+		if ((node1_ptr->config_ptr->real_memory != 
+		     node2_ptr->config_ptr->real_memory) ||
+		    (node1_ptr->config_ptr->tmp_disk != 
+		     node2_ptr->config_ptr->tmp_disk) ||
+		    (node1_ptr->config_ptr->cpus != 
+		     node2_ptr->config_ptr->cpus))
+			return 9;
+	} else {
+		if ((node1_ptr->real_memory != node2_ptr->real_memory) ||
+		    (node1_ptr->tmp_disk    != node2_ptr->tmp_disk) ||
+		    (node1_ptr->cpus        != node2_ptr->cpus))
+			return 10;
+	}
+	if (_str_cmp(node1_ptr->config_ptr->feature, 
+		     node2_ptr->config_ptr->feature))
+		return 11;
+	return 0;
+}
+
+static char *	_dump_node(struct node_record *node_ptr, hostlist_t hl, 
+			   time_t update_time)
+{
+	char tmp[16*1024], *buf = NULL;
 	int i;
 	uint32_t cpu_cnt;
 
 	if (!node_ptr)
 		return NULL;
 
-	snprintf(tmp, sizeof(tmp), "%s:STATE=%s;",
-		node_ptr->name, 
-		_get_node_state(node_ptr));
+	if (hl) {
+		hostlist_sort(hl);
+		hostlist_uniq(hl);
+		hostlist_ranged_string(hl, sizeof(tmp), tmp);
+		 xstrcat(buf, tmp);
+	} else {
+		snprintf(tmp, sizeof(tmp), "%s", node_ptr->name);
+		xstrcat(buf, tmp);
+	}
+
+	snprintf(tmp, sizeof(tmp), ":STATE=%s;", _get_node_state(node_ptr));
 	xstrcat(buf, tmp);
 	if (node_ptr->reason) {
 		snprintf(tmp, sizeof(tmp), "CAT=\"%s\";", node_ptr->reason);
@@ -178,6 +310,28 @@ static char *	_dump_node(struct node_record *node_ptr, time_t update_time)
 	if (i > 0)
 		xstrcat(buf, ";");
 
+	if (node_ptr->arch) {
+		snprintf(tmp, sizeof(tmp), "ARCH=%s;", node_ptr->arch);
+		xstrcat(buf, tmp);
+	}
+
+	if (node_ptr->os) {
+		snprintf(tmp, sizeof(tmp), "OS=%s;", node_ptr->os);
+		xstrcat(buf, tmp);
+	}
+
+	if (node_ptr->config_ptr
+	&&  node_ptr->config_ptr->feature) {
+		snprintf(tmp, sizeof(tmp), "FEATURE=%s;",
+			node_ptr->config_ptr->feature);
+		/* comma separator to colon */
+		for (i=0; (tmp[i] != '\0'); i++) {
+			if (tmp[i] == ',')
+				tmp[i] = ':';
+		}
+		xstrcat(buf, tmp);
+	}
+
 	if (update_time > 0)
 		return buf;
 
@@ -198,18 +352,6 @@ static char *	_dump_node(struct node_record *node_ptr, time_t update_time)
 	}
 	xstrcat(buf, tmp);
 
-	if (node_ptr->config_ptr
-	&&  node_ptr->config_ptr->feature) {
-		snprintf(tmp, sizeof(tmp), "FEATURE=%s;",
-			node_ptr->config_ptr->feature);
-		/* comma separator to colon */
-		for (i=0; (tmp[i] != '\0'); i++) {
-			if (tmp[i] == ',')
-				tmp[i] = ':';
-		}
-		xstrcat(buf, tmp);
-	}
-
 	return buf;
 }
 
@@ -218,7 +360,8 @@ static char *	_get_node_state(struct node_record *node_ptr)
 	uint16_t state = node_ptr->node_state;
 	uint16_t base_state = state & NODE_STATE_BASE;
 
-	if (state & NODE_STATE_DRAIN)
+	if ((state & NODE_STATE_DRAIN)
+	||  (state & NODE_STATE_FAIL))
 		return "Draining";
 	if (state & NODE_STATE_COMPLETING)
 		return "Busy";
@@ -231,4 +374,17 @@ static char *	_get_node_state(struct node_record *node_ptr)
 		return "Idle";
 	
 	return "Unknown";
+}
+
+/* Like strcmp(), but can handle NULL pointers */
+static int	_str_cmp(char *s1, char *s2)
+{
+	if (s1 && s2)
+		return strcmp(s1, s2);
+
+	if ((s1 == NULL) && (s2 == NULL))
+		return 0;
+
+	/* One pointer is valid and the other is NULL */
+	return 1;
 }

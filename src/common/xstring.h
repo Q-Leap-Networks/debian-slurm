@@ -5,7 +5,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jim Garlick <garlick@llnl.gov>, et. al.
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -97,6 +97,11 @@ void _xmemcat(char **str, char *start, char *end);
 ** strdup which uses xmalloc routines
 */
 char *xstrdup(const char *str);
+
+/*
+** strdup formatted which uses xmalloc routines
+*/
+char *xstrdup_printf(const char *fmt, ...);
 
 /*
 ** strndup which uses xmalloc routines

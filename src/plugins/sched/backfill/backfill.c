@@ -14,10 +14,11 @@
  *  "lx[06-08]", we can't start it without possibly delaying the higher 
  *  priority job.
  *****************************************************************************
- *  Copyright (C) 2003-2006 The Regents of the University of California.
+ *  Copyright (C) 2003-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-226842.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -59,93 +60,82 @@
 #include "slurm/slurm_errno.h"
 #include "src/common/list.h"
 #include "src/common/macros.h"
+#include "src/common/node_select.h"
+#include "src/common/parse_time.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
+#include "src/slurmctld/job_scheduler.h"
+#include "src/slurmctld/licenses.h"
 #include "src/slurmctld/locks.h"
+#include "src/slurmctld/node_scheduler.h"
 #include "src/slurmctld/slurmctld.h"
-
-typedef struct part_specs {
-	uint32_t idle_node_cnt;
-	uint32_t max_cpus;
-	uint32_t min_cpus;
-	uint32_t min_mem;
-	uint32_t min_disk;
-} part_specs_t;
+#include "src/slurmctld/srun_comm.h"
 
 typedef struct node_space_map {
-	uint32_t idle_node_cnt;
-	time_t time;
+	time_t begin_time;
+	time_t end_time;
+	bitstr_t *avail_bitmap;
+	int next;	/* next record, by time, zero termination */
 } node_space_map_t;
+int backfilled_jobs = 0;
 
 /*********************** local variables *********************/
-static bool altered_job   = false;
 static bool new_work      = false;
 static bool stop_backfill = false;
 static pthread_mutex_t thread_flag_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-static List pend_job_list = NULL;
-static List run_job_list  = NULL;
-
-#define MAX_JOB_CNT 100
-static int node_space_recs;
-static node_space_map_t node_space[MAX_JOB_CNT + 1];
+/* Backfill scheduling has considerable overhead, 
+ * so only attempt it every BACKFILL_INTERVAL seconds */
+#ifndef BACKFILL_INTERVAL
+#  define BACKFILL_INTERVAL	10
+#endif
 
 /* Set __DEBUG to get detailed logging for this thread without 
  * detailed logging for the entire slurmctld daemon */
-#define __DEBUG        0
-#define SLEEP_TIME     1
+#define __DEBUG			0
+
+/* Do not attempt to build job/resource/time record for
+ * more than MAX_BACKFILL_JOB_CNT records */
+#define MAX_BACKFILL_JOB_CNT	100
+
+/* Do not build job/resource/time record for more than this 
+ * far in the future, in seconds, currently one day */
+#define BACKFILL_WINDOW		(24 * 60 * 60)
 
 /*********************** local functions *********************/
-static int  _add_pending_job(struct job_record *job_ptr, 
-		struct part_record *part_ptr, part_specs_t *part_specs);
-static int  _add_running_job(struct job_record *job_ptr);
-static void _attempt_backfill(struct part_record *part_ptr);
-static void _backfill_part(part_specs_t *part_specs);
-static void _build_node_space_map(part_specs_t *part_specs);
-static void _change_prio(struct job_record *job_ptr, uint32_t prio);
+static void _add_reservation(uint32_t start_time, uint32_t end_reserve, 
+			     bitstr_t *res_bitmap, 
+			     node_space_map_t *node_space, 
+			     int *node_space_recs);
+static void _attempt_backfill(void);
 static void _diff_tv_str(struct timeval *tv1,struct timeval *tv2,
 		char *tv_str, int len_tv_str);
-static void _dump_node_space_map(uint32_t job_id, uint32_t node_cnt);
-static int  _get_avail_node_cnt(struct job_record *job_ptr); 
-static void _get_part_specs(struct part_record *part_ptr, 
-		part_specs_t *part_specs);
-static bool _has_state_changed(void);
-static bool _loc_restrict(struct job_record *job_ptr, part_specs_t *part_specs);
 static bool _more_work(void);
-static int  _sort_by_prio(void *x, void *y);
-static int  _sort_by_end(void *x, void *y);
-static int  _update_node_space_map(struct job_record *job_ptr);
+static int _start_job(struct job_record *job_ptr, bitstr_t *avail_bitmap);
 
-/* list processing function, sort jobs by _decreasing_ priority */
-static int _sort_by_prio(void *x, void *y)
+#if __DEBUG
+/* Log resource allocate table */
+static void _dump_node_space_table(node_space_map_t *node_space_ptr)
 {
-	struct job_record *job_ptr1 = (struct job_record *) x;
-	struct job_record *job_ptr2 = (struct job_record *) y;
-	double diff = job_ptr2->priority - job_ptr1->priority;
+	int i = 0;
+	char begin_buf[32], end_buf[32], *node_list;
 
-	if (diff > 0)
-		return 1;
-	else if (diff < 0)
-		return -1;
-	else
-		return 0;
+	info("=========================================");
+	while (1) {
+		slurm_make_time_str(&node_space_ptr[i].begin_time,
+				    begin_buf, sizeof(begin_buf));
+		slurm_make_time_str(&node_space_ptr[i].end_time,
+				    end_buf, sizeof(end_buf));
+		node_list = bitmap2node_name(node_space_ptr[i].avail_bitmap);
+		info("Begin:%s End:%s Nodes:%s", begin_buf, end_buf, node_list);
+		xfree(node_list);
+		if ((i = node_space_ptr[i].next) == 0)
+			break;
+	}
+	info("=========================================");
 }
-
-/* list processing function, sort jobs by _increasing_ end time */
-static int _sort_by_end(void *x, void *y)
-{
-	struct job_record *job_ptr1 = (struct job_record *) x;
-	struct job_record *job_ptr2 = (struct job_record *) y;
-	double diff = difftime(job_ptr1->end_time, job_ptr2->end_time);
-
-	if (diff > 0)
-		return 1;
-	else if (diff < 0)
-		return -1;
-	else
-		return 0;
-}
+#endif
 
 /*
  * _diff_tv_str - build a string showing the time difference between two times
@@ -171,512 +161,346 @@ extern void stop_backfill_agent(void)
 
 
 /* backfill_agent - detached thread periodically attempts to backfill jobs */
-extern void *
-backfill_agent(void *args)
+extern void *backfill_agent(void *args)
 {
 	struct timeval tv1, tv2;
 	char tv_str[20];
-	bool filter_root = false;
-	/* Read config, node, and partitions; Write jobs */
+	time_t now;
+	static time_t last_backfill_time = 0;
+	/* Read config, and partitions; Write jobs and nodes */
 	slurmctld_lock_t all_locks = {
-		READ_LOCK, WRITE_LOCK, READ_LOCK, READ_LOCK };
+		READ_LOCK, WRITE_LOCK, WRITE_LOCK, READ_LOCK };
 
-	if (slurm_get_root_filter())
-		filter_root = true;
 	while (!stop_backfill) {
-		sleep(SLEEP_TIME);      /* don't run continuously */
-		if ((!_more_work()) || stop_backfill)
+		sleep(2);		/* don't run continuously */
+
+		now = time(NULL);
+		/* Avoid resource fragmentation if important */
+		if (switch_no_frag() && job_is_completing())
 			continue;
+		if ((difftime(now, last_backfill_time) < BACKFILL_INTERVAL) ||
+		    stop_backfill || (!_more_work()))
+			continue;
+		last_backfill_time = now;
 
 		gettimeofday(&tv1, NULL);
 		lock_slurmctld(all_locks);
-		if ( _has_state_changed() ) {
-			ListIterator part_iterator;
-			struct part_record *part_ptr;
-
-			/* identify partitions eligible for backfill */
-			part_iterator = list_iterator_create(part_list);
-			while ((part_ptr = (struct part_record *) 
-						list_next(part_iterator))) {
-				if ( ((part_ptr->shared)       ||
-				      (part_ptr->state_up == 0)) )
-				 	continue; /* not under our control */
-				if ((part_ptr->root_only) && filter_root)
-					continue;
-				_attempt_backfill(part_ptr);
-			}
-			list_iterator_destroy(part_iterator);
-		}
+		_attempt_backfill();
 		unlock_slurmctld(all_locks);
 		gettimeofday(&tv2, NULL);
 		_diff_tv_str(&tv1, &tv2, tv_str, 20);
 #if __DEBUG
 		info("backfill: completed, %s", tv_str);
 #endif
-		if (altered_job) {
-			altered_job = false;
-			schedule();	/* has own locks */
-		}
 	}
 	return NULL;
 }
 
+static void _attempt_backfill(void)
+{
+	bool filter_root = false;
+	struct job_queue *job_queue = NULL;
+	int i, j,job_queue_size, node_space_recs = 0;
+	struct job_record *job_ptr;
+	struct part_record *part_ptr;
+	uint32_t end_time, end_reserve, time_limit;
+	uint32_t min_nodes, max_nodes, req_nodes;
+	uint16_t orig_shared;
+	bitstr_t *avail_bitmap = NULL;
+	time_t now = time(NULL);
+	node_space_map_t node_space[MAX_BACKFILL_JOB_CNT + 2];
+
+	if (slurm_get_root_filter())
+		filter_root = true;
+
+	job_queue_size = build_job_queue(&job_queue);
+	if (job_queue_size == 0)
+		return;
+
+	sort_job_queue(job_queue, job_queue_size);
+
+	node_space[0].begin_time = now;
+	node_space[0].end_time = now + BACKFILL_WINDOW;
+	node_space[0].avail_bitmap = bit_alloc(node_record_count);
+	bit_or(node_space[0].avail_bitmap, avail_node_bitmap);
+	node_space[0].next = 0;
+#if __DEBUG
+	_dump_node_space_table(node_space);
+#endif
+
+	for (i = 0; i < job_queue_size; i++) {
+		job_ptr = job_queue[i].job_ptr;
+		part_ptr = job_ptr->part_ptr;
+		if (part_ptr == NULL) {
+			part_ptr = find_part_record(job_ptr->partition);
+			xassert(part_ptr);
+			job_ptr->part_ptr = part_ptr;
+			error("partition pointer reset for job %u, part %s",
+			      job_ptr->job_id, job_ptr->partition);
+		}
+		if ((part_ptr->state_up == 0) ||
+		    (part_ptr->node_bitmap == NULL))
+		 	continue;
+		if ((part_ptr->root_only) && filter_root)
+			continue;
+
+		if (license_job_test(job_ptr) != SLURM_SUCCESS)
+			continue;
+		if (job_independent(job_ptr) != true)
+			continue;
+
+		/* Determine minimum and maximum node counts */
+		min_nodes = MAX(job_ptr->details->min_nodes,
+				part_ptr->min_nodes);
+		if (job_ptr->details->max_nodes == 0)
+			max_nodes = part_ptr->max_nodes;
+		else
+			max_nodes = MIN(job_ptr->details->max_nodes,
+					part_ptr->max_nodes);
+		max_nodes = MIN(max_nodes, 500000);     /* prevent overflows */
+		if (job_ptr->details->max_nodes)
+			req_nodes = max_nodes;
+		else
+			req_nodes = min_nodes;
+		if (min_nodes > max_nodes) {
+			/* job's min_nodes exceeds partition's max_nodes */
+			continue;
+		}
+
+		/* Determine job's expected completion time */
+		if (job_ptr->time_limit == NO_VAL)
+			time_limit = part_ptr->max_time;
+		else
+			time_limit = job_ptr->time_limit;
+		end_time = (time_limit * 60) + now;
+
+		/* Identify usable nodes for this job */
+		FREE_NULL_BITMAP(avail_bitmap);
+		avail_bitmap = bit_copy(part_ptr->node_bitmap);
+		for (j=0; ; ) {
+			if (node_space[j].end_time <= end_time) {
+				bit_and(avail_bitmap, 
+					node_space[j].avail_bitmap);
+			}
+			if ((j = node_space[j].next) == 0)
+				break;
+		}
+		if (job_req_node_filter(job_ptr, avail_bitmap))
+			continue;	/* problem with features */
+		if (job_ptr->details->exc_node_bitmap) {
+			bit_not(job_ptr->details->exc_node_bitmap);
+			bit_and(avail_bitmap, 
+				job_ptr->details->exc_node_bitmap);
+			bit_not(job_ptr->details->exc_node_bitmap);
+		}
+		if ((job_ptr->details->req_node_bitmap) &&
+		    (!bit_super_set(job_ptr->details->req_node_bitmap,
+				    avail_bitmap)))
+			continue;	/* required nodes missing */
+		if (bit_set_count(avail_bitmap) < min_nodes)
+			continue;	/* no nodes remain */
+
+		/* Try to schedule the job. First on dedicated nodes
+		 * then on shared nodes (if so configured). */
+		orig_shared = job_ptr->details->shared;
+		job_ptr->details->shared = 0;
+		j = select_g_job_test(job_ptr, avail_bitmap,
+				min_nodes, max_nodes, req_nodes, 
+				SELECT_MODE_WILL_RUN);
+		job_ptr->details->shared = orig_shared;
+		if ((j != SLURM_SUCCESS) && (orig_shared != 0)) {
+			j = select_g_job_test(job_ptr, avail_bitmap,
+					min_nodes, max_nodes, req_nodes, 
+					SELECT_MODE_WILL_RUN);
+		}
+		if (j != SLURM_SUCCESS)
+			continue;	/* not runable */
+		if (job_ptr->start_time <= now) {
+			/* Start the job now */
+			_start_job(job_ptr, avail_bitmap);
+			break;
+		}
+		if (job_ptr->start_time > (now + BACKFILL_WINDOW)) {
+			/* Starts too far in the future to worry about */
+			continue;
+		}
+
+		if (node_space_recs == MAX_BACKFILL_JOB_CNT) {
+			/* Already have too many jobs to deal with */
+			break;
+		}
+
+		/*
+		 * Add reservation to scheduling table
+		 */
+		end_reserve = job_ptr->start_time + (time_limit * 60);
+		bit_not(avail_bitmap);
+		_add_reservation(job_ptr->start_time, end_reserve, 
+				 avail_bitmap, node_space, &node_space_recs);
+#if __DEBUG
+		_dump_node_space_table(node_space);
+#endif
+	}
+	FREE_NULL_BITMAP(avail_bitmap);
+
+	for (i=0; ; ) {
+		bit_free(node_space[i].avail_bitmap);
+		if ((i = node_space[i].next) == 0)
+			break;
+	}
+	xfree(job_queue);
+}
+
+static int _start_job(struct job_record *job_ptr, bitstr_t *avail_bitmap)
+{
+	int rc;
+	bitstr_t *orig_exc_nodes = NULL;
+	static uint32_t fail_jobid = 0;
+
+	if (job_ptr->details->exc_node_bitmap)
+		orig_exc_nodes = job_ptr->details->exc_node_bitmap;
+	job_ptr->details->exc_node_bitmap = bit_copy(avail_bitmap);
+	bit_not(job_ptr->details->exc_node_bitmap);
+
+	rc = select_nodes(job_ptr, false, NULL);
+	bit_free(job_ptr->details->exc_node_bitmap);
+	job_ptr->details->exc_node_bitmap = orig_exc_nodes;
+	if (rc == SLURM_SUCCESS) {	
+		/* job initiated */
+		last_job_update = time(NULL);
+		info("backfill: Started JobId=%u on %s",
+		     job_ptr->job_id, job_ptr->nodes);
+		if (job_ptr->batch_flag)
+			launch_job(job_ptr);
+		else
+			srun_allocate(job_ptr->job_id);
+		backfilled_jobs++;
+#if __DEBUG
+		info("backfill: Jobs backfilled: %d", backfilled_jobs);
+#endif
+	} else if (job_ptr->job_id != fail_jobid) {
+		char *node_list = bitmap2node_name(avail_bitmap);
+		/* This happens when a job has sharing disabled and
+		 * a selected node is still completing some job, 
+		 * which should be a temporary situation. */
+		verbose("backfill: Failed to start JobId=%u on %s: %s",
+			job_ptr->job_id, node_list, slurm_strerror(rc));
+		xfree(node_list);
+		fail_jobid = job_ptr->job_id;
+	} else {
+		debug3("backfill: Failed to start JobId=%u", job_ptr->job_id);
+	}
+
+	return rc;
+}
+
 /* trigger the attempt of a backfill */
-extern void
-run_backfill (void)
+extern void run_backfill (void)
 {
 	pthread_mutex_lock( &thread_flag_mutex );
 	new_work = true;
 	pthread_mutex_unlock( &thread_flag_mutex );
 }
 
-static bool
-_more_work (void)
+/* Report if any changes occurred to job, node or partition information */
+static bool _more_work (void)
 {
-	static bool rc;
+	bool rc;
+	static time_t backfill_job_time  = (time_t) 0;
+	static time_t backfill_node_time = (time_t) 0;
+	static time_t backfill_part_time = (time_t) 0;
+
 	pthread_mutex_lock( &thread_flag_mutex );
-	rc = new_work;
-	new_work = false;
+	if ( (backfill_job_time  == last_job_update ) &&
+	     (backfill_node_time == last_node_update) &&
+	     (backfill_part_time == last_part_update) &&
+	     (new_work == false) ) {
+		rc = false;
+	} else {
+		backfill_job_time  = last_job_update;
+		backfill_node_time = last_node_update;
+		backfill_part_time = last_part_update;
+		new_work = false;
+		rc = true;
+	}
 	pthread_mutex_unlock( &thread_flag_mutex );
 	return rc;
 }
 
-/* Report if any changes occurred to job, node or partition information */
-static bool
-_has_state_changed(void)
-{
-	static time_t backfill_job_time  = (time_t) 0;
-        static time_t backfill_node_time = (time_t) 0;
-	static time_t backfill_part_time = (time_t) 0;
-
-	if ( (backfill_job_time  == last_job_update ) &&
-	     (backfill_node_time == last_node_update) &&
-	     (backfill_part_time == last_part_update) )
-		return false;
-
-	backfill_job_time  = last_job_update;
-	backfill_node_time = last_node_update;
-	backfill_part_time = last_part_update;
-	return true;
-}
-
-/* Attempt to perform backfill scheduling on the specified partition */
-static void 
-_attempt_backfill(struct part_record *part_ptr)
-{
-	int i, cg_hung = 0, error_code = 0;
-	uint32_t max_pending_prio = 0;
-	uint32_t min_pend_job_size = INFINITE;
-	struct job_record *job_ptr;
-	ListIterator job_iterator;
-	part_specs_t part_specs;
-	time_t now = time(NULL);
-
-#if __DEBUG
-	info("backfill: attempt on partition %s", part_ptr->name);
-#endif
-
-	_get_part_specs(part_ptr, &part_specs);
-	if (part_specs.idle_node_cnt == 0)
-		return;		/* no idle nodes */
-
-	pend_job_list = list_create(NULL);
-	run_job_list  = list_create(NULL);
-		
-	/* build lists of pending and running jobs in this partition */
-	job_iterator = list_iterator_create(job_list);
-	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
-		if (job_ptr->part_ptr != part_ptr)
-			continue;	/* job in different partition */
-
-		if (job_ptr->job_state & JOB_COMPLETING) {
-			long wait_time = (long) difftime(now, job_ptr->end_time);
-			if (wait_time > 600) {
-				/* Job has been in completing state for 
-				 * >10 minutes, try to schedule around it */
-				cg_hung++;
-				continue;
-			}
-#if __DEBUG
-			info("backfill: Job %u completing, skip partition", 
-					job_ptr->job_id);
-#endif
-			error_code = 1;
-			break;
-		} else if (job_ptr->job_state == JOB_RUNNING) {
-			if (_add_running_job(job_ptr)) {
-				error_code = 2;
-				break;
-			}
-		} else if (job_ptr->job_state == JOB_PENDING) {
-			max_pending_prio = MAX(max_pending_prio, 
-					job_ptr->priority);
-			if (_add_pending_job(job_ptr, part_ptr, &part_specs)) {
-				error_code = 3;
-				break;
-			}
-			min_pend_job_size = MIN(min_pend_job_size, 
-					job_ptr->node_cnt);
-		}
-	}
-	list_iterator_destroy(job_iterator);
-	if (error_code) 
-		goto cleanup;
-
-	i = list_count(run_job_list) + cg_hung;
-	/* Do not try to backfill if
-	 * we already have many running jobs,
-	 * there are no pending jobs, OR
-	 * there are insufficient idle nodes to start any pending jobs */
-	if ((i > MAX_JOB_CNT)
-	|| list_is_empty(pend_job_list)
-	|| (min_pend_job_size > part_specs.idle_node_cnt))
-		goto cleanup;
-
-	list_sort(pend_job_list, _sort_by_prio);
-	list_sort(run_job_list, _sort_by_end);
-	_build_node_space_map(&part_specs);
-	_backfill_part(&part_specs);
-
-      cleanup:
-	list_destroy(pend_job_list);
-	list_destroy(run_job_list);
-}
-
-/* get the specs on nodes within a partition */
-static void 
-_get_part_specs(struct part_record *part_ptr, part_specs_t *part_specs)
+/* Create a reservation for a job in the future */
+static void _add_reservation(uint32_t start_time, uint32_t end_reserve, 
+			     bitstr_t *res_bitmap, 
+			     node_space_map_t *node_space, 
+			     int *node_space_recs)
 {
 	int i, j;
 
-	part_specs->idle_node_cnt = 0;
-	part_specs->max_cpus      = 0;
-	part_specs->min_cpus      = INFINITE;
-	part_specs->min_mem       = INFINITE;
-	part_specs->min_disk      = INFINITE;
-
-	for (i=0; i<node_record_count; i++) {
-		struct node_record *node_ptr = &node_record_table_ptr[i];
-		bool found_part = false;
-
-		for (j=0; j<node_ptr->part_cnt; j++) {
-			if (node_ptr->part_pptr[j] != part_ptr)
-				continue;
-			found_part = true;
+	for (j=0; ; ) {
+		if (node_space[j].end_time > start_time) {
+			/* insert start entry record */
+			i = *node_space_recs;
+			node_space[i].begin_time = start_time;
+			node_space[i].end_time = node_space[j].end_time;
+			node_space[j].end_time = start_time;
+			node_space[i].avail_bitmap = 
+				bit_copy(node_space[j].avail_bitmap);
+			node_space[i].next = node_space[j].next;
+			node_space[j].next = i;
+			(*node_space_recs)++;
 			break;
 		}
-		if (found_part == false)
-			continue;	/* different partition */
-		if (node_ptr->node_state == NODE_STATE_IDLE)
-			part_specs->idle_node_cnt++;
-		if (slurmctld_conf.fast_schedule) {
-			part_specs->max_cpus = MAX(part_specs->max_cpus,
-					node_ptr->config_ptr->cpus);
-			part_specs->min_cpus = MIN(part_specs->min_cpus,
-					node_ptr->config_ptr->cpus);
-			part_specs->min_mem  = MIN(part_specs->min_mem,
-					node_ptr->config_ptr->real_memory);
-			part_specs->min_disk = MIN(part_specs->min_disk,
-					node_ptr->config_ptr->tmp_disk);
-		} else {
-			part_specs->max_cpus = MAX(part_specs->max_cpus,
-					node_ptr->cpus);
-			part_specs->min_cpus = MIN(part_specs->min_cpus,
-					node_ptr->cpus);
-			part_specs->min_mem  = MIN(part_specs->min_mem,
-					node_ptr->real_memory);
-			part_specs->min_disk = MIN(part_specs->min_disk,
-					 node_ptr->tmp_disk);
-		}
-	}
-
-#if __DEBUG
-	info("backfill: partition %s cpus=%u:%u mem=%u+ disk=%u+",
-		part_ptr->name, part_specs->min_cpus, part_specs->max_cpus, 
-		part_specs->min_mem, part_specs->min_disk);
-#endif
-}
-
-/* Add specified pending job to our records */
-static int
-_add_pending_job(struct job_record *job_ptr, struct part_record *part_ptr, 
-		part_specs_t *part_specs)
-{
-	int min_node_cnt;
-	struct job_details *detail_ptr = job_ptr->details;
-
-	if (job_ptr->priority == 0) {
-#if __DEBUG
-		info("backfill: pending job %u is held", job_ptr->job_id);
-#endif
-		return 0;	/* Skip this job */
-	}
-
-	if ((job_ptr->time_limit != NO_VAL) && 
-	    (job_ptr->time_limit > part_ptr->max_time)) {
-#if __DEBUG
-		info("backfill: pending job %u exceeds partition time limit", 
-			job_ptr->job_id);
-#endif
-		return 0;	/* Skip this job */
-	}
-
-	if (detail_ptr == NULL) {
-		error("backfill: pending job %u lacks details", 
-			job_ptr->job_id);
-		return 1;
-	}
-
-	/* figure out how many nodes this job needs */
-	min_node_cnt = (job_ptr->num_procs + part_specs->max_cpus - 1) /
-			part_specs->max_cpus;	/* round up */
-	detail_ptr->min_nodes = MAX(min_node_cnt, detail_ptr->min_nodes);
-	if (detail_ptr->min_nodes > part_ptr->max_nodes) {
-#if __DEBUG
-		info("backfill: pending job %u exceeds partition node limit", 
-				job_ptr->job_id);
-#endif
-		return 0;	/* Skip this job */
-	}
-
-#if __DEBUG
-	info("backfill: job %u pending on %d nodes", job_ptr->job_id, 
-		detail_ptr->min_nodes);
-#endif
-
-	list_append(pend_job_list, (void *) job_ptr);
-	return 0;
-}
-
-/* Add specified running job to our records */
-static int
-_add_running_job(struct job_record *job_ptr)
-{
-#if __DEBUG
-	info("backfill: job %u running on %d nodes: %s", job_ptr->job_id, 
-			job_ptr->node_cnt, job_ptr->nodes);
-#endif
-
-	list_append(run_job_list, (void *) job_ptr);
-	return 0;
-}
-
-/* build a map of how many nodes are free at any point in time 
- * based upon currently running jobs. pending jobs are added to 
- * the map as we execute the backfill algorithm */
-static void 
-_build_node_space_map(part_specs_t *part_specs)
-{
-	ListIterator run_job_iterate;
-	struct job_record *run_job_ptr;
-	int base_size = 0;
-
-	node_space_recs = 0;
-
-	if (part_specs->idle_node_cnt) {
-		base_size = part_specs->idle_node_cnt;
-		node_space[node_space_recs].idle_node_cnt = base_size; 
-		node_space[node_space_recs++].time = time(NULL);
-	}
-
-	run_job_iterate = list_iterator_create(run_job_list);
-	while ( (run_job_ptr = list_next(run_job_iterate)) ) {
-		uint32_t nodes2free = _get_avail_node_cnt(run_job_ptr);
-		if (nodes2free == 0)
-			continue;	/* no nodes returning to service */
-		base_size += nodes2free;
-		node_space[node_space_recs].idle_node_cnt = base_size;
-		node_space[node_space_recs++].time = run_job_ptr->end_time;
-	}
-	list_iterator_destroy(run_job_iterate);
-
-	_dump_node_space_map(0, 0);
-}
-
-static void
-_dump_node_space_map(uint32_t job_id, uint32_t node_cnt)
-{
-#if __DEBUG
-	int i;
-	time_t now;
-
-	if (job_id == 0)
-		info("backfill: initial node_space_map");
-	else
-		info("backfill: node_space_map after job %u allocated %u nodes", 
-				job_id, node_cnt);
-
-	now = time(NULL);
-	for (i=0; i<node_space_recs; i++) {
-		info("backfill: %3d nodes at time %4d (seconds in future)",
-			node_space[i].idle_node_cnt,	
-			(int) difftime(node_space[i].time, now));
-	}
-#endif
-}
-
-/* return 1 if the job could be started now, 0 otherwise and add job into
- * node_space_map
- */
-static int
-_update_node_space_map(struct job_record *job_ptr)
-{
-	int i, j, min_nodes, nodes_needed;
-	time_t fini_time;
-
-	if (node_space_recs == 0)	/* no nodes now or in future */
-		return 0;
-	if (job_ptr->details == NULL)	/* pending job lacks details */
-		return 0;
-
-	if (job_ptr->time_limit == NO_VAL)
-		fini_time = time(NULL) + job_ptr->part_ptr->max_time;
-	else
-		fini_time = time(NULL) + job_ptr->time_limit;
-	min_nodes = node_space[0].idle_node_cnt;
-	for (i=1; i<node_space_recs; i++) {
-		if (node_space[i].time > fini_time)
-			break;
-		if (min_nodes > node_space[i].idle_node_cnt)
-			min_nodes = node_space[i].idle_node_cnt;
-	}
-	
-	nodes_needed = job_ptr->details->min_nodes;
-	if (nodes_needed <= min_nodes)
-		return 1;
-
-	for (i=0; i<node_space_recs; i++) {
-		int fits = 0;
-		if (node_space[i].idle_node_cnt < nodes_needed)
-			continue;	/* can't start yet... */
-		fits = 1;
-		for (j=i; j<node_space_recs; j++) {
-			if (node_space[j].idle_node_cnt < nodes_needed) {
-				fits = 0;
-				break;
-			}
-		}
-		if (fits == 0)
-			continue;
-		for (j=i; j<node_space_recs; j++) {
-			node_space[j].idle_node_cnt -= nodes_needed;
-		}
-		break;
-	}
-
-	_dump_node_space_map(job_ptr->job_id, nodes_needed);
-	return 0;
-}
-
-/* return the number of nodes to be returned to this partition when
- * the specified job terminates. Don't count DRAIN or DOWN nodes */
-static int
-_get_avail_node_cnt(struct job_record *job_ptr)
-{
-	int cnt = 0, i;
-	struct node_record *node_ptr;
-	uint16_t base_state;
-
-	for (i=0; i<node_record_count; i++) { 
-		if (bit_test(job_ptr->node_bitmap, i) == 0)
-			continue;
-		node_ptr = node_record_table_ptr + i;
-		if (node_ptr->node_state & NODE_STATE_DRAIN)
-			continue;
-		base_state = node_ptr->node_state & NODE_STATE_BASE;
-		if (base_state == NODE_STATE_DOWN)
-			continue;	
-		cnt++;
-	}
-
-	return cnt;
-}
-
-
-/* scan pending job queue and change the priority of any that 
- * can run now without delaying the expected initiation time 
- * of any higher priority job */
-static void 
-_backfill_part(part_specs_t *part_specs)
-{
-	struct job_record *pend_job_ptr;
-	ListIterator pend_job_iterate;
-	struct job_record *first_job = NULL;	/* just used as flag */
-
-	/* find job to possibly backfill */
-	pend_job_iterate = list_iterator_create(pend_job_list);
-	while ( (pend_job_ptr = list_next(pend_job_iterate)) ) {
-		if (first_job == NULL)
-			first_job = pend_job_ptr;
-
-		if (_loc_restrict(pend_job_ptr, part_specs)) {
-#if __DEBUG
-			info("Job %u has locality restrictions",
-				pend_job_ptr->job_id);
-#endif
-			continue;
-		}
-
-		if (first_job == pend_job_ptr) {
-			if (pend_job_ptr->details == NULL)
-				break;
-			if (pend_job_ptr->details->min_nodes <= 
-					part_specs->idle_node_cnt) {
-#if __DEBUG
-				info("Job %u should start via FIFO",
-					pend_job_ptr->job_id);
-#endif
-				break;
-			}
-		}
-
-		if (_update_node_space_map(pend_job_ptr)) {
-			_change_prio(pend_job_ptr, 
-				(first_job->priority + 1));
+		if (node_space[j].end_time == start_time) {
+			/* no need to insert start entry record */
 			break;
 		}
-	}
-	list_iterator_destroy(pend_job_iterate);
-}
-
-/* Return true if job has locality restrictions, false otherwise */
-static bool
-_loc_restrict(struct job_record *job_ptr, part_specs_t *part_specs)
-{
-	struct job_details *detail_ptr = job_ptr->details;
-	
-	if (detail_ptr == NULL)
-		return false;
-
-	if ( (detail_ptr->contiguous) || (detail_ptr->features)  ||
-	     (detail_ptr->req_nodes && detail_ptr->req_nodes[0]) ||
-	     (detail_ptr->exc_nodes && detail_ptr->exc_nodes[0]) )
-		return true;
-
-	if ( (detail_ptr->job_min_procs    > part_specs->min_cpus) ||
-	     (detail_ptr->job_min_memory   > part_specs->min_mem)  ||
-	     (detail_ptr->job_min_tmp_disk > part_specs->min_disk) )
-		return true;
-
-	if (part_specs->max_cpus != part_specs->min_cpus) {
-		int max_node_cnt;
-		max_node_cnt = (job_ptr->num_procs + part_specs->min_cpus 
-				- 1) / part_specs->min_cpus;
-		if (max_node_cnt > detail_ptr->min_nodes)
-			return true;
+		if ((j = node_space[j].next) == 0)
+			break;
 	}
 
-	return false;
-}
+#if 0
+	/* This records end of reservation so we maintain a full map
+	 * of when jobs start and end. Since we only care about starting 
+	 * jobs right now, the end of reservation time is not very useful
+	 * unless we want to track expected job initiation time, which 
+	 * would necessitate additional logic. */
+	for (j=0; ; ) {
+		if ((node_space[j].begin_time < end_reserve) &&
+		    (node_space[j].end_time   > end_reserve)) {
+			/* insert end entry record */
+			i = *node_space_recs;
+			node_space[i].begin_time = node_space[j].begin_time;
+			node_space[j].begin_time = end_reserve;
+			node_space[i].end_time = end_reserve;
+			node_space[i].avail_bitmap = 
+				bit_copy(node_space[j].avail_bitmap);
+			node_space[i].next = j;
+			node_space[previous].next = i;
+			(*node_space_recs)++;
+			break;
+		}
+		if (node_space[j].end_time == end_reserve) {
+			/* no need to insert end entry record */
+			break;
+		}
+		previous = j;
+		if ((j = node_space[j].next) == 0)
+			break;
+	}
 
-/* Change the priority of a pending job to get it running now */
-static void
-_change_prio(struct job_record *job_ptr, uint32_t prio)
-{
-	info("backfill: set job %u to priority %u", job_ptr->job_id, prio);
-	job_ptr->priority = prio;
-	altered_job = true;
-	run_backfill();
-	last_job_update = time(NULL);
+	for (j=0; ; ) {
+		if ((node_space[j].begin_time >= start_time) &&
+		    (node_space[j].end_time   <= end_reserve)) {
+			bit_and(node_space[j].avail_bitmap, res_bitmap);
+		}
+		if ((j = node_space[j].next) == 0)
+			break;
+	}
+#else
+	for (j=0; ; ) {
+		if (node_space[j].begin_time >= start_time)
+			bit_and(node_space[j].avail_bitmap, res_bitmap);
+		if ((j = node_space[j].next) == 0)
+			break;
+	}
+#endif
 }
-
