@@ -204,7 +204,10 @@ Supported values presently include:
 for AIX systems only
 .TP
 \fBcheckpoint/blcr\fR
-Berkeley Lab Checkpoint Restart (BLCR)
+Berkeley Lab Checkpoint Restart (BLCR).
+NOTE: If a file is found at sbin/scch (relative to the SLURM installation
+location), it will be executed upon completion of the checkpoint. This can
+be a script used for managing the checkpoint files.
 .TP
 \fBcheckpoint/none\fR
 no checkpoint support (default)
@@ -424,7 +427,7 @@ See \fBProlog and Epilog Scripts\fR for more information.
 
 .TP
 \fBEpilogMsgTime\fR
-The number of microseconds the the slurmctld daemon requires to process
+The number of microseconds that the slurmctld daemon requires to process
 an epilog completion message from the slurmd dameons. This parameter can
 be used to prevent a burst of epilog completion messages from being sent
 at the same time which should help prevent lost messages and improve

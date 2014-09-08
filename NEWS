@@ -1,6 +1,40 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 2.2.6
+========================
+ -- Fix displaying of account coordinators with sacctmgr.  Possiblity to show
+    deleted accounts.  Only a cosmetic issue, since the accounts are already
+    deleted, and have no associations.
+ -- Prevent opaque ncurses WINDOW struct on OS X 10.6.
+ -- Fix issue with accounting when using PrivateData=jobs... users would not be
+    able to view there own jobs unless they were admin or coordinators which is
+    obviously wrong.
+ -- Fix bug in node stat if slurmctld is restarted while nodes are in the
+    process of being powered up. Patch from Andriy Grytsenko.
+ -- Change maximum batch script size from 128k to 4M.
+ -- Get slurmd -f option working. Patch from Andriy Grytsenko.
+ -- Fix for linking problem on OSX. Patches from Jon Bringhurst (LANL) and
+    Tyler Strickland.
+ -- Reset a job's priority to zero (suspended) when Moab requeues the job.
+    Patch from Par Andersson, NSC.
+ -- When enforcing accounting, fix polling for unknown uids for users after
+    the slurmctld started.  Previously one would have to issue a reconfigure
+    to the slurmctld to have it look for new uids.
+ -- BLUEGENE - if a block goes into an error state.  Fix issue where accounting
+    wasn't updated correctly when the block was resumed.
+ -- Synchronize power-save module better with scheduler. Patch from
+    Andriy Grytsenko (Massive Solutions Limited).
+ -- Avoid SEGV in association logic with user=NULL. Patch from
+    Andriy Grytsenko (Massive Solutions Limited).
+ -- Fixed issue in accounting where it was possible for a new
+    association/wckey to be set incorrectly as a default the new object
+    was added after an original default object already existed.  Before
+    the slurmctld would need to be restarted to fix the issue.
+ -- Updated the Normalized Usage section in priority_multifactor.shtml.
+ -- Disable use of SQUEUE_FORMAT env var if squeue -l, -o, or -s option is
+    used. Patch from Aaron Knister (UMBC).
+
 * Changes in SLURM 2.2.5
 ========================
  -- Correct init.d/slurm status to have non-zero exit code if ANY Slurm
@@ -90,7 +124,7 @@ documents those changes that are of interest to users and admins.
 
 * Changes in SLURM 2.2.3
 ========================
- -- Update srun, salloc, and sbatch man page descript((detail_ptr->pn_min_memory & (MEM_PER_CPU)) &ion of --distribution
+ -- Update srun, salloc, and sbatch man page description of --distribution
     option. Patches from Rod Schulz, Bull.
  -- Applied patch from Martin Perry to fix "Incorrect results for task/affinity
     block second distribution and cpus-per-task > 1" bug.
@@ -2960,7 +2994,7 @@ documents those changes that are of interest to users and admins.
     than one partition uses a node or there is more than one socket per node.
  -- In output for "scontrol show job" change "StartTime" header to "EligibleTime"
     for pending jobs to accurately describe what is reported.
- -- Add more slurmdbd.conf paramters: ArchiveScript, ArchiveAge, JobPurge, and
+ -- Add more slurmdbd.conf parameters: ArchiveScript, ArchiveAge, JobPurge, and
     StepPurge (not fully implemented yet).
  -- Add slurm.conf parameter EnforcePartLimits to reject jobs which exceed a
     partition's size and/or time limits rather than leaving them queued for a
@@ -3263,7 +3297,7 @@ documents those changes that are of interest to users and admins.
     removed!  That functionality is now available in the separate commands
     salloc, sbatch, and sattach, respectively.
  -- Add new node state FAILING plus trigger for when node enters that state.
- -- Add new configuration paramter "PrivateData". This can be used to 
+ -- Add new configuration parameter "PrivateData". This can be used to 
     prevent a user from seeing jobs or job steps belonging to other users.
  -- Added configuration parameters for node power save mode: ResumeProgram
     ResumeRate, SuspendExcNodes, SuspendExcParts, SuspendProgram and 
@@ -4176,7 +4210,7 @@ documents those changes that are of interest to users and admins.
  - BLUEGENE - check to make sure set_block_user works when the block
    is in a ready state.
  - Fix to slurmstepd to not use local variables in a pthread create.
- - In sched/wiki2 - add wiki.conf paramter HostFormat specifying 
+ - In sched/wiki2 - add wiki.conf parameter HostFormat specifying 
    format of hostlists exchanged between Slurm and Moab (experimental).
  - mpi/mvapich: Support Adam Moody's fast MPI initialization protocol 
    (MVAPICH protocol version 8).
