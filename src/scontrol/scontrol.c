@@ -71,6 +71,7 @@ static void     _ping_slurmctld(char *control_machine,
 				char *backup_controller);
 static void	_print_config (char *config_param);
 static void     _print_daemons (void);
+static void     _print_aliases (char* node_hostname);
 static void	_print_ping (void);
 static void	_print_slurmd(char *hostlist);
 static void     _print_version( void );
@@ -491,6 +492,40 @@ _print_daemons (void)
 }
 
 /*
+ * _print_aliases - report which aliases should be running on this node
+ */
+static void
+_print_aliases (char* node_hostname)
+{
+	char me[MAX_SLURM_NAME], *n = NULL, *a = NULL;
+	char *s;
+
+	slurm_conf_init(NULL);
+	if (!node_hostname) {
+		gethostname_short(me, MAX_SLURM_NAME);
+		s = me;
+	} else
+		s = node_hostname;
+
+	if (!(n = slurm_conf_get_aliases(s)) && (s == me)) {
+
+		if (!(a = slurm_conf_get_aliased_nodename()))
+			a = slurm_conf_get_nodename("localhost");
+
+		if (a) {
+			n = slurm_conf_get_aliases(a);
+			xfree(a);
+		}
+	}
+
+	if (n) {
+		fprintf(stdout, "%s\n", n);
+		xfree(n);
+	}
+
+}
+
+/*
  * _process_command - process the user's command
  * IN argc - count of arguments
  * IN argv - the arguments
@@ -677,7 +712,7 @@ _process_command (int argc, char *argv[])
 		if (argc > 2) {
 			exit_code = 1;
 			fprintf (stderr, "too many arguments for keyword:%s\n",
-			         tag);
+				 tag);
 		}
 		error_code = slurm_reconfigure();
 		if (error_code) {
@@ -691,15 +726,15 @@ _process_command (int argc, char *argv[])
 			exit_code = 1;
 			if (quiet_flag != 1)
 				fprintf(stderr,
-				        "too many arguments for keyword:%s\n",
-				        tag);
+					"too many arguments for keyword:%s\n",
+					tag);
 		}
 		else if (argc < 3) {
 			exit_code = 1;
 			if (quiet_flag != 1)
 				fprintf(stderr,
-				        "too few arguments for keyword:%s\n",
-				        tag);
+					"too few arguments for keyword:%s\n",
+					tag);
 		}
 		else {
 			error_code = scontrol_checkpoint(argv[1], argv[2],
@@ -738,7 +773,7 @@ _process_command (int argc, char *argv[])
 	else if ((strncasecmp (tag, "hold",  4) == 0) ||
 		 (strncasecmp (tag, "holdu", 5) == 0) ||
 		 (strncasecmp (tag, "uhold", 5) == 0) ||
-	         (strncasecmp (tag, "release", MAX(taglen, 3)) == 0)) {
+		 (strncasecmp (tag, "release", MAX(taglen, 3)) == 0)) {
 		if (argc > 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
@@ -762,7 +797,7 @@ _process_command (int argc, char *argv[])
 		}
 	}
 	else if ((strncasecmp (tag, "suspend", MAX(taglen, 2)) == 0) ||
-	         (strncasecmp (tag, "resume", MAX(taglen, 3)) == 0)) {
+		 (strncasecmp (tag, "resume", MAX(taglen, 3)) == 0)) {
 		if (argc > 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
@@ -1155,15 +1190,15 @@ _show_it (int argc, char *argv[])
 		exit_code = 1;
 		if (quiet_flag != 1)
 			fprintf(stderr,
-			        "too many arguments for keyword:%s\n",
-			        argv[0]);
+				"too many arguments for keyword:%s\n",
+				argv[0]);
 		return;
 	}
 	else if (argc < 2) {
 		exit_code = 1;
 		if (quiet_flag != 1)
 			fprintf(stderr,
-			        "too few arguments for keyword:%s\n", argv[0]);
+				"too few arguments for keyword:%s\n", argv[0]);
 		return;
 	}
 
@@ -1188,10 +1223,15 @@ _show_it (int argc, char *argv[])
 			exit_code = 1;
 			if (quiet_flag != 1)
 				fprintf(stderr,
-				        "too many arguments for keyword:%s\n",
-				        argv[0]);
+					"too many arguments for keyword:%s\n",
+					argv[0]);
 		}
 		_print_daemons ();
+	} else if (strncasecmp (tag, "aliases", MAX(taglen, 1)) == 0) {
+		if (val)
+			_print_aliases (val);
+		else
+			_print_aliases (NULL);
 	} else if (strncasecmp (tag, "jobs", MAX(taglen, 1)) == 0 ||
 		   strncasecmp (tag, "jobid", MAX(taglen, 1)) == 0 ) {
 		scontrol_print_job (val);
@@ -1377,7 +1417,8 @@ _update_bluegene_block (int argc, char *argv[])
 					 argv[i]);
 				fprintf (stderr,
 					 "Acceptable State values "
-					 "are FREE, ERROR, RECREATE, REMOVE\n");
+					 "are ERROR, FREE, RECREATE, "
+					 "REMOVE, RESUME\n");
 				return 0;
 			}
 			update_cnt++;
@@ -1522,41 +1563,41 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
      -Q or --quiet: equivalent to \"quiet\" command                        \n\
      -v or --verbose: equivalent to \"verbose\" command                    \n\
      -V or --version: equivalent to \"version\" command                    \n\
-                                                                           \n\
+									   \n\
   <keyword> may be omitted from the execute line and scontrol will execute \n\
   in interactive mode. It will process commands as entered until explicitly\n\
   terminated.                                                              \n\
-                                                                           \n\
+									   \n\
     Valid <COMMAND> values are:                                            \n\
      abort                    shutdown slurm controller immediately        \n\
-                              generating a core file.                      \n\
+			      generating a core file.                      \n\
      all                      display information about all partitions,    \n\
-                              including hidden partitions.                 \n\
+			      including hidden partitions.                 \n\
      cluster                  cluster to issue commands to.  Default is    \n\
-                              current cluster.  cluster with no name will  \n\
-                              reset to default.                            \n\
+			      current cluster.  cluster with no name will  \n\
+			      reset to default.                            \n\
      checkpoint <CH_OP><ID>   perform a checkpoint operation on identified \n\
-                              job or job step \n\
+			      job or job step \n\
      completing               display jobs in completing state along with  \n\
-                              their completing or down nodes               \n\
+			      their completing or down nodes               \n\
      create <SPECIFICATIONS>  create a new partition or reservation        \n\
      details                  evokes additional details from the \"show\"  \n\
-                              command                                      \n\
+			      command                                      \n\
      delete <SPECIFICATIONS>  delete the specified partition or reservation\n\
-                              On Dynamic layout Bluegene systems you can also\n\
-                              delete blocks.                               \n\
+			      On Dynamic layout Bluegene systems you can also\n\
+			      delete blocks.                               \n\
      exit                     terminate scontrol                           \n\
      help                     print this description of use.               \n\
      hold <job_id>            prevent specified job from starting (see release)\n\
      holdu <job_id>           place user hold on specified job (see release)\n\
      hide                     do not display information about hidden      \n\
-                              partitions                                   \n\
+			      partitions                                   \n\
      listpids <job_id<.step>> List pids associated with the given jobid, or\n\
-                              all jobs if no id is given (This will only   \n\
-                              display the processes on the node which the  \n\
-                              scontrol is ran on, and only for those       \n\
-                              processes spawned by SLURM and their         \n\
-                              descendants)                                 \n\
+			      all jobs if no id is given (This will only   \n\
+			      display the processes on the node which the  \n\
+			      scontrol is ran on, and only for those       \n\
+			      processes spawned by SLURM and their         \n\
+			      descendants)                                 \n\
      notify <job_id> msg      send message to specified job                \n\
      oneliner                 report output one record per line.           \n\
      pidinfo <pid>            return slurm job information for given pid.  \n\
@@ -1570,47 +1611,47 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
      setdebug <level>         set slurmctld debug level                    \n\
      schedloglevel <slevel>   set scheduler log level                      \n\
      show <ENTITY> [<ID>]     display state of identified entity, default  \n\
-                              is all records.                              \n\
+			      is all records.                              \n\
      shutdown <OPTS>          shutdown slurm daemons                       \n\
-                              (the primary controller will be stopped)     \n\
+			      (the primary controller will be stopped)     \n\
      suspend <job_id>         susend specified job (see resume)            \n\
      takeover                 ask slurm backup controller to take over     \n\
      uhold <job_id>           place user hold on specified job (see release)\n\
      update <SPECIFICATIONS>  update job, node, partition, reservation,    \n\
-                              step or bluegene block/subbp configuration   \n\
+			      step or bluegene block/subbp configuration   \n\
      verbose                  enable detailed logging.                     \n\
      version                  display tool version number.                 \n\
      wait_job <job_id>        wait until the nodes allocated to the job    \n\
-                              are booted and usable                        \n\
+			      are booted and usable                        \n\
      !!                       Repeat the last command entered.             \n\
-                                                                           \n\
-  <ENTITY> may be \"config\", \"daemons\", \"job\", \"node\", \"partition\"\n\
-       \"reservation\", \"hostlist\", \"hostnames\", \"slurmd\",           \n\
-       \"topology\", or \"step\"                                           \n\
+									   \n\
+  <ENTITY> may be \"aliases\", \"config\", \"daemons\", \"job\",           \n\
+       \"node\", \"partition\", \"reservation\", \"hostlist\",             \n\
+       \"hostnames\", \"slurmd\", \"topology\", or \"step\"                \n\
        (also for BlueGene only: \"block\" or \"subbp\").                   \n\
-                                                                           \n\
+									   \n\
   <ID> may be a configuration parameter name, job id, node name, partition \n\
        name, reservation name, job step id, or hostlist or pathname to a   \n\
        list of host names.                                                 \n\
-                                                                           \n\
+									   \n\
   <HOSTLIST> may either be a comma separated list of host names or the     \n\
        absolute pathname of a file (with leading '/' containing host names \n\
        either separated by commas or new-lines                             \n\
-                                                                           \n\
+									   \n\
   <LEVEL> may be an integer value like SlurmctldDebug in the slurm.conf    \n\
        file or the name of the most detailed errors to report (e.g. \"info\",\n\
        \"verbose\", \"debug\", \"debug2\", etc.).                          \n\
-                                                                           \n\
+									   \n\
   <SLEVEL> may be an integer value like SlurmSchedLogLevel in the          \n\
        slurm.conf file or \"enable\" or \"disable\".                       \n\
-                                                                           \n\
+									   \n\
   <OPTS> may be \"slurmctld\" to shutdown just the slurmctld daemon,       \n\
        otherwise all slurm daemons are shutdown                            \n\
-                                                                           \n\
+									   \n\
   Node names may be specified using simple range expressions,              \n\
   (e.g. \"lx[10-20]\" corresponds to lx10, lx11, lx12, ...)                \n\
   The job step id is the job id followed by a period and the step id.      \n\
-                                                                           \n\
+									   \n\
   <SPECIFICATIONS> are specified in the same format as the configuration   \n\
   file. You may wish to use the \"show\" keyword then use its output as    \n\
   input for the update keyword, editing as needed.  Bluegene blocks/subbps \n\
@@ -1618,12 +1659,12 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
   blocks by specifying 'remove' as the state.  The remove option is only   \n\
   valid on Dynamic layout systems.                                         \n\
   (Bluegene systems only)                                                  \n\
-                                                                           \n\
+									   \n\
   <CH_OP> identify checkpoint operations and may be \"able\", \"disable\", \n\
   \"enable\", \"create\", \"vacate\", \"requeue\", \"restart\", or \"error\"\n\
   Additional options include \"ImageDir=<dir>\", \"MaxWait=<seconds>\" and \n\
   \"StickToNodes\"   \n\
-                                                                           \n\
+									   \n\
   All commands and options are case-insensitive, although node names and   \n\
   partition names tests are case-sensitive (node names \"LX\" and \"lx\"   \n\
   are distinct).                                                       \n\n");

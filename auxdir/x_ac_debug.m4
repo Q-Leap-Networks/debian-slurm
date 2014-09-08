@@ -1,5 +1,5 @@
 ##*****************************************************************************
-#  $Id: x_ac_debug.m4 21164 2010-09-15 22:47:29Z jette $
+#  $Id: x_ac_debug.m4 22484 2011-02-15 19:14:24Z jette $
 ##*****************************************************************************
 #  AUTHOR:
 #    Chris Dunlap <cdunlap@llnl.gov>
@@ -90,6 +90,26 @@ AC_DEFUN([X_AC_DEBUG], [
     AC_DEFINE(DEBUGGER_PARTIAL_ATTACH, 1, [Define to 1 for debugger partial task attach support.])
   fi
   AC_MSG_RESULT([${x_ac_partial_attach=no}])
+
+
+  AC_MSG_CHECKING([whether to disable salloc execution in the background])
+  AC_ARG_ENABLE(
+    [salloc-background],
+    AS_HELP_STRING(--disable-salloc-background,disable salloc execution in the background),
+    [ case "$enableval" in
+        yes) x_ac_salloc_background=yes ;;
+         no) x_ac_salloc_background=no ;;
+          *) AC_MSG_RESULT([doh!])
+             AC_MSG_ERROR([bad value "$enableval" for --disable-salloc-background]) ;;
+      esac
+    ]
+  )
+  if test "$x_ac_salloc_background" = no; then
+    AC_DEFINE(SALLOC_RUN_FOREGROUND, 1, [Define to 1 to require salloc execution in the foreground.])
+    AC_MSG_RESULT([yes])
+  else
+    AC_MSG_RESULT([no])
+  fi
 
   ]
 )

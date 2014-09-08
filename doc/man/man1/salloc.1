@@ -21,6 +21,11 @@ section). If no command is specified, then the value of
 \fBSallocDefaultCommand\fR is not set, then \fBsalloc\fR runs the
 user's default shell.
 
+NOTE: The salloc logic includes support to save and restore the terminal line
+settings and is designed to be executed in the foreground. If you need to
+execute salloc in the background, set its standard input to some file, for
+example: "salloc \-n16 a.out </dev/null &"
+
 .SH "OPTIONS"
 .LP
 
@@ -240,6 +245,7 @@ preceded with an optional '0x'.
 .TP
 .B sockets
 Automatically generate masks binding tasks to sockets.
+Only the CPUs on the socket which have been allocated to the job will be used.
 If the number of tasks differs from the number of allocated sockets
 this can result in sub\-optimal binding.
 .TP
@@ -455,11 +461,24 @@ Multiple license names should be comma separated (e.g.
 
 .TP
 \fB\-m\fR, \fB\-\-distribution\fR=
-<\fIblock\fR|\fIcyclic\fR|\fIarbitrary\fR|\fIplane=<options>\fR>
-Specify an alternate distribution method for remote processes.  In
-salloc, this only sets environment variables that will be used by
+<\fIblock\fR|\fIcyclic\fR|\fIarbitrary\fR|\fIplane=<options>\fR[:\fIblock\fR|\fIcyclic\fR]>
+
+Specify alternate distribution methods for remote processes.
+In salloc, this only sets environment variables that will be used by
 subsequent srun requests.
+This option controls the assignment of tasks to the nodes on which
+resources have been allocated, and the distribution of those resources
+to tasks for binding (task affinity). The first distribution
+method (before the ":") controls the distribution of resources across
+nodes. The optional second distribution method (after the ":")
+controls the distribution of resources across sockets within a node.
+Note that with select/cons_res, the number of cpus allocated on each
+socket and node may be different. Refer to the mc_support.html document
+for more information on resource allocation, assignment of tasks to
+nodes, and binding of tasks to CPUs.
 .RS
+
+First distribution method:
 .TP
 .B block
 The block distribution method will distribute tasks to a node such
@@ -478,9 +497,9 @@ nodes each with two cpus. A four\-task cyclic distribution request
 will distribute those tasks to the nodes with tasks one and four on
 the first node, task two on the second node, and task three on the
 third node. 
-Note that when SelectType is select/cons_res the same number of CPUs
-may not be allocated on each node. Distribution will be round\-robin
-among all the nodes with CPUs yet to be allocated.
+Note that when SelectType is select/cons_res, the same number of CPUs
+may not be allocated on each node. Task distribution will be
+round\-robin among all the nodes with CPUs yet to be assigned to tasks.
 Cyclic distribution is the default behavior if the number
 of tasks is no larger than the number of allocated nodes.
 .TP
@@ -498,12 +517,26 @@ and
 https://computing.llnl.gov/linux/slurm/dist_plane.html.
 .TP
 .B arbitrary
-The arbitrary method of distribution will allocate processes in\-order as
-listed in file designated by the environment variable SLURM_HOSTFILE.  If
-this variable is listed it will over ride any other method specified.
-If not set the method will default to block.  Inside the hostfile must
-contain at minimum the number of hosts requested.  If requesting tasks
-(\-n) your tasks will be laid out on the nodes in the order of the file.
+The arbitrary method of distribution will allocate processes in\-order
+as listed in file designated by the environment variable
+SLURM_HOSTFILE.  If this variable is listed it will over ride any
+other method specified.  If not set the method will default to block.
+Inside the hostfile must contain at minimum the number of hosts
+requested and be one per line or comma separated.  If specifying a
+task count (\fB\-n\fR, \fB\-\-ntasks\fR=<\fInumber\fR>), your tasks
+will be laid out on the nodes in the order of the file.
+.TP
+
+Second distribution method:
+.TP
+.B block
+The block distribution method will distribute tasks to sockets such
+that consecutive tasks share a socket.
+.TP
+.B cyclic
+The cyclic distribution method will distribute tasks to sockets such
+that consecutive tasks are distributed over consecutive sockets (in a
+round\-robin fashion).
 .RE
 
 .TP
@@ -925,7 +958,7 @@ Default from \fIblugene.conf\fR if not set.
 .TP
 \fB\-R\fR, \fB\-\-no\-rotate\fR
 Disables rotation of the job's requested geometry in order to fit an
-appropriate partition.
+appropriate block.
 By default the specified geometry can rotate in three dimensions.
 
 .TP

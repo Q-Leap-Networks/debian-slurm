@@ -1,4 +1,4 @@
-# $Id: slurm.spec 22107 2011-01-18 18:33:28Z da $
+# $Id: slurm.spec 22705 2011-03-08 18:43:27Z jette $
 #
 # Note that this package is not relocatable
 
@@ -86,14 +86,14 @@
 %endif
 
 Name:    slurm
-Version: 2.2.1
+Version: 2.2.4
 Release: 1%{?dist}
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL
 Group: System Environment/Base
-Source: slurm-2.2.1.tar.bz2
+Source: slurm-2.2.4.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: https://computing.llnl.gov/linux/slurm/
 
@@ -368,7 +368,7 @@ Gives the ability for SLURM to use Berkeley Lab Checkpoint/Restart
 #############################################################################
 
 %prep
-%setup -n slurm-2.2.1
+%setup -n slurm-2.2.4
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \
@@ -602,6 +602,7 @@ rm -rf $RPM_BUILD_ROOT
 %{_sbindir}/slurm_epilog
 %{_sbindir}/slurm_prolog
 %{_sbindir}/sfree
+%{_libdir}/slurm/job_submit_cnode.so
 %config %{_sysconfdir}/bluegene.conf.example
 %endif
 #############################################################################

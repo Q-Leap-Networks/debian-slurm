@@ -419,14 +419,18 @@ static int _marknodes(db2_block_info_t *block_ptr, int count)
 		    && (block_ptr->nodes[j+4] == 'x'
 			|| block_ptr->nodes[j+4] == '-')) {
 			j++;
-			number = strtoul(block_ptr->nodes + j, &p,
-					 params.cluster_base);
+
+			number = xstrntol(block_ptr->nodes + j, &p,
+					  params.cluster_dims,
+					  params.cluster_base);
+
 			hostlist_parse_int_to_array(
 				number, start, params.cluster_dims,
 				params.cluster_base);
 			j += 4;
-			number = strtoul(block_ptr->nodes + j, &p,
-					 params.cluster_base);
+			number = xstrntol(block_ptr->nodes + j, &p,
+					  params.cluster_dims,
+					  params.cluster_base);
 			hostlist_parse_int_to_array(
 				number, end, params.cluster_dims,
 				params.cluster_base);
@@ -446,8 +450,9 @@ static int _marknodes(db2_block_info_t *block_ptr, int count)
 			  || (block_ptr->nodes[j] >= 'A'
 			      && block_ptr->nodes[j] <= 'Z')) {
 
-			number = strtoul(block_ptr->nodes + j, &p,
-					 params.cluster_base);
+			number = xstrntol(block_ptr->nodes + j, &p,
+					  params.cluster_dims,
+					  params.cluster_base);
 			hostlist_parse_int_to_array(
 				number, start, params.cluster_dims,
 				params.cluster_base);
@@ -564,13 +569,10 @@ static int _print_text_part(partition_info_t *part_ptr,
 		snprintf(tmp_cnt, sizeof(tmp_cnt), "%u", part_ptr->total_nodes);
 
 	if(!params.commandline) {
-		uint16_t root_only = 0;
-		if (part_ptr->flags & PART_FLAG_ROOT_ONLY)
-			root_only = 1;
 		mvwprintw(text_win,
 			  main_ycord,
 			  main_xcord, "%c",
-			  root_only);
+			  part_ptr->flags);
 		main_xcord += 4;
 
 		if (part_ptr->name) {

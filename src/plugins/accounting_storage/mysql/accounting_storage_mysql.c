@@ -73,6 +73,11 @@ char *slurmctld_cluster_name = NULL;
 #endif
 
 List as_mysql_cluster_list = NULL;
+/* This total list is only used for converting things, so no
+   need to keep it upto date even though it lives until the
+   end of the life of the slurmdbd.
+*/
+List as_mysql_total_cluster_list = NULL;
 pthread_mutex_t as_mysql_cluster_list_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /*
@@ -150,7 +155,7 @@ enum {
 
 extern int acct_storage_p_close_connection(mysql_conn_t **mysql_conn);
 
-static List _get_cluster_names(mysql_conn_t *mysql_conn)
+static List _get_cluster_names(mysql_conn_t *mysql_conn, bool with_deleted)
 {
 	MYSQL_RES *result = NULL;
 	MYSQL_ROW row;
@@ -158,8 +163,10 @@ static List _get_cluster_names(mysql_conn_t *mysql_conn)
 	char *cluster_name = NULL;
 	bool found = 0;
 
-	char *query = xstrdup_printf("select name from %s where deleted=0",
-				     cluster_table);
+	char *query = xstrdup_printf("select name from %s", cluster_table);
+
+	if (!with_deleted)
+		xstrcat(query, " where deleted=0");
 
 	if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
 		xfree(query);
@@ -612,15 +619,28 @@ static int _as_mysql_acct_check_tables(mysql_conn_t *mysql_conn)
 		return SLURM_ERROR;
 
 	slurm_mutex_lock(&as_mysql_cluster_list_lock);
-	if (!(as_mysql_cluster_list = _get_cluster_names(mysql_conn))) {
+	if (!(as_mysql_cluster_list = _get_cluster_names(mysql_conn, 0))) {
 		error("issue getting contents of %s", cluster_table);
 		slurm_mutex_unlock(&as_mysql_cluster_list_lock);
 		return SLURM_ERROR;
 	}
 
+	/* This total list is only used for converting things, so no
+	   need to keep it upto date even though it lives until the
+	   end of the life of the slurmdbd.
+	*/
+	if (!(as_mysql_total_cluster_list =
+	      _get_cluster_names(mysql_conn, 1))) {
+		error("issue getting total contents of %s", cluster_table);
+		slurm_mutex_unlock(&as_mysql_cluster_list_lock);
+		return SLURM_ERROR;
+	}
+
 	/* might as well do all the cluster centric tables inside this
-	 * lock */
-	itr = list_iterator_create(as_mysql_cluster_list);
+	 * lock.  We need to do this on all the clusters deleted or
+	 * other wise just to make sure everything is kept up to
+	 * date. */
+	itr = list_iterator_create(as_mysql_total_cluster_list);
 	while ((cluster_name = list_next(itr))) {
 		if ((rc = create_cluster_tables(mysql_conn, cluster_name))
 		    != SLURM_SUCCESS)
@@ -1307,20 +1327,59 @@ extern int remove_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name)
 extern int setup_association_limits(slurmdb_association_rec_t *assoc,
 				    char **cols, char **vals,
 				    char **extra, qos_level_t qos_level,
-				    bool get_fs)
+				    bool for_add)
 {
 	if (!assoc)
 		return SLURM_ERROR;
 
-	if ((int32_t)assoc->shares_raw >= 0) {
-		xstrcat(*cols, ", shares");
-		xstrfmtcat(*vals, ", %u", assoc->shares_raw);
-		xstrfmtcat(*extra, ", shares=%u", assoc->shares_raw);
-	} else if ((assoc->shares_raw == INFINITE) || get_fs) {
+	if (for_add) {
+		/* If we are adding we should make sure we don't get
+		   old reside sitting around from a former life.
+		*/
+		if (assoc->shares_raw == NO_VAL)
+			assoc->shares_raw = INFINITE;
+		if (assoc->grp_cpu_mins == (uint64_t)NO_VAL)
+			assoc->grp_cpu_mins = (uint64_t)INFINITE;
+		if (assoc->grp_cpu_run_mins == (uint64_t)NO_VAL)
+			assoc->grp_cpu_run_mins = (uint64_t)INFINITE;
+		if (assoc->grp_cpus == NO_VAL)
+			assoc->grp_cpus = INFINITE;
+		if (assoc->grp_jobs == NO_VAL)
+			assoc->grp_jobs = INFINITE;
+		if (assoc->grp_nodes == NO_VAL)
+			assoc->grp_nodes = INFINITE;
+		if (assoc->grp_submit_jobs == NO_VAL)
+			assoc->grp_submit_jobs = INFINITE;
+		if (assoc->grp_wall == NO_VAL)
+			assoc->grp_wall = INFINITE;
+		if (assoc->max_cpu_mins_pj == (uint64_t)NO_VAL)
+			assoc->max_cpu_mins_pj = (uint64_t)INFINITE;
+		if (assoc->max_cpu_run_mins == (uint64_t)NO_VAL)
+			assoc->max_cpu_run_mins = (uint64_t)INFINITE;
+		if (assoc->max_cpus_pj == NO_VAL)
+			assoc->max_cpus_pj = INFINITE;
+		if (assoc->max_jobs == NO_VAL)
+			assoc->max_jobs = INFINITE;
+		if (assoc->max_nodes_pj == NO_VAL)
+			assoc->max_nodes_pj = INFINITE;
+		if (assoc->max_submit_jobs == NO_VAL)
+			assoc->max_submit_jobs = INFINITE;
+		if (assoc->max_wall_pj == NO_VAL)
+			assoc->max_wall_pj = INFINITE;
+		if (assoc->def_qos_id == NO_VAL)
+			assoc->def_qos_id = INFINITE;
+	}
+
+	if (assoc->shares_raw == INFINITE) {
 		xstrcat(*cols, ", shares");
 		xstrcat(*vals, ", 1");
 		xstrcat(*extra, ", shares=1");
 		assoc->shares_raw = 1;
+	} else if ((assoc->shares_raw != NO_VAL)
+		   && (int32_t)assoc->shares_raw >= 0) {
+		xstrcat(*cols, ", shares");
+		xstrfmtcat(*vals, ", %u", assoc->shares_raw);
+		xstrfmtcat(*extra, ", shares=%u", assoc->shares_raw);
 	}
 
 	if (assoc->grp_cpu_mins == (uint64_t)INFINITE) {
@@ -1334,6 +1393,19 @@ extern int setup_association_limits(slurmdb_association_rec_t *assoc,
 			   assoc->grp_cpu_mins);
 		xstrfmtcat(*extra, ", grp_cpu_mins=%"PRIu64"",
 			   assoc->grp_cpu_mins);
+	}
+
+	if (assoc->grp_cpu_run_mins == (uint64_t)INFINITE) {
+		xstrcat(*cols, ", grp_cpu_run_mins");
+		xstrcat(*vals, ", NULL");
+		xstrcat(*extra, ", grp_cpu_run_mins=NULL");
+	} else if ((assoc->grp_cpu_run_mins != (uint64_t)NO_VAL)
+		   && ((int64_t)assoc->grp_cpu_run_mins >= 0)) {
+		xstrcat(*cols, ", grp_cpu_run_mins");
+		xstrfmtcat(*vals, ", %"PRIu64"",
+			   assoc->grp_cpu_run_mins);
+		xstrfmtcat(*extra, ", grp_cpu_run_mins=%"PRIu64"",
+			   assoc->grp_cpu_run_mins);
 	}
 
 	if (assoc->grp_cpus == INFINITE) {
@@ -1413,6 +1485,19 @@ extern int setup_association_limits(slurmdb_association_rec_t *assoc,
 			   assoc->max_cpu_mins_pj);
 		xstrfmtcat(*extra, ", max_cpu_mins_pj=%"PRIu64"",
 			   assoc->max_cpu_mins_pj);
+	}
+
+	if (assoc->max_cpu_run_mins == (uint64_t)INFINITE) {
+		xstrcat(*cols, ", max_cpu_run_mins");
+		xstrcat(*vals, ", NULL");
+		xstrcat(*extra, ", max_cpu_run_mins=NULL");
+	} else if ((assoc->max_cpu_run_mins != (uint64_t)NO_VAL)
+		   && ((int64_t)assoc->max_cpu_run_mins >= 0)) {
+		xstrcat(*cols, ", max_cpu_run_mins");
+		xstrfmtcat(*vals, ", %"PRIu64"",
+			   assoc->max_cpu_run_mins);
+		xstrfmtcat(*extra, ", max_cpu_run_mins=%"PRIu64"",
+			   assoc->max_cpu_run_mins);
 	}
 
 	if (assoc->max_cpus_pj == INFINITE) {
@@ -2017,6 +2102,10 @@ extern int fini ( void )
 	if (as_mysql_cluster_list) {
 		list_destroy(as_mysql_cluster_list);
 		as_mysql_cluster_list = NULL;
+	}
+	if (as_mysql_total_cluster_list) {
+		list_destroy(as_mysql_total_cluster_list);
+		as_mysql_total_cluster_list = NULL;
 	}
 	slurm_mutex_unlock(&as_mysql_cluster_list_lock);
 	slurm_mutex_destroy(&as_mysql_cluster_list_lock);

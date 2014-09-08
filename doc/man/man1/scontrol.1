@@ -276,9 +276,9 @@ is restarted or \fBscontrol reconfigure\fR is executed).
 .TP
 \fBshow\fP \fIENTITY\fP \fIID\fP
 Display the state of the specified entity with the specified identification.
-\fIENTITY\fP may be \fIconfig\fP, \fIdaemons\fP, \fIjob\fP, \fInode\fP,
-\fIpartition\fP, \fIreservation\fP, \fIslurmd\fP, \fIstep\fP, \fItopology\fP,
-\fIhostlist\fP or \fIhostnames\fP
+\fIENTITY\fP may be \fIaliases\fP, \fIconfig\fP, \fIdaemons\fP, \fIjob\fP,
+\fInode\fP, \fIpartition\fP, \fIreservation\fP, \fIslurmd\fP, \fIstep\fP,
+\fItopology\fP, \fIhostlist\fP or \fIhostnames\fP
 (also \fIblock\fP or \fIsubbp\fP on BlueGene systems).
 \fIID\fP can be used to identify a specific element of the identified
 entity: the configuration parameter name, job ID, node name, partition name,
@@ -289,6 +289,10 @@ If one node name is specified, all switches connected to that node (and
 their parent switches) will be shown.
 If more than one node name is specified, only switches that connect to all
 named nodes will be shown.
+\fIaliases\fP will return all \fINodeName\fP values associated to a given
+\fINodeHostname\fP (useful to get the list of virtual nodes associated with a
+real node in a configuration where multiple slurmd daemons execute on a single
+compute node).
 \fIhostnames\fP takes an optional hostlist expression as input and
 writes a list of individual host names to standard output (one per
 line). If no hostlist expression is supplied, the contents of the
@@ -357,7 +361,8 @@ updated configuration values to the \fIupdate\fP. Note that while most
 configuration values can be changed using this command, not all can be changed
 using this mechanism. In particular, the hardware configuration of a node or
 the physical addition or removal of nodes from the cluster may only be
-accomplished through editing the Slurm configuration file and executing the \fIreconfigure\fP command (described above).
+accomplished through editing the Slurm configuration file and executing
+the \fIreconfigure\fP command (described above).
 
 .TP
 \fBverbose\fP
@@ -367,6 +372,13 @@ This includes time\-stamps on data structures, record counts, etc.
 .TP
 \fBversion\fP
 Display the version number of scontrol being executed.
+
+.TP
+\fBwait_job\fP \fIjob_id\fP
+Wait until a job andall of its nodes are ready for use or the job has entered
+some termination state. This option is particularly useful in the SLURM Prolog
+or in the batch script itself if nodes are powered down and restarted
+automatically as needed.
 
 .TP
 \fB!!\fP
@@ -920,22 +932,25 @@ Specification of licenses (or other resources available on all
 nodes of the cluster) which are to be reserved.
 License names can be followed by an asterisk and count
 (the default count is one).
-Multiple license names should be comma separated (e.g.
-"Licenses=foo*4,bar").
+Multiple license names should be comma separated (e.g. "Licenses=foo*4,bar").
+A new reservation must specify one or more resource to be included: NodeCnt,
+Nodes and/or Licenses.
 
 .TP
 \fINodeCnt\fP=<num>
-Identify number of nodes to be reserved.  A new reservation must specify either
-NodeCnt or Nodes.
+Identify number of nodes to be reserved.
 On BlueGene systems, this number represents a cnode (compute node) count and
 will be rounded up as needed to represent whole nodes (midplanes).
+A new reservation must specify one or more resource to be included: NodeCnt,
+Nodes and/or Licenses.
 
 .TP
 \fINodes\fP=<name>
 Identify the node(s) to be reserved. Multiple node names
 may be specified using simple node range expressions (e.g. "Nodes=lx[10\-20]").
 Specify a blank data value to remove all nodes from a reservation: "Nodes=".
-A new reservation must specify either NodeCnt or Nodes.
+A new reservation must specify one or more resource to be included: NodeCnt,
+Nodes and/or Licenses.
 
 .TP
 \fIStartTime\fP=<time_spec>

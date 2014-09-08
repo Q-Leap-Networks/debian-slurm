@@ -75,6 +75,10 @@ extern List create_dynamic_block(List block_list,
 	}
 	memset(&blockreq, 0, sizeof(blockreq_t));
 
+	/* We need to lock this just incase a blocks_overlap is called
+	   which will in turn reset and set the system as it sees fit.
+	*/
+	slurm_mutex_lock(&block_state_mutex);
 	if (my_block_list) {
 		reset_ba_system(track_down_nodes);
 		itr = list_iterator_create(my_block_list);
@@ -316,8 +320,9 @@ extern List create_dynamic_block(List block_list,
 	itr = list_iterator_create(block_list);
 	itr2 = list_iterator_create(block_list);
 	while ((bg_record = (bg_record_t *) list_next(itr)) != NULL) {
-		/* never check a block with a job running */
-		if (bg_record->job_running != NO_JOB_RUNNING)
+		/* never check a block being deleted or with a job running */
+		if (bg_record->free_cnt
+		    || bg_record->job_running != NO_JOB_RUNNING)
 			continue;
 
 		/* Here we are only looking for the first
@@ -390,6 +395,7 @@ setup_records:
 
 finished:
 	reset_all_removed_bps();
+	slurm_mutex_unlock(&block_state_mutex);
 
 	xfree(unusable_nodes);
 	xfree(request->save_name);

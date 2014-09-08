@@ -56,17 +56,19 @@ Only used for database type storage plugins, ignored otherwise.
 
 .TP
 \fBAccountingStorageEnforce\fR
-This controls what level of enforcement you want on associations when new
-jobs are submitted.  Valid options are any combination of \fIassociations\fR, \fIlimits\fR,
-and \fIwckeys\fR, or \fIall\fR for all things.  If limits is set associations is implied.
-If wckeys is set both limits and associations are implied along with
-TrackWckey being set.  By enforcing Associations no new job is allowed to run
-unless a corresponding association exists in the system.  If limits are
-enforced users can be limited by association to how many nodes or how long
-jobs can run or other limits.  With wckeys enforced jobs will not be scheduled
-unless a valid workload characterization key is specified.  This value may not
-be reset via "scontrol reconfig". It only takes effect upon restart
-of the slurmctld daemon.
+This controls what level of association\-based enforcement to impose
+on job submissions.  Valid options are any combination of
+\fIassociations\fR, \fIlimits\fR, \fIqos\fR, and \fIwckeys\fR, or
+\fIall\fR for all things.  If limits, qos, or wckeys are set,
+associations will automatically be set.  In addition, if wckeys is
+set, TrackWCKey will automatically be set.  By enforcing Associations
+no new job is allowed to run unless a corresponding association exists
+in the system.  If limits are enforced users can be limited by
+association to whatever job size or run time limits are defined.  With
+qos and/or wckeys enforced jobs will not be scheduled unless a valid
+qos and/or workload characterization key is specified.  When
+\fBAccountingStorageEnforce\fR is changed, a restart of the slurmctld
+daemon is required (not just a "scontrol reconfig").
 
 .TP
 \fBAccountingStorageHost\fR
@@ -684,8 +686,8 @@ A comma delimited list of job submission plugins to be used.
 The specified plugins will be executed in the order listed.
 These are intended to be site\-specific plugins which can be used to set
 default job parameters and/or logging events.
-Sample plugins available in the distribution include "defaults", "logging",
-"lua", and "partition".
+Sample plugins available in the distribution include "cnode", "defaults",
+"logging", "lua", and "partition".
 See the SLURM code in "src/plugins/job_submit" and modify the code to satisfy
 your needs.
 No job submission plugins are used by default.
@@ -1495,7 +1497,7 @@ Sockets are consumable resources.
 On nodes with multiple cores, each core or thread is counted as a CPU
 to satisfy a job's resource requirement, but multiple jobs are not
 allocated resources on the same socket.
-Note that jobs requesting one CPU will only be given access to
+Note that jobs requesting one CPU will only be allocated
 that one CPU, but no other job will share the socket.
 .TP
 \fBCR_Socket_Memory\fR
@@ -1503,7 +1505,7 @@ Memory and sockets are consumable resources.
 On nodes with multiple cores, each core or thread is counted as a CPU
 to satisfy a job's resource requirement, but multiple jobs are not
 allocated resources on the same socket.
-Note that jobs requesting one CPU will only be given access to
+Note that jobs requesting one CPU will only be allocated
 that one CPU, but no other job will share the socket.
 Setting a value for \fBDefMemPerCPU\fR is strongly recommended.
 .TP
@@ -2212,7 +2214,9 @@ Number of logical threads in a single physical core (e.g. "2").
 Note that the SLURM can allocate resources to jobs down to the
 resolution of a core. If your system is configured with more than
 one thread per core, execution of a different job on each thread
-is not supported.
+is not supported unless you configure \fBSelectTypeParameters=CR_CPU\fR
+plus \fBProcs\fR; do not configure \fBSockets\fR, \fBCoresPerSocket\fR or
+\fBThreadsPerCore\fR.
 A job can execute a one task per thread from within one job step or
 execute a distinct job step on each of the threads.
 Note also if you are running with more than 1 thread per core and running

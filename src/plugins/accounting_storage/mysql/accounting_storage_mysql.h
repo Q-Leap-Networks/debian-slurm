@@ -98,6 +98,7 @@ extern char *wckey_table;
  * go off of.
  */
 extern List as_mysql_cluster_list;
+extern List as_mysql_total_cluster_list;
 extern pthread_mutex_t as_mysql_cluster_list_lock;
 
 
@@ -117,7 +118,7 @@ extern int remove_cluster_tables(mysql_conn_t *mysql_conn, char *cluster_name);
 extern int setup_association_limits(slurmdb_association_rec_t *assoc,
 				    char **cols, char **vals,
 				    char **extra, qos_level_t qos_level,
-				    bool get_fs);
+				    bool for_add);
 extern int modify_common(mysql_conn_t *mysql_conn,
 			 uint16_t type,
 			 time_t now,

@@ -1,6 +1,160 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 2.2.4
+========================
+ -- For batch jobs for which the Prolog fails, substitute the job ID for any
+    "%j" in the job's output or error file specification.
+ -- Add licenses field to the sview reservation information.
+ -- BLUEGENE - Fix for handling extremely overloaded system on Dynamic system
+    dealing with starting jobs on overlapping blocks.  Previous fallout
+    was job would be requeued.  (happens very rarely)
+ -- In accounting_storage/filetxt plugin, substitute spaces within job names,
+    step names, and account names with an underscore to insure proper parsing.
+ -- When building contribs/perlapi ignore both INSTALL_BASE and PERL_MM_OPT.
+    Use PREFIX instead to avoid build errors from multiple installation
+    specifications.
+ -- Add job_submit/cnode plugin to support resource reservations of less than
+    a full midplane on BlueGene computers. Treat cnodes as liceses which can
+    be reserved and are consumed by jobs. This reservation mechanism for less
+    than an entire midplane is still under development.
+ -- Clear a job's "reason" field when a held job is released.
+ -- When releasing a held job, calculate a new priority for it rather than
+    just setting the priority to 1.
+ -- Fix for sview started on a non-bluegene system to pick colors correctly
+    when talking to a real bluegene system.
+ -- Improve sched/backfill's expected start time calculation.
+ -- Prevent abort of sacctmgr for dump command with invalid (or no) filename.
+ -- Improve handling of job updates when using limits in accounting, and
+    updating jobs as a non-admin user.
+ -- Fix for "squeue --states=all" option. Bug would show no jobs.
+ -- Schedule jobs with reservations before those without reservations.
+ -- Fix squeue/scancel to query correctly against accounts of different case.
+ -- Abort an srun command when it's associated job gets aborted due to a
+    dependency that can not be satisfied.
+ -- In jobcomp plugins, report start time of zeroif pending job is cancelled.
+    Previously may report expected start time.
+ -- Fixed sacctmgr man to state correct variables.
+ -- Select nodes based upon their Weight when job allocation requests include
+    a constraint field with a count (e.g. "srun --constraint=gpu*2 -N4 a.out").
+ -- Add support for user names that are entirely numeric and do not treat them
+    as UID values. Patch from Dennis Leepow.
+ -- Patch to un/pack double values properly if negative value.  Patch from
+    Dennis Leepow
+ -- Do not reset a job's priority when requeued or suspended.
+ -- Fix problemm that could let new jobs start on a node in DRAINED state.
+ -- Fix cosmetic sacctmgr issue where if the user you are trying to add
+    doesn't exist in the /etc/passwd file and the account you are trying
+    to add them to doesn't exist it would print (null) instead of the bad
+    account name.
+ -- Fix associations/qos for when adding back a previously deleted object
+    the object will be cleared of all old limits.
+ -- BLUEGENE - Added back a lock when creating dynamic blocks to be more thread
+    safe on larger systems with heavy load.
+
+* Changes in SLURM 2.2.3
+========================
+ -- Update srun, salloc, and sbatch man page description of --distribution
+    option. Patches from Rod Schulz, Bull.
+ -- Applied patch from Martin Perry to fix "Incorrect results for task/affinity
+    block second distribution and cpus-per-task > 1" bug.
+ -- Avoid setting a job's eligible time while held (priority == 0).
+ -- Substantial performance improvement to backfill scheduling. Patch from
+    Bjorn-Helge Mevik, University of Oslo.
+ -- Make timeout for communications to the slurmctld be based upon the
+    MessageTimeout configuration parameter rather than always 3 seconds.
+    Patch from Matthieu Hautreux, CEA.
+ -- Add new scontrol option of "show aliases" to report every NodeName that is
+    associated with a given NodeHostName when running multiple slurmd daemons
+    per compute node (typically used for testing purposes). Patch from
+    Matthieu Hautreux, CEA.
+ -- Fix for handling job names with a "'" in the name within MySQL accounting.
+    Patch from Gerrit Renker, CSCS.
+ -- Modify condition under which salloc execution delayed until moved to the
+    foreground. Patch from Gerrit Renker, CSCS.
+	Job control for interactive salloc sessions: only if ...
+	a) input is from a terminal (stdin has valid termios attributes),
+	b) controlling terminal exists (non-negative tpgid),
+	c) salloc is not run in allocation-only (--no-shell) mode,
+	d) salloc runs in its own process group (true in interactive
+	   shells that support job control),
+	e) salloc has been configured at compile-time to support background
+	   execution and is not currently in the background process group.
+ -- Abort salloc if no controlling terminal and --no-shell option is not used
+    ("setsid salloc ..." is disabled). Patch from Gerrit Renker, CSCS.
+ -- Fix to gang scheduling logic which could cause jobs to not be suspended
+    or resumed when appropriate.
+ -- Applied patch from Martin Perry to fix "Slurmd abort when using task
+    affinity with plane distribution" bug.
+ -- Applied patch from Yiannis Georgiou to fix "Problem with cpu binding to
+    sockets option" behaviour. This change causes "--cpu_bind=sockets" to bind
+    tasks only to the CPUs on each socket allocated to the job rather than all
+    CPUs on each socket.
+ -- Advance daily or weekly reservations immediately after termination to avoid
+    having a job start that runs into the reservation when later advanced.
+ -- Fix for enabling users to change there own default account, wckey, or QOS.
+ -- BLUEGENE - If using OVERLAP mode fixed issue with multiple overlapping
+    blocks in error mode.
+ -- Fix for sacctmgr to display correctly default accounts.
+ -- scancel -s SIGKILL will always sent the RPC to the slurmctld rather than
+    the slurmd daemon(s). This insures that tasks in the process of getting
+    spawned are killed.
+ -- BLUEGENE - If using OVERLAP mode fixed issue with jobs getting denied
+    at submit if the only option for their job was overlapping a block in
+    error state.
+
+* Changes in SLURM 2.2.2
+========================
+ -- Correct logic to set correct job hold state (admin or user) when setting
+    the job's priority using scontrol's "update jobid=..." rather than its
+    "hold" or "holdu" commands.
+ -- Modify squeue to report unset --mincores, --minthreads or --extra-node-info
+    values as "*" rather than 65534. Patch from Rod Schulz, BULL.
+ -- Report the StartTime of a job as "Unknown" rather than the year 2106 if its
+    expected start time was too far in the future for the backfill scheduler
+    to compute.
+ -- Prevent a pending job reason field from inappropriately being set to
+    "Priority".
+ -- In sched/backfill with jobs having QOS_FLAG_NO_RESERVE set, then don't
+    consider the job's time limit when attempting to backfill schedule. The job
+    will just be preempted as needed at any time.
+ -- Eliminated a bug in sbatch when no valid target clusters are specified.
+ -- When explicitly sending a signal to a job with the scancel command and that
+    job is in a pending state, then send the request directly to the slurmctld
+    daemon and do not attempt to send the request to slurmd daemons, which are
+    not running the job anyway.
+ -- In slurmctld, properly set the up_node_bitmap when setting it's state to
+    IDLE (in case the previous node state was DOWN).
+ -- Fix smap to process block midplane names correctly when on a bluegene
+    system.
+ -- Fix smap to once again print out the Letter 'ID' for each line of a block/
+    partition view.
+ -- Corrected the NOTES section of the scancel man page
+ -- Fix for accounting_storage/mysql plugin to correctly query cluster based
+    transactions.
+ -- Fix issue when updating database for clusters that were previously deleted
+    before upgrade to 2.2 database.
+ -- BLUEGENE - Handle mesh torus check better in dynamic mode.
+ -- BLUEGENE - Fixed race condition when freeing block, most likely only would
+    happen in emulation.
+ -- Fix for calculating used QOS limits correctly on a slurmctld reconfig.
+ -- BLUEGENE - Fix for bad conn-type set when running small blocks in HTC mode.
+ -- If salloc's --no-shell option is used, then do not attempt to preserve the
+    terminal's state.
+ -- Add new SLURM configure time parameter of --disable-salloc-background. If
+    set, then salloc can only execute in the foreground. If started in the
+    background, then a message will be printed and the job allocation halted
+    until brought into the foreground.
+    NOTE: THIS IS A CHANGE IN DEFAULT SALLOC BEHAVIOR FROM V2.2.1, BUT IS
+    CONSISTENT WITH V2.1 AND EARLIER.
+ -- Added the Multi-Cluster Operation web page.
+ -- Removed remnant code for enforcing max sockets/cores/threads in the
+    cons_res plugin (see last item in 2.1.0-pre5).  This was responsible
+    for a bug reported by Rod Schultz.
+ -- BLUEGENE - Set correct env vars for HTC mode on a P system to get correct
+    block.
+ -- Correct RunTime reported by "scontrol show job" for pending jobs.
+
 * Changes in SLURM 2.2.1
 ========================
  -- Fix setting derived exit code correctly for jobs that happen to have the
@@ -612,10 +766,10 @@ documents those changes that are of interest to users and admins.
  -- Add scontrol "wait_job <job_id>" option to wait for nodes to boot as needed.
     Useful for batch jobs (in Prolog, PrologSlurmctld or the script) if powering
     down idle nodes.
- -- Added salloc and sbatch option --wait-for-nodes. If set non-zero, job 
+ -- Added salloc and sbatch option --wait-all-nodes. If set non-zero, job
     initiation will be delayed until all allocated nodes have booted. Salloc
     will log the delay with the messages "Waiting for nodes to boot" and "Nodes
-    are ready for use". 
+    are ready for job".
  -- The Priority/mulitfactor plugin now takes into consideration size of job
     in cpus as well as size in nodes when looking at the job size factor.
     Previously only nodes were considered.
@@ -6091,4 +6245,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 22224 2011-01-26 23:41:18Z da $
+$Id: NEWS 22954 2011-03-30 16:14:50Z da $

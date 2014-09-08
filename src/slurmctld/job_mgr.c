@@ -252,7 +252,8 @@ void delete_job_details(struct job_record *job_entry)
 		return;
 
 	xassert (job_entry->details->magic == DETAILS_MAGIC);
-	_delete_job_desc_files(job_entry->job_id);
+	if (IS_JOB_FINISHED(job_entry))
+		_delete_job_desc_files(job_entry->job_id);
 
 	for (i=0; i<job_entry->details->argc; i++)
 		xfree(job_entry->details->argv[i]);
@@ -1893,7 +1894,6 @@ extern int kill_running_job_by_node_name(char *node_name)
 
 				info("requeue job %u due to failure of node %s",
 				     job_ptr->job_id, node_name);
-				_set_job_prio(job_ptr);
 				snprintf(requeue_msg, sizeof(requeue_msg),
 					 "Job requeued due to failure "
 					 "of node %s",
@@ -3192,7 +3192,7 @@ static int _job_create(job_desc_msg_t * job_desc, int allocate, int will_run,
 				   assoc_ptr, qos_ptr,
 				   &limit_set_max_cpus,
 				   &limit_set_max_nodes,
-				   &limit_set_time))) {
+				   &limit_set_time, 0))) {
 		info("_job_create: exceeded association's node or time limit "
 		     "for user %u", job_desc->user_id);
 		error_code = ESLURM_ACCOUNTING_POLICY;
@@ -4632,8 +4632,7 @@ static void _list_delete_job(void *job_entry)
 		fatal("job hash error");
 	*job_pptr = job_ptr->job_next;
 
-	if (IS_JOB_FINISHED(job_ptr))
-		delete_job_details(job_ptr);
+	delete_job_details(job_ptr);
 	xfree(job_ptr->account);
 	xfree(job_ptr->alloc_node);
 	xfree(job_ptr->comment);
@@ -5908,7 +5907,7 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 					  job_ptr->assoc_ptr, job_ptr->qos_ptr,
 					  &limit_set_max_cpus,
 					  &limit_set_max_nodes,
-					  &limit_set_time)) {
+					  &limit_set_time, 1)) {
 			info("update_job: exceeded association's cpu, node or "
 			     "time limit for user %u", job_specs->user_id);
 			error_code = ESLURM_ACCOUNTING_POLICY;
@@ -6279,7 +6278,7 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 		else if (job_ptr->priority == job_specs->priority) {
 			debug("update_job: setting priority to current value");
 			if ((job_ptr->priority == 0) && authorized) {
-				if (job_specs->alloc_sid & ALLOC_SID_USER_HOLD)
+				if (job_specs->alloc_sid == ALLOC_SID_USER_HOLD)
 					job_ptr->state_reason = WAIT_HELD_USER;
 				else
 					job_ptr->state_reason = WAIT_HELD;
@@ -6300,11 +6299,15 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 			update_accounting = true;
 			if (job_ptr->priority == 0) {
 				if (authorized &&
-				    ((job_specs->alloc_sid &
-				      ALLOC_SID_USER_HOLD) == 0)) {
+				    (job_specs->alloc_sid !=
+				     ALLOC_SID_USER_HOLD)) {
 					job_ptr->state_reason = WAIT_HELD;
 				} else
 					job_ptr->state_reason = WAIT_HELD_USER;
+				xfree(job_ptr->state_desc);
+			} else if ((job_ptr->state_reason == WAIT_HELD) ||
+				   (job_ptr->state_reason == WAIT_HELD_USER)) {
+				job_ptr->state_reason = WAIT_NO_REASON;
 				xfree(job_ptr->state_desc);
 			}
 		} else if ((job_ptr->priority == 0) &&
@@ -6676,7 +6679,7 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 			     job_specs->min_nodes, job_specs->job_id);
 			error_code = ESLURM_INVALID_NODE_COUNT;
 			goto fini;
-		} else if (job_specs->min_nodes > job_ptr->node_cnt) {
+		} else if (job_specs->min_nodes == job_ptr->node_cnt) {
 			debug2("No change in node count update for job %u",
 			       job_specs->job_id);
 		} else {
@@ -7766,6 +7769,7 @@ extern bool job_independent(struct job_record *job_ptr, int will_run)
 		xfree(job_ptr->state_desc);
 		job_ptr->start_time	= now;
 		job_ptr->end_time	= now;
+		srun_allocate_abort(job_ptr);
 		job_completion_logger(job_ptr, false);
 		return false;
 	}
@@ -7787,7 +7791,8 @@ extern bool job_independent(struct job_record *job_ptr, int will_run)
 		job_ptr->state_reason = WAIT_NO_REASON;
 		xfree(job_ptr->state_desc);
 	}
-	if (detail_ptr && (detail_ptr->begin_time == 0)) {
+	if ((detail_ptr && (detail_ptr->begin_time == 0) &&
+	    (job_ptr->priority != 0))) {
 		detail_ptr->begin_time = now;
 	} else if (job_ptr->state_reason == WAIT_TIME) {
 		job_ptr->state_reason = WAIT_NO_REASON;
@@ -8099,7 +8104,6 @@ extern int job_suspend(suspend_msg_t *sus_ptr, uid_t uid,
 			goto reply;
 		_suspend_job(job_ptr, sus_ptr->op);
 		job_ptr->job_state = JOB_RUNNING;
-		_set_job_prio(job_ptr);
 		job_ptr->tot_sus_time +=
 			difftime(now, job_ptr->suspend_time);
 		if (!wiki_sched_test) {
@@ -8201,8 +8205,6 @@ extern int job_requeue (uid_t uid, uint32_t job_id, slurm_fd_t conn_fd,
 		goto reply;
 	}
 
-	/* reset the priority */
-	_set_job_prio(job_ptr);
 	slurm_sched_requeue(job_ptr, "Job requeued by user/admin");
 	last_job_update = now;
 
