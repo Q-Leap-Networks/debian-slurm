@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  smap.c - Report overall state the system
- *  $Id: smap.c 12858 2007-12-19 20:15:32Z da $
+ *  $Id: smap.c 13794 2008-04-04 15:56:01Z da $
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -249,7 +249,8 @@ part_fini:
 #else
 		default:
 			error("Must be on a BG SYSTEM to run this command");
-			endwin();
+			if(!params.commandline)
+				endwin();
 			ba_fini();
 			exit(0);
 			break;

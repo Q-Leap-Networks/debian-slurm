@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  proc_req.c - process incomming messages to slurmctld
  *
- *  $Id: proc_req.c 13341 2008-02-25 17:20:07Z jette $
+ *  $Id: proc_req.c 13871 2008-04-15 15:47:33Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -310,6 +310,7 @@ void _fill_ctld_conf(slurm_ctl_conf_t * conf_ptr)
 	conf_ptr->checkpoint_type     = xstrdup(conf->checkpoint_type);
 	conf_ptr->control_addr        = xstrdup(conf->control_addr);
 	conf_ptr->control_machine     = xstrdup(conf->control_machine);
+	conf_ptr->disable_root_jobs   = conf->disable_root_jobs;
 	conf_ptr->epilog              = xstrdup(conf->epilog);
 	conf_ptr->fast_schedule       = conf->fast_schedule;
 	conf_ptr->first_job_id        = conf->first_job_id;
@@ -1003,9 +1004,10 @@ static void _slurm_rpc_job_step_create(slurm_msg_t * msg)
 
 	dump_step_desc(req_step_msg);
 	uid = g_slurm_auth_get_uid(msg->auth_cred);
-	if ( (uid != req_step_msg->user_id) && (!_is_super_user(uid)) ) {
-		error("Security violation, JOB_STEP_CREATE RPC from uid=%u",
-			(unsigned int) uid);
+	if (uid != req_step_msg->user_id) {
+		error("Security violation, JOB_STEP_CREATE RPC from uid=%u "
+		      "to run as uid %u",
+			(unsigned int) uid, req_step_msg->user_id);
 		slurm_send_rc_msg(msg, ESLURM_USER_ID_MISSING);
 		return;
 	}
@@ -1701,6 +1703,7 @@ static void _slurm_rpc_submit_batch_job(slurm_msg_t * msg)
 	dump_job_desc(job_desc_msg);
 	uid = g_slurm_auth_get_uid(msg->auth_cred);
 	if ( (uid != job_desc_msg->user_id) && (!_is_super_user(uid)) ) {
+		/* NOTE: User root can submit a batch job for any other user */
 		error_code = ESLURM_USER_ID_MISSING;
 		error("Security violation, SUBMIT_JOB from uid=%u",
 		      (unsigned int) uid);
@@ -1726,6 +1729,17 @@ static void _slurm_rpc_submit_batch_job(slurm_msg_t * msg)
 				return;
 			}
 #endif
+
+			if (job_ptr->user_id != uid) {
+				error("Security violation, uid=%u attempting "
+				      "to execute a step within job %u owned "
+				      "by user %u",
+		 		      (unsigned int) uid, job_ptr->job_id,
+				      job_ptr->user_id);
+				slurm_send_rc_msg(msg, ESLURM_USER_ID_MISSING);
+				unlock_slurmctld(job_write_lock);
+				return;
+			}
 			error_code = _launch_batch_step(job_desc_msg, uid,
 							&step_id);
 			unlock_slurmctld(job_write_lock);

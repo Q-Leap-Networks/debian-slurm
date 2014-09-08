@@ -60,14 +60,14 @@
 %endif
 
 Name:    slurm
-Version: 1.2.25
+Version: 1.2.27
 Release: 1
 
 Summary: Simple Linux Utility for Resource Management
 
 License: GPL 
 Group: System Environment/Base
-Source: slurm-1.2.25.tar.bz2
+Source: slurm-1.2.27.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 URL: https://computing.llnl.gov/linux/slurm/
 BuildRequires: openssl-devel >= 0.9.6 openssl >= 0.9.6
@@ -212,7 +212,7 @@ SLURM process tracking plugin for SGI job containers.
 #############################################################################
 
 %prep
-%setup -n slurm-1.2.25
+%setup -n slurm-1.2.27
 
 %build
 %configure --program-prefix=%{?_program_prefix:%{_program_prefix}} \

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  step_mgr.c - manage the job step information of slurm
- *  $Id: step_mgr.c 13414 2008-02-28 23:22:33Z da $
+ *  $Id: step_mgr.c 13857 2008-04-11 19:14:36Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -712,17 +712,17 @@ step_create(job_step_create_request_msg_t *step_specs,
 		return ESLURM_DUPLICATE_JOB_ID;
 	}
 
+	/* NOTE: We have already confirmed the UID originating 
+	 * the request is identical with step_specs->user_id */
+	if (step_specs->user_id != job_ptr->user_id)
+		return ESLURM_ACCESS_DENIED ;
+
 	if (batch_step) {
 		info("user %u attempting to run batch script within "
 			"an existing job", step_specs->user_id);
 		/* This seems hazardous to allow, but LSF seems to 
-		 * work this way, so don't treat it as an error.
-		 * return ESLURM_ACCESS_DENIED ; */
+		 * work this way, so don't treat it as an error. */ 
 	}
-
-	if ((step_specs->user_id != job_ptr->user_id) &&
-	    (step_specs->user_id != 0))
-		return ESLURM_ACCESS_DENIED ;
 
 	if (IS_JOB_FINISHED(job_ptr) || 
 	    (job_ptr->end_time <= time(NULL)))
