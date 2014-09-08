@@ -135,7 +135,7 @@
 
 /* Seconds to wait for backup controller response to REQUEST_CONTROL RPC */
 #ifndef CONTROL_TIMEOUT
-#define CONTROL_TIMEOUT 4	/* seconds */
+#define CONTROL_TIMEOUT 10	/* seconds */
 #endif
 
 /*****************************************************************************\
@@ -214,6 +214,7 @@ extern bool  load_2_4_state;
 extern int   batch_sched_delay;
 extern int   sched_interval;
 extern bool  slurmctld_init_db;
+extern int   slurmctld_primary;
 
 /*****************************************************************************\
  *  NODE parameters and data structures, mostly in src/common/node_conf.h
@@ -765,6 +766,10 @@ enum select_plugindata_info {
 extern void abort_job_on_node(uint32_t job_id, struct job_record *job_ptr,
 			      char *node_name);
 
+/* Note that the backup slurmctld has assumed primary control.
+ * This function can be called multiple times. */
+extern void backup_slurmctld_restart(void);
+
 /* Complete a batch job requeue logic after all steps complete so that
  * subsequent jobs appear in a separate accounting record. */
 void batch_requeue_fini(struct job_record  *job_ptr);
@@ -1058,6 +1063,9 @@ extern int job_allocate(job_desc_msg_t * job_specs, int immediate,
 		int allocate, uid_t submit_uid, struct job_record **job_pptr,
 		char **err_msg);
 
+/* Reset a job's end-time based upon it's end_time.
+ * NOTE: Do not reset the end_time if already being preempted */
+extern void job_end_time_reset(struct job_record  *job_ptr);
 /*
  * job_hold_by_assoc_id - Hold all pending jobs with a given
  *	association ID. This happens when an association is deleted (e.g. when
@@ -1636,6 +1644,15 @@ extern List part_list_copy(List part_list_src);
  */
 extern bool part_policy_job_runnable_state(struct job_record *job_ptr);
 
+/* Validate a job's account against the partition's AllowAccounts or
+ * DenyAccounts parameters. */
+extern int part_policy_valid_acct(struct part_record *part_ptr, char *acct);
+
+/* Validate a job's QOS against the partition's AllowQOS or
+ * DenyQOS parameters. */
+extern int part_policy_valid_qos(
+	struct part_record *part_ptr, slurmdb_qos_rec_t *qos_ptr);
+
 /*
  * partition_in_use - determine whether a partition is in use by a RUNNING
  *	PENDING or SUSPENDED job
@@ -2034,5 +2051,19 @@ extern bool validate_super_user(uid_t uid);
  * RET true if permitted to run, false otherwise
  */
 extern bool validate_operator(uid_t uid);
+
+/* cleanup_completing()
+ *
+ * Clean up the JOB_COMPLETING flag and eventually
+ * requeue the job if there is a pending request
+ * for it. This function assumes the caller has the
+ * appropriate locks on the job_record.
+ * This function is called when a job completes
+ * by either when the slurmd epilog finishes or
+ * when the slurmctld epilog finishes, whichever
+ * comes last.
+ */
+extern void cleanup_completing(struct job_record *);
+
 
 #endif /* !_HAVE_SLURMCTLD_H */

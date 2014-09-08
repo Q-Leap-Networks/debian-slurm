@@ -1056,6 +1056,10 @@ extern char *job_reason_string(enum job_state_reason inx)
 		return "BlockFreeAction";
 	case WAIT_CLEANING:
 		return "Cleaning";
+	case WAIT_QOS:
+		return "QOSNotAllowed";
+	case WAIT_ACCOUNT:
+		return "AccountNotAllowed";
 	default:
 		return "?";
 	}
@@ -2986,6 +2990,8 @@ extern void slurm_free_license_info_request_msg(license_info_request_msg_t *msg)
 char *
 rpc_num2string(uint16_t opcode)
 {
+	static char buf[16];
+
 	switch (opcode) {
 		case REQUEST_NODE_REGISTRATION_STATUS:
 			return "REQUEST_NODE_REGISTRATION_STATUS";
@@ -3320,6 +3326,7 @@ rpc_num2string(uint16_t opcode)
 		case ACCOUNTING_REGISTER_CTLD:
 			return "ACCOUNTING_REGISTER_CTLD";
 		default:
-			return "UNKNOWN_PROTOCOL_MESSAGE";
+			(void) snprintf(buf, sizeof(buf), "%u", opcode);
+			return buf;
 	}
 }

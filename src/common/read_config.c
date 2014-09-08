@@ -4045,6 +4045,11 @@ extern char * debug_flags2str(uint32_t debug_flags)
 			xstrcat(rc, ",");
 		xstrcat(rc, "Backfill");
 	}
+	if (debug_flags & DEBUG_FLAG_BACKFILL_MAP) {
+		if (rc)
+			xstrcat(rc, ",");
+		xstrcat(rc, "BackfillMap");
+	}
 	if (debug_flags & DEBUG_FLAG_BG_ALGO) {
 		if (rc)
 			xstrcat(rc, ",");
@@ -4193,6 +4198,8 @@ extern uint32_t debug_str2flags(char *debug_flags)
 	while (tok) {
 		if      (strcasecmp(tok, "Backfill") == 0)
 			rc |= DEBUG_FLAG_BACKFILL;
+		else if (strcasecmp(tok, "BackfillMap") == 0)
+			rc |= DEBUG_FLAG_BACKFILL_MAP;
 		else if (strcasecmp(tok, "BGBlockAlgo") == 0)
 			rc |= DEBUG_FLAG_BG_ALGO;
 		else if (strcasecmp(tok, "BGBlockAlgoDeep") == 0)
@@ -4369,14 +4376,18 @@ extern int sort_key_pairs(void *v1, void *v2)
 extern char *get_extra_conf_path(char *conf_name)
 {
 	char *val = getenv("SLURM_CONF");
-	char *rc = NULL;
+	char *rc = NULL, *slash;
 
 	if (!val)
 		val = default_slurm_config_file;
 
 	/* Replace file name on end of path */
 	rc = xstrdup(val);
-	xstrsubstitute(rc, "slurm.conf", conf_name);
+	if ((slash = strrchr(rc, '/')))
+		slash[1] = '\0';
+	else
+		rc[0] = '\0';
+	xstrcat(rc, conf_name);
 
 	return rc;
 }

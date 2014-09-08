@@ -112,18 +112,43 @@ static void _set_pending_job_id(uint32_t job_id)
 	pending_job_id = job_id;
 }
 
-static void _signal_while_allocating(int signo)
+static void *_safe_signal_while_allocating(void *in_data)
 {
+	int signo = *(int *)in_data;
+
 	debug("Got signal %d", signo);
 	if (signo == SIGCONT)
-		return;
+		return NULL;
 
 	destroy_job = 1;
 	if (pending_job_id != 0) {
 		slurm_complete_job(pending_job_id, NO_VAL);
 		info("Job allocation %u has been revoked.", pending_job_id);
-
 	}
+
+	return NULL;
+}
+
+static void _signal_while_allocating(int signo)
+{
+	pthread_t thread_id;
+	pthread_attr_t thread_attr;
+
+	/* There are places where _signal_while_allocating can't be
+	 * put into a thread, but if this isn't on a separate thread
+	 * and we try to print something using the log functions and
+	 * it just so happens to be in a poll or something we can get
+	 * deadlock. So after the signal happens we are able to spawn
+	 * a thread here and avoid the deadlock.
+	 *
+	 * SO, DON'T PRINT ANYTHING IN THIS FUNCTION.
+	 */
+
+	slurm_attr_init(&thread_attr);
+	pthread_create(&thread_id, &thread_attr,
+		       _safe_signal_while_allocating,
+		       (void *)&signo);
+	slurm_attr_destroy(&thread_attr);
 }
 
 /* This typically signifies the job was cancelled by scancel */
@@ -669,8 +694,12 @@ job_desc_msg_create_from_opts (void)
 		j->sockets_per_node    = opt.sockets_per_node;
 	if (opt.cores_per_socket != NO_VAL)
 		j->cores_per_socket      = opt.cores_per_socket;
-	if (opt.threads_per_core != NO_VAL)
+	if (opt.threads_per_core != NO_VAL) {
 		j->threads_per_core    = opt.threads_per_core;
+		/* if 1 always make sure affinity knows about it */
+		if (j->threads_per_core == 1)
+			opt.cpu_bind_type |= CPU_BIND_ONE_THREAD_PER_CORE;
+	}
 	j->user_id        = opt.uid;
 	j->dependency     = opt.dependency;
 	if (opt.nice)

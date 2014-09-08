@@ -403,8 +403,8 @@ as part of the process launch.</p>
 
 <p><a name="prompt"><b>12. How can I get shell prompts in interactive
 mode?</b></a><br>
-<i>srun -u bash -i</i><br>
-Srun's <i>-u</i> option turns off buffering of stdout.
+<i>srun --pty bash -i</i><br>
+Srun's <i>--pty</i> option runs task zero in pseudo terminal mode.
 Bash's <i>-i</i> option tells it to run in interactive mode (with prompts).
 
 <p><a name="batch_out"><b>13. How can I get the task ID in the output
@@ -1809,7 +1809,7 @@ case_sensitive = False
 <p><a name="ha_db"><b>54. How critical is configuring high availability for my
 database?</b></a></br>
 <ul>
-<li>Consider if you really need mysql failover. Short outage of slurdbd is not
+<li>Consider if you really need mysql failover. Short outage of slurmdbd is not
 a problem, because slurmctld will store all data in memory and send it to
 slurmdbd when it's back operating. The slurmctld daemon will also cache all
 user limits and fair share information.</li>
@@ -1931,6 +1931,6 @@ sacctmgr delete user name=adam cluster=tux account=chemistry
 
 <p class="footer"><a href="#top">top</a></p>
 
-<p style="text-align:center;">Last modified 30 April 2014</p>
+<p style="text-align:center;">Last modified 12 June 2014</p>
 
 <!--#include virtual="footer.txt"-->
