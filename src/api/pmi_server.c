@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  pmi_server.c - Global PMI data as maintained within srun
- *  $Id: pmi_server.c 21624 2010-11-29 23:21:10Z jette $
+ *  $Id$
  *****************************************************************************
  *  Copyright (C) 2005-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  opt.c - options processing for sattach
- *  $Id: opt.c 21149 2010-09-14 22:04:42Z da $
+ *  $Id$
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

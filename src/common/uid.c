@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/common/uid.c - uid/gid lookup utility functions
- * $Id: uid.c 21058 2010-08-30 19:00:14Z jette $
+ * $Id$
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.

@@ -7,7 +7,7 @@
  *  http://www.etnus.com/
 \*****************************************************************************/
 
-/*  $Id: attach.h 19095 2009-12-01 22:59:18Z da $
+/*  $Id$
  */
 
 /* This file contains support for bringing processes up stopped, so that

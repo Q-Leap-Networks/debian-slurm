@@ -2,7 +2,7 @@
  *  bg_switch_connections.c - Blue Gene switch management functions,
  *  establish switch connections
  *
- *  $Id: bg_switch_connections.c 21904 2010-12-28 18:45:52Z da $
+ *  $Id$
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

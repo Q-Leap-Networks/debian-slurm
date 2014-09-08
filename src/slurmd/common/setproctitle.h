@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/slurmd/common/setproctitle.h - Emulation of BSD setproctitle()
- * $Id: setproctitle.h 21149 2010-09-14 22:04:42Z da $
+ * $Id$
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

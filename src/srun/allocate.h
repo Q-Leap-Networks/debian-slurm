@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/srun/allocate.h - node allocation functions for srun
- * $Id: allocate.h 20623 2010-07-01 16:24:19Z da $
+ * $Id$
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

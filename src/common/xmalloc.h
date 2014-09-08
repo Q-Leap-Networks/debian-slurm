@@ -3,7 +3,7 @@
  *  - default: never return if errors are encountered.
  *  - attempt to report file, line, and calling function on assertion failure
  *  - use configurable slurm log facility for reporting errors
- *  $Id: xmalloc.h 20020 2010-04-14 00:08:32Z jette $
+ *  $Id$
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

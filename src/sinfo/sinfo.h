@@ -1,7 +1,7 @@
 /****************************************************************************\
  *  sinfo.h - definitions used for sinfo data functions
  *
- *  $Id: sinfo.h 20335 2010-05-26 15:56:08Z jette $
+ *  $Id$
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.

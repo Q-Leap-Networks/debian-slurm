@@ -184,7 +184,7 @@ static int _change_user_name(slurmdb_user_rec_t *user)
 		while ((wckey = list_next(itr))) {
 			if (!strcmp(user->old_name, wckey->user)) {
 				xfree(wckey->user);
-				assoc->user = xstrdup(wckey->name);
+				wckey->user = xstrdup(user->name);
 				wckey->uid = user->uid;
 				debug3("changing wckey %d", wckey->id);
 			}
@@ -3174,7 +3174,7 @@ extern void assoc_mgr_remove_assoc_usage(slurmdb_association_rec_t *assoc)
 	info("Resetting usage for %s %s", child, child_str);
 
 	old_usage_raw = assoc->usage->usage_raw;
-	old_grp_used_wall = assoc->usage->usage_raw;
+	old_grp_used_wall = assoc->usage->grp_used_wall;
 /*
  *	Reset this association's raw and group usages and subtract its
  *	current usages from all parental units

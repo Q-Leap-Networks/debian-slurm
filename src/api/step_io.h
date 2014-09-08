@@ -1,6 +1,6 @@
 /*****************************************************************************\
  * src/api/step_io.h - job-step client-side I/O routines
- * $Id: step_io.h 19095 2009-12-01 22:59:18Z da $
+ * $Id$
  *****************************************************************************
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

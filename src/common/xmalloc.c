@@ -2,7 +2,7 @@
  *  xmalloc.c - enhanced malloc routines
  *  Started with Jim Garlick's xmalloc and tied into slurm log facility.
  *  Also added ability to print file, line, and function of caller.
- *  $Id: xmalloc.c 19095 2009-12-01 22:59:18Z da $
+ *  $Id$
  *****************************************************************************
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

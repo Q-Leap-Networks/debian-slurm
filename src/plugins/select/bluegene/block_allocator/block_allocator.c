@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  block_allocator.c - Assorted functions for layout of bluegene blocks,
  *	 wiring, mapping for smap, etc.
- *  $Id: block_allocator.c 21904 2010-12-28 18:45:52Z da $
+ *  $Id$
  *****************************************************************************
  *  Copyright (C) 2004-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.

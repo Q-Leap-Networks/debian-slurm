@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/mgr.c - job manager functions for slurmstepd
- *  $Id: mgr.c 21662 2010-12-02 16:02:22Z jette $
+ *  $Id$
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.
@@ -855,6 +855,8 @@ job_manager(slurmd_job_t *job)
 
 	if (rc) {
 		error("IO setup failed: %m");
+		job->task[0]->estatus = 0x0100;
+		step_complete.step_rc = 0x0100;
 		rc = SLURM_SUCCESS;	/* drains node otherwise */
 		goto fail2;
 	} else {

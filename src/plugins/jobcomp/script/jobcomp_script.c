@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  jobcomp_script.c - Script running slurm job completion logging plugin.
- *  $Id: jobcomp_script.c 22818 2011-03-21 15:20:11Z jette $
+ *  $Id$
  *****************************************************************************
  *  Produced at Center for High Performance Computing, North Dakota State
  *  University

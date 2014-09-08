@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  log.c - slurm logging facilities
- *  $Id: log.c 21614 2010-11-29 17:59:45Z jette $
+ *  $Id$
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.

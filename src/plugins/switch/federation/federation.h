@@ -1,6 +1,6 @@
 /*****************************************************************************\
  **  federation.h - Library routines for initiating jobs on IBM Federation
- **  $Id: federation.h 19095 2009-12-01 22:59:18Z da $
+ **  $Id$
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

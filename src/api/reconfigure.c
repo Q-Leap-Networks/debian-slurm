@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  reconfigure.c - request that slurmctld shutdown or re-read the
  *	            configuration files
- *  $Id: reconfigure.c 21211 2010-09-21 21:12:41Z jette $
+ *  $Id$
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.

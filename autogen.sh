@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# $Id: autogen.sh 8192 2006-05-25 00:15:05Z morrone $
+# $Id$
 # $Source$
 #
 # Run this script to generate aclocal.m4, config.h.in, 

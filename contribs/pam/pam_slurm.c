@@ -1,5 +1,5 @@
 /*****************************************************************************\
- *  $Id: pam_slurm.c 20260 2010-05-13 21:59:53Z da $
+ *  $Id$
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2009 Lawrence Livermore National Security.

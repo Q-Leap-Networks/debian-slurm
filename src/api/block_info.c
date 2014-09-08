@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  node_select_info.c - get the node select plugin state information of slurm
  *
- *  $Id: block_info.c 21397 2010-10-20 19:18:02Z da $
+ *  $Id$
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).

@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  suspend.c - job step suspend and resume functions.
- *  $Id: suspend.c 20255 2010-05-12 22:43:51Z da $
+ *  $Id$
  *****************************************************************************
  *  Copyright (C) 2005-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
