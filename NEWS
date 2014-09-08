@@ -1,6 +1,82 @@
 This file describes changes in recent versions of Slurm. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in Slurm 14.03.7
+==========================
+ -- Correct typos in man pages.
+ -- Add note to MaxNodesPerUser and multiple jobs running on the same node
+    counting as multiple nodes.
+ -- PerlAPI - fix renamed call from slurm_api_set_conf_file to
+    slurm_conf_reinit.
+ -- Fix gres race condition that could result in job deallocation error message.
+ -- Correct NumCPUs count for jobs with --exclusive option.
+ -- When creating reservation with CoreCnt, check that Slurm uses
+    SelectType=select/cons_res, otherwise don't send the request to slurmctld
+    and return an error.
+ -- Save the state of scheduled node reboots so they will not be lost should the
+    slurmctld restart.
+ -- In select/cons_res plugin - Insure the node count does not exceed the task
+    count.
+ -- switch/nrt - Unload tables rather than windows at job end, to release CAU.
+ -- When HealthCheckNodeState is configured as IDLE don't run the
+    HealthCheckProgram for nodes in any other states than IDLE.
+ -- Minor sanity check to verify the string sent in isn't NULL when using
+    bit_unfmt.
+ -- CRAY NATIVE - Fix issue on heavy systems to only run the NHC once per
+    job/step completion.
+ -- Remove unneeded step cleanup for pending steps.
+ -- Fix issue where if a batch job was manually requeued the batch step
+    information wasn't stored in accounting.
+ -- When job is release from a requeue hold state clean up its previous
+    exit code.
+ -- Correct the srun man page about how the output from the user application
+    is sent to srun.
+ -- Increase the timeout of the main thread while waiting for the i/o thread.
+    Allow up to 180 seconds for the i/o thread to complete.
+ -- When using sacct -c to read the job completion data compute the correct
+    job elapsed time.
+ -- Perl package: Define some missing node states.
+ -- When using AccountingStorageType=accounting_storage/mysql zero out the
+    database index for the array elements avoiding duplicate database values.
+ -- Reword the explanation of cputime and cputimeraw in the sacct man page.
+ -- JobCompType allows "jobcomp/mysql" as valid name but the code used
+    "job_comp/mysql" setting an incorrect default database.
+ -- Try to load libslurm.so only when necessary.
+ -- When nodes scheduled for reboot, set state to DOWN rather than FUTURE so
+    they are still visible to sinfo. State set to IDLE after reboot completes.
+ -- Apply BatchStartTimeout configuration to task launch and avoid aborting
+    srun commands due to long running Prolog scripts.
+ -- Fix minor memory leaks when freeing node_info_t structure.
+ -- Fix various memory leaks in sview
+ -- If a batch script is requeued and running steps get correct exit code/signal
+    previous it was always -2.
+ -- If step exitcode hasn't been set display with sacct the -2 instead
+    of acting like it is a signal and exitcode.
+ -- Send calculated step_rc for batch step instead of raw status as
+    done for normal steps.
+ -- If a job times out, set the exit code in accounting to 1 instead of the
+    signal 1.
+ -- Update the acct_gather.conf.5 man page removing the reference to
+    InfinibandOFEDFrequency.
+ -- Fix gang scheduling for jobs submitted to multiple partitions.
+ -- Enable srun to submit job to multiple partitions.
+ -- Update slurm.conf man page. When Epilog or Prolog fail the node state
+    is set ro DRAIN.
+ -- Start a job in the highest priority partition possible, even if it requires
+    preempting other jobs and delaying initiation, rather than using a lower
+    priority partition. Previous logic would preempt lower priority jobs, but
+    then might start the job in a lower priority partition and not use the
+    resources released by the preempted jobs.
+ -- Fix SelectTypeParameters=CR_PACK_NODES for srun making both job and step
+    resource allocation.
+ -- BGQ - Make it possible to pack multiple tasks on a core when not using
+    the entire cnode.
+ -- MYSQL - if unable to connect to mysqld close connection that was inited.
+ -- DBD - when connecting make sure we wait MessageTimeout + 5 since the
+    timeout when talking to the Database is the same timeout so a race
+    condition could occur in the requesting client when receiving the response
+    if the database is unresponsive.
+
 * Changes in Slurm 14.03.6
 ==========================
  -- Added examples to demonstrate the use of the sacct -T option to the man

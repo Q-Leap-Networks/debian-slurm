@@ -818,7 +818,7 @@ _get_req_features(struct node_set *node_set_ptr, int node_set_size,
 			/* _pick_best_nodes() is destructive of the node_set
 			 * data structure, so we need to make a copy and then
 			 * purge it */
-			for (i=0; i<node_set_size; i++) {
+			for (i = 0; i < node_set_size; i++) {
 				if (!_match_feature(feat_ptr->name,
 						    node_set_ptr+i))
 					continue;
@@ -1694,7 +1694,7 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 	 * free up. total_cpus is set within _get_req_features */
 	job_ptr->cpu_cnt = job_ptr->total_cpus;
 
-	if (!test_only && preemptee_job_list && (error_code == SLURM_SUCCESS)){
+	if (!test_only && preemptee_job_list && (error_code == SLURM_SUCCESS)) {
 		struct job_details *detail_ptr = job_ptr->details;
 		time_t now = time(NULL);
 		bool kill_pending = true;
@@ -1710,6 +1710,7 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 		if ((error_code == ESLURM_NODES_BUSY) &&
 		    (detail_ptr->preempt_start_time == 0)) {
   			detail_ptr->preempt_start_time = now;
+			job_ptr->preempt_in_progress = true;
 		}
 	}
 	if (error_code) {
@@ -1756,6 +1757,7 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 	 * memory. */
 	FREE_NULL_BITMAP(job_ptr->node_bitmap);
 	xfree(job_ptr->nodes);
+	job_ptr->exit_code = 0;
 
 	job_ptr->node_bitmap = select_bitmap;
 
