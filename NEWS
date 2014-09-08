@@ -3,6 +3,43 @@ documents those changes that are of interest to users and admins.
 
 * Changes in SLURM 2.1.8
 ========================
+ -- Update BUILD_NOTES for AIX and bgp systems on how to get sview to
+    build correctly.
+ -- Update man page for scontrol when nodes are in the "MIXED" state.
+ -- Better error messages for sacctmgr.
+ -- Fix bug in allocation of CPUs with select/cons_res and --cpus-per-task
+    option.
+ -- Fix bug in dependency support for afterok and afternotok options to insure
+    that the job's exit status gets checked for dependent jobs prior to puring
+    completed job records.
+ -- Fix bug in sched/backfill that could set an incorrect expected start time
+    for a job.
+ -- BLUEGENE - Fix for systems that have midplanes defined in the database
+    that don't exist.
+ -- Accounting, fixed bug where if removing an object a rollback wasn't
+    possible.
+ -- Fix possible scontrol stack corruption when listing jobs with very a long
+    job or working directory name (over 511 characters).
+ -- Insure that SPANK environment variables set by salloc or sbatch get
+    propagated to the Prolog on all nodes by setting SLURM_SPANK_* environment
+    variables for srun's use.
+ -- In sched/wiki2 - Add support for the MODIFYJOB command to alter a job's
+    comment field
+ -- When a cluster first registers with the SlurmDBD only send nodes in an
+    non-usable state.  Before all nodes were sent.
+ -- Alter sacct to be able to query jobs by association id.
+ -- Edit documentation for scontrol stating ExitCode as something not alterable.
+ -- Update documentation about ReturnToService and silently rebooting nodes.
+ -- When combining --ntasks-per-node and --exclusive in an allocation request
+    the correct thing, giving the allocation the entire node but only
+    ntasks-per-node, happens.
+ -- Fix accounting transaction logs when deleting associations to put the
+    ids instead of the lfts which could change over time.
+ -- Fix support for salloc, sbatch and srun's --hint option to avoid allocating
+    a job more sockets per node or more cores per socket than desired. Also
+    when --hint=compute_bound or --hint=memory_bound then avoid allocating more
+    than one task per hyperthread (a change in behavior, but almost certainly
+    a preferable mode of operation).
 
 * Changes in SLURM 2.1.7
 ========================
@@ -5000,4 +5037,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 20049 2010-04-16 00:34:17Z da $
+$Id: NEWS 20218 2010-05-07 21:29:56Z jette $

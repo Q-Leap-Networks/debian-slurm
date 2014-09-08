@@ -182,6 +182,8 @@
 #define LONG_OPT_SIGNAL          0x14e
 #define LONG_OPT_DEBUG_SLURMD    0x14f
 
+extern char **environ;
+
 /*---- global variables, defined in opt.h ----*/
 int _verbose;
 opt_t opt;
@@ -708,7 +710,7 @@ _get_int(const char *arg, const char *what, bool positive)
 
 static void set_options(const int argc, char **argv)
 {
-	int opt_char, option_index = 0;
+	int opt_char, option_index = 0, max_val = 0;
 	struct utsname name;
 	static struct option long_options[] = {
 		{"attach",        no_argument,       0, 'a'},
@@ -1302,17 +1304,26 @@ static void set_options(const int argc, char **argv)
 		case LONG_OPT_SOCKETSPERNODE:
 			get_resource_arg_range( optarg, "sockets-per-node",
 						&opt.min_sockets_per_node,
-						NULL, true );
+						&max_val, true );
+			if ((opt.min_sockets_per_node == 1) &&
+			    (max_val == INT_MAX))
+				opt.min_sockets_per_node = NO_VAL;
 			break;
 		case LONG_OPT_CORESPERSOCKET:
 			get_resource_arg_range( optarg, "cores-per-socket",
 						&opt.min_cores_per_socket,
-						NULL, true);
+						&max_val, true );
+			if ((opt.min_cores_per_socket == 1) &&
+			    (max_val == INT_MAX))
+				opt.min_cores_per_socket = NO_VAL;
 			break;
 		case LONG_OPT_THREADSPERCORE:
 			get_resource_arg_range( optarg, "threads-per-core",
 						&opt.min_threads_per_core,
-						NULL, true );
+						&max_val, true );
+			if ((opt.min_threads_per_core == 1) &&
+			    (max_val == INT_MAX))
+				opt.min_threads_per_core = NO_VAL;
 			break;
 		case LONG_OPT_NTASKSPERNODE:
 			opt.ntasks_per_node = _get_int(optarg, "ntasks-per-node",
@@ -1934,6 +1945,33 @@ static bool _opt_verify(void)
 		exit(error_exit);
 
 	return verified;
+}
+
+/* Initialize the the spank_job_env based upon environment variables set
+ *	via salloc or sbatch commands */
+extern void init_spank_env(void)
+{
+	int i;
+	char *name, *eq, *value;
+
+	if (environ == NULL)
+		return;
+
+	for (i=0; environ[i]; i++) {
+		if (strncmp(environ[i], "SLURM_SPANK_", 12))
+			continue;
+		name = xstrdup(environ[i] + 12);
+		eq = strchr(name, (int)'=');
+		if (eq == NULL) {
+			xfree(name);
+			break;
+		}
+		eq[0] = '\0';
+		value = eq + 1;
+		spank_set_job_env(name, value, 1);
+		xfree(name);
+	}
+		
 }
 
 /* Functions used by SPANK plugins to read and write job environment

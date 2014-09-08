@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  bg_block_info.c - bluegene block information from the db2 database.
  *
- *  $Id: bg_block_info.c 19270 2010-01-19 19:46:45Z da $
+ *  $Id: bg_block_info.c 20097 2010-04-20 16:42:16Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -184,6 +184,12 @@ extern int block_ready(struct job_record *job_ptr)
 			} else if ((bg_record->user_uid == job_ptr->user_id)
 				   && (bg_record->state
 				       == RM_PARTITION_READY)) {
+				/* Clear the state just incase we
+				   missed it somehow.
+				*/
+				job_ptr->job_state &= (~JOB_CONFIGURING);
+				last_job_update = time(NULL);
+				
 				rc = 1;
 			} else if (bg_record->user_uid != job_ptr->user_id)
 				rc = 0;

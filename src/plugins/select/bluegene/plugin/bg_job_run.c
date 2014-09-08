@@ -2,7 +2,7 @@
  *  bg_job_run.c - blue gene job execution (e.g. initiation and termination)
  *  functions.
  *
- *  $Id: bg_job_run.c 20011 2010-04-13 19:10:21Z da $
+ *  $Id: bg_job_run.c 20097 2010-04-20 16:42:16Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -547,6 +547,10 @@ static void _sync_agent(bg_update_t *bg_update_ptr)
 		list_push(bg_lists->booted, bg_record);
 
 	if(bg_record->state == RM_PARTITION_READY) {
+		if(bg_record->job_ptr) {
+			bg_record->job_ptr->job_state &= (~JOB_CONFIGURING);
+			last_job_update = time(NULL);
+		}
 		if(bg_record->user_uid != bg_update_ptr->job_ptr->user_id) {
 			int set_user_rc = SLURM_SUCCESS;
 

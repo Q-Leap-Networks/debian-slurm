@@ -71,7 +71,7 @@
 static int _compute_c_b_task_dist(struct job_record *job_ptr)
 {
 	bool over_subscribe = false;
-	uint32_t n, i, tid, maxtasks;
+	uint32_t n, i, tid, maxtasks, l;
 	uint16_t *avail_cpus;
 	job_resources_t *job_res = job_ptr->job_resrcs;
 	if (!job_res || !job_res->cpus) {
@@ -82,6 +82,9 @@ static int _compute_c_b_task_dist(struct job_record *job_ptr)
 	maxtasks = job_res->nprocs;
 	avail_cpus = job_res->cpus;
 	job_res->cpus = xmalloc(job_res->nhosts * sizeof(uint16_t));
+
+        if (job_ptr->details->cpus_per_task > 1)
+                 maxtasks = maxtasks / job_ptr->details->cpus_per_task;	
 
 	for (tid = 0, i = 0; (tid < maxtasks); i++) { /* cycle counter */
 		bool space_remaining = false;
@@ -96,10 +99,12 @@ static int _compute_c_b_task_dist(struct job_record *job_ptr)
 		for (n = 0; ((n < job_res->nhosts) && (tid < maxtasks)); n++) {
 			if ((i < avail_cpus[n]) || over_subscribe) {
 				tid++;
-				if (job_res->cpus[n] < avail_cpus[n])
-					job_res->cpus[n]++;
-				if ((i + 1) < avail_cpus[n])
-					space_remaining = true;
+				for (l = 0; l < job_ptr->details->cpus_per_task; l++) {
+					if (job_res->cpus[n] < avail_cpus[n])
+						job_res->cpus[n]++;
+					if ((i + 1) < avail_cpus[n])
+						space_remaining = true;
+				}
 			}
 		}
 		if (!space_remaining) {
@@ -192,9 +197,17 @@ static void _block_sync_core_bitmap(struct job_record *job_ptr,
 		alloc_cores = true;
 #endif
 
-	if (job_ptr->details && job_ptr->details->mc_ptr &&
-	    job_ptr->details->mc_ptr->ntasks_per_core)
-		ntasks_per_core = job_ptr->details->mc_ptr->ntasks_per_core;
+	if (job_ptr->details && job_ptr->details->mc_ptr) {
+		if (job_ptr->details->mc_ptr->ntasks_per_core) {
+			ntasks_per_core = job_ptr->details->mc_ptr->
+					  ntasks_per_core;
+		}
+		if ((job_ptr->details->mc_ptr->min_threads !=
+							(uint16_t) NO_VAL) &&
+		    (job_ptr->details->mc_ptr->min_threads < ntasks_per_core)) {
+			ntasks_per_core = job_ptr->details->mc_ptr->min_threads;
+		}
+	}
 
 	size  = bit_size(job_res->node_bitmap);
 	csize = bit_size(job_res->core_bitmap);
@@ -276,9 +289,17 @@ static void _cyclic_sync_core_bitmap(struct job_record *job_ptr,
 		alloc_cores = true;
 #endif
 	core_map = job_res->core_bitmap;
-	if (job_ptr->details && job_ptr->details->mc_ptr &&
-	    job_ptr->details->mc_ptr->ntasks_per_core)
-		ntasks_per_core = job_ptr->details->mc_ptr->ntasks_per_core;
+	if (job_ptr->details && job_ptr->details->mc_ptr) {
+		if (job_ptr->details->mc_ptr->ntasks_per_core) {
+			ntasks_per_core = job_ptr->details->mc_ptr->
+					  ntasks_per_core;
+		}
+		if ((job_ptr->details->mc_ptr->min_threads != 
+							(uint16_t) NO_VAL) &&
+		    (job_ptr->details->mc_ptr->min_threads < ntasks_per_core)) {
+			ntasks_per_core = job_ptr->details->mc_ptr->min_threads;
+		}
+	}
 
 	sock_size  = select_node_record[0].sockets;
 	sock_start = xmalloc(sock_size * sizeof(uint32_t));
