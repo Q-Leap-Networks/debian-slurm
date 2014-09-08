@@ -2,7 +2,7 @@
  *  node_scheduler.c - select and allocated nodes to jobs 
  *	Note: there is a global node table (node_record_table_ptr) 
  *
- *  $Id: node_scheduler.c 13234 2008-02-08 22:13:39Z jette $
+ *  $Id: node_scheduler.c 13639 2008-03-18 19:25:32Z jette $
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -223,7 +223,7 @@ extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
 
 	if ((agent_args->node_count - down_node_cnt) == 0) {
 		job_ptr->job_state &= (~JOB_COMPLETING);
-		delete_step_records(job_ptr, 1);
+		delete_step_records(job_ptr, 0);
 		slurm_sched_schedule();
 	}
 	
@@ -307,6 +307,10 @@ _pick_best_load(struct job_record *job_ptr, bitstr_t * bitmap,
 	if ((set_cnt < min_nodes) ||
 	    ((req_nodes > min_nodes) && (set_cnt < req_nodes)))
 		return error_code;	/* not usable */
+
+	if (job_ptr->details && job_ptr->details->req_node_bitmap &&
+	    (!bit_super_set(job_ptr->details->req_node_bitmap, bitmap)))
+		return error_code;	/* required nodes not available */
 
 	basemap = bit_copy(bitmap);
 	if (basemap == NULL)
@@ -1710,6 +1714,7 @@ extern void re_kill_job(struct job_record *job_ptr)
 			if ((--job_ptr->node_cnt) == 0) {
 				last_node_update = time(NULL);
 				job_ptr->job_state &= (~JOB_COMPLETING);
+				delete_step_records(job_ptr, 0);
 				slurm_sched_schedule();
 			}
 			continue;

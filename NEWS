@@ -1,6 +1,31 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 1.2.25
+=========================
+ -- Bug fix for setting exit code in accounting for batch script.
+ -- Add salloc option, --no-shell (for LSF).
+ -- Added new options for sacct output
+ -- mvapich: Ensure MPIRUN_ID is unique for all job steps within a job.
+    (Fixes crashes when running multiple job steps within a job on one node)
+ -- Prevent "scontrol show job" from failing with buffer overflow when a job 
+    has a very long Comment field.
+ -- Make certain that a job step is purged when a job has been completed.
+    Previous versions could have the job step persist if an allocated node
+    went DOWN and the slurmctld restarted.
+ -- Fix bug in sbcast that can cause communication problems for large files.
+ -- Add sbcast option -t/--timeout and SBCAST_TIMEOUT environment variable 
+    to control message timeout.
+ -- Add threaded agent to manage a queue of Gold update requests for 
+    performance reasons.
+ -- Add salloc options --chdir and --get-user-env (for Moab).
+ -- Modify scontrol update to support job comment changes.
+ -- Do not clear a DRAINED node's reason field when slurmctld restarts.
+ -- Do not cancel a pending job if Moab or Maui try to start it on unusable nodes.
+    Leave the job queued.
+ -- Add --requeue option to srun and sbatch (these undocumented options have no
+    effect in slurm v1.2, but are legitimate options in slurm v1.3).
+ 
 * Changes in SLURM 1.2.24
 =========================
  -- In sched/wiki and sched/wiki2, support non-zero UPDATE_TIME specification
@@ -2826,4 +2851,4 @@ documents those changes that are of interest to users and admins.
  -- Change directory to /tmp in slurmd if daemonizing.
  -- Logfiles are reopened on reconfigure.
  
-$Id: NEWS 13393 2008-02-27 23:07:43Z da $
+$Id: NEWS 13623 2008-03-17 16:46:23Z jette $

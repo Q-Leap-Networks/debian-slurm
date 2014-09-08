@@ -1,6 +1,6 @@
 /*****************************************************************************\
  *  src/slurmd/slurmstepd/mgr.c - job manager functions for slurmstepd
- *  $Id: mgr.c 13322 2008-02-21 19:06:27Z da $
+ *  $Id: mgr.c 13414 2008-02-28 23:22:33Z da $
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -173,6 +173,7 @@ static void _slurmd_job_log_init(slurmd_job_t *job);
 static void _wait_for_io(slurmd_job_t *job);
 static int  _send_exit_msg(slurmd_job_t *job, uint32_t *tid, int n, 
 		int status);
+static void _wait_for_children_slurmstepd(slurmd_job_t *job);
 static int  _send_pending_exit_msgs(slurmd_job_t *job);
 static void _send_step_complete_msgs(slurmd_job_t *job);
 static void _wait_for_all_tasks(slurmd_job_t *job);
@@ -229,7 +230,10 @@ mgr_launch_tasks_setup(launch_tasks_request_msg_t *msg, slurm_addr *cli,
 static void
 _batch_finish(slurmd_job_t *job, int rc)
 {
-	int status = job->task[0]->estatus;
+	int i;
+	for (i = 0; i < job->ntasks; i++)
+		step_complete.step_rc = MAX(step_complete.step_rc,
+					    WEXITSTATUS(job->task[i]->estatus));
 
 	if (job->argv[0] && (unlink(job->argv[0]) < 0))
 		error("unlink(%s): %m", job->argv[0]);
@@ -238,11 +242,12 @@ _batch_finish(slurmd_job_t *job, int rc)
 	xfree(job->batchdir);
 	if ((job->stepid == NO_VAL) || (job->stepid == SLURM_BATCH_SCRIPT)) {
 		verbose("job %u completed with slurm_rc = %d, job_rc = %d",
-			job->jobid, rc, status);
-		_send_complete_batch_script_msg(job, rc, status);
+			job->jobid, rc, step_complete.step_rc);
+		_send_complete_batch_script_msg(job, rc, job->task[0]->estatus);
 	} else {
+		_wait_for_children_slurmstepd(job);
 		verbose("job %u.%u completed with slurm_rc = %d, job_rc = %d",
-			job->jobid, job->stepid, rc, status);
+			job->jobid, job->stepid, rc, step_complete.step_rc);
 		_send_step_complete_msgs(job);
 	}
 }

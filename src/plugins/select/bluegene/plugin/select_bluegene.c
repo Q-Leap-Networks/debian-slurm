@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  select_bluegene.c - node selection plugin for Blue Gene system.
  * 
- *  $Id: select_bluegene.c 13271 2008-02-14 20:02:00Z da $
+ *  $Id: select_bluegene.c 13423 2008-02-29 17:30:38Z da $
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -1164,6 +1164,9 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 		
 		/* this means it is greater or equal to one bp */
 		if(tmp > 0) {
+			select_g_set_jobinfo(job_desc->select_jobinfo,
+					     SELECT_DATA_NODE_CNT,
+					     &job_desc->min_nodes);
 			job_desc->min_nodes = tmp;
 			job_desc->num_procs = procs_per_node * tmp;
 		} else { 
@@ -1179,6 +1182,10 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 				job_desc->min_nodes = 
 					bluegene_bp_node_cnt;
 			
+			select_g_set_jobinfo(job_desc->select_jobinfo,
+					     SELECT_DATA_NODE_CNT,
+					     &job_desc->min_nodes);
+
 			tmp = bluegene_bp_node_cnt/job_desc->min_nodes;
 			
 			job_desc->num_procs = procs_per_node/tmp;
