@@ -1,5 +1,6 @@
 slurm-llnl (14.03.7-1) UNRELEASED; urgency=medium
 
+  [ Rémi Palancher ]
   * New upstream release 14.03.7 (Closes: #756012)
     Maintainers patches have been ported to this new upstream version
     SONAME of shared libs in *-dev pkgs dumped from 26 to 27 with updated
@@ -21,6 +22,9 @@ slurm-llnl (14.03.7-1) UNRELEASED; urgency=medium
     + debian/patches/sacctmgr-increase-buffer
   * Enable parallel build
   * Remove all lintian overrides
+
+  [ Mehdi Dogguy ]
+  * Wrap {,Build-}Depends lines in debian/control file to increase readability.
 
  -- Rémi Palancher <remi@rezib.org>  Mon, 08 Sep 2014 15:00:28 +0200
 
