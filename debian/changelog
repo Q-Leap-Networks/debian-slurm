@@ -1,3 +1,29 @@
+slurm-llnl (14.03.7-1) UNRELEASED; urgency=medium
+
+  * New upstream release 14.03.7 (Closes: #756012)
+    Maintainers patches have been ported to this new upstream version
+    SONAME of shared libs in *-dev pkgs dumped from 26 to 27 with updated
+    debian/*.symbols
+  * Bump debhelper compat level from 7 to 9
+  * Split slurm-llnl package into 3 packages: slurm-llnl{,-slurmd,-slurmtld}
+    (Closes: #749945)
+  * Added native systemd services files
+  * Remove build-dep to libpq-dev since upstream does not support PostgreSQL
+    backend anymore
+  * Big cleanup in debian/rules back to something more dh standards compliant.
+    This also fixes FTBFS when built twice in a row (Closes: #617697).
+  * Moved examples in dedicated subdirectory
+  * Adds examples for cgroup configuration in slurmd pkg
+  * Remove useless file related to transient slurm-llnl-dev package
+  * Use globing in libslurm-dev.manpages
+  * Update paths in all doc and examples references
+  * Add patch to increase size of read buffer for sacctmgr
+    + debian/patches/sacctmgr-increase-buffer
+  * Enable parallel build
+  * Remove all lintian overrides
+
+ -- Rémi Palancher <remi@rezib.org>  Mon, 08 Sep 2014 15:00:28 +0200
+
 slurm-llnl (2.6.7-2) unstable; urgency=medium
 
   [ gregor herrmann ]
