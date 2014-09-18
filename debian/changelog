@@ -25,6 +25,7 @@ slurm-llnl (14.03.7-1) UNRELEASED; urgency=medium
 
   [ Mehdi Dogguy ]
   * Wrap {,Build-}Depends lines in debian/control file to increase readability.
+  * Add Rémi and myself as Uploaders
 
  -- Rémi Palancher <remi@rezib.org>  Mon, 08 Sep 2014 15:00:28 +0200
 

@@ -2,6 +2,7 @@ Source: slurm-llnl
 Section: admin
 Priority: extra
 Maintainer: Gennaro Oliva <oliva.g@na.icar.cnr.it>
+Uploaders: Rémi Palancher <remi@rezib.org>, Mehdi Dogguy <mehdi@debian.org>
 Build-Depends:
  debhelper (>= 9.20130504),
  autotools-dev,
