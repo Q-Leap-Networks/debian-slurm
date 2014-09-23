@@ -17,7 +17,7 @@ slurm-llnl (14.03.7-1) UNRELEASED; urgency=medium
   * Adds examples for cgroup configuration in slurmd pkg
   * Remove useless file related to transient slurm-llnl-dev package
   * Use globing in libslurm-dev.manpages
-  * Update paths in all doc and examples references
+  * Correct path to README in init scripts and path to example in README
   * Add patch to increase size of read buffer for sacctmgr
     + debian/patches/sacctmgr-increase-buffer
   * Enable parallel build
