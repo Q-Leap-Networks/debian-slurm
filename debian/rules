@@ -5,7 +5,7 @@
 #export DH_VERBOSE=1
 
 export PERL_ARCHLIB := $(shell perl -MConfig -e 'print substr($$Config{vendorarch}, 1)')
-DEB_HOST_MULTIARCH ?= $(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
+DEB_BUILD_GNU_TYPE ?= $(shell dpkg-architecture -qDEB_BUILD_GNU_TYPE)
 
 %:
 	dh $@ --builddirectory --parallel --with systemd
@@ -24,14 +24,14 @@ override_dh_auto_install:
 	mv debian/tmp/usr/share/man/man1/slurm.1 debian/tmp/usr/share/man/man1/slurm-llnl.1
 	
 	# run make install for libpam-slurm pkg
-	$(MAKE) -C obj-$(DEB_HOST_MULTIARCH)/contribs/pam install DESTDIR=$(CURDIR)/debian/tmp
+	$(MAKE) -C obj-$(DEB_BUILD_GNU_TYPE)/contribs/pam install DESTDIR=$(CURDIR)/debian/tmp
 	
 	# run make install for libslurm[db]-perl pkgs
-	$(MAKE) -C obj-$(DEB_HOST_MULTIARCH)/contribs/perlapi install DESTDIR=$(CURDIR)/debian/tmp PERL_MM_OPT="INSTALLDIRS=vendor"
+	$(MAKE) -C obj-$(DEB_BUILD_GNU_TYPE)/contribs/perlapi install DESTDIR=$(CURDIR)/debian/tmp PERL_MM_OPT="INSTALLDIRS=vendor"
 	find debian/tmp/$(PERL_ARCHLIB) -type f -name "*.so" | xargs chrpath -d
 	
 	# run make install for slurm-llnl-torque pkg
-	$(MAKE) -C obj-$(DEB_HOST_MULTIARCH)/contribs/torque install DESTDIR=$(CURDIR)/debian/tmp
+	$(MAKE) -C obj-$(DEB_BUILD_GNU_TYPE)/contribs/torque install DESTDIR=$(CURDIR)/debian/tmp
 	# build manpages for pbs wrappers
 	for i in debian/tmp/usr/bin/pbsnodes debian/tmp/usr/bin/q*; do \
 		pod2man $$i > debian/tmp/usr/share/man/man1/$$(basename $$i).1; \
