@@ -1,5 +1,5 @@
 #!/bin/sh
-# postrm script for slurm-llnl-base
+# postrm script for slurm-client
 #
 # see: dh_installdeb(1)
 
@@ -42,10 +42,12 @@ case "$1" in
              rm -f /etc/slurm-llnl/slurm.cert
            fi
 	 fi
-	 if which ucf >/dev/null; then
-	   ucf --purge /etc/slurm-llnl/slurm.conf
-	 fi
-         rm -f /etc/slurm-llnl/slurm.conf
+         if [ ! -e /usr/sbin/slurmctld -a ! -e /usr/sbin/slurmdbd ] ; then
+           if which ucf >/dev/null; then
+             ucf --purge /etc/slurm-llnl/slurm.conf
+           fi
+           rm -f /etc/slurm-llnl/slurm.conf
+         fi
          ;;
 
        remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)

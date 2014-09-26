@@ -1,4 +1,4 @@
-slurm-llnl (14.03.7-1) UNRELEASED; urgency=medium
+slurm-wlm (14.03.7-1) UNRELEASED; urgency=medium
 
   [ Rémi Palancher ]
   * New upstream release 14.03.7 (Closes: #756012)

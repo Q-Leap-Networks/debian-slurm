@@ -1,5 +1,5 @@
 #!/bin/sh
-# postrm script for slurm-llnl-slurmd
+# postrm script for slurmd
 #
 # see: dh_installdeb(1)
 
@@ -28,6 +28,12 @@ case "$1" in
             pkill -9 -u slurm || true
             deluser --quiet slurm || true
             rm -rf /var/run/slurm-llnl
+            if [ ! -e /usr/bin/sinfo ] ; then
+              if which ucf >/dev/null; then
+                ucf --purge /etc/slurm-llnl/slurm.conf
+              fi
+              rm -f /etc/slurm-llnl/slurm.conf
+            fi
          fi
          ;;
 

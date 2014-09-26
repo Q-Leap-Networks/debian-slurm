@@ -1,5 +1,5 @@
 #!/bin/sh
-# postinst script for slurm-llnl-slurmd
+# postinst script for slurmd
 #
 # see: dh_installdeb(1)
 

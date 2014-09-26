@@ -1,5 +1,5 @@
 #!/bin/sh
-# prerm script for slurm-llnl
+# prerm script for slurmctld
 
 set -e
 

@@ -8,10 +8,10 @@
 # processname: /usr/sbin/slurmd
 # pidfile: /var/run/slurm-llnl/slurmd.pid
 #
-# config: /etc/default/slurm-llnl-slurmd
+# config: /etc/default/slurmd
 #
 ### BEGIN INIT INFO
-# Provides:          slurm-llnl-slurmd
+# Provides:          slurmd
 # Required-Start:    $remote_fs $syslog $network munge
 # Required-Stop:     $remote_fs $syslog $network munge
 # Should-Start:      $named
@@ -28,8 +28,8 @@ LIBDIR=/usr/lib
 SBINDIR=/usr/sbin
 
 # Source slurm specific configuration
-if [ -f /etc/default/slurm-llnl-slurmd ] ; then
-    . /etc/default/slurm-llnl-slurmd
+if [ -f /etc/default/slurmd ] ; then
+    . /etc/default/slurmd
 else
     SLURMD_OPTIONS=""
 fi
@@ -37,29 +37,17 @@ fi
 # Checking for slurm.conf presence
 if [ ! -f $CONFDIR/slurm.conf ] ; then
     if [ -n "$(echo $1 | grep start)" ] ; then
-      echo Not starting slurm-llnl
+      echo Not starting slurmd
     fi
       echo slurm.conf was not found in $CONFDIR
       echo Please follow the instructions in \
-            /usr/share/doc/slurm-llnl/README.Debian
+            /usr/share/doc/slurmd/README.Debian
     exit 0
 fi
 
 
 DAEMONLIST="slurmd"
-
-if [ $? = 0 ] ; then
-  for prog in $DAEMONLIST ; do
-    test -f $SBINDIR/$prog || exit 0
-  done
-else
-  if [ -n "$(echo $1 | grep start)" ] ; then
-    echo "Not starting slurm-llnl-slurmd for problems in the configuration file"
-  else
-    echo "Problems in the configuration file"
-  fi
-  exit 0
-fi
+test -f $SBINDIR/slurmd || exit 0
 
 #Checking for lsb init function
 if [ -f /lib/lsb/init-functions ] ; then
@@ -88,10 +76,10 @@ checkcertkey()
   fi
 
   if [ "${MISSING}" != "" ] ; then
-    echo Not starting slurm-llnl
+    echo Not starting slurmd
     echo $MISSING not found
     echo Please follow the instructions in \
-      /usr/share/doc/slurm-llnl/README.cryptotype-openssl
+      /usr/share/doc/slurmd/README.cryptotype-openssl
     exit 0
   fi
 }
@@ -161,22 +149,6 @@ stop() {
       echo $STOPERRORMSG
     fi
     rm -f /var/lock/slurm
-}
-
-startall() {
-    for PROG in $DAEMONLIST ; do
-      case $PROG in
-        slurmd)
-	  OPTVAR=$SLURMD_OPTIONS
-	  ;;
-        slurmctld)
-	  OPTVAR=$SLURMCTLD_OPTIONS
-	  ;;
-        *)
-	  ;;
-      esac
-      start $PROG $OPTVAR
-    done
 }
 
 getpidfile() {
@@ -261,11 +233,11 @@ slurmstop() {
 #
 case "$1" in
     start)
-	startall
+	start slurmd "$SLURMD_OPTIONS"
         ;;
     startclean)
         SLURMD_OPTIONS="-c $SLURMD_OPTIONS"
-        startall
+        star slurmd "$SLURMD_OPTIONS"
         ;;
     stop)
 	slurmstop

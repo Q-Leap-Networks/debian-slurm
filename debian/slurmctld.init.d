@@ -8,10 +8,10 @@
 # processname: /usr/sbin/slurmctld
 # pidfile: /var/run/slurm-llnl/slurmctld.pid
 #
-# config: /etc/default/slurm-llnl-slurmctld
+# config: /etc/default/slurmctld
 #
 ### BEGIN INIT INFO
-# Provides:          slurm-llnl-slurmctld
+# Provides:          slurmctld
 # Required-Start:    $remote_fs $syslog $network munge
 # Required-Stop:     $remote_fs $syslog $network munge
 # Should-Start:      $named
@@ -28,8 +28,8 @@ LIBDIR=/usr/lib
 SBINDIR=/usr/sbin
 
 # Source slurm specific configuration
-if [ -f /etc/default/slurm-llnl-slurmctld ] ; then
-    . /etc/default/slurm-llnl-slurmctld
+if [ -f /etc/default/slurmctld ] ; then
+    . /etc/default/slurmctld
 else
     SLURMCTLD_OPTIONS=""
 fi
@@ -37,29 +37,17 @@ fi
 # Checking for slurm.conf presence
 if [ ! -f $CONFDIR/slurm.conf ] ; then
     if [ -n "$(echo $1 | grep start)" ] ; then
-      echo Not starting slurm-llnl
+      echo Not starting slurmctld
     fi
       echo slurm.conf was not found in $CONFDIR
       echo Please follow the instructions in \
-            /usr/share/doc/slurm-llnl/README.Debian
+            /usr/share/doc/slurmctld/README.Debian
     exit 0
 fi
 
 
-test -f $BINDIR/scontrol || exit 0
 DAEMONLIST="slurmctld"
-if [ $? = 0 ] ; then
-  for prog in $DAEMONLIST ; do
-    test -f $SBINDIR/$prog || exit 0
-  done
-else
-  if [ -n "$(echo $1 | grep start)" ] ; then
-    echo "Not starting slurm-llnl-slurmctld for problems in the configuration file"
-  else
-    echo "Problems in the configuration file"
-  fi
-  exit 0
-fi
+test -f $SBINDIR/slurmctld || exit 0
 
 #Checking for lsb init function
 if [ -f /lib/lsb/init-functions ] ; then
@@ -87,10 +75,10 @@ checkcertkey()
   fi
 
   if [ "${MISSING}" != "" ] ; then
-    echo Not starting slurm-llnl
+    echo Not starting slurmctld
     echo $MISSING not found
     echo Please follow the instructions in \
-      /usr/share/doc/slurm-llnl/README.cryptotype-openssl
+      /usr/share/doc/slurmctld/README.cryptotype-openssl
     exit 0
   fi
 
@@ -100,7 +88,7 @@ checkcertkey()
       echo Your slurm key stored in the file $keyfile
       echo is vulnerable because has been created with a buggy openssl.
       echo Please rebuild it with openssl version \>= 0.9.8g-9
-      echo More information in /usr/share/doc/slurm-llnl/README.Debian
+      echo More information in /usr/share/doc/slurmctld/README.Debian
       exit 0
     fi
   fi
@@ -171,22 +159,6 @@ stop() {
       echo $STOPERRORMSG
     fi
     rm -f /var/lock/slurm
-}
-
-startall() {
-    for PROG in $DAEMONLIST ; do
-      case $PROG in
-        slurmd)
-	  OPTVAR=$SLURMD_OPTIONS
-	  ;;
-        slurmctld)
-	  OPTVAR=$SLURMCTLD_OPTIONS
-	  ;;
-        *)
-	  ;;
-      esac
-      start $PROG $OPTVAR
-    done
 }
 
 getpidfile() {
@@ -271,11 +243,11 @@ slurmstop() {
 #
 case "$1" in
     start)
-	startall
+	start slurmctld "$SLURMCTLD_OPTIONS"
         ;;
     startclean)
         SLURMCTLD_OPTIONS="-c $SLURMCTLD_OPTIONS"
-        startall
+        start slurmctld "$SLURMCTLD_OPTIONS"
         ;;
     stop)
 	slurmstop

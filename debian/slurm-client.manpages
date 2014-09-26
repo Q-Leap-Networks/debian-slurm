@@ -12,7 +12,7 @@ debian/tmp/usr/share/man/man1/sdiag.1
 debian/tmp/usr/share/man/man1/sreport.1
 debian/tmp/usr/share/man/man1/sinfo.1
 debian/tmp/usr/share/man/man1/sbatch.1
-debian/tmp/usr/share/man/man1/slurm-llnl.1
+debian/tmp/usr/share/man/man1/slurm-wlm.1
 debian/tmp/usr/share/man/man1/srun_cr.1
 debian/tmp/usr/share/man/man1/sh5util.1
 debian/tmp/usr/share/man/man1/squeue.1

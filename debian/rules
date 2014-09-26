@@ -21,7 +21,7 @@ override_dh_auto_install:
 	sed -i "/dependency_libs/ s/'.*'/''/" `find debian/tmp/ -name '*.la'`
 	# Rename slurm(1) manpage before dh_installman run. It is not possible
 	# to rename manpages in debian/*.manpages so hardcore `mv` is done here
-	mv debian/tmp/usr/share/man/man1/slurm.1 debian/tmp/usr/share/man/man1/slurm-llnl.1
+	mv debian/tmp/usr/share/man/man1/slurm.1 debian/tmp/usr/share/man/man1/slurm-wlm.1
 	
 	# run make install for libpam-slurm pkg
 	$(MAKE) -C obj-$(DEB_BUILD_GNU_TYPE)/contribs/pam install DESTDIR=$(CURDIR)/debian/tmp
@@ -30,7 +30,7 @@ override_dh_auto_install:
 	$(MAKE) -C obj-$(DEB_BUILD_GNU_TYPE)/contribs/perlapi install DESTDIR=$(CURDIR)/debian/tmp PERL_MM_OPT="INSTALLDIRS=vendor"
 	find debian/tmp/$(PERL_ARCHLIB) -type f -name "*.so" | xargs chrpath -d
 	
-	# run make install for slurm-llnl-torque pkg
+	# run make install for slurm-wlm-torque pkg
 	$(MAKE) -C obj-$(DEB_BUILD_GNU_TYPE)/contribs/torque install DESTDIR=$(CURDIR)/debian/tmp
 	# build manpages for pbs wrappers
 	for i in debian/tmp/usr/bin/pbsnodes debian/tmp/usr/bin/q*; do \
