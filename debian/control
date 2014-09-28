@@ -1,4 +1,4 @@
-Source: slurm-wlm
+Source: slurm-llnl
 Section: admin
 Priority: extra
 Maintainer: Gennaro Oliva <oliva.g@na.icar.cnr.it>
