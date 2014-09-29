@@ -1,3 +1,6 @@
-var/lib/slurm-llnl
-var/log/slurm-llnl
 etc/slurm-llnl
+var/lib/slurm-llnl
+var/lib/slurm-llnl/slurmd
+var/lib/slurm-llnl/slurmctld
+var/lib/slurm-llnl/checkpoint
+var/log/slurm-llnl
