@@ -27,6 +27,14 @@ case "$1" in
       else
         adduser --quiet --system --group --uid 64030 --no-create-home slurm
       fi
+
+      if [ -e /etc/default/slurm-llnl -a ! -e /etc/default/slurmdbd ] ; then
+        # Copying relevant changes from the old default file
+        if grep "SLURMDBD_OPTIONS" /etc/default/slurm-llnl | grep -qv '^ *#' 2>/dev/null ; then
+           grep "SLURMDBD_OPTIONS" /etc/default/slurm-llnl >> \
+               /etc/default/slurmdbd 2>/dev/null
+        fi
+      fi
     ;;
 
     upgrade)
@@ -39,13 +47,6 @@ case "$1" in
         fi
       else
         adduser --quiet --system --group --uid 64030 --no-create-home slurm
-      fi
-      if [ -e /etc/default/slurm-llnl -a ! -e /etc/default/slurmdbd ] ; then
-        # Copying relevant changes from the old default file
-        if grep "SLURMDBD_OPTIONS" /etc/default/slurm-llnl | grep -qv '^ *#' 2>/dev/null ; then
-           grep "SLURMDBD_OPTIONS" /etc/default/slurm-llnl >> \
-               /etc/default/slurmdbd 2>/dev/null
-        fi
       fi
     ;;
 
