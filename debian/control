@@ -306,3 +306,11 @@ Description: transitional dummy package for slurm-wlm
  This is a transitional dummy package for slurm-wlm.
  It can safely be removed.
 
+Package: slurm-llnl-slurmdbd
+Architecture: all
+Section: oldlibs
+Depends: slurmdbd, ${misc:Depends}
+Description: transitional dummy package for slurmdbd
+ This is a transitional dummy package for slurmdbd
+ It can safely be removed.
+
