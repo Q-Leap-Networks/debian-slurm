@@ -5,9 +5,11 @@ ConditionPathExists=/etc/slurm-llnl/slurm.conf
 
 [Service]
 Type=forking
-EnvironmentFile=/etc/default/slurm-llnl-slurmctld
+EnvironmentFile=/etc/default/slurmctld
+ExecStartPre=/bin/mkdir -p /var/run/slurm-llnl
+ExecStartPre=/bin/chown slurm:slurm /var/run/slurm-llnl
 ExecStart=/usr/sbin/slurmctld $SLURMCTLD_OPTIONS
-PIDFile=/var/run/slurmctld.pid
+PIDFile=/var/run/slurm-llnl/slurmctld.pid
 
 [Install]
 WantedBy=multi-user.target
