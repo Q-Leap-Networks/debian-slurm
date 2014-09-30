@@ -20,15 +20,23 @@ case "$1" in
 
     upgrade)
 
-      #Deleting slurm-llnl init file if it does not contains user changes
+      # Deleting slurm-llnl init file if it does not contains user changes
       if [ -e /etc/init.d/slurm-llnl ] ; then
         md5sum="$(md5sum /etc/init.d/slurm-llnl | sed -e 's/ .*//')"
         pkg_md5sum="$(dpkg-query -W -f='${Conffiles}' slurm-llnl | \
           sed -n -e "\' /etc/init.d/slurm-llnl ' { s/ obsolete$//; s/.* //; p }")"
         if [ "$md5sum" = "$pkg_md5sum" ]; then
             rm -f /etc/init.d/slurm-llnl
+        else
+            echo "Warning! Since version 14.03.7 the old slurm-llnl package daemons are provided"
+            echo "in two different packages: slurmd and slurctld.  These packages have their own"
+            echo "init script that replace slurm-llnl.  It looks like you modified the slurm-llnl"
+            echo "init script on your system but unfortunately your changes cannot be ported in"
+            echo "the new initd scripts. Please modify the new init scripts accordingly, if you"
+            echo "need, and remove /etc/init.d/slurm-llnl"
         fi
       fi
+      # Deleting slurm-llnl symlink to the old init script
       update-rc.d -f slurm-llnl remove
 
     ;;
