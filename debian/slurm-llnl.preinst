@@ -20,7 +20,7 @@ case "$1" in
 
     upgrade)
 
-      # Deleting slurm-llnl init file if it does not contains user changes
+      # Deleting slurm-llnl init file if it does not contain user changes
       if [ -e /etc/init.d/slurm-llnl ] ; then
         md5sum="$(md5sum /etc/init.d/slurm-llnl | sed -e 's/ .*//')"
         pkg_md5sum="$(dpkg-query -W -f='${Conffiles}' slurm-llnl | \
