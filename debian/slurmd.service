@@ -6,8 +6,6 @@ ConditionPathExists=/etc/slurm-llnl/slurm.conf
 [Service]
 Type=forking
 EnvironmentFile=/etc/default/slurmd
-ExecStartPre=/bin/mkdir -p /var/run/slurm-llnl
-ExecStartPre=/bin/chown slurm:slurm /var/run/slurm-llnl
 ExecStart=/usr/sbin/slurmd $SLURMD_OPTIONS
 PIDFile=/var/run/slurm-llnl/slurmd.pid
 
