@@ -28,12 +28,14 @@ case "$1" in
         if [ "$md5sum" = "$pkg_md5sum" ]; then
             rm -f /etc/init.d/slurm-llnl
         else
+            echo "********************************************************************************"
             echo "Warning! Since version 14.03.7 the old slurm-llnl package daemons are provided"
             echo "in two different packages: slurmd and slurctld.  These packages have their own"
             echo "init script that replace slurm-llnl.  It looks like you modified the slurm-llnl"
             echo "init script on your system but unfortunately your changes cannot be ported in"
             echo "the new initd scripts. Please modify the new init scripts accordingly, if you"
             echo "need, and remove /etc/init.d/slurm-llnl"
+            echo "********************************************************************************"
         fi
       fi
       # Deleting slurm-llnl symlink to the old init script
