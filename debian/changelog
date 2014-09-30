@@ -1,5 +1,39 @@
 slurm-llnl (14.03.7-1) UNRELEASED; urgency=medium
 
+  [ Gennaro Oliva ]
+  * Binary packages renaming:
+    slurm-llnl -> slurm-client
+    slurm-llnl-slurmd -> slurmd
+    slurm-llnl-slurmctld -> slurmctld
+    slurm-llnl-slurdbd -> slurmdbd
+    slurm-llnl-basic-plugins -> slurm-wlm-basic-plugins
+    slurm-llnl-basic-plugins-dev -> slurm-wlm-basic-plugins-dev
+    slurm-llnl-sview -> sview
+    slurm-llnl-doc -> slurm-wlm-doc
+  * New slurm-wlm metapackage depending on slurmctld
+    slurm-client and slurmd
+  * New slurm-llnl and slurm-llnl-slurmdbd
+    transitional dummy packages
+  * README.* updated
+  * Configurators, slurm-resume.sh and
+    slurm-suspend.sh examples moved to the slurmctld
+    package
+  * init.d scripts modified to import old default and
+    to avoid usless dependency on slurm-client
+  * Restored lintian-overrides files to avoid
+    informational ("-I") tags
+  * Added slurm directories in transitional dummy
+    packages to avoid installation messages warnings
+    about not removing non-empty directories
+  * Added slurm-llnl-slurmdbd and slurm-llnl preinst
+    to remove rc?.d symlinks to the old init scripts
+    and the script itself if it doesn't contain user
+    changes
+  * Added {slurmd,slurmctld,slurmdbd}.tmpfile to
+    create /var/run/slurm-llnl when using systemd
+  * Added a warning message in the slurm-llnl preinst in case of
+    modified init files
+
   [ Rémi Palancher ]
   * New upstream release 14.03.7 (Closes: #756012)
     Maintainers patches have been ported to this new upstream version
