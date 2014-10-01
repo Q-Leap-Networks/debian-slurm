@@ -1,4 +1,4 @@
-slurm-llnl (14.03.8-1) UNRELEASED; urgency=medium
+slurm-llnl (14.03.8-1) experimental; urgency=medium
 
   [ Gennaro Oliva ]
   * Binary packages renaming:
