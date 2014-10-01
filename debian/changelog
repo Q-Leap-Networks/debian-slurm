@@ -1,4 +1,4 @@
-slurm-llnl (14.03.7-1) UNRELEASED; urgency=medium
+slurm-llnl (14.03.8-1) UNRELEASED; urgency=medium
 
   [ Gennaro Oliva ]
   * Binary packages renaming:
@@ -61,6 +61,7 @@ slurm-llnl (14.03.7-1) UNRELEASED; urgency=medium
   * Wrap {,Build-}Depends lines in debian/control file to increase readability.
   * Add Rémi and myself as Uploaders
   * Add Vcs-{Browser,Git} fields.
+  * Import new upstream release (14.03.8)
 
  -- Rémi Palancher <remi@rezib.org>  Mon, 08 Sep 2014 15:00:28 +0200
 
