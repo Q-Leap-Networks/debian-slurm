@@ -40,9 +40,10 @@ case "$1" in
       if [ -e /etc/init.d/slurm-llnl-slurmdbd ] ; then
         md5sum="$(md5sum /etc/init.d/slurm-llnl-slurmdbd | sed -e 's/ .*//')"
         pkg_md5sum="$(dpkg-query -W -f='${Conffiles}' slurm-llnl-slurmdbd | \
-          sed -n -e "\' /etc/init.d/slurm-llnl-surmdbd ' { s/ obsolete$//; s/.* //; p }")"
+          sed -n -e "\' /etc/init.d/slurm-llnl-slurmdbd ' { s/ obsolete$//; s/.* //; p }")"
         if [ "$md5sum" != "$pkg_md5sum" ]; then
-            cp /etc/init.d/slurm-llnl-slurmdbd /etc/init.d/slurmdbd
+            mv /etc/init.d/slurm-llnl-slurmdbd /etc/init.d/slurmdbd
+            sed -i "s/# Provides:\( *\)slurm-llnl-slurmdbd/# Provides:\1slurmdbd/" /etc/init.d/slurmdbd
         fi
       fi
     ;;
