@@ -61,7 +61,7 @@ plus dinner on Tuesday evening.<br>
   <td>08:40 - 09:30</td>
   <td>Keynote</td>
   <td>Prof. Felix Sch&uuml;rmann (EPFL)</td>
-  <td>European Human Brain Project</td>
+  <td>Role and Challenges of Interactive Supercomputing in the Human Brain Project</td>
 </tr>
 
 <tr>
@@ -72,7 +72,7 @@ plus dinner on Tuesday evening.<br>
 <tr>
   <td>09:45 - 10:15</td>
   <td>Technical</td>
-  <td>Morris Jette (SchedMD), Yiannis Georgiou (Bull)</td>
+  <td>Jacob Jenson (SchedMD), Yiannis Georgiou (Bull)</td>
   <td>Overview of Slurm Versions 14.03 and 14.11</td>
 </tr>
 <tr>
@@ -239,7 +239,7 @@ tel +41(0)91 923 10 68</td>
   <tr>
     <td>11:45 - 12:15</td>
     <td>Technical</td>
-    <td>Danny Auble (SchedMD)</td>
+    <td>Morris Jette and Danny Auble (SchedMD)</td>
     <td>Slurm Native Workload Management on Cray Systems</td>
   </tr>
   <tr>
@@ -320,14 +320,14 @@ tel +41(0)91 923 10 68</td>
 
 <h2>September 23, 2014</h2>
 
-<h3>Keynote</h3>
+<h3>Keynote: Role and Challenges of Interactive Supercomputing in the Human Brain Project</h3>
 <p>Prof. Felix Sch&uuml;rmann (Ecole Polytechnique F&eacute;d&eacute;rale de Lausanne)</p>
 <p>Dr. Felix Sch&uuml;rmann is adjunct professor at the Ecole Polytechnique
 F&eacute;d&eacute;rale de Lausanne, co-director of the Blue Brain Project
 and involved in several research challenges of the European Human Brain Project.</p>
 
 <h3>Overview of Slurm Versions 14.03 and 14.11</h3>
-<p>Morris Jette (SchedMD), Yiannis Georgiou (Bull)</p>
+<p>Jacob Jenson (SchedMD), Yiannis Georgiou (Bull)</p>
 <p>This presentation will describe new capabilities provided in Slurm
   versions 14.03 (released March 2014) and planned for version 14.11
   (to be released in November 2014). Major enhancements in version 14.03
@@ -646,18 +646,19 @@ and involved in several research challenges of the European Human Brain Project.
 
 <h3>Level-based job prioritization</h3>
 <p>Ryan Cox and Levi Morrison (Brigham Young University)</p>
-<p>We will present about our new LEVEL_BASED job prioritization mechanism.
-  The algorithm prioritizes users such that users in an under-served account
-  will always have a higher fair share factor than users in an over-served
-  account.  It recurses through the account tree, calculates fair share at
-  each level, then uses bitwise math to ensure that the effect of usage and
-  shares below the current level cannot affect calculations at the current
-  level.</p>
-<p>Basically, if accounts A and B have the same shares but A has higher usage
-  than B then children of account A will have a lower fair share factor than
-  children of account B. This is not guaranteed in other prioritization methods.
-  LEVEL_BASED was also designed to reduce the likelihood of errors due to
-  floating point precision loss.</p>
+<p>We will begin by highlighting some problems with existing fairshare
+   algorithms.  We will then present about our new Fair Tree algorithm which
+   is designed to avoid these issues.</p>
+<p>Fair Tree prioritizes users such that if accounts A and B are siblings and
+   A has a higher fairshare factor than B, all children of A will have higher
+   fairshare factors than all children of B. The algorithm uses classic computer
+   science techniques to achieve this goal. First, the traditional fairshare
+   equation, 2**-(Usage/Shares), is used but it only considers an association
+   and its siblings, rather than including the effect of parents or children
+   in the equation. It then sorts the association tree by fairshare value to
+   create a rooted plane tree and uses a depth-first traversal to rank users
+   in the order they are found. This ranking is used to create the final
+   fairshare factor.</p>
 
 <h3>Integrating Layouts Framework in SLURM</h3>
 <p>Thomas Cadeau (BULL), Yiannis Georgiou (BULL), Matthieu Hautreux (CEA)</p>
@@ -732,7 +733,7 @@ and involved in several research challenges of the European Human Brain Project.
   implementation.</p>
 
 <h3>Slurm Native Workload Management on Cray Systems</h3>
-<p>Danny Auble (SchedMD)</p>
+<p>Morris Jette and Danny Auble (SchedMD)</p>
 <p>Cray’s Application Level Placement Scheduler (ALPS) software has
   recently been refactored to expose low level network management
   interfaces in a new library. Slurm is the first workload manager to
@@ -865,6 +866,6 @@ and involved in several research challenges of the European Human Brain Project.
   system to dynamically allocate disk space on our test high-IOPS SSD
   scratch system.</p>
 
-<p style="text-align:center;">Last modified 19 August 2014</p>
+<p style="text-align:center;">Last modified 9 September 2014</p>
 
 <!--#include virtual="footer.txt"-->

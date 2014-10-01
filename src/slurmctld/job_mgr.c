@@ -161,6 +161,8 @@ static void _dump_job_state(struct job_record *dump_job_ptr, Buf buffer);
 static int  _find_batch_dir(void *x, void *key);
 static void _get_batch_job_dir_ids(List batch_dirs);
 static time_t _get_last_state_write_time(void);
+static struct job_record *_job_rec_copy(struct job_record *job_ptr,
+					uint32_t array_task_id);
 static void _job_timed_out(struct job_record *job_ptr);
 static int  _job_create(job_desc_msg_t * job_specs, int allocate, int will_run,
 			struct job_record **job_rec_ptr, uid_t submit_uid,
@@ -184,7 +186,7 @@ static void _pack_pending_job_details(struct job_details *detail_ptr,
 				      uint16_t protocol_version);
 static int  _purge_job_record(uint32_t job_id);
 static void _purge_missing_jobs(int node_inx, time_t now);
-static void _read_data_array_from_file(char *file_name, char ***data,
+static int  _read_data_array_from_file(char *file_name, char ***data,
 				       uint32_t * size,
  				       struct job_record *job_ptr);
 static void _read_data_from_file(char *file_name, char **data);
@@ -218,6 +220,7 @@ static void _xmit_new_end_time(struct job_record *job_ptr);
 static bool _validate_min_mem_partition(job_desc_msg_t *job_desc_msg,
                                         struct part_record *,
                                         List part_list);
+static int _copy_job_file(const char *src, const char *dst);
 
 /*
  * create_job_record - create an empty job_record including job_details.
@@ -3072,7 +3075,8 @@ extern void rehash_jobs(void)
 
 /* Create an exact copy of an existing job record for a job array.
  * Assumes the job has no resource allocaiton */
-struct job_record *_job_rec_copy(struct job_record *job_ptr)
+static struct job_record *_job_rec_copy(struct job_record *job_ptr,
+					uint32_t array_task_id)
 {
 	struct job_record *job_ptr_new = NULL, *save_job_next;
 	struct job_details *job_details, *details_new, *save_details;
@@ -3086,11 +3090,17 @@ struct job_record *_job_rec_copy(struct job_record *job_ptr)
 	if (!job_ptr_new)     /* MaxJobCount checked when job array submitted */
 		fatal("job array create_job_record error");
 	if (error_code != SLURM_SUCCESS)
-		return job_ptr_new;
+		return NULL;
 
 	/* Set job-specific ID and hash table */
 	if (_set_job_id(job_ptr_new) != SLURM_SUCCESS)
 		fatal("job array create_job_record error");
+	if (_copy_job_desc_files(job_ptr->job_id, job_ptr_new->job_id)) {
+		error("%s: failed to create task %u for job %u",
+		      __func__, array_task_id, job_ptr->job_id);
+		(void) _purge_job_record(job_ptr_new->job_id);
+		return NULL;
+	}
 	_add_job_hash(job_ptr_new);
 
 	/* Copy most of original job data.
@@ -3106,6 +3116,10 @@ struct job_record *_job_rec_copy(struct job_record *job_ptr)
 	job_ptr_new->details  = save_details;
 	job_ptr_new->prio_factors = save_prio_factors;
 	job_ptr_new->step_list = save_step_list;
+
+	job_ptr_new->array_job_id  = job_ptr->job_id;
+	job_ptr_new->array_task_id = array_task_id;
+	_add_job_array_hash(job_ptr_new);
 
 	job_ptr_new->account = xstrdup(job_ptr->account);
 	job_ptr_new->alias_list = xstrdup(job_ptr->alias_list);
@@ -3225,10 +3239,6 @@ struct job_record *_job_rec_copy(struct job_record *job_ptr)
 	details_new->std_in = xstrdup(job_details->std_in);
 	details_new->std_out = xstrdup(job_details->std_out);
 	details_new->work_dir = xstrdup(job_details->work_dir);
-	if (_copy_job_desc_files(job_ptr->job_id, job_ptr_new->job_id)) {
-		_list_delete_job((void *) job_ptr_new);
-		return NULL;
-	}
 
 	return job_ptr_new;
 }
@@ -3240,7 +3250,8 @@ static void _create_job_array(struct job_record *job_ptr,
 			      job_desc_msg_t *job_specs)
 {
 	struct job_record *job_ptr_new;
-	uint32_t i, i_first, i_last;
+	uint32_t i;
+	int i_first, i_last;
 
 	if (!job_specs->array_bitmap)
 		return;
@@ -3258,17 +3269,14 @@ static void _create_job_array(struct job_record *job_ptr,
 	for (i = (i_first + 1); i <= i_last; i++) {
 		if (!bit_test(job_specs->array_bitmap, i))
 			continue;
-		job_ptr_new = _job_rec_copy(job_ptr);
+		job_ptr_new = _job_rec_copy(job_ptr, i);
+		if (!job_ptr_new)
+			break;
 		/* Make sure the db_index is zero
 		 * for array elements in case the
 		 * first element had the index assigned.
 		 */
 		job_ptr_new->db_index = 0;
-		if (!job_ptr_new)
-			break;
-		job_ptr_new->array_job_id  = job_ptr->job_id;
-		job_ptr_new->array_task_id = i;
-		_add_job_array_hash(job_ptr_new);
 		acct_policy_add_job_submit(job_ptr);
 	}
 }
@@ -3344,10 +3352,24 @@ extern int job_allocate(job_desc_msg_t * job_specs, int immediate,
 			struct job_record **job_pptr, char **err_msg)
 {
 	static int defer_sched = -1;
-	int error_code;
+	int error_code, i;
 	bool no_alloc, top_prio, test_only, too_fragmented, independent;
 	struct job_record *job_ptr;
 	time_t now = time(NULL);
+
+	if (job_specs->array_bitmap) {
+		i = bit_set_count(job_specs->array_bitmap);
+		if ((job_count + i) >= slurmctld_conf.max_job_cnt) {
+			info("%s: MaxJobCount limit reached (%d + %d >= %u)",
+			     __func__, job_count, i,
+			     slurmctld_conf.max_job_cnt);
+			return EAGAIN;
+		}
+	} else if (job_count >= slurmctld_conf.max_job_cnt) {
+		info("%s: MaxJobCount limit reached (%u)",
+		     __func__, slurmctld_conf.max_job_cnt);
+		return EAGAIN;
+	}
 
 	error_code = _job_create(job_specs, allocate, will_run,
 				 &job_ptr, submit_uid, err_msg);
@@ -5058,24 +5080,39 @@ extern int validate_job_create_req(job_desc_msg_t * job_desc)
 	if (!_valid_array_inx(job_desc))
 		return ESLURM_INVALID_ARRAY;
 
-	if (job_desc->array_bitmap) {
-		int i = bit_set_count(job_desc->array_bitmap);
-		if ((job_count + i) >= slurmctld_conf.max_job_cnt) {
-			error("create_job_record: job_count exceeds "
-			      "MaxJobCount limit configured (%d + %d >= %u)",
-			      job_count, i, slurmctld_conf.max_job_cnt);
-			return EAGAIN;
-		}
-	} else if (job_count >= slurmctld_conf.max_job_cnt) {
-		error("create_job_record: MaxJobCount limit reached (%u)",
-		      slurmctld_conf.max_job_cnt);
-		return EAGAIN;
-	}
-
 	/* Make sure anything that may be put in the database will be
 	 * lower case */
 	xstrtolower(job_desc->account);
 	xstrtolower(job_desc->wckey);
+
+	/* Basic validation of some parameters */
+	if (job_desc->req_nodes) {
+		hostlist_t hl;
+		uint32_t host_cnt;
+		hl = hostlist_create(job_desc->req_nodes);
+		if (hl == NULL) {
+			/* likely a badly formatted hostlist */
+			error("create_job_record: bad hostlist");
+			return ESLURM_INVALID_NODE_NAME;
+		}
+		host_cnt = hostlist_count(hl);
+		hostlist_destroy(hl);
+		if ((job_desc->min_nodes == NO_VAL) ||
+		    (job_desc->min_nodes <  host_cnt))
+			job_desc->min_nodes = host_cnt;
+	}
+	if ((job_desc->ntasks_per_node != (uint16_t) NO_VAL) &&
+	    (job_desc->min_nodes       != NO_VAL) &&
+	    (job_desc->num_tasks       != NO_VAL)) {
+		uint32_t ntasks = job_desc->ntasks_per_node *
+				  job_desc->min_nodes;
+		job_desc->num_tasks = MAX(job_desc->num_tasks, ntasks);
+	}
+	if ((job_desc->min_cpus  != NO_VAL) &&
+	    (job_desc->min_nodes != NO_VAL) &&
+	    (job_desc->min_cpus  <  job_desc->min_nodes) &&
+	    (job_desc->max_cpus  >= job_desc->min_nodes))
+		job_desc->min_cpus = job_desc->min_nodes;
 
 	return SLURM_SUCCESS;
 }
@@ -5187,6 +5224,15 @@ _copy_job_desc_files(uint32_t job_id_src, uint32_t job_id_dest)
 	xstrcat(file_name_src,  "/environment");
 	xstrcat(file_name_dest, "/environment");
 	error_code = link(file_name_src, file_name_dest);
+	if (error_code < 0) {
+		error("%s: link() failed %m copy files src %s dest %s",
+		      __func__, file_name_src, file_name_dest);
+		error_code = _copy_job_file(file_name_src, file_name_dest);
+		if (error_code < 0) {
+			error("%s: failed copy files %m src %s dst %s",
+			      __func__, file_name_src, file_name_dest);
+		}
+	}
 	xfree(file_name_src);
 	xfree(file_name_dest);
 
@@ -5196,6 +5242,15 @@ _copy_job_desc_files(uint32_t job_id_src, uint32_t job_id_dest)
 		xstrcat(file_name_src,  "/script");
 		xstrcat(file_name_dest, "/script");
 		error_code = link(file_name_src, file_name_dest);
+		if (error_code < 0) {
+			error("%s: link() failed %m copy files src %s dest %s",
+			      __func__, file_name_src, file_name_dest);
+			error_code = _copy_job_file(file_name_src, file_name_dest);
+			if (error_code < 0) {
+				error("%s: failed copy files %m src %s dst %s",
+				      __func__, file_name_src, file_name_dest);
+			}
+		}
 		xfree(file_name_src);
 		xfree(file_name_dest);
 	}
@@ -5300,12 +5355,20 @@ static int _write_data_to_file(char *file_name, char *data)
 char **get_job_env(struct job_record *job_ptr, uint32_t * env_size)
 {
 	char job_dir[30], *file_name, **environment = NULL;
+	int cc;
 
 	file_name = slurm_get_state_save_location();
 	sprintf(job_dir, "/job.%u/environment", job_ptr->job_id);
 	xstrcat(file_name, job_dir);
 
-	_read_data_array_from_file(file_name, &environment, env_size, job_ptr);
+	cc = _read_data_array_from_file(file_name,
+					&environment,
+					env_size,
+					job_ptr);
+	if (cc < 0) {
+		xfree(file_name);
+		return NULL;
+	}
 
 	xfree(file_name);
 	return environment;
@@ -5343,7 +5406,7 @@ char *get_job_script(struct job_record *job_ptr)
  * IN job_ptr - job
  * NOTE: The output format of this must be identical with _xduparray2()
  */
-static void
+static int
 _read_data_array_from_file(char *file_name, char ***data, uint32_t * size,
 			   struct job_record *job_ptr)
 {
@@ -5360,7 +5423,7 @@ _read_data_array_from_file(char *file_name, char ***data, uint32_t * size,
 	fd = open(file_name, 0);
 	if (fd < 0) {
 		error("Error opening file %s, %m", file_name);
-		return;
+		return -1;
 	}
 
 	amount = read(fd, &rec_cnt, sizeof(uint32_t));
@@ -5370,14 +5433,21 @@ _read_data_array_from_file(char *file_name, char ***data, uint32_t * size,
 		else
 			verbose("File %s has zero size", file_name);
 		close(fd);
-		return;
+		return -1;
+	}
+
+	if (rec_cnt >= INT_MAX) {
+		error("%s: unreasonable record counter %d in file %s",
+		      __func__, rec_cnt, file_name);
+		close(fd);
+		return -1;
 	}
 
 	if (rec_cnt == 0) {
 		*data = NULL;
 		*size = 0;
 		close(fd);
-		return;
+		return 0;
 	}
 
 	pos = 0;
@@ -5389,7 +5459,7 @@ _read_data_array_from_file(char *file_name, char ***data, uint32_t * size,
 			error("Error reading file %s, %m", file_name);
 			xfree(buffer);
 			close(fd);
-			return;
+			return -1;
 		}
 		pos += amount;
 		if (amount < BUF_SIZE)	/* end of file */
@@ -5459,7 +5529,7 @@ _read_data_array_from_file(char *file_name, char ***data, uint32_t * size,
 
 	*size = rec_cnt;
 	*data = array_ptr;
-	return;
+	return 0;
 }
 
 /*
@@ -6235,7 +6305,7 @@ static void _list_delete_job(void *job_entry)
 
 	/* Remove the record from job hash table */
 	job_pptr = &job_hash[JOB_HASH_INX(job_ptr->job_id)];
-	while ((job_pptr != NULL) &&
+	while ((*job_pptr != NULL) &&
 	       ((job_ptr = *job_pptr) != (struct job_record *) job_entry)) {
 		job_pptr = &job_ptr->job_next;
 	}
@@ -6249,7 +6319,7 @@ static void _list_delete_job(void *job_entry)
 	if (job_ptr->array_task_id != NO_VAL) {
 		job_pptr = &job_array_hash_j[
 			JOB_HASH_INX(job_ptr->array_job_id)];
-		while ((job_pptr != NULL) &&
+		while ((*job_pptr != NULL) &&
 		       ((job_ptr = *job_pptr) !=
 			(struct job_record *) job_entry)) {
 			job_pptr = &job_ptr->job_array_next_j;
@@ -6263,7 +6333,7 @@ static void _list_delete_job(void *job_entry)
 		job_pptr = &job_array_hash_t[
 			JOB_ARRAY_HASH_INX(job_ptr->array_job_id,
 					   job_ptr->array_task_id)];
-		while ((job_pptr != NULL) &&
+		while ((*job_pptr != NULL) &&
 		       ((job_ptr = *job_pptr) !=
 			(struct job_record *) job_entry)) {
 			job_pptr = &job_ptr->job_array_next_t;
@@ -12139,4 +12209,56 @@ extern void job_end_time_reset(struct job_record  *job_ptr)
 		job_ptr->end_time = job_ptr->start_time +
 				    (job_ptr->time_limit * 60);	/* secs */
 	}
+}
+
+/* _copy_job_files()
+ *
+ * This function is invoked in case the controller fails
+ * to link the job array job files. If the link fails the
+ * controller tries to copy the files instead.
+ *
+ */
+static int
+_copy_job_file(const char *src, const char *dst)
+{
+	struct stat stat_buf;
+	int fsrc;
+	int fdst;
+	int cc;
+	char buf[BUFSIZ];
+
+	if (stat(src, &stat_buf) < 0)
+		return -1;
+
+	fsrc = open(src, O_RDONLY);
+	if (fsrc < 0)
+		return -1;
+
+
+	fdst = creat(dst, stat_buf.st_mode);
+	if (fdst < 0) {
+		close(fsrc);
+		return -1;
+	}
+
+	while (1) {
+		cc = read(fsrc, buf, BUFSIZ);
+		if (cc == 0)
+			break;
+		if (cc < 0) {
+			close(fsrc);
+			close(fdst);
+			return -1;
+		}
+		if (write(fdst, buf, cc) != cc) {
+			close(fsrc);
+			close(fdst);
+			return -1;
+		}
+	}
+
+	close(fsrc);
+	close(fdst);
+
+	return 0;
 }

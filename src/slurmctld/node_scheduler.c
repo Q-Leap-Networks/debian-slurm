@@ -1542,7 +1542,8 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 	bitstr_t *select_bitmap = NULL;
 	struct node_set *node_set_ptr = NULL;
 	struct part_record *part_ptr = NULL;
-	uint32_t min_nodes, max_nodes, req_nodes;
+	uint32_t min_nodes, max_nodes, req_nodes, acct_max_nodes;
+	uint32_t wait_reason = 0;
 	time_t now = time(NULL);
 	bool configuring = false;
 	List preemptee_job_list = NULL;
@@ -1636,7 +1637,11 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 		max_nodes = MIN(job_ptr->details->max_nodes,
 				part_ptr->max_nodes);
 
-	max_nodes = MIN(max_nodes, acct_policy_get_max_nodes(job_ptr));
+	/* Don't call functions in MIN/MAX it will result in the
+	   function being called multiple times.
+	*/
+	acct_max_nodes = acct_policy_get_max_nodes(job_ptr, &wait_reason);
+	max_nodes = MIN(max_nodes, acct_max_nodes);
 
 	if (job_ptr->details->req_node_bitmap && job_ptr->details->max_nodes) {
 		i = bit_set_count(job_ptr->details->req_node_bitmap);
@@ -1656,7 +1661,12 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 		req_nodes = min_nodes;
 	/* info("nodes:%u:%u:%u", min_nodes, req_nodes, max_nodes); */
 
-	if (max_nodes < min_nodes) {
+	if (acct_max_nodes < min_nodes) {
+		error_code = ESLURM_ACCOUNTING_POLICY;
+		xfree(job_ptr->state_desc);
+		job_ptr->state_reason = wait_reason;
+		goto cleanup;
+	} else if (max_nodes < min_nodes) {
 		error_code = ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE;
 	} else {
 		/* Select resources for the job here */
@@ -2595,7 +2605,7 @@ extern void build_node_details(struct job_record *job_ptr, bool new_alloc)
 	if ((job_ptr->node_bitmap == NULL) || (job_ptr->nodes == NULL)) {
 		/* No nodes allocated, we're done... */
 		job_ptr->node_cnt = 0;
-		job_ptr->node_addr = NULL;
+		xfree(job_ptr->node_addr);
 		return;
 	}
 
