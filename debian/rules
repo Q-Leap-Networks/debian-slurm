@@ -5,7 +5,8 @@
 #export DH_VERBOSE=1
 
 export PERL_ARCHLIB := $(shell perl -MConfig -e 'print substr($$Config{vendorarch}, 1)')
-DEB_BUILD_GNU_TYPE ?= $(shell dpkg-architecture -qDEB_BUILD_GNU_TYPE)
+# include defs of all DEB_HOST_*/DEB_BUILD_* vars
+include /usr/share/dpkg/architecture.mk
 
 %:
 	dh $@ --builddirectory --parallel --with systemd
