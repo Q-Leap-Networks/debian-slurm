@@ -1,3 +1,15 @@
+slurm-llnl (14.03.8-2) UNRELEASED; urgency=low
+
+  [ Mehdi Dogguy ]
+  * Update Homepage field in d/control file
+  * Fix watch file
+
+  [ Rémi Palancher ]
+  * Use architecture.mk for DEB_BUILD/DEB_HOST defs
+  * Fix typo in default PID path in configurator
+
+ -- Mehdi Dogguy <mehdi@debian.org>  Tue, 07 Oct 2014 21:53:14 +0200
+
 slurm-llnl (14.03.8-1) experimental; urgency=medium
 
   [ Gennaro Oliva ]
