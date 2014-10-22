@@ -1520,7 +1520,7 @@ extern int _node_config_validate(char *node_name, char *orig_config,
 	else if (gres_data->gres_cnt_avail == NO_VAL)
 		gres_data->gres_cnt_avail = 0;
 
-	if (context_ptr->has_file || gres_data->gres_cnt_avail) {
+	if (context_ptr->has_file) {
 		if (gres_data->gres_bit_alloc == NULL) {
 			gres_data->gres_bit_alloc =
 				bit_alloc(gres_data->gres_cnt_avail);
@@ -1653,7 +1653,7 @@ static int _node_reconfig(char *node_name, char *orig_config, char **new_config,
 	else if (gres_data->gres_cnt_avail == NO_VAL)
 		gres_data->gres_cnt_avail = 0;
 
-	if (context_ptr->has_file || gres_data->gres_cnt_avail) {
+	if (context_ptr->has_file) {
 		if (gres_data->gres_bit_alloc == NULL) {
 			gres_data->gres_bit_alloc =
 				bit_alloc(gres_data->gres_cnt_avail);
@@ -2126,7 +2126,7 @@ static int _job_config_validate(char *config, uint32_t *gres_cnt,
 				slurm_gres_context_t *context_ptr)
 {
 	char *last_num = NULL;
-	int cnt;
+	long cnt;
 
 	if (!strcmp(config, context_ptr->gres_name)) {
 		cnt = 1;
@@ -2144,7 +2144,7 @@ static int _job_config_validate(char *config, uint32_t *gres_cnt,
 			cnt *= (1024 * 1024 * 1024);
 		else
 			return SLURM_ERROR;
-		if (cnt < 0)
+		if ((cnt < 0) || (cnt > 0xffffffff))
 			return SLURM_ERROR;
 	} else
 		return SLURM_ERROR;
@@ -3039,7 +3039,7 @@ static int _job_alloc(void *job_gres_data, void *node_gres_data,
 	uint32_t gres_cnt;
 	gres_job_state_t  *job_gres_ptr  = (gres_job_state_t *)  job_gres_data;
 	gres_node_state_t *node_gres_ptr = (gres_node_state_t *) node_gres_data;
-	bitstr_t *alloc_core_bitmap;
+	bitstr_t *alloc_core_bitmap = NULL;
 
 	/*
 	 * Validate data structures. Either job_gres_data->node_cnt and

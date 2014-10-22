@@ -1,6 +1,90 @@
 This file describes changes in recent versions of Slurm. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in Slurm 14.03.10
+===========================
+
+* Changes in Slurm 14.03.9
+==========================
+ -- If slurmd fails to stat(2) the configuration print the string describing
+    the error code.
+ -- Fix for mixing core base reservations with whole node based reservations
+    to avoid overlapping erroneously.
+ -- BLUEGENE - Remove references to Base Partition.
+ -- sview - If compiled on a non-bluegene system then used to view a BGQ fix
+    to allow sview to display blocks correctly.
+ -- Fix bug in update reservation. When modifying the reservation the end time
+    was set incorrectly.
+ -- The start time of a reservation that is in ACTIVE state cannot be modified.
+ -- Update the cgroup documentation about release agent for devices.
+ -- MYSQL - fix for setting up preempt list on a QOS for multiple QOS.
+ -- Correct a minor error in the scancel.1 man page related to the
+    --signal option.
+ -- Enhance the scancel.1 man page to document the sequence of signals sent
+ -- Fix slurmstepd core dump if the cgroup hierarchy is not completed
+    when terminating the job.
+ -- Fix hostlist_shift to be able to give correct node names on names with a
+    different number of dimensions than the cluster.
+ -- BLUEGENE - Fix invalid pointer in corner case in the plugin.
+ -- Make sure on a reconfigure the select information for a node is preserved.
+ -- Correct logic to support job GRES specification over 31 bits (problem
+    in logic converting int to uint32_t).
+ -- Remove logic that was creating GRES bitmap for node when not needed (only
+    needed when GRES mapped to specific files).
+ -- BLUEGENE - Fix sinfo -tr before it would only print idle nodes correctly.
+ -- BLUEGENE - Fix for licenses_only reservation on bluegene systems.
+ -- sview - Verify pointer before using strchr.
+ -- -M option on tools talking to a Cray from a non-Cray fixed.
+ -- CRAY - Fix rpmbuild issue for missing file slurm.conf.template.
+ -- Fix race condition when dealing with removing many associations at
+    different times when reservations are using the associations that are
+    being deleted.
+ -- When a node's state is set to power_down/power_up, then execute
+    SuspendProgram/ResumeProgram even if previously executed for that node.
+ -- Fix logic determining when job configuration (i.e. running node power up
+    logic) is complete.
+ -- Setting the state of a node in powered down state node to "resume" will
+    no longer cause it to reboot, but only clear the "drain" state flag.
+ -- Fix srun documentation to remove SLURM_NODELIST being equivalent as the -w
+    option (since it isn't).
+ -- Fix issue with --hint=nomultithread and allocations with steps running
+    arbitrary layouts (test1.59).
+ -- PrivateData=reservation modified to permit users to view the reservations
+    which they have access to (rather then preventing them from seeing ANY
+    reservation).  Backport from 14.11 commit 77c2bd25c.
+ -- Fix PrivateData=reservation when using associations to give privileges to
+    a reservation.
+ -- Better checking to see if select plugin is linear or not.
+ -- Add support for time specification of "fika" (3 PM).
+ -- Standardize qstat wrapper more.
+ -- Provide better estimate of minimum node count for pending jobs using more
+    job parameters.
+ -- ALPS - Add SubAllocate to cray.conf file for those who like the way <=2.5
+    did the ALPS reservation.
+ -- Safer check to avoid invalid reads when shutting down the slurmctld with
+    lots of jobs.
+ -- Fix minor memory leak in the backfill scheduler when shutting down.
+ -- Add ArchiveResvs to the output of sacctmgr show config and init the variable
+    on slurmdbd startup.
+ -- SLURMDBD - Only set the archive flag if purging the object
+    (i.e ArchiveJobs PurgeJobs).  This is only a cosmetic change.
+ -- Fix for job step memory allocation logic if step requests GRES and memory
+    is not allocations are not managed.
+ -- Fix sinfo to display mixed nodes as allocated in '%F' output.
+ -- Sview - Fix cpu and node counts for partitions.
+ -- Ignore NO_VAL in SLURMDB_PURGE_* macros.
+ -- ALPS - Don't drain nodes if epilog fails.  It leaves them in drain state
+    with no way to get them out.
+ -- Fix issue with task/affinity oversubscribing cpus erroneously when
+    using --ntasks-per-node.
+ -- MYSQL - Fix load of archive files.
+ -- Treat Cray MPI job calling exit() without mpi_fini() as fatal error for
+    that specific task and let srun handle all timeout logic.
+ -- Fix small memory leak in jobcomp/mysql.
+ -- Correct tracking of licenses for suspended jobs on slurmctld reconfigure or
+    restart.
+ -- If failed to launch a batch job requeue it in hold.
+
 * Changes in Slurm 14.03.8
 ==========================
  -- Fix minor memory leak when Job doesn't have nodes on it (Meaning the job
