@@ -9,6 +9,12 @@ slurm-llnl (14.03.9-1) UNRELEASED; urgency=low
   * Fix spelling error in slurm.conf.5
     * add debian/patches/manpages
 
+  [ Rémi Palancher ]
+  * Enable hwloc support
+    * add Build-Depends on libhwloc-dev
+    * enable dh autoreconf
+    * add debian/patches/honor-without-rpath-hwloc
+
  -- Mehdi Dogguy <mehdi@debian.org>  Wed, 22 Oct 2014 21:42:30 +0200
 
 slurm-llnl (14.03.8-2) unstable; urgency=medium

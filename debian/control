@@ -19,6 +19,7 @@ Build-Depends:
  chrpath,
  libpam0g-dev,
  liblua5.1-0-dev,
+ libhwloc-dev,
  dh-autoreconf,
  dh-exec,
  dh-systemd (>= 1.5)
