@@ -22,7 +22,7 @@ Build-Depends:
  dh-autoreconf,
  dh-exec,
  dh-systemd (>= 1.5)
-Standards-Version: 3.9.5
+Standards-Version: 3.9.6
 Homepage: http://slurm.schedmd.com
 Vcs-Browser: http://anonscm.debian.org/cgit/collab-maint/slurm-llnl.git
 Vcs-Git: git://anonscm.debian.org/collab-maint/slurm-llnl.git
