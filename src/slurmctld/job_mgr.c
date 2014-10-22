@@ -1694,7 +1694,7 @@ static int _load_job_state(Buf buffer, uint16_t protocol_version)
 	if (assoc_mgr_fill_in_assoc(acct_db_conn, &assoc_rec,
 				    accounting_enforce,
 				    (slurmdb_association_rec_t **)
-				    &job_ptr->assoc_ptr) &&
+				    &job_ptr->assoc_ptr, false) &&
 	    (accounting_enforce & ACCOUNTING_ENFORCE_ASSOCS)
 	    && (!IS_JOB_FINISHED(job_ptr))) {
 		info("Holding job %u with invalid association", job_id);
@@ -3832,10 +3832,13 @@ extern int prolog_complete(uint32_t job_id, bool requeue,
 extern int job_complete(uint32_t job_id, uid_t uid, bool requeue,
 			bool node_fail, uint32_t job_return_code)
 {
+	struct node_record *node_ptr;
 	struct job_record *job_ptr;
 	time_t now = time(NULL);
 	uint32_t job_comp_flag = 0;
 	bool suspended = false;
+	int i;
+	int use_cloud = false;
 
 	info("completing job %u status %d", job_id, job_return_code);
 	job_ptr = find_job_record(job_id);
@@ -3905,8 +3908,16 @@ extern int job_complete(uint32_t job_id, uid_t uid, bool requeue,
 		 * is too early */
 		//job_ptr->db_index = 0;
 		//job_ptr->details->submit_time = now + 1;
-
-		job_ptr->batch_flag++;	/* only one retry */
+		if (job_ptr->node_bitmap) {
+			i = bit_ffs(job_ptr->node_bitmap);
+			if (i >= 0) {
+				node_ptr = node_record_table_ptr + i;
+				if (IS_NODE_CLOUD(node_ptr))
+					use_cloud = true;
+			}
+		}
+		if (!use_cloud)
+			job_ptr->batch_flag++;	/* only one retry */
 		job_ptr->restart_cnt++;
 		job_ptr->job_state = JOB_PENDING | job_comp_flag;
 		/* Since the job completion logger removes the job submit
@@ -4245,7 +4256,7 @@ static int _valid_job_part(job_desc_msg_t * job_desc,
 
 				assoc_mgr_fill_in_assoc(
 					acct_db_conn, &assoc_rec,
-					accounting_enforce, NULL);
+					accounting_enforce, NULL, false);
 			}
 
 			if (assoc_ptr && assoc_rec.id != assoc_ptr->id) {
@@ -4632,9 +4643,11 @@ static int _job_create(job_desc_msg_t * job_desc, int allocate, int will_run,
 	assoc_rec.acct      = job_desc->account;
 	assoc_rec.partition = part_ptr->name;
 	assoc_rec.uid       = job_desc->user_id;
-
+	/* Checks are done later to validate assoc_ptr, so we don't
+	   need to lock outside of fill_in_assoc.
+	*/
 	if (assoc_mgr_fill_in_assoc(acct_db_conn, &assoc_rec,
-				    accounting_enforce, &assoc_ptr)) {
+				    accounting_enforce, &assoc_ptr, false)) {
 		info("_job_create: invalid account or partition for user %u, "
 		     "account '%s', and partition '%s'",
 		     job_desc->user_id, assoc_rec.acct, assoc_rec.partition);
@@ -4648,7 +4661,7 @@ static int _job_create(job_desc_msg_t * job_desc, int allocate, int will_run,
 		 * accounting records. */
 		assoc_rec.acct = NULL;
 		assoc_mgr_fill_in_assoc(acct_db_conn, &assoc_rec,
-					accounting_enforce, &assoc_ptr);
+					accounting_enforce, &assoc_ptr, false);
 		if (assoc_ptr) {
 			info("_job_create: account '%s' has no association "
 			     "for user %u using default account '%s'",
@@ -4657,6 +4670,7 @@ static int _job_create(job_desc_msg_t * job_desc, int allocate, int will_run,
 			xfree(job_desc->account);
 		}
 	}
+
 	if (job_desc->account == NULL)
 		job_desc->account = xstrdup(assoc_rec.acct);
 
@@ -5982,11 +5996,9 @@ void job_time_limit(void)
 
 		if (IS_JOB_CONFIGURING(job_ptr)) {
 			if (!IS_JOB_RUNNING(job_ptr) ||
-			    ((bit_overlap(job_ptr->node_bitmap,
-					  power_node_bitmap) == 0) &&
-			     (bit_overlap(job_ptr->node_bitmap,
-					  avail_node_bitmap) == 0))) {
-				debug("Configuration for job %u is complete",
+			    (bit_overlap(job_ptr->node_bitmap,
+					 power_node_bitmap) == 0)) {
+				info("Configuration for job %u is complete",
 				      job_ptr->job_id);
 				job_ptr->job_state &= (~JOB_CONFIGURING);
 			}
@@ -7056,9 +7068,9 @@ void pack_job(struct job_record *dump_job_ptr, uint16_t show_flags, Buf buffer,
 	}
 }
 
-static int _find_node_max_cpu_cnt(void)
+static void _find_node_config(int *cpu_cnt_ptr, int *core_cnt_ptr)
 {
-	int i, max_cpu_cnt = 1;
+	int i, max_cpu_cnt = 1, max_core_cnt = 1;
 	struct node_record *node_ptr = node_record_table_ptr;
 
 	for (i = 0; i < node_record_count; i++, node_ptr++) {
@@ -7067,22 +7079,26 @@ static int _find_node_max_cpu_cnt(void)
 			/* Only data from config_record used for scheduling */
 			max_cpu_cnt = MAX(max_cpu_cnt,
 					  node_ptr->config_ptr->cpus);
+			max_core_cnt =  MAX(max_core_cnt,
+					    node_ptr->config_ptr->cores);
 		} else {
 #endif
 			/* Individual node data used for scheduling */
 			max_cpu_cnt = MAX(max_cpu_cnt, node_ptr->cpus);
+			max_core_cnt =  MAX(max_core_cnt, node_ptr->cores);
 #ifndef HAVE_BG
 		}
 #endif
 	}
-	return max_cpu_cnt;
+	*cpu_cnt_ptr  = max_cpu_cnt;
+	*core_cnt_ptr = max_core_cnt;
 }
 
 /* pack default job details for "get_job_info" RPC */
 static void _pack_default_job_details(struct job_record *job_ptr,
 				      Buf buffer, uint16_t protocol_version)
 {
-	static int max_cpu_cnt = -1;
+	static int max_cpu_cnt = -1, max_core_cnt = -1;
 	int i;
 	struct job_details *detail_ptr = job_ptr->details;
 	char *cmd_line = NULL;
@@ -7110,7 +7126,7 @@ static void _pack_default_job_details(struct job_record *job_ptr,
 		shared = (uint16_t) NO_VAL;	/* No user or partition info */
 
 	if (max_cpu_cnt == -1)
-		max_cpu_cnt = _find_node_max_cpu_cnt();
+		_find_node_config(&max_cpu_cnt, &max_core_cnt);
 
 	if (protocol_version >= SLURM_2_6_PROTOCOL_VERSION) {
 		if (detail_ptr) {
@@ -7159,14 +7175,53 @@ static void _pack_default_job_details(struct job_record *job_ptr,
 					pack32((uint32_t) 0, buffer);
 
 			}
+
 			if (IS_JOB_COMPLETING(job_ptr) && job_ptr->node_cnt) {
 				pack32(job_ptr->node_cnt, buffer);
 				pack32((uint32_t) 0, buffer);
 			} else if (job_ptr->total_nodes) {
 				pack32(job_ptr->total_nodes, buffer);
 				pack32((uint32_t) 0, buffer);
+			} else if (detail_ptr->ntasks_per_node) {
+				/* min_nodes based upon task count and ntasks
+				 * per node */
+				uint32_t min_nodes;
+				min_nodes = detail_ptr->num_tasks /
+					    detail_ptr->ntasks_per_node;
+				min_nodes = MAX(min_nodes,
+						detail_ptr->min_nodes);
+				pack32(min_nodes, buffer);
+				pack32(detail_ptr->max_nodes, buffer);
+			} else if (detail_ptr->cpus_per_task > 1) {
+				/* min_nodes based upon task count and cpus
+				 * per task */
+				uint32_t min_cpus, min_nodes;
+				min_cpus = detail_ptr->num_tasks *
+					   detail_ptr->cpus_per_task;
+				min_nodes = min_cpus + max_cpu_cnt - 1;
+				min_nodes /= max_cpu_cnt;
+				min_nodes = MAX(min_nodes,
+						detail_ptr->min_nodes);
+				pack32(min_nodes, buffer);
+				pack32(detail_ptr->max_nodes, buffer);
+			} else if (detail_ptr->mc_ptr &&
+				   detail_ptr->mc_ptr->ntasks_per_core) {
+				/* min_nodes based upon task count and ntasks
+				 * per core */
+				uint32_t min_cores, min_nodes;
+				min_cores = detail_ptr->num_tasks +
+					    detail_ptr->mc_ptr->ntasks_per_core
+					    - 1;
+				min_cores /= detail_ptr->mc_ptr->ntasks_per_core;
+
+				min_nodes = min_cores + max_core_cnt - 1;
+				min_nodes /= max_core_cnt;
+				min_nodes = MAX(min_nodes,
+						detail_ptr->min_nodes);
+				pack32(min_nodes, buffer);
+				pack32(detail_ptr->max_nodes, buffer);
 			} else {
-				/* Use task count to help estimate min_nodes */
+				/* min_nodes based upon task count only */
 				uint32_t min_nodes;
 				min_nodes = detail_ptr->num_tasks +
 					    max_cpu_cnt - 1;
@@ -8165,7 +8220,7 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 				    acct_db_conn, &assoc_rec,
 				    accounting_enforce,
 				    (slurmdb_association_rec_t **)
-				    &job_ptr->assoc_ptr)) {
+				    &job_ptr->assoc_ptr, false)) {
 				info("job_update: invalid account %s "
 				     "for job %u",
 				     job_specs->account, job_ptr->job_id);
@@ -10493,7 +10548,7 @@ extern void job_completion_logger(struct job_record  *job_ptr, bool requeue)
 		if (!(assoc_mgr_fill_in_assoc(acct_db_conn, &assoc_rec,
 					      accounting_enforce,
 					      (slurmdb_association_rec_t **)
-					      &job_ptr->assoc_ptr))) {
+					      &job_ptr->assoc_ptr, false))) {
 			job_ptr->assoc_id = assoc_rec.id;
 			/* we have to call job start again because the
 			 * associd does not get updated in job complete */
@@ -11367,7 +11422,7 @@ extern int update_job_account(char *module, struct job_record *job_ptr,
 	if (assoc_mgr_fill_in_assoc(acct_db_conn, &assoc_rec,
 				    accounting_enforce,
 				    (slurmdb_association_rec_t **)
-				    &job_ptr->assoc_ptr)) {
+				    &job_ptr->assoc_ptr, false)) {
 		info("%s: invalid account %s for job_id %u",
 		     module, new_account, job_ptr->job_id);
 		return ESLURM_INVALID_ACCOUNT;
@@ -11382,7 +11437,7 @@ extern int update_job_account(char *module, struct job_record *job_ptr,
 		assoc_mgr_fill_in_assoc(acct_db_conn, &assoc_rec,
 					accounting_enforce,
 					(slurmdb_association_rec_t **)
-					&job_ptr->assoc_ptr);
+					&job_ptr->assoc_ptr, false);
 		if (!job_ptr->assoc_ptr) {
 			debug("%s: we didn't have an association for account "
 			      "'%s' and user '%u', and we can't seem to find "
@@ -11501,7 +11556,7 @@ extern int send_jobs_to_accounting(void)
 				   acct_db_conn, &assoc_rec,
 				   accounting_enforce,
 				   (slurmdb_association_rec_t **)
-				   &job_ptr->assoc_ptr) &&
+				   &job_ptr->assoc_ptr, false) &&
 			    (accounting_enforce & ACCOUNTING_ENFORCE_ASSOCS)
 			    && (!IS_JOB_FINISHED(job_ptr))) {
 				info("Holding job %u with "
