@@ -447,6 +447,7 @@ libslurmdb.so.27 libslurmdb27 #MINVER#
  slurm_hostlist_ranged_string_xmalloc_dims@Base 2.3.1
  slurm_hostlist_remove@Base 2.2.0
  slurm_hostlist_shift@Base 2.2.0
+ slurm_hostlist_shift_dims@Base 14.03.9
  slurm_hostlist_shift_range@Base 2.2.0
  slurm_hostlist_sort@Base 2.5.7
 #MISSING 2.5.7# slurm_hostlist_soft@Base 2.2.0
