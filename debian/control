@@ -70,6 +70,7 @@ Depends:
  openssl,
  slurm-wlm-basic-plugins (= ${binary:Version}),
  adduser,
+ munge,
  openssl-blacklist,
  openssl (>= 0.9.8g-9),
  lsb-base (>= 3.2-12)
@@ -91,6 +92,7 @@ Depends:
  openssl,
  slurm-wlm-basic-plugins (= ${binary:Version}),
  adduser,
+ munge,
  openssl-blacklist,
  openssl (>= 0.9.8g-9),
  lsb-base (>= 3.2-12)

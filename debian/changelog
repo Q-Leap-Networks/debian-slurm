@@ -8,6 +8,7 @@ slurm-llnl (14.03.9-1) UNRELEASED; urgency=low
   * Updated libslurm27.symbols and libslurmdb27.symbols.
   * Fix spelling error in slurm.conf.5
     * add debian/patches/manpages
+  * Added munge to slurmd and slurmctld Depends (Closes: #766160)
 
   [ Rémi Palancher ]
   * Enable hwloc support
